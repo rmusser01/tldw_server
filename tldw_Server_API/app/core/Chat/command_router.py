@@ -22,8 +22,8 @@ Env flags:
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
+import inspect
 import os
 import re
 import threading
@@ -512,7 +512,7 @@ async def async_dispatch_command(ctx: CommandContext, command: str, args: str | 
 
     try:
         res = spec.handler(ctx, args)
-        if asyncio.iscoroutine(res):  # future-proof if handlers become async
+        if inspect.isawaitable(res):  # future-proof if handlers become async
             res = await res  # type: ignore[assignment]
         if not isinstance(res, CommandResult):
             raise TypeError(f"Command handler for /{cmd} returned {type(res)}")

@@ -393,16 +393,29 @@ class TestDocumentGeneratorService:
     def test_save_custom_prompt_config(self, service, real_db):
 
         """Test saving custom prompt configuration."""
-        # Skip if method doesn't exist
-        if not hasattr(service, 'save_prompt_config'):
-            pytest.skip("save_prompt_config not implemented")
+        assert service.save_prompt_config({DocumentType.SUMMARY: "Custom summary prompt"})
+
+        with real_db.get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT user_id, document_type, custom_prompt
+                FROM user_prompt_configs
+                WHERE user_id = ? AND document_type = ?
+                """,
+                ("test_user", DocumentType.SUMMARY.value),
+            ).fetchone()
+
+        assert dict(row) == {
+            "user_id": "test_user",
+            "document_type": DocumentType.SUMMARY.value,
+            "custom_prompt": "Custom summary prompt",
+        }
 
     def test_get_prompt_config(self, service, real_db):
 
         """Test retrieving custom prompt configuration."""
-        # Skip if method doesn't exist
-        if not hasattr(service, 'get_prompt_config'):
-            pytest.skip("get_prompt_config not implemented")
+        assert service.save_prompt_config({DocumentType.QA: "Custom QA prompt"})
+        assert service.get_prompt_config(DocumentType.QA) == "Custom QA prompt"
 
     def test_save_user_prompt_config_allows_multiple_inactive_versions(self, service, real_db):
         """Saving new prompt versions keeps history while leaving one active prompt."""

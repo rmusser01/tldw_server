@@ -215,6 +215,19 @@ class DocumentGeneratorService:
                 """)
                 self._repair_user_prompts_schema(conn)
 
+                # Create legacy custom prompt table used by save_prompt_config/get_prompt_config.
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS user_prompt_configs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT NOT NULL,
+                        document_type TEXT NOT NULL,
+                        custom_prompt TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(user_id, document_type)
+                    )
+                """)
+
                 # Create generated_documents table for storing results
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS generated_documents (

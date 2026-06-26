@@ -1,7 +1,7 @@
 ---
 id: TASK-12013
 title: Refactor Chat completion pipeline and fix validated review findings
-status: Done
+status: In Progress
 created_date: 2026-06-24 04:50
 labels:
 - chat
@@ -31,15 +31,20 @@ modified_files:
 - tldw_Server_API/app/core/Chat/completion_pipeline.py
 - tldw_Server_API/app/core/Chat/chat_service.py
 - tldw_Server_API/app/core/Chat/chat_orchestrator.py
+- tldw_Server_API/app/core/Chat/command_authorization.py
+- tldw_Server_API/app/core/Chat/command_router.py
+- tldw_Server_API/app/core/Chat/document_generator.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_content.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_tool_autoexec.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_streaming_tool_autoexec.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_fallback.py
 - tldw_Server_API/tests/Chat/unit/test_chat_service_system_messages.py
 - tldw_Server_API/tests/Chat/unit/test_streaming_utils.py
+- tldw_Server_API/tests/Chat/unit/test_document_generator.py
 - tldw_Server_API/tests/Chat/integration/test_chat_endpoint_auto_routing.py
 - tldw_Server_API/tests/Chat_NEW/integration/test_chat_command_audit.py
-updated_date: 2026-06-25 03:08
+- tldw_Server_API/tests/Chat_NEW/unit/test_command_router.py
+updated_date: 2026-06-26 06:28
 ---
 
 ## Description
@@ -90,6 +95,7 @@ Task 10 streaming pipeline extraction completed across commits 417f6e5611 and 69
 Task 11 completion pipeline coordinator completed in commit f44bfee1ad. Added `completion_pipeline.py` with `ChatCompletionPipeline`, renamed the non-stream body to `_execute_non_stream_call_impl`, kept the public `execute_non_stream_call` facade as a pipeline delegator, and routed streaming response assembly through the same default pipeline while preserving the existing stream factory monkeypatch path. Verification: new coordinator tests failed before implementation (missing module and facade bypass), then passed; final Task 11 checks passed for `test_chat_service_content.py`, `test_chat_service_tool_autoexec.py`, `test_streaming_utils.py`, and `test_chat_service_fallback.py` (91 passed, 1 skipped); Bandit on `completion_pipeline.py`, `chat_service.py`, and `streaming_pipeline.py` reported 0 findings.
 Task 12 documentation update completed. Updated the Chat README module map and completion pipeline ownership section so `chat_service.py` is documented as the compatibility facade and focused modules own response processing, moderation, persistence, streaming assembly, tool execution, command authorization, and safe logging. Updated `REFACTORING_PLAN.md` with the 2026-06-24 integrated refactor status, validated findings fixed, and the compatibility note for intentional multi-choice local tool auto-execution rejection.
 Task 13 verification update 2026-06-24: Wide Chat regression rerun after fixing two stale test harness assumptions. `test_chat_command_rbac_enforcement` now installs a non-admin request user before exercising deny/allow command audit events; root cause was that the default auth fixture is admin and correctly bypasses `_user_has_permission`. `test_chat_endpoint_auto_routing_uses_post_validation_tool_capabilities` now patches the endpoint's async skill-tool helper when present, while remaining compatible with the committed sync helper. Verification: command/auto-routing slice passed (`43 passed, 472 warnings`); full Chat regression passed except for the sandbox-only localhost mock-server setup errors (`1077 passed, 42 skipped, 9431 warnings, 2 errors`), and the two socket-backed tests passed when rerun with localhost bind permission (`2 passed, 115 warnings`). Bandit final scan over `app/core/Chat`, `endpoints/chat.py`, and `schemas/chat_commands_schemas.py` wrote `/tmp/bandit_chat_completion_pipeline_final.json`; it reported the same 7 low-severity historical findings in untouched files (`chat_exceptions.py`, `chat_helpers.py`, `tool_auto_exec.py`) and zero findings in the refactored modules/endpoints touched by this task.
+2026-06-25 PR #2516 review follow-up: rebased branch on latest origin/dev (bbd7ffada2) and addressed validated Gemini/Qodo comments. Added user_prompt_configs table + round-trip tests, restored inspect.isawaitable command handler support with custom awaitable coverage, added new-module docstrings, made dict content extraction text-only, logged fail-closed permission backend failures with safe summaries, and replaced chat_orchestrator's Loguru-as-logging alias with direct logger calls. Verification: touched unit files 71 passed; broader PR slice 87 passed; command-router rerun 27 passed; Bandit over touched Chat files reported 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

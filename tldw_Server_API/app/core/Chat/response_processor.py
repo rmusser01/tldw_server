@@ -1,3 +1,5 @@
+"""Utilities for normalizing and mutating non-streaming chat responses."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,6 +17,8 @@ _MISSING = object()
 
 @dataclass
 class NonStreamChoice:
+    """Normalized view of a chat completion choice and its assistant message."""
+
     index: int
     choice: dict[str, Any]
     message: dict[str, Any]
@@ -25,6 +29,8 @@ class NonStreamChoice:
 
 
 def _safe_getattr(obj: Any, name: str) -> Any | None:
+    """Return an attribute value without letting unusual response objects fail extraction."""
+
     try:
         return getattr(obj, name, None)
     except _EXPECTED_CONTENT_EXCEPTIONS:
@@ -32,17 +38,33 @@ def _safe_getattr(obj: Any, name: str) -> Any | None:
 
 
 def _safe_str(content: Any) -> str:
+    """Convert content to text while treating provider object failures as empty text."""
+
     try:
         return str(content)
     except _EXPECTED_CONTENT_EXCEPTIONS:
         return ""
 
 
+def _extract_dict_text(content: dict[str, Any]) -> str:
+    """Extract human-visible text from dict-shaped message content."""
+
+    if content.get("type") == "text" and isinstance(content.get("text"), str):
+        return content["text"]
+    if isinstance(content.get("text"), str):
+        return content["text"]
+    return ""
+
+
 def extract_text_from_content(content: Any | None) -> str:
+    """Extract text used for moderation and usage accounting from assistant content."""
+
     if content is None:
         return ""
     if isinstance(content, str):
         return content
+    if isinstance(content, dict):
+        return _extract_dict_text(content)
     if isinstance(content, list):
         parts: list[str] = []
         for item in content:
@@ -65,6 +87,8 @@ def extract_text_from_content(content: Any | None) -> str:
 
 
 def collect_non_stream_choices(llm_response: Any) -> list[NonStreamChoice]:
+    """Collect assistant message choices from a non-streaming provider response."""
+
     if not isinstance(llm_response, dict):
         return []
     raw_choices = llm_response.get("choices")
@@ -93,12 +117,16 @@ def collect_non_stream_choices(llm_response: Any) -> list[NonStreamChoice]:
 
 
 def set_choice_content(choice: NonStreamChoice, content: Any | None) -> None:
+    """Update a choice message in place and keep the normalized text cache in sync."""
+
     choice.message["content"] = content
     choice.content = content
     choice.content_text = extract_text_from_content(content)
 
 
 def apply_redaction_to_content(content: Any | None, redact_text: Callable[[str], str]) -> Any | None:
+    """Apply text redaction while preserving provider content container shapes."""
+
     if isinstance(content, str):
         return redact_text(content)
     if isinstance(content, dict):
@@ -147,14 +175,20 @@ def apply_redaction_to_content(content: Any | None, redact_text: Callable[[str],
 
 
 def estimate_completion_tokens_from_choices(choices: list[NonStreamChoice]) -> int:
+    """Estimate completion token usage from normalized choice text."""
+
     return sum(max(0, len(choice.content_text) // 4) for choice in choices)
 
 
 def primary_choice(choices: list[NonStreamChoice]) -> NonStreamChoice | None:
+    """Return the choice with OpenAI-compatible index zero, if present."""
+
     return next((choice for choice in choices if choice.index == 0), None)
 
 
 def inject_assistant_name_into_choices(choices: list[NonStreamChoice], assistant_name: str | None) -> None:
+    """Populate assistant names on choices that do not already provide one."""
+
     if not assistant_name:
         return
     for choice in choices:
@@ -169,6 +203,8 @@ def validate_structured_choices(
     validate_structured_response: Callable[..., dict[str, Any] | None],
     fallback_content: Any = _MISSING,
 ) -> dict[str, Any] | None:
+    """Run structured-response validation for each normalized choice."""
+
     if not choices:
         if fallback_content is _MISSING:
             return None

@@ -1,3 +1,5 @@
+"""Request guardrails for local chat tool auto-execution."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -9,6 +11,8 @@ _ABSENT_CHOICE_STRINGS = {"", "none", "false", "null"}
 
 
 def request_choice_count(cleaned_args: dict[str, Any] | None) -> int:
+    """Return the requested assistant choice count, defaulting invalid input to one."""
+
     if not isinstance(cleaned_args, dict):
         return 1
     raw_n = cleaned_args.get("n", 1)
@@ -19,6 +23,8 @@ def request_choice_count(cleaned_args: dict[str, Any] | None) -> int:
 
 
 def _non_empty_request_value(value: Any) -> bool:
+    """Return whether a request option declares meaningful user intent."""
+
     if value is None or value is False:
         return False
     if isinstance(value, str):
@@ -31,6 +37,8 @@ def _non_empty_request_value(value: Any) -> bool:
 
 
 def request_declares_local_tool_use(cleaned_args: dict[str, Any] | None) -> bool:
+    """Return whether the request includes local tools or legacy functions."""
+
     if not isinstance(cleaned_args, dict):
         return False
     return _non_empty_request_value(cleaned_args.get("tools")) or _non_empty_request_value(
@@ -43,6 +51,8 @@ def ensure_tool_autoexec_supports_request(
     cleaned_args: dict[str, Any] | None,
     should_run_tool_autoexec: Callable[[dict[str, Any] | None], bool],
 ) -> None:
+    """Reject ambiguous multi-choice requests when local tool auto-execution is active."""
+
     if (
         should_run_tool_autoexec(cleaned_args)
         and request_declares_local_tool_use(cleaned_args)

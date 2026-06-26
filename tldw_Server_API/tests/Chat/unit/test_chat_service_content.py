@@ -13,7 +13,10 @@ from tldw_Server_API.app.core.Chat.persistence_service import (
     build_assistant_message_payload,
     save_tool_messages,
 )
-from tldw_Server_API.app.core.Chat.response_processor import collect_non_stream_choices
+from tldw_Server_API.app.core.Chat.response_processor import (
+    collect_non_stream_choices,
+    extract_text_from_content,
+)
 
 
 class _DummyMetrics:
@@ -45,6 +48,12 @@ def test_collect_non_stream_choices_skips_unsupported_choices_without_mutation()
 
     assert choices == []
     assert payload == {"choices": [{"text": "legacy"}]}
+
+
+def test_extract_text_from_dict_content_uses_visible_text_only():
+    assert extract_text_from_content({"type": "text", "text": "visible"}) == "visible"
+    assert extract_text_from_content({"type": "output_text", "text": "also visible"}) == "also visible"
+    assert extract_text_from_content({"type": "image_url", "image_url": {"url": "secret"}}) == ""
 
 
 def test_build_assistant_message_payload_preserves_persisted_shape():

@@ -325,6 +325,42 @@ async def test_command_permission_allows_claim_without_db_lookup(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_async_dispatch_command_awaits_custom_awaitable(monkeypatch):
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+
+    class CustomAwaitable:
+        def __await__(self):
+            async def resolve():
+                return command_router.CommandResult(
+                    ok=True,
+                    command="awaitable",
+                    content="done",
+                    metadata={},
+                )
+
+            return resolve().__await__()
+
+    try:
+        command_router.register_command(
+            "awaitable",
+            "Awaitable test command",
+            lambda _ctx, _args: CustomAwaitable(),  # type: ignore[arg-type]
+            required_permission="chat.commands.awaitable",
+        )
+
+        result = await command_router.async_dispatch_command(
+            _authorized_ctx("awaitable-user", "chat.commands.awaitable"),
+            "awaitable",
+            None,
+        )
+    finally:
+        command_router._registry.pop("awaitable", None)
+
+    assert result.ok
+    assert result.content == "done"
+
+
+@pytest.mark.asyncio
 async def test_command_permission_does_not_allow_child_wildcard_claim(monkeypatch):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
 

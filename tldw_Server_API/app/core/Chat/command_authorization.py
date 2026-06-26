@@ -4,9 +4,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from loguru import logger
+
+from tldw_Server_API.app.core.Chat.chat_logging import exception_summary
+
 
 @dataclass(frozen=True)
 class CommandAuthorizationContext:
+    """Normalized caller identity and permission claims for command authorization."""
+
     auth_user_id: int | None
     user_id: str
     permissions: frozenset[str]
@@ -18,11 +24,15 @@ class CommandAuthorizationContext:
 
 @dataclass(frozen=True)
 class CommandAuthorizationDecision:
+    """Authorization result plus audit metadata for command dispatch/listing."""
+
     allowed: bool
     metadata: dict[str, Any]
 
 
 def _normalized_strings(values: Any) -> frozenset[str]:
+    """Normalize list-like claim values into a non-empty string set."""
+
     if values is None:
         return frozenset()
     if not isinstance(values, (list, tuple, set, frozenset)):
@@ -34,6 +44,8 @@ def _normalized_strings(values: Any) -> frozenset[str]:
 
 
 def build_command_authorization_context(ctx: Any) -> CommandAuthorizationContext:
+    """Build a command authorization context from a router command context."""
+
     request_meta = getattr(ctx, "request_meta", None) or {}
     if not isinstance(request_meta, dict):
         request_meta = {}
@@ -59,6 +71,8 @@ def build_command_authorization_context(ctx: Any) -> CommandAuthorizationContext
 
 
 def _permission_in_claims(permission: str, permissions: frozenset[str]) -> bool:
+    """Return whether exact or parent wildcard claims grant a permission."""
+
     if permission in permissions or "*" in permissions:
         return True
     parts = permission.split(".")
@@ -75,6 +89,8 @@ def authorize_command(
     context: CommandAuthorizationContext,
     permission_checker: Callable[[int, str], bool],
 ) -> CommandAuthorizationDecision:
+    """Authorize a slash command using claims first, then the RBAC backend."""
+
     required_permission = getattr(spec, "required_permission", None)
     rbac_required = bool(getattr(spec, "rbac_required", bool(required_permission)))
     if not required_permission or not rbac_required:
@@ -92,7 +108,13 @@ def authorize_command(
 
     try:
         permitted = bool(permission_checker(int(context.auth_user_id), required_permission))
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Slash command permission check failed; denying command. user_id={} permission={} error={}",
+            context.auth_user_id,
+            required_permission,
+            exception_summary(exc),
+        )
         permitted = False
     if permitted:
         return CommandAuthorizationDecision(True, {**metadata, "source": "db"})
