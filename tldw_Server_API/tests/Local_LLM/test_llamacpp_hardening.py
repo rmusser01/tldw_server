@@ -401,11 +401,12 @@ async def test_model_swap_rollback_on_stop_failure(monkeypatch, tmp_path: Path):
     handler._active_server_port = 8080
     handler._active_server_host = "127.0.0.1"
 
-    # Make stop_server fail
-    async def failing_stop():
+    # start_server() already holds the lifecycle lock and calls the unlocked
+    # stop path directly during model swaps.
+    async def failing_stop(*_args, **_kwargs):
         raise ServerError("Failed to stop server")
 
-    monkeypatch.setattr(handler, "stop_server", failing_stop)
+    monkeypatch.setattr(handler, "_stop_server_unlocked", failing_stop)
 
     # Attempt to swap models - should fail and restore state
     with pytest.raises(ServerError, match="Model swap failed"):
