@@ -1672,6 +1672,7 @@ class TestErrorHandling:
     async def test_missing_provider_credentials_returns_503(self, test_client, auth_headers, monkeypatch):
         """Missing provider credentials should return 503 with error code."""
         from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
+        from tldw_Server_API.app.core.Audio import tts_service
 
         async def _missing(provider, *args, **kwargs):
             return ResolvedByokCredentials(
@@ -1683,7 +1684,7 @@ class TestErrorHandling:
                 allowlisted=True,
             )
 
-        monkeypatch.setattr(audio_endpoints, "resolve_byok_credentials", _missing)
+        monkeypatch.setattr(tts_service, "resolve_byok_credentials", _missing)
 
         response = test_client.post(
             "/api/v1/audio/speech",

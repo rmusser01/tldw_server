@@ -120,6 +120,37 @@ def test_render_plan_rejects_cross_project_artifacts(db_user_1: CollectionsDatab
         )
 
 
+def test_render_plan_treats_windows_drive_artifact_paths_as_local(
+    db_user_1: CollectionsDatabase,
+) -> None:
+    project = _create_project(db_user_1)
+    artifact = db_user_1.create_audio_studio_artifact(
+        project_row_id=project.id,
+        artifact_id="art_windows_drive",
+        artifact_type="clip_audio",
+        provider="tts",
+        output_id=None,
+        storage_path="C:/definitely-missing-tldw-audio-studio-ci/clip.wav",
+        mime_type="audio/wav",
+        size_bytes=1,
+        source_resource_kind="clip",
+        source_resource_id="clip_windows_drive",
+        source_revision_id="rev_001",
+        content_hash="hash_windows_drive",
+        metadata_json=json.dumps({"duration_ms": 50}),
+    )
+
+    with pytest.raises(ValueError, match="audio_studio_artifact_file_not_found"):
+        build_render_plan(
+            collections_db=db_user_1,
+            project=project,
+            render_id="render_001",
+            target_revision_id="rev_001",
+            artifact_refs=[{"artifact_id": artifact.artifact_id, "source_revision_id": "rev_001"}],
+            output_format="wav",
+        )
+
+
 def test_render_plan_rejects_stale_artifact_revision(db_user_1: CollectionsDatabase, tmp_path: Path) -> None:
     project = _create_project(db_user_1)
     wav_path = tmp_path / "clip.wav"

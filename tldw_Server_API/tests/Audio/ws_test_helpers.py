@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,6 +9,8 @@ from starlette.websockets import WebSocketDisconnect
 @contextmanager
 def ws_client_without_lifespan(app):
     """Create a TestClient without entering the app lifespan context."""
+    previous_query_token_auth = os.environ.get("AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH")
+    os.environ["AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH"] = "1"
     try:
         from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
 
@@ -25,6 +28,10 @@ def ws_client_without_lifespan(app):
         yield client
     finally:
         client.close()
+        if previous_query_token_auth is None:
+            os.environ.pop("AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH", None)
+        else:
+            os.environ["AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH"] = previous_query_token_auth
 
 
 @contextmanager

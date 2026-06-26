@@ -280,9 +280,11 @@ def test_aggregate_streaming_route_import_failure_log_is_sanitized(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_aggregate_resolve_tts_byok_user_id_failure_log_is_sanitized(monkeypatch):
+    from tldw_Server_API.app.core.Audio import tts_service
+
     mod = _import_audio_aggregate_module(monkeypatch, cfg=_fake_cfg({}))
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(mod, "logger", logger_stub, raising=True)
+    monkeypatch.setattr(tts_service, "logger", logger_stub, raising=True)
 
     user = types.SimpleNamespace(id="user id leaked /private/user-id.txt")
 

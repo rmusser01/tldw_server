@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import ntpath
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +31,17 @@ _MIME_BY_FORMAT = {
     "m4a": "audio/mp4",
     "m4b": "audio/mp4",
 }
+
+
+def _is_url_storage_path(storage_path: str) -> bool:
+    """Return True when a storage pointer is a URL, not a local filesystem path."""
+
+    parsed = urlparse(storage_path)
+    if not parsed.scheme and not parsed.netloc:
+        return False
+    if len(parsed.scheme) == 1 and not parsed.netloc and ntpath.splitdrive(storage_path)[0]:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -279,8 +291,7 @@ def resolve_audio_studio_artifact_path(collections_db: Any, artifact: Any) -> Pa
     storage_path = str(getattr(artifact, "storage_path", "") or "").strip()
     if not storage_path:
         raise ValueError("audio_studio_artifact_file_not_available")
-    parsed = urlparse(storage_path)
-    if parsed.scheme or parsed.netloc:
+    if _is_url_storage_path(storage_path):
         raise ValueError("invalid_audio_studio_artifact_storage_path")
     path = Path(storage_path)
     if path.is_absolute():

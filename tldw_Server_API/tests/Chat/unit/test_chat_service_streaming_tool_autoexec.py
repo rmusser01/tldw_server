@@ -156,6 +156,25 @@ async def _collect_sse_chunks(response: StreamingResponse) -> list[str]:
     return chunks
 
 
+def _json_payload_chunks(chunks: list[str]) -> list[tuple[int, dict[str, Any]]]:
+    payloads = []
+    for chunk_idx, chunk in enumerate(chunks):
+        for line in chunk.splitlines():
+            if not line.startswith("data: "):
+                continue
+            raw = line[6:].strip()
+            if not raw or raw == "[DONE]":
+                continue
+            payload = None
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict):
+                payloads.append((chunk_idx, payload))
+    return payloads
+
+
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_streaming_autoexec_enabled_persists_tool_messages_and_emits_tool_results_event(
@@ -259,14 +278,15 @@ async def test_streaming_autoexec_enabled_persists_tool_messages_and_emits_tool_
     assert save_payloads[1]["role"] == "tool"
     assert save_payloads[1]["tool_call_id"] == "c1"
 
-    tool_event_idx = next(i for i, msg in enumerate(chunks) if msg.startswith("event: tool_results"))
+    payload_chunks = _json_payload_chunks(chunks)
+    tool_event_idx, payload = next(
+        (i, payload) for i, payload in payload_chunks if "tool_results" in payload
+    )
     finish_idx = next(i for i, msg in enumerate(chunks) if '"finish_reason": "stop"' in msg)
-    end_idx = next(i for i, msg in enumerate(chunks) if msg.startswith("event: stream_end"))
+    end_idx = next(i for i, payload in payload_chunks if payload.get("success") is True)
     done_idx = next(i for i, msg in enumerate(chunks) if "data: [DONE]" in msg)
     assert tool_event_idx < finish_idx < end_idx < done_idx
 
-    tool_data_line = next(line for line in chunks[tool_event_idx].splitlines() if line.startswith("data: "))
-    payload = json.loads(tool_data_line[6:])
     assert payload["tool_results"][0]["tool_call_id"] == "c1"
     assert payload["tldw_conversation_id"] == "conv-stream-1"
     assert payload["tldw_message_id"] == "m-1"
@@ -344,7 +364,7 @@ async def test_streaming_autoexec_disabled_does_not_emit_tool_results_event(
     assert called["autoexec"] == 0
     assert len(save_payloads) == 1
     assert save_payloads[0]["role"] == "assistant"
-    assert not any(msg.startswith("event: tool_results") for msg in chunks)
+    assert not any('"tool_results"' in msg for msg in chunks)
 
 
 class _RunFirstMetrics(_DummyMetrics):

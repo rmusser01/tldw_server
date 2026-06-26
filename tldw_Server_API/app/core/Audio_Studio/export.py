@@ -9,10 +9,10 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from tldw_Server_API.app.core.Audio_Studio.render import (
     audio_studio_artifact_manifest_entry,
+    _is_url_storage_path,
     load_pinned_audio_studio_artifacts,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -256,8 +256,7 @@ def _artifact_path_from_row(artifact: Any, *, collections_db: Any | None) -> Pat
     storage_path = str(getattr(artifact, "storage_path", "") or "")
     if not storage_path:
         raise ValueError("audio_studio_artifact_file_not_available")
-    parsed = urlparse(storage_path)
-    if parsed.scheme or parsed.netloc:
+    if _is_url_storage_path(storage_path):
         raise ValueError("invalid_audio_studio_artifact_storage_path")
     path = Path(storage_path)
     if ".." in path.parts:

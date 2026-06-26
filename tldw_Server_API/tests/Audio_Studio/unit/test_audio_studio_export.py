@@ -114,6 +114,37 @@ def test_export_manifest_includes_source_hashes_without_storage_paths(
     assert "storage_path" not in json.dumps(manifest)
 
 
+def test_export_manifest_treats_windows_drive_artifact_paths_as_local(
+    db_user_1: CollectionsDatabase,
+) -> None:
+    project = _create_project(db_user_1)
+    artifact = db_user_1.create_audio_studio_artifact(
+        project_row_id=project.id,
+        artifact_id="art_windows_drive",
+        artifact_type="final_mix",
+        provider="audio_studio",
+        output_id=None,
+        storage_path="C:/definitely-missing-tldw-audio-studio-ci/mix.wav",
+        mime_type="audio/wav",
+        size_bytes=1,
+        source_resource_kind="render",
+        source_resource_id="render_001",
+        source_revision_id="rev_001",
+        content_hash="hash_windows_drive",
+        metadata_json=json.dumps({"render_id": "render_001"}),
+    )
+
+    with pytest.raises(ValueError, match="audio_studio_artifact_file_not_found"):
+        create_audio_studio_export_manifest(
+            collections_db=db_user_1,
+            project=project,
+            export_id="export_001",
+            export_type="zip_package",
+            target_revision_id="rev_001",
+            artifact_refs=[{"artifact_id": artifact.artifact_id, "source_revision_id": "rev_001"}],
+        )
+
+
 def test_zip_and_narration_packages_include_manifest_and_audio(
     db_user_1: CollectionsDatabase,
     tmp_path: Path,

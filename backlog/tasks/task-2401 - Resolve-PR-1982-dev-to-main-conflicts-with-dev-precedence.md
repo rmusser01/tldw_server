@@ -4,7 +4,7 @@ title: Resolve PR 1982 dev-to-main conflicts with dev precedence
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-26 16:08'
+updated_date: '2026-06-26 18:45'
 labels:
   - merge-conflict
   - pr-1982
@@ -38,6 +38,14 @@ modified_files:
   - tldw_Server_API/tests/Context_Integrity/unit/test_inventory.py
   - tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v51.py
   - tldw_Server_API/tests/http_client/test_http_client_retry_after.py
+  - tldw_Server_API/app/core/Audio_Studio/export.py
+  - tldw_Server_API/app/core/Audio_Studio/render.py
+  - tldw_Server_API/tests/Audio/test_failopen_cap_minutes.py
+  - tldw_Server_API/tests/Audio/ws_test_helpers.py
+  - tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_export.py
+  - tldw_Server_API/tests/Audio_Studio/unit/test_audio_studio_render.py
+  - tldw_Server_API/tests/Chat/unit/test_chat_service_streaming_tool_autoexec.py
+  - tldw_Server_API/tests/TTS_NEW/integration/test_tts_endpoints.py
 ---
 
 ## Description
@@ -93,6 +101,7 @@ Old-head CI later exposed Full Suite shard integrations failing test_reconcile_c
 - 2026-06-26 media-ingestion current-run failures: `Full Suite shard (macos-latest / Python 3.12 / media-ingestion-modification)` failed because the nested email test used `EmailMessage.add_attachment(..., maintype="message", subtype="rfc822")`, which raises `TypeError: set_message_content() got an unexpected keyword argument 'maintype'`, and because yt-dlp cookie unit tests inherited the CI workflow egress allowlist that excluded `youtu.be`/`youtube.com` despite stubbing `yt_dlp.YoutubeDL`. Fixes added: use the Python-compatible `EmailMessage` RFC822 attachment form with `subtype="rfc822"` only, and isolate the yt-dlp unit fixture with an explicit allowlist for its stubbed hosts. Verification: the exact three failed tests passed locally, then the affected media-ingestion test files passed with `32 passed, 7 skipped, 1 xpassed`; `git diff --check` passed; `py_compile` on the touched test files passed; Bandit over the touched test files reported only an existing low-severity `B311` at an untouched line in `test_add_media_endpoint.py`, and the filtered run excluding existing test-file findings wrote `/tmp/bandit_pr1982_media_ingestion_followups_filtered.json` with 0 results.
 - 2026-06-26 chat-legacy current-run failures: `Full Suite shard (macos-latest / Python 3.12 / chat-legacy-integration)` exposed stale chat integration test contracts: the auto-routing test patched the removed sync skill-tool helper instead of the async endpoint import; image/streaming tests still expected literal provider `event:` frames even though the endpoint now emits normalized `data:` metadata/tool/result frames; and the disconnect smoke expected the old `stream_start` control frame. Fixes added: patch `add_skill_tool_to_tools_list_async` with an async fake, parse normalized JSON SSE payloads for conversation IDs and tool-results ordering, assert `[DONE]` as the final frame, and keep the disconnect test focused on receiving a streamed delta before closing the client context. Verification: the exact four failed tests failed before the change and passed after; the four modified chat integration files passed with `14 passed`; `git diff --check` passed; `py_compile` on touched chat tests passed; filtered Bandit wrote `/tmp/bandit_pr1982_chat_followups_filtered.json` with 0 results.
 - 2026-06-26 admin/settings current-run failures: `Full Suite shard (Ubuntu / Python 3.12 / admin-s-sessions-settings)` and the matching Python 3.13 shard failed in `test_admin_smoke_roles_permissions_sqlite_and_pg` because the isolated SQLite smoke called `ensure_authnz_tables` while CI exported a dead `REDIS_URL`; the migration helper correctly permits Redis-to-file fallback only in test mode, but this specific smoke used `_fresh_client()` with `TEST_MODE=0`. Fix added: run that smoke client with `test_mode=True`, matching the existing isolated test-client pattern used elsewhere in the file without weakening production migration-lock behavior. Verification: the exact failed admin smoke passed locally with `REDIS_URL=redis://127.0.0.1:6379/0`, then the full admin smoke file passed with `3 passed`; `git diff --check` passed; `py_compile` on the touched admin test passed; filtered Bandit wrote `/tmp/bandit_pr1982_admin_smoke_followup_filtered.json` with 0 results.
+- 2026-06-26 chat-unit/media-audio current-run failures: `Full Suite shard (macos-latest / Python 3.12 / chat-legacy-unit-a-l)` exposed a stale streaming auto-exec unit contract that still looked for provider `event:` frames instead of normalized `data:` JSON payloads. `Full Suite shard (windows-latest / Python 3.12 / media-audio)` exposed four clusters: legacy WebSocket tests used query-token auth without enabling the new opt-in flag; Audio Studio classified Windows drive paths like `C:/...` as URL schemes; a fail-open BYOK logging test patched the aggregate audio logger after resolution moved to the core TTS service; and a TTS missing-credentials test patched the old aggregate resolver instead of the core resolver. Fixes added: parse normalized SSE JSON in the chat-unit test, enable `AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH=1` only inside the shared WebSocket test client helper and restore the prior env afterward, treat Windows drive prefixes as local filesystem paths while still rejecting real URL storage pointers, add Windows-drive regression tests for render/export artifact paths, and retarget the stale BYOK/TTS monkeypatches to `core.Audio.tts_service`. Verification: focused Windows-drive regressions failed before the path fix and passed after; WebSocket query-token files passed `12 passed`; Audio Studio affected files passed `42 passed`; chat streaming auto-exec passed `6 passed`; fail-open file passed `18 passed`; missing-provider-credentials TTS test passed; `git diff --check` passed; `py_compile` on touched files passed; filtered Bandit wrote `/tmp/bandit_pr1982_media_audio.json` with 0 results.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
