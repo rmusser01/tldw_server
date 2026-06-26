@@ -122,16 +122,6 @@ _UPDATABLE_ANNOTATION_COLS = frozenset({
     "followup_note",
     "metadata",
 })
-_UPDATABLE_ANNOTATION_ASSIGNMENTS = {
-    "status": "status = ?",
-    "category": "category = ?",
-    "tags": "tags_json = ?",
-    "source": "source = ?",
-    "body": "body = ?",
-    "suggested_fix": "suggested_fix = ?",
-    "followup_note": "followup_note = ?",
-    "metadata": "metadata_json = ?",
-}
 _ANCHOR_STATUS_FILTER_CANDIDATE_CAP = 500
 _VALID_ANCHOR_STATUSES = frozenset({"scene_level", "attached", "reattached", "needs_review"})
 _ACTIVE_ANNOTATION_TARGET_SQL = """
@@ -177,6 +167,53 @@ _ACTIVE_ANNOTATION_TARGET_SQL = """
         )
     )
 )
+"""
+_GET_ANNOTATION_SQL = (
+    "SELECT ma.* FROM manuscript_annotations ma "  # nosec B608 - static query fragment; values are bound.
+    "WHERE ma.id = ? AND ma.deleted = 0 AND "
+    + _ACTIVE_ANNOTATION_TARGET_SQL
+)
+_LIST_ANNOTATIONS_WHERE_SQL = (
+    "ma.project_id = ? AND ma.deleted = 0 "
+    "AND (? IS NULL OR ma.target_type = ?) "
+    "AND (? IS NULL OR ma.target_id = ?) "
+    "AND (? IS NULL OR ma.status = ?) "
+    "AND (? IS NULL OR ma.category = ?) "
+    "AND (? IS NULL OR ma.source = ?) "
+    "AND "
+    + _ACTIVE_ANNOTATION_TARGET_SQL
+)
+_COUNT_ANNOTATIONS_SQL = (
+    "SELECT COUNT(*) AS cnt FROM manuscript_annotations ma "  # nosec B608 - static query fragment; values are bound.
+    "WHERE "
+    + _LIST_ANNOTATIONS_WHERE_SQL
+)
+_SELECT_ANNOTATIONS_PAGE_SQL = (
+    "SELECT ma.* FROM manuscript_annotations ma "  # nosec B608 - static query fragment; values are bound.
+    "WHERE "
+    + _LIST_ANNOTATIONS_WHERE_SQL
+    + " ORDER BY ma.last_modified DESC LIMIT ? OFFSET ?"
+)
+_SELECT_ANNOTATIONS_FOR_ANCHOR_FILTER_SQL = (
+    "SELECT ma.* FROM manuscript_annotations ma "  # nosec B608 - static query fragment; values are bound.
+    "WHERE "
+    + _LIST_ANNOTATIONS_WHERE_SQL
+    + " ORDER BY ma.last_modified DESC"
+)
+_UPDATE_ANNOTATION_SQL = """
+UPDATE manuscript_annotations
+   SET status = CASE WHEN ? THEN ? ELSE status END,
+       category = CASE WHEN ? THEN ? ELSE category END,
+       tags_json = CASE WHEN ? THEN ? ELSE tags_json END,
+       source = CASE WHEN ? THEN ? ELSE source END,
+       body = CASE WHEN ? THEN ? ELSE body END,
+       suggested_fix = CASE WHEN ? THEN ? ELSE suggested_fix END,
+       followup_note = CASE WHEN ? THEN ? ELSE followup_note END,
+       metadata_json = CASE WHEN ? THEN ? ELSE metadata_json END,
+       last_modified = ?,
+       version = ?,
+       client_id = ?
+ WHERE id = ? AND version = ? AND deleted = 0
 """
 _ANNOTATION_DUPLICATE_KEY_FIELDS = (
     "target_type",
@@ -1531,9 +1568,7 @@ class ManuscriptDBHelper:
         """Fetch a non-deleted annotation by ID."""
         with self.db.transaction() as conn:
             row = conn.execute(
-                "SELECT ma.* FROM manuscript_annotations ma "
-                "WHERE ma.id = ? AND ma.deleted = 0 AND "
-                f"{_ACTIVE_ANNOTATION_TARGET_SQL}",  # nosec B608
+                _GET_ANNOTATION_SQL,
                 (annotation_id,),
             ).fetchone()
             if row is None:
@@ -1566,36 +1601,30 @@ class ManuscriptDBHelper:
         )
         self._validate_annotation_anchor_status(anchor_status)
 
-        clauses = ["ma.project_id = ?", "ma.deleted = 0", _ACTIVE_ANNOTATION_TARGET_SQL]
-        params: list[Any] = [project_id]
-        if target_type is not None:
-            clauses.append("ma.target_type = ?")
-            params.append(target_type)
-        if target_id is not None:
-            clauses.append("ma.target_id = ?")
-            params.append(target_id)
-        if status is not None:
-            clauses.append("ma.status = ?")
-            params.append(status)
-        if category is not None:
-            clauses.append("ma.category = ?")
-            params.append(category)
-        if source is not None:
-            clauses.append("ma.source = ?")
-            params.append(source)
-        where_sql = " AND ".join(clauses)
+        params: list[Any] = [
+            project_id,
+            target_type,
+            target_type,
+            target_id,
+            target_id,
+            status,
+            status,
+            category,
+            category,
+            source,
+            source,
+        ]
 
         with self.db.transaction() as conn:
             if not self._project_is_active(conn, project_id):
                 return [], 0
             if anchor_status is None:
                 total_row = conn.execute(
-                    f"SELECT COUNT(*) AS cnt FROM manuscript_annotations ma WHERE {where_sql}",  # nosec B608
+                    _COUNT_ANNOTATIONS_SQL,
                     params,
                 ).fetchone()
                 rows = conn.execute(
-                    f"SELECT ma.* FROM manuscript_annotations ma WHERE {where_sql} "  # nosec B608
-                    "ORDER BY ma.last_modified DESC LIMIT ? OFFSET ?",
+                    _SELECT_ANNOTATIONS_PAGE_SQL,
                     (*params, limit, offset),
                 ).fetchall()
                 scene_rows = self._scene_rows_for_annotation_rows(conn, rows)
@@ -1605,7 +1634,7 @@ class ManuscriptDBHelper:
                 ], int(total_row["cnt"] or 0)
 
             total_row = conn.execute(
-                f"SELECT COUNT(*) AS cnt FROM manuscript_annotations ma WHERE {where_sql}",  # nosec B608
+                _COUNT_ANNOTATIONS_SQL,
                 params,
             ).fetchone()
             candidate_count = int(total_row["cnt"] or 0)
@@ -1617,8 +1646,7 @@ class ManuscriptDBHelper:
                 )  # noqa: TRY003
 
             rows = conn.execute(
-                f"SELECT ma.* FROM manuscript_annotations ma WHERE {where_sql} "  # nosec B608
-                "ORDER BY ma.last_modified DESC",
+                _SELECT_ANNOTATIONS_FOR_ANCHOR_FILTER_SQL,
                 params,
             ).fetchall()
             scene_rows = self._scene_rows_for_annotation_rows(conn, rows)
@@ -1653,19 +1681,28 @@ class ManuscriptDBHelper:
 
         now = self._now()
         next_version = expected_version + 1
-        set_parts: list[str] = []
+        update_values = {
+            "status": updates.get("status"),
+            "category": updates.get("category"),
+            "tags": json.dumps(updates.get("tags") or []) if "tags" in updates else None,
+            "source": updates.get("source"),
+            "body": updates.get("body"),
+            "suggested_fix": updates.get("suggested_fix"),
+            "followup_note": updates.get("followup_note"),
+            "metadata": json.dumps(updates.get("metadata") or {}) if "metadata" in updates else None,
+        }
         params: list[Any] = []
-        for key, value in updates.items():
-            if key == "tags":
-                set_parts.append(_UPDATABLE_ANNOTATION_ASSIGNMENTS[key])
-                params.append(json.dumps(value or []))
-            elif key == "metadata":
-                set_parts.append(_UPDATABLE_ANNOTATION_ASSIGNMENTS[key])
-                params.append(json.dumps(value or {}))
-            else:
-                set_parts.append(_UPDATABLE_ANNOTATION_ASSIGNMENTS[key])
-                params.append(value)
-        set_parts.extend(["last_modified = ?", "version = ?", "client_id = ?"])
+        for key in (
+            "status",
+            "category",
+            "tags",
+            "source",
+            "body",
+            "suggested_fix",
+            "followup_note",
+            "metadata",
+        ):
+            params.extend([key in updates, update_values[key]])
         params.extend([now, next_version, self._client_id, annotation_id, expected_version])
 
         with self.db.transaction() as conn:
@@ -1680,8 +1717,7 @@ class ManuscriptDBHelper:
                     entity_id=annotation_id,
                 )
             cur = conn.execute(
-                f"UPDATE manuscript_annotations SET {', '.join(set_parts)} "  # nosec B608
-                "WHERE id = ? AND version = ? AND deleted = 0",
+                _UPDATE_ANNOTATION_SQL,
                 params,
             )
             if cur.rowcount == 0:

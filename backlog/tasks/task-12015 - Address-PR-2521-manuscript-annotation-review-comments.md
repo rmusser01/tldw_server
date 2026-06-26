@@ -65,7 +65,7 @@ Address reviewer and CI follow-up items on PR #2521 after rebasing the manuscrip
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Rebased `codex/writing-manuscript-annotations-design` onto the latest `origin/dev` and addressed the PR #2521 review comments. The follow-up commit hardens the Writing Playground manuscript annotations flow across UI, API, DB, Jobs, and task metadata:
+Rebased `codex/writing-manuscript-annotations-design` onto the latest `origin/dev` and addressed the PR #2521 review comments. The follow-up commits harden the Writing Playground manuscript annotations flow across UI, API, DB, Jobs, and task metadata:
 
 - Fixed margin rail offset conversion for persisted code-point anchors, with emoji regression coverage.
 - Added UI mutation rejection handling and toast routing for annotation list/tab actions.
@@ -73,7 +73,7 @@ Rebased `codex/writing-manuscript-annotations-design` onto the latest `origin/de
 - Prevented TipTap scene content from re-seeding over local edits and skipped hot-path full-document comparison for editor-originated echoes.
 - Cleaned up the E2E margin rail seed fixture if setup fails after project creation.
 - Bulk-loaded scene rows for annotation list anchor derivation to avoid N+1 reads.
-- Rejected non-string annotation tags and preserved static SQL assignment fragments for annotation updates.
+- Rejected non-string annotation tags and replaced remaining dynamic annotation list/update SQL assembly with fixed statements and bound parameters.
 - Added PostgreSQL sync-log trigger/function coverage for `manuscript_annotations`.
 - Made scene-review processing deduplicate before `max_comments`, report empty model output, and use the real Jobs queue allowlist.
 - Moved writing annotation review exceptions into the shared exceptions module and extracted selected-text AI review persistence out of the API route.
@@ -82,7 +82,7 @@ Verification:
 - `git diff --check`: passed.
 - `bunx vitest run src/components/Option/WritingPlayground/__tests__/WritingPlayground.manuscript-api-shapes.guard.test.ts src/components/Option/WritingPlayground/__tests__/WritingTipTapEditor.external-sync.test.tsx src/components/Option/WritingPlayground/__tests__/writing-annotation-anchor-utils.test.ts src/components/Option/WritingPlayground/__tests__/WritingAnnotationMarginRail.test.tsx src/components/Option/WritingPlayground/__tests__/WritingAnnotationsTab.test.tsx`: 5 files passed, 42 tests passed.
 - `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Writing/test_manuscript_annotations_db.py tldw_Server_API/tests/Writing/test_manuscript_annotation_review_jobs.py tldw_Server_API/tests/Writing/test_manuscript_annotations_api.py tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py -q`: 59 passed, 5 warnings.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/DB_Management/ManuscriptDB.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Writing/manuscript_annotations.py tldw_Server_API/app/core/Writing/manuscript_annotation_jobs.py tldw_Server_API/app/api/v1/endpoints/writing_manuscripts.py tldw_Server_API/app/services/writing_annotation_review_jobs_worker.py tldw_Server_API/app/core/Jobs/manager.py tldw_Server_API/app/core/exceptions.py -f json -o /tmp/bandit_pr2521_review.json`: passed, zero findings.
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/DB_Management/ManuscriptDB.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Writing/manuscript_annotations.py tldw_Server_API/app/core/Writing/manuscript_annotation_jobs.py tldw_Server_API/app/api/v1/endpoints/writing_manuscripts.py tldw_Server_API/app/services/writing_annotation_review_jobs_worker.py tldw_Server_API/app/core/Jobs/manager.py tldw_Server_API/app/core/exceptions.py -f json -o /tmp/bandit_pr2521_review_3.json`: passed, zero findings.
 
 Known verification note:
 - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` remains red on pre-existing unrelated package errors in Notes tests, AudioStudio, ScheduledTasks, Setup tests, Dexie audiobook migration, background response narrowing, scheduled-tasks control-plane params, and voice cloning. No touched Writing Playground annotation files were reported.
