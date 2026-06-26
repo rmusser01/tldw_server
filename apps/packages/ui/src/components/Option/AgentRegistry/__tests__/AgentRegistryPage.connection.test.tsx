@@ -1,5 +1,6 @@
 import React from "react"
 import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AgentRegistryPage } from "../index"
@@ -55,11 +56,15 @@ const baseExecutionHealthSummaryPayload = {
 
 const installACPFetchMock = ({
   healthPayload = baseACPHealthPayload,
+  healthOk = true,
+  healthStatus = healthOk ? 200 : 503,
   summaryPayload = baseExecutionHealthSummaryPayload,
   summaryOk = true,
   summaryStatus = summaryOk ? 200 : 403
 }: {
   healthPayload?: Record<string, unknown>
+  healthOk?: boolean
+  healthStatus?: number
   summaryPayload?: Record<string, unknown>
   summaryOk?: boolean
   summaryStatus?: number
@@ -76,8 +81,8 @@ const installACPFetchMock = ({
         }
       }
       return {
-        ok: true,
-        status: 200,
+        ok: healthOk,
+        status: healthStatus,
         json: async () => healthPayload
       }
     })
@@ -484,13 +489,74 @@ describe("AgentRegistryPage connection config", () => {
   })
 
   it("keeps the registry usable when the admin execution-health summary is unavailable", async () => {
-    installACPFetchMock({ summaryOk: false, summaryStatus: 403 })
+    installACPFetchMock({
+      summaryOk: false,
+      summaryStatus: 403,
+      summaryPayload: { detail: "Admin scope required" }
+    })
 
     render(<AgentRegistryPage />)
 
     expect(await screen.findByText("Planner Agent")).toBeInTheDocument()
+    const recovery = screen.getByTestId("agent-registry-execution-health-recovery")
+    expect(recovery).toHaveAttribute("data-ds-component", "RecoveryCallout")
     expect(screen.getByText("Execution health summary unavailable")).toBeInTheDocument()
+    expect(screen.getByText("GET")).toBeInTheDocument()
+    expect(
+      screen.getByText("/api/v1/admin/acp/execution-health/summary?range_days=30")
+    ).toBeInTheDocument()
+    expect(screen.getByText("http://127.0.0.1:8000")).toBeInTheDocument()
+    expect(screen.getByText("403")).toBeInTheDocument()
+    expect(screen.getByText("Admin scope required")).toBeInTheDocument()
     expect(screen.getByText("Runner Binary")).toBeInTheDocument()
+  })
+
+  it("renders shared ACP health recovery with diagnostics while keeping registry cards usable", async () => {
+    installACPFetchMock({
+      healthOk: false,
+      healthStatus: 503,
+      healthPayload: { detail: "ACP runner disabled" }
+    })
+
+    render(<AgentRegistryPage />)
+
+    expect(await screen.findByText("Planner Agent")).toBeInTheDocument()
+    const recovery = screen.getByTestId("agent-registry-health-recovery")
+    expect(recovery).toHaveAttribute("data-ds-component", "RecoveryCallout")
+    expect(screen.getByText("ACP health is unavailable")).toBeInTheDocument()
+    expect(screen.getByText("GET")).toBeInTheDocument()
+    expect(screen.getByText("/api/v1/acp/health")).toBeInTheDocument()
+    expect(screen.getByText("http://127.0.0.1:8000")).toBeInTheDocument()
+    expect(screen.getByText("503")).toBeInTheDocument()
+    expect(screen.getByText("ACP runner disabled")).toBeInTheDocument()
+  })
+
+  it("renders retryable shared recovery when the agent registry cannot load", async () => {
+    const user = userEvent.setup()
+    const loadError = Object.assign(new Error("Not Found"), { status: 404 })
+    acpMocks.getAvailableAgents.mockRejectedValue(loadError)
+
+    render(<AgentRegistryPage />)
+
+    const recovery = await screen.findByTestId("agent-registry-agent-list-recovery")
+    expect(recovery).toHaveAttribute("data-ds-component", "RecoveryCallout")
+    expect(
+      screen.getByRole("heading", {
+        name: "Agent Registry is unavailable on this server"
+      })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("The connected server does not advertise ACP agent registry.")
+    ).toBeInTheDocument()
+    expect(screen.getByText("GET")).toBeInTheDocument()
+    expect(screen.getByText("/api/v1/acp/agents")).toBeInTheDocument()
+    expect(screen.getByText("http://127.0.0.1:8000")).toBeInTheDocument()
+    expect(screen.getByText("404")).toBeInTheDocument()
+    expect(screen.getByText("Not Found")).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Try again" }))
+
+    expect(acpMocks.getAvailableAgents).toHaveBeenCalledTimes(2)
   })
 
   it("treats malformed admin execution-health summaries as unavailable", async () => {

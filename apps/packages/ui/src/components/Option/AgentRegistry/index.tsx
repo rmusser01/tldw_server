@@ -8,11 +8,11 @@ import {
   AlertTriangle,
   RefreshCw,
   Play,
-  Settings,
   Heart,
   Activity,
 } from "lucide-react"
-import { Alert as DSAlert, Badge as DSBadge } from "@/components/ui/primitives"
+import { Badge as DSBadge } from "@/components/ui/primitives"
+import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { ACPRestClient } from "@/services/acp/client"
 import { buildACPAuthHeaders, buildACPClientConfig } from "@/services/acp/connection"
@@ -33,6 +33,14 @@ import { DESIGN_SYSTEM_STATES, getDesignSystemState, type DesignSystemStateKey }
 
 const ACP_EXECUTION_HEALTH_SUMMARY_PATH =
   "/api/v1/admin/acp/execution-health/summary?range_days=30"
+const ACP_HEALTH_PATH = "/api/v1/acp/health"
+const ACP_AGENTS_PATH = "/api/v1/acp/agents"
+
+type RequestFailure = {
+  status?: number
+  rawMessage?: string
+  error?: unknown
+}
 
 const FAILURE_BUCKET_LABELS: Array<{
   key: keyof ACPExecutionHealthFailureBuckets
@@ -127,18 +135,85 @@ const COMPATIBILITY_COLOR: Record<ACPSupportState, "success" | "warning" | "erro
   unsupported: "error"
 }
 
+const SECRET_VALUE_PATTERN =
+  /\b(api[_-]?key|authorization|bearer|token|secret|password)(\s*[:=]\s*)([^\s,;]+)/gi
+const BEARER_VALUE_PATTERN = /\b(Bearer\s+)([A-Za-z0-9._~+/-]+)/g
+
+const redactDiagnosticMessage = (value: string): string =>
+  value
+    .replace(BEARER_VALUE_PATTERN, "$1[redacted]")
+    .replace(SECRET_VALUE_PATTERN, "$1$2[redacted]")
+
+const readJsonOrNull = async (response: Response): Promise<unknown> => {
+  try {
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
+const messageFromPayload = (payload: unknown): string | undefined => {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return undefined
+  }
+  const record = payload as Record<string, unknown>
+  const candidate = record.detail ?? record.message ?? record.error
+  return typeof candidate === "string" && candidate.trim()
+    ? redactDiagnosticMessage(candidate)
+    : undefined
+}
+
+const failureFromResponse = async (
+  response: Response,
+  fallback: string
+): Promise<RequestFailure> => {
+  const payload = await readJsonOrNull(response)
+  return {
+    status: response.status,
+    rawMessage: messageFromPayload(payload) ?? fallback
+  }
+}
+
+const failureFromError = (
+  error: unknown,
+  fallback: string
+): RequestFailure => {
+  const statusCandidate = error as { status?: unknown; response?: { status?: unknown } }
+  const status =
+    typeof statusCandidate?.status === "number"
+      ? statusCandidate.status
+      : typeof statusCandidate?.response?.status === "number"
+        ? statusCandidate.response.status
+        : undefined
+  const rawMessage =
+    error instanceof Error && error.message
+      ? redactDiagnosticMessage(error.message)
+      : typeof error === "string" && error.trim()
+        ? redactDiagnosticMessage(error)
+        : fallback
+
+  return {
+    status,
+    rawMessage,
+    error
+  }
+}
+
 export const AgentRegistryPage: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const { config: connectionConfig } = useCanonicalConnectionConfig()
 
   const [agents, setAgents] = useState<AgentEntry[]>([])
   const [health, setHealth] = useState<ACPHealthStatus | null>(null)
+  const [healthFailure, setHealthFailure] = useState<RequestFailure | null>(null)
   const [executionHealth, setExecutionHealth] =
     useState<ACPExecutionHealthSummaryResponse | null>(null)
+  const [executionHealthFailure, setExecutionHealthFailure] =
+    useState<RequestFailure | null>(null)
   const [loading, setLoading] = useState(true)
   const [healthLoading, setHealthLoading] = useState(true)
   const [executionHealthLoading, setExecutionHealthLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [agentListFailure, setAgentListFailure] = useState<RequestFailure | null>(null)
 
   const restClient = useMemo(
     () =>
@@ -159,7 +234,7 @@ export const AgentRegistryPage: React.FC = () => {
   const fetchAgents = useCallback(async () => {
     if (!restClient) return
     setLoading(true)
-    setError(null)
+    setAgentListFailure(null)
     try {
       const response = await restClient.getAvailableAgents()
       setAgents(
@@ -175,7 +250,7 @@ export const AgentRegistryPage: React.FC = () => {
         }))
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load agents")
+      setAgentListFailure(failureFromError(err, "Failed to load agents"))
     } finally {
       setLoading(false)
     }
@@ -192,12 +267,19 @@ export const AgentRegistryPage: React.FC = () => {
       const res = await fetch(transport.url, { headers: getACPHeaders(transport) })
       if (res.ok) {
         setHealth(normalizeACPHealthStatus(await res.json()))
+        setHealthFailure(null)
       } else {
         setHealth(null)
+        setHealthFailure(
+          await failureFromResponse(
+            res,
+            `ACP health returned HTTP ${res.status}`
+          )
+        )
       }
-    } catch {
-      // Health check failure is not critical
+    } catch (err) {
       setHealth(null)
+      setHealthFailure(failureFromError(err, "Failed to reach ACP health"))
     } finally {
       setHealthLoading(false)
     }
@@ -213,13 +295,24 @@ export const AgentRegistryPage: React.FC = () => {
       })
       const res = await fetch(transport.url, { headers: getACPHeaders(transport) })
       if (res.ok) {
-        setExecutionHealth(normalizeACPExecutionHealthSummary(await res.json()))
+        setExecutionHealth(
+          normalizeACPExecutionHealthSummary(await res.json())
+        )
+        setExecutionHealthFailure(null)
       } else {
         setExecutionHealth(null)
+        setExecutionHealthFailure(
+          await failureFromResponse(
+            res,
+            `ACP execution health returned HTTP ${res.status}`
+          )
+        )
       }
-    } catch {
-      // The admin summary can be permission-gated; keep the registry usable.
+    } catch (err) {
       setExecutionHealth(null)
+      setExecutionHealthFailure(
+        failureFromError(err, "Failed to reach ACP execution health")
+      )
     } finally {
       setExecutionHealthLoading(false)
     }
@@ -259,6 +352,82 @@ export const AgentRegistryPage: React.FC = () => {
         return "warning"
     }
   }
+
+  const healthRecoveryState = healthFailure
+    ? buildCapabilityState({
+        featureName: "ACP health",
+        capabilityName: "ACP health checks",
+        endpoint: ACP_HEALTH_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        status: healthFailure.status,
+        rawMessage: healthFailure.rawMessage,
+        error: healthFailure.error,
+        title: t(
+          "option:agentRegistry.health.unavailableTitle",
+          "ACP health is unavailable"
+        ),
+        message: t(
+          "option:agentRegistry.health.unavailableBody",
+          "Agent Registry cannot confirm ACP runner health right now."
+        )
+      })
+    : null
+  const executionHealthRecoveryState = executionHealthFailure
+    ? buildCapabilityState({
+        featureName: "ACP execution health",
+        capabilityName: "ACP execution-health summary",
+        endpoint: ACP_EXECUTION_HEALTH_SUMMARY_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        status: executionHealthFailure.status,
+        rawMessage: executionHealthFailure.rawMessage,
+        error: executionHealthFailure.error,
+        title: t(
+          "option:agentRegistry.executionHealth.unavailableTitle",
+          "Execution health summary unavailable"
+        ),
+        message: t(
+          "option:agentRegistry.executionHealth.unavailableBody",
+          "The admin summary endpoint may require newer backend support or elevated permissions."
+        )
+      })
+    : null
+  const agentListRecoveryState = agentListFailure
+    ? buildCapabilityState({
+        featureName: "Agent Registry",
+        capabilityName: "ACP agent registry",
+        endpoint: ACP_AGENTS_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        status: agentListFailure.status,
+        rawMessage: agentListFailure.rawMessage,
+        error: agentListFailure.error
+      })
+    : null
+  const agentListRecoveryTitle =
+    agentListRecoveryState?.state === "auth_required" ||
+    agentListRecoveryState?.state === "permission_denied"
+      ? agentListRecoveryState.title
+      : agentListRecoveryState?.state === "unavailable"
+        ? t(
+            "option:agentRegistry.loadUnavailableTitle",
+            "Agent Registry is unavailable on this server"
+          )
+        : t("option:agentRegistry.loadFailedTitle", "Agent Registry could not load")
+  const agentListRecoveryMessage =
+    agentListRecoveryState?.state === "auth_required" ||
+    agentListRecoveryState?.state === "permission_denied"
+      ? agentListRecoveryState.message
+      : agentListRecoveryState?.state === "unavailable"
+        ? t(
+            "option:agentRegistry.loadUnavailableBody",
+            "The connected server does not advertise ACP agent registry."
+          )
+        : t(
+            "option:agentRegistry.loadFailedBody",
+            "The ACP agent registry overview could not be loaded. Try again or open diagnostics."
+          )
 
   return (
     <div className="space-y-6">
@@ -318,19 +487,39 @@ export const AgentRegistryPage: React.FC = () => {
               </div>
             </div>
           </div>
+        ) : healthRecoveryState ? (
+          <RecoveryCallout
+            state={healthRecoveryState.state}
+            title={healthRecoveryState.title}
+            message={healthRecoveryState.message}
+            diagnostics={healthRecoveryState.diagnostics}
+            primaryAction={{
+              label: t("common:actions.retry", "Try again"),
+              onClick: () => {
+                void fetchHealth()
+              }
+            }}
+            data-testid="agent-registry-health-recovery"
+          />
         ) : (
-          <DSAlert
-            variant="warning"
+          <RecoveryCallout
+            state="unavailable"
             title={t(
               "option:agentRegistry.health.unavailableTitle",
-              "Health check unavailable"
+              "ACP health is unavailable"
             )}
-          >
-            {t(
+            message={t(
               "option:agentRegistry.health.unavailableBody",
-              "Could not reach the ACP health endpoint. Ensure the server is running."
+              "Agent Registry cannot confirm ACP runner health right now."
             )}
-          </DSAlert>
+            primaryAction={{
+              label: t("common:actions.retry", "Try again"),
+              onClick: () => {
+                void fetchHealth()
+              }
+            }}
+            data-testid="agent-registry-health-recovery"
+          />
         )}
         {health?.details && (
           <div className="mt-2 text-xs text-muted-foreground">{health.details}</div>
@@ -351,32 +540,62 @@ export const AgentRegistryPage: React.FC = () => {
           </div>
         ) : executionHealth ? (
           <ExecutionHealthSummary summary={executionHealth} />
+        ) : executionHealthRecoveryState ? (
+          <RecoveryCallout
+            state={executionHealthRecoveryState.state}
+            title={executionHealthRecoveryState.title}
+            message={executionHealthRecoveryState.message}
+            diagnostics={executionHealthRecoveryState.diagnostics}
+            primaryAction={{
+              label: t("common:actions.retry", "Try again"),
+              onClick: () => {
+                void fetchExecutionHealth()
+              }
+            }}
+            data-testid="agent-registry-execution-health-recovery"
+          />
         ) : (
-          <DSAlert
-            variant="warning"
+          <RecoveryCallout
+            state="unavailable"
             title={t(
               "option:agentRegistry.executionHealth.unavailableTitle",
               "Execution health summary unavailable"
             )}
-          >
-            {t(
+            message={t(
               "option:agentRegistry.executionHealth.unavailableBody",
               "The admin summary endpoint may require newer backend support or elevated permissions."
             )}
-          </DSAlert>
+            primaryAction={{
+              label: t("common:actions.retry", "Try again"),
+              onClick: () => {
+                void fetchExecutionHealth()
+              }
+            }}
+            data-testid="agent-registry-execution-health-recovery"
+          />
         )}
       </Card>
 
-      {/* Error */}
-      {error && (
-        <DSAlert
-          variant="error"
-          title={t("option:agentRegistry.loadFailedTitle", "Agent registry could not load")}
-          dismissible
-          onDismiss={() => setError(null)}
-        >
-          {error}
-        </DSAlert>
+      {agentListRecoveryState && (
+        <RecoveryCallout
+          state={agentListRecoveryState.state}
+          title={agentListRecoveryTitle}
+          message={agentListRecoveryMessage}
+          diagnostics={agentListRecoveryState.diagnostics}
+          primaryAction={{
+            label: t("common:actions.retry", "Try again"),
+            onClick: () => {
+              void fetchAgents()
+            }
+          }}
+          secondaryActions={[
+            {
+              label: t("common:dismiss", "Dismiss"),
+              onClick: () => setAgentListFailure(null)
+            }
+          ]}
+          data-testid="agent-registry-agent-list-recovery"
+        />
       )}
 
       {/* Agent List */}
