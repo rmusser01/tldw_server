@@ -84,7 +84,7 @@ async def process_documents_endpoint(
     form_data: ProcessDocumentsForm = Depends(get_process_documents_form),
     files: list[UploadFile] | None = File(
         None,
-        description="Document file uploads (.txt, .md, .markdown, .docx, .rtf, .html, .xml)",
+        description="Document file uploads (.txt, .md, .markdown, .docx, .rtf, .html, .htm, .xhtml, .xml, .json)",
     ),
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
 ):
@@ -170,6 +170,7 @@ async def process_documents_endpoint(
                 temp_dir,
                 validator=validator,
                 allowed_extensions=ALLOWED_DOC_EXTENSIONS,
+                expected_media_type_key="document",
             )
             saved_files_info = list(saved_files)
             # Add file saving/validation errors to batch_result

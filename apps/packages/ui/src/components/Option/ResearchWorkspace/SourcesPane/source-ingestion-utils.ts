@@ -11,6 +11,9 @@ const ACCEPTED_EXTENSIONS = [
   "epub",
   "html",
   "htm",
+  "xhtml",
+  "xml",
+  "json",
   "mp3",
   "wav",
   "m4a",
@@ -33,7 +36,11 @@ const ACCEPTED_MIME_TYPES = new Set<string>([
   "application/epub+zip",
   "text/plain",
   "text/markdown",
-  "text/html"
+  "text/html",
+  "application/xhtml+xml",
+  "application/xml",
+  "text/xml",
+  "application/json"
 ])
 
 const clampPositiveInt = (value: number): number | null => {
@@ -241,4 +248,4 @@ export const formatSourceUploadSizeLimit = (bytes: number): string => {
 }
 
 export const buildSourceUploadAccept = (): UploadProps["accept"] =>
-  ".pdf,.docx,.txt,.md,.epub,.html,.htm,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.webm,.mkv,.avi,.mov"
+  ".pdf,.docx,.txt,.md,.markdown,.epub,.html,.htm,.xhtml,.xml,.json,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.webm,.mkv,.avi,.mov"
