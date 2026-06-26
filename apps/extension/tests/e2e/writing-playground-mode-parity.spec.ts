@@ -77,82 +77,106 @@ const seedMarginRailFixture = async (
   const projectTitle = `E2E Rail Project ${unique}`
   const chapterTitle = `E2E Rail Chapter ${unique}`
   const sceneTitle = `E2E Rail Scene ${unique}`
-  const project = await apiJson<{ id: string; version: number }>(
-    serverUrl,
-    apiKey,
-    "/api/v1/writing/manuscripts/projects",
-    {
-      method: "POST",
-      body: JSON.stringify({ title: projectTitle })
-    }
-  )
-  const chapter = await apiJson<{ id: string }>(
-    serverUrl,
-    apiKey,
-    `/api/v1/writing/manuscripts/projects/${encodeURIComponent(project.id)}/chapters`,
-    {
-      method: "POST",
-      body: JSON.stringify({ title: chapterTitle })
-    }
-  )
-  const scene = await apiJson<{ id: string; version: number }>(
-    serverUrl,
-    apiKey,
-    `/api/v1/writing/manuscripts/chapters/${encodeURIComponent(chapter.id)}/scenes`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        title: sceneTitle,
-        content: sceneRichContent(MANUSCRIPT_RAIL_SCENE_TEXT),
-        content_plain: MANUSCRIPT_RAIL_SCENE_TEXT
-      })
-    }
-  )
-  const firstStart = MANUSCRIPT_RAIL_SCENE_TEXT.indexOf("Morning rain")
-  const firstEnd = firstStart + "Morning rain".length
-  const secondStart = MANUSCRIPT_RAIL_SCENE_TEXT.indexOf("cleaner sentence")
-  const secondEnd = secondStart + "cleaner sentence".length
-  for (const annotation of [
-    {
-      category: "clarity",
-      body: "Clarify the opening sensory beat.",
-      start: firstStart,
-      end: firstEnd,
-      selected_text: MANUSCRIPT_RAIL_SCENE_TEXT.slice(firstStart, firstEnd)
-    },
-    {
-      category: "style",
-      body: "Make the revision payoff sharper.",
-      start: secondStart,
-      end: secondEnd,
-      selected_text: MANUSCRIPT_RAIL_SCENE_TEXT.slice(secondStart, secondEnd)
-    }
-  ] as const) {
-    await apiJson(serverUrl, apiKey, "/api/v1/writing/manuscripts/annotations", {
-      method: "POST",
-      body: JSON.stringify({
-        target_type: "scene",
-        target_id: scene.id,
-        scene_version: scene.version,
-        tags: [],
-        suggested_fix: null,
-        followup_note: null,
-        metadata: {},
-        ...annotation
-      })
-    })
-  }
+  let project: { id: string; version: number } | null = null
 
-  return {
-    projectId: project.id,
-    projectTitle,
-    sceneTitle,
-    cleanup: async () => {
-      await apiJson(serverUrl, apiKey, `/api/v1/writing/manuscripts/projects/${encodeURIComponent(project.id)}`, {
-        method: "DELETE",
-        headers: { "expected-version": String(project.version) }
-      }).catch(() => undefined)
+  try {
+    project = await apiJson<{ id: string; version: number }>(
+      serverUrl,
+      apiKey,
+      "/api/v1/writing/manuscripts/projects",
+      {
+        method: "POST",
+        body: JSON.stringify({ title: projectTitle })
+      }
+    )
+    const chapter = await apiJson<{ id: string }>(
+      serverUrl,
+      apiKey,
+      `/api/v1/writing/manuscripts/projects/${encodeURIComponent(project.id)}/chapters`,
+      {
+        method: "POST",
+        body: JSON.stringify({ title: chapterTitle })
+      }
+    )
+    const scene = await apiJson<{ id: string; version: number }>(
+      serverUrl,
+      apiKey,
+      `/api/v1/writing/manuscripts/chapters/${encodeURIComponent(chapter.id)}/scenes`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          title: sceneTitle,
+          content: sceneRichContent(MANUSCRIPT_RAIL_SCENE_TEXT),
+          content_plain: MANUSCRIPT_RAIL_SCENE_TEXT
+        })
+      }
+    )
+    const firstStart = MANUSCRIPT_RAIL_SCENE_TEXT.indexOf("Morning rain")
+    const firstEnd = firstStart + "Morning rain".length
+    const secondStart = MANUSCRIPT_RAIL_SCENE_TEXT.indexOf("cleaner sentence")
+    const secondEnd = secondStart + "cleaner sentence".length
+    for (const annotation of [
+      {
+        category: "clarity",
+        body: "Clarify the opening sensory beat.",
+        start: firstStart,
+        end: firstEnd,
+        selected_text: MANUSCRIPT_RAIL_SCENE_TEXT.slice(firstStart, firstEnd)
+      },
+      {
+        category: "style",
+        body: "Make the revision payoff sharper.",
+        start: secondStart,
+        end: secondEnd,
+        selected_text: MANUSCRIPT_RAIL_SCENE_TEXT.slice(secondStart, secondEnd)
+      }
+    ] as const) {
+      await apiJson(serverUrl, apiKey, "/api/v1/writing/manuscripts/annotations", {
+        method: "POST",
+        body: JSON.stringify({
+          target_type: "scene",
+          target_id: scene.id,
+          scene_version: scene.version,
+          tags: [],
+          suggested_fix: null,
+          followup_note: null,
+          metadata: {},
+          ...annotation
+        })
+      })
     }
+
+    const createdProject = project
+
+    return {
+      projectId: createdProject.id,
+      projectTitle,
+      sceneTitle,
+      cleanup: async () => {
+        await apiJson(
+          serverUrl,
+          apiKey,
+          `/api/v1/writing/manuscripts/projects/${encodeURIComponent(createdProject.id)}`,
+          {
+            method: "DELETE",
+            headers: { "expected-version": String(createdProject.version) }
+          }
+        ).catch(() => undefined)
+      }
+    }
+  } catch (error) {
+    if (project) {
+      await apiJson(
+        serverUrl,
+        apiKey,
+        `/api/v1/writing/manuscripts/projects/${encodeURIComponent(project.id)}`,
+        {
+          method: "DELETE",
+          headers: { "expected-version": String(project.version) }
+        }
+      ).catch(() => undefined)
+    }
+    throw error
   }
 }
 

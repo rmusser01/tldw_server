@@ -12,6 +12,7 @@ export type WritingAnnotationListProps = {
     version: number
   ) => Promise<unknown>
   onDelete: (annotationId: string, version: number) => Promise<unknown>
+  onError?: (error: unknown) => void
   disabled?: boolean
 }
 
@@ -19,10 +20,22 @@ export function WritingAnnotationList({
   annotations,
   onUpdate,
   onDelete,
+  onError,
   disabled = false
 }: WritingAnnotationListProps) {
   const [editingId, setEditingId] = React.useState<string | null>(null)
   const [draftBody, setDraftBody] = React.useState("")
+  const runAction = React.useCallback(
+    async (action: () => Promise<unknown>, onSuccess?: () => void) => {
+      try {
+        await action()
+        onSuccess?.()
+      } catch (error) {
+        onError?.(error)
+      }
+    },
+    [onError]
+  )
 
   if (annotations.length === 0) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No annotations" />
@@ -72,11 +85,15 @@ export function WritingAnnotationList({
                     aria-label={`Save ${annotation.id}`}
                     disabled={disabled || !draftBody.trim()}
                     onClick={() => {
-                      void onUpdate(
-                        annotation.id,
-                        { body: draftBody.trim() },
-                        annotation.version
-                      ).then(() => setEditingId(null))
+                      void runAction(
+                        () =>
+                          onUpdate(
+                            annotation.id,
+                            { body: draftBody.trim() },
+                            annotation.version
+                          ),
+                        () => setEditingId(null)
+                      )
                     }}>
                     Save
                   </Button>
@@ -98,10 +115,12 @@ export function WritingAnnotationList({
                   aria-label={`Resolve ${annotation.id}`}
                   disabled={disabled}
                   onClick={() => {
-                    void onUpdate(
-                      annotation.id,
-                      { status: "resolved" },
-                      annotation.version
+                    void runAction(() =>
+                      onUpdate(
+                        annotation.id,
+                        { status: "resolved" },
+                        annotation.version
+                      )
                     )
                   }}>
                   Resolve
@@ -112,10 +131,12 @@ export function WritingAnnotationList({
                   aria-label={`Reopen ${annotation.id}`}
                   disabled={disabled}
                   onClick={() => {
-                    void onUpdate(
-                      annotation.id,
-                      { status: "open" },
-                      annotation.version
+                    void runAction(() =>
+                      onUpdate(
+                        annotation.id,
+                        { status: "open" },
+                        annotation.version
+                      )
                     )
                   }}>
                   Reopen
@@ -137,7 +158,7 @@ export function WritingAnnotationList({
                 aria-label={`Delete ${annotation.id}`}
                 disabled={disabled}
                 onClick={() => {
-                  void onDelete(annotation.id, annotation.version)
+                  void runAction(() => onDelete(annotation.id, annotation.version))
                 }}>
                 Delete
               </Button>

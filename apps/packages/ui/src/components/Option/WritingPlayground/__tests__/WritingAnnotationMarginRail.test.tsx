@@ -61,6 +61,7 @@ const renderRail = (
     <WritingAnnotationMarginRail
       annotations={[makeAnnotation()]}
       adapter={adapter}
+      documentText="Opening passage with more text"
       activeAnnotationId={null}
       onActiveAnnotationChange={vi.fn()}
       {...props}
@@ -134,6 +135,7 @@ describe("WritingAnnotationMarginRail", () => {
       <WritingAnnotationMarginRail
         annotations={annotations}
         adapter={adapter}
+        documentText="Opening passage with more text"
         activeAnnotationId={null}
         onActiveAnnotationChange={vi.fn()}
         measurementVersion={0}
@@ -149,6 +151,7 @@ describe("WritingAnnotationMarginRail", () => {
       <WritingAnnotationMarginRail
         annotations={annotations}
         adapter={adapter}
+        documentText="Opening passage with more text"
         activeAnnotationId={null}
         onActiveAnnotationChange={vi.fn()}
         measurementVersion={1}
@@ -250,6 +253,7 @@ describe("WritingAnnotationMarginRail", () => {
           adapter={makeAdapter({
             "0:7": { top: 40, bottom: 60, height: 20 }
           })}
+          documentText="Opening passage with more text"
           activeAnnotationId={null}
           onActiveAnnotationChange={vi.fn()}
         />
@@ -312,6 +316,29 @@ describe("WritingAnnotationMarginRail", () => {
 
     expect(adapter.focus).toHaveBeenCalled()
     expect(adapter.setSelection).toHaveBeenCalledWith({ start: 2, end: 8 })
+  })
+
+  it("converts persisted code-point anchors to editor UTF-16 selections", () => {
+    const adapter = makeAdapter({
+      "1:3": { top: 40, bottom: 60, height: 20 }
+    })
+    renderRail({
+      annotations: [
+        makeAnnotation({
+          id: "emoji-anchor",
+          anchor_start: 1,
+          anchor_end: 2,
+          selected_text: "😀"
+        })
+      ],
+      adapter,
+      documentText: "A😀BC"
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Focus annotation emoji-anchor" }))
+
+    expect(adapter.measureRange).toHaveBeenCalledWith({ start: 1, end: 3 })
+    expect(adapter.setSelection).toHaveBeenCalledWith({ start: 1, end: 3 })
   })
 
   it("marks needs_review cards as unattached warnings when measured", () => {

@@ -6,6 +6,7 @@ import {
   type WritingEditorRangeMeasurement,
   type WritingEditorSelection
 } from "./writing-editor-adapter"
+import { codePointOffsetToUtf16Offset } from "./writing-annotation-anchor-utils"
 import { WritingAnnotationCard } from "./WritingAnnotationCard"
 
 const CARD_GAP_PX = 8
@@ -22,6 +23,7 @@ type MeasuredAnnotation = {
 export type WritingAnnotationMarginRailProps = {
   annotations: ManuscriptAnnotationResponse[]
   adapter: WritingEditorAdapter | null
+  documentText: string
   activeAnnotationId?: string | null
   onActiveAnnotationChange?: (annotationId: string | null) => void
   onReviewSuggestedFix?: (annotation: ManuscriptAnnotationResponse) => void
@@ -32,7 +34,8 @@ export type WritingAnnotationMarginRailProps = {
 }
 
 const resolveAnnotationSelection = (
-  annotation: ManuscriptAnnotationResponse
+  annotation: ManuscriptAnnotationResponse,
+  documentText: string
 ): WritingEditorSelection | null => {
   const useDerived =
     annotation.anchor_status === "reattached" &&
@@ -50,7 +53,12 @@ const resolveAnnotationSelection = (
     return null
   }
 
-  return { start, end }
+  const utf16Start = codePointOffsetToUtf16Offset(documentText, start)
+  const utf16End = codePointOffsetToUtf16Offset(documentText, end)
+  if (utf16End <= utf16Start) {
+    return null
+  }
+  return { start: utf16Start, end: utf16End }
 }
 
 const isRailCandidate = (
@@ -78,6 +86,7 @@ const sortMeasuredAnnotations = (
 export function WritingAnnotationMarginRail({
   annotations,
   adapter,
+  documentText,
   activeAnnotationId = null,
   onActiveAnnotationChange,
   onReviewSuggestedFix,
@@ -119,7 +128,7 @@ export function WritingAnnotationMarginRail({
     return annotations
       .filter((annotation) => isRailCandidate(annotation, includeResolved))
       .map((annotation): MeasuredAnnotation | null => {
-        const selection = resolveAnnotationSelection(annotation)
+        const selection = resolveAnnotationSelection(annotation, documentText)
         if (!selection) return null
         const measurement = measureRange(selection)
         if (!measurement) return null
@@ -152,6 +161,7 @@ export function WritingAnnotationMarginRail({
   }, [
     activeAnnotationId,
     annotations,
+    documentText,
     includeResolved,
     layoutVersion,
     measureRange,

@@ -4,6 +4,7 @@ import {
   ANNOTATION_CONTEXT_MAX_CHARS,
   buildSceneRangeAnnotationInput,
   captureAnnotationContext,
+  codePointOffsetToUtf16Offset,
   utf16OffsetToCodePointOffset,
   validateSelectedRange
 } from "../writing-annotation-anchor-utils"
@@ -31,6 +32,15 @@ describe("writing annotation anchor utilities", () => {
     expect(utf16OffsetToCodePointOffset(text, 1)).toBe(1)
     expect(utf16OffsetToCodePointOffset(text, 3)).toBe(2)
     expect(utf16OffsetToCodePointOffset(text, text.length)).toBe(4)
+  })
+
+  it("converts Unicode code-point offsets back to UTF-16 browser positions", () => {
+    const text = "A😀BC"
+
+    expect(codePointOffsetToUtf16Offset(text, 0)).toBe(0)
+    expect(codePointOffsetToUtf16Offset(text, 1)).toBe(1)
+    expect(codePointOffsetToUtf16Offset(text, 2)).toBe(3)
+    expect(codePointOffsetToUtf16Offset(text, 4)).toBe(text.length)
   })
 
   it("rejects empty selections", () => {

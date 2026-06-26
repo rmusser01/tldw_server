@@ -27,7 +27,7 @@ export function WritingAnnotationCard({
   onReviewSuggestedFix,
   onCopySuggestedFix
 }: WritingAnnotationCardProps) {
-  const anchorStateLabel = annotation.anchor_status.replace("_", " ")
+  const anchorStateLabel = annotation.anchor_status.replace(/_/g, " ")
   const requiresManualFix = annotation.anchor_status === "needs_review"
 
   return (

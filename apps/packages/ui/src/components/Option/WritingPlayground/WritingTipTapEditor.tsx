@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import { EditorContent, useEditor, type Editor, type JSONContent } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
 import Placeholder from "@tiptap/extension-placeholder"
@@ -13,6 +13,11 @@ import {
   type WritingEditorAdapter,
   type WritingEditorSelection
 } from "./writing-editor-adapter"
+
+const EMPTY_TIPTAP_DOCUMENT: JSONContent = {
+  type: "doc",
+  content: [{ type: "paragraph" }]
+}
 
 export type WritingTipTapEditorProps = {
   content: JSONContent | null
@@ -35,6 +40,7 @@ export function WritingTipTapEditor({
   placeholder = "Start writing...",
   className,
 }: WritingTipTapEditorProps) {
+  const editorOriginContentRef = useRef<JSONContent | null>(null)
   const extensions = useMemo(
     () => [
       StarterKit.configure({
@@ -52,6 +58,7 @@ export function WritingTipTapEditor({
   const handleUpdate = useCallback(
     ({ editor }: { editor: Editor }) => {
       const json = editor.getJSON() as JSONContent
+      editorOriginContentRef.current = json
       const plain = tipTapJsonToPlainText(json)
       onContentChange(json, plain)
     },
@@ -67,7 +74,7 @@ export function WritingTipTapEditor({
 
   const editor = useEditor({
     extensions,
-    content: content || { type: "doc", content: [{ type: "paragraph" }] },
+    content: content || EMPTY_TIPTAP_DOCUMENT,
     editable,
     onUpdate: handleUpdate,
     onSelectionUpdate: handleSelectionUpdate,
@@ -88,7 +95,11 @@ export function WritingTipTapEditor({
   useEffect(() => {
     if (!editor) return
     let frame: number | null = null
-    const nextContent = content || { type: "doc", content: [{ type: "paragraph" }] }
+    const nextContent = content || EMPTY_TIPTAP_DOCUMENT
+    if (content && editorOriginContentRef.current === content) {
+      editorOriginContentRef.current = null
+      return
+    }
     const currentJson = JSON.stringify(editor.getJSON())
     const nextJson = JSON.stringify(nextContent)
     if (currentJson !== nextJson) {

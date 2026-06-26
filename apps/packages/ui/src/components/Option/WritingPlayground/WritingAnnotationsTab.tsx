@@ -1,5 +1,5 @@
 import React from "react"
-import { Button, Input, Select, Segmented, Typography } from "antd"
+import { Button, Input, Select, Segmented, Typography, message } from "antd"
 import type {
   ManuscriptAnnotationCategory,
   ManuscriptAnnotationTargetType
@@ -139,6 +139,10 @@ export function WritingAnnotationsTab({
     activeSceneId
   })
   const noteDisabled = !trimmedBody || !noteTargetId
+  const reportAnnotationActionError = React.useCallback((error: unknown) => {
+    const text = error instanceof Error ? error.message : String(error || "")
+    message.error(text || "Annotation action failed.")
+  }, [])
 
   React.useEffect(() => {
     setSceneReviewJob(null)
@@ -163,73 +167,89 @@ export function WritingAnnotationsTab({
 
   const addNote = async () => {
     if (!noteTargetId || !trimmedBody) return
-    await annotationsHook.createAnnotation({
-      target_type: targetType,
-      target_id: noteTargetId,
-      category,
-      body: trimmedBody
-    })
-    setBody("")
+    try {
+      await annotationsHook.createAnnotation({
+        target_type: targetType,
+        target_id: noteTargetId,
+        category,
+        body: trimmedBody
+      })
+      setBody("")
+    } catch (error) {
+      reportAnnotationActionError(error)
+    }
   }
 
   const addRangeComment = async () => {
     if (!trimmedBody) return
-    const input = buildSceneRangeAnnotationInput({
-      canCreateRangeAnnotation,
-      sceneId: activeSceneId ?? null,
-      sceneVersion: activeSceneVersion ?? null,
-      documentText: activeSceneText,
-      selection,
-      category,
-      body: trimmedBody
-    })
-    await annotationsHook.createAnnotation(input)
-    setBody("")
+    try {
+      const input = buildSceneRangeAnnotationInput({
+        canCreateRangeAnnotation,
+        sceneId: activeSceneId ?? null,
+        sceneVersion: activeSceneVersion ?? null,
+        documentText: activeSceneText,
+        selection,
+        category,
+        body: trimmedBody
+      })
+      await annotationsHook.createAnnotation(input)
+      setBody("")
+    } catch (error) {
+      reportAnnotationActionError(error)
+    }
   }
 
   const reviewSelection = async () => {
     if (selectionReviewDisabled || !activeSceneId || !selection) return
-    const input = buildSceneRangeAnnotationInput({
-      canCreateRangeAnnotation,
-      sceneId: activeSceneId,
-      sceneVersion: activeSceneVersion ?? null,
-      documentText: activeSceneText,
-      selection,
-      category,
-      body: "AI selection review"
-    })
-    await annotationsHook.reviewSelection({
-      sceneId: activeSceneId,
-      provider: provider!,
-      model: model!,
-      scene_version: activeSceneVersion!,
-      start: input.start ?? 0,
-      end: input.end ?? 0,
-      selected_text: input.selected_text ?? "",
-      category_hints: [category]
-    })
+    try {
+      const input = buildSceneRangeAnnotationInput({
+        canCreateRangeAnnotation,
+        sceneId: activeSceneId,
+        sceneVersion: activeSceneVersion ?? null,
+        documentText: activeSceneText,
+        selection,
+        category,
+        body: "AI selection review"
+      })
+      await annotationsHook.reviewSelection({
+        sceneId: activeSceneId,
+        provider: provider!,
+        model: model!,
+        scene_version: activeSceneVersion!,
+        start: input.start ?? 0,
+        end: input.end ?? 0,
+        selected_text: input.selected_text ?? "",
+        category_hints: [category]
+      })
+    } catch (error) {
+      reportAnnotationActionError(error)
+    }
   }
 
   const reviewScene = async () => {
     if (aiReviewDisabled || !activeSceneId) return
     const requestedSceneId = activeSceneId
     const requestedSceneVersion = activeSceneVersion!
-    const job = await annotationsHook.reviewScene({
-      sceneId: requestedSceneId,
-      provider: provider!,
-      model: model!,
-      scene_version: requestedSceneVersion,
-      max_comments: 8,
-      category_filters: [category]
-    })
-    const currentContext = sceneReviewContextRef.current
-    if (
-      currentContext.sceneId !== requestedSceneId ||
-      currentContext.sceneVersion !== requestedSceneVersion
-    ) {
-      return
+    try {
+      const job = await annotationsHook.reviewScene({
+        sceneId: requestedSceneId,
+        provider: provider!,
+        model: model!,
+        scene_version: requestedSceneVersion,
+        max_comments: 8,
+        category_filters: [category]
+      })
+      const currentContext = sceneReviewContextRef.current
+      if (
+        currentContext.sceneId !== requestedSceneId ||
+        currentContext.sceneVersion !== requestedSceneVersion
+      ) {
+        return
+      }
+      setSceneReviewJob(job)
+    } catch (error) {
+      reportAnnotationActionError(error)
     }
-    setSceneReviewJob(job)
   }
 
   return (
@@ -320,6 +340,7 @@ export function WritingAnnotationsTab({
         annotations={annotationsHook.annotations}
         onUpdate={annotationsHook.updateAnnotation}
         onDelete={annotationsHook.deleteAnnotation}
+        onError={reportAnnotationActionError}
         disabled={
           annotationsHook.isUpdating ||
           annotationsHook.isDeleting ||

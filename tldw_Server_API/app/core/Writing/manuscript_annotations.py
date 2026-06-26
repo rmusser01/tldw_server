@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from typing import Any
 
 
 VALID_ANNOTATION_STATUSES = ("open", "resolved")
@@ -117,7 +118,8 @@ def parse_annotation_review_response(raw_text: str) -> list[dict[str, str]]:
 
 
 def parse_scene_review_response(raw_text: str, *, max_comments: int) -> list[dict[str, object]]:
-    """Parse and validate bounded scene-review annotations from model output."""
+    """Parse and validate scene-review annotations from model output."""
+    del max_comments
     content = _strip_markdown_fences(raw_text)
     if not content:
         raise ValueError("Model response must contain valid JSON.")
@@ -128,8 +130,7 @@ def parse_scene_review_response(raw_text: str, *, max_comments: int) -> list[dic
         raise ValueError("Model response must contain valid JSON.") from exc
 
     annotation_payload = _coerce_annotation_payload(payload)
-    bounded_max = max(1, min(int(max_comments), 10))
-    return [_validate_scene_review_annotation(annotation) for annotation in annotation_payload[:bounded_max]]
+    return [_validate_scene_review_annotation(annotation) for annotation in annotation_payload]
 
 
 def build_scene_anchor(text: str, *, start: int, end: int, scene_version: int) -> dict[str, object]:
@@ -191,6 +192,58 @@ def derive_scene_anchor_status(
         return _status("reattached", match_start, match_end)
 
     return _status("needs_review")
+
+
+async def create_selected_text_review_annotation(
+    *,
+    manuscript_db: Any,
+    scene: Mapping[str, object],
+    scene_id: str,
+    provider: str | None,
+    model: str | None,
+    scene_version: int,
+    start: int,
+    end: int,
+    selected_text: str,
+    category_hints: list[str],
+    instruction: str | None,
+) -> dict[str, Any]:
+    """Review selected scene text with an LLM and persist the resulting annotation."""
+    from tldw_Server_API.app.core.Chat import chat_service as _chat_service
+    from tldw_Server_API.app.core.Writing.manuscript_analysis import _extract_content
+
+    messages = build_selected_text_review_prompt(
+        scene_text=str(scene.get("content_plain") or ""),
+        selected_text=selected_text,
+        category_hints=category_hints,
+        instruction=instruction,
+    )
+    chat_kwargs: dict[str, Any] = {"messages": messages, "temp": 0.2}
+    if provider:
+        chat_kwargs["api_endpoint"] = provider
+    if model:
+        chat_kwargs["model"] = model
+
+    llm_response = await _chat_service.perform_chat_api_call_async(**chat_kwargs)
+    raw_text = _extract_content(llm_response)
+    review_annotation = parse_annotation_review_response(raw_text)[0]
+    annotation_id = manuscript_db.create_annotation(
+        project_id=str(scene["project_id"]),
+        target_type="scene",
+        target_id=scene_id,
+        category=review_annotation["category"],
+        source="ai_selected_text",
+        body=review_annotation["body"],
+        suggested_fix=review_annotation.get("suggested_fix"),
+        scene_version=scene_version,
+        anchor_start=start,
+        anchor_end=end,
+        selected_text=selected_text,
+    )
+    annotation = manuscript_db.get_annotation(annotation_id)
+    if not annotation:
+        raise RuntimeError("Annotation created but could not be retrieved")
+    return annotation
 
 
 def _coerce_annotation_payload(payload: object) -> list[object]:

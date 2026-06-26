@@ -77,6 +77,19 @@ class RecipeEnqueueError(RuntimeError):
         self.error_code = error_code
 
 
+class WritingAnnotationReviewEnqueueError(RuntimeError):
+    """Raised when a manuscript scene annotation review cannot be queued."""
+
+    def __init__(
+        self,
+        message: str = "Failed to enqueue manuscript scene annotation review.",
+        *,
+        error_code: str = "writing_annotation_review_enqueue_failed",
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
 class CodeGraphJobError(RuntimeError):
     """Raised when a CodeGraph Jobs worker rejects or fails a job."""
 
@@ -594,6 +607,21 @@ class ReadingDigestJobError(RuntimeError):
         self.retryable = retryable
         if backoff_seconds is not None:
             self.backoff_seconds = backoff_seconds
+
+
+class WritingAnnotationReviewJobError(RuntimeError):
+    """Raised for controlled Writing annotation review worker failures."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        failure_code: str = "writing_annotation_review_job_failed",
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.failure_code = failure_code
 
 
 class WorkflowAdapterError(Exception):

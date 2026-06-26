@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.Writing.manuscript_annotation_jobs import (
     process_scene_annotation_review_job,
     writing_annotation_review_jobs_queue,
 )
+from tldw_Server_API.app.core.exceptions import WritingAnnotationReviewJobError
 
 _FORBIDDEN_PAYLOAD_KEYS = frozenset(
     {
@@ -44,21 +45,6 @@ _FORBIDDEN_PAYLOAD_KEYS = frozenset(
         "raw_model_output",
     }
 )
-
-
-class WritingAnnotationReviewJobError(RuntimeError):
-    """Raised for controlled Writing annotation review worker failures."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        retryable: bool = False,
-        failure_code: str = "writing_annotation_review_job_failed",
-    ) -> None:
-        super().__init__(message)
-        self.retryable = retryable
-        self.failure_code = failure_code
 
 
 async def handle_writing_annotation_review_job(

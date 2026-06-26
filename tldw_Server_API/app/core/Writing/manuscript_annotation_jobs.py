@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.Writing.manuscript_annotations import (
     parse_scene_review_response,
 )
 from tldw_Server_API.app.core.Writing.manuscript_analysis import _extract_content
+from tldw_Server_API.app.core.exceptions import WritingAnnotationReviewEnqueueError
 
 WRITING_JOBS_DOMAIN = "writing"
 WRITING_SCENE_ANNOTATION_REVIEW_JOB_TYPE = "writing_scene_annotation_review"
@@ -32,19 +33,6 @@ _FORBIDDEN_PAYLOAD_KEYS = frozenset(
         "raw_model_output",
     }
 )
-
-
-class WritingAnnotationReviewEnqueueError(RuntimeError):
-    """Raised when a scene annotation review cannot be queued."""
-
-    def __init__(
-        self,
-        message: str = "Failed to enqueue manuscript scene annotation review.",
-        *,
-        error_code: str = "writing_annotation_review_enqueue_failed",
-    ) -> None:
-        super().__init__(message)
-        self.error_code = error_code
 
 
 def writing_annotation_review_jobs_queue() -> str:
@@ -123,7 +111,9 @@ def enqueue_scene_annotation_review_job(
             idempotency_key=_scene_annotation_review_idempotency_key(payload, normalized_owner_user_id),
         )
     except Exception as exc:
-        raise WritingAnnotationReviewEnqueueError() from exc
+        raise WritingAnnotationReviewEnqueueError(
+            f"Failed to enqueue manuscript scene annotation review for scene {scene_id!r}."
+        ) from exc
 
 
 async def process_scene_annotation_review_job(
@@ -172,6 +162,11 @@ async def process_scene_annotation_review_job(
             "Scene review output could not be parsed.",
             details=str(exc),
         )
+    if not parsed_annotations:
+        return _result_with_diagnostic(
+            "model_output_empty",
+            "Scene review output did not contain annotations.",
+        )
 
     diagnostics: list[dict[str, str]] = []
     candidates: list[dict[str, Any]] = []
@@ -204,7 +199,6 @@ async def process_scene_annotation_review_job(
         }
         candidates.append(candidate)
 
-    candidates = candidates[: payload["max_comments"]]
     retained = manuscript_db.suppress_duplicate_annotation_candidates(payload["project_id"], candidates)
     if len(retained) < len(candidates):
         diagnostics.append(

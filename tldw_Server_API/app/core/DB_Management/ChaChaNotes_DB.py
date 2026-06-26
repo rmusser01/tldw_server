@@ -5992,6 +5992,177 @@ CREATE INDEX IF NOT EXISTS idx_mann_source
 CREATE INDEX IF NOT EXISTS idx_mann_deleted
   ON manuscript_annotations(deleted);
 
+CREATE OR REPLACE FUNCTION manuscript_annotations_sync_log_fn()
+RETURNS trigger AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+    VALUES(
+      'manuscript_annotations',
+      NEW.id,
+      'create',
+      NEW.last_modified,
+      NEW.client_id,
+      NEW.version,
+      json_build_object(
+        'id', NEW.id,
+        'project_id', NEW.project_id,
+        'target_type', NEW.target_type,
+        'target_id', NEW.target_id,
+        'status', NEW.status,
+        'category', NEW.category,
+        'tags_json', NEW.tags_json,
+        'source', NEW.source,
+        'body', NEW.body,
+        'suggested_fix', NEW.suggested_fix,
+        'followup_note', NEW.followup_note,
+        'metadata_json', NEW.metadata_json,
+        'scene_version', NEW.scene_version,
+        'anchor_start', NEW.anchor_start,
+        'anchor_end', NEW.anchor_end,
+        'selected_text', NEW.selected_text,
+        'document_fingerprint', NEW.document_fingerprint,
+        'anchor_prefix', NEW.anchor_prefix,
+        'anchor_suffix', NEW.anchor_suffix,
+        'anchor_status', NEW.anchor_status,
+        'created_at', NEW.created_at,
+        'last_modified', NEW.last_modified,
+        'deleted', NEW.deleted,
+        'client_id', NEW.client_id,
+        'version', NEW.version
+      )::text
+    );
+  ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
+    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+    VALUES(
+      'manuscript_annotations',
+      NEW.id,
+      'delete',
+      NEW.last_modified,
+      NEW.client_id,
+      NEW.version,
+      json_build_object(
+        'id', NEW.id,
+        'project_id', NEW.project_id,
+        'target_type', NEW.target_type,
+        'target_id', NEW.target_id,
+        'scene_version', NEW.scene_version,
+        'anchor_start', NEW.anchor_start,
+        'anchor_end', NEW.anchor_end,
+        'selected_text', NEW.selected_text,
+        'document_fingerprint', NEW.document_fingerprint,
+        'anchor_prefix', NEW.anchor_prefix,
+        'anchor_suffix', NEW.anchor_suffix,
+        'anchor_status', NEW.anchor_status,
+        'deleted', NEW.deleted,
+        'last_modified', NEW.last_modified,
+        'version', NEW.version,
+        'client_id', NEW.client_id
+      )::text
+    );
+  ELSIF OLD.deleted = TRUE AND NEW.deleted = FALSE THEN
+    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+    VALUES(
+      'manuscript_annotations',
+      NEW.id,
+      'update',
+      NEW.last_modified,
+      NEW.client_id,
+      NEW.version,
+      json_build_object(
+        'id', NEW.id,
+        'project_id', NEW.project_id,
+        'target_type', NEW.target_type,
+        'target_id', NEW.target_id,
+        'status', NEW.status,
+        'category', NEW.category,
+        'tags_json', NEW.tags_json,
+        'source', NEW.source,
+        'body', NEW.body,
+        'suggested_fix', NEW.suggested_fix,
+        'followup_note', NEW.followup_note,
+        'metadata_json', NEW.metadata_json,
+        'scene_version', NEW.scene_version,
+        'anchor_start', NEW.anchor_start,
+        'anchor_end', NEW.anchor_end,
+        'selected_text', NEW.selected_text,
+        'document_fingerprint', NEW.document_fingerprint,
+        'anchor_prefix', NEW.anchor_prefix,
+        'anchor_suffix', NEW.anchor_suffix,
+        'anchor_status', NEW.anchor_status,
+        'created_at', NEW.created_at,
+        'last_modified', NEW.last_modified,
+        'deleted', NEW.deleted,
+        'client_id', NEW.client_id,
+        'version', NEW.version
+      )::text
+    );
+  ELSIF OLD.deleted IS NOT DISTINCT FROM NEW.deleted AND (
+    OLD.status IS DISTINCT FROM NEW.status OR
+    OLD.category IS DISTINCT FROM NEW.category OR
+    OLD.tags_json IS DISTINCT FROM NEW.tags_json OR
+    OLD.source IS DISTINCT FROM NEW.source OR
+    OLD.body IS DISTINCT FROM NEW.body OR
+    OLD.suggested_fix IS DISTINCT FROM NEW.suggested_fix OR
+    OLD.followup_note IS DISTINCT FROM NEW.followup_note OR
+    OLD.metadata_json IS DISTINCT FROM NEW.metadata_json OR
+    OLD.scene_version IS DISTINCT FROM NEW.scene_version OR
+    OLD.anchor_start IS DISTINCT FROM NEW.anchor_start OR
+    OLD.anchor_end IS DISTINCT FROM NEW.anchor_end OR
+    OLD.selected_text IS DISTINCT FROM NEW.selected_text OR
+    OLD.document_fingerprint IS DISTINCT FROM NEW.document_fingerprint OR
+    OLD.anchor_prefix IS DISTINCT FROM NEW.anchor_prefix OR
+    OLD.anchor_suffix IS DISTINCT FROM NEW.anchor_suffix OR
+    OLD.anchor_status IS DISTINCT FROM NEW.anchor_status OR
+    OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
+    OLD.version IS DISTINCT FROM NEW.version
+  ) THEN
+    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+    VALUES(
+      'manuscript_annotations',
+      NEW.id,
+      'update',
+      NEW.last_modified,
+      NEW.client_id,
+      NEW.version,
+      json_build_object(
+        'id', NEW.id,
+        'project_id', NEW.project_id,
+        'target_type', NEW.target_type,
+        'target_id', NEW.target_id,
+        'status', NEW.status,
+        'category', NEW.category,
+        'tags_json', NEW.tags_json,
+        'source', NEW.source,
+        'body', NEW.body,
+        'suggested_fix', NEW.suggested_fix,
+        'followup_note', NEW.followup_note,
+        'metadata_json', NEW.metadata_json,
+        'scene_version', NEW.scene_version,
+        'anchor_start', NEW.anchor_start,
+        'anchor_end', NEW.anchor_end,
+        'selected_text', NEW.selected_text,
+        'document_fingerprint', NEW.document_fingerprint,
+        'anchor_prefix', NEW.anchor_prefix,
+        'anchor_suffix', NEW.anchor_suffix,
+        'anchor_status', NEW.anchor_status,
+        'created_at', NEW.created_at,
+        'last_modified', NEW.last_modified,
+        'deleted', NEW.deleted,
+        'client_id', NEW.client_id,
+        'version', NEW.version
+      )::text
+    );
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS manuscript_annotations_sync_log ON manuscript_annotations;
+CREATE TRIGGER manuscript_annotations_sync_log
+AFTER INSERT OR UPDATE ON manuscript_annotations
+FOR EACH ROW EXECUTE FUNCTION manuscript_annotations_sync_log_fn();
+
 UPDATE db_schema_version
    SET version = 51
  WHERE schema_name = 'rag_char_chat_schema'

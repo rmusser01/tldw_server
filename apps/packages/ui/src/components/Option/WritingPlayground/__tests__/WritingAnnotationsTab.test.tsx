@@ -2,6 +2,19 @@ import React from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+const messageError = vi.hoisted(() => vi.fn())
+
+vi.mock("antd", async () => {
+  const actual = await vi.importActual<typeof import("antd")>("antd")
+  return {
+    ...actual,
+    message: {
+      ...actual.message,
+      error: messageError
+    }
+  }
+})
+
 import { WritingAnnotationsTab } from "../WritingAnnotationsTab"
 import type { UseWritingAnnotationsResult } from "../hooks/useWritingAnnotations"
 import type { ManuscriptAnnotationResponse } from "@/services/writing-playground"
@@ -86,6 +99,7 @@ const renderTab = (
 
 beforeEach(() => {
   vi.clearAllMocks()
+  messageError.mockClear()
   callbacks.createAnnotation.mockResolvedValue(makeAnnotation())
   callbacks.updateAnnotation.mockResolvedValue(makeAnnotation())
   callbacks.deleteAnnotation.mockResolvedValue(undefined)
@@ -171,6 +185,21 @@ describe("WritingAnnotationsTab", () => {
         { body: "Updated annotation body" },
         2
       )
+    })
+  })
+
+  it("routes rejected list actions through the annotation error handler", async () => {
+    callbacks.updateAnnotation.mockRejectedValue(new Error("Version conflict"))
+    renderTab({
+      annotationsHook: baseHookResult([
+        makeAnnotation({ id: "open-note", status: "open", version: 2 })
+      ])
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Resolve open-note" }))
+
+    await waitFor(() => {
+      expect(messageError).toHaveBeenCalledWith("Version conflict")
     })
   })
 
@@ -264,6 +293,20 @@ describe("WritingAnnotationsTab", () => {
       })
     })
     expect(screen.getByText("Scene review job 77 queued")).toBeInTheDocument()
+  })
+
+  it("routes rejected annotation creation through visible error messaging", async () => {
+    callbacks.createAnnotation.mockRejectedValue(new Error("Create failed"))
+    renderTab()
+
+    fireEvent.change(screen.getByLabelText("Annotation body"), {
+      target: { value: "Scene range note." }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add range comment" }))
+
+    await waitFor(() => {
+      expect(messageError).toHaveBeenCalledWith("Create failed")
+    })
   })
 
   it("clears queued scene review job state when the scene version changes", async () => {

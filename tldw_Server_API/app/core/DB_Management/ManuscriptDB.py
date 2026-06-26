@@ -23,6 +23,7 @@ and follow the existing optimistic-locking / soft-delete conventions.
 import json  # noqa: E402
 import sqlite3  # noqa: E402
 import uuid  # noqa: E402
+from collections.abc import Mapping, Sequence  # noqa: E402
 from typing import Any  # noqa: E402
 
 from loguru import logger  # noqa: E402
@@ -121,6 +122,16 @@ _UPDATABLE_ANNOTATION_COLS = frozenset({
     "followup_note",
     "metadata",
 })
+_UPDATABLE_ANNOTATION_ASSIGNMENTS = {
+    "status": "status = ?",
+    "category": "category = ?",
+    "tags": "tags_json = ?",
+    "source": "source = ?",
+    "body": "body = ?",
+    "suggested_fix": "suggested_fix = ?",
+    "followup_note": "followup_note = ?",
+    "metadata": "metadata_json = ?",
+}
 _ANCHOR_STATUS_FILTER_CANDIDATE_CAP = 500
 _VALID_ANCHOR_STATUSES = frozenset({"scene_level", "attached", "reattached", "needs_review"})
 _ACTIVE_ANNOTATION_TARGET_SQL = """
@@ -1255,6 +1266,8 @@ class ManuscriptDBHelper:
     ) -> None:
         if tags is not None and not isinstance(tags, list):
             raise ValueError("Annotation tags must be a list.")  # noqa: TRY003
+        if isinstance(tags, list) and any(not isinstance(tag, str) for tag in tags):
+            raise ValueError("Annotation tags must contain only strings.")  # noqa: TRY003
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError("Annotation metadata must be a dict.")  # noqa: TRY003
 
@@ -1365,7 +1378,12 @@ class ManuscriptDBHelper:
             raise ValueError("Annotation selected text does not match the saved scene range.")  # noqa: TRY003
         return dict(anchor)
 
-    def _annotation_row_to_dict(self, row: Any, conn: Any | None = None) -> dict[str, Any]:
+    def _annotation_row_to_dict(
+        self,
+        row: Any,
+        conn: Any | None = None,
+        scene_rows: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         data = dict(row)
         try:
             data["tags"] = json.loads(data.pop("tags_json") or "[]")
@@ -1378,26 +1396,28 @@ class ManuscriptDBHelper:
 
         derived = {"anchor_status": data.get("anchor_status") or "scene_level", "derived_start": None, "derived_end": None}
         if data.get("target_type") == "scene":
-            owns_conn = conn is None
-            if owns_conn:
-                tx = self.db.transaction()
-                conn = tx.__enter__()
-            else:
-                tx = None
-            try:
-                scene_row = conn.execute(
-                    "SELECT content_plain, version FROM manuscript_scenes WHERE id = ? AND deleted = 0",
-                    (data["target_id"],),
-                ).fetchone()
-                if scene_row is not None:
-                    derived = derive_scene_anchor_status(
-                        data,
-                        scene_row["content_plain"] or "",
-                        current_scene_version=scene_row["version"],
-                    )
-            finally:
-                if owns_conn and tx is not None:
-                    tx.__exit__(None, None, None)
+            scene_row = scene_rows.get(str(data["target_id"])) if scene_rows is not None else None
+            if scene_rows is None:
+                owns_conn = conn is None
+                if owns_conn:
+                    tx = self.db.transaction()
+                    conn = tx.__enter__()
+                else:
+                    tx = None
+                try:
+                    scene_row = conn.execute(
+                        "SELECT id, content_plain, version FROM manuscript_scenes WHERE id = ? AND deleted = 0",
+                        (data["target_id"],),
+                    ).fetchone()
+                finally:
+                    if owns_conn and tx is not None:
+                        tx.__exit__(None, None, None)
+            if scene_row is not None:
+                derived = derive_scene_anchor_status(
+                    data,
+                    scene_row["content_plain"] or "",
+                    current_scene_version=scene_row["version"],
+                )
 
         data["anchor_status"] = derived["anchor_status"]
         data["derived_start"] = derived["derived_start"]
@@ -1405,6 +1425,25 @@ class ManuscriptDBHelper:
         data["scene_level"] = data["anchor_status"] == "scene_level"
         data["deleted"] = bool(data.get("deleted"))
         return data
+
+    def _scene_rows_for_annotation_rows(self, conn: Any, rows: Sequence[Any]) -> dict[str, Any]:
+        """Return active scene rows needed to derive anchor status for annotation rows."""
+        scene_ids = sorted(
+            {
+                str(row["target_id"])
+                for row in rows
+                if row["target_type"] == "scene" and row["target_id"]
+            }
+        )
+        if not scene_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in scene_ids)
+        scene_rows = conn.execute(
+            "SELECT id, content_plain, version FROM manuscript_scenes "
+            f"WHERE id IN ({placeholders}) AND deleted = 0",  # nosec B608 - placeholders are generated, values are bound.
+            tuple(scene_ids),
+        ).fetchall()
+        return {str(row["id"]): row for row in scene_rows}
 
     def create_annotation(
         self,
@@ -1559,7 +1598,11 @@ class ManuscriptDBHelper:
                     "ORDER BY ma.last_modified DESC LIMIT ? OFFSET ?",
                     (*params, limit, offset),
                 ).fetchall()
-                return [self._annotation_row_to_dict(row, conn) for row in rows], int(total_row["cnt"] or 0)
+                scene_rows = self._scene_rows_for_annotation_rows(conn, rows)
+                return [
+                    self._annotation_row_to_dict(row, conn, scene_rows)
+                    for row in rows
+                ], int(total_row["cnt"] or 0)
 
             total_row = conn.execute(
                 f"SELECT COUNT(*) AS cnt FROM manuscript_annotations ma WHERE {where_sql}",  # nosec B608
@@ -1578,7 +1621,11 @@ class ManuscriptDBHelper:
                 "ORDER BY ma.last_modified DESC",
                 params,
             ).fetchall()
-            candidates = [self._annotation_row_to_dict(row, conn) for row in rows]
+            scene_rows = self._scene_rows_for_annotation_rows(conn, rows)
+            candidates = [
+                self._annotation_row_to_dict(row, conn, scene_rows)
+                for row in rows
+            ]
             filtered = [row for row in candidates if row["anchor_status"] == anchor_status]
         return filtered[offset:offset + limit], len(filtered)
 
@@ -1610,13 +1657,13 @@ class ManuscriptDBHelper:
         params: list[Any] = []
         for key, value in updates.items():
             if key == "tags":
-                set_parts.append("tags_json = ?")
+                set_parts.append(_UPDATABLE_ANNOTATION_ASSIGNMENTS[key])
                 params.append(json.dumps(value or []))
             elif key == "metadata":
-                set_parts.append("metadata_json = ?")
+                set_parts.append(_UPDATABLE_ANNOTATION_ASSIGNMENTS[key])
                 params.append(json.dumps(value or {}))
             else:
-                set_parts.append(f"{key} = ?")
+                set_parts.append(_UPDATABLE_ANNOTATION_ASSIGNMENTS[key])
                 params.append(value)
         set_parts.extend(["last_modified = ?", "version = ?", "client_id = ?"])
         params.extend([now, next_version, self._client_id, annotation_id, expected_version])

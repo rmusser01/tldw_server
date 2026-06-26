@@ -258,6 +258,7 @@ class JobManager:
         "reading": ("reading-digest",),
         "vn_assets": ("generation",),
         "persona_visuals": ("generation",),
+        "writing": ("writing-review", "writing-ai"),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---

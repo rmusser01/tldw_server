@@ -103,6 +103,7 @@ import { AIAgentTab } from "./AIAgentTab"
 import { FeedbackTab } from "./FeedbackTab"
 import { WritingAnnotationsTab } from "./WritingAnnotationsTab"
 import { WritingAnnotationMarginRail } from "./WritingAnnotationMarginRail"
+import { codePointOffsetToUtf16Offset } from "./writing-annotation-anchor-utils"
 import { MOOD_COLORS } from "./feedback-constants"
 import { WritingAnalysisModalHost } from "./WritingAnalysisModalHost"
 import { WritingPlaygroundDiagnosticsPanel } from "./WritingPlaygroundDiagnosticsPanel"
@@ -251,15 +252,6 @@ const sanitizeRevisionValue = (value: unknown): unknown => {
   )
 }
 
-const codePointOffsetToUtf16Offset = (
-  text: string,
-  codePointOffset: number
-): number => {
-  if (!Number.isFinite(codePointOffset)) return 0
-  const safeOffset = Math.max(0, Math.floor(codePointOffset))
-  return Array.from(text).slice(0, safeOffset).join("").length
-}
-
 const resolveAnnotationRevisionRange = (
   annotation: ManuscriptAnnotationResponse,
   text: string
@@ -365,6 +357,7 @@ export const WritingPlayground = () => {
   const [libraryView, setLibraryView] = React.useState<"sessions" | "manuscript">("sessions")
   const [tipTapContent, setTipTapContent] = React.useState<JSONContent | null>(null)
   const editorTextChangedByTipTap = React.useRef(false)
+  const lastAppliedTipTapSceneContentKeyRef = React.useRef<string | null>(null)
   const [editorView, setEditorView] = React.useState<EditorViewMode>("edit")
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState("")
@@ -596,25 +589,37 @@ export const WritingPlayground = () => {
     if (editorMode !== "tiptap") {
       setActiveEditorAdapter(textareaEditorAdapter)
       editorTextChangedByTipTap.current = false
+      lastAppliedTipTapSceneContentKeyRef.current = null
       return
     }
 
     if (!editorTextChangedByTipTap.current) {
+      const activeSceneContentKey =
+        activeScene?.id && activeScene.version !== undefined
+          ? `${activeScene.id}:${activeScene.version}`
+          : null
+      const shouldSeedFromSceneContent =
+        activeSceneContentKey !== null &&
+        lastAppliedTipTapSceneContentKeyRef.current !== activeSceneContentKey
+      const richFallback = shouldSeedFromSceneContent
+        ? (activeScene?.content as JSONContent | null | undefined) ?? null
+        : getPromptRichFromPayload(activeSessionDetail?.payload)
       const nextTipTapContent = resolveTipTapDocument(
         editorText,
-        (activeScene?.content as
-          | JSONContent
-          | null
-          | undefined) ??
-          getPromptRichFromPayload(activeSessionDetail?.payload)
+        richFallback
       )
       setTipTapContent(nextTipTapContent)
+      if (shouldSeedFromSceneContent) {
+        lastAppliedTipTapSceneContentKeyRef.current = activeSceneContentKey
+      }
     }
     editorTextChangedByTipTap.current = false
   }, [
     activeSessionDetail?.id,
     activeSessionDetail?.payload,
     activeScene?.content,
+    activeScene?.id,
+    activeScene?.version,
     editorMode,
     editorText,
     setActiveEditorAdapter,
@@ -1947,6 +1952,7 @@ export const WritingPlayground = () => {
     <WritingAnnotationMarginRail
       annotations={annotations.annotations}
       adapter={editorMode === "tiptap" && editorView !== "preview" ? annotationRailAdapter : null}
+      documentText={editorText}
       activeAnnotationId={activeAnnotationId}
       measurementVersion={annotationRailMeasurementVersion}
       onActiveAnnotationChange={setActiveAnnotationId}

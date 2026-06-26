@@ -52,6 +52,15 @@ export const utf16OffsetToCodePointOffset = (
   return Array.from(text.slice(0, offset)).length
 }
 
+export const codePointOffsetToUtf16Offset = (
+  text: string,
+  codePointOffset: number
+): number => {
+  if (!Number.isFinite(codePointOffset)) return 0
+  const safeOffset = Math.max(0, Math.floor(codePointOffset))
+  return Array.from(text).slice(0, safeOffset).join("").length
+}
+
 export const captureAnnotationContext = (
   documentText: string,
   selection: WritingEditorSelection

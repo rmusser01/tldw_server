@@ -632,6 +632,8 @@ AnnotationAnchorStatus = Literal["attached", "reattached", "needs_review", "scen
 
 
 class ManuscriptAnnotationCreate(BaseModel):
+    """Request payload for creating a user-authored manuscript annotation."""
+
     model_config = ConfigDict(extra="forbid")
 
     target_type: AnnotationTargetType = Field(..., description="Annotation target type")
@@ -648,7 +650,8 @@ class ManuscriptAnnotationCreate(BaseModel):
     selected_text: str | None = Field(None, min_length=1, max_length=12000, description="Selected scene text")
 
     @model_validator(mode="after")
-    def validate_range_fields(self):
+    def validate_range_fields(self) -> "ManuscriptAnnotationCreate":
+        """Require complete scene range fields and reject ranges on non-scene annotations."""
         range_fields = {
             "scene_version": self.scene_version,
             "start": self.start,
@@ -672,6 +675,8 @@ class ManuscriptAnnotationCreate(BaseModel):
 
 
 class ManuscriptSelectedTextAnnotationReviewRequest(BaseModel):
+    """Request payload for AI review of one selected saved scene range."""
+
     model_config = ConfigDict(extra="forbid")
 
     provider: str = Field(..., min_length=1, description="LLM provider override")
@@ -690,6 +695,7 @@ class ManuscriptSelectedTextAnnotationReviewRequest(BaseModel):
     @field_validator("provider", "model")
     @classmethod
     def validate_required_override(cls, value: str) -> str:
+        """Normalize required LLM override fields."""
         normalized = value.strip()
         if not normalized:
             raise ValueError("provider and model must be non-empty")
@@ -698,19 +704,23 @@ class ManuscriptSelectedTextAnnotationReviewRequest(BaseModel):
     @field_validator("instruction")
     @classmethod
     def normalize_instruction(cls, value: str | None) -> str | None:
+        """Trim optional selected-text review instructions."""
         if value is None:
             return None
         normalized = value.strip()
         return normalized or None
 
     @model_validator(mode="after")
-    def validate_range(self):
+    def validate_range(self) -> "ManuscriptSelectedTextAnnotationReviewRequest":
+        """Ensure the selected range is non-empty."""
         if self.end <= self.start:
             raise ValueError("Selected text end must be greater than start.")
         return self
 
 
 class ManuscriptSceneAnnotationReviewRequest(BaseModel):
+    """Request payload for queueing an AI full-scene annotation review."""
+
     model_config = ConfigDict(extra="forbid")
 
     provider: str = Field(..., min_length=1, description="LLM provider override")
@@ -732,6 +742,7 @@ class ManuscriptSceneAnnotationReviewRequest(BaseModel):
     @field_validator("provider", "model")
     @classmethod
     def validate_required_override(cls, value: str) -> str:
+        """Normalize required LLM override fields."""
         normalized = value.strip()
         if not normalized:
             raise ValueError("provider and model must be non-empty")
@@ -740,6 +751,7 @@ class ManuscriptSceneAnnotationReviewRequest(BaseModel):
     @field_validator("review_focus")
     @classmethod
     def normalize_review_focus(cls, value: str | None) -> str | None:
+        """Trim optional full-scene review focus text."""
         if value is None:
             return None
         normalized = value.strip()
@@ -806,7 +818,8 @@ class ManuscriptAnnotationListResponse(BaseModel):
     pagination: OffsetPaginationMeta
 
     @model_validator(mode="after")
-    def _default_pagination_aliases(self):
+    def _default_pagination_aliases(self) -> "ManuscriptAnnotationListResponse":
+        """Populate backwards-compatible pagination aliases."""
         return _default_offset_pagination_aliases(self)
 
 

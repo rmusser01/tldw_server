@@ -228,6 +228,29 @@ def test_enqueue_review_job_real_manager_scopes_idempotency_by_owner(
     assert owner_b not in different_owner["idempotency_key"]
 
 
+def test_enqueue_review_job_real_manager_accepts_configured_writing_queue(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WRITING_ANNOTATION_REVIEW_JOBS_QUEUE", "writing-review")
+    jobs = JobManager(db_path=tmp_path / "review-jobs.sqlite")
+
+    job = enqueue_scene_annotation_review_job(
+        job_manager=jobs,
+        owner_user_id="owner-alpha",
+        project_id="project-1",
+        scene_id="scene-1",
+        scene_version=7,
+        provider="openai",
+        model="gpt-4o-mini",
+        max_comments=5,
+        category_filters=["clarity"],
+    )
+
+    assert job["domain"] == WRITING_JOBS_DOMAIN
+    assert job["queue"] == "writing-review"
+
+
 @pytest.mark.asyncio
 async def test_process_scene_review_job_creates_bounded_anchored_annotations(
     manuscript: tuple[ManuscriptDBHelper, dict[str, Any]],
@@ -351,6 +374,70 @@ async def test_process_scene_review_job_suppresses_duplicate_open_annotations(
 
 
 @pytest.mark.asyncio
+async def test_process_scene_review_job_suppresses_duplicates_before_max_comment_limit(
+    manuscript: tuple[ManuscriptDBHelper, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    helper, ids = manuscript
+    scene = ids["scene"]
+    existing_start = scene["content_plain"].index("gamma")
+    helper.create_annotation(
+        project_id=ids["project_id"],
+        target_type="scene",
+        target_id=scene["id"],
+        category="clarity",
+        source="ai_scene_review",
+        body="Clarify why this image matters.",
+        scene_version=scene["version"],
+        anchor_start=existing_start,
+        anchor_end=existing_start + len("gamma"),
+        selected_text="gamma",
+    )
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    monkeypatch.setattr(
+        chat_service,
+        "perform_chat_api_call_async",
+        AsyncMock(
+            return_value=_mock_llm_response(
+                {
+                    "annotations": [
+                        {
+                            "category": "clarity",
+                            "quote": "gamma",
+                            "body": "Clarify why this image matters.",
+                        },
+                        {
+                            "category": "pacing",
+                            "quote": "Omega",
+                            "body": "Let this beat land more cleanly.",
+                        },
+                    ]
+                }
+            )
+        ),
+    )
+
+    result = await process_scene_annotation_review_job(
+        manuscript_db=helper,
+        job_payload={
+            "project_id": ids["project_id"],
+            "scene_id": scene["id"],
+            "scene_version": scene["version"],
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "max_comments": 1,
+            "category_filters": [],
+        },
+    )
+
+    assert len(result["created_annotation_ids"]) == 1
+    annotation = helper.get_annotation(result["created_annotation_ids"][0])
+    assert annotation is not None
+    assert annotation["selected_text"] == "Omega"
+
+
+@pytest.mark.asyncio
 async def test_process_scene_review_job_reports_stale_scene_version_without_llm_call(
     manuscript: tuple[ManuscriptDBHelper, dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,
@@ -383,3 +470,40 @@ async def test_process_scene_review_job_reports_stale_scene_version_without_llm_
         }
     ]
     llm_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_scene_review_job_reports_empty_model_annotation_output(
+    manuscript: tuple[ManuscriptDBHelper, dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    helper, ids = manuscript
+    scene = ids["scene"]
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    monkeypatch.setattr(
+        chat_service,
+        "perform_chat_api_call_async",
+        AsyncMock(return_value=_mock_llm_response({"annotations": []})),
+    )
+
+    result = await process_scene_annotation_review_job(
+        manuscript_db=helper,
+        job_payload={
+            "project_id": ids["project_id"],
+            "scene_id": scene["id"],
+            "scene_version": scene["version"],
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "max_comments": 3,
+            "category_filters": [],
+        },
+    )
+
+    assert result["created_annotation_ids"] == []
+    assert result["diagnostics"] == [
+        {
+            "code": "model_output_empty",
+            "message": "Scene review output did not contain annotations.",
+        }
+    ]

@@ -148,6 +148,12 @@ def test_postgres_v50_migration_script_contract_and_routing():
     assert "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP" in script
     assert "BOOLEAN NOT NULL DEFAULT FALSE" in script
     assert "CHECK(anchor_status IN ('scene_level','attached','reattached','needs_review'))" in script
+    assert "manuscript_annotations_sync_log_fn" in script
+    assert "DROP TRIGGER IF EXISTS manuscript_annotations_sync_log" in script
+    assert "CREATE TRIGGER manuscript_annotations_sync_log" in script
+    assert "json_build_object(" in script
+    assert "OLD.deleted = FALSE AND NEW.deleted = TRUE" in script
+    assert "OLD.deleted = TRUE AND NEW.deleted = FALSE" in script
     assert "json_object(" not in script
     assert "UPDATE db_schema_version" in script
     assert "SET version = 51" in script
@@ -415,6 +421,50 @@ def test_list_annotations_filters_by_target_status_category_and_source(mdb, manu
     assert rows[0]["id"] == resolved_id
 
 
+def test_list_annotations_bulk_loads_scene_rows_for_anchor_derivation(mdb, manuscript):
+    scene = mdb.get_scene(manuscript["scene_id"])
+    gamma_start = scene["content_plain"].index("gamma")
+    delta_start = scene["content_plain"].index("delta")
+    for body, start, selected_text in (
+        ("Review gamma.", gamma_start, "gamma"),
+        ("Review delta.", delta_start, "delta"),
+    ):
+        mdb.create_annotation(
+            project_id=manuscript["project_id"],
+            target_type="scene",
+            target_id=manuscript["scene_id"],
+            category="clarity",
+            source="ai_scene_review",
+            body=body,
+            scene_version=scene["version"],
+            anchor_start=start,
+            anchor_end=start + len(selected_text),
+            selected_text=selected_text,
+        )
+
+    traced_sql: list[str] = []
+    conn = mdb.db.get_connection()
+    conn.set_trace_callback(traced_sql.append)
+    try:
+        rows, total = mdb.list_annotations(
+            manuscript["project_id"],
+            target_type="scene",
+            target_id=manuscript["scene_id"],
+        )
+    finally:
+        conn.set_trace_callback(None)
+
+    assert total == 2
+    assert len(rows) == 2
+    scene_lookup_count = sum(
+        "FROM manuscript_scenes" in statement
+        and "content_plain" in statement
+        and "version" in statement
+        for statement in traced_sql
+    )
+    assert scene_lookup_count == 1
+
+
 def test_list_annotations_rejects_unknown_anchor_status_filter(mdb, manuscript):
     mdb.create_annotation(
         project_id=manuscript["project_id"],
@@ -552,6 +602,17 @@ def test_create_and_update_annotation_reject_non_structured_tags_and_metadata(md
             tags="not-a-list",
         )
 
+    with pytest.raises(ValueError, match="tags must contain only strings"):
+        mdb.create_annotation(
+            project_id=manuscript["project_id"],
+            target_type="project",
+            target_id=manuscript["project_id"],
+            category="other",
+            source="user",
+            body="Invalid tag entry.",
+            tags=["valid", 42],
+        )
+
     with pytest.raises(ValueError, match="metadata must be a dict"):
         mdb.create_annotation(
             project_id=manuscript["project_id"],
@@ -574,6 +635,9 @@ def test_create_and_update_annotation_reject_non_structured_tags_and_metadata(md
 
     with pytest.raises(ValueError, match="tags must be a list"):
         mdb.update_annotation(annotation_id, {"tags": "not-a-list"}, expected_version=1)
+
+    with pytest.raises(ValueError, match="tags must contain only strings"):
+        mdb.update_annotation(annotation_id, {"tags": ["valid", None]}, expected_version=1)
 
     with pytest.raises(ValueError, match="metadata must be a dict"):
         mdb.update_annotation(annotation_id, {"metadata": ["not-a-dict"]}, expected_version=1)

@@ -14,11 +14,27 @@ const readWritingPlaygroundRootSource = (filename: string) =>
 const extractExportTypeSource = (source: string, typeName: string) => {
   const start = source.indexOf(`export type ${typeName} =`)
   if (start < 0) return ""
-  const nextType = source.indexOf("\n\nexport type ", start + 1)
-  const nextConst = source.indexOf("\n\nconst ", start + 1)
-  const candidates = [nextType, nextConst].filter((index) => index > start)
+  const candidates = [
+    "\n\nexport type ",
+    "\n\nexport const ",
+    "\n\nexport async function ",
+    "\n\nexport function ",
+    "\n\nconst ",
+  ]
+    .map((marker) => source.indexOf(marker, start + 1))
+    .filter((index) => index > start)
   const end = candidates.length ? Math.min(...candidates) : source.length
   return source.slice(start, end)
+}
+
+const extractExportFunctionSignature = (source: string, functionName: string) => {
+  const start = source.indexOf(`export async function ${functionName}(`)
+  if (start < 0) return ""
+  const returnTypeStart = source.indexOf("): Promise<", start)
+  if (returnTypeStart < 0) return ""
+  const bodyStart = source.indexOf(" {", returnTypeStart)
+  if (bodyStart < 0) return ""
+  return source.slice(start, bodyStart)
 }
 
 describe("Writing playground manuscript API shape guards", () => {
@@ -76,6 +92,30 @@ describe("Writing playground manuscript API shape guards", () => {
       serviceSource,
       "ManuscriptSceneAnnotationReviewJobResponse"
     )
+    const listAnnotationsSignature = extractExportFunctionSignature(
+      serviceSource,
+      "listManuscriptAnnotations"
+    )
+    const createAnnotationSignature = extractExportFunctionSignature(
+      serviceSource,
+      "createManuscriptAnnotation"
+    )
+    const getAnnotationSignature = extractExportFunctionSignature(
+      serviceSource,
+      "getManuscriptAnnotation"
+    )
+    const updateAnnotationSignature = extractExportFunctionSignature(
+      serviceSource,
+      "updateManuscriptAnnotation"
+    )
+    const reviewSelectionSignature = extractExportFunctionSignature(
+      serviceSource,
+      "reviewManuscriptSelection"
+    )
+    const reviewSceneSignature = extractExportFunctionSignature(
+      serviceSource,
+      "reviewManuscriptScene"
+    )
 
     expect(responseTypeSource).toContain("export type ManuscriptAnnotationResponse")
     expect(listTypeSource).toContain("export type ManuscriptAnnotationListResponse")
@@ -106,9 +146,12 @@ describe("Writing playground manuscript API shape guards", () => {
     expect(updateTypeSource).not.toContain("status?: ManuscriptAnnotationStatus | null")
     expect(updateTypeSource).not.toContain("category?: ManuscriptAnnotationCategory | null")
     expect(updateTypeSource).not.toContain("body?: string | null")
-    expect(serviceSource).toContain("): Promise<ManuscriptAnnotationListResponse>")
-    expect(serviceSource).toContain("): Promise<ManuscriptAnnotationResponse>")
-    expect(serviceSource).toContain("): Promise<ManuscriptSceneAnnotationReviewJobResponse>")
+    expect(listAnnotationsSignature).toContain("): Promise<ManuscriptAnnotationListResponse>")
+    expect(createAnnotationSignature).toContain("): Promise<ManuscriptAnnotationResponse>")
+    expect(getAnnotationSignature).toContain("): Promise<ManuscriptAnnotationResponse>")
+    expect(updateAnnotationSignature).toContain("): Promise<ManuscriptAnnotationResponse>")
+    expect(reviewSelectionSignature).toContain("): Promise<ManuscriptAnnotationResponse>")
+    expect(reviewSceneSignature).toContain("): Promise<ManuscriptSceneAnnotationReviewJobResponse>")
   })
 
   it("exports manuscript scene and research response types only once", () => {
