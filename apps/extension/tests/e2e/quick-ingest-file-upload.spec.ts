@@ -544,12 +544,12 @@ test.describe('Quick ingest file upload', () => {
       await expect
         .poll(
           () =>
-            ingestJobSubmitFileNames.filter((fileName) =>
-              expectedNames.includes(fileName)
-            ).length,
+            ingestJobSubmitFileNames
+              .filter((fileName) => expectedNames.includes(fileName))
+              .sort(),
           { timeout: 10_000 }
         )
-        .toBe(expectedNames.length)
+        .toEqual([...expectedNames].sort())
     } finally {
       try {
         await page.evaluate(() => {

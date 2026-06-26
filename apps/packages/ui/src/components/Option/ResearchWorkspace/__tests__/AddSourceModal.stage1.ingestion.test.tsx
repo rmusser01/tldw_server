@@ -174,15 +174,20 @@ describe("AddSourceModal Stage 1 ingestion safety", () => {
     )
   })
 
-  it("rejects unsupported file types before upload starts", async () => {
+  it.each([
+    {
+      name: "archive.zip",
+      file: new File(["zip"], "archive.zip", { type: "application/zip" })
+    },
+    {
+      name: "legacy.doc",
+      file: new File(["legacy"], "legacy.doc", { type: "application/msword" })
+    }
+  ])("rejects unsupported file type $name before upload starts", async ({ file }) => {
     render(<AddSourceModal />)
 
-    const unsupportedFile = new File(["zip"], "archive.zip", {
-      type: "application/zip"
-    })
-
     await act(async () => {
-      fireEvent.change(getUploadInput(), { target: { files: [unsupportedFile] } })
+      fireEvent.change(getUploadInput(), { target: { files: [file] } })
     })
 
     expect(mockUploadMedia).not.toHaveBeenCalled()

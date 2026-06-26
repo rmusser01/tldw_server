@@ -17,7 +17,9 @@ modified_files:
 - tldw_Server_API/app/api/v1/endpoints/media/process_documents.py
 - apps/packages/ui/src/components/Common/QuickIngest/constants.ts
 - apps/packages/ui/src/components/Common/QuickIngest/AddContentStep.tsx
+- apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/AddSourceModal.tsx
 - apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/source-ingestion-utils.ts
+- apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/AddSourceModal.stage1.ingestion.test.tsx
 - apps/packages/ui/src/components/Option/ResearchWorkspace/__tests__/source-ingestion-utils.test.ts
 - apps/packages/ui/src/services/tldw/media-routing.ts
 - apps/packages/ui/src/services/tldw/__tests__/media-routing.test.ts
@@ -56,6 +58,8 @@ Changes:
 - PR review follow-up: `/process-documents` now passes an explicit `expected_media_type_key="document"` into shared upload saving so `.html`, `.htm`, `.xhtml`, and `.xml` document uploads use document upload limits/validation instead of filename-inferred HTML/XML buckets.
 - PR review follow-up: Research Workspace source upload validation and accept strings now include `.markdown`, `.xhtml`, `.xml`, `.json`, plus XHTML/XML/JSON MIME types to match backend document support.
 - PR review follow-up: document routing coverage now uses parameterized test cases so each accepted filename gets an independently reported test case.
+- PR review follow-up: Research Workspace source-type fallback no longer classifies unknown extensions such as legacy `.doc` as documents, and modal upload safety coverage now verifies `.doc` is rejected before upload.
+- PR review follow-up: extension e2e coverage now polls for the exact expected filename multiset instead of only counting matching submissions.
 - Legacy binary `.doc` and `application/msword` were removed from Quick Ingest/source/workflow/attachment accept lists and backend document validation because no real `.doc` parser/converter exists in the current processing path.
 - Extension Quick Ingest e2e regression coverage now includes a matrix test that asserts every advertised explicit upload extension is present in the bundled file input, confirms `.doc`/`application/msword` are excluded, selects representative files for all advertised extensions, and verifies each selected file reaches the test ingest-job submission path. This is regression coverage only and is not counted as UAT.
 
@@ -67,6 +71,8 @@ Verification:
 - `git rebase origin/dev` after fetching latest `dev` -> branch already up to date with `origin/dev` commit `8b0726f2e3a9069a7da5cbfc57f459de3640076f`.
 - `python -m pytest tldw_Server_API/tests/Media_Ingestion_Modification/test_ingestion_helpers_stage3.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py tldw_Server_API/tests/MediaIngestion_NEW/unit/test_plaintext_conversion.py tldw_Server_API/tests/Media/test_json_document_processing.py -q` -> 51 passed, 1 xfailed.
 - `bunx vitest run src/services/tldw/__tests__/media-routing.test.ts src/components/Common/QuickIngest/__tests__/constants.test.ts src/components/Option/ResearchWorkspace/__tests__/source-ingestion-utils.test.ts` from `apps/packages/ui` -> 3 files passed, 35 tests passed.
+- `bunx vitest run src/components/Option/ResearchWorkspace/__tests__/AddSourceModal.stage1.ingestion.test.tsx src/components/Option/ResearchWorkspace/__tests__/source-ingestion-utils.test.ts src/services/tldw/__tests__/media-routing.test.ts src/components/Common/QuickIngest/__tests__/constants.test.ts` from `apps/packages/ui` -> 4 files passed, 39 tests passed.
+- `npx playwright test tests/e2e/quick-ingest-file-upload.spec.ts --project=chromium-extension --list` from `apps/extension` -> listed all 3 tests, including accepted-extension coverage.
 - `git diff --check` -> clean.
 - `python -m bandit -r tldw_Server_API/app/core/Ingestion_Media_Processing/input_sourcing.py tldw_Server_API/app/api/v1/endpoints/media/process_documents.py -f json -o /tmp/bandit_pr2522_review_fixes.json` -> 0 findings.
 - `CI=1 npx playwright test tests/e2e/quick-ingest-file-upload.spec.ts --project=chromium-extension --reporter=line` built Chrome MV3 successfully, then failed in local sandbox before UI assertions because the mock server could not bind `127.0.0.1` (`listen EPERM`).

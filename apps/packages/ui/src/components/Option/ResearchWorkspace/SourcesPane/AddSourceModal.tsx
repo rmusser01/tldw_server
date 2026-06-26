@@ -1855,11 +1855,12 @@ function getSourceTypeFromFile(file: File): WorkspaceSourceType {
     return "video"
   if (["mp3", "wav", "m4a", "ogg", "flac"].includes(ext) || mimeType.startsWith("audio/"))
     return "audio"
-  if (["docx", "odt", "rtf"].includes(ext)) return "document"
+  if (["docx", "odt", "rtf", "epub", "xhtml", "xml", "json"].includes(ext))
+    return "document"
   if (["txt", "md", "markdown"].includes(ext)) return "text"
   if (["html", "htm"].includes(ext)) return "website"
 
-  return "document"
+  return ext ? "text" : "document"
 }
 
 function getSourceTypeFromUrl(url: string): WorkspaceSourceType {
