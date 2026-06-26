@@ -324,9 +324,14 @@ describe("AgentTasksPage connection and payload normalization", () => {
     renderAgentTasksPage()
 
     expect(await screen.findByText("Agent orchestration unavailable")).toBeInTheDocument()
+    const recovery = screen.getByTestId("agent-tasks-unsupported-recovery")
+    expect(recovery).toHaveAttribute("data-ds-component", "RecoveryCallout")
     expect(
       screen.getByText("This server does not expose agent orchestration endpoints.")
     ).toBeInTheDocument()
+    expect(screen.getByText("GET")).toBeInTheDocument()
+    expect(screen.getByText("/api/v1/agent-orchestration/projects")).toBeInTheDocument()
+    expect(screen.getByText("http://127.0.0.1:8000")).toBeInTheDocument()
     expect(screen.queryByText("HTTP 404")).toBeNull()
   })
 
@@ -413,12 +418,14 @@ describe("AgentTasksPage connection and payload normalization", () => {
     const { container } = renderAgentTasksPage()
 
     expect(await screen.findByText("ACP setup needs attention")).toBeInTheDocument()
+    const statePanel = screen.getByTestId("agent-tasks-acp-setup-state")
+    expect(statePanel).toHaveAttribute("data-ds-component", "StatePanel")
     expect(
       screen
         .getByText("ACP setup needs attention")
-        .closest('[data-ds-component="Alert"]')
+        .closest('[data-ds-component="StatePanel"]')
     ).toBeInTheDocument()
-    expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(1)
+    expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(0)
     expect(screen.getByText("Runner is missing")).toBeInTheDocument()
     expect(screen.getByText("API keys are missing")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /open agent registry/i })).toBeInTheDocument()
@@ -960,12 +967,14 @@ describe("AgentTasksPage connection and payload normalization", () => {
     )
 
     expect(await screen.findByText("Workspace setup needs attention")).toBeInTheDocument()
+    const statePanel = screen.getByTestId("agent-tasks-workspace-setup-state")
+    expect(statePanel).toHaveAttribute("data-ds-component", "StatePanel")
     expect(
       screen
         .getByText("Workspace setup needs attention")
-        .closest('[data-ds-component="Alert"]')
+        .closest('[data-ds-component="StatePanel"]')
     ).toBeInTheDocument()
-    expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(1)
+    expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(0)
     expect(
       screen.getByText("No ACP execution workspace is linked to workspace-missing")
     ).toBeInTheDocument()
@@ -1016,7 +1025,21 @@ describe("AgentTasksPage connection and payload normalization", () => {
 
     renderAgentTasksPage("/agent-tasks?workspace=workspace-alpha")
 
-    expect(await screen.findByText("Project API unavailable")).toBeInTheDocument()
+    const recovery = await screen.findByTestId("agent-tasks-projects-load-recovery")
+    expect(recovery).toHaveAttribute("data-ds-component", "RecoveryCallout")
+    expect(
+      screen.getByRole("heading", { name: "Agent tasks could not load" })
+    ).toBeInTheDocument()
+    expect(screen.getByText("GET")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "/api/v1/agent-orchestration/projects?canonical_workspace_id=workspace-alpha&canonical_workspace_source=research_workspace"
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByText("http://127.0.0.1:8000")).toBeInTheDocument()
+    expect(screen.getByText("503")).toBeInTheDocument()
+    expect(screen.getByText("Project API unavailable")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
     expect(screen.queryByText("Workspace setup needs attention")).toBeNull()
     expect(
       screen.queryByText("No ACP execution workspace is linked to workspace-alpha")
