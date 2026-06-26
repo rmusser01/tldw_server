@@ -1,7 +1,7 @@
 ---
 id: TASK-12048
 title: Address PR 2531 review comments and latest dev rebase
-status: In Progress
+status: Done
 created_date: 2026-06-26 17:50
 labels:
 - webui
@@ -34,7 +34,7 @@ modified_files:
 - apps/packages/ui/src/utils/server-error-message.ts
 - tldw_Server_API/tests/Notifications/test_scheduled_tasks_control_plane.py
 - tldw_Server_API/tests/UserProfile/test_user_profile_read.py
-updated_date: 2026-06-26 18:11
+updated_date: 2026-06-26 18:12
 ---
 
 ## Description
@@ -45,10 +45,10 @@ Rebase PR #2531 onto the latest dev branch and address actionable review feedbac
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 PR branch is based on the latest fetched origin/dev and pushed back to PR #2531.
-- [ ] #2 New or modified backend tests added by this PR carry accepted pytest markers and docstrings where required by the review feedback.
-- [ ] #3 Recovery diagnostics rendered from buildCapabilityState redact raw backend messages and sensitive diagnostic values before display.
-- [ ] #4 Focused regression tests and lint/security checks are run and recorded.
+- [x] #1 PR branch is based on the latest fetched origin/dev and pushed back to PR #2531.
+- [x] #2 New or modified backend tests added by this PR carry accepted pytest markers and docstrings where required by the review feedback.
+- [x] #3 Recovery diagnostics rendered from buildCapabilityState redact raw backend messages and sensitive diagnostic values before display.
+- [x] #4 Focused regression tests and lint/security checks are run and recorded.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -66,15 +66,15 @@ Rebased codex/webui-auth-persistence onto fetched origin/dev (6fe09bb9). Address
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Rebased PR #2531 onto fetched origin/dev (6fe09bb9) and force-pushed codex/webui-auth-persistence. Addressed visible review feedback by adding pytest markers/docstrings to reviewed backend tests, sanitizing buildCapabilityState diagnostics, reusing sanitizeServerErrorMessage across Models, Data Tables, Skills Manager, Agent Registry, and Agent Tasks, and updating tests to assert redacted diagnostics. Verification recorded: focused frontend batch passed (24 files, 212 tests), backend focused tests passed (22 tests), eslint on changed TS/TSX completed with warnings only, git diff --check passed, Bandit ran on touched Python tests with only LOW B101 pytest-assert findings, and design-state verification remains blocked by the local missing typescript package.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
