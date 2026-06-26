@@ -312,6 +312,14 @@ def test_chat_endpoint_auto_routing_uses_post_validation_tool_capabilities(
             ],
         }
 
+    async def fake_add_skill_tools(tools, **_kwargs):
+        return [
+            {
+                "type": "function",
+                "function": {"name": "skills.lookup", "parameters": {"type": "object"}},
+            }
+        ]
+
     with (
         patch(
             "tldw_Server_API.app.api.v1.endpoints.chat.route_model",
@@ -337,13 +345,8 @@ def test_chat_endpoint_auto_routing_uses_post_validation_tool_capabilities(
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.add_skill_tool_to_tools_list",
-            return_value=[
-                {
-                    "type": "function",
-                    "function": {"name": "skills.lookup", "parameters": {"type": "object"}},
-                }
-            ],
+            "tldw_Server_API.app.api.v1.endpoints.chat.add_skill_tool_to_tools_list_async",
+            side_effect=fake_add_skill_tools,
         ),
         patch(
             "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",

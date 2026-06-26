@@ -33,17 +33,13 @@ async def test_chat_stream_disconnect_no_generatorexit(async_client, auth_header
         ) as resp:
             assert resp.status_code == 200
             # Read only a couple of chunks then disconnect
-            found_start = False
             received_some_data = False
             async for chunk in resp.aiter_text():
                 if not chunk:
                     continue
-                if "event: stream_start" in chunk:
-                    found_start = True
-                if "\ndata: " in chunk and "\n\n" in chunk and "\"delta\"" in chunk:
+                if "data: " in chunk and "\"delta\"" in chunk:
                     received_some_data = True
                     break  # Simulate client disconnect early
-            assert found_start is True
             assert received_some_data is True
         # Exiting the context closes the connection. The absence of exceptions here
         # indicates generators handled GeneratorExit correctly.

@@ -47,6 +47,23 @@ def _post_with_csrf(client: TestClient, url: str, **kwargs):
     return client.post(url, headers={"X-CSRF-Token": csrf, **headers}, **kwargs)
 
 
+def _json_sse_payloads(text: str) -> list[dict[str, Any]]:
+    payloads = []
+    for line in text.splitlines():
+        if not line.startswith("data: "):
+            continue
+        raw = line[6:].strip()
+        if not raw or raw == "[DONE]":
+            continue
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            payloads.append(payload)
+    return payloads
+
+
 @contextmanager
 def _make_test_client(db):
     with TestClient(app) as client:
@@ -351,13 +368,15 @@ def test_endpoint_streaming_emits_tool_results_event_before_stream_end():
                 assert "text/event-stream" in r.headers.get("content-type", "").lower()
 
                 events = [evt for evt in r.text.split("\n\n") if evt.strip()]
-                tool_idx = next(i for i, evt in enumerate(events) if evt.startswith("event: tool_results"))
-                end_idx = next(i for i, evt in enumerate(events) if evt.startswith("event: stream_end"))
+                payloads = _json_sse_payloads(r.text)
+                tool_idx = next(i for i, payload in enumerate(payloads) if "tool_results" in payload)
+                end_idx = next(i for i, payload in enumerate(payloads) if payload.get("success") is True)
                 done_idx = next(i for i, evt in enumerate(events) if evt.strip() == "data: [DONE]")
-                assert tool_idx < end_idx < done_idx
+                assert tool_idx < end_idx
+                assert events[done_idx].strip() == "data: [DONE]"
+                assert done_idx == len(events) - 1
 
-                data_line = next(line for line in events[tool_idx].splitlines() if line.startswith("data: "))
-                payload = json.loads(data_line[6:])
+                payload = payloads[tool_idx]
                 assert payload["tool_results"][0]["tool_call_id"] == "c1"
                 assert payload["tool_results"][0]["ok"] is True
                 assert payload.get("tldw_conversation_id")
