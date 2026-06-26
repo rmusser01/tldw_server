@@ -1,23 +1,38 @@
 ---
 id: TASK-223.2
 title: 'PR 2: MCP Hub setup polish and diagnostics'
+<<<<<<< HEAD
 status: Done
 assignee:
   - Codex
 created_date: '2026-05-10 06:13'
 updated_date: '2026-05-28 20:17'
+=======
+status: In Progress
+assignee: []
+created_date: 2026-05-10 06:13
+>>>>>>> 85cb3b7a4f (docs: design MCP Hub setup recovery UX)
 labels:
-  - mcp
-  - webui
-  - ux
-  - diagnostics
+- mcp
+- webui
+- ux
+- diagnostics
 dependencies:
+<<<<<<< HEAD
   - TASK-223.1
 documentation:
   - Docs/superpowers/specs/2026-05-10-mcp-hub-walkthrough-remediation-design.md
   - Docs/superpowers/plans/2026-05-28-mcp-hub-setup-polish-diagnostics-plan.md
+=======
+- TASK-223.1
+>>>>>>> 85cb3b7a4f (docs: design MCP Hub setup recovery UX)
 parent_task_id: TASK-223
 priority: medium
+documentation:
+- Docs/superpowers/specs/2026-06-26-mcp-hub-setup-recovery-ux-design.md
+modified_files:
+- Docs/superpowers/specs/2026-06-26-mcp-hub-setup-recovery-ux-design.md
+- backlog/tasks/task-223.2 - PR-2-MCP-Hub-setup-polish-and-diagnostics.md
 ---
 
 ## Description
