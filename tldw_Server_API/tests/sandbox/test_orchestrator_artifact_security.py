@@ -172,3 +172,50 @@ def test_store_artifacts_resists_parent_swap_during_open(
 
     assert swapped
     assert not (outside / "leaked.txt").exists()
+
+
+@pytest.mark.unit
+def test_store_artifacts_path_fallback_resists_parent_swap_during_open(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Path-only artifact writes must remove escaped files before writing data."""
+    monkeypatch.setattr(orchestrator_module, "_ARTIFACT_OPENAT_SUPPORTED", False)
+    orch = _orchestrator_with_artifact_root(monkeypatch, tmp_path)
+    run_id = "run-artifact-parent-race-fallback"
+    art_dir = orch._artifact_dir("artifact-user", run_id)
+    race_dir = art_dir / "race"
+    race_dir.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "outside-race-target"
+    outside.mkdir()
+    original_open = orchestrator_module.os.open
+    swapped = False
+
+    probe = tmp_path / "symlink-probe"
+    try:
+        os.symlink(str(outside), str(probe))
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    finally:
+        with contextlib.suppress(OSError):
+            probe.unlink()
+
+    def _racing_open(path: str | bytes | os.PathLike[str], flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
+        nonlocal swapped
+        path_text = os.fspath(path)
+        should_swap = not swapped and path_text.endswith(f"{os.sep}race{os.sep}leaked.txt")
+        if should_swap:
+            race_dir.rmdir()
+            os.symlink(str(outside), str(race_dir))
+            swapped = True
+        if dir_fd is None:
+            return original_open(path, flags, mode)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(orchestrator_module.os, "open", _racing_open)
+
+    orch.store_artifacts(run_id, {"race/leaked.txt": b"secret"})
+
+    assert swapped
+    assert not (outside / "leaked.txt").exists()
+    assert orch.get_artifact(run_id, "race/leaked.txt") is None

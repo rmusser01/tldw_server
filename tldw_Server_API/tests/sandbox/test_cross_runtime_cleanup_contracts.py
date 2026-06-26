@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -11,6 +12,12 @@ import tldw_Server_API.app.core.Sandbox.runners.lima_runner as lima_module
 from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType
 from tldw_Server_API.app.core.Sandbox.runners.firecracker_runner import FirecrackerRunner
 from tldw_Server_API.app.core.Sandbox.runners.lima_runner import LimaRunner
+
+
+_requires_posix_shell = pytest.mark.skipif(
+    os.name == "nt",
+    reason="entry scripts run inside Linux VMs; the local contract runner requires a POSIX shell",
+)
 
 
 def _spec(runtime: RuntimeType, *, network_policy: str | None = "deny_all") -> RunSpec:
@@ -61,6 +68,7 @@ def _source_env_file(workspace: Path) -> str:
     return (workspace / "sourced-value.txt").read_text(encoding="utf-8")
 
 
+@_requires_posix_shell
 def test_lima_entry_script_writes_status_for_nonzero_user_command(tmp_path: Path) -> None:
     LimaRunner._write_entry_script(str(tmp_path), ["false"])
 
@@ -72,6 +80,7 @@ def test_lima_entry_script_writes_status_for_nonzero_user_command(tmp_path: Path
     assert status["reason"] == "exit"
 
 
+@_requires_posix_shell
 def test_firecracker_entry_script_writes_status_for_nonzero_user_command(tmp_path: Path) -> None:
     firecracker_module._write_entry_script(str(tmp_path), ["false"])
 
@@ -83,6 +92,7 @@ def test_firecracker_entry_script_writes_status_for_nonzero_user_command(tmp_pat
     assert status["reason"] == "exit"
 
 
+@_requires_posix_shell
 def test_lima_env_file_quotes_values_and_rejects_invalid_keys(tmp_path: Path) -> None:
     marker = tmp_path / "env-injection-created"
     raw_value = f"ok'; touch {marker}; echo '"
@@ -100,6 +110,7 @@ def test_lima_env_file_quotes_values_and_rejects_invalid_keys(tmp_path: Path) ->
     assert not marker.exists()
 
 
+@_requires_posix_shell
 def test_firecracker_env_file_quotes_values_and_rejects_invalid_keys(tmp_path: Path) -> None:
     marker = tmp_path / "env-injection-created"
     raw_value = f"ok'; touch {marker}; echo '"
@@ -117,6 +128,7 @@ def test_firecracker_env_file_quotes_values_and_rejects_invalid_keys(tmp_path: P
     assert not marker.exists()
 
 
+@_requires_posix_shell
 def test_firecracker_entry_script_exports_env_to_user_command(tmp_path: Path) -> None:
     firecracker_module._write_env_file(str(tmp_path), {"SAFE_VALUE": "visible-in-child"})
     firecracker_module._write_entry_script(str(tmp_path), ["/usr/bin/env"])
@@ -127,6 +139,7 @@ def test_firecracker_entry_script_exports_env_to_user_command(tmp_path: Path) ->
     assert "SAFE_VALUE=visible-in-child" in (tmp_path / "run.log").read_text(encoding="utf-8")
 
 
+@_requires_posix_shell
 def test_lima_entry_script_exports_env_to_user_command(tmp_path: Path) -> None:
     LimaRunner._write_env_file(str(tmp_path), {"SAFE_VALUE": "visible-in-child"})
     LimaRunner._write_entry_script(str(tmp_path), ["/usr/bin/env"])

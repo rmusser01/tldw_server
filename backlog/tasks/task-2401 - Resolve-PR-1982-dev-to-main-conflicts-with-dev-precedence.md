@@ -4,7 +4,7 @@ title: Resolve PR 1982 dev-to-main conflicts with dev precedence
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-26 19:17'
+updated_date: '2026-06-26 19:32'
 labels:
   - merge-conflict
   - pr-1982
@@ -56,6 +56,9 @@ modified_files:
   - tldw_Server_API/tests/Chat_NEW/integration/test_chat_loop_dual_emit_compat.py
   - tldw_Server_API/tests/DB_Management/test_db_migration_planning.py
   - tldw_Server_API/tests/Local_LLM/test_llamacpp_hardening.py
+  - tldw_Server_API/app/core/Sandbox/orchestrator.py
+  - tldw_Server_API/tests/sandbox/test_cross_runtime_cleanup_contracts.py
+  - tldw_Server_API/tests/sandbox/test_orchestrator_artifact_security.py
 ---
 
 ## Description
@@ -116,6 +119,8 @@ Old-head CI later exposed Full Suite shard integrations failing test_reconcile_c
 
 - 2026-06-26 chat-new/db-privileges follow-up failures: `chat-new-integration-property` failed because chat unified SSE treated internally generated event frames as provider control lines and dropped `event: stream_start`, `event: stream_end`, and loop compat events; `db-privileges` failed because `DatabaseMigrator` did not pass the existing Redis-to-file migration-lock fallback flag during pytest/test mode, so CI jobs exporting a dead `REDIS_URL` failed before migration-planning assertions and media DB v23 bootstrap could run. Fixes added: chat unified SSE now preserves internal control frames with `provider_control_passthru=True`, the dual-emission test explicitly exercises `STREAMS_UNIFIED=1`, and DB migrations opt into file-lock fallback only under `TEST_MODE` or explicit pytest runtime while preserving fail-closed behavior outside tests. Verification: exact chat dual-emission reproduction passed; Redis-unavailable DB migration/media bootstrap reproduction passed 6 tests; broader Redis-unavailable DB/embedding set passed 14 tests; touched chat streaming set passed 2 tests; `git diff --check` passed; `py_compile` on touched Python files passed; Bandit on touched app files had 0 findings and filtered touched-scope Bandit wrote `/tmp/bandit_pr1982_chat_db_followups_filtered.json` with 0 results.
 - 2026-06-26 llm-local-backends follow-up failure: `Full Suite shard (macos-latest / Python 3.12 / llm-local-backends)` failed in `test_model_swap_rollback_on_stop_failure` because the test monkeypatched `stop_server()`, but model swapping already holds the lifecycle lock and calls `_stop_server_unlocked()` directly; the fake non-executable server then failed earlier with macOS `Permission denied` instead of exercising rollback. Fix added: patch `_stop_server_unlocked()` in the rollback test. Verification: the exact failed test passed locally, the full `tldw_Server_API/tests/LLamaCpp tldw_Server_API/tests/Local_LLM` shard passed with `101 passed, 3 skipped`, `git diff --check` passed, `py_compile` on the touched test passed, and filtered Bandit wrote `/tmp/bandit_pr1982_llm_local_followup_filtered.json` with 0 results after excluding existing test-only `B101/B105` findings.
+
+- 2026-06-26 sandbox/platform-state-store follow-up failure: the Windows shard executed local Linux VM entry-script contracts through host `/bin/sh`, which is unavailable on Windows, and the artifact path-only fallback could create an outside file when a checked parent was swapped during `os.open`. Fixes added: skip host shell execution contracts on Windows because the scripts run inside Linux VMs, harden the path-only artifact writer by re-resolving the parent after open with exclusive create and closing/unlinking escaped files before data is written, and add a forced-fallback race regression. Verification: exact artifact security file passed 6 tests; cross-runtime contract file passed 11 tests; full sandbox state-store shard path group passed with 228 passed and 7 skipped; `git diff --check` passed; `py_compile` on touched files passed; Bandit app scope had 0 findings and filtered test scope had 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

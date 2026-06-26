@@ -1303,12 +1303,32 @@ class SandboxOrchestrator:
         full = self._prepare_artifact_write_path(art_dir, rel)
         if full is None:
             return None
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        try:
+            expected_parent = full.parent.resolve(strict=True)
+            resolved_root = art_dir.resolve(strict=True)
+            if expected_parent != resolved_root and resolved_root not in expected_parent.parents:
+                return None
+        except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
+            return None
+
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
+        fd: int | None = None
         try:
-            return os.open(str(full), flags, 0o600)
+            fd = os.open(str(full), flags, 0o600)
+            current_parent = full.parent.resolve(strict=True)
+            if current_parent != expected_parent:
+                os.close(fd)
+                fd = None
+                with contextlib.suppress(_SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS):
+                    full.unlink()
+                return None
+            return fd
         except _SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS:
+            if fd is not None:
+                with contextlib.suppress(_SANDBOX_ORCH_NONCRITICAL_EXCEPTIONS):
+                    os.close(fd)
             return None
 
     def store_artifacts(self, run_id: str, items: dict[str, bytes]) -> None:
