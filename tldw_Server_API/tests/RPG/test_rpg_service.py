@@ -1,11 +1,43 @@
+import pytest
+
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
+from tldw_Server_API.app.core.RPG.errors import RPGValidationError
+from tldw_Server_API.app.core.RPG.rules.refs import RulesPackSourceValidation
 from tldw_Server_API.app.core.RPG.service import RPGService
 
 
-def _service() -> RPGService:
+class FakeRulesSourceValidator:
+    def __init__(self, readable: bool = True) -> None:
+        self.readable = readable
+        self.media_item_calls: list[tuple[int, int]] = []
+        self.media_collection_calls: list[tuple[int, int]] = []
+
+    async def validate_media_item(self, owner_user_id: int, media_id: int) -> RulesPackSourceValidation:
+        self.media_item_calls.append((owner_user_id, media_id))
+        return RulesPackSourceValidation(
+            ref_id=f"media_item:{media_id}",
+            readable=self.readable,
+            display_name=f"Media {media_id}",
+        )
+
+    async def validate_media_collection(
+        self,
+        owner_user_id: int,
+        collection_id: int,
+    ) -> RulesPackSourceValidation:
+        self.media_collection_calls.append((owner_user_id, collection_id))
+        return RulesPackSourceValidation(
+            ref_id=f"media_collection:{collection_id}",
+            readable=self.readable,
+            display_name=f"Collection {collection_id}",
+            ready_media_ids=[],
+        )
+
+
+def _service(rules_source_validator: FakeRulesSourceValidator | None = None) -> RPGService:
     repo = RPGRepository.initialized(CharactersRAGDB(":memory:", "rpg-service-test"))
-    return RPGService(repo=repo, owner_user_id=42)
+    return RPGService(repo=repo, owner_user_id=42, rules_source_validator=rules_source_validator)
 
 
 def test_model_events_create_pending_proposal_by_default():
@@ -175,3 +207,212 @@ def test_replaying_proposal_reject_returns_same_rejected_proposal():
     assert second.id == first.id  # nosec B101
     assert second.status == "rejected"  # nosec B101
     assert snapshot.snapshot_version == 0  # nosec B101
+
+
+def test_create_session_copies_campaign_rules_refs_when_request_omits_refs():
+    service = _service()
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-copy-rules")
+    service.repo.replace_campaign_rules_pack_refs(
+        owner_user_id=42,
+        campaign_id=campaign.id,
+        rules_pack_refs=[{"source_type": "media_item", "source_id": 7, "display_name": "Rules"}],
+        expected_version=campaign.version,
+        idempotency_key="campaign-copy-rules-ref",
+        request_payload_hash="arranged",
+        source_type="user",
+    )
+
+    session = service.create_session(
+        campaign.id,
+        "Opening",
+        adapter_key="fate",
+        idempotency_key="session-copy-rules",
+    )
+
+    assert session.active_rules_pack_refs[0]["ref_id"] == "media_item:7"  # nosec B101
+
+
+def test_create_session_uses_explicit_empty_rules_refs():
+    service = _service()
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-empty-rules")
+    service.repo.replace_campaign_rules_pack_refs(
+        owner_user_id=42,
+        campaign_id=campaign.id,
+        rules_pack_refs=[{"source_type": "media_item", "source_id": 7, "display_name": "Rules"}],
+        expected_version=campaign.version,
+        idempotency_key="campaign-empty-rules-ref",
+        request_payload_hash="arranged",
+        source_type="user",
+    )
+
+    session = service.create_session(
+        campaign.id,
+        "Opening",
+        adapter_key="fate",
+        idempotency_key="session-empty-rules",
+        active_rules_pack_refs=[],
+    )
+
+    assert session.active_rules_pack_refs == []  # nosec B101
+
+
+def test_create_session_validates_explicit_rules_refs():
+    validator = FakeRulesSourceValidator()
+    service = _service(validator)
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-explicit-rules")
+
+    session = service.create_session(
+        campaign.id,
+        "Opening",
+        adapter_key="fate",
+        idempotency_key="session-explicit-rules",
+        active_rules_pack_refs=[{"source_type": "media_item", "source_id": 7}],
+    )
+
+    assert validator.media_item_calls == [(42, 7)]  # nosec B101
+    assert session.active_rules_pack_refs[0]["ref_id"] == "media_item:7"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_replace_campaign_rules_pack_refs_validates_each_enabled_source():
+    validator = FakeRulesSourceValidator()
+    service = _service(validator)
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-validate-rules")
+
+    result = await service.replace_campaign_rules_pack_refs(
+        campaign.id,
+        [
+            {"source_type": "media_item", "source_id": 7},
+            {"source_type": "media_collection", "source_id": 3},
+        ],
+        expected_version=campaign.version,
+        idempotency_key="campaign-validate-rules-ref",
+    )
+
+    assert validator.media_item_calls == [(42, 7)]  # nosec B101
+    assert validator.media_collection_calls == [(42, 3)]  # nosec B101
+    assert [ref.ref_id for ref in result.refs] == ["media_item:7", "media_collection:3"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_replace_session_rules_pack_refs_validates_each_enabled_source():
+    validator = FakeRulesSourceValidator()
+    service = _service(validator)
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-session-validate")
+    session = service.create_session(
+        campaign.id,
+        "Opening",
+        adapter_key="fate",
+        idempotency_key="session-validate-rules",
+    )
+
+    result = await service.replace_session_rules_pack_refs(
+        session.id,
+        [
+            {"source_type": "media_item", "source_id": 7},
+            {"source_type": "media_collection", "source_id": 3},
+        ],
+        expected_version=session.version,
+        idempotency_key="session-validate-rules-ref",
+    )
+
+    assert validator.media_item_calls == [(42, 7)]  # nosec B101
+    assert validator.media_collection_calls == [(42, 3)]  # nosec B101
+    assert [ref.ref_id for ref in result.refs] == ["media_item:7", "media_collection:3"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_replace_rules_pack_refs_allows_disabled_unreadable_source_without_dereference():
+    validator = FakeRulesSourceValidator(readable=False)
+    service = _service(validator)
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-disabled-rules")
+
+    result = await service.replace_campaign_rules_pack_refs(
+        campaign.id,
+        [{"source_type": "media_item", "source_id": 7, "enabled": False}],
+        expected_version=campaign.version,
+        idempotency_key="campaign-disabled-rules-ref",
+    )
+
+    assert validator.media_item_calls == []  # nosec B101
+    assert result.refs[0].enabled is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_replace_rules_pack_refs_rejects_unreadable_media_item():
+    validator = FakeRulesSourceValidator(readable=False)
+    service = _service(validator)
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-unreadable-rules")
+
+    with pytest.raises(RPGValidationError, match="rules_pack_source_unreadable"):
+        await service.replace_campaign_rules_pack_refs(
+            campaign.id,
+            [{"source_type": "media_item", "source_id": 7}],
+            expected_version=campaign.version,
+            idempotency_key="campaign-unreadable-rules-ref",
+        )
+
+    assert validator.media_item_calls == [(42, 7)]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_replace_rules_pack_refs_allows_empty_readable_collection():
+    validator = FakeRulesSourceValidator()
+    service = _service(validator)
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-empty-collection")
+
+    result = await service.replace_campaign_rules_pack_refs(
+        campaign.id,
+        [{"source_type": "media_collection", "source_id": 3}],
+        expected_version=campaign.version,
+        idempotency_key="campaign-empty-collection-ref",
+    )
+
+    assert validator.media_collection_calls == [(42, 3)]  # nosec B101
+    assert result.refs[0].ref_id == "media_collection:3"  # nosec B101
+
+
+def test_list_campaign_rules_pack_refs_returns_current_version():
+    service = _service()
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-list-rules")
+    service.repo.replace_campaign_rules_pack_refs(
+        owner_user_id=42,
+        campaign_id=campaign.id,
+        rules_pack_refs=[{"source_type": "media_item", "source_id": 7}],
+        expected_version=campaign.version,
+        idempotency_key="campaign-list-rules-ref",
+        request_payload_hash="arranged",
+        source_type="user",
+    )
+
+    result = service.list_campaign_rules_pack_refs(campaign.id)
+
+    assert result.version == 2  # nosec B101
+    assert result.refs[0].ref_id == "media_item:7"  # nosec B101
+    assert result.replayed is False  # nosec B101
+
+
+def test_list_session_rules_pack_refs_returns_current_version():
+    service = _service()
+    campaign = service.create_campaign("Campaign", None, "fate", idempotency_key="campaign-list-session-rules")
+    session = service.create_session(
+        campaign.id,
+        "Opening",
+        adapter_key="fate",
+        idempotency_key="session-list-rules",
+    )
+    service.repo.replace_session_rules_pack_refs(
+        owner_user_id=42,
+        session_id=session.id,
+        rules_pack_refs=[{"source_type": "media_collection", "source_id": 3}],
+        expected_version=session.version,
+        idempotency_key="session-list-rules-ref",
+        request_payload_hash="arranged",
+        source_type="user",
+    )
+
+    result = service.list_session_rules_pack_refs(session.id)
+
+    assert result.version == 2  # nosec B101
+    assert result.refs[0].ref_id == "media_collection:3"  # nosec B101
+    assert result.replayed is False  # nosec B101

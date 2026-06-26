@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Literal, cast
+from typing import Any, Literal, Protocol, cast
 
 from tldw_Server_API.app.core.RPG.errors import RPGValidationError
 
@@ -27,6 +27,26 @@ class RulesPackRefReplacementResult:
     refs: list[RulesPackRef]
     version: int
     replayed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class RulesPackSourceValidation:
+    ref_id: str
+    readable: bool
+    display_name: str | None
+    ready_media_ids: list[int] = field(default_factory=list)
+
+
+class RulesPackSourceValidator(Protocol):
+    async def validate_media_item(self, owner_user_id: int, media_id: int) -> RulesPackSourceValidation:
+        ...
+
+    async def validate_media_collection(
+        self,
+        owner_user_id: int,
+        collection_id: int,
+    ) -> RulesPackSourceValidation:
+        ...
 
 
 def normalize_rules_pack_ref_payloads(

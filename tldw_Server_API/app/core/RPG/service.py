@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
 from tldw_Server_API.app.core.RPG.authority import decide_authority
 from tldw_Server_API.app.core.RPG.constants import MAX_RPG_CONTEXT_CHARS
 from tldw_Server_API.app.core.RPG.context import SessionContext, SessionContextBuilder
-from tldw_Server_API.app.core.RPG.errors import RPGConflictError
+from tldw_Server_API.app.core.RPG.errors import RPGConflictError, RPGValidationError
 from tldw_Server_API.app.core.RPG.events import canonical_request_hash, validate_event_envelope
 from tldw_Server_API.app.core.RPG.models import (
     RPGCampaign,
@@ -19,6 +21,14 @@ from tldw_Server_API.app.core.RPG.reducer import reduce_events
 from tldw_Server_API.app.core.RPG.rules.adapters import RuleAdapterRegistry, build_default_adapter_registry
 from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupResult
 from tldw_Server_API.app.core.RPG.rules.lookup import RulesLookupService
+from tldw_Server_API.app.core.RPG.rules.refs import (
+    RulesPackRef,
+    RulesPackRefReplacementResult,
+    RulesPackSourceValidator,
+    normalize_rules_pack_ref_payloads,
+    rules_pack_ref_from_dict,
+    rules_pack_ref_to_dict,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,10 +59,12 @@ class RPGService:
         repo: RPGRepository,
         owner_user_id: int,
         adapter_registry: RuleAdapterRegistry | None = None,
+        rules_source_validator: RulesPackSourceValidator | None = None,
     ) -> None:
         self.repo = repo
         self.owner_user_id = owner_user_id
         self.adapter_registry = adapter_registry or build_default_adapter_registry()
+        self.rules_source_validator = rules_source_validator
 
     def create_campaign(
         self,
@@ -90,10 +102,13 @@ class RPGService:
         title: str,
         adapter_key: str,
         idempotency_key: str,
+        active_rules_pack_refs: list[dict[str, Any]] | None = None,
     ) -> RPGSession:
         self._require_idempotency_key(idempotency_key)
         adapter = self.adapter_registry.get(adapter_key)
         authority_settings = {"model_auto_commit": False, "mcp_auto_commit": False}
+        campaign = self.repo.get_campaign(owner_user_id=self.owner_user_id, campaign_id=campaign_id)
+        active_refs = self._prepare_session_rules_pack_refs(active_rules_pack_refs, campaign)
         request_hash = canonical_request_hash(
             {
                 "campaign_id": campaign_id,
@@ -101,6 +116,7 @@ class RPGService:
                 "adapter_key": adapter.adapter_key,
                 "adapter_version": adapter.adapter_version,
                 "authority_settings": authority_settings,
+                "active_rules_pack_refs": active_refs,
             }
         )
         return self.repo.create_session(
@@ -111,10 +127,88 @@ class RPGService:
             adapter_version=adapter.adapter_version,
             authority_settings=authority_settings,
             linked_chat_id=None,
-            active_rules_pack_refs=[],
+            active_rules_pack_refs=active_refs,
             idempotency_key=idempotency_key,
             request_payload_hash=request_hash,
             source_type="user",
+        )
+
+    def list_campaign_rules_pack_refs(self, campaign_id: int) -> RulesPackRefReplacementResult:
+        campaign = self.repo.get_campaign(owner_user_id=self.owner_user_id, campaign_id=campaign_id)
+        return RulesPackRefReplacementResult(
+            refs=[rules_pack_ref_from_dict(ref) for ref in campaign.linked_rules_pack_refs],
+            version=campaign.version,
+        )
+
+    def list_session_rules_pack_refs(self, session_id: int) -> RulesPackRefReplacementResult:
+        session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
+        return RulesPackRefReplacementResult(
+            refs=[rules_pack_ref_from_dict(ref) for ref in session.active_rules_pack_refs],
+            version=session.version,
+        )
+
+    async def replace_campaign_rules_pack_refs(
+        self,
+        campaign_id: int,
+        refs: list[dict[str, Any]],
+        expected_version: int,
+        idempotency_key: str,
+        source_type: str = "user",
+    ) -> RulesPackRefReplacementResult:
+        self._require_idempotency_key(idempotency_key)
+        campaign = self.repo.get_campaign(owner_user_id=self.owner_user_id, campaign_id=campaign_id)
+        normalized = self._normalize_rules_pack_refs(refs, campaign.linked_rules_pack_refs)
+        normalized_dicts = [rules_pack_ref_to_dict(ref) for ref in normalized]
+        await self._validate_rules_pack_refs(normalized)
+        request_hash = canonical_request_hash(
+            {
+                "target_type": "campaign",
+                "campaign_id": campaign_id,
+                "rules_pack_refs": self._rules_pack_ref_request_dicts(normalized),
+                "expected_version": expected_version,
+                "source_type": source_type,
+            }
+        )
+        return self.repo.replace_campaign_rules_pack_refs(
+            owner_user_id=self.owner_user_id,
+            campaign_id=campaign_id,
+            rules_pack_refs=normalized_dicts,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_hash,
+            source_type=source_type,
+        )
+
+    async def replace_session_rules_pack_refs(
+        self,
+        session_id: int,
+        refs: list[dict[str, Any]],
+        expected_version: int,
+        idempotency_key: str,
+        source_type: str = "user",
+    ) -> RulesPackRefReplacementResult:
+        self._require_idempotency_key(idempotency_key)
+        session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
+        normalized = self._normalize_rules_pack_refs(refs, session.active_rules_pack_refs)
+        normalized_dicts = [rules_pack_ref_to_dict(ref) for ref in normalized]
+        await self._validate_rules_pack_refs(normalized)
+        request_hash = canonical_request_hash(
+            {
+                "target_type": "session",
+                "session_id": session_id,
+                "rules_pack_refs": self._rules_pack_ref_request_dicts(normalized),
+                "expected_version": expected_version,
+                "source_type": source_type,
+            }
+        )
+        return self.repo.replace_session_rules_pack_refs(
+            owner_user_id=self.owner_user_id,
+            session_id=session_id,
+            rules_pack_refs=normalized_dicts,
+            expected_version=expected_version,
+            idempotency_key=idempotency_key,
+            request_payload_hash=request_hash,
+            source_type=source_type,
         )
 
     def record_events(
@@ -335,6 +429,72 @@ class RPGService:
     def _require_idempotency_key(idempotency_key: str) -> None:
         if not idempotency_key:
             raise RPGConflictError("idempotency_key_required")
+
+    def _prepare_session_rules_pack_refs(
+        self,
+        active_rules_pack_refs: list[dict[str, Any]] | None,
+        campaign: RPGCampaign,
+    ) -> list[dict[str, Any]]:
+        if active_rules_pack_refs is None:
+            return [dict(ref) for ref in campaign.linked_rules_pack_refs]
+        if not active_rules_pack_refs:
+            return []
+
+        normalized = self._normalize_rules_pack_refs(active_rules_pack_refs, existing_refs=[])
+        if any(ref.enabled for ref in normalized):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                asyncio.run(self._validate_rules_pack_refs(normalized))
+            else:
+                raise RPGValidationError("rules_source_validation_requires_async_context")
+        return [rules_pack_ref_to_dict(ref) for ref in normalized]
+
+    @staticmethod
+    def _normalize_rules_pack_refs(
+        refs: list[dict[str, Any]],
+        existing_refs: list[dict[str, Any]],
+    ) -> list[RulesPackRef]:
+        return normalize_rules_pack_ref_payloads(
+            refs,
+            existing_refs=existing_refs,
+            now=datetime.now(timezone.utc),
+        )
+
+    @staticmethod
+    def _rules_pack_ref_request_dicts(refs: list[RulesPackRef]) -> list[dict[str, Any]]:
+        return [
+            {
+                "ref_id": ref.ref_id,
+                "source_type": ref.source_type,
+                "source_id": ref.source_id,
+                "display_name": ref.display_name,
+                "enabled": ref.enabled,
+                "metadata": dict(ref.metadata),
+            }
+            for ref in refs
+        ]
+
+    async def _validate_rules_pack_refs(self, refs: list[RulesPackRef]) -> None:
+        enabled_refs = [ref for ref in refs if ref.enabled]
+        if not enabled_refs:
+            return
+        if self.rules_source_validator is None:
+            raise RPGValidationError("rules_source_validator_required")
+
+        for ref in enabled_refs:
+            if ref.source_type == "media_item":
+                validation = await self.rules_source_validator.validate_media_item(
+                    self.owner_user_id,
+                    ref.source_id,
+                )
+            else:
+                validation = await self.rules_source_validator.validate_media_collection(
+                    self.owner_user_id,
+                    ref.source_id,
+                )
+            if not validation.readable:
+                raise RPGValidationError("rules_pack_source_unreadable")
 
     def _source_actor_id(self, source_type: str) -> str | None:
         if source_type in {"user", "mcp"}:
