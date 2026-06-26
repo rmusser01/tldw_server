@@ -834,7 +834,7 @@ Task 5 verification completed 2026-06-25:
 - Modify: `backlog/tasks/task-12029 - Design-RPG-rules-pack-attachment-and-retrieval-backed-lookup.md`
 - Modify: implementation Backlog.md task created before code execution
 
-- [ ] **Step 1: Write failing MCP tests**
+- [x] **Step 1: Write failing MCP tests**
 
 Add:
 
@@ -854,7 +854,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg
 
 Confirm tests fail because MCP tools are missing.
 
-- [ ] **Step 2: Add MCP tools**
+- [x] **Step 2: Add MCP tools**
 
 Add tool names:
 
@@ -876,7 +876,7 @@ Service construction:
 - Inject media/collection validation only when MCP context exposes user media and collection DB paths.
 - If MCP context lacks media DB access, ref dereference tools return a structured error rather than silently treating refs as empty.
 
-- [ ] **Step 3: Update README**
+- [x] **Step 3: Update README**
 
 Add a concise section to `tldw_Server_API/app/core/RPG/README.md`:
 
@@ -886,19 +886,19 @@ Add a concise section to `tldw_Server_API/app/core/RPG/README.md`:
 - Lookup/answer mode behavior.
 - Licensing/privacy statement: user-provided rules content stays in user media stores; bundled adapters remain mechanics metadata and citations.
 
-- [ ] **Step 4: Run focused RPG suite**
+- [x] **Step 4: Run focused RPG suite**
 
 ```bash
 source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG -v
 ```
 
-- [ ] **Step 5: Run privilege catalog checks**
+- [x] **Step 5: Run privilege catalog checks**
 
 ```bash
 source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py -v
 ```
 
-- [ ] **Step 6: Run Bandit on touched Python scope**
+- [x] **Step 6: Run Bandit on touched Python scope**
 
 ```bash
 source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/RPG tldw_Server_API/app/api/v1/endpoints/rpg.py tldw_Server_API/app/api/v1/schemas/rpg_schemas.py tldw_Server_API/app/core/MCP_unified/modules/implementations/rpg_module.py -f json -o /tmp/bandit_task_12029_rpg_rules_packs.json
@@ -906,7 +906,7 @@ source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/RPG tl
 
 Open the JSON report and fix any new finding in touched code before marking the implementation task complete.
 
-- [ ] **Step 7: Run formatting and diff checks**
+- [x] **Step 7: Run formatting and diff checks**
 
 ```bash
 git diff --check
@@ -918,7 +918,7 @@ If the project environment has Ruff installed:
 source .venv/bin/activate && python -m ruff check tldw_Server_API/app/core/RPG tldw_Server_API/app/api/v1/endpoints/rpg.py tldw_Server_API/app/api/v1/schemas/rpg_schemas.py tldw_Server_API/app/core/MCP_unified/modules/implementations/rpg_module.py tldw_Server_API/tests/RPG
 ```
 
-- [ ] **Step 8: Update Backlog.md records**
+- [x] **Step 8: Update Backlog.md records**
 
 Record in the implementation task:
 
@@ -936,16 +936,37 @@ Record in `TASK-12029`:
 - The implementation task ID.
 - Final summary that design and implementation planning are complete.
 
+**Status:** Complete after post-review hardening.
+
+**Post-review hardening:**
+
+- Enforced declared RPG/media domain permissions inside the RPG MCP module from authenticated context metadata before database construction.
+- Made MCP `mode="answer"` fail closed unless `chat.completions` is present and trusted host metadata indicates chat-generation token-scope, budget, and rate-limit controls already ran.
+- Closed partially constructed MCP service resources on construction failure.
+- Kept rules-pack replacement on the source-validation path only, without constructing a retrieval engine.
+- Aligned REST/MCP lookup input limits and clarified REST/MCP idempotency wording in the RPG README.
+
+**Verification:**
+
+- Initial post-review RED checks failed as expected for missing permission enforcement, missing answer governance, missing cleanup, and unnecessary replacement retriever construction.
+- Focused review-fix checks: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_mcp_module.py::test_rpg_module_rules_lookup_uses_attached_media_refs tldw_Server_API/tests/RPG/test_rpg_mcp_module.py::test_rpg_mcp_tool_requires_declared_domain_permissions tldw_Server_API/tests/RPG/test_rpg_mcp_module.py::test_protocol_denies_rpg_tool_when_domain_permission_missing tldw_Server_API/tests/RPG/test_rpg_mcp_module.py::test_rpg_mcp_answer_mode_requires_chat_permissions_and_generation_controls tldw_Server_API/tests/RPG/test_rpg_mcp_module.py::test_rpg_mcp_session_rules_pack_replace_succeeds_and_replays tldw_Server_API/tests/RPG/test_rpg_mcp_module.py::test_rpg_mcp_rules_pack_replace_does_not_construct_retriever tldw_Server_API/tests/RPG/test_rpg_mcp_module.py::test_rpg_mcp_service_construction_closes_opened_resources_on_failure -v` -> 7 passed, 51 warnings.
+- Full MCP module: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_mcp_module.py -v` -> 28 passed, 119 warnings.
+- Full RPG suite after final lint cleanup: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG -v` -> 174 passed, 424 warnings.
+- RPG endpoint scope catalog: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_api.py::test_rpg_endpoint_scopes_are_cataloged -v` -> 1 passed, 16 warnings.
+- Ruff: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m ruff check tldw_Server_API/app/api/v1/endpoints/rpg.py tldw_Server_API/app/api/v1/schemas/rpg_schemas.py tldw_Server_API/app/core/MCP_unified/modules/implementations/rpg_module.py tldw_Server_API/app/core/RPG/__init__.py tldw_Server_API/app/core/RPG/dice.py tldw_Server_API/app/core/RPG/rules/lookup.py tldw_Server_API/tests/RPG/test_rpg_api.py tldw_Server_API/tests/RPG/test_rpg_events_reducer.py tldw_Server_API/tests/RPG/test_rpg_mcp_module.py tldw_Server_API/tests/RPG/test_rpg_rules_context.py` -> All checks passed.
+- Bandit: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m bandit tldw_Server_API/app/api/v1/endpoints/rpg.py tldw_Server_API/app/api/v1/schemas/rpg_schemas.py tldw_Server_API/app/core/MCP_unified/modules/implementations/rpg_module.py tldw_Server_API/app/core/RPG/__init__.py tldw_Server_API/app/core/RPG/dice.py tldw_Server_API/app/core/RPG/rules/lookup.py tldw_Server_API/tests/RPG/test_rpg_api.py tldw_Server_API/tests/RPG/test_rpg_events_reducer.py tldw_Server_API/tests/RPG/test_rpg_mcp_module.py tldw_Server_API/tests/RPG/test_rpg_rules_context.py -f json -o /tmp/bandit_task12030_task6_post_review.json` -> 0 findings, 0 errors.
+- Diff check: `git diff --check` -> clean.
+
 ---
 
 ## Review Checklist Before Runtime Code Starts
 
-- [ ] The implementation task exists in Backlog.md and links to this plan.
-- [ ] Task 1 starts with failing tests before repository changes.
-- [ ] Ref writes use existing `version` fields and do not add new DB tables.
-- [ ] Media and collection refs are validated through user-scoped DB access.
-- [ ] Lookup never falls back to unscoped RAG or web search.
-- [ ] Answer mode uses existing chat provider governance and never fabricates citation IDs.
-- [ ] Context builder uses lookup evidence only and does not call answer generation.
-- [ ] MCP and REST surfaces expose the same semantics.
-- [ ] Bandit scope is limited to touched Python files and every new finding is fixed.
+- [x] The implementation task exists in Backlog.md and links to this plan.
+- [x] Task 1 starts with failing tests before repository changes.
+- [x] Ref writes use existing `version` fields and do not add new DB tables.
+- [x] Media and collection refs are validated through user-scoped DB access.
+- [x] Lookup never falls back to unscoped RAG or web search.
+- [x] Answer mode uses existing chat provider governance and never fabricates citation IDs.
+- [x] Context builder uses lookup evidence only and does not call answer generation.
+- [x] MCP and REST surfaces expose the same semantics.
+- [x] Bandit scope is limited to touched Python files and every new finding is fixed.

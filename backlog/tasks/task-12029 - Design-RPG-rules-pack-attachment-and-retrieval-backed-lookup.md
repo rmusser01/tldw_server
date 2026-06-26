@@ -15,12 +15,13 @@ references:
 - TASK-12026
 - TASK-12028
 - TASK-12030
+- TASK-12031
 documentation:
 - tldw_Server_API/app/core/RPG/README.md
 - Docs/superpowers/specs/2026-06-25-rpg-campaign-session-runtime-design.md
 - Docs/superpowers/specs/2026-06-25-rpg-rules-pack-attachment-retrieval-design.md
 - Docs/superpowers/plans/2026-06-25-rpg-rules-pack-attachment-retrieval-implementation-plan.md
-updated_date: 2026-06-25 23:30
+updated_date: 2026-06-26 03:34
 modified_files:
 - Docs/superpowers/specs/2026-06-25-rpg-rules-pack-attachment-retrieval-design.md
 - Docs/superpowers/plans/2026-06-25-rpg-rules-pack-attachment-retrieval-implementation-plan.md
@@ -57,6 +58,7 @@ Design the next RPG runtime feature: attaching user-provided rules-pack referenc
 2026-06-25: Wrote approved design spec at Docs/superpowers/specs/2026-06-25-rpg-rules-pack-attachment-retrieval-design.md. Self-review checked for placeholders, contradictory scope, ambiguous retrieval behavior, and licensing overclaims. `git diff --check` passed. Bandit is not applicable because this step changed only Markdown/backlog task metadata, not Python code.
 2026-06-25: Post-review amendment tightened the spec around async service boundaries, media.read requirements for attached-source dereference/retrieval, live collection readiness semantics, server-owned ref timestamps, answer-mode quota/governance, and authorization regression tests.
 2026-06-25: Wrote implementation plan at Docs/superpowers/plans/2026-06-25-rpg-rules-pack-attachment-retrieval-implementation-plan.md after checking current RPG, RAG, Media, MCP, and Chat integration points. Self-review scan found and removed ellipsis placeholders; `git diff --check` passed for the plan. Created follow-on implementation task TASK-12030. Bandit is not applicable for this step because only Markdown/backlog metadata changed.
+2026-06-25: Implementation completed in TASK-12030. Follow-up TASK-12031 tracks host-level MCP answer-generation controls so MCP answer mode can pass a trusted preflight marker instead of remaining fail-closed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

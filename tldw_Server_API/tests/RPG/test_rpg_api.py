@@ -6,9 +6,9 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import AuthPrincipal, get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import AuthPrincipal, get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints import rpg as rpg_endpoint
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.RPG.context import SessionContext
@@ -16,7 +16,6 @@ from tldw_Server_API.app.core.RPG.rules.answering import RulesAnswerOptions
 from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupResult
 from tldw_Server_API.app.main import app
 from tldw_Server_API.tests.PrivilegeCatalog.test_endpoint_scope_catalog_sync import load_catalog_scope_ids
-
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -666,8 +665,8 @@ def test_answer_mode_generation_controls_pass_bearer_credentials(monkeypatch):
     asyncio.run(rpg_endpoint._enforce_answer_mode_generation_controls(request, principal))
 
     credentials = captured["credentials"]
-    assert getattr(credentials, "scheme") == "Bearer"  # nosec B101
-    assert getattr(credentials, "credentials") == "scoped-token"  # nosec B101
+    assert credentials.scheme == "Bearer"  # nosec B101
+    assert credentials.credentials == "scoped-token"  # nosec B101
     assert captured["principal"] is principal  # nosec B101
     assert captured["budget_checked"] is True  # nosec B101
     assert captured["rate_limit_resource"] == rpg_endpoint.CHAT_CREATE_RATE_LIMIT  # nosec B101

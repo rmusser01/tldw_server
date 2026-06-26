@@ -20,9 +20,9 @@ def __getattr__(name: str) -> object:
         return RPGProposalRecord
     if name in {"RPGService", "RPGServiceProposal", "RecordEventsResult", "SnapshotResult"}:
         from tldw_Server_API.app.core.RPG.service import (
+            RecordEventsResult,
             RPGService,
             RPGServiceProposal,
-            RecordEventsResult,
             SnapshotResult,
         )
 

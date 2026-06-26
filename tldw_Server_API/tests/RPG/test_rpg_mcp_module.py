@@ -1,20 +1,34 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Any
-import uuid
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import rpg_module
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.rpg_module import RPGModule
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+from tldw_Server_API.app.core.RPG.context import SessionContext
+from tldw_Server_API.app.core.RPG.rules.answering import RulesAnswerOptions
+from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupResult
 from tldw_Server_API.app.core.RPG.service import RPGService
+
+_MCP_RPG_TEST_PERMISSIONS = [
+    "rpg.campaigns.read",
+    "rpg.campaigns.manage",
+    "rpg.sessions.read",
+    "rpg.sessions.manage",
+    "rpg.proposals.review",
+    "rpg.rules.read",
+    "media.read",
+    "chat.completions",
+]
 
 
 class _RPGRegistryStub:
@@ -37,6 +51,10 @@ class _RPGRegistryStub:
             "rpg.sessions.get",
             "rpg.rules.lookup",
             "rpg.context.build",
+            "rpg.campaigns.rules_packs.get",
+            "rpg.campaigns.rules_packs.replace",
+            "rpg.sessions.rules_packs.get",
+            "rpg.sessions.rules_packs.replace",
             "rpg.events.record",
             "rpg.proposals.apply",
             "rpg.proposals.reject",
@@ -85,6 +103,24 @@ def _seed_session(chacha_path: str) -> int:
         idempotency_key="mcp-session",
     )
     return session.id
+
+
+def _seed_campaign_and_session(chacha_path: str) -> tuple[int, int]:
+    repo = RPGRepository.initialized(CharactersRAGDB(chacha_path, "rpg-mcp-campaign-seed"))
+    service = RPGService(repo=repo, owner_user_id=42)
+    campaign = service.create_campaign(
+        "MCP Campaign",
+        None,
+        "fate",
+        idempotency_key="mcp-campaign-pair",
+    )
+    session = service.create_session(
+        campaign.id,
+        "MCP Session",
+        adapter_key="fate",
+        idempotency_key="mcp-session-pair",
+    )
+    return campaign.id, session.id
 
 
 def _seed_session_with_rules_pack(chacha_path: str, media_id: int) -> int:
@@ -149,8 +185,14 @@ def _context(
     user_id: str | None = "42",
     allowed_tools: list[str] | None = None,
     media_path: str | None = None,
+    permissions: list[str] | None = None,
+    answer_generation_controls: bool = True,
 ) -> RequestContext:
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = {
+        "permissions": list(_MCP_RPG_TEST_PERMISSIONS if permissions is None else permissions),
+    }
+    if answer_generation_controls:
+        metadata["mcp_rpg_answer_generation_controls"] = "enforced"
     if allowed_tools is not None:
         metadata["allowed_tools"] = allowed_tools
     return RequestContext(
@@ -164,10 +206,16 @@ def _context(
 
 class _FakeRagRetriever:
     calls: list[dict[str, Any]] = []
+    instances: list[_FakeRagRetriever] = []
 
     def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
+        self.close_called = False
+        self.__class__.instances.append(self)
+
+    def close(self):
+        self.close_called = True
 
     async def retrieve_from_plan(self, plan, **kwargs):
         self.__class__.calls.append({"plan": plan, **kwargs})
@@ -207,6 +255,38 @@ async def test_rpg_module_lists_read_and_write_tools() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rpg_mcp_tool_list_includes_rules_pack_ref_tools() -> None:
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    tools = await module.get_tools()
+    tool_names = {tool["name"] for tool in tools}
+
+    assert {  # nosec B101
+        "rpg.campaigns.rules_packs.get",
+        "rpg.campaigns.rules_packs.replace",
+        "rpg.sessions.rules_packs.get",
+        "rpg.sessions.rules_packs.replace",
+    } <= tool_names
+
+
+@pytest.mark.asyncio
+async def test_rpg_mcp_rules_pack_ref_tools_have_read_write_metadata() -> None:
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    tools = await module.get_tools()
+    tool_by_name = {tool["name"]: tool for tool in tools}
+
+    campaign_get = tool_by_name["rpg.campaigns.rules_packs.get"]
+    session_replace = tool_by_name["rpg.sessions.rules_packs.replace"]
+
+    assert campaign_get["metadata"]["readOnlyHint"] is True  # nosec B101
+    assert campaign_get["metadata"]["required_permissions"] == ["rpg.campaigns.read", "media.read"]  # nosec B101
+    assert session_replace["metadata"]["readOnlyHint"] is False  # nosec B101
+    assert session_replace["metadata"]["required_permissions"] == ["rpg.sessions.manage", "media.read"]  # nosec B101
+    assert module.is_write_tool_def(session_replace) is True  # nosec B101
+
+
+@pytest.mark.asyncio
 async def test_rpg_module_lists_adapters_without_database_context() -> None:
     module = RPGModule(ModuleConfig(name="rpg"))
 
@@ -226,7 +306,12 @@ async def test_rpg_database_tools_fail_closed_without_user_context(tmp_path: Pat
     with pytest.raises(ValueError, match="authenticated user context"):
         await module.execute_tool("rpg.sessions.get", {"session_id": 1}, context=context)
 
-    missing_db_context = RequestContext(request_id="missing-db", user_id="42", client_id="unit")
+    missing_db_context = RequestContext(
+        request_id="missing-db",
+        user_id="42",
+        client_id="unit",
+        metadata={"permissions": list(_MCP_RPG_TEST_PERMISSIONS)},
+    )
     with pytest.raises(ValueError, match="ChaChaNotes DB path"):
         await module.execute_tool("rpg.sessions.get", {"session_id": 1}, context=missing_db_context)
 
@@ -305,6 +390,23 @@ async def test_rpg_module_rejects_invalid_arguments_before_db_lookup(tmp_path: P
 
 
 @pytest.mark.asyncio
+async def test_rpg_mcp_rules_pack_ref_replace_validates_expected_version() -> None:
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    with pytest.raises(ValueError, match="expected_version must be a positive integer"):
+        await module.execute_tool(
+            "rpg.sessions.rules_packs.replace",
+            {
+                "session_id": 1,
+                "expected_version": 0,
+                "refs": [],
+                "idempotencyKey": "mcp-rules-pack-version",
+            },
+            context=None,
+        )
+
+
+@pytest.mark.asyncio
 async def test_rpg_module_gets_session_snapshot_from_chacha_context(tmp_path: Path) -> None:
     chacha_path = _chacha_path(tmp_path)
     session_id = _seed_session(chacha_path)
@@ -349,6 +451,7 @@ async def test_rpg_module_rules_lookup_uses_attached_media_refs(tmp_path: Path, 
     media_id = _seed_media(media_path, title="MCP Rules", content="MCP rules source")
     session_id = _seed_session_with_rules_pack(_chacha_path(tmp_path), media_id)
     _FakeRagRetriever.calls = []
+    _FakeRagRetriever.instances = []
     monkeypatch.setattr(rpg_module, "MultiDatabaseRetriever", _FakeRagRetriever, raising=False)
     module = RPGModule(ModuleConfig(name="rpg"))
 
@@ -361,6 +464,309 @@ async def test_rpg_module_rules_lookup_uses_attached_media_refs(tmp_path: Path, 
     assert result["results"][0]["origin"] == "user_provided"  # nosec B101
     assert result["results"][0]["text"] == "MCP retrieved rules evidence"  # nosec B101
     assert _FakeRagRetriever.calls[0]["allowed_media_ids"] == [media_id]  # nosec B101
+    assert _FakeRagRetriever.instances[0].close_called is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rpg_mcp_tool_requires_declared_domain_permissions(tmp_path: Path) -> None:
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    with pytest.raises(PermissionError, match="media.read"):
+        await module.execute_tool(
+            "rpg.rules.lookup",
+            {"session_id": 1, "query": "stress"},
+            context=_context(tmp_path, permissions=["rpg.rules.read"]),
+        )
+
+    with pytest.raises(PermissionError, match="rpg.sessions.manage"):
+        await module.execute_tool(
+            "rpg.sessions.rules_packs.replace",
+            {
+                "session_id": 1,
+                "expected_version": 1,
+                "refs": [],
+                "idempotencyKey": "mcp-rules-pack-missing-manage",
+            },
+            context=_context(tmp_path, permissions=["media.read"]),
+        )
+
+
+@pytest.mark.asyncio
+async def test_protocol_denies_rpg_tool_when_domain_permission_missing(tmp_path: Path) -> None:
+    _seed_session(_chacha_path(tmp_path))
+    proto = _protocol({"rpg.rules.lookup"})
+
+    response = await proto.process_request(
+        MCPRequest(
+            method="tools/call",
+            params={"name": "rpg.rules.lookup", "arguments": {"session_id": 1, "query": "stress"}},
+            id="deny-domain-rpg",
+        ),
+        _context(tmp_path, permissions=["rpg.rules.read"]),
+    )
+
+    assert response.error is not None  # nosec B101
+    assert response.error.code == -32001  # nosec B101
+    assert response.error.message == "tool_execution_error"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rpg_mcp_answer_mode_requires_chat_permissions_and_generation_controls(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    async def fake_lookup_rules(self, *, session_id, query, mode="lookup", answer_options=None):
+        nonlocal called
+        called = True
+        return RuleLookupResult(
+            query=query,
+            mode=mode,
+            results=[],
+            answer=None,
+            answer_status="no_evidence",
+            answer_citation_ids=[],
+            diagnostics={},
+        )
+
+    monkeypatch.setattr(RPGService, "lookup_rules", fake_lookup_rules)
+    module = RPGModule(ModuleConfig(name="rpg"))
+    args = {"session_id": 1, "query": "stress", "mode": "answer"}
+
+    with pytest.raises(PermissionError, match="chat.completions"):
+        await module.execute_tool(
+            "rpg.rules.lookup",
+            args,
+            context=_context(tmp_path, permissions=["rpg.rules.read", "media.read"]),
+        )
+
+    with pytest.raises(PermissionError, match="answer generation controls"):
+        await module.execute_tool(
+            "rpg.rules.lookup",
+            args,
+            context=_context(
+                tmp_path,
+                permissions=["rpg.rules.read", "media.read", "chat.completions"],
+                answer_generation_controls=False,
+            ),
+        )
+
+    assert called is False  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rpg_mcp_session_rules_pack_replace_succeeds_and_replays(tmp_path: Path) -> None:
+    media_path = str(tmp_path / "rpg-mcp-replace-media.sqlite")
+    media_id = _seed_media(media_path, title="Replacement Rules", content="replacement rules")
+    _, session_id = _seed_campaign_and_session(_chacha_path(tmp_path))
+    module = RPGModule(ModuleConfig(name="rpg"))
+    args = {
+        "session_id": session_id,
+        "expected_version": 1,
+        "refs": [{"source_type": "media_item", "source_id": media_id}],
+        "idempotency_key": "mcp-rules-pack-replace-success",
+    }
+    context = _context(tmp_path, media_path=media_path)
+
+    result = await module.execute_tool("rpg.sessions.rules_packs.replace", args, context=context)
+    replay = await module.execute_tool("rpg.sessions.rules_packs.replace", args, context=context)
+
+    assert result["version"] == 2  # nosec B101
+    assert result["refs"][0]["source_id"] == media_id  # nosec B101
+    assert replay["replayed"] is True  # nosec B101
+
+    with pytest.raises(Exception, match="idempotency_key_conflict"):
+        await module.execute_tool(
+            "rpg.sessions.rules_packs.replace",
+            {**args, "refs": []},
+            context=context,
+        )
+
+
+@pytest.mark.asyncio
+async def test_rpg_mcp_rules_pack_replace_does_not_construct_retriever(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    media_path = str(tmp_path / "rpg-mcp-replace-media-no-retriever.sqlite")
+    media_id = _seed_media(media_path, title="Replacement Rules", content="replacement rules")
+    _, session_id = _seed_campaign_and_session(_chacha_path(tmp_path))
+
+    def fail_retriever(*args, **kwargs):
+        raise AssertionError("rules-pack replacement should not construct a retriever")
+
+    monkeypatch.setattr(rpg_module, "MultiDatabaseRetriever", fail_retriever)
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    result = await module.execute_tool(
+        "rpg.sessions.rules_packs.replace",
+        {
+            "session_id": session_id,
+            "expected_version": 1,
+            "refs": [{"source_type": "media_item", "source_id": media_id}],
+            "idempotency_key": "mcp-rules-pack-replace-no-retriever",
+        },
+        context=_context(tmp_path, media_path=media_path),
+    )
+
+    assert result["refs"][0]["source_id"] == media_id  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rpg_mcp_service_construction_closes_opened_resources_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[str] = []
+
+    class FakeChaChaDB:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+        def close_connection(self):
+            closed.append("chacha")
+
+    class FakeMediaDB:
+        backend = object()
+
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+        def close_connection(self):
+            closed.append("media")
+
+    def fail_retriever(*args, **kwargs):
+        raise RuntimeError("retriever unavailable")
+
+    monkeypatch.setattr(rpg_module, "CharactersRAGDB", FakeChaChaDB)
+    monkeypatch.setattr(rpg_module, "MediaDatabase", FakeMediaDB)
+    monkeypatch.setattr(rpg_module.CollectionsDatabase, "from_backend", lambda *args, **kwargs: object())
+    monkeypatch.setattr(rpg_module, "MultiDatabaseRetriever", fail_retriever)
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    with pytest.raises(RuntimeError, match="retriever unavailable"):
+        await module.execute_tool(
+            "rpg.rules.lookup",
+            {"session_id": 1, "query": "stress"},
+            context=_context(tmp_path, media_path=str(tmp_path / "media.sqlite")),
+        )
+
+    assert closed == ["media", "chacha"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rpg_mcp_rules_lookup_accepts_answer_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_lookup_rules(self, *, session_id, query, mode="lookup", answer_options=None):
+        captured.update(
+            {
+                "session_id": session_id,
+                "query": query,
+                "mode": mode,
+                "answer_options": answer_options,
+            }
+        )
+        return RuleLookupResult(
+            query=query,
+            mode=mode,
+            results=[],
+            answer=None,
+            answer_status="no_evidence",
+            answer_citation_ids=[],
+            diagnostics={
+                "bundled_policy": "no_match",
+                "result_mode": "citation_index",
+                "linked_rules_pack_count": 0,
+                "enabled_rules_pack_count": 0,
+                "ready_media_item_count": 0,
+                "retrieval_result_count": 0,
+                "bundled_citation_count": 0,
+                "skipped_refs": [],
+                "broad_fallback_used": False,
+            },
+        )
+
+    monkeypatch.setattr(RPGService, "lookup_rules", fake_lookup_rules)
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    result = await module.execute_tool(
+        "rpg.rules.lookup",
+        {
+            "session_id": 1,
+            "query": "stress",
+            "mode": "answer",
+            "provider": "openai",
+            "model": "gpt-test",
+            "temperature": 0.4,
+            "max_tokens": 321,
+        },
+        context=_context(tmp_path),
+    )
+
+    assert result["mode"] == "answer"  # nosec B101
+    assert captured["mode"] == "answer"  # nosec B101
+    options = captured["answer_options"]
+    assert isinstance(options, RulesAnswerOptions)  # nosec B101
+    assert options.provider == "openai"  # nosec B101
+    assert options.model == "gpt-test"  # nosec B101
+    assert options.temperature == 0.4  # nosec B101
+    assert options.max_tokens == 321  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rpg_mcp_context_build_awaits_async_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_build_context(self, *, session_id, query=None, max_chars=24000):
+        captured.update({"session_id": session_id, "query": query, "max_chars": max_chars})
+        return SessionContext(text="async context", diagnostics={"rules_lookup": {}})
+
+    monkeypatch.setattr(RPGService, "build_context", fake_build_context)
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    result = await module.execute_tool(
+        "rpg.context.build",
+        {"session_id": 7, "query": "stress", "max_chars": 1000},
+        context=_context(tmp_path),
+    )
+
+    assert result["text"] == "async context"  # nosec B101
+    assert captured == {"session_id": 7, "query": "stress", "max_chars": 1000}  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rpg_mcp_read_tools_require_media_read_for_attached_refs(tmp_path: Path) -> None:
+    session_id = _seed_session_with_rules_pack(_chacha_path(tmp_path), media_id=123)
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    with pytest.raises(ValueError, match="Media DB path not available"):
+        await module.execute_tool(
+            "rpg.rules.lookup",
+            {"session_id": session_id, "query": "stress"},
+            context=_context(tmp_path),
+        )
+
+
+@pytest.mark.asyncio
+async def test_rpg_mcp_write_tools_require_media_read_for_source_validation(tmp_path: Path) -> None:
+    _, session_id = _seed_campaign_and_session(_chacha_path(tmp_path))
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    with pytest.raises(ValueError, match="Media DB path not available"):
+        await module.execute_tool(
+            "rpg.sessions.rules_packs.replace",
+            {
+                "session_id": session_id,
+                "expected_version": 1,
+                "refs": [{"source_type": "media_item", "source_id": 123}],
+                "idempotencyKey": "mcp-rules-pack-no-media",
+            },
+            context=_context(tmp_path),
+        )
 
 
 @pytest.mark.asyncio

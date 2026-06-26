@@ -65,10 +65,10 @@ class RPGRecordEventsResponse(BaseModel):
 class RPGRulesLookupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    query: str = Field(min_length=1, max_length=1000)
+    query: str = Field(min_length=1, max_length=500)
     mode: Literal["lookup", "answer"] = "lookup"
-    provider: str | None = None
-    model: str | None = None
+    provider: str | None = Field(default=None, max_length=100)
+    model: str | None = Field(default=None, max_length=200)
     temperature: float = Field(default=0.2, ge=0, le=2)
     max_tokens: int = Field(default=600, ge=64, le=2000)
 

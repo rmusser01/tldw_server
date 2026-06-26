@@ -64,7 +64,7 @@ def test_validate_event_envelope_rejects_unknown_event_type():
 
 
 def test_supported_event_registry_exposes_v1_core_event_types():
-    assert SUPPORTED_EVENT_TYPES == frozenset(  # nosec B101
+    assert frozenset(  # nosec B101
         {
             "actor.upserted",
             "clock.updated",
@@ -79,7 +79,7 @@ def test_supported_event_registry_exposes_v1_core_event_types():
             "ruling.added",
             "scene.updated",
         }
-    )
+    ) == SUPPORTED_EVENT_TYPES
 
 
 def test_reducer_rebuilds_same_snapshot_from_all_v1_core_events():

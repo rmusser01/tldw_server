@@ -7,7 +7,6 @@ from collections.abc import Iterable
 from tldw_Server_API.app.core.RPG.errors import RPGValidationError
 from tldw_Server_API.app.core.RPG.models import DiceRollResult
 
-
 _DICE_EXPR_RE = re.compile(r"^(?P<count>\d{1,3})d(?P<sides>\d{1,4})(?P<modifier>[+-]\d{1,4})?$")
 
 MAX_DICE_COUNT = 100

@@ -1,3 +1,5 @@
+import pytest
+
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
 from tldw_Server_API.app.core.RPG.context import SessionContextBuilder
@@ -7,8 +9,6 @@ from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupCitation,
 from tldw_Server_API.app.core.RPG.rules.lookup import RulesLookupService
 from tldw_Server_API.app.core.RPG.rules.retrieval import RulesRetrievalResult
 from tldw_Server_API.app.core.RPG.service import RPGService
-
-import pytest
 
 
 def _service() -> RPGService:

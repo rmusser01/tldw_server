@@ -76,7 +76,7 @@ class RulesLookupService:
                 )
             except RPGError:
                 raise
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("RPG rules retrieval failed: {}", type(exc).__name__)
                 diagnostics["retrieval_error"] = "retrieval_failed"
                 if mode == "answer":
@@ -98,7 +98,7 @@ class RulesLookupService:
                         evidence=retrieval_items,
                         options=answer_options or RulesAnswerOptions(),
                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     logger.warning("RPG rules answer generation failed: {}", type(exc).__name__)
                     answer_status = "generation_error"
                 else:
