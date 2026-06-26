@@ -1,4 +1,5 @@
 import json
+import threading
 from contextlib import contextmanager
 
 import pytest
@@ -40,6 +41,35 @@ async def test_rebuild_handler_uses_owner_db_path_and_returns_result(monkeypatch
 
     assert result["outcome"] == "ok"
     assert calls == [{"db_path": "/tmp/user-7/Media_DB_v2.db", "media_id": 42}]
+
+
+@pytest.mark.asyncio
+async def test_rebuild_handler_runs_sync_work_off_event_loop_thread(monkeypatch) -> None:
+    event_loop_thread = threading.get_ident()
+    handler_threads: list[int] = []
+
+    monkeypatch.setattr(
+        claims_job_handlers,
+        "get_user_media_db_path",
+        lambda owner: f"/tmp/user-{owner}/Media_DB_v2.db",
+    )
+    monkeypatch.setattr(
+        claims_job_handlers,
+        "rebuild_claims_for_media",
+        lambda **_kwargs: handler_threads.append(threading.get_ident()) or {"outcome": "ok", "media_id": 42},
+    )
+
+    result = await claims_job_handlers.process_claims_job(
+        {
+            "id": 1,
+            "job_type": CLAIMS_REBUILD_MEDIA_JOB_TYPE,
+            "owner_user_id": "7",
+            "payload": {"version": 1, "owner_user_id": "7", "media_id": 42},
+        }
+    )
+
+    assert result["outcome"] == "ok"
+    assert handler_threads and handler_threads[0] != event_loop_thread
 
 
 @pytest.mark.asyncio
@@ -124,6 +154,35 @@ async def test_review_notification_delivery_failure_is_retryable(monkeypatch) ->
 
 
 @pytest.mark.asyncio
+async def test_review_notification_handler_runs_sync_work_off_event_loop_thread(monkeypatch) -> None:
+    event_loop_thread = threading.get_ident()
+    handler_threads: list[int] = []
+
+    monkeypatch.setattr(
+        claims_job_handlers,
+        "get_user_media_db_path",
+        lambda owner: f"/tmp/user-{owner}/Media_DB_v2.db",
+    )
+    monkeypatch.setattr(
+        claims_job_handlers,
+        "deliver_claim_review_notifications_now",
+        lambda **_kwargs: handler_threads.append(threading.get_ident()) or {"outcome": "ok", "notification_ids": [5]},
+    )
+
+    result = await claims_job_handlers.process_claims_job(
+        {
+            "id": 1,
+            "job_type": CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE,
+            "owner_user_id": "7",
+            "payload": {"version": 1, "owner_user_id": "7", "notification_ids": [5]},
+        }
+    )
+
+    assert result["outcome"] == "ok"
+    assert handler_threads and handler_threads[0] != event_loop_thread
+
+
+@pytest.mark.asyncio
 async def test_alert_delivery_uses_existing_db_and_preserves_slack_payload(monkeypatch) -> None:
     open_kwargs: dict[str, object] = {}
     delivered: list[dict[str, object]] = []
@@ -179,6 +238,30 @@ async def test_alert_delivery_uses_existing_db_and_preserves_slack_payload(monke
     assert (
         delivered[0]["payload"]["text"] == "Claims alert: unsupported ratio 42.00% (threshold 25.00%, baseline 10.00%)"
     )
+
+
+@pytest.mark.asyncio
+async def test_alert_delivery_handler_runs_sync_work_off_event_loop_thread(monkeypatch) -> None:
+    event_loop_thread = threading.get_ident()
+    handler_threads: list[int] = []
+
+    monkeypatch.setattr(
+        claims_job_handlers,
+        "_deliver_alert",
+        lambda _payload: handler_threads.append(threading.get_ident()) or {"outcome": "ok", "alert_id": 3},
+    )
+
+    result = await claims_job_handlers.process_claims_job(
+        {
+            "id": 1,
+            "job_type": CLAIMS_DELIVER_ALERT_JOB_TYPE,
+            "owner_user_id": "7",
+            "payload": {"version": 1, "owner_user_id": "7", "event_id": 9, "alert_id": 3, "channel": "slack"},
+        }
+    )
+
+    assert result["outcome"] == "ok"
+    assert handler_threads and handler_threads[0] != event_loop_thread
 
 
 @pytest.mark.asyncio

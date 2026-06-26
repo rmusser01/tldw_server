@@ -418,6 +418,12 @@ def deliver_claim_review_notifications_now(
         suppress_init_exceptions=_CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
         suppress_close_exceptions=_CLAIMS_NOTIFICATION_NONCRITICAL_EXCEPTIONS,
     ) as db:
+        if db is None:
+            return {
+                "outcome": "failed",
+                "reason": "database_initialization_failed",
+                "notification_ids": normalized_ids,
+            }
         config_row = db.get_claims_monitoring_settings(str(owner_user_id)) or {}
         if config_row and not bool(config_row.get("enabled", True)):
             return {"outcome": "skipped", "reason": "settings_disabled", "notification_ids": normalized_ids}

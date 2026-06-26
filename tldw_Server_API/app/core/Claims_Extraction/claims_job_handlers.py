@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -207,14 +208,16 @@ async def process_claims_job(job: dict[str, Any]) -> dict[str, Any]:
     if job_type == CLAIMS_REBUILD_MEDIA_JOB_TYPE:
         payload = validate_rebuild_media_payload(_payload(job))
         owner_user_id = _assert_owner(job, payload["owner_user_id"])
-        return rebuild_claims_for_media(
+        return await asyncio.to_thread(
+            rebuild_claims_for_media,
             db_path=_db_path(owner_user_id),
             media_id=payload["media_id"],
         )
     if job_type == CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE:
         payload = validate_review_notification_payload(_payload(job))
         owner_user_id = _assert_owner(job, payload["owner_user_id"])
-        result = deliver_claim_review_notifications_now(
+        result = await asyncio.to_thread(
+            deliver_claim_review_notifications_now,
             db_path=_db_path(owner_user_id),
             owner_user_id=owner_user_id,
             notification_ids=payload["notification_ids"],
@@ -229,7 +232,7 @@ async def process_claims_job(job: dict[str, Any]) -> dict[str, Any]:
     if job_type == CLAIMS_DELIVER_ALERT_JOB_TYPE:
         payload = validate_alert_delivery_payload(_payload(job))
         _assert_owner(job, payload["owner_user_id"])
-        return _deliver_alert(payload)
+        return await asyncio.to_thread(_deliver_alert, payload)
     raise ClaimsJobError(
         "unsupported claims job type",
         retryable=False,

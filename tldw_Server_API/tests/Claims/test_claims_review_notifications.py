@@ -156,6 +156,22 @@ def test_deliver_claim_review_notifications_now_returns_skipped_when_disabled(mo
     assert result == {"outcome": "skipped", "reason": "settings_disabled", "notification_ids": [7]}
 
 
+def test_deliver_claim_review_notifications_now_returns_failed_when_db_unavailable(monkeypatch, tmp_path):
+    @contextmanager
+    def _fake_managed_media_database(*_args, **_kwargs):
+        yield None
+
+    monkeypatch.setattr(claims_notifications, "managed_media_database", _fake_managed_media_database)
+
+    result = claims_notifications.deliver_claim_review_notifications_now(
+        db_path=str(tmp_path / "claims-review.db"),
+        owner_user_id="1",
+        notification_ids=[7],
+    )
+
+    assert result == {"outcome": "failed", "reason": "database_initialization_failed", "notification_ids": [7]}
+
+
 def test_deliver_claim_review_notifications_now_returns_success_contract(monkeypatch, tmp_path):
     class _FakeDb:
         def __init__(self) -> None:
