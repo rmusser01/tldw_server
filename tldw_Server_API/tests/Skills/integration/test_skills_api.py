@@ -20,9 +20,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("MINIMAL_TEST_APP", "1")
 os.environ.setdefault("TEST_MODE", "1")
 _routes_disable = {
-    part.strip()
-    for part in str(os.environ.get("ROUTES_DISABLE", "")).split(",")
-    if part and part.strip()
+    part.strip() for part in str(os.environ.get("ROUTES_DISABLE", "")).split(",") if part and part.strip()
 }
 _routes_disable.update({"media", "audio", "audio-websocket"})
 os.environ["ROUTES_DISABLE"] = ",".join(sorted(_routes_disable))
@@ -32,6 +30,7 @@ from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints.skills import MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.Context_Integrity.resolver import clear_global_context_integrity_resolver
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Skills.exceptions import SkillsError
@@ -68,9 +67,12 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
 
     try:
+        clear_global_context_integrity_resolver()
         with TestClient(fastapi_app) as c:
+            clear_global_context_integrity_resolver()
             yield c
     finally:
+        clear_global_context_integrity_resolver()
         fastapi_app.dependency_overrides.clear()
         chacha_db.close_connection()
 
@@ -122,9 +124,12 @@ def principal_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
 
     try:
+        clear_global_context_integrity_resolver()
         with TestClient(fastapi_app) as c:
+            clear_global_context_integrity_resolver()
             yield c
     finally:
+        clear_global_context_integrity_resolver()
         fastapi_app.dependency_overrides.clear()
         chacha_db.close_connection()
 
@@ -148,9 +153,12 @@ def auth_path_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
 
     try:
+        clear_global_context_integrity_resolver()
         with TestClient(fastapi_app) as c:
+            clear_global_context_integrity_resolver()
             yield c
     finally:
+        clear_global_context_integrity_resolver()
         fastapi_app.dependency_overrides.clear()
         chacha_db.close_connection()
 
@@ -561,7 +569,9 @@ class TestUpdateSkill:
         assert data["supporting_files"]["keep.md"] == "to keep"
 
     def test_update_skill_sanitizes_skills_error(self, client, monkeypatch):
-        async def _boom(self, *, name, content=None, supporting_files=None, expected_version=None):  # noqa: ANN001, ANN202
+        async def _boom(
+            self, *, name, content=None, supporting_files=None, expected_version=None
+        ):  # noqa: ANN001, ANN202
             raise SkillsError("skills backend exploded at /private/update")
 
         monkeypatch.setattr(SkillsService, "update_skill", _boom)
@@ -1006,6 +1016,42 @@ class TestImportExport:
         assert "skills backend exploded" not in joined
         assert "/private/" not in joined
 
+    def test_get_quarantined_skill_returns_423(self, client, monkeypatch):
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityBlocked,
+        )
+
+        async def _blocked(self, name, *args, **kwargs):  # noqa: ANN001, ANN202
+            raise ContextIntegrityBlocked(
+                asset_id=f"skill:user:1/{name}",
+                state="changed_approved_executable",
+            )
+
+        monkeypatch.setattr(SkillsService, "get_skill", _blocked)
+
+        r = client.get(f"{SKILLS_PREFIX}/blocked-skill")
+
+        assert r.status_code == 423
+        assert r.json()["detail"] == "Asset is quarantined pending admin review."
+
+    def test_export_quarantined_skill_returns_423(self, client, monkeypatch):
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityBlocked,
+        )
+
+        async def _blocked(self, name, *args, **kwargs):  # noqa: ANN001, ANN202
+            raise ContextIntegrityBlocked(
+                asset_id=f"skill:user:1/{name}",
+                state="changed_approved_executable",
+            )
+
+        monkeypatch.setattr(SkillsService, "export_skill", _blocked)
+
+        r = client.get(f"{SKILLS_PREFIX}/blocked-skill/export")
+
+        assert r.status_code == 423
+        assert r.json()["detail"] == "Asset is quarantined pending admin review."
+
 
 class TestExecuteSkill:
     def test_execute_skill_inline(self, client):
@@ -1090,6 +1136,27 @@ class TestExecuteSkill:
         assert "Error executing skill" in joined
         assert "skills backend exploded" not in joined
         assert "/private/" not in joined
+
+    def test_execute_quarantined_skill_returns_423(self, client, monkeypatch):
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityBlocked,
+        )
+
+        async def _blocked(self, name, *args, **kwargs):  # noqa: ANN001, ANN202
+            raise ContextIntegrityBlocked(
+                asset_id=f"skill:user:1/{name}",
+                state="changed_approved_executable",
+            )
+
+        monkeypatch.setattr(SkillsService, "get_skill", _blocked)
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/blocked-skill/execute",
+            json={"args": "my test args"},
+        )
+
+        assert r.status_code == 423
+        assert r.json()["detail"] == "Asset is quarantined pending admin review."
 
     def test_execute_skill_request_context_uses_current_principal_alias(
         self,
@@ -1273,11 +1340,7 @@ class TestSkillsEndToEndWorkflow:
             json={
                 "name": skill_name,
                 "content": (
-                    "---\n"
-                    "description: E2E workflow skill\n"
-                    "context: inline\n"
-                    "---\n\n"
-                    "Analyze: $ARGUMENTS"
+                    "---\n" "description: E2E workflow skill\n" "context: inline\n" "---\n\n" "Analyze: $ARGUMENTS"
                 ),
                 "supporting_files": {
                     "guide.md": "workflow guide",

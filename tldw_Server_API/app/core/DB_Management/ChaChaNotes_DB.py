@@ -16350,7 +16350,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         model: str | None = None,
         sort: str = "name",
         order: str = "asc",
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """List skill registry entries with optional filters."""
@@ -16369,9 +16369,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = (
             "SELECT * FROM skill_registry "  # nosec B608
             f"{where_sql} "
-            f"{order_sql} LIMIT ? OFFSET ?"
+            f"{order_sql}"
         )
-        params.extend([limit, offset])
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
         try:
             cursor = self.execute_query(query, tuple(params))
             return [item for row in cursor.fetchall() if (item := self._skill_row_to_dict(row))]

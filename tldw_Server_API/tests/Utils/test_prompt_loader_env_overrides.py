@@ -37,3 +37,39 @@ def test_load_env_prompt_file_logs_warning_on_oserror(monkeypatch):
     assert warning_call[1] == env_name
     assert warning_call[2] == "demo"
     assert warning_call[3] == "existing key"
+
+
+def test_env_prompt_override_uses_integrity_source_label(tmp_path, monkeypatch):
+    env_name = "TLDW_PROMPT_FILE_DEMO__EXISTING_KEY"
+    override_file = tmp_path / "override.txt"
+    override_file.write_text("approved-env-file", encoding="utf-8")
+    monkeypatch.setenv(env_name, str(override_file))
+
+    from tldw_Server_API.app.core.Context_Integrity.inventory import (
+        inventory_env_prompt_overrides,
+    )
+    from tldw_Server_API.app.core.Context_Integrity.models import ContextIntegrityBootState
+    from tldw_Server_API.app.core.Context_Integrity.resolver import (
+        ContextIntegrityResolver,
+        clear_global_context_integrity_resolver,
+        set_global_context_integrity_resolver,
+    )
+    from tldw_Server_API.app.core.Utils import prompt_loader as pl
+
+    asset = inventory_env_prompt_overrides(environ={env_name: str(override_file)})[0]
+    resolver = ContextIntegrityResolver(
+        ContextIntegrityBootState(
+            mode="enforce",
+            degraded=False,
+            manifest_sequence=1,
+            manifest_digest="sha256:manifest",
+            approved_digests_by_asset_id={asset.asset_id: asset.digest},
+        )
+    )
+    set_global_context_integrity_resolver(resolver)
+    try:
+        assert pl.load_prompt("demo", "Existing Key") == "approved-env-file"
+        override_file.write_text("modified-env-file", encoding="utf-8")
+        assert pl.load_prompt("demo", "Existing Key") is None
+    finally:
+        clear_global_context_integrity_resolver()

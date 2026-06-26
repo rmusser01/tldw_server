@@ -303,12 +303,24 @@ async def test_batch_request_sanitizes_safe_config_parse_log(monkeypatch: pytest
 @pytest.mark.asyncio
 async def test_refresh_token_sanitizes_rotation_failure_log(monkeypatch: pytest.MonkeyPatch) -> None:
     logger = _LoggerStub()
+    auth_request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/mcp/auth/refresh",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+        }
+    )
+    monkeypatch.setenv("MCP_ENABLE_DEMO_AUTH", "1")
+    monkeypatch.setenv("MCP_DEMO_AUTH_SECRET", "supersecretvalue12345")
     monkeypatch.setattr(mcp, "logger", logger)
     monkeypatch.setattr(mcp, "get_jwt_manager", lambda: _FailingJwtManager())
 
     with pytest.raises(HTTPException) as excinfo:
         await mcp.refresh_token(
             auth_request=mcp.AuthRefreshRequest(refresh_token="refresh-token", token_id="token-id"),
+            request=auth_request,
             _guard=None,
         )
 

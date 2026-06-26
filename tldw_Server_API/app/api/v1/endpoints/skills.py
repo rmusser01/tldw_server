@@ -51,6 +51,7 @@ from tldw_Server_API.app.api.v1.schemas.skills_schemas import (
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
 from tldw_Server_API.app.core.Skills.exceptions import (
     SkillConflictError,
     SkillNotFoundError,
@@ -64,6 +65,7 @@ router = APIRouter()
 
 MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES = 6 * 1024 * 1024
 _ZIP_UPLOAD_SIGNATURES = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
+CONTEXT_INTEGRITY_LOCKED_DETAIL = "Asset is quarantined pending admin review."
 
 
 async def _read_skill_import_preview_upload(file: UploadFile) -> bytes:
@@ -141,6 +143,13 @@ def _metadata_to_summary(metadata) -> SkillSummary:
         disable_model_invocation=metadata.disable_model_invocation,
         context=metadata.context,
     )
+
+
+def _raise_context_integrity_locked(exc: ContextIntegrityBlocked) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_423_LOCKED,
+        detail=CONTEXT_INTEGRITY_LOCKED_DETAIL,
+    ) from exc
 
 
 @router.get("/", response_model=SkillsListResponse)
@@ -240,9 +249,7 @@ async def get_skills_context(
     try:
         payload = await service.get_context_payload_async()
         return SkillContextPayload(
-            available_skills=[
-                SkillSummary(**s) for s in payload["available_skills"]
-            ],
+            available_skills=[SkillSummary(**s) for s in payload["available_skills"]],
             context_text=payload["context_text"],
         )
     except SkillsError as e:
@@ -266,6 +273,8 @@ async def get_skill(
     try:
         skill_data = await service.get_skill(skill_name)
         return _skill_data_to_response(skill_data)
+    except ContextIntegrityBlocked as e:
+        _raise_context_integrity_locked(e)
     except SkillNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -585,6 +594,8 @@ async def export_skill(
                 "Content-Disposition": f'attachment; filename="{skill_name}.zip"',
             },
         )
+    except ContextIntegrityBlocked as e:
+        _raise_context_integrity_locked(e)
     except SkillNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -620,11 +631,13 @@ async def execute_skill(
             # Populate full RequestContext for fork mode support
             try:
                 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+
                 default_provider = DEFAULT_LLM_PROVIDER
             except Exception:
                 default_provider = "openai"
             try:
                 from tldw_Server_API.app.core.config import load_and_log_configs
+
                 app_config = load_and_log_configs()
             except Exception:
                 app_config = None
@@ -650,6 +663,8 @@ async def execute_skill(
             fork_output=result.fork_output,
             dry_run=result.dry_run,
         )
+    except ContextIntegrityBlocked as e:
+        _raise_context_integrity_locked(e)
     except SkillNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

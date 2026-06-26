@@ -37,6 +37,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Chat.rate_limiter import TokenBucket
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
 from tldw_Server_API.app.core.Integrations import weather_providers
 from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
@@ -63,6 +64,7 @@ _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS = (
 try:
     from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission as _user_has_permission
 except ImportError:  # pragma: no cover - fallback if AuthNZ is trimmed in tests
+
     def _user_has_permission(user_id: int, permission: str) -> bool:  # type: ignore
         logger.warning("AuthNZ RBAC unavailable; denying chat command permission check for {}", permission)
         return False
@@ -87,9 +89,9 @@ def _cfg_bool(env_name: str, cfg_key: str, fallback: bool) -> bool:
     if isinstance(v, str) and v.strip():
         return is_truthy(v)
     cp = _cfg()
-    if cp and cp.has_section('Chat-Commands'):
+    if cp and cp.has_section("Chat-Commands"):
         try:
-            raw = cp.get('Chat-Commands', cfg_key, fallback=str(fallback))
+            raw = cp.get("Chat-Commands", cfg_key, fallback=str(fallback))
             return is_truthy(raw)
         except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
             return fallback
@@ -104,9 +106,9 @@ def _cfg_int(env_name: str, cfg_key: str, fallback: int) -> int:
         except (TypeError, ValueError):
             return fallback
     cp = _cfg()
-    if cp and cp.has_section('Chat-Commands'):
+    if cp and cp.has_section("Chat-Commands"):
         try:
-            raw = cp.get('Chat-Commands', cfg_key, fallback=str(fallback))
+            raw = cp.get("Chat-Commands", cfg_key, fallback=str(fallback))
             return max(1, int(str(raw)))
         except (TypeError, ValueError):
             return fallback
@@ -118,9 +120,9 @@ def _cfg_str(env_name: str, cfg_key: str, fallback: str) -> str:
     if isinstance(v, str) and v.strip():
         return v.strip()
     cp = _cfg()
-    if cp and cp.has_section('Chat-Commands'):
+    if cp and cp.has_section("Chat-Commands"):
         try:
-            raw = cp.get('Chat-Commands', cfg_key, fallback=fallback)
+            raw = cp.get("Chat-Commands", cfg_key, fallback=fallback)
             return str(raw).strip()
         except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
             return fallback
@@ -349,9 +351,7 @@ def list_commands() -> list[dict[str, Any]]:
             "requires_api_key": bool(spec.requires_api_key),
             "rate_limit": spec.rate_limit or default_rate_limit,
             "rbac_required": (
-                bool(spec.required_permission)
-                if spec.rbac_required is None
-                else bool(spec.rbac_required)
+                bool(spec.required_permission) if spec.rbac_required is None else bool(spec.rbac_required)
             ),
         }
         for spec in _registry.values()
@@ -560,8 +560,10 @@ async def async_dispatch_command(ctx: CommandContext, command: str, args: str | 
 # Built-in command handlers
 # -----------------------------
 
+
 def _time_handler(ctx: CommandContext, args: str | None) -> CommandResult:
     from datetime import datetime
+
     try:
         # Optional timezone support via zoneinfo
         tzlabel = (args or "").strip() if args else None
@@ -570,6 +572,7 @@ def _time_handler(ctx: CommandContext, args: str | None) -> CommandResult:
         if tzlabel:
             try:
                 from zoneinfo import ZoneInfo  # Python 3.9+
+
                 dt = datetime.now(ZoneInfo(tzlabel))
                 tzused = tzlabel
             except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
@@ -585,7 +588,9 @@ def _time_handler(ctx: CommandContext, args: str | None) -> CommandResult:
             metadata={"tz": tzused},
         )
     except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS as e:
-        return CommandResult(ok=False, command="time", content=f"Time lookup failed: {e}", metadata={"error": "time_error"})
+        return CommandResult(
+            ok=False, command="time", content=f"Time lookup failed: {e}", metadata={"error": "time_error"}
+        )
 
 
 async def _weather_handler(ctx: CommandContext, args: str | None) -> CommandResult:
@@ -607,7 +612,9 @@ async def _weather_handler(ctx: CommandContext, args: str | None) -> CommandResu
         return CommandResult(ok=False, command="weather", content=result.summary, metadata=metadata)
     except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Weather provider error: {e}", exc_info=True)
-        return CommandResult(ok=False, command="weather", content=f"Weather unavailable: {e}", metadata={"error": "exception"})
+        return CommandResult(
+            ok=False, command="weather", content=f"Weather unavailable: {e}", metadata={"error": "exception"}
+        )
 
 
 def _request_meta(ctx: CommandContext) -> dict[str, Any]:
@@ -670,7 +677,8 @@ def _filter_skills_for_query(skills: list[dict[str, Any]], query: str | None) ->
     if not q:
         return list(skills)
     return [
-        skill for skill in skills
+        skill
+        for skill in skills
         if (
             q in str(skill.get("name") or "").lower()
             or q in str(skill.get("description") or "").lower()
@@ -756,6 +764,8 @@ async def _execute_skill(ctx: CommandContext, skill_name: str, skill_args: str) 
         user_id, base_path, db = await _resolve_skills_runtime(ctx)
         service = SkillsService(user_id=user_id, base_path=base_path, db=db)
         skill_data = await service.get_skill(normalized_name)
+    except ContextIntegrityBlocked:
+        return {"success": False, "error": "context_integrity_blocked"}
     except SkillNotFoundError:
         return {"success": False, "error": "skill_not_found"}
     except SkillsError as e:
@@ -869,6 +879,8 @@ async def _skill_handler(ctx: CommandContext, args: str | None) -> CommandResult
             message = f"Skill '{skill_name}' not found."
         elif error == "skill_not_invocable":
             message = f"Skill '{skill_name}' is not invocable."
+        elif error == "context_integrity_blocked":
+            message = "Skill is quarantined pending admin review."
         else:
             detail = str(result.get("detail") or "Skill execution failed.")
             message = f"Skill execution failed: {detail}"
@@ -936,6 +948,7 @@ register_command(
     requires_api_key=True,
     rbac_required=True,
 )
+
 
 # --- Test seam helpers ---
 def get_weather_client(ctx: CommandContext | None = None):

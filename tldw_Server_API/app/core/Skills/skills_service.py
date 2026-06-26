@@ -17,8 +17,10 @@ Provides:
 
 import asyncio
 import contextlib
+import os
 import re
 import shutil
+import stat
 import time
 import zipfile
 from datetime import datetime, timezone
@@ -34,6 +36,14 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
+    canonical_filesystem_digest,
+)
+from tldw_Server_API.app.core.Context_Integrity.resolver import (
+    ContextIntegrityBlocked,
+    ContextIntegrityResolver,
+    get_global_context_integrity_resolver,
+)
 from tldw_Server_API.app.core.Skills.exceptions import (
     SkillConflictError,
     SkillNotFoundError,
@@ -45,14 +55,67 @@ from tldw_Server_API.app.core.Skills.exceptions import (
 from tldw_Server_API.app.core.Skills.skill_parser import SkillFrontmatter, SkillParser
 
 # Skill name validation pattern (same as in schemas)
-SKILL_NAME_PATTERN = re.compile(r'^[a-z][a-z0-9-]{0,63}$')
+SKILL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 # Supporting file name validation pattern (same as in schemas)
-SUPPORTING_FILE_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$')
+SUPPORTING_FILE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$")
 MAX_SUPPORTING_FILES_COUNT = 20
 MAX_SUPPORTING_FILE_BYTES = 500000
 MAX_SUPPORTING_FILES_TOTAL_BYTES = 5 * 1024 * 1024  # 5MB
 MAX_SKILL_MD_BYTES = 500000
 MAX_ZIP_IMPORT_ENTRIES = 100
+SKILL_INTEGRITY_TEXT_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh"}
+SkillFileFingerprint = tuple[tuple[str, int, int, int, int, int], ...]
+
+
+def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    return (
+        left.st_dev,
+        left.st_ino,
+        stat.S_IFMT(left.st_mode),
+    ) == (
+        right.st_dev,
+        right.st_ino,
+        stat.S_IFMT(right.st_mode),
+    )
+
+
+def _stat_mtime_ns(value: os.stat_result) -> int:
+    return int(getattr(value, "st_mtime_ns", int(value.st_mtime * 1_000_000_000)))
+
+
+def _fingerprint_entry(relative_path: str, value: os.stat_result) -> tuple[str, int, int, int, int, int]:
+    return (
+        relative_path,
+        int(value.st_dev),
+        int(value.st_ino),
+        int(stat.S_IFMT(value.st_mode)),
+        int(value.st_size),
+        _stat_mtime_ns(value),
+    )
+
+
+def _fd_relative_walk_supported() -> bool:
+    supports_dir_fd = getattr(os, "supports_dir_fd", set())
+    return bool(hasattr(os, "fwalk") and os.open in supports_dir_fd and os.stat in supports_dir_fd)
+
+
+def _read_regular_file_bytes_no_follow(path: Path) -> bytes:
+    expected = path.lstat()
+    if not stat.S_ISREG(expected.st_mode):
+        raise OSError(f"Skill file is not a regular file: {path}")
+
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or not _same_file_identity(expected, opened):
+            raise OSError(f"Skill file changed while being opened: {path}")
+        with os.fdopen(fd, "rb", closefd=True) as file_obj:
+            fd = -1
+            return file_obj.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 class SkillMetadata:
@@ -145,6 +208,7 @@ class SkillsService:
         base_path: Path,
         db: CharactersRAGDB | None = None,
         sync_interval: float = 5.0,
+        integrity_resolver: ContextIntegrityResolver | None = None,
     ):
         """
         Initialize the SkillsService.
@@ -162,6 +226,10 @@ class SkillsService:
         self._parser = SkillParser()
         self._sync_interval = sync_interval
         self._last_sync_time: float = 0.0
+        self.integrity_resolver = (
+            integrity_resolver if integrity_resolver is not None else get_global_context_integrity_resolver()
+        )
+        self._integrity_decision_cache: dict[tuple[str, str], tuple[float, SkillFileFingerprint, bool]] = {}
         self._ensure_skills_directory()
         self._ensure_registry_ready()
 
@@ -192,6 +260,250 @@ class SkillsService:
     def _get_skill_dir(self, name: str) -> Path:
         """Get the directory path for a skill."""
         return self.skills_dir / name
+
+    def _skill_asset_id(self, name: str) -> str:
+        """Return the Context Integrity asset id for a user skill."""
+        return f"skill:user:{self.user_id}/{name}"
+
+    def _relative_skill_path(self, skill_dir: Path, path: Path) -> str:
+        try:
+            return path.relative_to(skill_dir).as_posix()
+        except ValueError:
+            return path.resolve().relative_to(skill_dir.resolve()).as_posix()
+
+    def _read_skill_file_map_fd_walk(self, skill_dir: Path) -> dict[str, bytes]:
+        root_stat = skill_dir.lstat()
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise OSError(f"Skill directory is not a directory: {skill_dir}")
+
+        files: dict[str, bytes] = {}
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        for directory, dirnames, filenames, dirfd in os.fwalk(skill_dir, topdown=True, follow_symlinks=False):
+            dirnames.sort()
+            for dirname in list(dirnames):
+                entry_path = Path(directory) / dirname
+                entry_stat = os.stat(dirname, dir_fd=dirfd, follow_symlinks=False)
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    raise OSError(f"Symlinked skill path is not allowed: {entry_path}")
+                if not stat.S_ISDIR(entry_stat.st_mode):
+                    dirnames.remove(dirname)
+
+            for filename in sorted(filenames):
+                entry_path = Path(directory) / filename
+                entry_stat = os.stat(filename, dir_fd=dirfd, follow_symlinks=False)
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    raise OSError(f"Symlinked skill path is not allowed: {entry_path}")
+                if not stat.S_ISREG(entry_stat.st_mode):
+                    continue
+                if Path(filename).suffix.lower() not in SKILL_INTEGRITY_TEXT_SUFFIXES:
+                    continue
+
+                fd = os.open(filename, flags, dir_fd=dirfd)
+                try:
+                    opened_stat = os.fstat(fd)
+                    if not stat.S_ISREG(opened_stat.st_mode) or not _same_file_identity(entry_stat, opened_stat):
+                        raise OSError(f"Skill file changed while being opened: {entry_path}")
+                    with os.fdopen(fd, "rb", closefd=True) as file_obj:
+                        fd = -1
+                        files[self._relative_skill_path(skill_dir, entry_path)] = file_obj.read()
+                finally:
+                    if fd >= 0:
+                        os.close(fd)
+        return files
+
+    def _read_skill_file_map_path_walk(self, skill_dir: Path) -> dict[str, bytes]:
+        root_stat = skill_dir.lstat()
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise OSError(f"Skill directory is not a directory: {skill_dir}")
+
+        files: dict[str, bytes] = {}
+
+        def _walk(directory: Path, relative_prefix: str = "") -> None:
+            for path in sorted(directory.iterdir(), key=lambda item: item.name):
+                entry_stat = path.lstat()
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    raise OSError(f"Symlinked skill path is not allowed: {path}")
+
+                relative_path = f"{relative_prefix}{path.name}"
+                if stat.S_ISDIR(entry_stat.st_mode):
+                    _walk(path, f"{relative_path}/")
+                    continue
+
+                if not stat.S_ISREG(entry_stat.st_mode):
+                    continue
+                if path.suffix.lower() not in SKILL_INTEGRITY_TEXT_SUFFIXES:
+                    continue
+                files[relative_path] = _read_regular_file_bytes_no_follow(path)
+
+        _walk(skill_dir)
+        return files
+
+    def _read_skill_file_map(self, skill_dir: Path) -> dict[str, bytes]:
+        """Read prompt-bearing skill files without following symlinks."""
+        if _fd_relative_walk_supported():
+            return self._read_skill_file_map_fd_walk(skill_dir)
+        return self._read_skill_file_map_path_walk(skill_dir)
+
+    def _skill_file_fingerprint_fd_walk(self, skill_dir: Path) -> SkillFileFingerprint:
+        root_stat = skill_dir.lstat()
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise OSError(f"Skill directory is not a directory: {skill_dir}")
+
+        entries: list[tuple[str, int, int, int, int, int]] = []
+        for directory, dirnames, filenames, dirfd in os.fwalk(skill_dir, topdown=True, follow_symlinks=False):
+            dirnames.sort()
+            for dirname in list(dirnames):
+                entry_path = Path(directory) / dirname
+                entry_stat = os.stat(dirname, dir_fd=dirfd, follow_symlinks=False)
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    raise OSError(f"Symlinked skill path is not allowed: {entry_path}")
+                if not stat.S_ISDIR(entry_stat.st_mode):
+                    dirnames.remove(dirname)
+
+            for filename in sorted(filenames):
+                entry_path = Path(directory) / filename
+                entry_stat = os.stat(filename, dir_fd=dirfd, follow_symlinks=False)
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    raise OSError(f"Symlinked skill path is not allowed: {entry_path}")
+                if not stat.S_ISREG(entry_stat.st_mode):
+                    continue
+                if Path(filename).suffix.lower() not in SKILL_INTEGRITY_TEXT_SUFFIXES:
+                    continue
+                entries.append(_fingerprint_entry(self._relative_skill_path(skill_dir, entry_path), entry_stat))
+        return tuple(entries)
+
+    def _skill_file_fingerprint_path_walk(self, skill_dir: Path) -> SkillFileFingerprint:
+        root_stat = skill_dir.lstat()
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise OSError(f"Skill directory is not a directory: {skill_dir}")
+
+        entries: list[tuple[str, int, int, int, int, int]] = []
+
+        def _walk(directory: Path, relative_prefix: str = "") -> None:
+            for path in sorted(directory.iterdir(), key=lambda item: item.name):
+                entry_stat = path.lstat()
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    raise OSError(f"Symlinked skill path is not allowed: {path}")
+
+                relative_path = f"{relative_prefix}{path.name}"
+                if stat.S_ISDIR(entry_stat.st_mode):
+                    _walk(path, f"{relative_path}/")
+                    continue
+
+                if not stat.S_ISREG(entry_stat.st_mode):
+                    continue
+                if path.suffix.lower() not in SKILL_INTEGRITY_TEXT_SUFFIXES:
+                    continue
+                entries.append(_fingerprint_entry(relative_path, entry_stat))
+
+        _walk(skill_dir)
+        return tuple(entries)
+
+    def _skill_file_fingerprint(self, skill_dir: Path) -> SkillFileFingerprint:
+        if _fd_relative_walk_supported():
+            return self._skill_file_fingerprint_fd_walk(skill_dir)
+        return self._skill_file_fingerprint_path_walk(skill_dir)
+
+    def _skill_digest(self, name: str, files: dict[str, bytes]) -> str:
+        """Compute the same canonical digest used by startup skill inventory."""
+        return canonical_filesystem_digest(
+            source_type="skill_file",
+            asset_id=self._skill_asset_id(name),
+            files=files,
+            metadata={"skill_name": name},
+        )
+
+    def _is_skill_allowed(self, name: str, *, purpose: str) -> bool:
+        """Return whether a skill can be advertised for a model-facing purpose."""
+        if self.integrity_resolver is None:
+            return True
+
+        cache_key = (name, purpose)
+        now = time.monotonic()
+        try:
+            skill_dir = self._get_skill_dir(name)
+            fingerprint = self._skill_file_fingerprint(skill_dir)
+            cached = self._integrity_decision_cache.get(cache_key)
+            if cached is not None and cached[0] >= now and cached[1] == fingerprint:
+                return cached[2]
+
+            files = self._read_skill_file_map(skill_dir)
+            if "SKILL.md" not in files:
+                self._integrity_decision_cache[cache_key] = (
+                    now + min(max(self._sync_interval, 0.0), 5.0),
+                    fingerprint,
+                    False,
+                )
+                return False
+            current_digest = self._skill_digest(name, files)
+            self.integrity_resolver.require_digest_allowed(
+                self._skill_asset_id(name),
+                current_digest=current_digest,
+                purpose=purpose,
+            )
+            self._integrity_decision_cache[cache_key] = (
+                now + min(max(self._sync_interval, 0.0), 5.0),
+                fingerprint,
+                True,
+            )
+            return True
+        except (ContextIntegrityBlocked, OSError, UnicodeDecodeError):
+            self._integrity_decision_cache.pop(cache_key, None)
+            return False
+
+    def _require_skill_allowed(
+        self,
+        name: str,
+        *,
+        purpose: str,
+        current_digest: str | None = None,
+    ) -> None:
+        """Raise when a skill is not allowed by the current integrity resolver."""
+        if self.integrity_resolver is None:
+            return
+
+        asset_id = self._skill_asset_id(name)
+        if current_digest is None:
+            self.integrity_resolver.require_allowed(asset_id, purpose=purpose)
+            return
+
+        self.integrity_resolver.require_digest_allowed(
+            asset_id,
+            current_digest=current_digest,
+            purpose=purpose,
+        )
+
+    def _parse_unchecked_skill_directory(
+        self,
+        name: str,
+        skill_dir: Path,
+        *,
+        files: dict[str, bytes] | None = None,
+    ) -> Any:
+        """Parse a skill from an already-read file map without integrity checks."""
+        files = files if files is not None else self._read_skill_file_map(skill_dir)
+        raw_skill = files.get("SKILL.md")
+        if raw_skill is None:
+            raise SkillNotFoundError(name, detail="SKILL.md not found")
+
+        parsed = self._parser.parse_content(raw_skill.decode("utf-8"), default_name=name)
+        parsed.supporting_files = {
+            relative_path: content.decode("utf-8")
+            for relative_path, content in files.items()
+            if relative_path != "SKILL.md"
+        }
+        return parsed
+
+    def _parse_verified_skill_directory(self, name: str, skill_dir: Path) -> Any:
+        """Read, verify, and parse a skill using one file snapshot."""
+        files = self._read_skill_file_map(skill_dir)
+        current_digest = self._skill_digest(name, files)
+        self._require_skill_allowed(
+            name,
+            purpose="skill_read",
+            current_digest=current_digest,
+        )
+        return self._parse_unchecked_skill_directory(name, skill_dir, files=files)
 
     def _normalize_and_validate_skill_name(self, name: str, *, source: str = "skill name") -> str:
         """Normalize and validate a skill name."""
@@ -289,11 +601,11 @@ class SkillsService:
     def _parse_skill_file(self, skill_dir: Path) -> Optional[Any]:
         """Parse SKILL.md content without loading supporting files."""
         skill_file = skill_dir / "SKILL.md"
-        if not skill_file.exists():
-            return None
         try:
-            content = skill_file.read_text(encoding="utf-8")
-        except OSError as e:
+            content = _read_regular_file_bytes_no_follow(skill_file).decode("utf-8")
+        except FileNotFoundError:
+            return None
+        except (OSError, UnicodeDecodeError) as e:
             logger.warning(f"Failed to read SKILL.md for {skill_dir.name}: {e}")
             return None
         try:
@@ -350,9 +662,29 @@ class SkillsService:
         disk_names: set[str] = set()
         if self.skills_dir.exists():
             for item in self.skills_dir.iterdir():
-                if not item.is_dir():
+                try:
+                    item_stat = item.lstat()
+                except OSError as e:
+                    logger.warning("Skipping unreadable skill path '{}': {}", item, e)
                     continue
-                if not (item / "SKILL.md").exists():
+                if stat.S_ISLNK(item_stat.st_mode):
+                    logger.warning("Skipping symlinked skill directory '{}'", item)
+                    continue
+                if not stat.S_ISDIR(item_stat.st_mode):
+                    continue
+
+                skill_file = item / "SKILL.md"
+                try:
+                    skill_file_stat = skill_file.lstat()
+                except FileNotFoundError:
+                    continue
+                except OSError as e:
+                    logger.warning("Skipping unreadable SKILL.md for '{}': {}", item.name, e)
+                    continue
+                if stat.S_ISLNK(skill_file_stat.st_mode):
+                    logger.warning("Skipping skill '{}' because SKILL.md is a symlink", item.name)
+                    continue
+                if not stat.S_ISREG(skill_file_stat.st_mode):
                     continue
 
                 disk_names.add(item.name)
@@ -475,6 +807,25 @@ class SkillsService:
         """
         await self._sync_registry_async()
         db = self._get_db()
+        if self.integrity_resolver is not None:
+            rows = db.list_skill_registry(
+                include_hidden=include_hidden,
+                include_deleted=False,
+                q=q,
+                context=context,
+                user_invocable=user_invocable,
+                has_tools=has_tools,
+                model=model,
+                sort=sort,
+                order=order,
+                limit=None,
+                offset=0,
+            )
+            allowed_rows = [
+                row for row in rows if self._is_skill_allowed(str(row.get("name") or ""), purpose="skill_discovery")
+            ]
+            return [self._metadata_from_row(row) for row in allowed_rows[offset : offset + limit]]
+
         rows = db.list_skill_registry(
             include_hidden=include_hidden,
             include_deleted=False,
@@ -490,7 +841,7 @@ class SkillsService:
         )
         return [self._metadata_from_row(row) for row in rows]
 
-    async def get_skill(self, name: str) -> dict[str, Any]:
+    async def get_skill(self, name: str, *, enforce_integrity: bool = True) -> dict[str, Any]:
         """
         Get full skill content.
 
@@ -519,7 +870,12 @@ class SkillsService:
             raise SkillNotFoundError(name, detail="Skill directory not found")
 
         try:
-            parsed = self._parser.parse_directory(skill_dir)
+            if enforce_integrity:
+                parsed = self._parse_verified_skill_directory(name, skill_dir)
+            else:
+                parsed = self._parse_unchecked_skill_directory(name, skill_dir)
+        except ContextIntegrityBlocked:
+            raise
         except Exception as e:
             raise SkillsError(f"Failed to parse skill: {e}") from e
 
@@ -534,6 +890,7 @@ class SkillsService:
             "model": parsed.frontmatter.model,
             "context": parsed.frontmatter.context,
             "content": parsed.content,
+            "raw_content": parsed.raw_content,
             "supporting_files": parsed.supporting_files,
             "directory_path": str(skill_dir),
             "created_at": metadata.created_at,
@@ -645,7 +1002,7 @@ class SkillsService:
 
         logger.info(f"Created skill '{name}' for user {self.user_id}")
 
-        return await self.get_skill(name)
+        return await self.get_skill(name, enforce_integrity=False)
 
     async def update_skill(
         self,
@@ -814,7 +1171,7 @@ class SkillsService:
 
         logger.info(f"Updated skill '{name}' for user {self.user_id}")
 
-        return await self.get_skill(name)
+        return await self.get_skill(name, enforce_integrity=False)
 
     async def delete_skill(self, name: str, expected_version: Optional[int] = None) -> None:
         """
@@ -909,10 +1266,14 @@ class SkillsService:
             raise SkillValidationError("Skill name must be specified in frontmatter or as parameter")
 
         skill_name = self._normalize_and_validate_skill_name(skill_name)
-        normalized_supporting_files = self._normalize_supporting_files(
-            supporting_files,
-            allow_deletes=False,
-        ) if supporting_files else None
+        normalized_supporting_files = (
+            self._normalize_supporting_files(
+                supporting_files,
+                allow_deletes=False,
+            )
+            if supporting_files
+            else None
+        )
 
         await self._sync_registry_async(force=True)
         db = self._get_db()
@@ -1072,9 +1433,7 @@ class SkillsService:
 
                         relative_path = PurePosixPath(relative_name)
                         if relative_path.is_absolute() or ".." in relative_path.parts:
-                            raise SkillValidationError(
-                                f"Zip contains path traversal entry: '{name}'"
-                            )
+                            raise SkillValidationError(f"Zip contains path traversal entry: '{name}'")
 
                         # Ignore nested directories; supporting files are top-level only.
                         if relative_path.name != relative_name:
@@ -1180,11 +1539,8 @@ class SkillsService:
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             # Write SKILL.md with full content (including frontmatter)
-            skill_dir = self._get_skill_dir(name)
-            skill_file = skill_dir / "SKILL.md"
-            if skill_file.exists():
-                full_content = skill_file.read_text(encoding="utf-8")
-            else:
+            full_content = skill_data.get("raw_content")
+            if not isinstance(full_content, str):
                 # Reconstruct from parsed data
                 fm = SkillFrontmatter(
                     name=skill_data["name"],
@@ -1210,8 +1566,11 @@ class SkillsService:
     def _build_context_payload(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         """Build a context payload from skill registry rows."""
         skills = [
-            row for row in rows
-            if row.get("user_invocable") and not row.get("disable_model_invocation")
+            row
+            for row in rows
+            if row.get("user_invocable")
+            and not row.get("disable_model_invocation")
+            and self._is_skill_allowed(str(row.get("name") or ""), purpose="skill_context")
         ]
 
         if not skills:
@@ -1294,6 +1653,24 @@ class SkillsService:
         """
         await self._sync_registry_async()
         db = self._get_db()
+        if self.integrity_resolver is not None:
+            rows = db.list_skill_registry(
+                include_hidden=include_hidden,
+                include_deleted=False,
+                q=q,
+                context=context,
+                user_invocable=user_invocable,
+                has_tools=has_tools,
+                model=model,
+                sort="name",
+                order="asc",
+                limit=None,
+                offset=0,
+            )
+            return sum(
+                1 for row in rows if self._is_skill_allowed(str(row.get("name") or ""), purpose="skill_discovery")
+            )
+
         return db.count_skill_registry(
             include_hidden=include_hidden,
             include_deleted=False,

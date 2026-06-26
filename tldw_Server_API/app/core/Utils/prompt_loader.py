@@ -1,11 +1,20 @@
 import json
 import os
 import re
+import stat
+from pathlib import Path
 from typing import Any, Optional
 
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_prompts_dir
+from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
+    canonical_filesystem_digest,
+)
+from tldw_Server_API.app.core.Context_Integrity.resolver import (
+    ContextIntegrityBlocked,
+    get_global_context_integrity_resolver,
+)
 
 
 def _prompts_dir() -> str:
@@ -35,6 +44,73 @@ def _prompt_env_file_key(module: str, key: str) -> str:
     return f"TLDW_PROMPT_FILE_{module_token}__{key_token}"
 
 
+def _prompt_asset_id(path: str, *, source_label: str | None = None) -> str:
+    filename = Path(path).name
+    if source_label:
+        return f"prompt_file:{source_label}:{filename}"
+    return f"prompt_file:{filename}"
+
+
+def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    return (
+        left.st_dev,
+        left.st_ino,
+        stat.S_IFMT(left.st_mode),
+    ) == (
+        right.st_dev,
+        right.st_ino,
+        stat.S_IFMT(right.st_mode),
+    )
+
+
+def _read_regular_file_bytes_no_follow(path: Path) -> bytes:
+    expected = path.lstat()
+    if not stat.S_ISREG(expected.st_mode):
+        raise OSError(f"Prompt file is not a regular file: {path}")
+
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or not _same_file_identity(expected, opened):
+            raise OSError(f"Prompt file changed while being opened: {path}")
+        with os.fdopen(fd, "rb", closefd=True) as file_obj:
+            fd = -1
+            return file_obj.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _read_prompt_file_text(path: str, *, source_label: str | None = None) -> str:
+    prompt_path = Path(path)
+    asset_id = _prompt_asset_id(path, source_label=source_label)
+    raw = _read_regular_file_bytes_no_follow(prompt_path)
+
+    metadata: dict[str, str]
+    if source_label is None:
+        metadata = {"path": prompt_path.name}
+    else:
+        metadata = {"path": str(prompt_path), "source_label": source_label}
+
+    current_digest = canonical_filesystem_digest(
+        source_type="prompt_file",
+        asset_id=asset_id,
+        files={prompt_path.name: raw},
+        metadata=metadata,
+    )
+    resolver = get_global_context_integrity_resolver()
+    if resolver is not None:
+        resolver.require_digest_allowed(
+            asset_id,
+            current_digest=current_digest,
+            purpose="prompt_load",
+            changed_state="changed_approved_non_executable",
+        )
+
+    return raw.decode("utf-8")
+
+
 def _load_env_prompt_file(module: str, key: str) -> Optional[str]:
     env_name = _prompt_env_file_key(module, key)
     raw_path = os.getenv(env_name)
@@ -43,9 +119,8 @@ def _load_env_prompt_file(module: str, key: str) -> Optional[str]:
 
     path = os.path.expanduser(str(raw_path).strip())
     try:
-        with open(path, encoding="utf-8") as f:
-            return f.read().strip()
-    except OSError as exc:
+        return _read_prompt_file_text(path, source_label=f"env:{env_name}").strip()
+    except (OSError, UnicodeDecodeError, ContextIntegrityBlocked) as exc:
         logger.warning(
             "Prompt override file read failed for env '{}' (module='{}', key='{}', error_type='{}')",
             env_name,
@@ -62,23 +137,23 @@ def _load_yaml(path: str) -> Optional[dict[str, Any]]:
     except ImportError:
         return None
     try:
-        with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+        raw = _read_prompt_file_text(path)
+        data = yaml.safe_load(raw)
         if isinstance(data, dict):
             return data
         return None
-    except (OSError, TypeError, ValueError, yaml.YAMLError):
+    except (OSError, UnicodeDecodeError, ContextIntegrityBlocked, TypeError, ValueError, yaml.YAMLError):
         return None
 
 
 def _load_json(path: str) -> Optional[dict[str, Any]]:
     try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+        raw = _read_prompt_file_text(path)
+        data = json.loads(raw)
         if isinstance(data, dict):
             return data
         return None
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, ContextIntegrityBlocked, TypeError, ValueError, json.JSONDecodeError):
         return None
 
 
@@ -135,9 +210,8 @@ def load_prompt(module: str, key: str) -> Optional[str]:
     md_path = base + ".md"
     if os.path.exists(md_path):
         try:
-            with open(md_path, encoding="utf-8") as f:
-                text = f.read()
-        except OSError:
+            text = _read_prompt_file_text(md_path)
+        except (OSError, UnicodeDecodeError, ContextIntegrityBlocked):
             text = ""
         if text:
             pattern = re.compile(
