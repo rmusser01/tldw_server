@@ -135,6 +135,7 @@ dependencies = [
 
   # LLM/ML Integration
   "flashrank>=0.2.0",
+  "onnx-asr[hub]>=0.11.0",
   "onnxruntime>=1.14.0",
   "openai>=1.0.0",
   "optimum>=1.13.0",
