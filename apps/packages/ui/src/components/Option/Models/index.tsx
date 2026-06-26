@@ -47,6 +47,38 @@ const getStatusCode = (error: unknown): number | null => {
   return maybeStatus
 }
 
+const getModelActionErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  return String(error)
+}
+
+const formatModelActionError = (error: unknown): string => {
+  let message = getModelActionErrorMessage(error).replace(/^Error:\s*/i, "")
+
+  message = message.replace(
+    /\b(GET|POST|PUT|PATCH|DELETE)\s+\/api\/v1\/[^\s)]+/gi,
+    "$1 [server-endpoint]"
+  )
+  message = message.replace(/\b\/api\/v1\/[^\s)]+/gi, "[server-endpoint]")
+  message = message.replace(
+    /\/(?:Users|home|var|etc|opt|tmp|private|srv)\/[^\s)]+/g,
+    "[redacted-path]"
+  )
+  message = message.replace(
+    /[A-Za-z]:\\(?:[^\\\s]+\\)+[^\\\s)]+/g,
+    "[redacted-path]"
+  )
+  message = message.replace(
+    /\b(?:sk|rk|pk|api|token)[_-][A-Za-z0-9_-]{6,}\b/g,
+    "[redacted-secret]"
+  )
+  message = message.replace(/(token|api[_-]?key|secret)=([^\s)]+)/gi, "$1=[redacted-secret]")
+
+  const trimmed = message.trim()
+  return trimmed.length > 220 ? `${trimmed.slice(0, 217)}...` : trimmed
+}
+
 const getRecord = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null
     ? (value as Record<string, unknown>)
@@ -380,22 +412,15 @@ export const ModelsBody = () => {
         })
       }
     } catch (e: unknown) {
-      console.error("[tldw] Failed to refresh models", e)
-      const rawMessage = e instanceof Error ? e.message : String(e)
-      const message =
-        rawMessage.length > 200 ? `${rawMessage.slice(0, 197)}...` : rawMessage
+      const safeMessage = formatModelActionError(e)
+      console.error("[tldw] Failed to refresh models", safeMessage)
       notification.error({
         message: t("settings:models.refreshFailed", { defaultValue: "Failed to refresh models" }),
-        description: message
+        description: safeMessage
       })
     } finally {
       setRefreshing(false)
     }
-  }
-
-  const _formatOauthError = (error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error)
-    return message.length > 220 ? `${message.slice(0, 217)}...` : message
   }
 
   const handleOpenAIOauthConnect = useCallback(async () => {
@@ -433,7 +458,7 @@ export const ModelsBody = () => {
           "settings:models.openaiOauth.connectFailed",
           "Failed to start OpenAI OAuth"
         ),
-        description: _formatOauthError(error)
+        description: formatModelActionError(error)
       })
     } finally {
       setOpenaiOauthAction(null)
@@ -466,7 +491,7 @@ export const ModelsBody = () => {
           "settings:models.openaiOauth.refreshFailed",
           "Failed to refresh OpenAI OAuth token"
         ),
-        description: _formatOauthError(error)
+        description: formatModelActionError(error)
       })
     } finally {
       setOpenaiOauthAction(null)
@@ -490,7 +515,7 @@ export const ModelsBody = () => {
           "settings:models.openaiOauth.disconnectFailed",
           "Failed to disconnect OpenAI OAuth"
         ),
-        description: _formatOauthError(error)
+        description: formatModelActionError(error)
       })
     } finally {
       setOpenaiOauthAction(null)
@@ -514,7 +539,7 @@ export const ModelsBody = () => {
           "settings:models.openaiOauth.switchApiKeyFailed",
           "Failed to switch to API key credential"
         ),
-        description: _formatOauthError(error)
+        description: formatModelActionError(error)
       })
     } finally {
       setOpenaiOauthAction(null)
