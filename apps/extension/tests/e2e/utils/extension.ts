@@ -35,6 +35,41 @@ async function waitForStorageSeed(page: Page) {
   )
 }
 
+async function seedStorageFromExtensionPage(
+  page: Page,
+  seedConfig?: Record<string, any>
+) {
+  await page.evaluate((cfg) => {
+    return new Promise<void>((resolve) => {
+      if (typeof chrome === 'undefined' || !chrome.storage?.local || !chrome.storage?.sync) {
+        resolve()
+        return
+      }
+
+      const finish = () => {
+        chrome.storage.sync.set({ __e2eSeeded: true }, () => {
+          chrome.storage.local.set({ __e2eSeeded: true }, () => {
+            resolve()
+          })
+        })
+      }
+
+      chrome.storage.local.clear(() => {
+        chrome.storage.sync.clear(() => {
+          if (cfg) {
+            chrome.storage.sync.set(cfg, () => {
+              chrome.storage.local.set(cfg, finish)
+            })
+            return
+          }
+
+          finish()
+        })
+      })
+    })
+  }, seedConfig || null)
+}
+
 function makeTempProfileDirs() {
   const root = path.resolve('tmp-playwright-profile')
   fs.mkdirSync(root, { recursive: true })
@@ -57,6 +92,17 @@ function isExtensionBuildDir(dir: string): boolean {
   const optionsPath = path.join(dir, 'options.html')
   const sidepanelPath = path.join(dir, 'sidepanel.html')
   return fs.existsSync(backgroundPath) && (fs.existsSync(optionsPath) || fs.existsSync(sidepanelPath))
+}
+
+function hasManifestKey(dir: string): boolean {
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')
+    ) as { key?: unknown }
+    return typeof manifest.key === 'string' && manifest.key.trim().length > 0
+  } catch {
+    return false
+  }
 }
 
 function resolveChromiumExecutablePath(explicitPath?: string): string | undefined {
@@ -240,6 +286,9 @@ export async function launchWithExtension(
     Number.isFinite(configuredTargetWait) && configuredTargetWait > 0
       ? configuredTargetWait
       : 30000
+  const backgroundTargetProbeWaitMs = hasManifestKey(launchExtPath)
+    ? Math.min(targetWaitMs, 5000)
+    : targetWaitMs
 
   // Wait for background targets to appear (service worker or background page)
   const waitForTargets = async () => {
@@ -248,7 +297,7 @@ export async function launchWithExtension(
     await Promise.race([
       context.waitForEvent('serviceworker').catch(() => null),
       context.waitForEvent('backgroundpage').catch(() => null),
-      new Promise((r) => setTimeout(r, targetWaitMs))
+      new Promise((r) => setTimeout(r, backgroundTargetProbeWaitMs))
     ])
   }
   await waitForTargets()
@@ -378,6 +427,9 @@ export async function launchWithExtension(
   // Ensure the extension is ready before navigating
   await page.waitForTimeout(250)
   await page.goto(optionsUrl)
+  if (!sw) {
+    await seedStorageFromExtensionPage(page, seedConfig)
+  }
   // Wait until storage has been cleared/seeded (sentinel set)
   await waitForStorageSeed(page)
 

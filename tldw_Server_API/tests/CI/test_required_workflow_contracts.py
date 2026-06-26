@@ -266,6 +266,20 @@ def test_e2e_smoke_skips_ffmpeg_but_keeps_portaudio() -> None:
     )
 
 
+def test_e2e_smoke_uses_minimal_test_dependencies() -> None:
+    workflow = _load(".github/workflows/e2e-smoke.yml")
+    install_step = _get_step(workflow["jobs"]["e2e-smoke"]["steps"], "Install dependencies")
+    install_script = install_step["run"]
+    install_commands = "\n".join(
+        line for line in install_script.splitlines() if not line.strip().startswith("#")
+    )
+
+    assert "pip install -e .[dev]" not in install_commands
+    assert "locust" not in install_commands
+    for package in ("pytest", "pytest-asyncio", "pytest-xdist", "pytest-timeout"):
+        assert package in install_commands
+
+
 def test_security_required_lane_exists_and_uses_threshold_policy() -> None:
     workflow = _load(".github/workflows/security-required.yml")
     jobs = workflow["jobs"]
