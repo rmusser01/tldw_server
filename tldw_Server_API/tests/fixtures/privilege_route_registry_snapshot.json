@@ -7433,6 +7433,74 @@
         }
       ],
       "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.list_campaign_rules_pack_refs",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_campaign_rules_pack_refs",
+      "path": "/api/v1/rpg/campaigns/{campaign_id}/rules-packs",
+      "rate_limit_resources": [
+        "rpg.campaigns.read"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._rules_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.replace_campaign_rules_pack_refs",
+      "methods": [
+        "PUT"
+      ],
+      "name": "replace_campaign_rules_pack_refs",
+      "path": "/api/v1/rpg/campaigns/{campaign_id}/rules-packs",
+      "rate_limit_resources": [
+        "rpg.campaigns.manage"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.create_session",
       "methods": [
         "POST"
@@ -7671,6 +7739,74 @@
         }
       ],
       "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.list_session_rules_pack_refs",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_session_rules_pack_refs",
+      "path": "/api/v1/rpg/sessions/{session_id}/rules-packs",
+      "rate_limit_resources": [
+        "rpg.sessions.read"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._rules_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.replace_session_rules_pack_refs",
+      "methods": [
+        "PUT"
+      ],
+      "name": "replace_session_rules_pack_refs",
+      "path": "/api/v1/rpg/sessions/{session_id}/rules-packs",
+      "rate_limit_resources": [
+        "rpg.sessions.manage"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
       "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.lookup_rules",
       "methods": [
         "POST"
@@ -7715,6 +7851,76 @@
       "path": "/api/v1/rpg/campaigns",
       "rate_limit_resources": [
         "rpg.campaigns.manage"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._rules_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.replace_campaign_rules_pack_refs",
+      "methods": [
+        "PUT"
+      ],
+      "name": "replace_campaign_rules_pack_refs",
+      "path": "/api/v1/rpg/campaigns/{campaign_id}/rules-packs",
+      "rate_limit_resources": [
+        "rpg.campaigns.manage"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    }
+  ],
+  "rpg.campaigns.read": [
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.list_campaign_rules_pack_refs",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_campaign_rules_pack_refs",
+      "path": "/api/v1/rpg/campaigns/{campaign_id}/rules-packs",
+      "rate_limit_resources": [
+        "rpg.campaigns.read"
       ],
       "summary": null,
       "tags": [
@@ -7965,6 +8171,40 @@
         "rpg",
         "rpg"
       ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._rules_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.replace_session_rules_pack_refs",
+      "methods": [
+        "PUT"
+      ],
+      "name": "replace_session_rules_pack_refs",
+      "path": "/api/v1/rpg/sessions/{session_id}/rules-packs",
+      "rate_limit_resources": [
+        "rpg.sessions.manage"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
     }
   ],
   "rpg.sessions.read": [
@@ -7993,6 +8233,40 @@
       ],
       "name": "build_context",
       "path": "/api/v1/rpg/sessions/{session_id}/context",
+      "rate_limit_resources": [
+        "rpg.sessions.read"
+      ],
+      "summary": null,
+      "tags": [
+        "rpg",
+        "rpg"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "rpg._service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.rpg",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.rpg.list_session_rules_pack_refs",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_session_rules_pack_refs",
+      "path": "/api/v1/rpg/sessions/{session_id}/rules-packs",
       "rate_limit_resources": [
         "rpg.sessions.read"
       ],

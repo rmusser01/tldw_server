@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 
 class RPGCampaignCreateRequest(BaseModel):
@@ -64,7 +65,47 @@ class RPGRecordEventsResponse(BaseModel):
 class RPGRulesLookupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    query: str = Field(min_length=1, max_length=500)
+    query: str = Field(min_length=1, max_length=1000)
+    mode: Literal["lookup", "answer"] = "lookup"
+    provider: str | None = None
+    model: str | None = None
+    temperature: float = Field(default=0.2, ge=0, le=2)
+    max_tokens: int = Field(default=600, ge=64, le=2000)
+
+
+class RPGRulesPackRefInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_type: Literal["media_item", "media_collection"]
+    source_id: int = Field(gt=0)
+    display_name: str | None = None
+    enabled: StrictBool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RPGRulesPackRefsReplaceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    refs: list[RPGRulesPackRefInput] = Field(default_factory=list, max_length=50)
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class RPGRulesPackRefResponse(BaseModel):
+    ref_id: str
+    source_type: Literal["media_item", "media_collection"]
+    source_id: int
+    display_name: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+    metadata: dict[str, Any]
+
+
+class RPGRulesPackRefsResponse(BaseModel):
+    refs: list[RPGRulesPackRefResponse]
+    version: int
+    replayed: bool = False
 
 
 class RPGRuleCitationResponse(BaseModel):

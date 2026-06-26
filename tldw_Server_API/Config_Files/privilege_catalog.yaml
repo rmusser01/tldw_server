@@ -71,6 +71,22 @@ scopes:
     ownership_predicates:
       - same_org
     doc_url: https://docs.example.com/privileges/media-catalog-view
+  - id: media.read
+    description: Read user-owned media metadata and content for retrieval or display.
+    resource_tags:
+      - media
+      - read
+    sensitivity_tier: moderate
+    rate_limit_class: standard
+    default_roles:
+      - admin
+      - analyst
+      - developer
+      - viewer
+    feature_flag_id: null
+    ownership_predicates:
+      - same_org
+    doc_url: https://docs.example.com/privileges/media-read
   - id: any
     description: Generic low-risk scope used for permissive endpoints and legacy clients.
     resource_tags:

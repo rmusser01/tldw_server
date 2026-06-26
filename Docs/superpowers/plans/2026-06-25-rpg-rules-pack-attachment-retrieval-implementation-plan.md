@@ -376,7 +376,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg
 - Modify: `tldw_Server_API/tests/fixtures/privilege_route_registry_snapshot.json`
 - Modify: `tldw_Server_API/tests/RPG/test_rpg_api.py`
 
-- [ ] **Step 1: Write failing REST schema and endpoint tests**
+- [x] **Step 1: Write failing REST schema and endpoint tests**
 
 Add or update API tests:
 
@@ -401,7 +401,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg
 
 Confirm the new tests fail because schemas/routes/scope metadata are missing.
 
-- [ ] **Step 2: Add Pydantic schemas**
+- [x] **Step 2: Add Pydantic schemas**
 
 Add:
 
@@ -449,7 +449,7 @@ class RPGRulesLookupRequest(BaseModel):
     max_tokens: int = Field(default=600, ge=64, le=2000)
 ```
 
-- [ ] **Step 3: Add concrete media/collection validator for REST**
+- [x] **Step 3: Add concrete media/collection validator for REST**
 
 In `endpoints/rpg.py`, create a small adapter class that receives the authenticated user's media DB and collections DB:
 
@@ -460,7 +460,7 @@ In `endpoints/rpg.py`, create a small adapter class that receives the authentica
 
 Keep this adapter in the endpoint layer unless shared MCP construction needs the same concrete class; if both REST and MCP need it, move it to `tldw_Server_API/app/core/RPG/rules/retrieval.py`.
 
-- [ ] **Step 4: Add endpoints**
+- [x] **Step 4: Add endpoints**
 
 Add constants:
 
@@ -486,7 +486,7 @@ Endpoint dependency requirements:
 
 Convert lookup and context endpoints that touch async service methods to `async def`.
 
-- [ ] **Step 5: Update privilege catalog and snapshot**
+- [x] **Step 5: Update privilege catalog and snapshot**
 
 Run the project helper after endpoint metadata is added:
 
@@ -500,7 +500,7 @@ Then run:
 source .venv/bin/activate && python -m pytest tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py -v
 ```
 
-- [ ] **Step 6: Run task verification**
+- [x] **Step 6: Run task verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_api.py tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py -v
