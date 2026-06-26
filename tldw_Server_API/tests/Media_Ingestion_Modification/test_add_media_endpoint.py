@@ -400,7 +400,7 @@ def _build_nested_eml_bytes():
     outer["To"] = "Bob <bob@example.com>"
     outer["Subject"] = "Outer Parent"
     outer.set_content("Outer body.")
-    outer.add_attachment(inner, maintype="message", subtype="rfc822", filename="child.eml")
+    outer.add_attachment(inner, subtype="rfc822", filename="child.eml")
     return outer.as_bytes()
 
 

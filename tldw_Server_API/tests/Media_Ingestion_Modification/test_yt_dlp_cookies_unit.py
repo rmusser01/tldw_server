@@ -7,6 +7,11 @@ import pytest
 @pytest.fixture()
 def recorder_and_stub(monkeypatch):
     """Provide a simple stub for yt_dlp.YoutubeDL that records init options."""
+    monkeypatch.setenv(
+        "WORKFLOWS_EGRESS_ALLOWLIST",
+        "example.com,youtu.be,youtube.com,www.youtube.com",
+    )
+
     class Recorder:
         last_opts = None
         last_calls = []
