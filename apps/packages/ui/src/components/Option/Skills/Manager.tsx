@@ -36,6 +36,7 @@ import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { SkillDrawer } from "./SkillDrawer"
 import { SkillPreview } from "./SkillPreview"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
+import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import type {
   SkillContext,
   SkillImportPreviewResponse,
@@ -123,6 +124,16 @@ const getSeededSkillNames = (result: SeedSkillsResult | undefined): string[] => 
   return result.seeded
     .map((name) => (typeof name === "string" ? name.trim() : ""))
     .filter((name): name is string => SKILL_NAME_REGEX.test(name))
+}
+
+const getErrorDescription = (error: unknown): string | undefined => {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error.trim()) return error
+  if (error && typeof error === "object" && "message" in error) {
+    const message = (error as { message?: unknown }).message
+    return typeof message === "string" && message.trim() ? message : undefined
+  }
+  return undefined
 }
 
 const buildSkillInvocation = (skillName: string) => `/skill ${skillName}`
@@ -324,12 +335,22 @@ export const SkillsManager: React.FC = () => {
         defaultValue: `${totalSkills} ${totalSkills === 1 ? "skill" : "skills"}`,
         count: totalSkills
       })
-  const listErrorDescription =
-    error instanceof Error && error.message
-      ? error.message
-      : t("option:skills.loadListErrorDescription", {
-          defaultValue: "Check your server connection and try again."
+  const listLoadRecoveryState = isError
+    ? buildCapabilityState({
+        featureName: "Skills",
+        capabilityName: "Skills API",
+        endpoint: "/api/v1/skills",
+        method: "GET",
+        error,
+        title: t("option:skills.loadListError", {
+          defaultValue: "Failed to load skills"
+        }),
+        message: t("option:skills.loadListErrorRecoveryDescription", {
+          defaultValue:
+            "The Skills list could not be loaded. Try again or open diagnostics."
         })
+      })
+    : null
 
   React.useEffect(() => {
     if (!hasLoadedSkills) return
@@ -414,10 +435,10 @@ export const SkillsManager: React.FC = () => {
         message: t("option:skills.deleteSuccess", { defaultValue: "Skill deleted" })
       })
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       notification.error({
         message: t("option:skills.deleteError", { defaultValue: "Failed to delete skill" }),
-        description: err?.message
+        description: getErrorDescription(err)
       })
     }
   })
@@ -450,12 +471,12 @@ export const SkillsManager: React.FC = () => {
       setImportTextPreview(result)
       importTextForm.setFieldValue("overwrite", false)
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       notification.error({
         message: t("option:skills.importPreviewError", {
           defaultValue: "Failed to review skill import"
         }),
-        description: err?.message
+        description: getErrorDescription(err)
       })
     }
   })
@@ -472,10 +493,10 @@ export const SkillsManager: React.FC = () => {
       importTextForm.resetFields()
       showImportSuccess(result, variables.name)
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       notification.error({
         message: t("option:skills.importError", { defaultValue: "Failed to import skill" }),
-        description: err?.message
+        description: getErrorDescription(err)
       })
     }
   })
@@ -486,12 +507,12 @@ export const SkillsManager: React.FC = () => {
       setSuccessAction(null)
       setFileImportReview({ file, preview, overwrite: false })
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       notification.error({
         message: t("option:skills.importPreviewError", {
           defaultValue: "Failed to review skill import"
         }),
-        description: err?.message
+        description: getErrorDescription(err)
       })
     }
   })
@@ -503,10 +524,10 @@ export const SkillsManager: React.FC = () => {
       setFileImportReview(null)
       showImportSuccess(result)
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       notification.error({
         message: t("option:skills.importError", { defaultValue: "Failed to import skill" }),
-        description: err?.message
+        description: getErrorDescription(err)
       })
     }
   })
@@ -544,10 +565,10 @@ export const SkillsManager: React.FC = () => {
         })
       })
     },
-    onError: (err: any) => {
+    onError: (err: unknown) => {
       notification.error({
         message: t("option:skills.seedError", { defaultValue: "Failed to seed built-in skills" }),
-        description: err?.message
+        description: getErrorDescription(err)
       })
     }
   })
@@ -563,10 +584,10 @@ export const SkillsManager: React.FC = () => {
       const skill = await tldwClient.getSkill(name)
       setEditingSkill(skill)
       setDrawerOpen(true)
-    } catch (err: any) {
+    } catch (err: unknown) {
       notification.error({
         message: t("option:skills.loadError", { defaultValue: "Failed to load skill" }),
-        description: err?.message
+        description: getErrorDescription(err)
       })
     }
   }
@@ -598,10 +619,10 @@ export const SkillsManager: React.FC = () => {
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-    } catch (err: any) {
+    } catch (err: unknown) {
       notification.error({
         message: t("option:skills.exportError", { defaultValue: "Failed to export skill" }),
-        description: err?.message
+        description: getErrorDescription(err)
       })
     }
   }
@@ -687,12 +708,12 @@ export const SkillsManager: React.FC = () => {
           defaultValue: "Skill invocation copied"
         })
       })
-    } catch (err: any) {
+    } catch (err: unknown) {
       notification.error({
         message: t("option:skills.copyInvocationError", {
           defaultValue: "Failed to copy skill invocation"
         }),
-        description: err?.message
+        description: getErrorDescription(err)
       })
     }
   }
@@ -1323,19 +1344,19 @@ export const SkillsManager: React.FC = () => {
         </Dropdown>
       </div>
 
-      {isError && (
-        <DesignSystemAlert
-          variant="error"
-          title={t("option:skills.loadListError", {
-            defaultValue: "Failed to load skills"
-          })}
-          action={{
+      {listLoadRecoveryState && (
+        <RecoveryCallout
+          state={listLoadRecoveryState.state}
+          title={listLoadRecoveryState.title}
+          message={listLoadRecoveryState.message}
+          diagnostics={listLoadRecoveryState.diagnostics}
+          role="alert"
+          primaryAction={{
             label: t("common:tryAgain", { defaultValue: "Try again" }),
             onClick: () => void refetch()
           }}
-        >
-          {listErrorDescription}
-        </DesignSystemAlert>
+          data-testid="skills-list-recovery-state"
+        />
       )}
 
       {successAction && (

@@ -192,6 +192,9 @@ describe("SkillsManager imports", () => {
     )
 
   const openColumnVisibilityMenu = async () => {
+    const existingMenu = screen.queryByRole("menu")
+    if (existingMenu) return existingMenu
+
     fireEvent.click(screen.getByRole("button", { name: "Column visibility" }))
     return screen.findByRole("menu")
   }
@@ -267,15 +270,24 @@ describe("SkillsManager imports", () => {
     ).toBeInTheDocument()
   })
 
-  it("shows an explicit load error instead of the beginner empty state", async () => {
-    tldwClientMock.listSkills.mockRejectedValueOnce(new Error("backend down"))
+  it("shows a shared recovery state with diagnostics instead of the beginner empty state", async () => {
+    tldwClientMock.listSkills.mockRejectedValueOnce(
+      Object.assign(new Error("backend down"), { status: 503 })
+    )
 
     renderManager()
 
     const alert = await screen.findByRole("alert")
-    expect(alert).toHaveAttribute("data-ds-component", "Alert")
+    expect(alert).toHaveAttribute("data-ds-component", "RecoveryCallout")
     expect(alert).toHaveTextContent("Failed to load skills")
-    expect(alert).toHaveTextContent("backend down")
+    expect(alert).toHaveTextContent(
+      "The Skills list could not be loaded. Try again or open diagnostics."
+    )
+    const diagnostics = within(alert).getByLabelText("Diagnostics")
+    expect(diagnostics).toHaveTextContent("GET")
+    expect(diagnostics).toHaveTextContent("/api/v1/skills")
+    expect(diagnostics).toHaveTextContent("503")
+    expect(diagnostics).toHaveTextContent("backend down")
     expect(screen.queryByTestId("skills-empty-state")).not.toBeInTheDocument()
 
     fireEvent.click(within(alert).getByRole("button", { name: "Try again" }))
