@@ -121,6 +121,7 @@ TASK5_JOB_POLLER_SPEC_NAMES = {
     "vn_asset_generation_jobs_task",
     "companion_reflection_jobs_task",
     "workspace_file_inventory_jobs_task",
+    "writing_annotation_review_jobs_task",
 }
 
 TASK6_BACKGROUND_SPEC_NAMES = {

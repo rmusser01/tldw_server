@@ -153,6 +153,7 @@ def test_collect_startup_worker_specs_accepts_real_provider_graph() -> None:
         "vn_asset_jobs_task",
         "websub_renewal_task",
         "workspace_file_inventory_jobs_task",
+        "writing_annotation_review_jobs_task",
         "workflows_dlq_task",
         "workflows_gc_task",
         "workflows_maint_task",

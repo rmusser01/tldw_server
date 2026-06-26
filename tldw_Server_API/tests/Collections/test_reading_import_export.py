@@ -12,7 +12,6 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.Collections.reading_import_jobs import (
     READING_IMPORT_DOMAIN,
     READING_IMPORT_JOB_TYPE,
-    ReadingImportJobError,
     handle_reading_import_job,
     reading_import_queue,
     resolve_reading_import_file,
@@ -96,8 +95,8 @@ def test_stage_and_resolve_import_file():
 
 @pytest.mark.usefixtures("client_with_user")
 def test_resolve_import_file_rejects_invalid_token():
-    with pytest.raises(ReadingImportJobError):
-        resolve_reading_import_file(222, "../evil.json")
+    with pytest.raises(reading_import_jobs_module.ReadingImportJobError):
+        reading_import_jobs_module.resolve_reading_import_file(222, "../evil.json")
 
 
 @pytest.fixture()

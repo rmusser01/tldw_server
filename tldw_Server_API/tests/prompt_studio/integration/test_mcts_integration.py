@@ -234,11 +234,12 @@ async def test_runner_python_scores_via_evaluator_toggle(monkeypatch, temp_ps_db
     monkeypatch.setattr(TestRunner, "run_test_case", fake_run_test_case)
 
     # Enabled → sandbox path
-    os.environ["PROMPT_STUDIO_ENABLE_CODE_EVAL"] = "true"
+    monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "true")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", "true")
     res_on = await tr.run_single_test(prompt_id=prompt_id, test_case_id=tc_id, model_config={"model": "dummy"})
     score_on = float(res_on["scores"]["aggregate_score"])
     # Disabled → heuristic fallback
-    os.environ["PROMPT_STUDIO_ENABLE_CODE_EVAL"] = "false"
+    monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "false")
     res_off = await tr.run_single_test(prompt_id=prompt_id, test_case_id=tc_id, model_config={"model": "dummy"})
     score_off = float(res_off["scores"]["aggregate_score"])
     assert score_on > score_off
