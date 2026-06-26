@@ -36,9 +36,14 @@ import {
   OPENAI_TTS_VOICES,
   useTtsProviderData
 } from "@/hooks/useTtsProviderData"
+import type {
+  Model as ElevenLabsModel,
+  Voice as ElevenLabsVoice
+} from "@/services/elevenlabs"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { PageShell } from "@/components/Common/PageShell"
 import { TtsProviderPanel } from "@/components/Option/TTS/TtsProviderPanel"
+import { StatePanel } from "@/components/ui/state"
 import { isTimeoutLikeError } from "@/utils/request-timeout"
 import { withTemplateFallback } from "@/utils/template-guards"
 
@@ -545,12 +550,13 @@ const TtsPlaygroundPage: React.FC = () => {
         </div>
 
         {isTldw && !hasAudio && (
-          <Alert
-            type="info"
-            showIcon
-            className="mb-4"
-            message={t("playground:tts.noProviderTitle", "No TTS provider detected on your server")}
-            description={
+          <StatePanel
+            state="setup_required"
+            title={t(
+              "playground:tts.noProviderTitle",
+              "No TTS provider detected on your server"
+            )}
+            message={
               <Trans
                 i18nKey="playground:tts.noProviderDescription"
                 defaults="Your tldw server doesn't have a TTS engine configured yet. <settingsLink>Open Speech Settings</settingsLink> to configure one, or switch to <strong>Browser</strong> TTS which works without any setup."
@@ -560,25 +566,8 @@ const TtsPlaygroundPage: React.FC = () => {
                 }}
               />
             }
-          />
-        )}
-
-        {isTldw && !hasAudio && (
-          <Alert
-            type="info"
-            showIcon
             className="mb-4"
-            message={t("playground:tts.noProviderTitle", "No TTS provider detected on your server")}
-            description={
-              <Trans
-                i18nKey="playground:tts.noProviderDescription"
-                defaults="Your tldw server doesn't have a TTS engine configured yet. <settingsLink>Open Speech Settings</settingsLink> to configure one, or switch to <strong>Browser</strong> TTS which works without any setup."
-                components={{
-                  settingsLink: <Link to="/settings/speech" />,
-                  strong: <strong />
-                }}
-              />
-            }
+            data-testid="tts-no-provider-recovery"
           />
         )}
 
@@ -679,7 +668,7 @@ const TtsPlaygroundPage: React.FC = () => {
                       style={{ minWidth: 160 }}
                       placeholder="Select voice"
                       className="focus-ring"
-                      options={elevenLabsData.voices.map((v: any) => ({
+                      options={elevenLabsData.voices.map((v: ElevenLabsVoice) => ({
                         label: v.name,
                         value: v.voice_id
                       }))}
@@ -699,7 +688,7 @@ const TtsPlaygroundPage: React.FC = () => {
                       style={{ minWidth: 160 }}
                       placeholder="Select model"
                       className="focus-ring"
-                      options={elevenLabsData.models.map((m: any) => ({
+                      options={elevenLabsData.models.map((m: ElevenLabsModel) => ({
                         label: m.name,
                         value: m.model_id
                       }))}
