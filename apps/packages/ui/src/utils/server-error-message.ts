@@ -41,6 +41,18 @@ export const sanitizeServerErrorMessage = (
     /[A-Za-z]:\\(?:[^\\\s]+\\)+[^\\\s)]+/g,
     "[redacted-path]"
   )
+  cleaned = cleaned.replace(
+    /\b(token|api[_-]?key|secret)\s*=\s*([^\s)]+)/gi,
+    "$1=[redacted-secret]"
+  )
+  cleaned = cleaned.replace(
+    /\bBearer\s+[A-Za-z0-9._~+/_=-]{6,}\b/gi,
+    "Bearer [redacted-secret]"
+  )
+  cleaned = cleaned.replace(
+    /\b(?:sk|rk|pk|api|token)[_-][A-Za-z0-9_-]{6,}\b/g,
+    "[redacted-secret]"
+  )
 
   if (cleaned.length > MAX_ERROR_LENGTH) {
     cleaned = `${cleaned.slice(0, MAX_ERROR_LENGTH - 3)}...`

@@ -28,6 +28,20 @@ describe("sanitizeServerErrorMessage", () => {
     expect(message).not.toContain("https://localhost:8000")
   })
 
+  it("redacts token-like secrets", () => {
+    const message = sanitizeServerErrorMessage(
+      "Request failed token=sk_secret_inline Authorization: Bearer sk-secret-inline api_key=api_secret_value",
+      "fallback message"
+    )
+
+    expect(message).toContain("token=[redacted-secret]")
+    expect(message).toContain("api_key=[redacted-secret]")
+    expect(message).toContain("Bearer [redacted-secret]")
+    expect(message).not.toContain("sk_secret_inline")
+    expect(message).not.toContain("sk-secret-inline")
+    expect(message).not.toContain("api_secret_value")
+  })
+
   it("uses fallback when error content is empty", () => {
     expect(sanitizeServerErrorMessage("", "fallback message")).toBe(
       "fallback message"
