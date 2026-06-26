@@ -9,8 +9,14 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MultiDatabaseRetriever
 from tldw_Server_API.app.core.RPG.rules.adapters import build_default_adapter_registry
+from tldw_Server_API.app.core.RPG.rules.lookup import RulesLookupService
+from tldw_Server_API.app.core.RPG.rules.retrieval import RulesRetrievalAdapter
+from tldw_Server_API.app.core.RPG.rules.source_validation import RPGRulesSourceValidator
 from tldw_Server_API.app.core.RPG.service import RPGService
 
 from ..base import BaseModule, ModuleConfig, create_tool_definition
@@ -194,20 +200,23 @@ class RPGModule(BaseModule):
             self._required_idempotency_key(args)
         else:
             self._validate_read_arguments(tool_name, args)
-        service, db = self._service_for_context(context)
+        service, closeables = self._service_for_context(
+            context,
+            include_rules_retrieval=tool_name in {_TOOL_RULES_LOOKUP, _TOOL_CONTEXT_BUILD},
+        )
         try:
             if tool_name == _TOOL_SESSIONS_GET:
                 return self._get_session(service, self._positive_int_arg(args, "session_id"))
             if tool_name == _TOOL_RULES_LOOKUP:
                 return _to_jsonable(
-                    service.lookup_rules(
+                    await service.lookup_rules(
                         session_id=self._positive_int_arg(args, "session_id"),
                         query=self._str_arg(args, "query", max_chars=_MAX_QUERY_CHARS),
                     )
                 )
             if tool_name == _TOOL_CONTEXT_BUILD:
                 return _to_jsonable(
-                    service.build_context(
+                    await service.build_context(
                         session_id=self._positive_int_arg(args, "session_id"),
                         query=self._optional_str_arg(args, "query", max_chars=_MAX_QUERY_CHARS),
                         max_chars=self._optional_bounded_int_arg(
@@ -253,7 +262,8 @@ class RPGModule(BaseModule):
                     )
                 )
         finally:
-            self._close_db(db)
+            for closeable in reversed(closeables):
+                self._close_db(closeable)
         raise ValueError(f"Unknown RPG tool: {tool_name}")
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
@@ -289,7 +299,12 @@ class RPGModule(BaseModule):
                     max_value=_MAX_CONTEXT_CHARS,
                 )
 
-    def _service_for_context(self, context: Any | None) -> tuple[RPGService, CharactersRAGDB]:
+    def _service_for_context(
+        self,
+        context: Any | None,
+        *,
+        include_rules_retrieval: bool = False,
+    ) -> tuple[RPGService, list[Any]]:
         if context is None or not str(getattr(context, "user_id", "") or "").strip():
             raise ValueError("RPG MCP tools require an authenticated user context")
         db_paths = getattr(context, "db_paths", None)
@@ -303,7 +318,41 @@ class RPGModule(BaseModule):
             db_path=str(db_paths["chacha"]),
             client_id=f"mcp_rpg_{self.config.name}",
         )
-        return RPGService(repo=RPGRepository.initialized(db), owner_user_id=owner_user_id), db
+        closeables: list[Any] = [db]
+        rules_source_validator = None
+        rules_lookup_service = None
+        media_path = str(db_paths.get("media") or "").strip() if include_rules_retrieval else ""
+        if media_path:
+            media_db = MediaDatabase(
+                db_path=media_path,
+                client_id=str(owner_user_id),
+            )
+            closeables.append(media_db)
+            collections_db = CollectionsDatabase.from_backend(owner_user_id, media_db.backend)
+            rules_source_validator = RPGRulesSourceValidator(
+                media_db=media_db,
+                collections_db=collections_db,
+            )
+            rag_retriever = MultiDatabaseRetriever(
+                {"media_db": media_path},
+                user_id=str(owner_user_id),
+                media_db=media_db,
+            )
+            rules_lookup_service = RulesLookupService(
+                retriever=RulesRetrievalAdapter(
+                    source_validator=rules_source_validator,
+                    rag_retriever=rag_retriever,
+                )
+            )
+        return (
+            RPGService(
+                repo=RPGRepository.initialized(db),
+                owner_user_id=owner_user_id,
+                rules_source_validator=rules_source_validator,
+                rules_lookup_service=rules_lookup_service,
+            ),
+            closeables,
+        )
 
     def _get_session(self, service: RPGService, session_id: int) -> dict[str, Any]:
         session = service.repo.get_session(owner_user_id=service.owner_user_id, session_id=session_id)
@@ -450,10 +499,14 @@ class RPGModule(BaseModule):
         return key
 
     @staticmethod
-    def _close_db(db: CharactersRAGDB) -> None:
+    def _close_db(db: Any) -> None:
         close_all = getattr(db, "close_all_connections", None)
         if callable(close_all):
             close_all()
+            return
+        close_connection = getattr(db, "close_connection", None)
+        if callable(close_connection):
+            close_connection()
             return
         close = getattr(db, "close", None)
         if callable(close):

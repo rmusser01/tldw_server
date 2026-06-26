@@ -60,11 +60,13 @@ class RPGService:
         owner_user_id: int,
         adapter_registry: RuleAdapterRegistry | None = None,
         rules_source_validator: RulesPackSourceValidator | None = None,
+        rules_lookup_service: RulesLookupService | None = None,
     ) -> None:
         self.repo = repo
         self.owner_user_id = owner_user_id
         self.adapter_registry = adapter_registry or build_default_adapter_registry()
         self.rules_source_validator = rules_source_validator
+        self.rules_lookup_service = rules_lookup_service or RulesLookupService()
 
     def create_campaign(
         self,
@@ -397,15 +399,24 @@ class RPGService:
             diagnostics=record.diagnostics_json,
         )
 
-    def lookup_rules(self, session_id: int, query: str) -> RuleLookupResult:
+    async def lookup_rules(
+        self,
+        session_id: int,
+        query: str,
+        mode: str = "lookup",
+        answer_options: Any | None = None,
+    ) -> RuleLookupResult:
         session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
-        return RulesLookupService().lookup(
+        return await self.rules_lookup_service.lookup(
+            owner_user_id=self.owner_user_id,
             adapter_key=session.adapter_key,
             query=query,
             linked_rules_pack_refs=session.active_rules_pack_refs,
+            mode=mode,  # type: ignore[arg-type]
+            answer_options=answer_options,
         )
 
-    def build_context(
+    async def build_context(
         self,
         session_id: int,
         query: str | None = None,
@@ -414,7 +425,7 @@ class RPGService:
         bounded_max_chars = min(max(int(max_chars), 1000), MAX_RPG_CONTEXT_CHARS)
         session = self.repo.get_session(owner_user_id=self.owner_user_id, session_id=session_id)
         snapshot = self.get_snapshot(session_id).snapshot
-        rules_results = self.lookup_rules(session_id, query).results if query and query.strip() else []
+        rules_results = (await self.lookup_rules(session_id, query, mode="lookup")).results if query and query.strip() else []
         return SessionContextBuilder(max_chars=bounded_max_chars).build(
             adapter_key=session.adapter_key,
             session_title=session.title,

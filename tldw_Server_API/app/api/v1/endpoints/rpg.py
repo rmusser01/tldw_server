@@ -8,7 +8,7 @@ from fastapi.encoders import jsonable_encoder
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user, get_media_db_path_for_rag
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
     TokenScopeGuard,
@@ -35,8 +35,11 @@ from tldw_Server_API.app.api.v1.schemas.rpg_schemas import (
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
+from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MultiDatabaseRetriever
 from tldw_Server_API.app.core.RPG.errors import RPGConflictError, RPGNotFoundError, RPGValidationError
-from tldw_Server_API.app.core.RPG.rules.refs import RulesPackSourceValidation
+from tldw_Server_API.app.core.RPG.rules.lookup import RulesLookupService
+from tldw_Server_API.app.core.RPG.rules.retrieval import RulesRetrievalAdapter
+from tldw_Server_API.app.core.RPG.rules.source_validation import RPGRulesSourceValidator
 from tldw_Server_API.app.core.RPG.service import RPGService
 
 router = APIRouter(prefix="/rpg", tags=["rpg"])
@@ -48,64 +51,6 @@ RPG_SESSIONS_READ = "rpg.sessions.read"
 RPG_SESSIONS_MANAGE = "rpg.sessions.manage"
 RPG_PROPOSALS_REVIEW = "rpg.proposals.review"
 MEDIA_READ = "media.read"
-_READY_COLLECTION_ITEM_STATUSES = {"completed", "skipped_existing"}
-
-
-class RPGRulesSourceValidator:
-    def __init__(self, media_db: Any, collections_db: CollectionsDatabase) -> None:
-        self.media_db = media_db
-        self.collections_db = collections_db
-
-    async def validate_media_item(self, owner_user_id: int, media_id: int) -> RulesPackSourceValidation:
-        media = self._readable_media_by_id(owner_user_id=owner_user_id, media_id=media_id)
-        if not media:
-            return RulesPackSourceValidation(
-                ref_id=f"media_item:{media_id}",
-                readable=False,
-                display_name=None,
-            )
-        return RulesPackSourceValidation(
-            ref_id=f"media_item:{media_id}",
-            readable=True,
-            display_name=_media_display_name(media),
-            ready_media_ids=[int(media_id)],
-        )
-
-    async def validate_media_collection(
-        self,
-        owner_user_id: int,
-        collection_id: int,
-    ) -> RulesPackSourceValidation:
-        try:
-            collection = self.collections_db.get_media_collection(collection_id)
-        except KeyError:
-            return RulesPackSourceValidation(
-                ref_id=f"media_collection:{collection_id}",
-                readable=False,
-                display_name=None,
-            )
-
-        ready_media_ids = [
-            int(item.media_id)
-            for item in collection.items
-            if item.media_id is not None
-            and item.status in _READY_COLLECTION_ITEM_STATUSES
-            and self._readable_media_by_id(owner_user_id=owner_user_id, media_id=int(item.media_id)) is not None
-        ]
-        return RulesPackSourceValidation(
-            ref_id=f"media_collection:{collection_id}",
-            readable=True,
-            display_name=collection.name,
-            ready_media_ids=ready_media_ids,
-        )
-
-    def _readable_media_by_id(self, *, owner_user_id: int, media_id: int) -> dict[str, Any] | None:
-        media = self.media_db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
-        if not media:
-            return None
-        if not _media_belongs_to_owner(media, owner_user_id=owner_user_id, media_db=self.media_db):
-            return None
-        return media
 
 
 def _read_dependencies(*scopes: str):
@@ -127,33 +72,6 @@ def _owner_user_id(current_user: User) -> int:
     return int(current_user.id_int)
 
 
-def _media_display_name(media: dict[str, Any]) -> str | None:
-    for key in ("title", "name", "filename", "url"):
-        value = str(media.get(key) or "").strip()
-        if value:
-            return value
-    return None
-
-
-def _media_belongs_to_owner(media: dict[str, Any], *, owner_user_id: int, media_db: Any) -> bool:
-    allowed_owner_ids = {str(owner_user_id)}
-    client_id = getattr(media_db, "client_id", None)
-    if client_id is not None:
-        allowed_owner_ids.add(str(client_id))
-
-    owner_value = media.get("owner_user_id")
-    if owner_value is not None:
-        owner_text = str(owner_value).strip()
-        return not owner_text or owner_text in allowed_owner_ids
-
-    client_value = media.get("client_id")
-    if client_value is not None:
-        client_text = str(client_value).strip()
-        return not client_text or client_text in allowed_owner_ids
-
-    return True
-
-
 def _service(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
@@ -167,10 +85,24 @@ def _rules_service(
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> RPGService:
+    owner_user_id = _owner_user_id(current_user)
+    validator = RPGRulesSourceValidator(media_db=media_db, collections_db=collections_db)
+    media_db_path = get_media_db_path_for_rag(media_db)
+    rag_retriever = MultiDatabaseRetriever(
+        {"media_db": media_db_path} if media_db_path else {},
+        user_id=str(owner_user_id),
+        media_db=media_db,
+    )
     return RPGService(
         repo=RPGRepository.initialized(db),
-        owner_user_id=_owner_user_id(current_user),
-        rules_source_validator=RPGRulesSourceValidator(media_db=media_db, collections_db=collections_db),
+        owner_user_id=owner_user_id,
+        rules_source_validator=validator,
+        rules_lookup_service=RulesLookupService(
+            retriever=RulesRetrievalAdapter(
+                source_validator=validator,
+                rag_retriever=rag_retriever,
+            )
+        ),
     )
 
 
@@ -296,14 +228,22 @@ def record_events(
     response_model=RPGRulesLookupResponse,
     dependencies=_read_dependencies(RPG_RULES_READ, MEDIA_READ),
 )
-def lookup_rules(
+async def lookup_rules(
     session_id: int,
     request: RPGRulesLookupRequest,
-    service: RPGService = Depends(_service),
+    service: RPGService = Depends(_rules_service),
 ) -> RPGRulesLookupResponse:
     try:
         return RPGRulesLookupResponse.model_validate(
-            jsonable_encoder(asdict(service.lookup_rules(session_id=session_id, query=request.query)))
+            jsonable_encoder(
+                asdict(
+                    await service.lookup_rules(
+                        session_id=session_id,
+                        query=request.query,
+                        mode=request.mode,
+                    )
+                )
+            )
         )
     except Exception as exc:
         raise _map_error(exc) from exc
@@ -386,18 +326,18 @@ async def replace_session_rules_pack_refs(
 @router.post(
     "/sessions/{session_id}/context",
     response_model=RPGContextResponse,
-    dependencies=_read_dependencies(RPG_SESSIONS_READ),
+    dependencies=_read_dependencies(RPG_SESSIONS_READ, MEDIA_READ),
 )
-def build_context(
+async def build_context(
     session_id: int,
     request: RPGContextBuildRequest,
-    service: RPGService = Depends(_service),
+    service: RPGService = Depends(_rules_service),
 ) -> RPGContextResponse:
     try:
         return RPGContextResponse.model_validate(
             jsonable_encoder(
                 asdict(
-                    service.build_context(
+                    await service.build_context(
                         session_id=session_id,
                         query=request.query,
                         max_chars=request.max_chars,

@@ -513,13 +513,16 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg
 **Files:**
 
 - Create: `tldw_Server_API/app/core/RPG/rules/retrieval.py`
+- Create: `tldw_Server_API/app/core/RPG/rules/source_validation.py`
 - Modify: `tldw_Server_API/app/core/RPG/rules/content_packs.py`
 - Modify: `tldw_Server_API/app/core/RPG/rules/lookup.py`
 - Modify: `tldw_Server_API/app/core/RPG/service.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/rpg_module.py`
 - Create: `tldw_Server_API/tests/RPG/test_rpg_rules_retrieval.py`
 - Modify: `tldw_Server_API/tests/RPG/test_rpg_rules_context.py`
+- Modify: `tldw_Server_API/tests/RPG/test_rpg_mcp_module.py`
 
-- [ ] **Step 1: Write failing lookup and retrieval tests**
+- [x] **Step 1: Write failing lookup and retrieval tests**
 
 Add retrieval tests:
 
@@ -547,7 +550,7 @@ source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg
 
 Confirm the new tests fail because retrieval-backed lookup is missing.
 
-- [ ] **Step 2: Extend lookup dataclasses**
+- [x] **Step 2: Extend lookup dataclasses**
 
 In `content_packs.py`, update or add serializable dataclasses:
 
@@ -587,7 +590,7 @@ class RuleLookupResult:
 
 Update bundled citation creation to map existing `RuleCitation` into `RuleLookupCitation` with `source_type="bundled_rules_citation"` and `source_id=None`.
 
-- [ ] **Step 3: Add retrieval protocols and concrete adapter**
+- [x] **Step 3: Add retrieval protocols and concrete adapter**
 
 Create:
 
@@ -615,7 +618,7 @@ Concrete adapter requirements:
 - Use `snippet_id` from the retriever when present; otherwise derive `f"media:{media_id}:chunk:{chunk_index}"`.
 - Truncate single snippet text to a conservative bound, such as 1,500 characters, before returning to lookup.
 
-- [ ] **Step 4: Update `RulesLookupService`**
+- [x] **Step 4: Update `RulesLookupService`**
 
 Constructor:
 
@@ -657,17 +660,31 @@ Behavior:
 - Validation/auth errors from unreadable refs propagate as domain errors.
 - Diagnostics include linked count, enabled count, ready media count, retrieval result count, bundled citation count, and skipped refs.
 
-- [ ] **Step 5: Update service async lookup path**
+- [x] **Step 5: Update service async lookup path**
 
 Change `RPGService.lookup_rules()` to `async def` and pass `owner_user_id`, `mode`, and answer options to `RulesLookupService`.
 
 Update REST and MCP call sites after this change. Temporary test fakes can call `await service.lookup_rules(session_id=1, query="advantage", mode="lookup")`.
 
-- [ ] **Step 6: Run task verification**
+- [x] **Step 6: Run task verification**
 
 ```bash
 source .venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_rules_retrieval.py tldw_Server_API/tests/RPG/test_rpg_rules_context.py tldw_Server_API/tests/RPG/test_rpg_service.py -v
 ```
+
+Task 4 verification completed 2026-06-25:
+
+- RED: focused retrieval/context pytest failed during collection because `rules.retrieval` and `RuleLookupCitation` were missing.
+- GREEN: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_rules_retrieval.py tldw_Server_API/tests/RPG/test_rpg_rules_context.py tldw_Server_API/tests/RPG/test_rpg_service.py -v` -> 35 passed, 82 existing warnings.
+- API async call-site check: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_api.py tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py -v` -> 27 passed, 76 existing warnings.
+- Bandit: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m bandit -r <Task 4 touched Python files> -f json -o /tmp/bandit_task12030_task4.json` -> 0 findings.
+
+Task 4 post-review hardening completed 2026-06-25:
+
+- Added shared source validation for REST/MCP, MCP retrieval wiring for attached rules refs, executor result scope filtering, diagnostics/log redaction, and lazy MCP media binding for rules lookup/context only.
+- RED/GREEN post-review checks covered out-of-scope documents, redacted warning logs, MCP attached-media lookup, and non-rules MCP tools avoiding media DB opens.
+- Final focused verification: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/RPG/test_rpg_rules_retrieval.py tldw_Server_API/tests/RPG/test_rpg_rules_context.py tldw_Server_API/tests/RPG/test_rpg_api.py tldw_Server_API/tests/RPG/test_rpg_mcp_module.py tldw_Server_API/tests/PrivilegeCatalog/test_endpoint_scope_catalog_sync.py -v` -> 64 passed, 176 existing warnings.
+- Bandit: `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/RPG tldw_Server_API/app/api/v1/endpoints/rpg.py tldw_Server_API/app/api/v1/schemas/rpg_schemas.py tldw_Server_API/app/core/MCP_unified/modules/implementations/rpg_module.py -f json -o /tmp/bandit_task12030_task4.json` -> 0 findings, 0 errors.
 
 ---
 

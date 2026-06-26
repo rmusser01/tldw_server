@@ -2,14 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import uuid
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.RPG_DB import RPGRepository
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
+from tldw_Server_API.app.core.MCP_unified.modules.implementations import rpg_module
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.rpg_module import RPGModule
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
+from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 from tldw_Server_API.app.core.RPG.service import RPGService
 
 
@@ -83,11 +87,68 @@ def _seed_session(chacha_path: str) -> int:
     return session.id
 
 
+def _seed_session_with_rules_pack(chacha_path: str, media_id: int) -> int:
+    repo = RPGRepository.initialized(CharactersRAGDB(chacha_path, "rpg-mcp-rules-seed"))
+    service = RPGService(repo=repo, owner_user_id=42)
+    campaign = service.create_campaign(
+        "MCP Rules Campaign",
+        None,
+        "fate",
+        idempotency_key="mcp-rules-campaign",
+    )
+    session = service.create_session(
+        campaign.id,
+        "MCP Rules Session",
+        adapter_key="fate",
+        idempotency_key="mcp-rules-session",
+    )
+    repo.replace_session_rules_pack_refs(
+        owner_user_id=42,
+        session_id=session.id,
+        expected_version=session.version,
+        rules_pack_refs=[
+            {
+                "ref_id": f"media_item:{media_id}",
+                "source_type": "media_item",
+                "source_id": media_id,
+                "display_name": "MCP Rules",
+                "enabled": True,
+                "metadata": {},
+            }
+        ],
+        idempotency_key="mcp-rules-pack-refs",
+        request_payload_hash="mcp-rules-pack-refs-hash",
+        source_type="mcp",
+    )
+    return session.id
+
+
+def _seed_media(media_path: str, *, title: str, content: str) -> int:
+    db = MediaDatabase(db_path=media_path, client_id="42")
+    try:
+        media_uuid = str(uuid.uuid4())
+        last_modified = db._get_current_utc_timestamp_str()
+        cursor = db.execute_query(
+            "INSERT INTO Media (title, type, content, author, content_hash, uuid, last_modified, client_id, owner_user_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (title, "document", content, "Test Author", f"hash:{media_uuid}", media_uuid, last_modified, "42", 42),
+            commit=True,
+        )
+        media_id = getattr(cursor, "lastrowid", None)
+        if media_id:
+            return int(media_id)
+        row = db.execute_query("SELECT id FROM Media WHERE uuid = ?", (media_uuid,)).fetchone()
+        return int(row["id"] if isinstance(row, dict) else row[0])
+    finally:
+        db.close_connection()
+
+
 def _context(
     tmp_path: Path,
     *,
     user_id: str | None = "42",
     allowed_tools: list[str] | None = None,
+    media_path: str | None = None,
 ) -> RequestContext:
     metadata: dict[str, Any] = {}
     if allowed_tools is not None:
@@ -97,8 +158,29 @@ def _context(
         user_id=user_id,
         client_id="unit",
         metadata=metadata,
-        db_paths={"chacha": _chacha_path(tmp_path)},
+        db_paths={"chacha": _chacha_path(tmp_path), **({"media": media_path} if media_path else {})},
     )
+
+
+class _FakeRagRetriever:
+    calls: list[dict[str, Any]] = []
+
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+    async def retrieve_from_plan(self, plan, **kwargs):
+        self.__class__.calls.append({"plan": plan, **kwargs})
+        media_id = int(kwargs["allowed_media_ids"][0])
+        return [
+            Document(
+                id=str(media_id),
+                content="MCP retrieved rules evidence",
+                metadata={"media_id": media_id, "title": "MCP Rules"},
+                source=DataSource.MEDIA_DB,
+                score=0.9,
+            )
+        ]
 
 
 def _protocol(tool_permissions: set[str]) -> MCPProtocol:
@@ -236,6 +318,49 @@ async def test_rpg_module_gets_session_snapshot_from_chacha_context(tmp_path: Pa
 
     assert result["session"]["id"] == session_id  # nosec B101
     assert result["snapshot"]["last_event_sequence"] == 0  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rpg_module_session_lookup_does_not_open_media_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chacha_path = _chacha_path(tmp_path)
+    session_id = _seed_session(chacha_path)
+
+    def fail_media_database(*args, **kwargs):
+        raise AssertionError("media db should not be opened for session metadata")
+
+    monkeypatch.setattr(rpg_module, "MediaDatabase", fail_media_database)
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    result = await module.execute_tool(
+        "rpg.sessions.get",
+        {"session_id": session_id},
+        context=_context(tmp_path, media_path=str(tmp_path / "unused-media.sqlite")),
+    )
+
+    assert result["session"]["id"] == session_id  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_rpg_module_rules_lookup_uses_attached_media_refs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    media_path = str(tmp_path / "rpg-mcp-media.sqlite")
+    media_id = _seed_media(media_path, title="MCP Rules", content="MCP rules source")
+    session_id = _seed_session_with_rules_pack(_chacha_path(tmp_path), media_id)
+    _FakeRagRetriever.calls = []
+    monkeypatch.setattr(rpg_module, "MultiDatabaseRetriever", _FakeRagRetriever, raising=False)
+    module = RPGModule(ModuleConfig(name="rpg"))
+
+    result = await module.execute_tool(
+        "rpg.rules.lookup",
+        {"session_id": session_id, "query": "stress"},
+        context=_context(tmp_path, media_path=media_path),
+    )
+
+    assert result["results"][0]["origin"] == "user_provided"  # nosec B101
+    assert result["results"][0]["text"] == "MCP retrieved rules evidence"  # nosec B101
+    assert _FakeRagRetriever.calls[0]["allowed_media_ids"] == [media_id]  # nosec B101
 
 
 @pytest.mark.asyncio

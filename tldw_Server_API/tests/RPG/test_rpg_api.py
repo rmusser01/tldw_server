@@ -121,6 +121,12 @@ def test_lookup_requires_rules_read_and_media_read():
     assert {rpg_endpoint.RPG_RULES_READ, rpg_endpoint.MEDIA_READ} <= permissions  # nosec B101
 
 
+def test_context_requires_session_read_and_media_read():
+    permissions = _route_permissions("POST", "/api/v1/rpg/sessions/{session_id}/context")
+
+    assert {rpg_endpoint.RPG_SESSIONS_READ, rpg_endpoint.MEDIA_READ} <= permissions  # nosec B101
+
+
 def test_non_rules_pack_routes_do_not_open_media_databases():
     calls = _route_dependency_calls("GET", "/api/v1/rpg/rules/adapters")
 

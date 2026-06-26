@@ -59,9 +59,20 @@ class SessionContextBuilder:
         if snapshot.unresolved_rulings:
             append_line(f"Open rulings: {len(snapshot.unresolved_rulings)}", "rulings")
 
-        if rules_results:
+        user_rules = [item for item in rules_results if item.origin == "user_provided" and item.text.strip()]
+        bundled_rules = [item for item in rules_results if item.origin == "bundled_citation"]
+        if user_rules:
+            evidence_open = append_line("Rules evidence:", "rules")
+            for item in user_rules:
+                citation = item.citation
+                snippet = item.text.strip()
+                line = f"- {citation.source_title} [{citation.snippet_id}]: {snippet}"
+                if not evidence_open or not append_line(line, "rules"):
+                    break
+
+        if bundled_rules:
             citations_open = append_line("Rules citations:", "rules")
-            for item in rules_results:
+            for item in bundled_rules:
                 citation = item.citation
                 if not citations_open or not append_line(f"- {citation.source_title}: {citation.source_url}", "rules"):
                     break

@@ -109,34 +109,49 @@ class RPGRulesPackRefsResponse(BaseModel):
 
 
 class RPGRuleCitationResponse(BaseModel):
-    adapter_key: str
+    source_type: str
+    source_id: int | None = None
     source_title: str
-    source_url: str
-    license: str
+    source_url: str | None
+    license: str | None
     license_url: str | None
-    attribution: str
+    attribution: str | None
     trust_level: str
     content_hash: str
     snippet_id: str
-    source_version: str
-    content_pack_version: str
+    adapter_key: str | None = None
+    source_version: str | None = None
+    content_pack_version: str | None = None
 
 
 class RPGRuleLookupItemResponse(BaseModel):
+    origin: Literal["user_provided", "bundled_citation"]
     text: str
     citation: RPGRuleCitationResponse
     score: float
 
 
 class RPGRulesLookupDiagnostics(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     bundled_policy: Literal["citations_only", "no_match"]
-    result_mode: Literal["citation_index"]
+    result_mode: str
     linked_rules_pack_count: int
+    enabled_rules_pack_count: int = 0
+    ready_media_item_count: int = 0
+    retrieval_result_count: int = 0
+    bundled_citation_count: int = 0
+    skipped_refs: list[dict[str, Any]] = Field(default_factory=list)
+    broad_fallback_used: bool = False
 
 
 class RPGRulesLookupResponse(BaseModel):
     query: str
+    mode: Literal["lookup", "answer"]
     results: list[RPGRuleLookupItemResponse]
+    answer: str | None = None
+    answer_status: str
+    answer_citation_ids: list[str] = Field(default_factory=list)
     diagnostics: RPGRulesLookupDiagnostics
 
 
