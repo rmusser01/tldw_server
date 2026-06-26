@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import ipaddress
+import math
 import os
 import socket
 import threading
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -32,6 +34,16 @@ _DNS_RESOLVER_MAX_OUTSTANDING_DEFAULT = 64
 _DNS_RESOLVER_SLOT_WAIT_SECONDS_DEFAULT = 0.05
 
 
+def _log_invalid_dns_config(name: str, raw: object, default: int | float, reason: str) -> None:
+    logger.bind(
+        env_var=name,
+        raw_value=str(raw),
+        default_value=default,
+        reason=reason,
+        event="invalid_egress_dns_config",
+    ).warning("Invalid egress DNS configuration; using default")
+
+
 def _positive_int_env(name: str, default: int) -> int:
     raw = os.getenv(name)
     if raw is None or str(raw).strip() == "":
@@ -39,10 +51,10 @@ def _positive_int_env(name: str, default: int) -> int:
     try:
         value = int(str(raw).strip())
     except (TypeError, ValueError):
-        logger.warning("Invalid {} value {!r}; using {}", name, raw, default)
+        _log_invalid_dns_config(name, raw, default, "invalid_integer")
         return default
     if value < 1:
-        logger.warning("Invalid {} value {}; using {}", name, value, default)
+        _log_invalid_dns_config(name, raw, default, "not_positive")
         return default
     return value
 
@@ -54,10 +66,10 @@ def _nonnegative_float_env(name: str, default: float) -> float:
     try:
         value = float(str(raw).strip())
     except (TypeError, ValueError):
-        logger.warning("Invalid {} value {!r}; using {}", name, raw, default)
+        _log_invalid_dns_config(name, raw, default, "invalid_float")
         return default
-    if value < 0:
-        logger.warning("Invalid {} value {}; using {}", name, value, default)
+    if not math.isfinite(value) or value < 0:
+        _log_invalid_dns_config(name, raw, default, "not_finite_or_negative")
         return default
     return value
 
@@ -144,7 +156,7 @@ def _host_matches_allowlist(host: str, allowlist: Sequence[str]) -> bool:
 
 
 def _dns_slot_wait_seconds(timeout_s: float) -> float:
-    if timeout_s <= 0:
+    if not math.isfinite(timeout_s) or timeout_s <= 0:
         return 0.0
     configured = _nonnegative_float_env(
         DNS_RESOLVER_SLOT_WAIT_SECONDS_ENV,
@@ -157,15 +169,28 @@ def _release_dns_resolver_slot(host: str, reason: str) -> None:
     try:
         _DNS_RESOLVER_SLOTS.release()
     except ValueError as exc:
-        logger.debug(
-            "DNS resolver slot release failed for host {} after {}: {}",
-            host,
-            reason,
-            type(exc).__name__,
-        )
+        logger.bind(
+            host=host,
+            reason=reason,
+            exception_type=type(exc).__name__,
+            event="dns_resolver_slot_release_failed",
+        ).debug("DNS resolver slot release failed")
+
+
+def _remaining_dns_budget(start_time: float, timeout_s: float) -> float:
+    return max(0.0, timeout_s - (time.monotonic() - start_time))
 
 
 def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
+    if not math.isfinite(timeout_s) or timeout_s <= 0:
+        logger.bind(
+            host=host,
+            timeout_s=timeout_s,
+            event="dns_resolver_invalid_timeout",
+        ).warning("Invalid DNS resolver timeout; failing closed")
+        return []
+
+    start_time = time.monotonic()
     slot_wait_s = _dns_slot_wait_seconds(timeout_s)
     acquired = (
         _DNS_RESOLVER_SLOTS.acquire(blocking=False)
@@ -173,11 +198,24 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
         else _DNS_RESOLVER_SLOTS.acquire(timeout=slot_wait_s)
     )
     if not acquired:
-        logger.warning(
-            "DNS resolver slots exhausted for host {}; failing closed after {:.3f}s wait",
-            host,
-            slot_wait_s,
-        )
+        logger.bind(
+            host=host,
+            slot_wait_s=slot_wait_s,
+            elapsed_s=time.monotonic() - start_time,
+            timeout_s=timeout_s,
+            event="dns_resolver_slots_exhausted",
+        ).warning("DNS resolver slots exhausted; failing closed")
+        return []
+
+    remaining_s = _remaining_dns_budget(start_time, timeout_s)
+    if remaining_s <= 0:
+        _release_dns_resolver_slot(host, "timeout budget exhausted before worker start")
+        logger.bind(
+            host=host,
+            elapsed_s=time.monotonic() - start_time,
+            timeout_s=timeout_s,
+            event="dns_resolver_timeout_budget_exhausted",
+        ).warning("DNS resolver timeout budget exhausted before worker start; failing closed")
         return []
 
     result: list[list[tuple]] = []
@@ -203,27 +241,38 @@ def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
         thread.start()
     except RuntimeError as exc:
         _release_dns_resolver_slot(host, "thread start failure")
-        logger.opt(exception=exc).warning(
-            "DNS resolver worker could not start for host {}; failing closed",
-            host,
-        )
+        logger.bind(
+            host=host,
+            exception_type=type(exc).__name__,
+            event="dns_resolver_worker_start_failed",
+        ).opt(exception=exc).warning("DNS resolver worker could not start; failing closed")
         return []
-    thread.join(timeout_s)
+
+    remaining_s = _remaining_dns_budget(start_time, timeout_s)
+    if remaining_s <= 0:
+        logger.bind(
+            host=host,
+            elapsed_s=time.monotonic() - start_time,
+            timeout_s=timeout_s,
+            event="dns_resolver_timeout",
+        ).warning("DNS resolver timed out before waiting for worker; failing closed")
+        return []
+    thread.join(remaining_s)
     if thread.is_alive():
-        logger.warning(
-            "DNS resolver timed out for host {} after {:.3f}s; failing closed",
-            host,
-            timeout_s,
-        )
+        logger.bind(
+            host=host,
+            elapsed_s=time.monotonic() - start_time,
+            timeout_s=timeout_s,
+            event="dns_resolver_timeout",
+        ).warning("DNS resolver timed out; failing closed")
         return []
     if error:
         exc = error[0]
-        logger.debug(
-            "DNS resolver failed for host {} with {}: {}; failing closed",
-            host,
-            type(exc).__name__,
-            exc,
-        )
+        logger.bind(
+            host=host,
+            exception_type=type(exc).__name__,
+            event="dns_resolver_error",
+        ).debug("DNS resolver failed; failing closed")
         return []
     return result[0] if result else []
 

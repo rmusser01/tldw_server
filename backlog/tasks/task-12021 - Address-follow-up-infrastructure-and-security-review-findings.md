@@ -26,7 +26,7 @@ modified_files:
 - tldw_Server_API/tests/Infrastructure/test_redis_factory.py
 - tldw_Server_API/tests/Infrastructure/test_redis_factory_metrics.py
 - tldw_Server_API/tests/Embeddings/test_backpressure_and_quotas.py
-updated_date: 2026-06-26 22:22
+updated_date: 2026-06-26 22:33
 ---
 
 ## Description
@@ -93,12 +93,25 @@ Latest verification:
 - `python -m bandit -r tldw_Server_API/app/api/v1/API_Deps/backpressure.py tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py -f json -o /tmp/bandit_task_12021_all_pr_issues.json` -> 0 errors, 0 findings.
 
 Remaining external state at start of this pass: GitHub full-suite checks had many pending shards; no local code change was made for pending-only checks. CodeRabbit docstring coverage warning appears global/non-actionable for this narrow PR. PR must remain draft until the human-authored change summary gate is satisfied.
+Reopened again after Qodo posted new egress DNS comments on commit 0791e67cfa: structure DNS warning logs with bound fields, keep total DNS timeout within timeout_s when waiting for resolver slots, and reject NaN/inf slot-wait configuration.
+Latest egress DNS PR issue pass:
+- Replaced remaining DNS warning/debug log calls in egress resolver helpers with bound structured Loguru context for config validation, slot exhaustion, timeout budget exhaustion, timeouts, worker-start failure, slot release failure, and resolver errors.
+- Rejected non-finite DNS timeout and slot-wait values so NaN/inf configuration cannot bypass timeout budgeting.
+- Bounded total DNS resolution wall-clock budget by subtracting resolver-slot wait/elapsed time before joining the resolver worker.
+- Added/updated egress regressions for structured DNS log context, NaN slot-wait fallback, and slot-wait-aware join timeout budgeting.
+
+Latest verification after these changes:
+- `python -m pytest tldw_Server_API/tests/Infrastructure/test_distributed_lock.py tldw_Server_API/tests/Embeddings/test_backpressure_and_quotas.py tldw_Server_API/tests/Security/test_egress.py tldw_Server_API/tests/Infrastructure/test_redis_factory.py tldw_Server_API/tests/Infrastructure/test_redis_factory_metrics.py tldw_Server_API/tests/test_minimal_deploy.py tldw_Server_API/tests/Resource_Governance/test_rg_fail_modes_across_categories.py -q` -> 65 passed.
+- `python -m ruff check tldw_Server_API/app/core/Security/egress.py tldw_Server_API/tests/Security/test_egress.py` -> passed.
+- `python -m py_compile tldw_Server_API/app/core/Security/egress.py` -> passed.
+- `git diff --check -- tldw_Server_API/app/core/Security/egress.py tldw_Server_API/tests/Security/test_egress.py backlog/tasks/task-12021\ -\ Address-follow-up-infrastructure-and-security-review-findings.md` -> passed.
+- `python -m bandit -r tldw_Server_API/app/core/Security/egress.py -f json -o /tmp/bandit_task_12021_egress_final.json` -> 0 errors, 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Created a clean PR branch from origin/dev, ported the TASK-12021 review fixes, addressed the latest PR review comments, and completed the follow-up all-issues pass. The branch keeps file locks from unlinking active successors, removes now-unused FileLock metadata writes, verifies the existing clean-base migration-lock body-exception behavior, defaults Redis helper fallbacks to fail-closed behavior unless explicitly enabled, makes egress DNS saturation observable/configurable, fails closed for embeddings and ingest tenant quota Redis outages with structured contextual warning logs, and updates Redis factory docs/tests to match the fallback contract without brittle exact-snippet assertions. Focused tests, compile, diff hygiene, and Bandit all passed in the clean worktree.
+Created a clean PR branch from origin/dev, ported the TASK-12021 review fixes, and addressed the latest PR review comments through the egress DNS follow-up pass. The branch keeps file locks from unlinking active successors, verifies clean-base migration-lock body-exception behavior, defaults Redis helper fallbacks to fail-closed behavior unless explicitly enabled, fails closed for embeddings and ingest tenant quota Redis outages with structured contextual warning logs, updates Redis factory docs/tests to match the fallback contract without brittle exact-snippet assertions, and hardens egress DNS handling with structured logs, finite config validation, and timeout budgeting that accounts for resolver-slot wait time. Focused tests, Ruff, compile, diff hygiene, and Bandit passed in the clean worktree.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
