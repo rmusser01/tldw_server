@@ -16,6 +16,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useDataTablesStore } from "@/store/data-tables"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { DataTableSource, DataTableSourceType } from "@/types/data-tables"
+import { StatePanel } from "@/components/ui/state"
 
 const DOCUMENT_MEDIA_TYPES = new Set([
   "document",
@@ -200,6 +201,37 @@ export const SourceSelector: React.FC = () => {
 
   const availableItems =
     activeSourceType === "rag_query" ? [] : sourcesQuery.data ?? []
+  const sourcesError =
+    activeSourceType !== "rag_query" && sourcesQuery.isError
+      ? sourcesQuery.error instanceof Error
+        ? sourcesQuery.error.message
+        : t("dataTables:sourceLoadErrorFallback", "Failed to load sources")
+      : null
+  const activeSourceTypeLabel =
+    activeSourceType === "chat"
+      ? t("dataTables:sourceTypes.chat", "Chats")
+      : t("dataTables:sourceTypes.document", "Documents")
+  const sourceDiagnostics = useMemo(() => {
+    if (!sourcesError) return []
+    return [
+      {
+        label: t("dataTables:sourceLoadErrorTypeLabel", "Source type"),
+        value: activeSourceTypeLabel
+      },
+      ...(sourceSearchQuery.trim()
+        ? [
+            {
+              label: t("dataTables:sourceLoadErrorSearchLabel", "Search"),
+              value: sourceSearchQuery.trim()
+            }
+          ]
+        : []),
+      {
+        label: t("dataTables:sourceLoadErrorDetailsLabel", "Details"),
+        value: sourcesError
+      }
+    ]
+  }, [activeSourceTypeLabel, sourceSearchQuery, sourcesError, t])
   const loading =
     activeSourceType !== "rag_query" &&
     (sourcesQuery.isLoading || sourcesQuery.isFetching)
@@ -293,6 +325,27 @@ export const SourceSelector: React.FC = () => {
             <div className="flex justify-center py-8">
               <Spin />
             </div>
+          ) : sourcesError ? (
+            <StatePanel
+              state="unavailable"
+              title={t(
+                "dataTables:sourceLoadErrorTitle",
+                "Data sources could not load"
+              )}
+              message={t(
+                "dataTables:sourceLoadErrorBody",
+                "Try again after checking the server connection. Your selected sources are preserved."
+              )}
+              diagnostics={sourceDiagnostics}
+              primaryAction={{
+                label: t("common:tryAgain", "Try again"),
+                onClick: () => {
+                  void sourcesQuery.refetch()
+                },
+                loading
+              }}
+              data-testid="data-tables-source-load-recovery"
+            />
           ) : availableItems.length === 0 ? (
             <Empty
               description={t(
