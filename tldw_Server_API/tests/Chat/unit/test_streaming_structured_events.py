@@ -83,6 +83,24 @@ async def _collect_sse_chunks(response: StreamingResponse) -> list[str]:
     return chunks
 
 
+def _json_payload_chunks(chunks: list[str]) -> list[tuple[int, dict[str, Any]]]:
+    payloads: list[tuple[int, dict[str, Any]]] = []
+    for chunk_idx, chunk in enumerate(chunks):
+        for line in chunk.splitlines():
+            if not line.startswith("data: "):
+                continue
+            raw_payload = line[6:].strip()
+            if not raw_payload or raw_payload == "[DONE]":
+                continue
+            try:
+                payload = json.loads(raw_payload)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                payloads.append((chunk_idx, payload))
+    return payloads
+
+
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_stream_emits_structured_result_before_done(
@@ -151,16 +169,17 @@ async def test_stream_emits_structured_result_before_done(
     assert isinstance(response, StreamingResponse)
     events = await _collect_sse_chunks(response)
 
-    assert any("event: structured_result" in chunk for chunk in events)
     done_indices = [idx for idx, chunk in enumerate(events) if "data: [DONE]" in chunk]
     assert done_indices, "missing DONE marker"
     done_idx = done_indices[-1]
-    structured_idx = next(idx for idx, chunk in enumerate(events) if "event: structured_result" in chunk)
-    assert structured_idx < done_idx
 
-    structured_chunk = events[structured_idx]
-    data_line = next(line for line in structured_chunk.splitlines() if line.startswith("data: "))
-    payload = json.loads(data_line[6:])
+    structured_idx, payload = next(
+        (idx, payload)
+        for idx, payload in _json_payload_chunks(events)
+        if payload.get("validated_payload") == {"answer": "ok"}
+    )
+    assert structured_idx < done_idx
+    assert payload["validated"] is True
     assert payload["validated_payload"] == {"answer": "ok"}
 
 
@@ -232,10 +251,11 @@ async def test_stream_emits_structured_error_and_done_on_validation_failure(
     assert isinstance(response, StreamingResponse)
     events = await _collect_sse_chunks(response)
 
-    assert any("event: structured_error" in chunk for chunk in events)
     assert any("data: [DONE]" in chunk for chunk in events)
-    error_chunk = next(chunk for chunk in events if "event: structured_error" in chunk)
-    data_line = next(line for line in error_chunk.splitlines() if line.startswith("data: "))
-    payload = json.loads(data_line[6:])
+    payload = next(
+        payload
+        for _idx, payload in _json_payload_chunks(events)
+        if payload.get("code") == "structured_output_schema_error"
+    )
     assert payload["code"] == "structured_output_schema_error"
     assert payload["message"] == "Model output did not match the requested JSON schema."

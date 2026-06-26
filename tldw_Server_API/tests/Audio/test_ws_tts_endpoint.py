@@ -93,7 +93,7 @@ async def test_websocket_tts_records_underrun(monkeypatch: pytest.MonkeyPatch):
 
     class QueueStub:
         def __init__(self, *_args, **_kwargs):
-            self.items = []
+            self.items = [b"stale"]
             self.first_full = True
 
         def put_nowait(self, item):

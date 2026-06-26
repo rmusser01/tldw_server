@@ -362,7 +362,7 @@ async def _handle_collecting_phase(
                 evidence_notes.append(dict(note))
 
     for focus_area in plan.focus_areas:
-        halted = _halt_for_control_before_phase(db=db, session_id=session.id)
+        halted = _halt_for_cancel_during_phase(db=db, session_id=session.id)
         if halted is not None:
             return halted
         _update_runtime_usage(usage=usage, started_at=started_at)
@@ -425,7 +425,7 @@ async def _handle_collecting_phase(
             if gap not in gap_set:
                 gap_set.add(gap)
                 remaining_gaps.append(gap)
-        halted = _halt_for_control_before_phase(db=db, session_id=session.id)
+        halted = _halt_for_cancel_during_phase(db=db, session_id=session.id)
         if halted is not None:
             return halted
 
@@ -947,6 +947,15 @@ def _halt_for_control_before_phase(*, db: ResearchSessionsDB, session_id: str) -
             "checkpoint_id": updated.latest_checkpoint_id,
             "artifacts_written": 0,
         }
+    return None
+
+
+def _halt_for_cancel_during_phase(*, db: ResearchSessionsDB, session_id: str) -> dict[str, Any] | None:
+    session = db.get_session(session_id)
+    if session is None:
+        raise KeyError(session_id)
+    if session.control_state == "cancel_requested":
+        return _cancel_session(db=db, session_id=session_id)
     return None
 
 

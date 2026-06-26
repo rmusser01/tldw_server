@@ -1336,7 +1336,7 @@ async def test_audio_chat_ws_records_metrics(monkeypatch: pytest.MonkeyPatch) ->
         """Queue stub that simulates initial overflow and then enqueues items."""
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG002
-            self.items = []
+            self.items = [b"stale"]
             self.first_full = True
 
         def put_nowait(self, item: Any) -> None:
