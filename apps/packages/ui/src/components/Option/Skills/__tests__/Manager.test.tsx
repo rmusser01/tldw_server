@@ -285,7 +285,8 @@ describe("SkillsManager imports", () => {
     )
     const diagnostics = within(alert).getByLabelText("Diagnostics")
     expect(diagnostics).toHaveTextContent("GET")
-    expect(diagnostics).toHaveTextContent("/api/v1/skills")
+    expect(diagnostics).toHaveTextContent("[server-endpoint]")
+    expect(diagnostics).not.toHaveTextContent("/api/v1/skills")
     expect(diagnostics).toHaveTextContent("503")
     expect(diagnostics).toHaveTextContent("backend down")
     expect(screen.queryByTestId("skills-empty-state")).not.toBeInTheDocument()
@@ -1158,6 +1159,42 @@ describe("SkillsManager imports", () => {
     await waitFor(() => {
       expect(tldwClientMock.seedSkills).toHaveBeenCalledWith({ overwrite: true })
     })
+  })
+
+  it("sanitizes skill action failure notifications", async () => {
+    tldwClientMock.seedSkills.mockRejectedValueOnce(
+      new Error(
+        "Request failed: POST /api/v1/skills/seed?token=sk_live_secret from /Users/alice/.tldw with Bearer token_secret_123"
+      )
+    )
+
+    renderManager()
+
+    await waitFor(() => {
+      expect(tldwClientMock.listSkills).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Seed Built-ins" }))
+    fireEvent.click(await screen.findByText("Seed Missing Only"))
+
+    await waitFor(() => {
+      expect(notificationMock.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Failed to seed built-in skills",
+          description: expect.stringContaining("[server-endpoint]")
+        })
+      )
+    })
+
+    const payload = notificationMock.error.mock.calls.at(-1)?.[0] as {
+      description?: string
+    }
+    expect(payload.description).toContain("[redacted-path]")
+    expect(payload.description).toContain("Bearer [redacted-secret]")
+    expect(payload.description).not.toContain("/api/v1/skills")
+    expect(payload.description).not.toContain("sk_live_secret")
+    expect(payload.description).not.toContain("/Users/alice")
+    expect(payload.description).not.toContain("token_secret_123")
   })
 
   it("offers test-run and copy-invocation actions after creating a skill", async () => {

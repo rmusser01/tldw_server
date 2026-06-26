@@ -30,7 +30,7 @@ export const sanitizeServerErrorMessage = (
     /\b(GET|POST|PUT|PATCH|DELETE)\s+\/api\/v1\/[^\s)]+/gi,
     "$1 [server-endpoint]"
   )
-  cleaned = cleaned.replace(/\b\/api\/v1\/[^\s)]+/gi, "[server-endpoint]")
+  cleaned = cleaned.replace(/\/api\/v1\/[^\s)]+/gi, "[server-endpoint]")
   cleaned = cleaned.replace(/\bhttps?:\/\/[^\s)]+/gi, "[server-url]")
 
   cleaned = cleaned.replace(

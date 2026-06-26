@@ -120,13 +120,16 @@ def _create_automation_definition(
 
 
 def _find_scheduled_tasks_router_spec(specs: list[RouterSpec]) -> RouterSpec:
+    """Return the scheduled-tasks router spec from a router group."""
     for spec in specs:
         if spec.name == "scheduled_tasks_control_plane":
             return spec
     raise AssertionError("scheduled_tasks_control_plane router spec is missing")
 
 
+@pytest.mark.unit
 def test_scheduled_tasks_router_groups_expose_control_plane_route() -> None:
+    """Verify router groups expose the scheduled-tasks control-plane route."""
     minimal_spec = _find_scheduled_tasks_router_spec(list(iter_minimal_optional_router_specs()))
     content_spec = _find_scheduled_tasks_router_spec(list(iter_content_router_specs()))
 

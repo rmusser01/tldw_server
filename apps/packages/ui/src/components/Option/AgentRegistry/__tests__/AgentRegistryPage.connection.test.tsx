@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -501,13 +501,16 @@ describe("AgentRegistryPage connection config", () => {
     const recovery = screen.getByTestId("agent-registry-execution-health-recovery")
     expect(recovery).toHaveAttribute("data-ds-component", "RecoveryCallout")
     expect(screen.getByText("Execution health summary unavailable")).toBeInTheDocument()
-    expect(screen.getByText("GET")).toBeInTheDocument()
-    expect(
-      screen.getByText("/api/v1/admin/acp/execution-health/summary?range_days=30")
-    ).toBeInTheDocument()
-    expect(screen.getByText("http://127.0.0.1:8000")).toBeInTheDocument()
-    expect(screen.getByText("403")).toBeInTheDocument()
-    expect(screen.getByText("Admin scope required")).toBeInTheDocument()
+    const diagnostics = within(recovery).getByLabelText("Diagnostics")
+    expect(diagnostics).toHaveTextContent("GET")
+    expect(diagnostics).toHaveTextContent("[server-endpoint]")
+    expect(diagnostics).toHaveTextContent("[server-url]")
+    expect(diagnostics).toHaveTextContent("403")
+    expect(diagnostics).toHaveTextContent("Admin scope required")
+    expect(diagnostics).not.toHaveTextContent(
+      "/api/v1/admin/acp/execution-health/summary?range_days=30"
+    )
+    expect(diagnostics).not.toHaveTextContent("http://127.0.0.1:8000")
     expect(screen.getByText("Runner Binary")).toBeInTheDocument()
   })
 
@@ -524,11 +527,14 @@ describe("AgentRegistryPage connection config", () => {
     const recovery = screen.getByTestId("agent-registry-health-recovery")
     expect(recovery).toHaveAttribute("data-ds-component", "RecoveryCallout")
     expect(screen.getByText("ACP health is unavailable")).toBeInTheDocument()
-    expect(screen.getByText("GET")).toBeInTheDocument()
-    expect(screen.getByText("/api/v1/acp/health")).toBeInTheDocument()
-    expect(screen.getByText("http://127.0.0.1:8000")).toBeInTheDocument()
-    expect(screen.getByText("503")).toBeInTheDocument()
-    expect(screen.getByText("ACP runner disabled")).toBeInTheDocument()
+    const diagnostics = within(recovery).getByLabelText("Diagnostics")
+    expect(diagnostics).toHaveTextContent("GET")
+    expect(diagnostics).toHaveTextContent("[server-endpoint]")
+    expect(diagnostics).toHaveTextContent("[server-url]")
+    expect(diagnostics).toHaveTextContent("503")
+    expect(diagnostics).toHaveTextContent("ACP runner disabled")
+    expect(diagnostics).not.toHaveTextContent("/api/v1/acp/health")
+    expect(diagnostics).not.toHaveTextContent("http://127.0.0.1:8000")
   })
 
   it("renders retryable shared recovery when the agent registry cannot load", async () => {
@@ -548,11 +554,14 @@ describe("AgentRegistryPage connection config", () => {
     expect(
       screen.getByText("The connected server does not advertise ACP agent registry.")
     ).toBeInTheDocument()
-    expect(screen.getByText("GET")).toBeInTheDocument()
-    expect(screen.getByText("/api/v1/acp/agents")).toBeInTheDocument()
-    expect(screen.getByText("http://127.0.0.1:8000")).toBeInTheDocument()
-    expect(screen.getByText("404")).toBeInTheDocument()
-    expect(screen.getByText("Not Found")).toBeInTheDocument()
+    const diagnostics = within(recovery).getByLabelText("Diagnostics")
+    expect(diagnostics).toHaveTextContent("GET")
+    expect(diagnostics).toHaveTextContent("[server-endpoint]")
+    expect(diagnostics).toHaveTextContent("[server-url]")
+    expect(diagnostics).toHaveTextContent("404")
+    expect(diagnostics).toHaveTextContent("Not Found")
+    expect(diagnostics).not.toHaveTextContent("/api/v1/acp/agents")
+    expect(diagnostics).not.toHaveTextContent("http://127.0.0.1:8000")
 
     await user.click(screen.getByRole("button", { name: "Try again" }))
 

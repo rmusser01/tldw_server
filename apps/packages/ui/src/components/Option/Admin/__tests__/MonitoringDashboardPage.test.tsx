@@ -369,7 +369,8 @@ describe("MonitoringDashboardPage", () => {
 
     const diagnostics = within(callout).getByLabelText("Diagnostics")
     expect(diagnostics).toHaveTextContent("GET")
-    expect(diagnostics).toHaveTextContent(
+    expect(diagnostics).toHaveTextContent("[server-endpoint]")
+    expect(diagnostics).not.toHaveTextContent(
       "/api/v1/sandbox/admin/runtime-diagnostics"
     )
     expect(diagnostics).toHaveTextContent("403")

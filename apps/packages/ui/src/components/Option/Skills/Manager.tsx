@@ -46,6 +46,7 @@ import type {
   SkillResponse,
   SkillsListResponse
 } from "@/types/skill"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 const DEFAULT_PAGE_SIZE = 10
 const SKILLS_SEARCH_DEBOUNCE_MS = 300
@@ -127,13 +128,8 @@ const getSeededSkillNames = (result: SeedSkillsResult | undefined): string[] => 
 }
 
 const getErrorDescription = (error: unknown): string | undefined => {
-  if (error instanceof Error && error.message) return error.message
-  if (typeof error === "string" && error.trim()) return error
-  if (error && typeof error === "object" && "message" in error) {
-    const message = (error as { message?: unknown }).message
-    return typeof message === "string" && message.trim() ? message : undefined
-  }
-  return undefined
+  if (!error) return undefined
+  return sanitizeServerErrorMessage(error, "") || undefined
 }
 
 const buildSkillInvocation = (skillName: string) => `/skill ${skillName}`

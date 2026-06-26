@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.main import app
@@ -59,7 +60,9 @@ def test_user_profile_effective_config(auth_headers) -> None:
     assert not payload.get("section_errors", {}).get("effective_config")
 
 
+@pytest.mark.integration
 def test_user_profile_preferences_section_returns_success(auth_headers) -> None:
+    """Verify the preferences section loads without section-level errors."""
     with TestClient(app) as client:
         resp = client.get(
             "/api/v1/users/me/profile",

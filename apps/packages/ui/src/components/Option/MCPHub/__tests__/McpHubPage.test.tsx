@@ -135,11 +135,13 @@ describe("McpHubPage", () => {
         "The connected server does not advertise MCP Hub management."
       )
     ).toBeTruthy()
-    expect(
-      within(recovery).getByText("/api/v1/mcp/hub/tool-registry/summary")
-    ).toBeTruthy()
-    expect(within(recovery).getByText("404")).toBeTruthy()
-    expect(within(recovery).getByText("Request failed: 404")).toBeTruthy()
+    const diagnostics = within(recovery).getByLabelText("Diagnostics")
+    expect(diagnostics).toHaveTextContent("[server-endpoint]")
+    expect(diagnostics).toHaveTextContent("404")
+    expect(diagnostics).toHaveTextContent("Request failed: 404")
+    expect(diagnostics).not.toHaveTextContent(
+      "/api/v1/mcp/hub/tool-registry/summary"
+    )
 
     await user.click(
       within(recovery).getByRole("button", { name: "Try again" })

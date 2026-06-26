@@ -6,6 +6,7 @@ import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { ProviderIcons } from '@/components/Common/ProviderIcon'
 import { getProviderDisplayName } from '@/utils/provider-registry'
 import { RecoveryCallout, buildCapabilityState } from '@/components/ui/state'
+import { sanitizeServerErrorMessage } from '@/utils/server-error-message'
 
 type ProviderModel = {
   id: string
@@ -16,9 +17,6 @@ type ProviderModel = {
 type ProviderMap = Record<string, ProviderModel[]>
 
 const MODELS_METADATA_PATH = '/api/v1/llm/models/metadata'
-const SECRET_VALUE_PATTERN =
-  /\b(api[_-]?key|authorization|bearer|token|secret|password)(\s*[:=]\s*)([^\s,;]+)/gi
-const BEARER_VALUE_PATTERN = /\b(Bearer\s+)([A-Za-z0-9._~+/-]+)/g
 
 const isAbortLikeError = (error: unknown): boolean => {
   if (!error || typeof error !== "object") return false
@@ -37,22 +35,17 @@ const isAbortLikeError = (error: unknown): boolean => {
   )
 }
 
-const redactDiagnosticMessage = (value: string): string =>
-  value
-    .replace(BEARER_VALUE_PATTERN, '$1[redacted]')
-    .replace(SECRET_VALUE_PATTERN, '$1$2[redacted]')
-
 const getModelLoadErrorMessage = (error: unknown): string | null => {
   if (error instanceof Error && error.message.trim()) {
-    return redactDiagnosticMessage(error.message)
+    return sanitizeServerErrorMessage(error, error.message)
   }
   if (typeof error === "string" && error.trim()) {
-    return redactDiagnosticMessage(error)
+    return sanitizeServerErrorMessage(error, error)
   }
   if (error && typeof error === "object" && "message" in error) {
     const message = (error as { message?: unknown }).message
     if (typeof message === "string" && message.trim()) {
-      return redactDiagnosticMessage(message)
+      return sanitizeServerErrorMessage(message, message)
     }
   }
   return null

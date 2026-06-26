@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
@@ -84,11 +84,14 @@ describe("ACPPlaygroundRecovery", () => {
         "The connected server does not advertise ACP session orchestration."
       )
     ).toBeInTheDocument()
-    expect(screen.getByText("GET")).toBeInTheDocument()
-    expect(screen.getByText("/api/v1/acp/health")).toBeInTheDocument()
-    expect(screen.getByText("http://127.0.0.1:8000")).toBeInTheDocument()
-    expect(screen.getByText("503")).toBeInTheDocument()
-    expect(screen.getByText("ACP runner disabled")).toBeInTheDocument()
+    const diagnostics = within(recovery).getByLabelText("Diagnostics")
+    expect(diagnostics).toHaveTextContent("GET")
+    expect(diagnostics).toHaveTextContent("[server-endpoint]")
+    expect(diagnostics).toHaveTextContent("[server-url]")
+    expect(diagnostics).toHaveTextContent("503")
+    expect(diagnostics).toHaveTextContent("ACP runner disabled")
+    expect(diagnostics).not.toHaveTextContent("/api/v1/acp/health")
+    expect(diagnostics).not.toHaveTextContent("http://127.0.0.1:8000")
 
     await user.click(screen.getByRole("button", { name: "Try again" }))
 

@@ -80,7 +80,8 @@ describe("SourceSelector recovery states", () => {
   })
 
   it("renders a shared recovery state when chat sources fail to load", () => {
-    const rawError = "/api/v1/chats?limit=50 returned 404"
+    const rawError =
+      "/api/v1/chats?limit=50&token=sk_chat_secret returned 404 from /Users/alice/chats.db"
     vi.mocked(useQuery).mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -107,10 +108,17 @@ describe("SourceSelector recovery states", () => {
     expect(
       within(recovery).getByText("Data sources could not load")
     ).toBeInTheDocument()
-    expect(within(recovery).getByText(rawError).closest("dl")).toHaveAttribute(
+    expect(
+      within(recovery).getByText(
+        "[server-endpoint] returned 404 from [redacted-path]"
+      ).closest("dl")
+    ).toHaveAttribute(
       "aria-label",
       "Diagnostics"
     )
+    expect(within(recovery).queryByText(/\/api\/v1\/chats/)).not.toBeInTheDocument()
+    expect(within(recovery).queryByText(/sk_chat_secret/)).not.toBeInTheDocument()
+    expect(within(recovery).queryByText(/\/Users\/alice/)).not.toBeInTheDocument()
 
     fireEvent.click(within(recovery).getByRole("button", { name: "Try again" }))
     expect(refetchMock).toHaveBeenCalledTimes(1)

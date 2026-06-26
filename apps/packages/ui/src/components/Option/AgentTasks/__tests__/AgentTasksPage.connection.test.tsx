@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter, useLocation } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -329,9 +329,12 @@ describe("AgentTasksPage connection and payload normalization", () => {
     expect(
       screen.getByText("This server does not expose agent orchestration endpoints.")
     ).toBeInTheDocument()
-    expect(screen.getByText("GET")).toBeInTheDocument()
-    expect(screen.getByText("/api/v1/agent-orchestration/projects")).toBeInTheDocument()
-    expect(screen.getByText("http://127.0.0.1:8000")).toBeInTheDocument()
+    const diagnostics = within(recovery).getByLabelText("Diagnostics")
+    expect(diagnostics).toHaveTextContent("GET")
+    expect(diagnostics).toHaveTextContent("[server-endpoint]")
+    expect(diagnostics).toHaveTextContent("[server-url]")
+    expect(diagnostics).not.toHaveTextContent("/api/v1/agent-orchestration/projects")
+    expect(diagnostics).not.toHaveTextContent("http://127.0.0.1:8000")
     expect(screen.queryByText("HTTP 404")).toBeNull()
   })
 
@@ -1030,15 +1033,16 @@ describe("AgentTasksPage connection and payload normalization", () => {
     expect(
       screen.getByRole("heading", { name: "Agent tasks could not load" })
     ).toBeInTheDocument()
-    expect(screen.getByText("GET")).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        "/api/v1/agent-orchestration/projects?canonical_workspace_id=workspace-alpha&canonical_workspace_source=research_workspace"
-      )
-    ).toBeInTheDocument()
-    expect(screen.getByText("http://127.0.0.1:8000")).toBeInTheDocument()
-    expect(screen.getByText("503")).toBeInTheDocument()
-    expect(screen.getByText("Project API unavailable")).toBeInTheDocument()
+    const diagnostics = within(recovery).getByLabelText("Diagnostics")
+    expect(diagnostics).toHaveTextContent("GET")
+    expect(diagnostics).toHaveTextContent("[server-endpoint]")
+    expect(diagnostics).toHaveTextContent("[server-url]")
+    expect(diagnostics).toHaveTextContent("503")
+    expect(diagnostics).toHaveTextContent("Project API unavailable")
+    expect(diagnostics).not.toHaveTextContent(
+      "/api/v1/agent-orchestration/projects?canonical_workspace_id=workspace-alpha&canonical_workspace_source=research_workspace"
+    )
+    expect(diagnostics).not.toHaveTextContent("http://127.0.0.1:8000")
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument()
     expect(screen.queryByText("Workspace setup needs attention")).toBeNull()
     expect(

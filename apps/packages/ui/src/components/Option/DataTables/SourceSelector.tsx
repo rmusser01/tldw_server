@@ -17,6 +17,7 @@ import { useDataTablesStore } from "@/store/data-tables"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { DataTableSource, DataTableSourceType } from "@/types/data-tables"
 import { StatePanel } from "@/components/ui/state"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 const DOCUMENT_MEDIA_TYPES = new Set([
   "document",
@@ -228,7 +229,10 @@ export const SourceSelector: React.FC = () => {
         : []),
       {
         label: t("dataTables:sourceLoadErrorDetailsLabel", "Details"),
-        value: sourcesError
+        value: sanitizeServerErrorMessage(
+          sourcesError,
+          t("dataTables:sourceLoadErrorFallback", "Failed to load sources")
+        )
       }
     ]
   }, [activeSourceTypeLabel, sourceSearchQuery, sourcesError, t])

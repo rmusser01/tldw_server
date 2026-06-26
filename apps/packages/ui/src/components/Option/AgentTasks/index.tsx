@@ -35,6 +35,7 @@ import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
 import { Alert } from "@/components/ui/primitives/Alert"
 import { Badge as DesignSystemBadge } from "@/components/ui/primitives/Badge"
 import { RecoveryCallout, StatePanel, buildCapabilityState } from "@/components/ui/state"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 // Types matching the backend orchestration API
 type CanonicalWorkspaceLink = {
@@ -146,10 +147,6 @@ const ACP_HEALTH_PATH = "/api/v1/acp/health"
 const CANONICAL_WORKSPACE_SOURCE = "research_workspace"
 const ALL_WORKSPACES_FILTER_VALUE = "__all_workspaces__"
 const LINKED_CANONICAL_WORKSPACE_STATUS = "linked"
-const SECRET_VALUE_PATTERN =
-  /\b(api[_-]?key|authorization|bearer|token|secret|password)(\s*[:=]\s*)([^\s,;]+)/gi
-const BEARER_VALUE_PATTERN = /\b(Bearer\s+)([A-Za-z0-9._~+/-]+)/g
-
 const STATUS_COLORS: Record<string, string> = {
   todo: "default",
   inprogress: "processing",
@@ -270,11 +267,6 @@ const isUnsupportedError = (error: unknown): boolean =>
       (error as { code?: string }).code === AGENT_ORCHESTRATION_UNSUPPORTED_CODE
   )
 
-const redactDiagnosticMessage = (value: string): string =>
-  value
-    .replace(BEARER_VALUE_PATTERN, "$1[redacted]")
-    .replace(SECRET_VALUE_PATTERN, "$1$2[redacted]")
-
 const readJsonOrNull = async (response: Response): Promise<unknown> => {
   try {
     return await response.json()
@@ -290,7 +282,7 @@ const messageFromPayload = (payload: unknown): string | undefined => {
   const record = payload as Record<string, unknown>
   const candidate = record.detail ?? record.message ?? record.error
   return typeof candidate === "string" && candidate.trim()
-    ? redactDiagnosticMessage(candidate)
+    ? sanitizeServerErrorMessage(candidate, candidate)
     : undefined
 }
 
@@ -319,12 +311,7 @@ const failureFromError = (
       : typeof statusCandidate?.response?.status === "number"
         ? statusCandidate.response.status
         : undefined
-  const rawMessage =
-    error instanceof Error && error.message
-      ? redactDiagnosticMessage(error.message)
-      : typeof error === "string" && error.trim()
-        ? redactDiagnosticMessage(error)
-        : fallback
+  const rawMessage = sanitizeServerErrorMessage(error, fallback)
 
   return {
     status,

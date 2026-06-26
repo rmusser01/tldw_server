@@ -1,4 +1,5 @@
 import type { DesignSystemStateKey } from "@/design-system"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import type { StatePanelDiagnostic } from "./StatePanel"
 
 export type CapabilityStateReason =
@@ -189,7 +190,12 @@ const pushDiagnostic = (
   code = false
 ) => {
   if (value === null || value === undefined || value === "") return
-  diagnostics.push({ label, value: String(value), code })
+  const renderedValue = String(value)
+  diagnostics.push({
+    label,
+    value: sanitizeServerErrorMessage(renderedValue, renderedValue),
+    code
+  })
 }
 
 export const buildCapabilityState = (

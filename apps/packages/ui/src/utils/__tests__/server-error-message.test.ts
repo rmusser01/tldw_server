@@ -18,6 +18,17 @@ describe("sanitizeServerErrorMessage", () => {
     expect(message).not.toContain("/Users/macbook-dev/secrets/config.yml")
   })
 
+  it("redacts standalone API endpoints with query strings", () => {
+    const message = sanitizeServerErrorMessage(
+      "/api/v1/chats?limit=50&token=sk_chat_secret returned 404",
+      "fallback message"
+    )
+
+    expect(message).toContain("[server-endpoint]")
+    expect(message).not.toContain("/api/v1/chats")
+    expect(message).not.toContain("sk_chat_secret")
+  })
+
   it("redacts full server URLs", () => {
     const message = sanitizeServerErrorMessage(
       "POST https://localhost:8000/api/v1/chatbooks/import failed",
