@@ -493,6 +493,173 @@ def _read_skill_file_map_fd(
     return files
 
 
+def _read_skill_file_map_portable(
+    *,
+    skill_dir: Path,
+    asset_id: str,
+    findings: list[ContextIntegrityFinding],
+    relative_prefix: str = "",
+) -> dict[str, bytes]:
+    files: dict[str, bytes] = {}
+    scan_dir = skill_dir / relative_prefix if relative_prefix else skill_dir
+    try:
+        entries = sorted(scan_dir.iterdir(), key=lambda entry: entry.name)
+    except OSError as exc:
+        findings.append(
+            _verification_error(
+                asset_id=asset_id,
+                source_type="skill_file",
+                summary=f"Unable to scan skill directory: {exc.__class__.__name__}.",
+                path=scan_dir,
+                details={"error": str(exc)},
+            )
+        )
+        return files
+
+    for path in entries:
+        relative = f"{relative_prefix}{path.name}"
+        try:
+            child_stat = path.lstat()
+        except OSError as exc:
+            findings.append(
+                _verification_error(
+                    asset_id=asset_id,
+                    source_type="skill_file",
+                    summary=f"Unable to inspect skill path: {exc.__class__.__name__}.",
+                    path=path,
+                    details={"error": str(exc)},
+                )
+            )
+            continue
+
+        if stat.S_ISLNK(child_stat.st_mode):
+            findings.append(
+                _symlink_finding(
+                    asset_id=asset_id,
+                    source_type="skill_file",
+                    path=path,
+                    root=skill_dir,
+                )
+            )
+            continue
+
+        if stat.S_ISDIR(child_stat.st_mode):
+            files.update(
+                _read_skill_file_map_portable(
+                    skill_dir=skill_dir,
+                    asset_id=asset_id,
+                    findings=findings,
+                    relative_prefix=f"{relative}/",
+                )
+            )
+            continue
+
+        if path.suffix.lower() not in _SKILL_TEXT_SUFFIXES:
+            continue
+
+        content = _read_regular_file_portable(
+            path=path,
+            asset_id=asset_id,
+            source_type="skill_file",
+            findings=findings,
+        )
+        if content is not None:
+            files[relative] = content
+
+    return files
+
+
+def _inventory_user_skills_portable(*, user_id: int, skills_root: Path) -> InventoryResult:
+    root_asset_id = f"skill:user:{user_id}"
+    root_ok, root_finding = _validate_inventory_root(
+        root=skills_root,
+        asset_id=root_asset_id,
+        source_type="skill_file",
+    )
+    if not root_ok:
+        return InventoryResult(
+            assets=(),
+            findings=(root_finding,) if root_finding is not None else (),
+        )
+
+    assets: list[ContextAssetDescriptor] = []
+    findings: list[ContextIntegrityFinding] = []
+    try:
+        entries = sorted(skills_root.iterdir(), key=lambda entry: entry.name)
+    except OSError as exc:
+        return InventoryResult(
+            assets=(),
+            findings=(
+                _verification_error(
+                    asset_id=root_asset_id,
+                    source_type="skill_file",
+                    summary=f"Unable to scan user skills root: {exc.__class__.__name__}.",
+                    path=skills_root,
+                    details={"error": str(exc)},
+                ),
+            ),
+        )
+
+    for skill_dir in entries:
+        asset_id = f"skill:user:{user_id}/{skill_dir.name}"
+        try:
+            entry_stat = skill_dir.lstat()
+        except OSError as exc:
+            findings.append(
+                _verification_error(
+                    asset_id=asset_id,
+                    source_type="skill_file",
+                    summary=f"Unable to inspect skill directory: {exc.__class__.__name__}.",
+                    path=skill_dir,
+                    details={"error": str(exc)},
+                )
+            )
+            continue
+
+        if stat.S_ISLNK(entry_stat.st_mode):
+            findings.append(
+                _symlink_finding(
+                    asset_id=asset_id,
+                    source_type="skill_file",
+                    path=skill_dir,
+                    root=skills_root,
+                )
+            )
+            continue
+        if not stat.S_ISDIR(entry_stat.st_mode):
+            continue
+
+        files = _read_skill_file_map_portable(
+            skill_dir=skill_dir,
+            asset_id=asset_id,
+            findings=findings,
+        )
+        if "SKILL.md" not in files:
+            continue
+
+        metadata = {"skill_name": skill_dir.name}
+        digest = canonical_filesystem_digest(
+            source_type="skill_file",
+            asset_id=asset_id,
+            files=files,
+            metadata=metadata,
+        )
+        assets.append(
+            ContextAssetDescriptor(
+                asset_id=asset_id,
+                source_type="skill_file",
+                digest=digest,
+                display_name=skill_dir.name,
+                executable=True,
+                owner_scope=f"user:{user_id}",
+                path=str(skill_dir),
+                metadata=metadata,
+            )
+        )
+
+    return InventoryResult(assets=tuple(assets), findings=tuple(findings))
+
+
 def _inventory_prompt_files_portable(prompts_dir: Path) -> InventoryResult:
     root_asset_id = f"prompt_file:{prompts_dir.name}"
     root_ok, root_finding = _validate_inventory_root(
@@ -630,6 +797,16 @@ def _open_root_fd_or_result(
 
 def inventory_user_skills_with_findings(*, user_id: int, skills_root: Path) -> InventoryResult:
     """Inventory per-user skill directories with non-fatal discovery findings."""
+    try:
+        _require_fd_traversal_support()
+    except OSError as exc:
+        if _is_fd_support_unavailable(exc):
+            return _inventory_user_skills_portable(
+                user_id=user_id,
+                skills_root=skills_root,
+            )
+        raise
+
     root_asset_id = f"skill:user:{user_id}"
     root_fd, root_result = _open_root_fd_or_result(
         root=skills_root,

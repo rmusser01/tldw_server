@@ -68,6 +68,7 @@ except ImportError:  # pragma: no cover - compatibility fallback
 import contextlib  # noqa: E402
 
 from tldw_Server_API.app.core.config import load_comprehensive_config, settings  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
     BackendType,
     DatabaseBackend,
@@ -15390,16 +15391,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _convert_sqlite_schema_to_postgres_statements(self, sql: str) -> list[str]:
         """Convert SQLite schema SQL into individual Postgres-compatible statements."""
 
-        statements: list[str] = []
-        buffer: list[str] = []
+        filtered_lines: list[str] = []
         in_block_comment = False
         skip_until_semicolon = False
-        skip_trigger_block = False
+        trigger_buffer: list[str] | None = None
 
         for raw_line in sql.splitlines():
             stripped = raw_line.strip()
 
             if not stripped:
+                continue
+
+            if trigger_buffer is not None:
+                trigger_buffer.append(raw_line)
+                upper = stripped.upper()
+                is_postgres_trigger = "EXECUTE FUNCTION" in upper and stripped.endswith(";")
+                is_sqlite_trigger_end = upper.endswith("END;")
+                if is_postgres_trigger or is_sqlite_trigger_end:
+                    trigger_sql = "\n".join(trigger_buffer)
+                    if "EXECUTE FUNCTION" in trigger_sql.upper():
+                        filtered_lines.extend(trigger_buffer)
+                    trigger_buffer = None
                 continue
 
             if in_block_comment:
@@ -15425,11 +15437,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     skip_until_semicolon = False
                 continue
 
-            if skip_trigger_block:
-                if upper.endswith('END;'):
-                    skip_trigger_block = False
-                continue
-
             # SQLite FTS maintenance statements have no equivalent Postgres table.
             # Example: INSERT INTO notes_fts(notes_fts) VALUES('rebuild');
             if re.match(
@@ -15445,22 +15452,29 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 continue
 
             if upper.startswith('DROP TRIGGER'):
+                if " ON " in upper:
+                    filtered_lines.append(raw_line)
+                    continue
                 if not stripped.endswith(';'):
                     skip_until_semicolon = True
                 continue
 
             if upper.startswith('CREATE TRIGGER'):
-                skip_trigger_block = True
+                trigger_buffer = [raw_line]
                 continue
 
-            buffer.append(raw_line)
+            filtered_lines.append(raw_line)
 
-            if stripped.endswith(';'):
-                statement = '\n'.join(buffer).strip()
-                buffer = []
-                transformed = self._transform_sqlite_schema_statement_for_postgres(statement)
-                if transformed:
-                    statements.append(transformed)
+        if trigger_buffer is not None:
+            trigger_sql = "\n".join(trigger_buffer)
+            if "EXECUTE FUNCTION" in trigger_sql.upper():
+                filtered_lines.extend(trigger_buffer)
+
+        statements: list[str] = []
+        for statement in split_sql_statements("\n".join(filtered_lines)):
+            transformed = self._transform_sqlite_schema_statement_for_postgres(statement)
+            if transformed:
+                statements.append(transformed)
 
         return statements
 

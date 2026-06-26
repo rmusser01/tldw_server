@@ -1087,6 +1087,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_archive_and_sanitization.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_auto_chunking_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
@@ -1102,6 +1103,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_analysis_regressions.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_safe_paths.py
           - name: media-ingestion-new-unit-persistence
             paths: >-
@@ -2461,6 +2463,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_archive_and_sanitization.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_auto_chunking_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
@@ -2476,6 +2479,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_analysis_regressions.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_safe_paths.py
           - name: media-ingestion-new-unit-persistence
             paths: >-
@@ -3708,6 +3712,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_archive_and_sanitization.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_auto_chunking_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
@@ -3723,6 +3728,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_analysis_regressions.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_safe_paths.py
           - name: media-ingestion-new-unit-persistence
             paths: >-
@@ -4879,6 +4885,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_archive_and_sanitization.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_auto_chunking_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
@@ -4894,6 +4901,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_analysis_regressions.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_safe_paths.py
           - name: media-ingestion-new-unit-persistence
             paths: >-
@@ -6051,6 +6059,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_archive_and_sanitization.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_auto_chunking_*.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
@@ -6066,6 +6075,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_analysis_regressions.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_safe_paths.py
           - name: media-ingestion-new-unit-persistence
             paths: >-

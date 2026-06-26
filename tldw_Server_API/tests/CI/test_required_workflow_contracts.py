@@ -827,6 +827,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert shard_path_sets["media-audio"] == {
             "tldw_Server_API/tests/Audio",
             "tldw_Server_API/tests/AudioJobs",
+            "tldw_Server_API/tests/Audio_Studio",
             "tldw_Server_API/tests/STT",
             "tldw_Server_API/tests/TTS",
             "tldw_Server_API/tests/TTS_NEW",
@@ -858,6 +859,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_archive_and_sanitization.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_audio_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_auto_chunking_*.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py",
@@ -873,6 +875,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert shard_path_sets["media-ingestion-new-unit-mediawiki"] == {
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ms_g_eval_validation.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_analysis_regressions.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_pdf_safe_paths.py",
         }
         assert shard_path_sets["media-ingestion-new-unit-persistence"] == {
@@ -1027,6 +1030,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         core_dirs = (
             "Audit",
             "Config",
+            "Context_Integrity",
             "Health",
             "Helper_Scripts",
             "Logging",

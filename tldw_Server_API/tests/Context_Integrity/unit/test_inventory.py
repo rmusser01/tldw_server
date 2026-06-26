@@ -106,6 +106,15 @@ def _fail_parent_traversal_lstat(monkeypatch: pytest.MonkeyPatch, root: Path) ->
     monkeypatch.setattr(Path, "lstat", guarded_lstat)
 
 
+def _skip_if_fd_traversal_unavailable() -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    try:
+        inventory._require_fd_traversal_support()
+    except OSError as exc:
+        pytest.skip(f"fd-relative traversal is unavailable in this environment: {exc}")
+
+
 def test_inventory_user_skill_directory_includes_supporting_files(tmp_path) -> None:
     from tldw_Server_API.app.core.Context_Integrity.inventory import inventory_user_skills
 
@@ -333,6 +342,7 @@ def test_inventory_user_skill_file_root_reports_error(tmp_path) -> None:
 
 
 def test_inventory_user_skill_reports_no_follow_open_error(monkeypatch, tmp_path) -> None:
+    _skip_if_fd_traversal_unavailable()
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
     skill_dir = tmp_path / "skills" / "demo"
@@ -358,6 +368,7 @@ def test_inventory_user_skill_reports_no_follow_open_error(monkeypatch, tmp_path
 
 
 def test_inventory_user_skill_root_fd_open_failure_reports_error(monkeypatch, tmp_path) -> None:
+    _skip_if_fd_traversal_unavailable()
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
     skill_dir = tmp_path / "skills" / "demo"
@@ -380,6 +391,7 @@ def test_inventory_user_skill_root_fd_open_failure_reports_error(monkeypatch, tm
 
 
 def test_inventory_user_skill_root_fd_listdir_type_error_reports_error(monkeypatch, tmp_path) -> None:
+    _skip_if_fd_traversal_unavailable()
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
     skill_dir = tmp_path / "skills" / "demo"
@@ -401,6 +413,7 @@ def test_inventory_user_skill_symlink_preflight_permission_error_reports_finding
     monkeypatch,
     tmp_path,
 ) -> None:
+    _skip_if_fd_traversal_unavailable()
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
     skill_dir = tmp_path / "skills" / "demo"
@@ -420,6 +433,7 @@ def test_inventory_user_skill_symlink_preflight_permission_error_reports_finding
 
 
 def test_inventory_user_skill_reads_files_without_path_reader(monkeypatch, tmp_path) -> None:
+    _skip_if_fd_traversal_unavailable()
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
     skill_dir = tmp_path / "skills" / "demo"
@@ -464,6 +478,27 @@ def test_inventory_user_skill_reads_files_without_path_reader(monkeypatch, tmp_p
     assert [asset.asset_id for asset in result.assets] == ["skill:user:1/demo"]
     assert result.findings == ()
     assert {path.name for path in fd_reader_paths} == {"SKILL.md", "ref.md"}
+
+
+def test_inventory_user_skills_falls_back_when_fd_traversal_is_unavailable(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from tldw_Server_API.app.core.Context_Integrity import inventory
+
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Demo\n", encoding="utf-8")
+    (skill_dir / "helper.py").write_text("print('helper')\n", encoding="utf-8")
+    monkeypatch.setattr(inventory.os, "supports_fd", set())
+
+    result = inventory.inventory_user_skills_with_findings(
+        user_id=1,
+        skills_root=tmp_path / "skills",
+    )
+
+    assert [asset.asset_id for asset in result.assets] == ["skill:user:1/demo"]
+    assert result.findings == ()
 
 
 def test_inventory_user_skill_fifo_supporting_file_reports_error_without_opening(
@@ -691,6 +726,7 @@ def test_inventory_prompt_files_file_root_reports_error(tmp_path) -> None:
 
 
 def test_inventory_prompt_files_reports_no_follow_open_error(monkeypatch, tmp_path) -> None:
+    _skip_if_fd_traversal_unavailable()
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
     prompts = tmp_path / "Prompts"
@@ -710,6 +746,7 @@ def test_inventory_prompt_files_reports_no_follow_open_error(monkeypatch, tmp_pa
 
 
 def test_inventory_prompt_files_root_fd_open_failure_reports_error(monkeypatch, tmp_path) -> None:
+    _skip_if_fd_traversal_unavailable()
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
     prompts = tmp_path / "Prompts"
@@ -729,6 +766,7 @@ def test_inventory_prompt_files_root_fd_open_failure_reports_error(monkeypatch, 
 
 
 def test_inventory_prompt_files_root_fd_listdir_type_error_reports_error(monkeypatch, tmp_path) -> None:
+    _skip_if_fd_traversal_unavailable()
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
     prompts = tmp_path / "Prompts"
@@ -747,6 +785,7 @@ def test_inventory_prompt_files_symlink_preflight_permission_error_reports_findi
     monkeypatch,
     tmp_path,
 ) -> None:
+    _skip_if_fd_traversal_unavailable()
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
     prompts = tmp_path / "Prompts"
@@ -763,6 +802,7 @@ def test_inventory_prompt_files_symlink_preflight_permission_error_reports_findi
 
 
 def test_inventory_prompt_files_reads_files_without_path_reader(monkeypatch, tmp_path) -> None:
+    _skip_if_fd_traversal_unavailable()
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
     prompts = tmp_path / "Prompts"
@@ -976,6 +1016,7 @@ def test_inventory_env_prompt_overrides_symlink_preflight_permission_error_repor
     monkeypatch,
     tmp_path,
 ) -> None:
+    _skip_if_fd_traversal_unavailable()
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
     override = tmp_path / "override.md"
@@ -998,6 +1039,7 @@ def test_inventory_env_prompt_overrides_parent_fd_open_failure_reports_error(
     monkeypatch,
     tmp_path,
 ) -> None:
+    _skip_if_fd_traversal_unavailable()
     from tldw_Server_API.app.core.Context_Integrity import inventory
 
     override = tmp_path / "override.md"

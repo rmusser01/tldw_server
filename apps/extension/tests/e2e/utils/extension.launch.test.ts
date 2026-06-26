@@ -203,7 +203,7 @@ describe("launchWithExtension", () => {
     }
   })
 
-  it("uses lightweight locale staging for minimal-locale launches", async () => {
+  it("preserves default locale catalog for minimal-locale launches", async () => {
     process.env.TLDW_E2E_EXTENSION_MINIMAL_LOCALES = "1"
     process.env.TLDW_E2E_EXTENSION_TARGET_WAIT_MS = "1"
 
@@ -280,7 +280,7 @@ describe("launchWithExtension", () => {
           path.join(stagedPath, "_locales", "en", "messages.json"),
           "utf8",
         )
-      ).toBe("{}\n")
+      ).toBe(JSON.stringify({ appName: { message: "tldw Assistant" } }))
       expect(
         fs.existsSync(path.join(stagedPath, "_locales", "de", "messages.json"))
       ).toBe(false)

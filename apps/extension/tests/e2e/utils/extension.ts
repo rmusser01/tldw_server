@@ -209,7 +209,7 @@ export async function launchWithExtension(
   const headless = resolveExtensionHeadlessMode()
   const launchExtPath = prepareExtensionLaunchPath(extPath, {
     deterministicManifestKey: true,
-    preserveDefaultLocaleCatalog: false,
+    preserveDefaultLocaleCatalog: true,
     rootDir: path.join(userDataDir, 'extension-launch')
   })
   const context = await chromium.launchPersistentContext(userDataDir, {
