@@ -1,7 +1,7 @@
 import configparser
 
 
-def _fake_config(mlx_model_path: str = "/tmp/mlx-model") -> configparser.ConfigParser:
+def _fake_config(mlx_model_path: str = "test-mlx-model") -> configparser.ConfigParser:
     cfg = configparser.ConfigParser()
     cfg.add_section("API")
     cfg.set("API", "openai_api_key", "sk-test")
@@ -42,6 +42,21 @@ def _fake_openai_only_config() -> configparser.ConfigParser:
     return cfg
 
 
+def _ready_provider_readiness(*, provider_name: str, **_kwargs) -> dict[str, object]:
+    chat_provider_aliases = {
+        "custom_openai_api": "custom-openai-api",
+        "llama": "llama.cpp",
+    }
+    chat_provider = chat_provider_aliases.get(provider_name, provider_name)
+    return {
+        "availability": "enabled",
+        "provider_enabled": True,
+        "readiness_reason_code": None,
+        "readiness_message": None,
+        "chat_provider": chat_provider,
+    }
+
+
 def test_llm_providers_tokenizer_metadata_mirrors_strict_fields(monkeypatch, tmp_path):
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
 
@@ -57,6 +72,7 @@ def test_llm_providers_tokenizer_metadata_mirrors_strict_fields(monkeypatch, tmp
     monkeypatch.setattr(llm_endpoints, "get_api_keys", lambda: {})
     monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(llm_endpoints, "_llm_registry_capability_envelopes", lambda: {})
+    monkeypatch.setattr(llm_endpoints, "_provider_readiness", _ready_provider_readiness)
     monkeypatch.setattr(
         llm_endpoints,
         "ALL_SUPPORTED_PROVIDER_NAMES_LIST",
@@ -130,6 +146,7 @@ def test_llm_providers_tokenizer_metadata_reflects_strict_runtime_env(monkeypatc
     monkeypatch.setattr(llm_endpoints, "get_api_keys", lambda: {})
     monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(llm_endpoints, "_llm_registry_capability_envelopes", lambda: {})
+    monkeypatch.setattr(llm_endpoints, "_provider_readiness", _ready_provider_readiness)
     monkeypatch.setattr(
         llm_endpoints,
         "ALL_SUPPORTED_PROVIDER_NAMES_LIST",
