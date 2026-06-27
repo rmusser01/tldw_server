@@ -1505,6 +1505,40 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     })
   })
 
+  it("uses chatProvider and raw model id for provider-qualified llama.cpp selections", async () => {
+    messageOptionStoreState.selectedModel =
+      "llama.cpp:gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
+    mockGetChatModels.mockResolvedValue([
+      {
+        id: "gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+        name: "Gemma 4 26B",
+        provider: "llama",
+        chatProvider: "llama.cpp",
+        type: "chat"
+      }
+    ])
+
+    renderStudioPane()
+
+    await waitFor(() => {
+      expect(mockGetChatModels).toHaveBeenCalled()
+    })
+
+    const summaryButton = screen.getByRole("button", { name: "Summary" })
+    expect(summaryButton).not.toBeDisabled()
+
+    fireEvent.click(summaryButton)
+
+    await waitFor(() => {
+      expect(mockCreateChatCompletion).toHaveBeenCalled()
+    })
+
+    expect(mockCreateChatCompletion.mock.calls[0]?.[0]).toMatchObject({
+      model: "gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+      api_provider: "llama.cpp"
+    })
+  })
+
   it("normalizes configured tldw-prefixed model selections before summary generation", async () => {
     messageOptionStoreState.selectedModel = "tldw:ollama/gemma3:1b"
     mockGetChatModels.mockResolvedValue([

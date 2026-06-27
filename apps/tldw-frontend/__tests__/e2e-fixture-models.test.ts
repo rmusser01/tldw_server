@@ -66,6 +66,28 @@ describe("e2e model preflight helpers", () => {
     ).toEqual(["ollama:gemma3:1b"])
   })
 
+  it("prefers backend chat_provider when metadata provider is only a catalog family", () => {
+    expect(
+      extractUsableModelIds({
+        models: [
+          {
+            provider: "llama",
+            chat_provider: "llama.cpp",
+            id: "gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+            is_configured: true,
+            provider_is_configured: true,
+            provider_enabled: true,
+            availability: "enabled",
+            type: "chat",
+            output_modality: "text",
+          },
+        ],
+      })
+    ).toEqual([
+      "llama.cpp:gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+    ])
+  })
+
   it("filters and normalizes provider fallback entries", () => {
     expect(
       extractModelIds({

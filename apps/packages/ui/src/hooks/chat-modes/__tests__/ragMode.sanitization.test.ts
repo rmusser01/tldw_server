@@ -78,7 +78,24 @@ vi.mock("@/utils/actor", () => ({
 
 vi.mock("@/utils/resolve-api-provider", () => ({
   resolveApiProviderForModel: (...args: unknown[]) =>
-    mocks.resolveApiProviderForModel(...args)
+    mocks.resolveApiProviderForModel(...args),
+  parseProviderQualifiedModelSelection: (value: unknown) => {
+    const raw = String(value || "").trim()
+    if (!raw.startsWith("llama.cpp:")) {
+      return {
+        raw,
+        modelId: raw,
+        provider: undefined,
+        isProviderQualified: false
+      }
+    }
+    return {
+      raw,
+      modelId: raw.slice("llama.cpp:".length),
+      provider: "llama.cpp",
+      isProviderQualified: true
+    }
+  }
 }))
 
 vi.mock("../chatModePipeline", () => ({
@@ -223,6 +240,41 @@ describe("ragMode sanitizer", () => {
     )
   })
 
+  it("sends raw generation_model when the selected RAG model is provider-qualified", async () => {
+    mocks.ragSearch.mockResolvedValue({
+      documents: [
+        {
+          content: "The llama.cpp provider accepted the raw GGUF model id.",
+          metadata: {
+            source: "media_db",
+            title: "llama.cpp runtime source",
+            type: "text"
+          }
+        }
+      ]
+    })
+    mocks.resolveApiProviderForModel.mockResolvedValue("llama.cpp")
+
+    await expect(
+      __testing__.ragModeDefinition.preflight?.(
+        createRagContext({
+          selectedModel:
+            "llama.cpp:gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+          currentChatModelSettings: { apiProvider: undefined }
+        })
+      )
+    ).resolves.toBeNull()
+
+    expect(mocks.ragSearch).toHaveBeenCalledWith(
+      "What phrase proves the selected source was used?",
+      expect.objectContaining({
+        generation_model:
+          "gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+        generation_provider: "llama.cpp"
+      })
+    )
+  })
+
   it("handles selected-source RAG with no evidence without continuing as general chat", async () => {
     mocks.ragSearch.mockResolvedValue({
       documents: [],
@@ -288,7 +340,7 @@ describe("ragMode sanitizer", () => {
     )
   })
 
-  it("uses backend generated answers directly for selected workspace media RAG", async () => {
+  it("continues through chat completion when selected workspace media RAG returns evidence and a generated answer", async () => {
     mocks.ragSearch.mockResolvedValue({
       documents: [
         {
@@ -302,24 +354,40 @@ describe("ragMode sanitizer", () => {
       generated_answer:
         "The exact phrase is PASTE-EVIDENCE-ORION. It proves pasted workspace sources are indexed and used in grounded Research Workspace answers with visible evidence."
     })
+    const context = createRagContext()
 
-    const response = await __testing__.ragModeDefinition.preflight?.(
-      createRagContext()
-    )
+    await expect(
+      __testing__.ragModeDefinition.preflight?.(context)
+    ).resolves.toBeNull()
 
-    expect(response).toMatchObject({
-      handled: true,
-      fullText: expect.stringContaining("PASTE-EVIDENCE-ORION"),
-      sources: [
-        expect.objectContaining({
-          name: "TASK-478.5 Paste Evidence Source",
-          mode: "rag"
-        })
-      ],
-      generationInfo: expect.objectContaining({
-        grounded: true,
-        reason: "selected_source_generated_answer"
+    const prompt = await __testing__.ragModeDefinition.preparePrompt(context)
+
+    expect(mocks.ragSearch).toHaveBeenCalledTimes(1)
+    expect(prompt.sources).toEqual([
+      expect.objectContaining({
+        name: "TASK-478.5 Paste Evidence Source",
+        mode: "rag"
       })
-    })
+    ])
+    expect(mocks.humanMessageFormatter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: [
+          expect.objectContaining({
+            text: expect.stringContaining("PASTE-EVIDENCE-ORION")
+          })
+        ]
+      })
+    )
+    expect(mocks.humanMessageFormatter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: [
+          expect.objectContaining({
+            text: expect.stringContaining(
+              "What phrase proves the selected source was used?"
+            )
+          })
+        ]
+      })
+    )
   })
 })

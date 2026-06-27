@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { QuizPlayground } from "../QuizPlayground"
@@ -277,6 +277,29 @@ describe("QuizPlayground navigation intents", () => {
     render(<QuizPlayground />)
 
     expect(screen.getByTestId("quiz-reset-current-tab")).toBeInTheDocument()
+  })
+
+  it("does not let the late FTUX default override an explicit Manage tab click", async () => {
+    vi.mocked(useQuizzesQuery)
+      .mockReturnValueOnce({
+        data: undefined,
+        isLoading: true
+      } as any)
+      .mockReturnValueOnce({
+        data: { items: [], count: 0 },
+        isLoading: false
+      } as any)
+
+    const { rerender } = render(<QuizPlayground />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }))
+    expect(screen.getByTestId("active-tab")).toHaveTextContent("manage")
+
+    rerender(<QuizPlayground />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-tab")).toHaveTextContent("manage")
+    })
   })
 
   it("keeps inactive tab panes mounted for per-tab state preservation", () => {

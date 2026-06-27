@@ -241,7 +241,13 @@ const OUTPUT_GROUPS: Array<{
 ]
 
 // Primary output types shown by default; remaining are collapsed behind an expander
-const PRIMARY_OUTPUT_TYPES = new Set<ArtifactType>(["summary", "flashcards", "quiz", "report"])
+const PRIMARY_OUTPUT_TYPES = new Set<ArtifactType>([
+  "summary",
+  "flashcards",
+  "quiz",
+  "report",
+  "compare_sources"
+])
 
 const getStudioWorkspaceSourceStatus = (source: WorkspaceSource) =>
   source.status || "ready"

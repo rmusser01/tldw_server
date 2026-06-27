@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("node:child_process", () => ({
+  default: { spawn: mocks.spawn },
   spawn: mocks.spawn
 }))
 
@@ -109,6 +110,74 @@ describe("research-workspace-uat-runner", () => {
     expect(skipped.reasons).toContain("skipped_tests_present")
     expect(empty.status).toBe("environment_blocked")
     expect(empty.reasons).toContain("no_tests_executed")
+  })
+
+  it("classifies known environment-only skips as environment blocked", () => {
+    const classification = classifyPlaywrightRun({
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+      report: {
+        stats: {
+          expected: 19,
+          skipped: 2,
+          unexpected: 0,
+          flaky: 0,
+        },
+        suites: [
+          {
+            suites: [
+              {
+                specs: [
+                  {
+                    title:
+                      "grounds live chat requests on the selected source",
+                    tests: [
+                      {
+                        status: "skipped",
+                        expectedStatus: "skipped",
+                        annotations: [
+                          {
+                            type: "skip",
+                            description:
+                              "Skipping live generation workflow: server did not advertise a runnable chat model"
+                          }
+                        ],
+                        results: []
+                      }
+                    ]
+                  },
+                  {
+                    title:
+                      "shows workspace-linked sandbox run in diagnostics when sandbox run API is available",
+                    tests: [
+                      {
+                        status: "skipped",
+                        expectedStatus: "skipped",
+                        annotations: [
+                          {
+                            type: "skip",
+                            description:
+                              "POST /api/v1/sandbox/runs returned HTTP 404: {\"detail\":\"Not Found\"}"
+                          }
+                        ],
+                        results: []
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+    })
+
+    expect(classification.status).toBe("environment_blocked")
+    expect(classification.failureScope).toBe("environment")
+    expect(classification.reasons).toContain("environment_skips_present")
+    expect(classification.reasons).toContain("no_runnable_chat_model")
+    expect(classification.reasons).toContain("sandbox_run_api_unavailable")
   })
 
   it("writes evidence that separates environment failures from product results", () => {

@@ -652,7 +652,12 @@ describe("StudioPane Stage 2 workflows", () => {
         model: "gpt-4o-mini",
         response_format: { type: "json_object" }
       }),
-      expect.any(Object)
+      expect.objectContaining({
+        timeoutMs: expect.any(Number)
+      })
+    )
+    expect(mockCreateChatCompletion.mock.calls[0]?.[1]?.timeoutMs).toBeGreaterThanOrEqual(
+      120_000
     )
 
     expect(mockUpsertWorkspace).toHaveBeenCalledWith("workspace-a", {
@@ -1130,6 +1135,7 @@ describe("StudioPane Stage 2 workflows", () => {
     expect(mockGenerateFlashcardsService).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining("DSPy Prompting Talk"),
+        num_cards: 6,
         model: "gpt-4o-mini",
         provider: "openai"
       })
@@ -1319,7 +1325,6 @@ describe("StudioPane Stage 2 workflows", () => {
     workspaceStoreState.getSelectedMediaIds = () => [101]
 
     renderStudioPane()
-    expandMoreOutputsSection()
 
     const compareButton = screen.getByRole("button", { name: "Compare Sources" })
     expect(compareButton).toBeDisabled()
@@ -1674,7 +1679,7 @@ describe("StudioPane Stage 2 workflows", () => {
       expect(mockGetMediaDetails).toHaveBeenCalledTimes(2)
     })
 
-    expect(mockCreateChatCompletion).toHaveBeenCalledWith(
+    expect(mockCreateChatCompletion.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         model: "gpt-4o-mini",
         temperature: 0.7,

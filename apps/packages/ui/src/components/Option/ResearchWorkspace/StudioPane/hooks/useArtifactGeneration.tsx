@@ -3,6 +3,7 @@ import type { MessageInstance } from "antd/es/message/interface"
 import { tldwClient, type VisualStyleRecord } from "@/services/tldw/TldwApiClient"
 import { tldwModels, type ModelInfo } from "@/services/tldw"
 import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import {
   createQuestion,
   createQuiz,
@@ -64,6 +65,7 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STUDIO_GENERATION_RAG_TIMEOUT_MS = 120000
+const STUDIO_GENERATION_CHAT_TIMEOUT_MS = 180000
 const STUDIO_SOURCE_CHAR_LIMIT = 6000
 const STUDIO_TOTAL_SOURCE_CHAR_LIMIT = 18000
 const FLASHCARD_GENERATION_TEXT_LIMIT = 8000
@@ -132,6 +134,17 @@ const normalizeStudioApiProviderForRequest = (
   }
 
   return rawProvider
+}
+
+const resolveStudioModelSelection = (value: unknown) => {
+  const normalized = normalizeStudioChatModelId(value)
+  const parsed = parseProviderQualifiedModelSelection(normalized)
+  const modelId = normalizeStudioChatModelId(parsed.modelId || normalized)
+  return {
+    rawModelId: normalized,
+    modelId,
+    provider: parsed.provider
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -262,6 +275,11 @@ const buildQuizSourceBundle = (
 const buildBundledQuizQuestionCount = (mediaCount: number): number => {
   const normalizedMediaCount = Math.max(1, mediaCount)
   return Math.min(8, Math.max(6, normalizedMediaCount * 3))
+}
+
+const buildBundledFlashcardCount = (sourceCount: number): number => {
+  const normalizedSourceCount = Math.max(1, sourceCount)
+  return Math.min(10, Math.max(6, normalizedSourceCount * 3))
 }
 
 const extractJsonPayloadText = (value: string): string => {
@@ -1039,7 +1057,10 @@ ${sourceText}`
       top_p: options.topP,
       max_tokens: options.maxTokens
     },
-    { signal: options.abortSignal }
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
   )
 
   const { content: rawContent, usage } =
@@ -1090,7 +1111,10 @@ ${sourceText}`
           ? Math.min(options.maxTokens, options.maxOutputTokens)
           : options.maxTokens
     },
-    { signal: options.abortSignal }
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
   )
 
   const { content: rawContent, usage } =
@@ -1296,7 +1320,10 @@ ${sourceText}`
       top_p: options.topP,
       max_tokens: quizMaxTokens
     },
-    { signal: options.abortSignal }
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
   )
 
   const { content: rawContent, usage } = await readChatCompletionResponsePayload(response)
@@ -1442,7 +1469,7 @@ async function generateFlashcards(
 
   const generationRequest: FlashcardsGenerateRequest = {
     text: sourceText,
-    num_cards: 12,
+    num_cards: buildBundledFlashcardCount(sourceContexts.length),
     difficulty: "mixed",
     provider: options.apiProvider,
     model:
@@ -1600,7 +1627,10 @@ ${sourceContexts
     temperature: options.temperature,
     top_p: options.topP,
     max_tokens: options.maxTokens
-  }, { signal: options.abortSignal })
+  }, {
+    signal: options.abortSignal,
+    timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+  })
 
   const content = (await readChatCompletionResponseText(response)).trim()
   if (!content) {
@@ -1658,7 +1688,10 @@ ${sourceText}`
       top_p: options.topP,
       max_tokens: options.maxTokens
     },
-    { signal: options.abortSignal }
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
   )
   const { content: rawScript, usage } = await readChatCompletionResponsePayload(response)
   const script = rawScript.trim()
@@ -1852,7 +1885,10 @@ async function generateLiteratureMatrix(
       max_tokens: options.maxTokens,
       response_format: { type: "json_object" }
     },
-    { signal: options.abortSignal }
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
   )
 
   const { content: rawContent, usage } =
@@ -1925,7 +1961,10 @@ async function generateCorpusGapFinder(
       max_tokens: options.maxTokens,
       response_format: { type: "json_object" }
     },
-    { signal: options.abortSignal }
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
   )
 
   const { content: rawContent, usage } =
@@ -2019,7 +2058,10 @@ async function generateEvidenceBoundHypotheses(
       max_tokens: options.maxTokens,
       response_format: { type: "json_object" }
     },
-    { signal: options.abortSignal }
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
   )
 
   const { content: rawContent, usage } =
@@ -2122,7 +2164,10 @@ async function generateResearchProposalPack(
       top_p: options.topP,
       max_tokens: options.maxTokens
     },
-    { signal: options.abortSignal }
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
   )
 
   const { content: rawContent, usage } =
@@ -2177,6 +2222,9 @@ ${sourceContexts
     temperature: options.temperature,
     top_p: options.topP,
     max_tokens: options.maxTokens
+  }, {
+    signal: options.abortSignal,
+    timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
   })
 
   const content = (await readChatCompletionResponseText(response)).trim()
@@ -2545,29 +2593,42 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       typeof value === "string" && value.trim().length > 0
         ? normalizeStudioApiProviderForRequest(value)
         : undefined
+    const providerCandidatesForModel = (model: ModelInfo | undefined) =>
+      [
+        normalizeProviderValue(model?.chatProvider),
+        normalizeProviderValue(model?.provider)
+      ].filter((provider): provider is string => Boolean(provider))
+    const providerForModel = (model: ModelInfo | undefined) =>
+      providerCandidatesForModel(model)[0]
+    const normalizedProviderOverride =
+      normalizedApiProvider !== "__auto__"
+        ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
+        : undefined
 
     const pickRuntime = (models: ModelInfo[]) => {
-      const selectedModelId = normalizeStudioChatModelId(selectedModel) || undefined
+      const selectedModelSelection = resolveStudioModelSelection(selectedModel)
+      const selectedModelId = selectedModelSelection.modelId || undefined
       const providerFiltered =
-        normalizedApiProvider === "__auto__"
+        !normalizedProviderOverride
           ? models
           : models.filter(
               (model) =>
-                String(model.provider || "").trim().toLowerCase() ===
-                normalizedApiProvider
+                providerCandidatesForModel(model).includes(normalizedProviderOverride)
             )
       if (selectedModelId) {
         const matchedModel = models.find(
           (model) =>
             typeof model.id === "string" &&
-            normalizeStudioChatModelId(model.id) === selectedModelId
+            [selectedModelId, selectedModelSelection.rawModelId].includes(
+              normalizeStudioChatModelId(model.id)
+            )
         )
         return {
           model: selectedModelId,
           provider:
-            normalizedApiProvider !== "__auto__"
-              ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
-              : normalizeProviderValue(matchedModel?.provider)
+            normalizedProviderOverride ||
+            normalizeProviderValue(selectedModelSelection.provider) ||
+            providerForModel(matchedModel)
         }
       }
 
@@ -2581,10 +2642,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       return {
         model: fallbackModel?.id?.trim() || undefined,
         provider:
-          normalizeProviderValue(fallbackModel?.provider) ||
-          (normalizedApiProvider !== "__auto__"
-            ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
-            : undefined)
+          providerForModel(fallbackModel) ||
+          normalizedProviderOverride
       }
     }
 

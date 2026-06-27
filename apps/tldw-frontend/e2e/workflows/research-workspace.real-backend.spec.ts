@@ -14,7 +14,8 @@ import {
   test,
   expect,
   skipIfServerUnavailable,
-  assertNoCriticalErrors
+  assertNoCriticalErrors,
+  type ServerInfo
 } from "../utils/fixtures"
 import {
   seedAuth,
@@ -36,6 +37,51 @@ const REQUIRE_SANDBOX_WORKSPACE_RUN =
   process.env.TLDW_E2E_REQUIRE_SANDBOX_WORKSPACE_RUN === "1"
 const EXPECTED_SANDBOX_RUN_PHASE =
   process.env.TLDW_E2E_EXPECT_SANDBOX_RUN_PHASE?.trim() || ""
+
+const requireRealBackendChatModel = (
+  serverInfo: ServerInfo
+): string => {
+  const modelId = serverInfo.models?.[0]?.trim() || ""
+  test.skip(
+    modelId.length === 0,
+    "Skipping live generation workflow: server did not advertise a runnable chat model"
+  )
+  return modelId
+}
+
+const selectRealBackendChatModel = async (
+  page: Page,
+  modelId: string
+): Promise<void> => {
+  const separatorIndex = modelId.indexOf(":")
+  const provider = separatorIndex > 0 ? modelId.slice(0, separatorIndex) : ""
+  const selectedModel =
+    provider === "llama.cpp" ? modelId.slice(separatorIndex + 1) : modelId
+
+  await page.evaluate(({ selectedModel, provider }) => {
+    const store = (window as { __tldw_useStoreMessageOption?: unknown })
+      .__tldw_useStoreMessageOption as
+      | {
+          setState?: (nextState: Record<string, unknown>) => void
+        }
+      | undefined
+    if (!store?.setState) {
+      throw new Error("Message option store is unavailable on window")
+    }
+    store.setState({ selectedModel })
+
+    if (provider) {
+      const modelSettingsStore = (window as {
+        __tldw_useStoreChatModelSettings?: unknown
+      }).__tldw_useStoreChatModelSettings as
+        | {
+            setState?: (nextState: Record<string, unknown>) => void
+          }
+        | undefined
+      modelSettingsStore?.setState?.({ apiProvider: provider })
+    }
+  }, { selectedModel, provider })
+}
 
 type BootstrapResponse = {
   url: string
@@ -305,7 +351,7 @@ const seedLiveWorkspaceDocument = async (
   body.append("media_type", "document")
   body.append("title", title)
   body.append("perform_analysis", "false")
-  body.append("perform_chunking", "false")
+  body.append("perform_chunking", "true")
   body.append("files", new Blob([content], { type: "text/plain" }), fileName)
 
   const response = await fetchWithApiKey(
@@ -597,9 +643,24 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
         expect(beginnerEvidence.persona).toBe("beginner-no-key")
         expect(beginnerEvidence.routeTiming.durationMs).toBeGreaterThanOrEqual(0)
         expect(beginnerEvidence.url).toContain("/research-workspace")
-        expect(
-          await beginnerPage.evaluate(() => localStorage.getItem("tldwConfig"))
-        ).toBeNull()
+        const beginnerStoredConfig = await beginnerPage.evaluate(() => {
+          const raw = localStorage.getItem("tldwConfig")
+          if (!raw) {
+            return { raw: null, apiKey: null }
+          }
+          try {
+            const parsed = JSON.parse(raw)
+            return {
+              raw,
+              apiKey:
+                typeof parsed?.apiKey === "string" ? parsed.apiKey : null
+            }
+          } catch {
+            return { raw, apiKey: null }
+          }
+        })
+        expect(beginnerStoredConfig.apiKey).toBeNull()
+        expect(beginnerStoredConfig.raw || "").not.toContain(TEST_CONFIG.apiKey)
       } finally {
         beginnerDiagnostics.dispose()
       }
@@ -950,6 +1011,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       chatBootstrapPreflight.reason ||
         "Skipping real-backend workspace test: chat bootstrap endpoint unavailable"
     )
+    const chatModelId = requireRealBackendChatModel(serverInfo)
 
     const fixtureId = generateTestId("workspace-chat-grounding")
     const probeToken = `${fixtureId}-beacon-fox`
@@ -969,6 +1031,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     try {
       await workspacePage.goto()
       await workspacePage.waitForReady()
+      await selectRealBackendChatModel(authedPage, chatModelId)
       await assertChatBootstrapHealthy(tracker.responses, tracker.failures)
 
       await workspacePage.seedSources([selectedSource, unselectedSource])
@@ -1022,6 +1085,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       chatBootstrapPreflight.reason ||
         "Skipping real-backend workspace test: chat bootstrap endpoint unavailable"
     )
+    const chatModelId = requireRealBackendChatModel(serverInfo)
 
     const fixtureId = generateTestId("research-workspace-scope")
     const leftSource = await seedLiveWorkspaceDocument(
@@ -1039,6 +1103,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     try {
       await workspacePage.goto()
       await workspacePage.waitForReady()
+      await selectRealBackendChatModel(authedPage, chatModelId)
       await assertChatBootstrapHealthy(tracker.responses, tracker.failures)
 
       await workspacePage.seedSources([leftSource, rightSource])
@@ -1110,6 +1175,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       chatBootstrapPreflight.reason ||
         "Skipping real-backend workspace test: chat bootstrap endpoint unavailable"
     )
+    const chatModelId = requireRealBackendChatModel(serverInfo)
 
     const fixtureId = generateTestId("workspace-global-search")
     const probeToken = `${fixtureId}-search-token`
@@ -1125,6 +1191,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     try {
       await workspacePage.goto()
       await workspacePage.waitForReady()
+      await selectRealBackendChatModel(authedPage, chatModelId)
       await assertChatBootstrapHealthy(tracker.responses, tracker.failures)
 
       await workspacePage.seedSources([selectedSource])
@@ -1173,6 +1240,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       chatBootstrapPreflight.reason ||
         "Skipping real-backend workspace test: chat bootstrap endpoint unavailable"
     )
+    const chatModelId = requireRealBackendChatModel(serverInfo)
 
     const fixtureId = generateTestId("workspace-study-quiz")
     const probeToken = `${fixtureId}-quiz-token`
@@ -1192,6 +1260,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     try {
       await workspacePage.goto()
       await workspacePage.waitForReady()
+      await selectRealBackendChatModel(authedPage, chatModelId)
       await assertChatBootstrapHealthy(tracker.responses, tracker.failures)
 
       await workspacePage.resetWorkspace(`Workspace ${fixtureId}`)
@@ -1336,6 +1405,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       chatBootstrapPreflight.reason ||
         "Skipping real-backend workspace test: chat bootstrap endpoint unavailable"
     )
+    const chatModelId = requireRealBackendChatModel(serverInfo)
 
     const fixtureId = generateTestId("workspace-study-flashcards")
     const probeToken = `${fixtureId}-flashcards-token`
@@ -1355,6 +1425,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     try {
       await workspacePage.goto()
       await workspacePage.waitForReady()
+      await selectRealBackendChatModel(authedPage, chatModelId)
       await assertChatBootstrapHealthy(tracker.responses, tracker.failures)
 
       await workspacePage.resetWorkspace(`Workspace ${fixtureId}`)
