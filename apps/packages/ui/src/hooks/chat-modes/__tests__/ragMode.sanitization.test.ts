@@ -288,7 +288,7 @@ describe("ragMode sanitizer", () => {
     )
   })
 
-  it("uses backend generated answers directly for selected workspace media RAG", async () => {
+  it("continues through chat completion when selected workspace media RAG returns evidence and a generated answer", async () => {
     mocks.ragSearch.mockResolvedValue({
       documents: [
         {
@@ -302,24 +302,40 @@ describe("ragMode sanitizer", () => {
       generated_answer:
         "The exact phrase is PASTE-EVIDENCE-ORION. It proves pasted workspace sources are indexed and used in grounded Research Workspace answers with visible evidence."
     })
+    const context = createRagContext()
 
-    const response = await __testing__.ragModeDefinition.preflight?.(
-      createRagContext()
-    )
+    await expect(
+      __testing__.ragModeDefinition.preflight?.(context)
+    ).resolves.toBeNull()
 
-    expect(response).toMatchObject({
-      handled: true,
-      fullText: expect.stringContaining("PASTE-EVIDENCE-ORION"),
-      sources: [
-        expect.objectContaining({
-          name: "TASK-478.5 Paste Evidence Source",
-          mode: "rag"
-        })
-      ],
-      generationInfo: expect.objectContaining({
-        grounded: true,
-        reason: "selected_source_generated_answer"
+    const prompt = await __testing__.ragModeDefinition.preparePrompt(context)
+
+    expect(mocks.ragSearch).toHaveBeenCalledTimes(1)
+    expect(prompt.sources).toEqual([
+      expect.objectContaining({
+        name: "TASK-478.5 Paste Evidence Source",
+        mode: "rag"
       })
-    })
+    ])
+    expect(mocks.humanMessageFormatter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: [
+          expect.objectContaining({
+            text: expect.stringContaining("PASTE-EVIDENCE-ORION")
+          })
+        ]
+      })
+    )
+    expect(mocks.humanMessageFormatter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: [
+          expect.objectContaining({
+            text: expect.stringContaining(
+              "What phrase proves the selected source was used?"
+            )
+          })
+        ]
+      })
+    )
   })
 })

@@ -310,25 +310,6 @@ const buildSelectedSourceGroundingResponse = (
   saveToDb: false
 })
 
-const buildSelectedSourceGeneratedAnswerResponse = (
-  retrieval: PreparedRagRetrieval,
-  fullText: string
-) => ({
-  handled: true as const,
-  fullText,
-  sources: retrieval.source,
-  generationInfo: {
-    mode: "rag",
-    grounded: true,
-    reason: "selected_source_generated_answer",
-    retrievalMetadata: retrieval.rawResponse?.metadata,
-    citations: retrieval.rawResponse?.citations,
-    academicCitations: retrieval.rawResponse?.academic_citations,
-    chunkCitations: retrieval.rawResponse?.chunk_citations
-  },
-  saveToDb: false
-})
-
 const resolveRagQuery = async (
   ctx: ChatModeContext<RagModeParams>,
   questionPrompt: string
@@ -520,13 +501,6 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
     try {
       const retrieval = await prepareRagRetrieval(ctx, questionPrompt)
       if (retrieval.source.length > 0) {
-        const generatedAnswer = getGeneratedRagAnswer(retrieval.rawResponse)
-        if (generatedAnswer) {
-          return buildSelectedSourceGeneratedAnswerResponse(
-            retrieval,
-            generatedAnswer
-          )
-        }
         selectedSourceRetrievalCache.set(ctx, retrieval)
         return null
       }

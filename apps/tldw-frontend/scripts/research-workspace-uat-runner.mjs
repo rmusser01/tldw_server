@@ -29,6 +29,23 @@ const ENVIRONMENT_FAILURE_PATTERNS = [
   },
 ]
 
+const ENVIRONMENT_SKIP_PATTERNS = [
+  {
+    code: "no_runnable_chat_model",
+    pattern:
+      /server did not advertise a runnable chat model|No LLM models available/i,
+  },
+  {
+    code: "sandbox_run_api_unavailable",
+    pattern:
+      /sandbox run API unavailable|POST\s+\/api\/v1\/sandbox\/runs\s+returned\s+HTTP\s+404/i,
+  },
+  {
+    code: "server_unavailable",
+    pattern: /Server is not available/i,
+  },
+]
+
 const readJsonIfPresent = (filePath) => {
   if (!filePath || !fs.existsSync(filePath)) return null
   return JSON.parse(fs.readFileSync(filePath, "utf8"))
@@ -192,6 +209,67 @@ const getReportStats = (report) => {
   }
 }
 
+const collectSkippedTests = (report) => {
+  const skippedTests = []
+
+  const visitSuite = (suite) => {
+    for (const spec of suite?.specs || []) {
+      for (const test of spec.tests || []) {
+        const isSkipped =
+          test?.status === "skipped" ||
+          test?.expectedStatus === "skipped" ||
+          (test?.results || []).some((result) => result?.status === "skipped")
+        if (!isSkipped) continue
+
+        const annotations = [
+          ...(test.annotations || []),
+          ...(test.results || []).flatMap((result) => result?.annotations || []),
+        ]
+        skippedTests.push({
+          annotations,
+          title: spec.title || "",
+        })
+      }
+    }
+
+    for (const childSuite of suite?.suites || []) {
+      visitSuite(childSuite)
+    }
+  }
+
+  for (const suite of report?.suites || []) {
+    visitSuite(suite)
+  }
+
+  return skippedTests
+}
+
+const getEnvironmentSkipReasons = ({ report, stats }) => {
+  const skippedTests = collectSkippedTests(report)
+  if (skippedTests.length === 0 || skippedTests.length !== stats.skipped) {
+    return null
+  }
+
+  const reasonCodes = new Set()
+  for (const skippedTest of skippedTests) {
+    const description = skippedTest.annotations
+      .map((annotation) => annotation?.description || "")
+      .filter(Boolean)
+      .join("\n")
+    const matchingReasons = ENVIRONMENT_SKIP_PATTERNS.filter(({ pattern }) =>
+      pattern.test(description)
+    )
+    if (matchingReasons.length === 0) {
+      return null
+    }
+    for (const reason of matchingReasons) {
+      reasonCodes.add(reason.code)
+    }
+  }
+
+  return ["environment_skips_present", ...reasonCodes]
+}
+
 export const classifyPlaywrightRun = ({ exitCode, stdout = "", stderr = "", report }) => {
   const combinedOutput = `${stdout}\n${stderr}`
   const environmentReasons = ENVIRONMENT_FAILURE_PATTERNS.filter(({ pattern }) =>
@@ -219,6 +297,21 @@ export const classifyPlaywrightRun = ({ exitCode, stdout = "", stderr = "", repo
         failureScope: "environment",
         reasons,
         status: "environment_blocked",
+      }
+    }
+    if (
+      stats.skipped > 0 &&
+      stats.unexpected === 0 &&
+      stats.flaky === 0 &&
+      exitCode === 0
+    ) {
+      const environmentSkipReasons = getEnvironmentSkipReasons({ report, stats })
+      if (environmentSkipReasons) {
+        return {
+          failureScope: "environment",
+          reasons: environmentSkipReasons,
+          status: "environment_blocked",
+        }
       }
     }
     if (reasons.length > 0 || exitCode !== 0) {

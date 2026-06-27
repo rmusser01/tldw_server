@@ -1319,7 +1319,6 @@ describe("StudioPane Stage 2 workflows", () => {
     workspaceStoreState.getSelectedMediaIds = () => [101]
 
     renderStudioPane()
-    expandMoreOutputsSection()
 
     const compareButton = screen.getByRole("button", { name: "Compare Sources" })
     expect(compareButton).toBeDisabled()

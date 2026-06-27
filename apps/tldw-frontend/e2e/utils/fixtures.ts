@@ -272,6 +272,35 @@ function isRunnableModelDescriptor(
     "providerConfigured"
   ])
   if (providerConfigured === false) return false
+  const providerEnabled = firstBoolean(value, [
+    "provider_enabled",
+    "providerEnabled",
+    "enabled"
+  ])
+  if (providerEnabled === false) return false
+  const availability = normalizeModelField(
+    value?.availability ?? value?.status ?? value?.readiness
+  )
+  if (
+    availability === "unavailable" ||
+    availability === "not-configured" ||
+    availability === "not_configured"
+  ) {
+    return false
+  }
+  const readinessReasonCode = normalizeModelField(
+    value?.readiness_reason_code ?? value?.readinessReasonCode
+  )
+  if (
+    [
+      "egress_blocked",
+      "missing_credentials",
+      "provider_not_configured",
+      "unsupported_chat_provider"
+    ].includes(readinessReasonCode || "")
+  ) {
+    return false
+  }
   const deprecated = firstBoolean(value, ["deprecated", "is_deprecated", "isDeprecated"])
   if (deprecated === true) return false
   return true
