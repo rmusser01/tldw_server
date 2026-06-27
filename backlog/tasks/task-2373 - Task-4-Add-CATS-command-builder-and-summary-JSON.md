@@ -28,6 +28,8 @@ Implement Task 4 for the CATS API fuzzing harness: add CATS command construction
 - Verification: `python -m pytest tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cats_cli.py tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_summary.py -q` passed with 8 tests.
 - Formatting: `python -m black --check Helper_Scripts/cats_fuzz/cats_cli.py Helper_Scripts/cats_fuzz/summary.py tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cats_cli.py tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_summary.py` passed.
 - Security: `python -m bandit -r Helper_Scripts/cats_fuzz/cats_cli.py Helper_Scripts/cats_fuzz/summary.py -f json -o /tmp/bandit_cats_fuzz_cli_summary.json` passed with no findings.
+- Review fix: added red regression coverage for the top-level CATS fuzz command prefix and dry-run flag, then removed the incorrect `run` subcommand from `build_cats_run_command()`.
+- Review-fix verification: `python -m pytest tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cats_cli.py tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_summary.py -q` passed with 10 tests; `python -m black --check Helper_Scripts/cats_fuzz/cats_cli.py tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cats_cli.py` passed; `python -m bandit -r Helper_Scripts/cats_fuzz/cats_cli.py -f json -o /tmp/bandit_cats_fuzz_cli_fix.json` passed with no findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -37,6 +37,51 @@ def test_public_read_command_uses_blackbox_and_junit_reports(tmp_path: Path) -> 
 
 
 @pytest.mark.unit
+def test_run_command_uses_top_level_cats_fuzz_command(tmp_path: Path) -> None:
+    block = get_builtin_block("public-read")
+    contract_path = tmp_path / "openapi.json"
+    command = build_cats_run_command(
+        block,
+        contract_path=contract_path,
+        server_url="http://127.0.0.1:8000",
+        output_dir=tmp_path / "reports",
+        api_key=DEFAULT_TEST_API_KEY,
+    )
+
+    assert command[:5] == [
+        "cats",
+        "-c",
+        str(contract_path),
+        "-s",
+        "http://127.0.0.1:8000",
+    ]
+    assert command[1] != "run"
+
+
+@pytest.mark.unit
+def test_dry_run_stays_on_top_level_cats_fuzz_command(tmp_path: Path) -> None:
+    block = get_builtin_block("public-read")
+    contract_path = tmp_path / "openapi.json"
+    command = build_cats_run_command(
+        block,
+        contract_path=contract_path,
+        server_url="http://127.0.0.1:8000",
+        output_dir=tmp_path / "reports",
+        api_key=DEFAULT_TEST_API_KEY,
+        dry_run=True,
+    )
+
+    assert command[:5] == [
+        "cats",
+        "-c",
+        str(contract_path),
+        "-s",
+        "http://127.0.0.1:8000",
+    ]
+    assert "--dryRun" in command
+
+
+@pytest.mark.unit
 def test_cats_exit_classification_separates_usage_tool_and_api_failures() -> None:
     assert classify_cats_exit(0, "") == "ok"
     assert classify_cats_exit(2, "Invalid value for option") == "usage"

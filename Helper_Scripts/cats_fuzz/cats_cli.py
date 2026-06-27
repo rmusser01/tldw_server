@@ -32,7 +32,6 @@ def build_cats_run_command(
 ) -> list[str]:
     command = [
         cats_bin,
-        "run",
         "-c",
         str(contract_path),
         "-s",
