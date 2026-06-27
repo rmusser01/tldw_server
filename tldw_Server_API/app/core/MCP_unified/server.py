@@ -34,6 +34,7 @@ from .jsonrpc_transport import (
     parse_error_response,
     safe_jsonrpc_id,
 )
+from .module_surface import describe_module_surface
 from .protocol import MCPError, MCPProtocol, MCPRequest, MCPResponse, RequestContext, _trusted_compat_claims_metadata
 from .security.ip_filter import get_ip_access_controller
 from .security.request_guards import enforce_client_certificate_headers
@@ -1795,6 +1796,12 @@ class MCPServer:
 
         # Get module health
         health_results = await self.module_registry.check_all_health()
+        module_surface = describe_module_surface(
+            {
+                module_id: {"status": health.status.value}
+                for module_id, health in health_results.items()
+            }
+        )
 
         # Get connection stats
         connection_stats = {
@@ -1813,7 +1820,8 @@ class MCPServer:
                 "healthy": sum(1 for h in health_results.values() if h.is_healthy),
                 "degraded": sum(1 for h in health_results.values() if h.is_operational and not h.is_healthy),
                 "unhealthy": sum(1 for h in health_results.values() if not h.is_operational)
-            }
+            },
+            "surface": module_surface
         }
 
     async def get_metrics(self) -> dict[str, Any]:

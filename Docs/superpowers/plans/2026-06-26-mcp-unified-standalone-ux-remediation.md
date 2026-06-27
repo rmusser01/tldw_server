@@ -325,7 +325,7 @@ git commit -m "docs: add unified mcp first-run path"
 - Modify: `Docs/MCP/Unified/Modules.md`
 - Modify: `Docs/MCP/Unified/Using_Modules_YAML.md`
 
-- [ ] **Step 1: Write a focused helper test for risk tier summaries**
+- [x] **Step 1: Write a focused helper test for risk tier summaries**
 
 Create or extend a core MCP test:
 
@@ -352,7 +352,7 @@ def test_describe_module_surface_groups_enabled_modules_by_risk():
     assert surface["enabled_count"] == 3
 ```
 
-- [ ] **Step 2: Run the failing helper test**
+- [x] **Step 2: Run the failing helper test**
 
 Run:
 
@@ -363,7 +363,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_basic_functiona
 
 Expected: FAIL because `module_surface.py` does not exist.
 
-- [ ] **Step 3: Implement `module_surface.py`**
+- [x] **Step 3: Implement `module_surface.py`**
 
 Add a small, dependency-light helper:
 
@@ -434,15 +434,15 @@ def describe_module_surface(modules: dict[str, Any]) -> dict[str, Any]:
     }
 ```
 
-- [ ] **Step 4: Add `surface` to status responses**
+- [x] **Step 4: Add `surface` to status responses**
 
 In `server.py`, call `describe_module_surface()` inside the existing status builder. In `mcp_unified_endpoint.py`, add an optional `surface` field to `ServerStatusResponse`.
 
-- [ ] **Step 5: Document risk tiers and defaults**
+- [x] **Step 5: Document risk tiers and defaults**
 
 Update module docs with the same tiers. Include a table of common default modules and whether each can read data, write data, access files, contact external servers, or run local processes.
 
-- [ ] **Step 6: Re-run focused tests**
+- [x] **Step 6: Re-run focused tests**
 
 Run:
 
@@ -453,7 +453,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_basic_functiona
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 4**
+- [x] **Step 7: Commit Task 4**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/module_surface.py tldw_Server_API/app/core/MCP_unified/server.py tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py Docs/MCP/Unified/Modules.md Docs/MCP/Unified/Using_Modules_YAML.md

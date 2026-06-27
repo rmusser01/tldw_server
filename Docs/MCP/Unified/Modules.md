@@ -6,12 +6,29 @@
 
 - Unified MCP exposes tools, resources, and prompts through pluggable modules.
 - Each module subclasses `BaseModule` and is registered through YAML configuration or environment variables.
+- `GET /api/v1/mcp/status` includes a `surface` summary that groups enabled modules by user-facing risk tier.
+
+## Capability Risk Tiers
+
+Use these tiers to explain what an enabled module can do before connecting an MCP client:
+
+| Tier | Meaning | Common modules |
+|---|---|---|
+| `read_only` | Reads or searches existing TLDW data without writing by default. | `media`, `knowledge`, `chats`, `prompts`, `prompts_catalog`, `mcp_discovery` |
+| `write` | Creates, updates, exports, or manages TLDW data or generated artifacts. | `notes`, `template`, `quizzes`, `flashcards`, `kanban`, `slides`, `characters`, `persona_visuals`, `governance` |
+| `local_files` | Reads, writes, indexes, or scopes local files/workspaces. | `filesystem`, `codegraph` |
+| `external_network` | Connects to external MCP servers or networked tool providers. | `external_federation` |
+| `local_process` | Runs configured commands, code, or sandbox workloads on the host. | `run_command`, `sandbox` |
+| `unknown` | A module is enabled but has no registered tier yet. | Custom modules until classified |
+
+The tier is explanatory, not a permission grant. Execution still depends on RBAC, module settings, tool schemas, and runtime policy.
 
 ## Quick Start
 
 1. Implement the module under `tldw_Server_API/app/core/MCP_unified/modules/implementations/`.
 2. Add a module entry to `tldw_Server_API/Config_Files/mcp_modules.yaml` (or define `MCP_MODULES`).
 3. Restart the server and verify availability with `GET /api/v1/mcp/modules` and `/api/v1/mcp/tools`.
+4. Check `GET /api/v1/mcp/status` and review `surface.tiers` to confirm the effective capability surface before connecting an agent.
 
 ## Module Interface
 

@@ -100,6 +100,7 @@ class ServerStatusResponse(BaseModel):
     uptime_seconds: float
     connections: dict[str, int]
     modules: dict[str, int]
+    surface: dict[str, Any] | None = None
 
 
 class ServerMetricsResponse(BaseModel):

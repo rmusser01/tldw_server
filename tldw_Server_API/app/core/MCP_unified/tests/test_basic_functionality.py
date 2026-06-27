@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.MCP_unified import (
     get_rbac_policy,
     UserRole
 )
+from tldw_Server_API.app.core.MCP_unified.modules.base import HealthStatus, ModuleHealth
 from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
 
 
@@ -111,6 +112,29 @@ class TestConfiguration:
         # Should not be the default hardcoded value
         assert config.jwt_secret_key.get_secret_value() != "your-secret-key-change-this-in-production"
         assert len(config.jwt_secret_key.get_secret_value()) >= 32
+
+
+def test_describe_module_surface_groups_enabled_modules_by_risk():
+    """Effective MCP surface should be grouped into user-facing risk tiers."""
+    from tldw_Server_API.app.core.MCP_unified.module_surface import describe_module_surface
+
+    modules = {
+        "media": {"enabled": True, "status": "healthy"},
+        "filesystem": {"enabled": True, "status": "healthy"},
+        "run_command": {"enabled": True, "status": "healthy"},
+        "external_federation": {"enabled": False, "status": "disabled"},
+    }
+
+    surface = describe_module_surface(modules)
+
+    assert "read_only" in surface["tiers"]
+    assert "local_files" in surface["tiers"]
+    assert "local_process" in surface["tiers"]
+    assert "external_network" not in surface["tiers"]
+    assert [module["id"] for module in surface["tiers"]["read_only"]["modules"]] == ["media"]
+    assert [module["id"] for module in surface["tiers"]["local_files"]["modules"]] == ["filesystem"]
+    assert [module["id"] for module in surface["tiers"]["local_process"]["modules"]] == ["run_command"]
+    assert surface["enabled_count"] == 3
 
 
 class TestJWTManager:
@@ -393,6 +417,27 @@ class TestMCPServer:
         assert status["uptime_seconds"] >= 0
 
         await server.shutdown()
+
+    async def test_server_status_includes_module_surface(self, monkeypatch):
+        """Server status should explain enabled module risk tiers, not only counts."""
+        server = MCPServer()
+        server.initialized = True
+
+        async def _check_all_health():
+            return {
+                "media": ModuleHealth(status=HealthStatus.HEALTHY),
+                "filesystem": ModuleHealth(status=HealthStatus.HEALTHY),
+                "run_command": ModuleHealth(status=HealthStatus.DEGRADED),
+            }
+
+        monkeypatch.setattr(server.module_registry, "check_all_health", _check_all_health)
+
+        status = await server.get_status()
+
+        assert status["surface"]["enabled_count"] == 3
+        assert [m["id"] for m in status["surface"]["tiers"]["read_only"]["modules"]] == ["media"]
+        assert [m["id"] for m in status["surface"]["tiers"]["local_files"]["modules"]] == ["filesystem"]
+        assert [m["id"] for m in status["surface"]["tiers"]["local_process"]["modules"]] == ["run_command"]
 
     async def test_server_metrics(self):
         """Test getting server metrics"""
