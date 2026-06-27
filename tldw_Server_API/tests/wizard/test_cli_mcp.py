@@ -5,7 +5,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from tldw_Server_API.cli.wizard.cli import app
+from tldw_Server_API.cli.wizard.cli import _mcp_tools_url, app
 from tldw_Server_API.tests.wizard.helpers import assert_action_field, assert_wizard_json
 
 
@@ -245,6 +245,16 @@ def test_mcp_add_verify_network_failure_reports_server_url(monkeypatch):
         assert result.exit_code == 0, result.output
         assert "http://127.0.0.1:8000/api/v1/mcp/tools" in result.output
         assert "start tldw server" in result.output.lower()
+
+
+def test_mcp_tools_url_handles_schemeless_websocket_url() -> None:
+    """Scheme-less host URLs should still map to a valid HTTP tools endpoint."""
+    assert _mcp_tools_url("127.0.0.1:8000/api/v1/mcp/ws") == "http://127.0.0.1:8000/api/v1/mcp/tools"
+
+
+def test_mcp_tools_url_handles_schemeless_hostname_url() -> None:
+    """Scheme-less hostname URLs should not be mistaken for URL schemes."""
+    assert _mcp_tools_url("localhost:8000/api/v1/mcp/ws") == "http://localhost:8000/api/v1/mcp/tools"
 
 
 def test_mcp_remove_removes_entry():

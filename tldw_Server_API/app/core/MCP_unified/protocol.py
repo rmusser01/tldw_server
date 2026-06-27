@@ -2127,11 +2127,12 @@ class MCPProtocol:
             return None
         try:
             metadata = context.metadata if isinstance(getattr(context, "metadata", None), dict) else {}
+            provider_strict = strict and not fail_open
             resolved = await self.tool_catalog_provider.resolve_tool_names(
                 catalog_name=catalog_name if isinstance(catalog_name, str) else None,
                 catalog_id=catalog_id,
                 metadata=metadata,
-                strict=strict,
+                strict=provider_strict,
             )
             if resolved is None and not fail_open:
                 return set()
@@ -2141,7 +2142,7 @@ class MCPProtocol:
                 "Catalog lookup unavailable; returning fallback: {}",
                 exc.__class__.__name__,
             )
-            return None if fail_open and not strict else set()
+            return None if fail_open else set()
 
     def _catalog_filter_requested(self, params: dict[str, Any]) -> bool:
         """Return true when the caller requested catalog-scoped discovery."""

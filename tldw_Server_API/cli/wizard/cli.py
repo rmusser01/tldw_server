@@ -376,7 +376,11 @@ def _check_endpoints(base_url: str) -> dict[str, dict[str, Any]]:
 
 def _mcp_tools_url(server_url: str) -> str:
     """Return the HTTP tools endpoint corresponding to an MCP server URL."""
-    parsed = urlsplit(server_url)
+    raw_url = server_url.strip()
+    parsed = urlsplit(raw_url)
+    known_schemes = {"http", "https", "ws", "wss"}
+    if not parsed.netloc and (not parsed.scheme or parsed.scheme not in known_schemes):
+        parsed = urlsplit(f"http://{raw_url}")
     scheme = "https" if parsed.scheme in {"wss", "https"} else "http"
     base_path = parsed.path.split("/api/v1/mcp", 1)[0]
     return f"{scheme}://{parsed.netloc}{base_path}/api/v1/mcp/tools"

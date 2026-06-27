@@ -78,6 +78,7 @@ async def test_discovery_tools_list_parses_catalog_strict_string(monkeypatch: py
 
 @pytest.mark.asyncio
 async def test_discovery_tools_list_parses_catalog_fail_open_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    """String fail-open inputs should be parsed and forwarded as booleans."""
     captured: dict[str, Any] = {}
 
     async def _handle_tools_list(
