@@ -76,3 +76,54 @@ Bandit summary command:
 jq '{metrics: .metrics._totals, issue_count: (.results|length), severities: (.results|group_by(.issue_severity)|map({severity: .[0].issue_severity, count: length})), confidences: (.results|group_by(.issue_confidence)|map({confidence: .[0].issue_confidence, count: length}))}' /tmp/bandit_mcp_sandbox_agent_protocol.json
 Summary: 4418 results, 0 high severity, 17 medium severity, 4401 low severity. Medium findings were in MCP test files under tldw_Server_API/app/core/MCP_unified/tests, primarily Bandit B108 temp-path findings plus one B103 chmod test case.
 ```
+
+## Stage 5 Findings Index Normalization
+
+```text
+Source reports normalized:
+- Docs/superpowers/reviews/2026-06-27-repo-audit/domains/authnz-admin.md
+- Docs/superpowers/reviews/2026-06-27-repo-audit/domains/db-migrations-data-durability.md
+- Docs/superpowers/reviews/2026-06-27-repo-audit/domains/webui-extension-api-contracts.md
+- Docs/superpowers/reviews/2026-06-27-repo-audit/domains/ci-deployment-operations-release.md
+- Docs/superpowers/reviews/2026-06-27-repo-audit/domains/media-ingestion-storage.md
+- Docs/superpowers/reviews/2026-06-27-repo-audit/domains/chat-rag-llm.md
+- Docs/superpowers/reviews/2026-06-27-repo-audit/domains/jobs-scheduler-workflows.md
+- Docs/superpowers/reviews/2026-06-27-repo-audit/domains/integrations-providers.md
+- Docs/superpowers/reviews/2026-06-27-repo-audit/domains/mcp-sandbox-agent-protocol.md
+
+Normalization result:
+- findings-index.json retained the existing object root, audit metadata, schema metadata, and date-prefixed ID format.
+- 26 raw candidates were normalized into 26 canonical findings.
+- Canonical ID ranges used: AUDIT-2026-06-27-AUTH-001..003, DB-001..002, WEBUI-001..002, OPS-001..006, MEDIA-001..004, CHAT-001..002, JOBS-001..002, INTEGRATIONS-001..003, MCP-001..002.
+- Each finding includes its original CANDIDATE-* ID in evidence, a source report, owner domain, affected paths, recommendation, status, and validation status.
+- Duplicate/overlap review compared candidate titles, affected paths, and recommendations across all nine reports. No candidates were merged; no duplicate titles were found.
+- Stable mapping correction: integrations-providers.md now maps to AUDIT-2026-06-27-INTEGRATIONS-NNN, matching the shared index format.
+
+Verification commands run during normalization:
+- jq empty Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json
+- jq '.findings | length' Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json
+- jq -r '.findings[].id' Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json | sort | uniq -d
+- jq -e '.schema.allowed_values as $a | all(.findings[]; ((.severity as $v | $a.severity | index($v)) and (.confidence as $v | $a.confidence | index($v)) and (.category as $v | $a.category | index($v)) and (.evidence_tier as $v | $a.evidence_tier | index($v)) and (.evidence_strength as $v | $a.evidence_strength | index($v)) and (.status as $v | $a.status | index($v)) and (.validation_status as $v | $a.validation_status | index($v))))' Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json
+- jq -r '.schema.finding_required_fields as $req | .findings[] | .id as $id | ($req - (keys_unsorted))[]? | "missing \($id) \(.)"' Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json
+- jq -r '.findings[] | select((.recommendation|length)==0 or (.affected_paths|length)==0 or (.evidence|length)==0) | .id' Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json
+- rg -o "CANDIDATE-[A-Za-z0-9_-]+-[0-9]{3}" Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json | sort -u | wc -l | tr -d ' '
+- jq -r '.findings[].title' Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json | sort | uniq -d
+- placeholder-token scan against Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json
+- git diff --check -- Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json Docs/superpowers/reviews/2026-06-27-repo-audit/domains/integrations-providers.md Docs/superpowers/reviews/2026-06-27-repo-audit/evidence/command-log.md "backlog/tasks/task-12050 - Execute-comprehensive-repository-audit.md"
+- final-summary marker count check on backlog/tasks/task-12050 - Execute-comprehensive-repository-audit.md
+- git status --short
+
+Verification result:
+- JSON parse passed.
+- Finding count is 26.
+- Duplicate ID check returned no output.
+- Allowed-value schema check returned true.
+- Required-field check returned no output.
+- Empty recommendation/evidence/affected path check returned no output.
+- Unique original candidate ID count is 26.
+- Duplicate title check returned no output.
+- Placeholder scan returned no matches.
+- Diff whitespace check passed.
+- Final-summary markers remain exactly one begin marker and one end marker.
+- Git status showed only intended audit files changed plus the two known unrelated untracked watchlist templates.
+```

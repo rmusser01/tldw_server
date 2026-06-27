@@ -20,7 +20,7 @@
 ## Index Mapping
 
 This domain uses the requested candidate ID range `CANDIDATE-integrations-providers-NNN`.
-If promoted into `findings-index.json`, map these candidates to the integrations/provider audit range, for example `AUDIT-2026-06-27-INT-001` through `AUDIT-2026-06-27-INT-003`.
+If promoted into `findings-index.json`, map these candidates to the integrations/provider audit range, for example `AUDIT-2026-06-27-INTEGRATIONS-001` through `AUDIT-2026-06-27-INTEGRATIONS-003`.
 For each promoted entry:
 
 - `source_report`: `Docs/superpowers/reviews/2026-06-27-repo-audit/domains/integrations-providers.md`
@@ -236,7 +236,7 @@ rg --files tldw_Server_API/app/core tldw_Server_API/app/api/v1/endpoints tldw_Se
 rg -n "from tldw_Server_API\.app\.core\.http_client|import httpx|import requests|requests\.|httpx\.|create_client|create_async_client|fetch\(|afetch\(" tldw_Server_API/app/core tldw_Server_API/app/api/v1/endpoints tldw_Server_API/tests
 rg -n "evaluate_url_policy|decide_web_outbound_policy|skip_egress_check|egress|allowlist|block_private|private" tldw_Server_API/app/core tldw_Server_API/app/api/v1/endpoints tldw_Server_API/tests
 rg -n "API_KEY|api_key|token|secret|Authorization|Bearer|headers" tldw_Server_API/app/core tldw_Server_API/app/api/v1/endpoints tldw_Server_API/tests
-rg -n "CANDIDATE-integrations-providers|AUDIT-2026-06-27-INT|integrations-providers" Docs/superpowers/reviews/2026-06-27-repo-audit
+rg -n "CANDIDATE-integrations-providers|AUDIT-2026-06-27-INTEGRATIONS|integrations-providers" Docs/superpowers/reviews/2026-06-27-repo-audit
 nl -ba tldw_Server_API/app/core/http_client.py | sed -n '1,360p'
 nl -ba tldw_Server_API/app/core/http_client.py | sed -n '760,1180p'
 nl -ba tldw_Server_API/app/core/LLM_Calls/tokenizer_resolver.py | sed -n '1,760p'
