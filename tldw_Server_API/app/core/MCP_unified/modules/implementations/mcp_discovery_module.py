@@ -64,7 +64,11 @@ class MCPDiscoveryModule(BaseModule):
                         "catalog_id": {"type": "integer", "description": "Catalog id."},
                         "catalog_strict": {
                             "type": "boolean",
-                            "description": "Return empty tool list when catalog resolution fails.",
+                            "description": "Return empty tool list when catalog resolution fails; wins over fail-open.",
+                        },
+                        "catalog_fail_open": {
+                            "type": "boolean",
+                            "description": "Return the RBAC-filtered tool list when catalog resolution fails unless strict is true.",
                         },
                         "module": {"type": "string", "description": "Single module id filter."},
                         "modules": {
@@ -114,6 +118,14 @@ class MCPDiscoveryModule(BaseModule):
             params["catalog_strict"] = bool(catalog_strict)
         elif isinstance(catalog_strict, str):
             params["catalog_strict"] = is_truthy(catalog_strict)
+
+        catalog_fail_open = args.get("catalog_fail_open")
+        if isinstance(catalog_fail_open, bool):
+            params["catalog_fail_open"] = catalog_fail_open
+        elif isinstance(catalog_fail_open, (int, float)):
+            params["catalog_fail_open"] = bool(catalog_fail_open)
+        elif isinstance(catalog_fail_open, str):
+            params["catalog_fail_open"] = is_truthy(catalog_fail_open)
 
         modules: list[str] = []
         module_single = args.get("module")

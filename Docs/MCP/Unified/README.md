@@ -1,5 +1,7 @@
 # MCP Unified Documentation
 
+> **Current state:** Unified MCP is embedded in TLDW Server today. The standalone package/gateway is planned but not shipped in this tree yet. Use the TLDW Server launch path unless a future release explicitly says the standalone gateway is available.
+
 The MCP Unified stack is the production Model Context Protocol surface that ships with TLDW. Use this directory as the starting point for all current development, deployment, and client-integration work.
 
 ## Available Guides
@@ -12,6 +14,7 @@ The MCP Unified stack is the production Model Context Protocol surface that ship
 - `Governance_Operations.md` - Rollout modes, compatibility guarantees, and runbook for unified governance operations
 - `Documentation_Ingestion_Playbook.md` - Step-by-step workflow for ingesting project docs and exposing them through MCP tools
 - `Client_Snippets.md` - Minimal JS/Python examples for initialize → tools/list → tools/call
+- `Operator_Cheatsheet.md` - Compact command reference for repeat HTTP, WebSocket, batch, session, status, and metrics workflows
 - `Adding_Tools.md` - Step-by-step guide to add new tools (modules) and register them
 - `External_Federation.md` - Enabling and operating external MCP server federation (read + write policy controls)
 - `../../API-related/Tools_API_Documentation.md` - REST facade for listing/executing tools via MCP

@@ -42,6 +42,10 @@ def _protocol_dependencies(*, tool_catalog_provider: Any) -> SimpleNamespace:
         telemetry_provider=_NoopTelemetry(),
         redis_client_factory=lambda **_kwargs: None,
         tool_catalog_provider=tool_catalog_provider,
+        effective_policy_resolver=object(),
+        approval_evaluator=object(),
+        path_scope_enforcer=object(),
+        external_access_evaluator=object(),
     )
 
 
@@ -99,7 +103,7 @@ async def test_protocol_catalog_resolution_uses_injected_provider() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_protocol_catalog_provider_failure_honors_strict_mode() -> None:
+async def test_protocol_catalog_provider_failure_fails_closed_by_default() -> None:
     from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
 
     class _FailingToolCatalogProvider:
@@ -123,13 +127,23 @@ async def test_protocol_catalog_provider_failure_honors_strict_mode() -> None:
         {"catalog": "A"},
         ctx,
     )
+    fail_open = await proto._resolve_catalog_tool_names(  # noqa: SLF001
+        {"catalog": "A", "catalog_fail_open": True},
+        ctx,
+    )
     strict = await proto._resolve_catalog_tool_names(  # noqa: SLF001
         {"catalog": "A", "catalog_strict": True},
         ctx,
     )
+    strict_fail_open = await proto._resolve_catalog_tool_names(  # noqa: SLF001
+        {"catalog": "A", "catalog_strict": True, "catalog_fail_open": True},
+        ctx,
+    )
 
-    assert non_strict is None
+    assert non_strict == set()
+    assert fail_open is None
     assert strict == set()
+    assert strict_fail_open == set()
 
 
 @pytest.mark.unit
@@ -264,6 +278,162 @@ async def test_protocol_tools_list_catalog_filter(monkeypatch):
     names = {t.get("name") for t in tools}
     assert "media.search" in names
     assert "ingest_media" not in names  # filtered out by catalog
+    assert result.get("_meta", {}).get("catalog", {}).get("status") == "resolved"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_protocol_tools_list_unresolved_catalog_returns_empty_with_meta(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unresolved catalog filters should return no tools and explicit metadata."""
+    os.environ["TEST_MODE"] = "true"
+
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
+
+    class _ToolCatalogProvider:
+        """Catalog provider that simulates an unresolved catalog lookup."""
+
+        async def resolve_tool_names(
+            self,
+            *,
+            catalog_name: str | None,
+            catalog_id: Any,
+            metadata: dict[str, Any],
+            strict: bool,
+        ) -> set[str] | None:
+            del catalog_name, catalog_id, metadata, strict
+            return None
+
+    class _ModuleStub:
+        """Module stub with two discoverable media tools."""
+
+        name = "Media"
+
+        async def get_tools(self) -> list[dict[str, Any]]:
+            """Return tools that should be hidden when the catalog is unresolved."""
+            return [
+                {"name": "media.search", "inputSchema": {"type": "object"}},
+                {"name": "ingest_media", "inputSchema": {"type": "object"}},
+            ]
+
+    class _RegistryStub:
+        """Registry stub exposing the media module."""
+
+        async def get_all_modules(self) -> dict[str, Any]:
+            """Return registered modules for tools/list."""
+            return {"media": _ModuleStub()}
+
+    monkeypatch.setenv("MCP_ENABLE_MEDIA_MODULE", "false")
+    monkeypatch.setenv("MCP_MODULES", "")
+
+    proto = MCPProtocol(dependencies=_protocol_dependencies(tool_catalog_provider=_ToolCatalogProvider()))
+    proto.module_registry = _RegistryStub()
+
+    async def _allow_mod(*_args: Any, **_kwargs: Any) -> bool:
+        """Allow all module discovery in this test."""
+        return True
+
+    async def _allow_tool(*_args: Any, **_kwargs: Any) -> bool:
+        """Allow all tool discovery in this test."""
+        return True
+
+    proto._has_module_permission = _allow_mod  # type: ignore
+    proto._has_tool_permission = _allow_tool  # type: ignore
+
+    ctx = RequestContext(request_id="catalog-miss", user_id="1", client_id="unit", metadata={})
+    result = await proto._handle_tools_list({"catalog": "typo-catalog"}, ctx)
+
+    assert result.get("tools") == []
+    assert result.get("_meta", {}).get("catalog") == {
+        "status": "unresolved",
+        "filtered": True,
+        "toolCount": 0,
+        "hint": "Check catalog name/id or remove the catalog filter.",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_protocol_catalog_strict_overrides_fail_open_for_unresolved_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Strict catalog lookup should still fail closed when fail-open is also requested."""
+    os.environ["TEST_MODE"] = "true"
+
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
+
+    class _ToolCatalogProvider:
+        """Catalog provider that exposes whether strict was forwarded."""
+
+        def __init__(self) -> None:
+            """Track strict values passed by the protocol."""
+            self.strict_values: list[bool] = []
+
+        async def resolve_tool_names(
+            self,
+            *,
+            catalog_name: str | None,
+            catalog_id: Any,
+            metadata: dict[str, Any],
+            strict: bool,
+        ) -> set[str] | None:
+            """Return strict-mode empty sets and fail-open None otherwise."""
+            del catalog_name, catalog_id, metadata
+            self.strict_values.append(strict)
+            return set() if strict else None
+
+    class _ModuleStub:
+        """Module stub with tools that strict catalog lookup should hide."""
+
+        name = "Media"
+
+        async def get_tools(self) -> list[dict[str, Any]]:
+            """Return tools that should be hidden when strict lookup cannot resolve."""
+            return [
+                {"name": "media.search", "inputSchema": {"type": "object"}},
+                {"name": "ingest_media", "inputSchema": {"type": "object"}},
+            ]
+
+    class _RegistryStub:
+        """Registry stub exposing the media module."""
+
+        async def get_all_modules(self) -> dict[str, Any]:
+            """Return registered modules for tools/list."""
+            return {"media": _ModuleStub()}
+
+    monkeypatch.setenv("MCP_ENABLE_MEDIA_MODULE", "false")
+    monkeypatch.setenv("MCP_MODULES", "")
+
+    provider = _ToolCatalogProvider()
+    proto = MCPProtocol(dependencies=_protocol_dependencies(tool_catalog_provider=provider))
+    proto.module_registry = _RegistryStub()
+
+    async def _allow_mod(*_args: Any, **_kwargs: Any) -> bool:
+        """Allow all module discovery in this test."""
+        return True
+
+    async def _allow_tool(*_args: Any, **_kwargs: Any) -> bool:
+        """Allow all tool discovery in this test."""
+        return True
+
+    proto._has_module_permission = _allow_mod  # type: ignore
+    proto._has_tool_permission = _allow_tool  # type: ignore
+
+    ctx = RequestContext(request_id="catalog-fail-open", user_id="1", client_id="unit", metadata={})
+    result = await proto._handle_tools_list(
+        {"catalog": "typo-catalog", "catalog_strict": True, "catalog_fail_open": True},
+        ctx,
+    )
+
+    assert provider.strict_values == [True]
+    assert result.get("tools") == []
+    assert result.get("_meta", {}).get("catalog") == {
+        "status": "unresolved",
+        "filtered": True,
+        "toolCount": 0,
+        "hint": "Check catalog name/id or remove the catalog filter.",
+    }
 
 
 @pytest.mark.unit
@@ -436,7 +606,7 @@ async def test_protocol_catalog_resolution_precedence(monkeypatch):
     names_global = {t.get("name") for t in res_global.get("tools", [])}
     assert names_global == {"global.only"}
 
-    # unresolved catalog (fetchone returns None for all): fail-open (no filter)
+    # unresolved catalog (fetchone returns None for all): fail closed with explicit metadata
     class _PoolNone:
         async def fetchone(self, *a, **k):
             return None
@@ -446,7 +616,8 @@ async def test_protocol_catalog_resolution_precedence(monkeypatch):
     monkeypatch.setattr(db_mod, "get_db_pool", lambda: _PoolNone())
     res_unres = await proto._handle_tools_list({"catalog": "missing"}, ctx_global)
     names_unres = {t.get("name") for t in res_unres.get("tools", [])}
-    assert names_unres == {"team.only", "org.only", "global.only"}
+    assert names_unres == set()
+    assert res_unres.get("_meta", {}).get("catalog", {}).get("status") == "unresolved"
 
 
 @pytest.mark.unit

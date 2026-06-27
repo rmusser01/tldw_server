@@ -4,6 +4,8 @@ Author: tldw_server team
 Status: Draft (v0.1)
 Target Version: v0.2.x
 
+> **Status note:** This PRD describes planned extraction work. It is not an installation guide for a shipped standalone package or gateway.
+
 ## 1) Summary
 Extract the existing MCP Unified server into a reusable, installable module without removing it from tldw_server. The module will expose FastAPI routers (HTTP + WebSocket), clean interfaces for AuthNZ, rate limiting, metrics, and pluggable tools/modules. The tldw_server app will include these routers and provide adapters, preserving current behavior and API shapes.
 

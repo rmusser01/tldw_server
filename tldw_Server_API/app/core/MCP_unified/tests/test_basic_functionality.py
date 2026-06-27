@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.MCP_unified import (
     get_rbac_policy,
     UserRole
 )
+from tldw_Server_API.app.core.MCP_unified.modules.base import HealthStatus, ModuleHealth
 from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
 
 
@@ -113,6 +114,44 @@ class TestConfiguration:
         assert len(config.jwt_secret_key.get_secret_value()) >= 32
 
 
+def test_describe_module_surface_groups_enabled_modules_by_risk():
+    """Effective MCP surface should be grouped into user-facing risk tiers."""
+    from tldw_Server_API.app.core.MCP_unified.module_surface import describe_module_surface
+
+    modules = {
+        "media": {"enabled": True, "status": "healthy"},
+        "filesystem": {"enabled": True, "status": "healthy"},
+        "git": {"enabled": True, "status": "healthy"},
+        "web_fetch": {"enabled": True, "status": "healthy"},
+        "web_search": {"enabled": True, "status": "healthy"},
+        "web_research": {"enabled": True, "status": "healthy"},
+        "browser_cdp": {"enabled": True, "status": "healthy"},
+        "run_command": {"enabled": True, "status": "healthy"},
+        "external_federation": {"enabled": False, "status": "disabled"},
+    }
+
+    surface = describe_module_surface(modules)
+
+    assert "read_only" in surface["tiers"]
+    assert "local_files" in surface["tiers"]
+    assert "local_process" in surface["tiers"]
+    assert "external_network" in surface["tiers"]
+    assert "unknown" not in surface["tiers"]
+    assert [module["id"] for module in surface["tiers"]["read_only"]["modules"]] == ["media"]
+    assert [module["id"] for module in surface["tiers"]["local_files"]["modules"]] == ["filesystem"]
+    assert [module["id"] for module in surface["tiers"]["local_process"]["modules"]] == [
+        "browser_cdp",
+        "git",
+        "run_command",
+    ]
+    assert [module["id"] for module in surface["tiers"]["external_network"]["modules"]] == [
+        "web_fetch",
+        "web_research",
+        "web_search",
+    ]
+    assert surface["enabled_count"] == 8
+
+
 class TestJWTManager:
     """Test JWT authentication manager"""
 
@@ -192,7 +231,14 @@ class TestRBACPolicy:
         assert policy.check_permission(
             "test_user",
             Resource.TOOL,
-            Action.EXECUTE
+            Action.EXECUTE,
+            "search_media"
+        )
+        assert not policy.check_permission(
+            "test_user",
+            Resource.TOOL,
+            Action.EXECUTE,
+            "definitely_missing_tool"
         )
         assert policy.check_permission(
             "test_user",
@@ -393,6 +439,82 @@ class TestMCPServer:
         assert status["uptime_seconds"] >= 0
 
         await server.shutdown()
+
+    async def test_server_status_includes_module_surface(self, monkeypatch):
+        """Server status should explain enabled module risk tiers, not only counts."""
+        server = MCPServer()
+        server.initialized = True
+
+        async def _check_all_health():
+            return {
+                "media": ModuleHealth(status=HealthStatus.HEALTHY),
+                "filesystem": ModuleHealth(status=HealthStatus.HEALTHY),
+                "run_command": ModuleHealth(status=HealthStatus.DEGRADED),
+            }
+
+        monkeypatch.setattr(server.module_registry, "check_all_health", _check_all_health)
+
+        status = await server.get_status()
+
+        assert status["surface"]["enabled_count"] == 3
+        assert [m["id"] for m in status["surface"]["tiers"]["read_only"]["modules"]] == ["media"]
+        assert [m["id"] for m in status["surface"]["tiers"]["local_files"]["modules"]] == ["filesystem"]
+        assert [m["id"] for m in status["surface"]["tiers"]["local_process"]["modules"]] == ["run_command"]
+
+    async def test_server_status_includes_sanitized_problem_modules(self, monkeypatch):
+        """Server status should expose actionable, canned module problem reasons."""
+        server = MCPServer()
+        server.initialized = True
+
+        async def _check_all_health():
+            return {
+                "media": ModuleHealth(status=HealthStatus.HEALTHY),
+                "broken": ModuleHealth(
+                    status=HealthStatus.UNHEALTHY,
+                    message="Health check failed at /private/authnz.db with api_key=secret-token",
+                ),
+                "degraded": ModuleHealth(
+                    status=HealthStatus.DEGRADED,
+                    message="Slow dependency at /tmp/token-cache with token=secret-token",
+                ),
+            }
+
+        async def _list_registrations():
+            return [
+                {
+                    "module_id": "registration_error",
+                    "status": "error",
+                    "error_message": "Import failed at /private/module.py with api_key=secret-token",
+                }
+            ]
+
+        monkeypatch.setattr(server.module_registry, "check_all_health", _check_all_health)
+        monkeypatch.setattr(server.module_registry, "list_registrations", _list_registrations)
+
+        status = await server.get_status()
+
+        assert status["problem_modules"] == [
+            {
+                "id": "broken",
+                "status": "unhealthy",
+                "reason": "module_unhealthy",
+                "next_action": "Check module configuration and dependencies, then restart or disable the module.",
+            },
+            {
+                "id": "degraded",
+                "status": "degraded",
+                "reason": "module_degraded",
+                "next_action": "Check module configuration and dependencies, then restart or disable the module.",
+            },
+            {
+                "id": "registration_error",
+                "status": "error",
+                "reason": "module_registration_error",
+                "next_action": "Check module configuration and dependencies, then restart or disable the module.",
+            }
+        ]
+        assert "/private/" not in repr(status["problem_modules"])
+        assert "secret-token" not in repr(status["problem_modules"])
 
     async def test_server_metrics(self):
         """Test getting server metrics"""

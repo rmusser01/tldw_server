@@ -1,5 +1,7 @@
 # MCP Unified Module - Production Ready
 
+> **Current state:** Unified MCP is embedded in TLDW Server today. The standalone package/gateway is planned but not shipped in this tree yet. Use the TLDW Server launch path unless a future release explicitly says the standalone gateway is available.
+
 ## 1. Descriptive of Current Feature Set
 
 - Purpose: Secure, production-ready Model Context Protocol (MCP) server with HTTP + WebSocket transport, JWT/RBAC, rate limiting, idempotency, module system, and Prometheus metrics.
@@ -92,6 +94,8 @@ Current enterprise support matrix for this path:
 - **Graceful Degradation** - Circuit breaker pattern for resilience
 
 ## 🚀 Quick Start
+
+For an end-to-end first success, use the Golden Path Quickstart in `Docs/MCP/Unified/User_Guide.md`. The commands below are contributor-oriented runtime checks, not a standalone gateway install flow.
 
 ### 1. Set Required Environment Variables
 
@@ -608,6 +612,9 @@ Notes
 See also: Ops tuning guide at Docs/Deployment/Operations/MCP_Rate_Limits_Tuning.md
 
 ### Docker Deployment
+
+> **Experimental:** This MCP-specific Dockerfile is not the supported standalone gateway. Unified MCP is embedded in TLDW Server today; use the repository-level TLDW Server Docker or local server launch path for supported MCP usage.
+
 ```bash
 docker build -f docker/Dockerfile -t mcp-unified .
 docker run -d \

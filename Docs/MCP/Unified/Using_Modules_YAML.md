@@ -33,6 +33,17 @@ Rules
   - `tldw_Server_API.app.core.MCP_unified.modules.implementations`
   - The server logs and ignores entries outside this namespace.
 - If `modules:` is empty and `MCP_ENABLE_MEDIA_MODULE=1`, MediaModule is auto-enabled with defaults.
+- Enabled modules appear in the `/api/v1/mcp/status` `surface` summary, grouped by risk tier.
+
+Capability Risk Tiers
+- `read_only`: Reads/searches existing TLDW data, such as `media`, `knowledge`, `chats`, `prompts`, and `mcp_discovery`.
+- `write`: Creates or changes TLDW data/artifacts, such as `notes`, `template`, `quizzes`, `flashcards`, `kanban`, `slides`, and `governance`.
+- `local_files`: Reads, writes, indexes, or scopes local files/workspaces, such as `filesystem` and `codegraph`.
+- `external_network`: Connects to external servers, such as `external_federation`.
+- `local_process`: Runs configured local commands or sandbox workloads, such as `run_command` and `sandbox`.
+- `unknown`: Custom modules that have not been classified yet.
+
+Before enabling a high-risk tier, verify the relevant module settings, RBAC permissions, and runtime policy. The tier explains capability shape; it does not grant execution permission.
 
 Runtime Controls
 - `max_concurrent`: Limits concurrent calls per module (0 disables guard).

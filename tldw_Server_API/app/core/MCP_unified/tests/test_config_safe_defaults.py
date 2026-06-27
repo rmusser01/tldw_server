@@ -5,6 +5,7 @@ import pytest
 from tldw_Server_API.app.core.MCP_unified.config import _is_local_only_safe_profile
 from tldw_Server_API.app.core.MCP_unified.config import get_config
 from tldw_Server_API.app.core.MCP_unified.config import validate_config
+from tldw_Server_API.app.core.MCP_unified import config as config_module
 from tldw_Server_API.app.core.MCP_unified.tests.support import SAFE_DEFAULT_ENV_VARS
 
 
@@ -78,3 +79,20 @@ def test_validate_config_rejects_generated_secrets_for_non_local_profile(monkeyp
     monkeypatch.setenv("MCP_TRUST_X_FORWARDED", "false")
 
     assert validate_config() is False  # nosec B101
+
+
+def test_invalid_tool_category_map_records_sanitized_warning(monkeypatch):
+    monkeypatch.setenv("MCP_TOOL_CATEGORY_MAP", '{"media.search":')
+
+    cfg = get_config()
+
+    assert cfg.tool_category_map == {}
+    warnings = config_module.get_config_warnings()
+    assert warnings == [
+        {
+            "code": "invalid_tool_category_map",
+            "message": "MCP_TOOL_CATEGORY_MAP must be a JSON object; using an empty category map.",
+            "next_action": "Provide valid JSON such as {\"tool.name\":\"category\"} or remove MCP_TOOL_CATEGORY_MAP.",
+        }
+    ]
+    assert '{"media.search":' not in repr(warnings)

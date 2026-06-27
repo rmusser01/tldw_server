@@ -56,6 +56,7 @@ async def test_discovery_lists_modules_and_tools(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_discovery_tools_list_parses_catalog_strict_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    """String strict inputs should be parsed and forwarded as booleans."""
     captured: dict[str, Any] = {}
 
     async def _handle_tools_list(
@@ -63,6 +64,7 @@ async def test_discovery_tools_list_parses_catalog_strict_string(monkeypatch: py
         params: dict[str, Any],
         _context: RequestContext,
     ) -> dict[str, Any]:
+        """Capture normalized tools/list parameters."""
         captured.update(params)
         return {"tools": []}
 
@@ -74,6 +76,30 @@ async def test_discovery_tools_list_parses_catalog_strict_string(monkeypatch: py
     await mod.execute_tool("mcp.tools.list", {"catalog_strict": "yes"}, context=ctx)
 
     assert captured["catalog_strict"] is True
+
+
+@pytest.mark.asyncio
+async def test_discovery_tools_list_parses_catalog_fail_open_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    """String fail-open inputs should be parsed and forwarded as booleans."""
+    captured: dict[str, Any] = {}
+
+    async def _handle_tools_list(
+        _self: MCPProtocol,
+        params: dict[str, Any],
+        _context: RequestContext,
+    ) -> dict[str, Any]:
+        """Capture normalized tools/list parameters."""
+        captured.update(params)
+        return {"tools": []}
+
+    monkeypatch.setattr(MCPProtocol, "_handle_tools_list", _handle_tools_list)
+
+    mod = MCPDiscoveryModule(ModuleConfig(name="mcp_discovery"))
+    ctx = RequestContext(request_id="mcp-discovery-fail-open", user_id="1", metadata={})
+
+    await mod.execute_tool("mcp.tools.list", {"catalog_fail_open": "yes"}, context=ctx)
+
+    assert captured["catalog_fail_open"] is True
 
 
 @pytest.mark.asyncio

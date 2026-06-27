@@ -91,6 +91,38 @@ def _normalize_optional_text(value: Any) -> str | None:
     return text or None
 
 
+def _parse_safe_config_query(config: str | None) -> dict[str, Any]:
+    """Parse base64url-encoded JSON safe config from a query parameter."""
+    if not config:
+        return {}
+    try:
+        import base64
+        import binascii
+        import json as _json
+
+        raw = config.strip()
+        padded = raw + ("=" * (-len(raw) % 4))
+        decoded = base64.b64decode(
+            padded.encode("ascii"),
+            altchars=b"-_",
+            validate=True,
+        ).decode("utf-8")
+        parsed = _json.loads(decoded)
+        if isinstance(parsed, dict):
+            return parsed
+        raise ValueError("safe config must decode to a JSON object")
+    except (binascii.Error, UnicodeError, ValueError, TypeError):
+        logger.debug("Failed to parse safe config")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_safe_config",
+                "message": "The config query parameter must be base64url-encoded JSON.",
+                "next_action": "Remove the config parameter or send a valid encoded JSON object.",
+            },
+        ) from None
+
+
 # Request/Response models
 class ServerStatusResponse(BaseModel):
     """Server status response"""
@@ -100,6 +132,9 @@ class ServerStatusResponse(BaseModel):
     uptime_seconds: float
     connections: dict[str, int]
     modules: dict[str, int]
+    surface: dict[str, Any] | None = None
+    problem_modules: list[dict[str, str]] | None = None
+    config_warnings: list[dict[str, str]] | None = None
 
 
 class ServerMetricsResponse(BaseModel):
@@ -889,19 +924,8 @@ async def mcp_request(
     # Derive user id from the authenticated token user when present.
     derived_user_id = _get_derived_user_id(auth.user)
 
-    # Parse optional safe config (base64-encoded JSON)
-    safe_config: dict[str, Any] = {}
-    if config:
-        try:
-            import base64
-            import json as _json
-
-            decoded = base64.b64decode(config).decode("utf-8")
-            cfg = _json.loads(decoded)
-            if isinstance(cfg, dict):
-                safe_config = cfg
-        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-            logger.debug("Failed to parse safe config")
+    # Parse optional safe config (base64url-encoded JSON)
+    safe_config = _parse_safe_config_query(config)
 
     # Session lifecycle: if initialize and no session id provided, generate one and return header
     try:
@@ -999,18 +1023,7 @@ async def mcp_request_batch(
     derived_user_id = _get_derived_user_id(auth.user)
 
     # Optional safe config
-    safe_config: dict[str, Any] = {}
-    if config:
-        try:
-            import base64
-            import json as _json
-
-            decoded = base64.b64decode(config).decode("utf-8")
-            cfg = _json.loads(decoded)
-            if isinstance(cfg, dict):
-                safe_config = cfg
-        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-            logger.debug("Batch failed to parse safe config")
+    safe_config = _parse_safe_config_query(config)
 
     # If any initialize request is present and no session id was provided, generate one.
     try:
@@ -1149,11 +1162,13 @@ async def get_prometheus_metrics(
         "  `team > org > global` based on the authenticated context (API key or JWT). When both\n"
         "  `catalog` and `catalog_id` are provided, `catalog_id` takes precedence.\n"
         "- `catalog_id`: Filter by tool catalog id directly.\n\n"
-        "- `catalog_strict`: When true, unresolved catalogs return an empty tool list instead\n"
-        "  of falling back to the full discovery set.\n\n"
+        "- `catalog_strict`: Backward-compatible alias for fail-closed catalog resolution;\n"
+        "  when combined with `catalog_fail_open`, strict fail-closed behavior wins.\n"
+        "- `catalog_fail_open`: When true, unresolved catalogs fall back to the RBAC-filtered\n"
+        "  discovery set and return `_meta.catalog.status=fail_open`, unless `catalog_strict=true`.\n\n"
         "Behavior:\n"
-        "- If the catalog name/id cannot be resolved, the server fails open (no catalog filter),\n"
-        "  but RBAC is still enforced unless `catalog_strict` is enabled.\n"
+        "- If the catalog name/id cannot be resolved, the server returns an empty tool list and\n"
+        "  `_meta.catalog.status=unresolved` by default.\n"
         "- `canExecute` reflects the caller's permissions. Catalog membership does not grant\n"
         "  execution rights; it only affects discovery."
     ),
@@ -1164,6 +1179,7 @@ async def list_tools(
     catalog: Optional[str] = Query(None, description="Filter by tool catalog name"),
     catalog_id: Optional[int] = Query(None, description="Filter by tool catalog id"),
     catalog_strict: Optional[bool] = Query(None, description="Fail closed on unresolved catalogs"),
+    catalog_fail_open: Optional[bool] = Query(None, description="Fail open unless catalog_strict=true"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
 ):
@@ -1191,6 +1207,8 @@ async def list_tools(
         params["catalog_id"] = catalog_id
     if catalog_strict is not None:
         params["catalog_strict"] = catalog_strict
+    if catalog_fail_open is not None:
+        params["catalog_fail_open"] = catalog_fail_open
     request = MCPRequest(method="tools/list", params=params, id="http-tools-list")
 
     server = get_mcp_server()

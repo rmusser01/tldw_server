@@ -24,7 +24,7 @@ from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, is_single_user_profile_mode
 
 from .auth.rate_limiter import RateLimitExceeded
-from .config import get_config, validate_config
+from .config import get_config, get_config_warnings, validate_config
 from .interfaces.runtime import MCPRuntimeDependencies, WebSocketStream
 from .jsonrpc_transport import (
     invalid_request_response,
@@ -34,6 +34,7 @@ from .jsonrpc_transport import (
     parse_error_response,
     safe_jsonrpc_id,
 )
+from .module_surface import describe_module_surface
 from .protocol import MCPError, MCPProtocol, MCPRequest, MCPResponse, RequestContext, _trusted_compat_claims_metadata
 from .security.ip_filter import get_ip_access_controller
 from .security.request_guards import enforce_client_certificate_headers
@@ -529,6 +530,77 @@ class MCPServer:
             return text
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
             return text
+
+    @staticmethod
+    def _sanitize_status_reason(status: str, *, source: str = "health") -> str:
+        """Map module problem states to stable public reason codes."""
+        normalized = str(status or "").strip().lower()
+        if source == "registration" and normalized == "error":
+            return "module_registration_error"
+        return {
+            "degraded": "module_degraded",
+            "inactive": "module_inactive",
+            "unhealthy": "module_unhealthy",
+            "error": "module_error",
+        }.get(normalized, "module_problem")
+
+    def _problem_module_entry(self, module_id: str, status: str, *, source: str = "health") -> dict[str, str]:
+        """Build a user-facing problem module diagnostic."""
+        return {
+            "id": module_id,
+            "status": status,
+            "reason": self._sanitize_status_reason(status, source=source),
+            "next_action": "Check module configuration and dependencies, then restart or disable the module.",
+        }
+
+    async def _problem_modules_from_health(
+        self,
+        health_results: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        """Summarize non-healthy module states for status responses."""
+        problems: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        for module_id, health in health_results.items():
+            status_value = getattr(getattr(health, "status", ""), "value", getattr(health, "status", ""))
+            status = str(status_value or "unknown")
+            if status == "healthy":
+                continue
+            raw_reason = str(getattr(health, "message", "") or "").strip()
+            if raw_reason:
+                logger.debug(
+                    "MCP module {} reported non-healthy status {}: {}",
+                    module_id,
+                    status,
+                    self._mask_secrets(raw_reason),
+                )
+            problems.append(self._problem_module_entry(module_id, status))
+            seen.add(module_id)
+
+        try:
+            registrations = await self.module_registry.list_registrations()
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            registrations = []
+        for registration in registrations:
+            if not isinstance(registration, dict):
+                continue
+            module_id = str(registration.get("module_id") or "").strip()
+            if not module_id or module_id in seen:
+                continue
+            status = str(registration.get("status") or "unknown")
+            if status not in {"degraded", "inactive", "error"}:
+                continue
+            raw_reason = str(registration.get("error_message") or "").strip()
+            if raw_reason:
+                logger.debug(
+                    "MCP module {} registration status {}: {}",
+                    module_id,
+                    status,
+                    self._mask_secrets(raw_reason),
+                )
+            problems.append(self._problem_module_entry(module_id, status, source="registration"))
+
+        return problems
 
     async def initialize(self):
         """Initialize the server and all modules"""
@@ -1795,6 +1867,14 @@ class MCPServer:
 
         # Get module health
         health_results = await self.module_registry.check_all_health()
+        module_surface = describe_module_surface(
+            {
+                module_id: {"status": health.status.value}
+                for module_id, health in health_results.items()
+            }
+        )
+        problem_modules = await self._problem_modules_from_health(health_results)
+        config_warnings = get_config_warnings()
 
         # Get connection stats
         connection_stats = {
@@ -1813,7 +1893,10 @@ class MCPServer:
                 "healthy": sum(1 for h in health_results.values() if h.is_healthy),
                 "degraded": sum(1 for h in health_results.values() if h.is_operational and not h.is_healthy),
                 "unhealthy": sum(1 for h in health_results.values() if not h.is_operational)
-            }
+            },
+            "surface": module_surface,
+            "problem_modules": problem_modules,
+            "config_warnings": config_warnings,
         }
 
     async def get_metrics(self) -> dict[str, Any]:

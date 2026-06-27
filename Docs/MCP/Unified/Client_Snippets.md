@@ -2,9 +2,13 @@
 
 Quick, copy-paste examples to authenticate, initialize, discover tools, and call tools against the MCP Unified API.
 
+For repeat operator workflows including batch calls, session headers, status, metrics, and failure recovery, see `Operator_Cheatsheet.md`.
+
 ## Prerequisites
 - Server running with MCP Unified endpoints mounted at `/api/v1/mcp`
 - Auth token (preferred) or API key
+
+Primary examples use header or WebSocket subprotocol auth. Query-string tokens are disabled by default and should only be used for explicit legacy/debug workflows.
 
 ## JSON-RPC over HTTP (Initialize → Tools List → Tools Call)
 
@@ -88,5 +92,6 @@ print(exec_resp.json())
 
 ## Notes
 - Tool discovery can be narrowed with catalogs: `GET /api/v1/mcp/tools?catalog=<name>` or `?catalog_id=<id>`.
+- Unresolved catalogs return an empty result with `_meta.catalog.status=unresolved`; use `/api/v1/mcp/tool_catalogs` to list visible catalog names.
 - Results include `canExecute` for each tool; catalog membership doesn’t grant execute permissions.
 - Prefer WS headers/subprotocol for auth; query-param tokens are disabled by default.
