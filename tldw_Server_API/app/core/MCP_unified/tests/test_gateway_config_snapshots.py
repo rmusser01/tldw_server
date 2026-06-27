@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
+
+# Subprocess verifies a fresh interpreter import with warnings promoted to errors.
 import subprocess  # nosec B404
 import sys
 from collections.abc import Mapping
@@ -28,11 +29,13 @@ from mcp_unified.storage.models import (
 from mcp_unified.storage.sqlite import SQLiteMCPStore
 
 
+@pytest.mark.unit
 def test_snapshot_model_import_is_warning_clean_and_preserves_schema_key() -> None:
     """Gateway config snapshot imports warning-clean and still serializes schema."""
 
-    repo_root = Path(__file__).resolve().parents[5]
-    package_src = repo_root / "apps" / "mcp-unified" / "src"
+    package_src = Path(snapshot_module.__file__).resolve().parents[2]
+    if not package_src.is_dir():
+        pytest.fail(f"Package source path not found: {package_src}")
     script = """
 from mcp_unified.gateway.snapshots import GatewayConfigSnapshot
 
@@ -41,19 +44,22 @@ assert payload["schema"] == "mcp_unified.gateway.config_snapshot"
 assert "snapshot_schema" not in payload
 """
     env = {
-        **os.environ,
         "PYTHONPATH": str(package_src),
+        "PYTHONNOUSERSITE": "1",
     }
 
+    # Safe subprocess: sys.executable, constant script, explicit PYTHONPATH, no shell.
     result = subprocess.run(  # nosec B603
         [sys.executable, "-W", "error::UserWarning", "-c", script],
         check=False,
         capture_output=True,
+        cwd=package_src,
         env=env,
         text=True,
     )
 
-    assert result.returncode == 0, result.stderr  # nosec B101
+    if result.returncode != 0:
+        pytest.fail(result.stderr)
 
 
 @pytest.mark.asyncio

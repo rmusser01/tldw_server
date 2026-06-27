@@ -86,8 +86,7 @@ class GatewayConfigSnapshot(BaseModel):
 
     snapshot_schema: Literal["mcp_unified.gateway.config_snapshot"] = Field(
         default=SNAPSHOT_SCHEMA,
-        validation_alias="schema",
-        serialization_alias="schema",
+        alias="schema",
     )
     version: Literal[1] = SNAPSHOT_VERSION
     profiles: list[MCPProfile] = Field(default_factory=list)
