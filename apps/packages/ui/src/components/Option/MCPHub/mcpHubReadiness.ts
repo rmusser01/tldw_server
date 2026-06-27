@@ -115,7 +115,7 @@ const REASON_ACTIONS: Record<McpReasonCode, McpReadinessAction[]> = {
   runtime_unavailable: ["edit_config", "view_details"],
   unreachable: ["edit_config", "refresh_discovery", "view_details"],
   discovery_failed: ["refresh_discovery", "view_details"],
-  no_tools_returned: ["open_tool_catalog", "refresh_discovery", "view_details"],
+  no_tools_returned: ["refresh_discovery", "view_details"],
   config_changed: ["refresh_discovery", "edit_config"],
   catalog_expired: ["refresh_discovery", "view_details"],
   partial_capability: ["open_tool_catalog", "view_details"]
@@ -327,12 +327,24 @@ const getReadinessHint = (
   return readinessHintsByServerId[serverId]
 }
 
-const hasBlockingAuthTemplateIssue = (server: McpHubExternalServer): boolean => {
+const getAuthTemplateBlockedReason = (
+  server: McpHubExternalServer
+): string | undefined => {
   const blockedReason = server.auth_template_blocked_reason?.trim()
 
+  return blockedReason || undefined
+}
+
+const allowsNoAuthTemplate = (server: McpHubExternalServer): boolean => {
+  const blockedReason = getAuthTemplateBlockedReason(server)
+
+  return !blockedReason || blockedReason === "no_auth_template"
+}
+
+const hasBlockingAuthTemplateIssue = (server: McpHubExternalServer): boolean => {
   return (
     (server.auth_template_present === true && server.auth_template_valid === false) ||
-    Boolean(blockedReason && blockedReason !== "no_auth_template")
+    !allowsNoAuthTemplate(server)
   )
 }
 
@@ -360,7 +372,8 @@ export const getMcpCredentialState = (
   if (
     server.transport === "stdio" &&
     !hasAuthTemplate &&
-    credentialSlots.length === 0
+    credentialSlots.length === 0 &&
+    allowsNoAuthTemplate(server)
   ) {
     return "not_required"
   }
@@ -427,10 +440,9 @@ export const getMcpServerReadiness = ({
   const displayState = currentOperation
     ? "checking"
     : getDisplayStateForReason(primaryReasonCode)
-  const allowedActions = getActionsForReasons(
-    reasonCodes,
-    currentOperation ? CHECKING_ACTIONS : SERVER_READY_ACTIONS
-  )
+  const allowedActions = currentOperation
+    ? CHECKING_ACTIONS
+    : getActionsForReasons(reasonCodes, SERVER_READY_ACTIONS)
 
   return {
     serverId: server.id,
@@ -511,10 +523,9 @@ export const getMcpHubReadiness = ({
     displayState,
     reasonCodes,
     primaryReasonCode,
-    allowedActions: getActionsForReasons(
-      reasonCodes,
-      currentOperation ? CHECKING_ACTIONS : HUB_READY_ACTIONS
-    ),
+    allowedActions: currentOperation
+      ? CHECKING_ACTIONS
+      : getActionsForReasons(reasonCodes, HUB_READY_ACTIONS),
     message: getMessageForHub({
       displayState,
       primaryReasonCode,

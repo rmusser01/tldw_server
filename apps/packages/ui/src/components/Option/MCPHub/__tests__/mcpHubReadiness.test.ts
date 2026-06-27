@@ -122,6 +122,22 @@ describe("mcpHubReadiness", () => {
     })
   })
 
+  it("limits server actions to view details during current operations with other reasons", () => {
+    const readiness = getMcpServerReadiness({
+      server: server(),
+      registryEntries: [],
+      readinessHint: {
+        currentOperation: { operation: "discovery", label: "Refreshing discovery" }
+      }
+    })
+
+    expect(readiness).toMatchObject({
+      displayState: "checking",
+      primaryReasonCode: "discovery_not_run"
+    })
+    expect(readiness.allowedActions).toEqual(["view_details"])
+  })
+
   it("maps preflight failure hints to preflight_failed", () => {
     expect(
       getMcpServerReadiness({
@@ -237,6 +253,24 @@ describe("mcpHubReadiness", () => {
       displayState: "needs_attention",
       primaryReasonCode: "preflight_failed",
       reasonCodes: ["preflight_failed"]
+    })
+  })
+
+  it("does not classify blocked stdio servers as not requiring credentials", () => {
+    expect(
+      getMcpServerReadiness({
+        server: server({
+          auth_template_present: false,
+          auth_template_valid: false,
+          auth_template_blocked_reason: "missing_slot_mapping",
+          credential_slots: []
+        }),
+        registryEntries: [registryEntry()]
+      })
+    ).toMatchObject({
+      credentialState: "unknown",
+      displayState: "needs_attention",
+      primaryReasonCode: "preflight_failed"
     })
   })
 
@@ -435,17 +469,18 @@ describe("mcpHubReadiness", () => {
   })
 
   it("maps explicit successful zero-tool discovery to no_tools_returned and no_tools", () => {
-    expect(
-      getMcpServerReadiness({
-        server: server(),
-        registryEntries: [],
-        readinessHint: { discoverySucceededWithNoTools: true }
-      })
-    ).toMatchObject({
+    const readiness = getMcpServerReadiness({
+      server: server(),
+      registryEntries: [],
+      readinessHint: { discoverySucceededWithNoTools: true }
+    })
+
+    expect(readiness).toMatchObject({
       displayState: "no_tools",
       primaryReasonCode: "no_tools_returned",
       reasonCodes: ["no_tools_returned"]
     })
+    expect(readiness.allowedActions).toEqual(["refresh_discovery", "view_details"])
   })
 
   it("aggregates hub reasons by priority instead of first row order", () => {
@@ -478,5 +513,26 @@ describe("mcpHubReadiness", () => {
     expect(readiness.allowedActions).toEqual(
       expect.arrayContaining(["open_credentials", "refresh_discovery"])
     )
+  })
+
+  it("limits hub actions to view details during current operations with other reasons", () => {
+    const readiness = getMcpHubReadiness({
+      servers: [server()],
+      registryEntries: [],
+      readinessHintsByServerId: {
+        "toy-server": {
+          currentOperation: {
+            operation: "discovery",
+            label: "Refreshing discovery"
+          }
+        }
+      }
+    })
+
+    expect(readiness).toMatchObject({
+      displayState: "checking",
+      primaryReasonCode: "discovery_not_run"
+    })
+    expect(readiness.allowedActions).toEqual(["view_details"])
   })
 })
