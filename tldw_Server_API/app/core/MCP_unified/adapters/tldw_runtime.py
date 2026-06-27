@@ -110,7 +110,7 @@ class TldwToolCatalogProvider:
         metadata: dict[str, Any],
         strict: bool,
     ) -> set[str] | None:
-        """Return tool names for a catalog identifier or name, preserving legacy fallback semantics."""
+        """Return raw catalog lookup results; the protocol applies fallback policy."""
         try:
             from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
             from tldw_Server_API.app.services.admin_tool_catalog_service import (

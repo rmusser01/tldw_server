@@ -433,6 +433,7 @@ Catalogs reduce discovery noise by grouping tools. Use filters:
 - `GET /api/v1/mcp/tool_catalogs` (visible catalogs for current principal)
 
 Catalog membership affects discovery, not execution rights.
+If a catalog cannot be resolved, `tools/list` returns an empty list with `_meta.catalog.status` set to `unresolved`. Check the spelling, use `/api/v1/mcp/tool_catalogs` to see visible catalogs, or remove the catalog filter. `catalog_fail_open=true` is available for migration diagnostics when you intentionally want the RBAC-filtered full discovery result.
 
 Reference: `Docs/MCP/mcp_tool_catalogs.md`
 

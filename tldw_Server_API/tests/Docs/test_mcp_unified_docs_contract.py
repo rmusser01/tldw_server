@@ -70,3 +70,27 @@ def test_unified_mcp_auth_matrix_exists() -> None:
         "query",
     ):
         _require(snippet in guide, f"Auth matrix should mention {snippet}.")
+
+
+def test_unified_mcp_catalog_miss_recovery_is_documented() -> None:
+    """Catalog docs should explain misspelled or invisible catalog recovery."""
+    docs = "\n\n".join(
+        [
+            _read("Docs/MCP/Unified/User_Guide.md"),
+            _read("Docs/MCP/Unified/Developer_Guide.md"),
+            _read("Docs/MCP/Unified/Client_Snippets.md"),
+        ]
+    ).lower()
+
+    _require(
+        "_meta.catalog.status" in docs,
+        "Catalog docs should tell clients where catalog resolution status is returned.",
+    )
+    _require(
+        "unresolved" in docs,
+        "Catalog docs should name the unresolved catalog state.",
+    )
+    _require(
+        "catalog_fail_open" in docs,
+        "Catalog docs should document the explicit diagnostic fail-open escape hatch.",
+    )

@@ -185,7 +185,8 @@ Notes for module authors
   - `catalog` (name) and `catalog_id` (numeric) narrow discovery to tools included in a named catalog.
   - Name resolution honors caller context with precedence: team > org > global.
   - When both `catalog` and `catalog_id` are supplied, `catalog_id` takes precedence.
-  - If resolution fails, the server fails open (no catalog filter) while RBAC still gates visibility and execution.
+  - If resolution fails, the server returns an empty list and `_meta.catalog.status=unresolved`.
+  - Use `catalog_fail_open=true` only when a migration or diagnostics flow intentionally needs the RBAC-filtered discovery set despite an unresolved catalog.
   - `canExecute` indicates whether the caller can execute the tool; catalog membership alone does not grant execute rights.
 
 HTTP examples:
@@ -199,6 +200,9 @@ curl -H "X-API-KEY: ..." "http://127.0.0.1:8000/api/v1/mcp/tools?catalog=researc
 
 # List tools by catalog id (takes precedence over name)
 curl -H "X-API-KEY: ..." "http://127.0.0.1:8000/api/v1/mcp/tools?catalog_id=123"
+
+# Diagnose a catalog typo; check _meta.catalog.status in the response
+curl -H "X-API-KEY: ..." "http://127.0.0.1:8000/api/v1/mcp/tools?catalog=research-kti"
 ```
 
 ### Client Libraries

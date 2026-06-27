@@ -17,7 +17,7 @@ curl -i -H "Authorization: Bearer <token>" \
   "http://127.0.0.1:8000/api/v1/mcp/request?config=$cfg" \
   -d '{"jsonrpc":"2.0","method":"initialize","params":{"clientInfo":{"name":"demo"}},"id":1}'
 
-# List tools (RBAC-filtered; add &catalog=...&catalog_strict=true or &catalog_id=... if desired)
+# List tools (RBAC-filtered; add &catalog=... or &catalog_id=... if desired)
 curl -H "Authorization: Bearer <token>" \
   "http://127.0.0.1:8000/api/v1/mcp/tools"
 
@@ -89,6 +89,7 @@ print(exec_resp.json())
 ```
 
 ## Notes
-- Tool discovery can be narrowed with catalogs: `GET /api/v1/mcp/tools?catalog=<name>&catalog_strict=true` or `?catalog_id=<id>`.
+- Tool discovery can be narrowed with catalogs: `GET /api/v1/mcp/tools?catalog=<name>` or `?catalog_id=<id>`.
+- Unresolved catalogs return an empty result with `_meta.catalog.status=unresolved`; use `/api/v1/mcp/tool_catalogs` to list visible catalog names.
 - Results include `canExecute` for each tool; catalog membership doesn’t grant execute permissions.
 - Prefer WS headers/subprotocol for auth; query-param tokens are disabled by default.

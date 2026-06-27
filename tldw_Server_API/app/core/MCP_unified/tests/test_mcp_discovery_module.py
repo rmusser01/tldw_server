@@ -77,6 +77,28 @@ async def test_discovery_tools_list_parses_catalog_strict_string(monkeypatch: py
 
 
 @pytest.mark.asyncio
+async def test_discovery_tools_list_parses_catalog_fail_open_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _handle_tools_list(
+        _self: MCPProtocol,
+        params: dict[str, Any],
+        _context: RequestContext,
+    ) -> dict[str, Any]:
+        captured.update(params)
+        return {"tools": []}
+
+    monkeypatch.setattr(MCPProtocol, "_handle_tools_list", _handle_tools_list)
+
+    mod = MCPDiscoveryModule(ModuleConfig(name="mcp_discovery"))
+    ctx = RequestContext(request_id="mcp-discovery-fail-open", user_id="1", metadata={})
+
+    await mod.execute_tool("mcp.tools.list", {"catalog_fail_open": "yes"}, context=ctx)
+
+    assert captured["catalog_fail_open"] is True
+
+
+@pytest.mark.asyncio
 async def test_discovery_lists_catalogs_admin(monkeypatch):
     class FakePool:
         async def fetchall(self, query: str, *args):

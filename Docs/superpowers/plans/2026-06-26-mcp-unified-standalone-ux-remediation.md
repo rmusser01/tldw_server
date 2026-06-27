@@ -469,11 +469,16 @@ git commit -m "feat: summarize unified mcp capability surface"
 **Files:**
 - Modify: `tldw_Server_API/app/core/MCP_unified/protocol.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/adapters/tldw_runtime.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/mcp_discovery_module.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_mcp_discovery_module.py`
+- Modify: `tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py`
 - Modify: `Docs/MCP/Unified/Client_Snippets.md`
+- Modify: `Docs/MCP/Unified/Developer_Guide.md`
 - Modify: `Docs/MCP/Unified/User_Guide.md`
 
-- [ ] **Step 1: Write tests for unresolved catalog behavior**
+- [x] **Step 1: Write tests for unresolved catalog behavior**
 
 Add tests that prove unresolved catalogs are visible to callers and do not silently broaden discovery.
 
@@ -496,7 +501,7 @@ async def test_tools_list_unresolved_catalog_returns_warning_not_silent_full_lis
 
 Use the existing test fixture names in `test_protocol_catalog_filter.py`; do not invent a new large harness if a local fixture already covers tool listing.
 
-- [ ] **Step 2: Run the failing catalog tests**
+- [x] **Step 2: Run the failing catalog tests**
 
 Run:
 
@@ -507,7 +512,9 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalo
 
 Expected: FAIL until the protocol behavior changes.
 
-- [ ] **Step 3: Change protocol behavior**
+Observed: the focused unresolved-catalog test failed because the old behavior returned the full tool list.
+
+- [x] **Step 3: Change protocol behavior**
 
 In the catalog resolution path:
 
@@ -515,11 +522,11 @@ In the catalog resolution path:
 - If a caller explicitly depends on legacy fail-open behavior, support it only through a clearly named config or parameter such as `catalog_fail_open=true`, not through the default.
 - Keep RBAC `canExecute` filtering unchanged.
 
-- [ ] **Step 4: Update endpoint docs and snippets**
+- [x] **Step 4: Update endpoint docs and snippets**
 
 Make `catalog_strict` language clear, and update snippets to show strict/fail-closed discovery.
 
-- [ ] **Step 5: Re-run catalog tests**
+- [x] **Step 5: Re-run catalog tests**
 
 Run:
 
@@ -529,6 +536,8 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalo
 ```
 
 Expected: PASS.
+
+Observed: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py tldw_Server_API/app/core/MCP_unified/tests/test_mcp_discovery_module.py tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py -v` passed.
 
 - [ ] **Step 6: Commit Task 5**
 

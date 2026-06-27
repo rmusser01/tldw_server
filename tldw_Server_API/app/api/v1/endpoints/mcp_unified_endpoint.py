@@ -1150,11 +1150,12 @@ async def get_prometheus_metrics(
         "  `team > org > global` based on the authenticated context (API key or JWT). When both\n"
         "  `catalog` and `catalog_id` are provided, `catalog_id` takes precedence.\n"
         "- `catalog_id`: Filter by tool catalog id directly.\n\n"
-        "- `catalog_strict`: When true, unresolved catalogs return an empty tool list instead\n"
-        "  of falling back to the full discovery set.\n\n"
+        "- `catalog_strict`: Backward-compatible alias for fail-closed catalog resolution.\n"
+        "- `catalog_fail_open`: When true, unresolved catalogs fall back to the RBAC-filtered\n"
+        "  discovery set and return `_meta.catalog.status=fail_open`.\n\n"
         "Behavior:\n"
-        "- If the catalog name/id cannot be resolved, the server fails open (no catalog filter),\n"
-        "  but RBAC is still enforced unless `catalog_strict` is enabled.\n"
+        "- If the catalog name/id cannot be resolved, the server returns an empty tool list and\n"
+        "  `_meta.catalog.status=unresolved` by default.\n"
         "- `canExecute` reflects the caller's permissions. Catalog membership does not grant\n"
         "  execution rights; it only affects discovery."
     ),
@@ -1165,6 +1166,7 @@ async def list_tools(
     catalog: Optional[str] = Query(None, description="Filter by tool catalog name"),
     catalog_id: Optional[int] = Query(None, description="Filter by tool catalog id"),
     catalog_strict: Optional[bool] = Query(None, description="Fail closed on unresolved catalogs"),
+    catalog_fail_open: Optional[bool] = Query(None, description="Fail open on unresolved catalogs"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
 ):
@@ -1192,6 +1194,8 @@ async def list_tools(
         params["catalog_id"] = catalog_id
     if catalog_strict is not None:
         params["catalog_strict"] = catalog_strict
+    if catalog_fail_open is not None:
+        params["catalog_fail_open"] = catalog_fail_open
     request = MCPRequest(method="tools/list", params=params, id="http-tools-list")
 
     server = get_mcp_server()

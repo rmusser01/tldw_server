@@ -2102,6 +2102,7 @@ class MCPProtocol:
     ) -> Optional[set[str]]:
         """Resolve catalog parameter into a set of tool names for filtering."""
         strict = False
+        fail_open = False
         if isinstance(params, dict):
             raw_strict = params.get("catalog_strict")
             if isinstance(raw_strict, bool):
@@ -2110,6 +2111,13 @@ class MCPProtocol:
                 strict = bool(raw_strict)
             elif isinstance(raw_strict, str):
                 strict = _is_truthy(raw_strict)
+            raw_fail_open = params.get("catalog_fail_open")
+            if isinstance(raw_fail_open, bool):
+                fail_open = raw_fail_open
+            elif isinstance(raw_fail_open, (int, float)):
+                fail_open = bool(raw_fail_open)
+            elif isinstance(raw_fail_open, str):
+                fail_open = _is_truthy(raw_fail_open)
         catalog_name = None
         catalog_id = None
         if isinstance(params, dict):
@@ -2119,18 +2127,54 @@ class MCPProtocol:
             return None
         try:
             metadata = context.metadata if isinstance(getattr(context, "metadata", None), dict) else {}
-            return await self.tool_catalog_provider.resolve_tool_names(
+            resolved = await self.tool_catalog_provider.resolve_tool_names(
                 catalog_name=catalog_name if isinstance(catalog_name, str) else None,
                 catalog_id=catalog_id,
                 metadata=metadata,
                 strict=strict,
             )
+            if resolved is None and not fail_open:
+                return set()
+            return resolved
         except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as exc:
             context.logger.debug(
                 "Catalog lookup unavailable; returning fallback: {}",
                 exc.__class__.__name__,
             )
-            return set() if strict else None
+            return None if fail_open and not strict else set()
+
+    def _catalog_filter_requested(self, params: dict[str, Any]) -> bool:
+        """Return true when the caller requested catalog-scoped discovery."""
+        if not isinstance(params, dict):
+            return False
+        return params.get("catalog") is not None or params.get("catalog_id") is not None
+
+    def _catalog_filter_metadata(
+        self,
+        params: dict[str, Any],
+        catalog_filter: Optional[set[str]],
+    ) -> dict[str, Any] | None:
+        """Describe catalog filter resolution for clients."""
+        if not self._catalog_filter_requested(params):
+            return None
+        if catalog_filter is None:
+            return {
+                "status": "fail_open",
+                "filtered": False,
+                "hint": "Catalog lookup was bypassed by catalog_fail_open=true.",
+            }
+        if not catalog_filter:
+            return {
+                "status": "unresolved",
+                "filtered": True,
+                "toolCount": 0,
+                "hint": "Check catalog name/id or remove the catalog filter.",
+            }
+        return {
+            "status": "resolved",
+            "filtered": True,
+            "toolCount": len(catalog_filter),
+        }
 
     async def _handle_tools_list(
         self,
@@ -2140,6 +2184,7 @@ class MCPProtocol:
         """List available tools"""
         tools = []
         catalog_filter = await self._resolve_catalog_tool_names(params, context)
+        catalog_meta = self._catalog_filter_metadata(params, catalog_filter)
         modules = await self.module_registry.get_all_modules()
         module_filter = None
         if isinstance(params, dict):
@@ -2201,7 +2246,10 @@ class MCPProtocol:
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
                 context.logger.exception(f"Error getting tools from module {module_id}: {e}")
 
-        return {"tools": tools}
+        response: dict[str, Any] = {"tools": tools}
+        if catalog_meta is not None:
+            response["_meta"] = {"catalog": catalog_meta}
+        return response
 
     def _extract_allowed_tools(self, context: RequestContext) -> list[str] | None:
         """Extract allowed-tools list from request context metadata."""
@@ -2435,6 +2483,7 @@ class MCPProtocol:
         resources = []
         modules = await self.module_registry.get_all_modules()
         catalog_filter = await self._resolve_catalog_tool_names(params, context)
+        catalog_meta = self._catalog_filter_metadata(params, catalog_filter)
         module_tool_names: dict[str, set[str]] = {}
 
         for module_id, module in modules.items():
@@ -2472,7 +2521,10 @@ class MCPProtocol:
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
                 context.logger.exception(f"Error getting resources from module {module_id}: {e}")
 
-        return {"resources": resources}
+        response: dict[str, Any] = {"resources": resources}
+        if catalog_meta is not None:
+            response["_meta"] = {"catalog": catalog_meta}
+        return response
 
     async def _handle_resources_read(
         self,
