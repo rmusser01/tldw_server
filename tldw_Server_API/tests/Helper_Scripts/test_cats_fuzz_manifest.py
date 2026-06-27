@@ -23,6 +23,7 @@ def test_builtin_manifest_contains_initial_blocks() -> None:
     assert manifest["public-read"].expected_gate is ExpectedGate.NO_5XX
     assert manifest["public-read"].blackbox is True
     assert manifest["public-read"].requires_readiness is True
+    assert manifest["public-read"].timeout_seconds >= 300
     assert manifest["public-read"].allows_mutation is False
     assert manifest["public-read"].allows_network is False
     assert "/" in manifest["public-read"].paths

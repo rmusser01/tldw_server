@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -86,6 +87,7 @@ def test_cats_exit_classification_separates_usage_tool_and_api_failures() -> Non
     assert classify_cats_exit(0, "") == "ok"
     assert classify_cats_exit(2, "Invalid value for option") == "usage"
     assert classify_cats_exit(1, "Internal execution error") == "tool"
+    assert classify_cats_exit(124, "Command timed out after 10 seconds") == "tool"
     assert classify_cats_exit(1, "Some tests failed with 500") == "api"
 
 
@@ -123,3 +125,27 @@ def test_run_command_captures_stdout_stderr_and_exit_code() -> None:
     assert result.exit_code == 3
     assert result.stdout == "out\n"
     assert result.stderr == "err\n"
+
+
+@pytest.mark.unit
+def test_run_command_returns_structured_result_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    command = ["cats", "-c", "openapi.json"]
+
+    def raise_timeout(*_args: object, **kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(
+            cmd=command,
+            timeout=kwargs["timeout"],
+            output=b"partial stdout",
+            stderr=b"partial stderr",
+        )
+
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.cats_cli.subprocess.run", raise_timeout)
+
+    result = run_command(command, timeout_seconds=10)
+
+    assert result.command == command
+    assert result.exit_code == 124
+    assert result.stdout == "partial stdout"
+    assert "Command timed out after 10 seconds" in result.stderr
+    assert "partial stderr" in result.stderr
+    assert classify_cats_exit(result.exit_code, result.stderr) == "tool"

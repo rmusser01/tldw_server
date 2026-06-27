@@ -16,6 +16,17 @@ class CatsProcessResult:
     stderr: str
 
 
+_TIMEOUT_EXIT_CODE = 124
+
+
+def _normalize_timeout_output(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
 def _append_csv_option(command: list[str], option: str, values: Sequence[str]) -> None:
     if values:
         command.extend([option, ",".join(values)])
@@ -108,8 +119,10 @@ def classify_cats_exit(exit_code: int, stderr: str) -> str:
         "exception",
         "stacktrace",
         "stack trace",
+        "timed out",
+        "timeout",
     )
-    if any(marker in normalized_stderr for marker in tool_markers):
+    if exit_code == _TIMEOUT_EXIT_CODE or any(marker in normalized_stderr for marker in tool_markers):
         return "tool"
 
     return "api"
@@ -121,14 +134,26 @@ def run_command(
     env: Mapping[str, str] | None = None,
 ) -> CatsProcessResult:
     # Command arguments are built by the local harness from controlled values.
-    completed = subprocess.run(  # nosec B603
-        list(command),
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-        env=dict(env) if env is not None else None,
-    )
+    try:
+        completed = subprocess.run(  # nosec B603
+            list(command),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            env=dict(env) if env is not None else None,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout = _normalize_timeout_output(exc.output)
+        partial_stderr = _normalize_timeout_output(exc.stderr)
+        timeout_message = f"Command timed out after {timeout_seconds} seconds"
+        stderr = timeout_message if not partial_stderr else f"{timeout_message}\n{partial_stderr}"
+        return CatsProcessResult(
+            command=list(command),
+            exit_code=_TIMEOUT_EXIT_CODE,
+            stdout=stdout,
+            stderr=stderr,
+        )
     return CatsProcessResult(
         command=list(command),
         exit_code=completed.returncode,

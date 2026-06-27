@@ -88,7 +88,7 @@ def get_builtin_manifest() -> dict[str, CatsBlock]:
             requires_readiness=True,
             expected_gate=ExpectedGate.NO_5XX,
             max_requests_per_minute=60,
-            timeout_seconds=120,
+            timeout_seconds=300,
         ),
         "auth-read": CatsBlock(
             name="auth-read",
