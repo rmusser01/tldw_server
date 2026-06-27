@@ -1096,7 +1096,6 @@ class CollectionsDatabase:
                 delivered_at TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_user_notifications_user_created ON user_notifications(user_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_user_notifications_user_snooze ON user_notifications(user_id, snooze_task_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_user_notifications_user_unread ON user_notifications(user_id, read_at);
             CREATE UNIQUE INDEX IF NOT EXISTS ux_user_notifications_user_dedupe ON user_notifications(user_id, dedupe_key) WHERE dedupe_key IS NOT NULL;
 
@@ -1505,7 +1504,6 @@ class CollectionsDatabase:
                 delivered_at TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_user_notifications_user_created ON user_notifications(user_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_user_notifications_user_snooze ON user_notifications(user_id, snooze_task_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_user_notifications_user_unread ON user_notifications(user_id, read_at);
             CREATE UNIQUE INDEX IF NOT EXISTS ux_user_notifications_user_dedupe ON user_notifications(user_id, dedupe_key);
 
@@ -2452,9 +2450,23 @@ class CollectionsDatabase:
                     "ALTER TABLE user_notifications ADD COLUMN snooze_task_id TEXT",
                     (),
                 )
+                notif_columns.add("snooze_task_id")
             except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
                 if _is_backfill_noop_error(exc):
                     logger.debug("collections backfill: user_notifications.snooze_task_id already exists or skipped")
+                    notif_columns.add("snooze_task_id")
+                else:
+                    raise
+        if notif_columns and "snooze_task_id" in notif_columns:
+            try:
+                self.backend.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_user_notifications_user_snooze "
+                    "ON user_notifications(user_id, snooze_task_id, created_at DESC)",
+                    (),
+                )
+            except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
+                if _is_backfill_noop_error(exc):
+                    logger.debug("collections backfill: user_notifications snooze index already exists or skipped")
                 else:
                     raise
 
