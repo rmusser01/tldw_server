@@ -178,6 +178,13 @@ const CHAT_MODELS_CACHE_TTL_MS = 60_000
 let chatModelsCache: { value: any[]; expiresAt: number } | null = null
 let chatModelsInFlight: Promise<any[]> | null = null
 
+type ChatModelsCacheListenerState = {
+  clear: () => void
+  listenersAdded: boolean
+}
+
+const CHAT_MODELS_CACHE_LISTENER_KEY = "__tldwChatModelsCacheListeners"
+
 const dedupeChatModelsByModel = (models: any[]) => {
   const unique: any[] = []
   const indexByModel = new Map<string, number>()
@@ -252,13 +259,36 @@ export const clearChatModelsCache = () => {
   chatModelsInFlight = null
 }
 
+const getChatModelsCacheListenerState = (): ChatModelsCacheListenerState => {
+  const globalWindow = window as typeof window & {
+    [CHAT_MODELS_CACHE_LISTENER_KEY]?: ChatModelsCacheListenerState
+  }
+  const existing = globalWindow[CHAT_MODELS_CACHE_LISTENER_KEY]
+  if (existing) {
+    return existing
+  }
+  const created: ChatModelsCacheListenerState = {
+    clear: clearChatModelsCache,
+    listenersAdded: false
+  }
+  globalWindow[CHAT_MODELS_CACHE_LISTENER_KEY] = created
+  return created
+}
+
 if (typeof window !== "undefined") {
-  window.addEventListener("tldw:config-updated", clearChatModelsCache)
-  window.addEventListener("storage", (event) => {
-    if (!event.key || event.key === "tldwConfig") {
-      clearChatModelsCache()
-    }
-  })
+  const listenerState = getChatModelsCacheListenerState()
+  listenerState.clear = clearChatModelsCache
+  if (!listenerState.listenersAdded) {
+    window.addEventListener("tldw:config-updated", () => {
+      listenerState.clear()
+    })
+    window.addEventListener("storage", (event) => {
+      if (!event.key || event.key === "tldwConfig") {
+        listenerState.clear()
+      }
+    })
+    listenerState.listenersAdded = true
+  }
 }
 
 export const getAllModels = async ({ returnEmpty = false }: { returnEmpty?: boolean }) => {

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { SourcesPane } from "../SourcesPane"
+import { SourceFolderTree } from "../SourcesPane/SourceFolderTree"
 
 const mockToggleSourceSelection = vi.fn()
 const mockSelectAllSources = vi.fn()
@@ -260,6 +261,44 @@ describe("SourcesPane Stage 3 source folders", () => {
       "folder-new",
       "Field notes"
     )
+  })
+
+  it("cancels folder rename without committing a blurred draft", () => {
+    const onCancelFolderRename = vi.fn()
+    const onCommitFolderRename = vi.fn()
+
+    render(
+      <SourceFolderTree
+        nodes={[
+          {
+            id: "folder-new",
+            name: "New folder",
+            sourceCount: 0,
+            children: []
+          }
+        ]}
+        activeFolderId={null}
+        selectionStateByFolderId={{ "folder-new": "unchecked" }}
+        onClearFocus={vi.fn()}
+        onCreateFolder={vi.fn()}
+        editingFolderId="folder-new"
+        editingFolderName="Draft name"
+        onEditingFolderNameChange={vi.fn()}
+        onCommitFolderRename={onCommitFolderRename}
+        onCancelFolderRename={onCancelFolderRename}
+        onFocusFolder={vi.fn()}
+        onToggleFolderSelection={vi.fn()}
+      />
+    )
+
+    const renameInput = screen.getByRole("textbox", {
+      name: "Rename folder New folder"
+    })
+    fireEvent.keyDown(renameInput, { key: "Escape" })
+    fireEvent.blur(renameInput)
+
+    expect(onCancelFolderRename).toHaveBeenCalledTimes(1)
+    expect(onCommitFolderRename).not.toHaveBeenCalled()
   })
 
   it("clears active folder focus back to all sources", () => {

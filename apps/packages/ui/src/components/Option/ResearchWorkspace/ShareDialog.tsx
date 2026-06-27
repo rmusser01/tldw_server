@@ -227,6 +227,10 @@ const LinkShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
 
   const copyLink = async () => {
     if (generatedLink) {
+      if (!navigator.clipboard?.writeText) {
+        message.error("Clipboard access is not supported in this browser context")
+        return
+      }
       try {
         await navigator.clipboard.writeText(generatedLink)
         message.success("Share link copied to clipboard")

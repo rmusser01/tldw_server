@@ -142,6 +142,48 @@ describe("ShareDialog", () => {
     })
   })
 
+  it("shows an actionable error when clipboard access is unavailable", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined
+    })
+    mockCreateToken.mockResolvedValue({
+      id: 12,
+      raw_token: "workspace-secret-token",
+      token_prefix: "workspace",
+      resource_type: "workspace",
+      resource_id: "workspace-alpha",
+      access_level: "view_chat",
+      allow_clone: true,
+      is_password_protected: false,
+      max_uses: null,
+      use_count: 0,
+      expires_at: null,
+      is_revoked: false
+    })
+
+    render(
+      <ShareDialog
+        workspaceId="workspace-alpha"
+        open={true}
+        onClose={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("tab", { name: "Share Link" }))
+    fireEvent.click(screen.getByRole("button", { name: "Generate Link" }))
+
+    await screen.findByLabelText("Generated share link")
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy generated share link" })
+    )
+
+    expect(mockClipboardWriteText).not.toHaveBeenCalled()
+    expect(mockMessage.error).toHaveBeenCalledWith(
+      "Clipboard access is not supported in this browser context"
+    )
+  })
+
   it("validates an empty team or organization target inline before submitting", async () => {
     render(
       <ShareDialog

@@ -1047,7 +1047,13 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       setEditingFolderId(folder.id)
       setEditingFolderName(folder.name || "New folder")
     }
-  }, [activeFolderId, createSourceFolder, setActiveFolder])
+  }, [
+    activeFolderId,
+    createSourceFolder,
+    setActiveFolder,
+    setEditingFolderId,
+    setEditingFolderName
+  ])
 
   const handleCommitFolderRename = React.useCallback(
     (folderId: string) => {

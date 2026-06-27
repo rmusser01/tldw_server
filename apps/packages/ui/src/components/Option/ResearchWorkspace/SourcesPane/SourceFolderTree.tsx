@@ -33,6 +33,7 @@ const renderNode = (
   editingFolderName: string | undefined,
   onEditingFolderNameChange: ((name: string) => void) | undefined,
   onCommitFolderRename: ((folderId: string) => void) | undefined,
+  onFolderRenameInputBlur: ((folderId: string) => void) | undefined,
   onCancelFolderRename: (() => void) | undefined,
   onFocusFolder: (folderId: string) => void,
   onToggleFolderSelection: (folderId: string) => void
@@ -62,7 +63,7 @@ const renderNode = (
             className="min-w-0 flex-1 rounded border border-primary/40 bg-surface px-1.5 py-0.5 text-sm text-text outline-none focus:ring-2 focus:ring-focus"
             value={editingFolderName ?? node.name}
             onChange={(event) => onEditingFolderNameChange?.(event.target.value)}
-            onBlur={() => onCommitFolderRename?.(node.id)}
+            onBlur={() => onFolderRenameInputBlur?.(node.id)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault()
@@ -100,6 +101,7 @@ const renderNode = (
           editingFolderName,
           onEditingFolderNameChange,
           onCommitFolderRename,
+          onFolderRenameInputBlur,
           onCancelFolderRename,
           onFocusFolder,
           onToggleFolderSelection
@@ -123,6 +125,45 @@ export const SourceFolderTree: React.FC<SourceFolderTreeProps> = ({
   onFocusFolder,
   onToggleFolderSelection
 }) => {
+  const cancelingRenameRef = React.useRef(false)
+  const cancelingRenameResetRef = React.useRef<number | null>(null)
+
+  React.useEffect(
+    () => () => {
+      if (cancelingRenameResetRef.current !== null) {
+        window.clearTimeout(cancelingRenameResetRef.current)
+      }
+    },
+    []
+  )
+
+  const handleCancelFolderRename = React.useCallback(() => {
+    cancelingRenameRef.current = true
+    if (cancelingRenameResetRef.current !== null) {
+      window.clearTimeout(cancelingRenameResetRef.current)
+    }
+    cancelingRenameResetRef.current = window.setTimeout(() => {
+      cancelingRenameRef.current = false
+      cancelingRenameResetRef.current = null
+    }, 0)
+    onCancelFolderRename?.()
+  }, [onCancelFolderRename])
+
+  const handleFolderRenameInputBlur = React.useCallback(
+    (folderId: string) => {
+      if (cancelingRenameRef.current) {
+        cancelingRenameRef.current = false
+        if (cancelingRenameResetRef.current !== null) {
+          window.clearTimeout(cancelingRenameResetRef.current)
+          cancelingRenameResetRef.current = null
+        }
+        return
+      }
+      onCommitFolderRename?.(folderId)
+    },
+    [onCommitFolderRename]
+  )
+
   return (
     <div
       className="rounded-lg border border-border/70 bg-surface/60 p-2"
@@ -168,7 +209,8 @@ export const SourceFolderTree: React.FC<SourceFolderTreeProps> = ({
               editingFolderName,
               onEditingFolderNameChange,
               onCommitFolderRename,
-              onCancelFolderRename,
+              handleFolderRenameInputBlur,
+              handleCancelFolderRename,
               onFocusFolder,
               onToggleFolderSelection
             )
