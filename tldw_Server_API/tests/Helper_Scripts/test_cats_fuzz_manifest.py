@@ -22,11 +22,23 @@ def test_builtin_manifest_contains_initial_blocks() -> None:
     assert manifest["contract"].paths == ()
     assert manifest["public-read"].expected_gate is ExpectedGate.NO_5XX
     assert manifest["public-read"].blackbox is True
+    assert manifest["public-read"].requires_readiness is True
     assert manifest["public-read"].allows_mutation is False
     assert manifest["public-read"].allows_network is False
     assert "/" in manifest["public-read"].paths
     assert manifest["auth-read"].allows_mutation is False
     assert manifest["auth-read"].allows_network is False
+
+
+@pytest.mark.unit
+def test_public_read_readiness_paths_require_readiness_metadata() -> None:
+    manifest = get_builtin_manifest()
+    readiness_paths = {"/ready", "/health/ready", "/api/v1/health/ready"}
+
+    for block in manifest.values():
+        covered_readiness_paths = readiness_paths.intersection(block.paths)
+        if covered_readiness_paths:
+            assert block.requires_readiness is True, block.name
 
 
 @pytest.mark.unit

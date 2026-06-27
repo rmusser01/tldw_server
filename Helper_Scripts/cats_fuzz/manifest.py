@@ -33,6 +33,7 @@ class CatsBlock:
     allows_network: bool = False
     calls_api_service: bool = True
     blackbox: bool = True
+    requires_readiness: bool = False
     timeout_seconds: int = 120
     read_timeout: int = 5
     connection_timeout: int = 5
@@ -84,6 +85,7 @@ def get_builtin_manifest() -> dict[str, CatsBlock]:
             allows_mutation=False,
             allows_network=False,
             blackbox=True,
+            requires_readiness=True,
             expected_gate=ExpectedGate.NO_5XX,
             max_requests_per_minute=60,
             timeout_seconds=120,
