@@ -25,7 +25,7 @@ Implement this as phased reviewable slices. Do not attempt the full MCP Hub rede
 - Tasks 5-7 add the guided first-success setup flow and diagnostics.
 - Task 8 handles status-card truthfulness, design-token cleanup, and final verification.
 
-If a backend readiness/refresh endpoint is required, implement Task 2 before frontend fan-out. If Stage 0 proves existing APIs are sufficient for the first slice, skip Task 2 and record that decision in the Backlog task.
+Task 2 is required for valid discovery-refresh actions. Skip backend work inside Task 2 only when Stage 0 finds an existing refresh/readiness endpoint that satisfies the spec; in that case, Task 2 still adds or verifies the frontend service client and tests. Do not leave refresh actions as disabled or no-op controls in the final implementation.
 
 ## Planned File Structure
 
@@ -36,10 +36,9 @@ If a backend readiness/refresh endpoint is required, implement Task 2 before fro
 - Create `apps/packages/ui/src/components/Option/MCPHub/__tests__/mcpHubReadiness.test.ts`
   - Unit coverage for mapper state, reason, credential, and action decisions.
 - Modify `apps/packages/ui/src/services/tldw/mcp-hub.ts`
-  - Add optional readiness/refresh client types only if backend support is implemented.
-  - Otherwise keep this untouched for Phase 1 except type imports if needed.
+  - Add or verify readiness/refresh client types for the endpoint selected in Stage 0.
 - Modify `apps/packages/ui/src/services/tldw/__tests__/mcp-hub.test.ts`
-  - Add service-client tests only if new endpoints are added.
+  - Add service-client tests for refresh/readiness client behavior.
 - Modify `apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx`
   - Use readiness mapper for server row tags/actions.
   - Replace misleading no-auth/secret copy.
@@ -51,18 +50,22 @@ If a backend readiness/refresh endpoint is required, implement Task 2 before fro
   - Load external server state alongside registry summary.
   - Use readiness mapper for empty/stale/discovery recovery state.
 - Modify `apps/packages/ui/src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx`
-  - Add empty, discovery-not-run, auth/runtime, and recovery-action tests.
+  - Add empty, discovery-not-run, auth/runtime, operation/failure, stale, and recovery-action tests.
   - Add no-tools tests only after Stage 0 confirms the data can distinguish
     successful zero-tool discovery from discovery not run.
 - Modify `apps/packages/ui/src/components/Option/MCPHub/McpHubPage.tsx`
   - Later: make status cards data-backed or demote them to navigation.
 - Modify `apps/packages/ui/src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx`
   - Later: status-card truthfulness tests.
+- Modify `apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts`
+  - Add first-run setup smoke coverage and responsive screenshot assertions.
+- Modify `apps/tldw-frontend/e2e/utils/page-objects/MCPHubPage.ts`
+  - Add page-object helpers for guided setup, Tool Catalog recovery, diagnostics, and screenshot targets as needed.
 - Optional create `apps/packages/ui/src/components/Option/MCPHub/McpHubSetupGuide.tsx`
   - Guided first-success setup UI, if splitting from `ExternalServersTab.tsx` keeps the file manageable.
 - Optional create `apps/packages/ui/src/components/Option/MCPHub/McpHubDiagnosticsDrawer.tsx`
   - Sanitized diagnostics drawer, if splitting from `ExternalServersTab.tsx` keeps the file manageable.
-- Optional backend files if Stage 0 requires backend support:
+- Backend files if Stage 0 finds no existing endpoint or fields for valid refresh/stale/readiness behavior:
   - Modify `tldw_Server_API/app/api/v1/schemas/mcp_hub_schemas.py`
   - Modify `tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py`
   - Modify or create service support under `tldw_Server_API/app/services/`
@@ -105,6 +108,13 @@ cd apps/packages/ui
 bun run verify:design-system-state
 ```
 
+Frontend browser smoke and visual QA:
+
+```bash
+cd apps/tldw-frontend
+bun run e2e:pw -- e2e/workflows/tier-2-features/mcp-hub.spec.ts --project=tier-2 --reporter=line
+```
+
 ## Task 0: Stage 0 Implementation Discovery
 
 **Files:**
@@ -119,31 +129,43 @@ bun run verify:design-system-state
 - [ ] **Step 1: Confirm current API fields**
 
   Inspect `McpHubExternalServer`, `McpHubToolRegistrySummary`, and their backend schemas. Record whether the current fields can derive:
-  `credentialState`, `discovery_not_run`, `config_changed`, `runtime_unavailable`, `no_tools_returned`, and `partial_capability`.
+  `credentialState`, `checking`, `preflight_failed`, `discovery_not_run`, `config_changed`, `runtime_unavailable`, `unreachable`, `discovery_failed`, `no_tools_returned`, and `partial_capability`.
   If the current data cannot distinguish successful zero-tool discovery from
   discovery not run, Phase 1 must not emit `no_tools_returned`.
 
 - [ ] **Step 2: Decide Phase 1 backend scope**
 
-  If existing API responses are enough for the first slice, write in the Backlog task:
+  If existing API responses are enough for the first slice, including stale/config-changed state and valid discovery refresh, write in the Backlog task:
   `Stage 0 decision: Phase 1 uses frontend-normalized readiness from existing external server and tool registry APIs.`
 
   If not enough, write:
   `Stage 0 decision: Phase 1 requires backend readiness/refresh support before UI fan-out.`
 
-- [ ] **Step 3: Decide permission names**
+- [ ] **Step 3: Decide refresh action support**
+
+  Find an existing discovery refresh endpoint/client or confirm Task 2 must add one. Record the chosen endpoint path and response shape. Final UI actions must call a real refresh operation or route to an existing implemented refresh flow; disabled "coming soon" refresh buttons are not acceptable for the final slice.
+
+- [ ] **Step 4: Decide permission names**
 
   Inspect existing MCP Hub route dependencies. Record which existing permission gates preflight and discovery refresh should use. Use the current admin/mutation permission unless a narrower existing permission is already present.
 
-- [ ] **Step 4: Decide catalog staleness**
+- [ ] **Step 5: Decide catalog staleness**
 
   Record that Phase 1 must not emit `catalog_expired` unless an explicit age threshold already exists. Otherwise use only `config_changed`, manual invalidation, failed refresh after prior success, and `discovery_not_run`. Record whether `no_tools_returned` is available; if not, zero tools maps to `discovery_not_run`.
 
-- [ ] **Step 5: Decide toy MCP smoke path**
+- [ ] **Step 6: Decide diagnostics data availability**
 
-  Find the existing toy MCP walkthrough/server path or mark the browser smoke as a later Phase 2/4 verification if no stable toy server exists in the repo.
+  Identify where the frontend can read deployment mode, API origin, health endpoint, operation timestamps, current operation metadata, and last sanitized error category/message. If any field is unavailable, record whether Task 2 adds it or Task 6 must display a precise unavailable state plus setup-isolation guidance.
 
-- [ ] **Step 6: Commit Stage 0 task note**
+- [ ] **Step 7: Decide permission-gated catalog state**
+
+  Confirm whether the Tool Catalog API or frontend client can distinguish a permission-gated catalog from an ordinary empty/error state. If yes, record the response shape and expected recovery action in `TASK-223.2`; Task 4 must add a focused permission-boundary recovery test. If not, record that Phase 1 cannot emit a separate permission-gated catalog state.
+
+- [ ] **Step 8: Decide toy MCP smoke path**
+
+  Find the existing toy MCP walkthrough/server path. If no stable toy server exists in the repo, record an explicit skip reason in `TASK-223.2` and replace the smoke with the closest automated browser path that exercises the guided setup UI without mutating production data.
+
+- [ ] **Step 9: Commit Stage 0 task note**
 
   ```bash
   git add "backlog/tasks/task-223.2 - PR-2-MCP-Hub-setup-polish-and-diagnostics.md"
@@ -259,6 +281,32 @@ bun run verify:design-system-state
     | "legacy_fallback"
     | "unknown"
 
+  export type McpCurrentOperationHint = {
+    operationId?: string
+    operationType: "preflight" | "discovery"
+    startedAt?: string
+    initiatedBy?: string
+    timeoutMs?: number
+  }
+
+  export type McpServerReadinessHint = {
+    currentOperation?: McpCurrentOperationHint
+    preflightFailed?: boolean
+    configChanged?: boolean
+    manuallyInvalidated?: boolean
+    failedRefreshAfterSuccess?: boolean
+    unreachable?: boolean
+    discoveryFailed?: boolean
+    discoverySucceededWithNoTools?: boolean
+    catalogExpired?: boolean
+    partialCapability?: boolean
+    lastValidationAt?: string
+    lastDiscoveryAt?: string
+    lastSuccessfulDiscoveryAt?: string
+    lastErrorCategory?: string
+    lastErrorMessage?: string
+  }
+
   export type McpServerReadiness = {
     serverId: string
     displayName?: string
@@ -268,6 +316,12 @@ bun run verify:design-system-state
     reasonCodes: McpReasonCode[]
     credentialState: McpCredentialState
     toolCount: number
+    lastValidationAt?: string
+    lastDiscoveryAt?: string
+    lastSuccessfulDiscoveryAt?: string
+    currentOperation?: McpCurrentOperationHint
+    lastErrorCategory?: string
+    lastErrorMessage?: string
     message: string
     allowedActions: McpReadinessAction[]
   }
@@ -284,10 +338,12 @@ bun run verify:design-system-state
 
   export const getMcpHubReadiness = ({
     servers,
-    registryEntries
+    registryEntries,
+    readinessHintsByServerId = {}
   }: {
     servers: McpHubExternalServer[]
     registryEntries: McpHubToolRegistryEntry[]
+    readinessHintsByServerId?: Record<string, McpServerReadinessHint>
   }): McpHubReadiness => {
     const managedServers = servers.filter((server) => server.server_source !== "legacy")
     if (managedServers.length === 0) {
@@ -303,7 +359,11 @@ bun run verify:design-system-state
     }
 
     const serverReadiness = managedServers.map((server) =>
-      getMcpServerReadiness({ server, registryEntries })
+      getMcpServerReadiness({
+        server,
+        registryEntries,
+        readinessHint: readinessHintsByServerId[server.id]
+      })
     )
     return {
       displayState: serverReadiness.some((row) => row.displayState === "ready")
@@ -349,7 +409,9 @@ bun run verify:design-system-state
 
 - [ ] **Step 5: Implement server readiness mapping**
 
-  Add `getMcpServerReadiness()` using the spec mapping:
+  Add `getMcpServerReadiness()` using the spec mapping. The mapper must aggregate
+  all applicable reason codes before selecting the primary reason. Do not
+  implement this as a chain of early returns that drops secondary blockers.
 
   ```ts
   const getToolCountForServer = (
@@ -365,77 +427,191 @@ bun run verify:design-system-state
     ).length
   }
 
+  const REASON_PRIORITY: McpReasonCode[] = [
+    "auth_missing",
+    "runtime_unavailable",
+    "preflight_failed",
+    "unreachable",
+    "discovery_failed",
+    "config_changed",
+    "discovery_not_run",
+    "no_tools_returned",
+    "catalog_expired",
+    "partial_capability"
+  ]
+
+  const DISPLAY_STATE_BY_REASON: Record<McpReasonCode, McpDisplayState> = {
+    not_configured: "needs_setup",
+    preflight_failed: "needs_attention",
+    discovery_not_run: "needs_attention",
+    auth_missing: "needs_attention",
+    runtime_unavailable: "needs_attention",
+    unreachable: "needs_attention",
+    discovery_failed: "needs_attention",
+    no_tools_returned: "no_tools",
+    config_changed: "stale",
+    catalog_expired: "stale",
+    partial_capability: "ready"
+  }
+
+  const ACTIONS_BY_REASON: Record<McpReasonCode, McpReadinessAction[]> = {
+    not_configured: ["add_server"],
+    preflight_failed: ["edit_config", "validate", "view_details"],
+    discovery_not_run: ["refresh_discovery", "edit_config"],
+    auth_missing: ["open_credentials", "view_details"],
+    runtime_unavailable: ["edit_config", "view_details"],
+    unreachable: ["edit_config", "refresh_discovery", "view_details"],
+    discovery_failed: ["refresh_discovery", "view_details"],
+    no_tools_returned: ["refresh_discovery", "view_details"],
+    config_changed: ["refresh_discovery", "edit_config"],
+    catalog_expired: ["refresh_discovery", "view_details"],
+    partial_capability: ["open_tool_catalog", "view_details"]
+  }
+
+  const uniqueReasons = (reasons: McpReasonCode[]) =>
+    [...new Set(reasons)].sort(
+      (left, right) => REASON_PRIORITY.indexOf(left) - REASON_PRIORITY.indexOf(right)
+    )
+
+  const getPrimaryReasonCode = (reasonCodes: McpReasonCode[]) =>
+    uniqueReasons(reasonCodes).find((reason) => REASON_PRIORITY.includes(reason))
+
+  const getReasonActions = (reasonCodes: McpReasonCode[]) =>
+    [...new Set(reasonCodes.flatMap((reason) => ACTIONS_BY_REASON[reason] ?? []))]
+
+  const getReasonMessage = (
+    primaryReasonCode: McpReasonCode | undefined,
+    credentialState: McpCredentialState
+  ) => {
+    switch (primaryReasonCode) {
+      case "auth_missing":
+        return "Credentials are required before this server can be used."
+      case "runtime_unavailable":
+        return "Runtime is not available for this server."
+      case "preflight_failed":
+        return "Preflight validation failed. Check the server configuration."
+      case "unreachable":
+        return "Server cannot be reached."
+      case "discovery_failed":
+        return "Discovery ran but failed."
+      case "config_changed":
+        return "Server config or discovery state changed. Refresh discovery."
+      case "discovery_not_run":
+        return credentialState === "not_required"
+          ? "No credentials required. Discover tools to make this server available."
+          : "Server is saved, but tool discovery has not run."
+      case "no_tools_returned":
+        return "Server responded, but exposed no tools."
+      case "catalog_expired":
+        return "Tool catalog is stale. Refresh discovery."
+      case "partial_capability":
+        return "Ready with limited capability."
+      default:
+        return credentialState === "not_required"
+          ? "Ready. No credentials required."
+          : "Ready."
+    }
+  }
+
+  const deriveReasonCodes = ({
+    server,
+    credentialState,
+    toolCount,
+    readinessHint
+  }: {
+    server: McpHubExternalServer
+    credentialState: McpCredentialState
+    toolCount: number
+    readinessHint: McpServerReadinessHint
+  }) => {
+    const reasons: McpReasonCode[] = []
+    if (credentialState === "required_missing") reasons.push("auth_missing")
+    if (server.runtime_executable === false) reasons.push("runtime_unavailable")
+    if (readinessHint.preflightFailed) reasons.push("preflight_failed")
+    if (readinessHint.unreachable) reasons.push("unreachable")
+    if (readinessHint.discoveryFailed) reasons.push("discovery_failed")
+    if (
+      readinessHint.configChanged ||
+      readinessHint.manuallyInvalidated ||
+      readinessHint.failedRefreshAfterSuccess
+    ) {
+      reasons.push("config_changed")
+    }
+    if (readinessHint.catalogExpired) reasons.push("catalog_expired")
+    if (toolCount === 0 && readinessHint.discoverySucceededWithNoTools) {
+      reasons.push("no_tools_returned")
+    } else if (toolCount === 0) {
+      reasons.push("discovery_not_run")
+    }
+    if (toolCount > 0 && readinessHint.partialCapability) {
+      reasons.push("partial_capability")
+    }
+    return uniqueReasons(reasons)
+  }
+
   export const getMcpServerReadiness = ({
     server,
-    registryEntries
+    registryEntries,
+    readinessHint = {}
   }: {
     server: McpHubExternalServer
     registryEntries: McpHubToolRegistryEntry[]
+    readinessHint?: McpServerReadinessHint
   }): McpServerReadiness => {
     const credentialState = getMcpCredentialState(server)
     const toolCount = getToolCountForServer(server, registryEntries)
 
-    if (credentialState === "required_missing") {
+    if (readinessHint.currentOperation) {
       return {
         serverId: server.id,
         displayName: server.name,
         transport: server.transport,
-        displayState: "needs_attention",
-        primaryReasonCode: "auth_missing",
-        reasonCodes: ["auth_missing"],
+        displayState: "checking",
+        reasonCodes: [],
         credentialState,
         toolCount,
-        message: "Credentials are required before this server can be used.",
-        allowedActions: ["open_credentials", "view_details"]
-      }
-    }
-
-    if (server.runtime_executable === false) {
-      return {
-        serverId: server.id,
-        displayName: server.name,
-        transport: server.transport,
-        displayState: "needs_attention",
-        primaryReasonCode: "runtime_unavailable",
-        reasonCodes: ["runtime_unavailable"],
-        credentialState,
-        toolCount,
-        message: "Runtime is not available for this server.",
-        allowedActions: ["edit_config", "view_details"]
-      }
-    }
-
-    if (toolCount === 0) {
-      return {
-        serverId: server.id,
-        displayName: server.name,
-        transport: server.transport,
-        displayState: "needs_attention",
-        primaryReasonCode: "discovery_not_run",
-        reasonCodes: ["discovery_not_run"],
-        credentialState,
-        toolCount,
+        currentOperation: readinessHint.currentOperation,
+        lastValidationAt: readinessHint.lastValidationAt,
+        lastDiscoveryAt: readinessHint.lastDiscoveryAt,
+        lastSuccessfulDiscoveryAt: readinessHint.lastSuccessfulDiscoveryAt,
         message:
-          credentialState === "not_required"
-            ? "No credentials required. Discover tools to make this server available."
-            : "Server is saved, but tool discovery has not run.",
-        allowedActions: ["refresh_discovery", "edit_config"]
+          readinessHint.currentOperation.operationType === "discovery"
+            ? "Tool discovery is running."
+            : "Preflight validation is running.",
+        allowedActions: ["view_details"]
       }
     }
+
+    const reasonCodes = deriveReasonCodes({
+      server,
+      credentialState,
+      toolCount,
+      readinessHint
+    })
+    const primaryReasonCode = getPrimaryReasonCode(reasonCodes)
+    const displayState = primaryReasonCode
+      ? DISPLAY_STATE_BY_REASON[primaryReasonCode]
+      : "ready"
 
     return {
       serverId: server.id,
       displayName: server.name,
       transport: server.transport,
-      displayState: "ready",
-      reasonCodes: [],
+      displayState,
+      primaryReasonCode,
+      reasonCodes,
       credentialState,
       toolCount,
-      message:
-        credentialState === "not_required"
-          ? "Ready. No credentials required."
-          : "Ready.",
-      allowedActions: ["open_tool_catalog", "view_details"]
+      lastValidationAt: readinessHint.lastValidationAt,
+      lastDiscoveryAt: readinessHint.lastDiscoveryAt,
+      lastSuccessfulDiscoveryAt: readinessHint.lastSuccessfulDiscoveryAt,
+      lastErrorCategory: readinessHint.lastErrorCategory,
+      lastErrorMessage: readinessHint.lastErrorMessage,
+      message: getReasonMessage(primaryReasonCode, credentialState),
+      allowedActions:
+        reasonCodes.length > 0
+          ? getReasonActions(reasonCodes)
+          : ["open_tool_catalog", "view_details"]
     }
   }
   ```
@@ -447,13 +623,30 @@ bun run verify:design-system-state
 - [ ] **Step 6: Add mapper tests for remaining states**
 
   Add tests for:
+  - `readinessHint.currentOperation` -> `checking`
+  - `readinessHint.preflightFailed` -> `preflight_failed`
   - `required_missing` -> `auth_missing`
   - `runtime_executable: false` -> `runtime_unavailable`
+  - `readinessHint.unreachable` -> `unreachable`
+  - `readinessHint.discoveryFailed` -> `discovery_failed`
   - zero tools -> `discovery_not_run`
+  - `readinessHint.configChanged` -> `stale` with `refresh_discovery`
+  - multiple simultaneous reasons, such as missing required credentials plus
+    `configChanged`, preserve both reason codes, choose the priority primary
+    reason, and union allowed actions without duplicates
   - matching registry tool -> `ready`
+  - matching registry tool plus `partialCapability` -> `ready` with `partial_capability`
   - `secret_configured` with no template/slots -> `legacy_fallback`
   - `no_tools_returned` only if Stage 0 found an explicit successful-zero-tools
     signal
+  - every reason code selected by Stage 0 either maps to the spec's display
+    state/action set or is intentionally not emitted because the required
+    backend signal is unavailable
+
+  When implementing, place reason-priority helpers above both hub and server
+  mappers. `getMcpHubReadiness()` must also use the same priority helper across
+  aggregated server reason codes instead of taking the first row's primary
+  reason.
 
 - [ ] **Step 7: Run mapper tests**
 
@@ -471,9 +664,9 @@ bun run verify:design-system-state
   git commit -m "feat: add MCP Hub readiness mapper"
   ```
 
-## Task 2: Optional Backend Readiness Or Refresh Contract
+## Task 2: Ensure Backend Readiness And Discovery Refresh Contract
 
-Only do this task if Stage 0 proves existing APIs cannot support the first readiness slice.
+Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that satisfy the requirements, this task verifies and adds the frontend service client/tests for those existing routes. If Stage 0 finds gaps, this task adds the smallest backend contract needed before UI fan-out. Do not continue to Tasks 3-5 with placeholder, disabled, or no-op refresh actions.
 
 **Files:**
 - Modify: `tldw_Server_API/app/api/v1/schemas/mcp_hub_schemas.py`
@@ -482,13 +675,22 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
 - Modify: `apps/packages/ui/src/services/tldw/mcp-hub.ts`
 - Modify: `apps/packages/ui/src/services/tldw/__tests__/mcp-hub.test.ts`
 
-- [ ] **Step 1: Write backend API tests first**
+- [ ] **Step 1: Write or verify backend API tests first**
 
-  Add focused tests in `test_mcp_hub_management_api.py` for:
+  Add or verify focused tests in `test_mcp_hub_management_api.py` for:
   - readiness response redacts secrets;
   - no-auth stdio returns `credential_state="not_required"`;
+  - active validation/discovery can return `display_state="checking"` with current operation metadata;
+  - preflight failure returns `primary_reason_code="preflight_failed"`;
   - configured but undiscovered returns `primary_reason_code="discovery_not_run"`;
-  - refresh/preflight route requires the same MCP Hub admin permission used by external server mutation routes.
+  - config-changed or invalidated catalog returns `display_state="stale"` and `primary_reason_code="config_changed"`;
+  - unreachable/discovery failure states return `primary_reason_code="unreachable"` or `primary_reason_code="discovery_failed"` when the backend exposes those causes;
+  - partial capability returns `display_state="ready"` with `primary_reason_code="partial_capability"` when the backend exposes that warning state;
+  - refresh/preflight route requires the same MCP Hub admin permission used by external server mutation routes;
+  - refresh/preflight route rejects access to servers outside the caller's owner scope using the same visibility/mutation rules as external server update/delete;
+  - concurrent refresh requests for the same server are serialized or deduplicated and return a stable current-operation response or bounded conflict, not two simultaneous runtime launches;
+  - refresh honors the existing runtime execution and outbound/network safety policy before starting stdio or contacting HTTP/SSE endpoints;
+  - refresh/preflight audit payloads redact env, headers, URL query secrets, args, and raw config values.
 
 - [ ] **Step 2: Run backend tests to verify failure**
 
@@ -497,7 +699,7 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
   python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py -k "readiness or refresh" -v
   ```
 
-  Expected: fail because schemas/routes do not exist.
+  Expected: fail if schemas/routes are missing. If existing tests already cover this behavior, record the passing command in `TASK-223.2` and continue to service-client verification.
 
 - [ ] **Step 3: Add Pydantic response schemas**
 
@@ -516,9 +718,9 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
 
   Keep it read-only unless implementing explicit refresh. Do not execute stdio processes in readiness.
 
-- [ ] **Step 5: Add optional explicit refresh route only if needed**
+- [ ] **Step 5: Add explicit refresh route if no compliant route exists**
 
-  If refresh is needed in this slice, add:
+  If no compliant refresh endpoint exists, add:
 
   ```python
   @router.post("/external-servers/{server_id}/refresh-discovery", response_model=McpServerReadinessResponse)
@@ -528,19 +730,27 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
 
   Requirements:
   - same MCP Hub mutation/admin permission as create/update/delete;
+  - same owner-scope visibility/mutation checks as external server update/delete;
+  - per-server serialization or operation dedupe so one server cannot run multiple overlapping refresh jobs;
+  - use the existing runtime execution and outbound/network safety policy; do not add a new ad hoc subprocess or HTTP client path that bypasses current MCP Hub runtime guards;
   - bounded timeout;
   - sanitized audit/log output;
   - no secret values in response.
+  - returns enough state for the frontend to update the result panel and Tool Catalog recovery state.
 
-- [ ] **Step 6: Add frontend service client tests**
+- [ ] **Step 6: Add operation metadata and sanitized error fields when backend-owned**
+
+  If the backend owns readiness, include optional fields for `last_validation_at`, `last_discovery_at`, `last_successful_discovery_at`, `current_operation`, `last_error_category`, and sanitized `last_error_message`. Do not include secret-bearing raw config.
+
+- [ ] **Step 7: Add frontend service client tests**
 
   In `apps/packages/ui/src/services/tldw/__tests__/mcp-hub.test.ts`, verify exact paths and methods for any new client methods.
 
-- [ ] **Step 7: Add frontend service methods**
+- [ ] **Step 8: Add frontend service methods**
 
   Add typed client methods in `apps/packages/ui/src/services/tldw/mcp-hub.ts` only for the backend routes actually added.
 
-- [ ] **Step 8: Run focused tests**
+- [ ] **Step 9: Run focused tests**
 
   ```bash
   source .venv/bin/activate
@@ -549,14 +759,14 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
   bunx vitest run src/services/tldw/__tests__/mcp-hub.test.ts
   ```
 
-- [ ] **Step 9: Run Bandit for backend changes**
+- [ ] **Step 10: Run Bandit for backend changes**
 
   ```bash
   source .venv/bin/activate
   python -m bandit -r tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py tldw_Server_API/app/api/v1/schemas/mcp_hub_schemas.py tldw_Server_API/app/services -f json -o /tmp/bandit_mcp_hub_setup_recovery.json
   ```
 
-- [ ] **Step 10: Commit backend/client contract**
+- [ ] **Step 11: Commit backend/client contract**
 
   ```bash
   git add tldw_Server_API/app/api/v1/schemas/mcp_hub_schemas.py tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py apps/packages/ui/src/services/tldw/mcp-hub.ts apps/packages/ui/src/services/tldw/__tests__/mcp-hub.test.ts
@@ -594,17 +804,38 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
   bunx vitest run src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
   ```
 
-- [ ] **Step 4: Import and compute readiness**
+- [ ] **Step 4: Load registry/readiness inputs for rows**
 
-  In `ExternalServersTab.tsx`, import:
+  In `ExternalServersTab.tsx`, import the registry client and readiness mapper:
 
   ```ts
+  import {
+    getToolRegistrySummary,
+    ...
+  } from "@/services/tldw/mcp-hub"
   import { getMcpServerReadiness } from "./mcpHubReadiness"
   ```
 
-  If registry entries are not loaded in this component yet, pass an empty array for Task 3 and let Task 4 wire registry-aware catalog recovery. Keep the row copy focused on credential/runtime states.
+  Add state for registry entries and any backend readiness hints selected in Stage 0. Load them in the same refresh path as `loadServers()` so server rows and Tool Catalog can derive the same readiness state. Do not pass `[]` registry entries as a permanent shortcut.
 
-- [ ] **Step 5: Replace misleading credential tags**
+- [ ] **Step 5: Add row/catalog consistency test**
+
+  Add a test where a managed server has a matching registry tool and assert the server row shows `Ready` or equivalent ready copy, not `discovery_not_run`. Add a second test where Stage 0 readiness hints mark `configChanged` and assert the row shows stale/refresh copy.
+
+- [ ] **Step 6: Write failing row recovery-action tests**
+
+  Add tests that row-level actions are present and wired from `allowedActions`:
+  - `validate` renders `Validate` and calls the real validation/preflight client selected in Task 2;
+  - `refresh_discovery` renders `Refresh tools` and calls the real refresh client selected in Task 2;
+  - `edit_config` renders `Edit config` and opens the existing edit flow for that server;
+  - `open_credentials` renders `Credentials` and opens the credential/secret flow for that server;
+  - `view_details` renders `Details` and opens diagnostics for that server;
+  - `open_tool_catalog` renders `Tool Catalog` and switches to the Tool Catalog view.
+
+  Tests must assert that these controls are not clickable no-ops. Mock the service
+  method or parent view callback and verify the exact method/callback is invoked.
+
+- [ ] **Step 7: Replace misleading credential tags**
 
   Replace unconditional `no secret` and `No auth template` tags for managed servers with tags derived from `credentialState`:
   - `not_required`: green or neutral `No credentials required`
@@ -613,15 +844,30 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
   - `legacy_fallback`: orange `Legacy Secret Fallback`
   - `unknown`: neutral `credential status unknown`
 
-- [ ] **Step 6: Preserve expert detail without making it primary**
+- [ ] **Step 8: Preserve expert detail without making it primary**
 
   Keep template validity and slot counts visible where useful, but do not present `No auth template` as an error for no-auth stdio. If retaining the raw template tag, make it secondary text or tooltip detail.
 
-- [ ] **Step 7: Fix literal color tokens**
+- [ ] **Step 9: Render row recovery actions**
+
+  Add a compact row action group derived from `readiness.allowedActions`. Required mappings:
+  - `validate` -> `Validate`, calls validation/preflight;
+  - `refresh_discovery` -> `Refresh tools`, calls discovery refresh and reloads servers/registry/readiness;
+  - `edit_config` -> `Edit config`, opens the existing edit flow;
+  - `open_credentials` -> `Credentials`, opens existing credential/secret editing;
+  - `view_details` -> `Details`, opens diagnostics;
+  - `open_tool_catalog` -> `Tool Catalog`, switches to Tool Catalog.
+
+  Preserve existing edit/delete controls, but do not make them the only recovery
+  path. If a Task 2 client method is unavailable because Stage 0 selected an
+  existing route with a different name, wire to that selected route instead of
+  rendering a disabled placeholder.
+
+- [ ] **Step 10: Fix literal color tokens**
 
   Replace both `QuestionCircleOutlined style={{ color: "rgba(0,0,0,0.45)" }}` usages with an existing token/class. Prefer Ant Design token access if already used nearby; otherwise use `Typography.Text type="secondary"` wrapping or a local CSS class that maps to the design system.
 
-- [ ] **Step 8: Run row tests**
+- [ ] **Step 11: Run row tests**
 
   ```bash
   cd apps/packages/ui
@@ -630,7 +876,7 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
 
   Expected: pass.
 
-- [ ] **Step 9: Commit server-row readiness**
+- [ ] **Step 12: Commit server-row readiness**
 
   ```bash
   git add apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
@@ -668,58 +914,90 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
   - Missing credentials offers `Fix credentials`.
   - Runtime unavailable offers `Open server config`.
 
-- [ ] **Step 4: Add no-tools test only if data supports it**
+- [ ] **Step 4: Write failing operation/failure recovery tests**
+
+  Add tests for any Stage 0 readiness signals exposed by the frontend/backend contract:
+  - `checking`: shows in-progress discovery/preflight copy and no duplicate refresh action;
+  - `preflight_failed`: offers `Open server config` and `View details`;
+  - `unreachable`: offers `Open server config`, `Refresh discovery`, and `View details`;
+  - `discovery_failed`: offers `Refresh discovery` and `View details`;
+  - `partial_capability`: still allows Tool Catalog access and shows warning detail.
+
+- [ ] **Step 5: Write failing stale recovery test**
+
+  Mock one managed server with a Stage 0 readiness hint equivalent to `configChanged: true`, or the backend field selected in Stage 0. Assert:
+  - the catalog recovery state says discovery is stale or config changed;
+  - `Refresh discovery` appears;
+  - `Open server config` appears.
+
+- [ ] **Step 6: Add no-tools test only if data supports it**
 
   If Stage 0 found a backend field that distinguishes successful zero-tool
   discovery from discovery not run, add a test asserting that `no_tools_returned`
   renders a `no_tools` display state with explanatory copy. Otherwise do not add
   this test in Phase 1.
 
-- [ ] **Step 5: Run tests to verify failure**
+- [ ] **Step 7: Add permission-gated catalog test only if data supports it**
+
+  If Stage 0 found a response shape that distinguishes a permission-gated Tool
+  Catalog from an ordinary empty/error state, add a test asserting that the
+  recovery state explains the permission boundary and offers the selected access
+  action, such as switching to Access/Policy Assignments or opening Details. If
+  Stage 0 found no such signal, do not infer this state from generic failures.
+
+- [ ] **Step 8: Run tests to verify failure**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx
   ```
 
-- [ ] **Step 6: Load external server state**
+- [ ] **Step 9: Load external server state**
 
   In `ToolCatalogsTab.tsx`, import `listExternalServers` and store servers alongside registry entries/modules.
 
   Keep loading and error states independent enough that a registry failure still reports registry failure, while server-state failure reports recovery limitations.
 
-- [ ] **Step 7: Compute hub and server readiness**
+- [ ] **Step 10: Compute hub and server readiness**
 
-  Use `getMcpHubReadiness()` and `getMcpServerReadiness()` to derive empty-state copy and actions.
+  Use `getMcpHubReadiness()` and `getMcpServerReadiness()` to derive empty-state copy and actions. Pass the same registry entries and Stage 0 readiness hints used by `ExternalServersTab` so rows and Tool Catalog agree.
 
-- [ ] **Step 8: Render actionable empty state**
+- [ ] **Step 11: Render actionable empty state**
 
   Replace the passive `Empty` copy with state-driven content:
   - no servers: `Add server`
+  - checking: show the current validation/discovery operation and `View details`
   - discovery not run: `Refresh discovery` and `Open server config`
+  - preflight failed: `Open server config` and `View details`
+  - stale/config changed: `Refresh discovery` and `Open server config`
   - auth missing: `Fix credentials`
   - runtime unavailable: `Open server config`
+  - unreachable: `Open server config`, `Refresh discovery`, and `View details`
+  - discovery failed: `Refresh discovery` and `View details`
   - no tools returned: only when Stage 0 found an explicit successful-zero-tools
     signal, explain that the server responded with no tools and offer `Refresh
     discovery`
+  - partial capability: allow Tool Catalog access and show warning detail
+  - permission-gated catalog: only when Stage 0 found an explicit signal, explain
+    the permission boundary and offer the selected Access/Details action
 
-  If refresh action is not implemented yet, render it disabled with copy such as `Refresh discovery coming from the runtime refresh slice`, or wire it only when Task 2 added a client method. Do not render a clickable no-op.
+  `Refresh discovery` must call the real client method selected or added in Task 2. Do not render a disabled placeholder or clickable no-op in the final implementation.
 
-- [ ] **Step 9: Run catalog tests**
+- [ ] **Step 12: Run catalog tests**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx
   ```
 
-- [ ] **Step 10: Run first-slice frontend suite**
+- [ ] **Step 13: Run first-slice frontend suite**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/mcpHubReadiness.test.ts src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx
   ```
 
-- [ ] **Step 11: Commit Tool Catalog recovery**
+- [ ] **Step 14: Commit Tool Catalog recovery**
 
   ```bash
   git add apps/packages/ui/src/components/Option/MCPHub/ToolCatalogsTab.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx
@@ -745,14 +1023,26 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
 
   Assert that `Advanced/manual` exposes the existing raw Config JSON flow without requiring the guided fields.
 
-- [ ] **Step 3: Run tests to verify failure**
+- [ ] **Step 3: Write failing import config test**
+
+  Assert that `Import config` exposes a pasted JSON/config input, previews the decoded server ID/name/transport when valid, reports validation errors for invalid JSON, and does not save invalid input.
+
+- [ ] **Step 4: Write failing result-panel test**
+
+  Mock create/import plus refresh. Assert that after `Save and discover tools` or a valid import:
+  - the setup form closes or moves to a result panel;
+  - the result panel reports what was saved/imported;
+  - the result panel reports discovery result/readiness;
+  - the next actions include Tool Catalog and the valid recovery action for the returned readiness state.
+
+- [ ] **Step 5: Run tests to verify failure**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
   ```
 
-- [ ] **Step 4: Add setup mode state**
+- [ ] **Step 6: Add setup mode state**
 
   Add local state:
 
@@ -761,13 +1051,15 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
   const [setupMode, setSetupMode] = useState<SetupMode>("choice")
   ```
 
-- [ ] **Step 5: Add starter choice UI**
+- [ ] **Step 7: Add starter choice UI**
 
   When creating a new managed server, show the four setup choices first. Keep cards compact and work-focused. Avoid nested cards; use full-width rows or a simple segmented/button group inside the existing form area.
 
-- [ ] **Step 6: Add guided stdio fields**
+- [ ] **Step 8: Add guided stdio fields**
 
   Add fields for:
+  - display name, or reuse the existing name field in the same create form and
+    keep it visible before save
   - command
   - args
   - env vars
@@ -776,16 +1068,25 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
 
   Convert them into the existing `config` object shape during save. Use the project’s observed external server config shape from Stage 0.
 
-- [ ] **Step 7: Add guided HTTP/SSE fields**
+- [ ] **Step 9: Add guided HTTP/SSE fields**
 
   Add fields for:
+  - display name, or reuse the existing name field in the same create form and
+    keep it visible before save
   - URL
   - headers/auth choice
   - owner scope
 
   Convert them into the existing config object shape during save.
 
-- [ ] **Step 8: Add safe preflight checks**
+- [ ] **Step 10: Add import config path**
+
+  Implement pasted JSON import with preview and validation. Support the existing legacy import path separately from pasted managed config import:
+  - pasted/imported managed config should produce the same payload shape as `createExternalServer`;
+  - legacy row import still uses `importExternalServer(serverId)`;
+  - invalid JSON or unsupported shape shows a validation error before save/import.
+
+- [ ] **Step 11: Add safe preflight checks**
 
   Before save, validate:
   - required fields;
@@ -795,22 +1096,22 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
 
   Do not execute commands or contact URLs.
 
-- [ ] **Step 9: Rename primary/secondary actions**
+- [ ] **Step 12: Implement save, refresh, and result panel**
 
   Use:
   - primary `Save and discover tools`
   - secondary `Save without discovery`
 
-  If discovery refresh is not implemented, the primary action should save and show an honest post-save message that discovery refresh is not available yet. Do not claim discovery succeeded.
+  `Save and discover tools` must save/import, call the real refresh client selected or added in Task 2, reload servers/registry, and show a result panel. `Save without discovery` saves/imports, skips refresh, reloads server state, and shows a `discovery_not_run` result panel with `Refresh discovery` as the next action.
 
-- [ ] **Step 10: Run setup tests**
+- [ ] **Step 13: Run setup tests**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
   ```
 
-- [ ] **Step 11: Commit setup guide**
+- [ ] **Step 14: Commit setup guide**
 
   ```bash
   git add apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
@@ -829,9 +1130,12 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
 
   Add tests for:
   - details action opens diagnostics;
-  - diagnostics show reason code, credential state, transport, tool count;
-  - diagnostics do not show secret values from env, headers, URL query, or raw config;
-  - diagnostics show API origin/health endpoint/deployment mode if the data source exists, or an explicit unavailable message if not.
+  - diagnostics show display state, primary reason, all reason codes, credential state, transport, tool count;
+  - diagnostics show `lastValidationAt`, `lastDiscoveryAt`, `lastSuccessfulDiscoveryAt`, and current operation metadata when supplied by readiness hints/backend response;
+  - diagnostics show last sanitized error category/message when supplied;
+  - diagnostics do not show secret values from nested env, headers, URL query, args, or raw config objects/arrays;
+  - diagnostics show API origin/health endpoint/deployment mode if the data source exists, or an explicit unavailable message if not;
+  - diagnostics show setup isolation guidance or a link/copy explaining how local walkthrough/E2E setup should avoid unintended runtime database writes.
 
 - [ ] **Step 2: Run tests to verify failure**
 
@@ -845,14 +1149,34 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
   Put the helper in `mcpHubReadiness.ts` or a new pure helper file if it grows:
 
   ```ts
-  export const redactMcpDiagnosticValue = (key: string, value: unknown): string => {
+  const SECRET_KEY_PATTERN = /(token|secret|password|authorization|api[_-]?key)/i
+  const redactUrlSecrets = (value: string) =>
+    value.replace(/([?&][^=]*(token|key|secret|password)[^=]*=)[^&]+/gi, "$1[redacted]")
+
+  export const redactMcpDiagnosticValue = (key: string, value: unknown): unknown => {
     const lowered = key.toLowerCase()
-    if (/(token|secret|password|authorization|api[_-]?key)/.test(lowered)) {
+    if (SECRET_KEY_PATTERN.test(lowered)) {
       return "[redacted]"
     }
-    const text = typeof value === "string" ? value : JSON.stringify(value)
-    return text.replace(/([?&][^=]*(token|key|secret|password)[^=]*=)[^&]+/gi, "$1[redacted]")
+    if (typeof value === "string") {
+      return redactUrlSecrets(value)
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry, index) => redactMcpDiagnosticValue(`${key}.${index}`, entry))
+    }
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([nestedKey, nestedValue]) => [
+          nestedKey,
+          redactMcpDiagnosticValue(nestedKey, nestedValue)
+        ])
+      )
+    }
+    return value
   }
+
+  export const formatMcpDiagnosticValue = (key: string, value: unknown) =>
+    JSON.stringify(redactMcpDiagnosticValue(key, value), null, 2)
   ```
 
 - [ ] **Step 4: Add diagnostics UI**
@@ -864,26 +1188,45 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
   - transport;
   - sanitized command/endpoint facts;
   - tool count;
-  - last operation fields only if available;
+  - last validation/discovery/success timestamps;
+  - current operation ID, type, start time, initiator, and timeout when available;
+  - last sanitized error category/message;
   - Audit tab link or copy explaining where audit details live.
 
 - [ ] **Step 5: Add environment diagnostics**
 
-  Show effective deployment mode, frontend API origin, and health endpoint if current frontend settings expose them. If not, show `Not available in this client` and keep a Stage 0 note for a later shared diagnostics provider.
+  Show effective deployment mode, frontend API origin, health endpoint, latest health result, and setup isolation guidance. If a field is unavailable in this client, show `Not available in this client` for that exact field and ensure the Stage 0 Backlog note records whether a later shared diagnostics provider is needed.
 
-- [ ] **Step 6: Run diagnostics tests**
+- [ ] **Step 6: Add backend RBAC/audit verification if Task 2 touched backend**
+
+  If Task 2 added or modified backend validation/discovery routes, add or update tests proving:
+  - validation/discovery actions require the selected MCP Hub permission;
+  - audit events are emitted for refresh/validation attempts;
+  - audit payloads and error responses redact nested env, headers, URL query,
+    args, and raw config secrets.
+
+- [ ] **Step 7: Run diagnostics tests**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
   ```
 
-- [ ] **Step 7: Commit diagnostics**
+- [ ] **Step 8: Run backend diagnostics tests if backend changed**
 
   ```bash
-  git add apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
+  source .venv/bin/activate
+  python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py -k "readiness or refresh or audit" -v
+  ```
+
+- [ ] **Step 9: Commit diagnostics**
+
+  ```bash
+  git add apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py
   git commit -m "feat: add MCP Hub setup diagnostics"
   ```
+
+  Only stage backend test files if they were changed.
 
 ## Task 7: Make Status Summary Truthful
 
@@ -931,6 +1274,8 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
   - `apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx`
   - `apps/packages/ui/src/components/Option/MCPHub/ToolCatalogsTab.tsx`
   - `apps/packages/ui/src/components/Option/MCPHub/McpHubPage.tsx`
+  - `apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts`
+  - `apps/tldw-frontend/e2e/utils/page-objects/MCPHubPage.ts`
   - relevant tests
 - Modify: `backlog/tasks/task-223.2 - PR-2-MCP-Hub-setup-polish-and-diagnostics.md`
 
@@ -986,14 +1331,64 @@ Only do this task if Stage 0 proves existing APIs cannot support the first readi
   - diagnostics drawer/modal does not hide controls;
   - Tool Catalog recovery actions are reachable.
 
-- [ ] **Step 8: Update Backlog task**
+- [ ] **Step 8: Add or update first-run browser smoke**
+
+  In `apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts`, add a focused smoke test using route mocks unless Stage 0 found a safe toy MCP server path. The test must avoid writing to the developer's normal runtime database.
+
+  Cover:
+  - fresh MCP Hub setup state with no external servers and empty tool registry;
+  - open Servers & Credentials;
+  - open the create flow;
+  - verify `Local stdio`, `HTTP/SSE`, `Import config`, and `Advanced/manual`;
+  - choose the Stage 0 toy/local stdio path or a mocked equivalent;
+  - fill the minimum safe fields;
+  - trigger `Save and discover tools`;
+  - receive a mocked or toy-server refresh result;
+  - verify the result panel and Tool Catalog recovery/ready state match the returned readiness.
+
+  Use the existing `MCPHubPage` page object. Add helpers there instead of duplicating selectors in the spec when the helper will be reused by later MCP Hub E2E tests.
+
+- [ ] **Step 9: Add responsive screenshot assertions**
+
+  In the same Playwright spec, add a screenshot-oriented test that runs MCP Hub at:
+  - desktop: `1440x900`
+  - mobile: `390x844`
+
+  For each viewport:
+  - navigate to `/mcp-hub?workflow=setup&view=credentials`;
+  - open the guided setup choices;
+  - open diagnostics for a mocked server state;
+  - switch to `/mcp-hub?workflow=setup&view=tool-catalogs`;
+  - assert `document.documentElement.scrollWidth <= document.documentElement.clientWidth`;
+  - attach screenshots with names such as `mcp-hub-setup-desktop.png` and `mcp-hub-setup-mobile.png` using Playwright `testInfo.attach`.
+
+- [ ] **Step 10: Run first-run browser smoke and capture evidence**
+
+  ```bash
+  cd apps/tldw-frontend
+  bun run e2e:pw -- e2e/workflows/tier-2-features/mcp-hub.spec.ts --project=tier-2 --reporter=line
+  ```
+
+  Expected: pass. Record the command, outcome, and screenshot artifact locations in `TASK-223.2`.
+
+- [ ] **Step 11: Record explicit smoke skips only when unavoidable**
+
+  If the full `Save and discover tools` smoke cannot run because no stable toy MCP server or safe mocked backend path exists, do not silently omit it. Record in `TASK-223.2`:
+  - exact missing dependency;
+  - why mocked route coverage cannot exercise the path;
+  - closest browser test that was run instead;
+  - follow-up task or issue needed to unblock full first-success smoke.
+
+  Even when the full save/discovery smoke is skipped, the plan still requires a browser test for setup choices, recovery copy, no horizontal overflow, and desktop/mobile screenshots.
+
+- [ ] **Step 12: Update Backlog task**
 
   Add verification results, known skips, and final summary to `TASK-223.2`.
 
-- [ ] **Step 9: Final commit**
+- [ ] **Step 13: Final commit**
 
   ```bash
-  git add apps/packages/ui/src/components/Option/MCPHub apps/packages/ui/src/services/tldw/mcp-hub.ts apps/packages/ui/src/services/tldw/__tests__/mcp-hub.test.ts tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py tldw_Server_API/app/api/v1/schemas/mcp_hub_schemas.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py "backlog/tasks/task-223.2 - PR-2-MCP-Hub-setup-polish-and-diagnostics.md"
+  git add apps/packages/ui/src/components/Option/MCPHub apps/packages/ui/src/services/tldw/mcp-hub.ts apps/packages/ui/src/services/tldw/__tests__/mcp-hub.test.ts apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts apps/tldw-frontend/e2e/utils/page-objects/MCPHubPage.ts tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py tldw_Server_API/app/api/v1/schemas/mcp_hub_schemas.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py "backlog/tasks/task-223.2 - PR-2-MCP-Hub-setup-polish-and-diagnostics.md"
   git commit -m "test: verify MCP Hub setup recovery UX"
   ```
 
