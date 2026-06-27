@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Button, Card, Checkbox, Empty, List, Modal, Space, Tag, Tooltip, Typography } from "antd"
 import { QuestionCircleOutlined } from "@ant-design/icons"
-import { useQueryClient } from "@tanstack/react-query"
 import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
 import { StatePanel } from "@/components/ui/state"
 
@@ -16,7 +15,6 @@ import {
   getToolRegistrySummary,
   importExternalServer,
   listExternalServers,
-  describeExternalServerDiscoveryRefreshFailure,
   refreshExternalServerDiscovery,
   setExternalServerSecret,
   setExternalServerSlotSecret,
@@ -27,6 +25,7 @@ import {
   validateExternalServer,
   type McpHubExternalServer,
   type McpHubExternalServerAuthTemplateMapping,
+  type McpHubExternalServerCreateInput,
   type McpHubExternalServerCredentialSlot,
   type McpHubReadiness,
   type McpHubReadinessAction,
@@ -39,8 +38,8 @@ import {
   getManagedExternalServers,
   getManagedExternalServerSlots
 } from "./policyHelpers"
-import { invalidateMcpRuntimeQueries } from "./runtimeRefresh"
 import {
+  formatMcpDiagnosticValue,
   getMcpServerReadiness,
   type McpReadinessAction,
   type McpServerReadiness
@@ -48,71 +47,25 @@ import {
 
 const DEFAULT_SLOT_SECRET_KIND = "bearer_token"
 const DEFAULT_SLOT_PRIVILEGE_CLASS = "read"
+const DIAGNOSTIC_UNAVAILABLE = "Not available in this client"
+type SetupMode = "choice" | "stdio" | "http" | "import" | "advanced"
+
+type SetupResult = {
+  serverId: string
+  serverName: string
+  discovered: boolean
+  readiness: McpHubServerReadiness | null
+}
+
+type ManagedServerDraft = McpHubExternalServerCreateInput & {
+  owner_scope_type: "global" | "org" | "team" | "user"
+  enabled: boolean
+}
+
 const AUTH_TEMPLATE_TARGET_BY_TRANSPORT: Record<string, "header" | "env"> = {
   websocket: "header",
   stdio: "env"
 }
-const NO_AUTH_MODE_VALUES = new Set(["", "none", "no_auth", "disabled"])
-
-const asRecord = (value: unknown): Record<string, unknown> | null =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
-
-const normalizeStringValue = (value: unknown): string =>
-  typeof value === "string" ? value.trim().toLowerCase() : ""
-
-const getExternalServerAuthMode = (server: McpHubExternalServer | null | undefined): string => {
-  const config = asRecord(server?.config)
-  const authConfig = asRecord(config?.auth)
-  return normalizeStringValue(authConfig?.mode || config?.auth_mode)
-}
-
-const hasServerLevelAuthConfig = (server: McpHubExternalServer | null | undefined): boolean => {
-  if (!server) {
-    return false
-  }
-  if (server.secret_configured) {
-    return true
-  }
-
-  const config = asRecord(server.config)
-  const authConfig = asRecord(config?.auth)
-  const authMode = getExternalServerAuthMode(server)
-  if (!NO_AUTH_MODE_VALUES.has(authMode)) {
-    return true
-  }
-  return Boolean(
-    authConfig?.token_env ||
-      authConfig?.api_key_env ||
-      config?.token_env ||
-      config?.api_key_env
-  )
-}
-
-const isNoAuthManagedStdioServer = (server: McpHubExternalServer | null | undefined): boolean => {
-  if (!server || server.server_source === "legacy") {
-    return false
-  }
-  const transport = normalizeStringValue(server.transport)
-  const slots = getManagedExternalServerSlots(server)
-  return (
-    transport === "stdio" &&
-    slots.length === 0 &&
-    !server.secret_configured &&
-    !server.auth_template_present &&
-    !server.auth_template_valid &&
-    !hasServerLevelAuthConfig(server)
-  )
-}
-
-const shouldShowLegacySecretFallback = (server: McpHubExternalServer | null | undefined): boolean =>
-  Boolean(
-    server &&
-      getManagedExternalServerSlots(server).length === 0 &&
-      !isNoAuthManagedStdioServer(server) &&
-      hasServerLevelAuthConfig(server)
-  )
 
 const normalizeAuthTemplateMapping = (
   mapping: Partial<McpHubExternalServerAuthTemplateMapping>,
@@ -128,6 +81,91 @@ const normalizeAuthTemplateMapping = (
 
 const getErrorMessage = (err: unknown): string =>
   err instanceof Error ? err.message : "Unknown error"
+
+const parseArgs = (value: string): string[] =>
+  value
+    .split(/\s+/)
+    .map((arg) => arg.trim())
+    .filter(Boolean)
+
+const parseEnvVars = (value: string): Record<string, string> => {
+  const env: Record<string, string> = {}
+  for (const rawLine of value.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) {
+      continue
+    }
+    const separatorIndex = line.indexOf("=")
+    if (separatorIndex <= 0) {
+      throw new Error("Env vars must use KEY=value lines.")
+    }
+    env[line.slice(0, separatorIndex).trim()] = line.slice(separatorIndex + 1).trim()
+  }
+  return env
+}
+
+const getImportedManagedServerDraft = (value: unknown): ManagedServerDraft => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Import config JSON must decode to an object.")
+  }
+  const record = value as Record<string, unknown>
+  const serverId = String(record.server_id ?? record.id ?? "").trim()
+  const name = String(record.name ?? "").trim()
+  const transport = String(record.transport ?? "").trim()
+  const config = record.config ?? {}
+  if (!serverId || !name || !transport) {
+    throw new Error("Import config JSON must include server_id, name, and transport.")
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    throw new Error("Import config JSON config must be an object.")
+  }
+  return {
+    server_id: serverId,
+    name,
+    transport,
+    config: config as Record<string, unknown>,
+    owner_scope_type:
+      record.owner_scope_type === "org" ||
+      record.owner_scope_type === "team" ||
+      record.owner_scope_type === "user"
+        ? record.owner_scope_type
+        : "global",
+    enabled: record.enabled !== false
+  }
+}
+
+const getImportedManagedServerDraftFromText = (value: string): ManagedServerDraft => {
+  try {
+    return getImportedManagedServerDraft(JSON.parse(value))
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      throw new Error("Import config JSON must be valid JSON.")
+    }
+    throw err
+  }
+}
+
+const getClientDiagnosticValue = (value: unknown): string => {
+  const normalized = typeof value === "string" ? value.trim() : ""
+  return normalized || DIAGNOSTIC_UNAVAILABLE
+}
+
+const getMcpHubEnvironmentDiagnostics = () => {
+  const deploymentMode = getClientDiagnosticValue(
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+  )
+  const apiOrigin = getClientDiagnosticValue(process.env.NEXT_PUBLIC_API_URL)
+
+  return {
+    deploymentMode,
+    apiOrigin,
+    healthEndpoint:
+      apiOrigin === DIAGNOSTIC_UNAVAILABLE
+        ? DIAGNOSTIC_UNAVAILABLE
+        : `${apiOrigin.replace(/\/+$/, "")}/api/v1/health`,
+    latestHealthResult: DIAGNOSTIC_UNAVAILABLE
+  }
+}
 
 type ExternalServersTabProps = {
   drillTarget?: McpHubDrillTarget | null
@@ -210,17 +248,31 @@ const toMapperReadiness = (
   }
 }
 
-type RuntimeRefreshResult = { ok: true } | { ok: false; message: string }
+const formatDiagnosticTimestamp = (value?: string | null): string =>
+  value?.trim() || "Not available"
 
-const getRuntimeRefreshFailureMessage = (result: RuntimeRefreshResult) =>
-  "message" in result ? result.message : ""
+const formatDiagnosticCurrentOperation = (
+  operation?: McpHubServerReadiness["current_operation"]
+): string => {
+  if (!operation) {
+    return "none"
+  }
+
+  const operationType = operation.operation_type || "operation"
+  const startedAt = operation.started_at ? ` since ${operation.started_at}` : ""
+  const message = operation.message ? `, ${operation.message}` : ""
+
+  return `${operationType}${startedAt}${message}`
+}
+
+const formatDiagnosticNullable = (value?: string | null): string =>
+  value?.trim() || "none"
 
 export const ExternalServersTab = ({
   drillTarget = null,
   onDrillHandled,
   onOpenToolCatalog
 }: ExternalServersTabProps) => {
-  const queryClient = useQueryClient()
   const handledDrillRequestRef = useRef<number | null>(null)
   const [servers, setServers] = useState<McpHubExternalServer[]>([])
   const [registryEntries, setRegistryEntries] = useState<McpHubToolRegistryEntry[]>([])
@@ -237,6 +289,8 @@ export const ExternalServersTab = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [readinessWarningMessage, setReadinessWarningMessage] = useState<string | null>(null)
   const [serverFormOpen, setServerFormOpen] = useState(false)
+  const [setupMode, setSetupMode] = useState<SetupMode>("choice")
+  const [setupResult, setSetupResult] = useState<SetupResult | null>(null)
   const [editingServerId, setEditingServerId] = useState<string | null>(null)
   const [serverIdValue, setServerIdValue] = useState("")
   const [serverNameValue, setServerNameValue] = useState("")
@@ -244,9 +298,14 @@ export const ExternalServersTab = ({
   const [ownerScopeType, setOwnerScopeType] = useState<"global" | "org" | "team" | "user">("global")
   const [enabledValue, setEnabledValue] = useState(true)
   const [configText, setConfigText] = useState("{}")
+  const [stdioCommandValue, setStdioCommandValue] = useState("")
+  const [stdioArgsValue, setStdioArgsValue] = useState("")
+  const [stdioEnvValue, setStdioEnvValue] = useState("")
+  const [stdioCwdValue, setStdioCwdValue] = useState("")
+  const [httpUrlValue, setHttpUrlValue] = useState("")
+  const [httpHeadersText, setHttpHeadersText] = useState("{}")
+  const [importConfigText, setImportConfigText] = useState("")
   const [serverSaving, setServerSaving] = useState(false)
-  const [runtimeRefreshCount, setRuntimeRefreshCount] = useState(0)
-  const runtimeRefreshing = runtimeRefreshCount > 0
   const [slotFormOpen, setSlotFormOpen] = useState(false)
   const [editingSlotName, setEditingSlotName] = useState<string | null>(null)
   const [slotNameValue, setSlotNameValue] = useState("")
@@ -264,6 +323,7 @@ export const ExternalServersTab = ({
   const [authTemplateMappings, setAuthTemplateMappings] = useState<McpHubExternalServerAuthTemplateMapping[]>([])
   const [authTemplateLoading, setAuthTemplateLoading] = useState(false)
   const [authTemplateSaving, setAuthTemplateSaving] = useState(false)
+  const environmentDiagnostics = useMemo(() => getMcpHubEnvironmentDiagnostics(), [])
   const managedServers = useMemo(() => getManagedExternalServers(servers), [servers])
   const activeManagedServer = useMemo(
     () => managedServers.find((server) => server.id === activeServerId) || null,
@@ -282,14 +342,6 @@ export const ExternalServersTab = ({
   )
   const activeAuthTemplateBlockedReason = getExternalAuthTemplateBlockedReasonLabel(
     activeManagedServer?.auth_template_blocked_reason
-  )
-  const activeServerHasNoCredentialRequirements = useMemo(
-    () => isNoAuthManagedStdioServer(activeManagedServer),
-    [activeManagedServer]
-  )
-  const showLegacySecretFallback = useMemo(
-    () => shouldShowLegacySecretFallback(activeManagedServer),
-    [activeManagedServer]
   )
   const backendReadinessByServerId = useMemo(() => {
     const nextReadiness = new Map<string, McpHubServerReadiness>()
@@ -318,10 +370,32 @@ export const ExternalServersTab = ({
   const detailsReadiness = detailsServerId
     ? rowReadinessByServerId.get(detailsServerId)
     : undefined
+  const detailsBackendReadiness = detailsServerId
+    ? backendReadinessByServerId.get(detailsServerId)
+    : undefined
+  const detailsDiagnosticConfig = detailsServer
+    ? formatMcpDiagnosticValue("config", detailsServer.config || {})
+    : "{}"
   const activeManagedServerReadiness = activeManagedServer
     ? rowReadinessByServerId.get(activeManagedServer.id)
     : undefined
   const activeCredentialState = activeManagedServerReadiness?.credentialState
+  const importPreview = useMemo(() => {
+    if (setupMode !== "import" || !importConfigText.trim()) {
+      return null
+    }
+    try {
+      return {
+        draft: getImportedManagedServerDraftFromText(importConfigText),
+        error: null
+      }
+    } catch (err) {
+      return {
+        draft: null,
+        error: getErrorMessage(err)
+      }
+    }
+  }, [importConfigText, setupMode])
 
   const canSave = useMemo(
     () => activeServerId.trim().length > 0 && secretValue.trim().length > 0 && !saving,
@@ -401,30 +475,6 @@ export const ExternalServersTab = ({
     }
   }
 
-  const refreshRuntimeDiscovery = async (
-    serverId?: string
-  ): Promise<RuntimeRefreshResult> => {
-    setRuntimeRefreshCount((count) => count + 1)
-    try {
-      const refreshResult = serverId
-        ? await refreshExternalServerDiscovery(serverId)
-        : await refreshExternalServerDiscovery()
-      await invalidateMcpRuntimeQueries(queryClient)
-      if (!refreshResult.ok) {
-        return {
-          ok: false,
-          message: describeExternalServerDiscoveryRefreshFailure(refreshResult)
-        }
-      }
-      return { ok: true }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error"
-      return { ok: false, message: msg }
-    } finally {
-      setRuntimeRefreshCount((count) => Math.max(0, count - 1))
-    }
-  }
-
   useEffect(() => {
     void loadServers()
   }, [])
@@ -474,7 +524,7 @@ export const ExternalServersTab = ({
     let cancelled = false
 
     const loadAuthTemplate = async () => {
-      if (!activeManagedServer || !activeAuthTemplateTarget || activeServerHasNoCredentialRequirements) {
+      if (!activeManagedServer || !activeAuthTemplateTarget) {
         setAuthTemplateMappings([])
         setAuthTemplateLoading(false)
         return
@@ -506,7 +556,7 @@ export const ExternalServersTab = ({
     return () => {
       cancelled = true
     }
-  }, [activeManagedServer?.id, activeAuthTemplateTarget, activeServerHasNoCredentialRequirements])
+  }, [activeManagedServer?.id, activeAuthTemplateTarget])
 
   const resetSlotForm = () => {
     setSlotFormOpen(false)
@@ -576,16 +626,9 @@ export const ExternalServersTab = ({
     setSuccessMessage(null)
     try {
       const imported = await importExternalServer(serverId)
-      const refreshResult = await refreshRuntimeDiscovery(imported.id)
       await loadServers()
       setActiveServerId(imported.id)
-      if (refreshResult.ok) {
-        setSuccessMessage("Legacy server imported and tools refreshed")
-      } else {
-        setSuccessMessage(
-          `Legacy server imported, but discovery refresh failed. Retry runtime refresh. ${getRuntimeRefreshFailureMessage(refreshResult)}`
-        )
-      }
+      setSuccessMessage("Legacy server imported")
     } catch {
       setErrorMessage("Failed to import legacy external server.")
     } finally {
@@ -593,8 +636,9 @@ export const ExternalServersTab = ({
     }
   }
 
-  const resetServerForm = () => {
+  const resetServerForm = ({ keepResult = false }: { keepResult?: boolean } = {}) => {
     setServerFormOpen(false)
+    setSetupMode("choice")
     setEditingServerId(null)
     setServerIdValue("")
     setServerNameValue("")
@@ -602,6 +646,16 @@ export const ExternalServersTab = ({
     setOwnerScopeType("global")
     setEnabledValue(true)
     setConfigText("{}")
+    setStdioCommandValue("")
+    setStdioArgsValue("")
+    setStdioEnvValue("")
+    setStdioCwdValue("")
+    setHttpUrlValue("")
+    setHttpHeadersText("{}")
+    setImportConfigText("")
+    if (!keepResult) {
+      setSetupResult(null)
+    }
     setServerSaving(false)
   }
 
@@ -612,6 +666,8 @@ export const ExternalServersTab = ({
 
   const openEditForm = (server: McpHubExternalServer) => {
     setServerFormOpen(true)
+    setSetupMode("advanced")
+    setSetupResult(null)
     setEditingServerId(server.id)
     setServerIdValue(server.id)
     setServerNameValue(server.name)
@@ -621,14 +677,14 @@ export const ExternalServersTab = ({
     setConfigText(JSON.stringify(server.config || {}, null, 2))
   }
 
-  const handleSaveServer = async () => {
+  const getAdvancedServerDraft = (): ManagedServerDraft | null => {
     if (!serverNameValue.trim() || !transportValue.trim()) {
       setErrorMessage("Server name and transport are required.")
-      return
+      return null
     }
     if (!editingServerId && !serverIdValue.trim()) {
       setErrorMessage("Server id is required.")
-      return
+      return null
     }
     let parsedConfig: Record<string, unknown> = {}
     try {
@@ -638,42 +694,155 @@ export const ExternalServersTab = ({
       }
     } catch {
       setErrorMessage("Server config JSON must decode to an object.")
+      return null
+    }
+    return {
+      server_id: serverIdValue.trim(),
+      name: serverNameValue.trim(),
+      transport: transportValue,
+      config: parsedConfig,
+      owner_scope_type: ownerScopeType,
+      enabled: enabledValue
+    }
+  }
+
+  const getStdioServerDraft = (): ManagedServerDraft | null => {
+    if (!serverIdValue.trim() || !serverNameValue.trim()) {
+      setErrorMessage("Server id and name are required.")
+      return null
+    }
+    if (!stdioCommandValue.trim()) {
+      setErrorMessage("Command is required for local stdio servers.")
+      return null
+    }
+    let env: Record<string, string> = {}
+    try {
+      env = parseEnvVars(stdioEnvValue)
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err))
+      return null
+    }
+    return {
+      server_id: serverIdValue.trim(),
+      name: serverNameValue.trim(),
+      transport: "stdio",
+      config: {
+        command: stdioCommandValue.trim(),
+        args: parseArgs(stdioArgsValue),
+        ...(stdioCwdValue.trim() ? { cwd: stdioCwdValue.trim() } : {}),
+        ...(Object.keys(env).length > 0 ? { env } : {})
+      },
+      owner_scope_type: ownerScopeType,
+      enabled: enabledValue
+    }
+  }
+
+  const getHttpServerDraft = (): ManagedServerDraft | null => {
+    if (!serverIdValue.trim() || !serverNameValue.trim()) {
+      setErrorMessage("Server id and name are required.")
+      return null
+    }
+    const urlValue = httpUrlValue.trim()
+    try {
+      new URL(urlValue)
+    } catch {
+      setErrorMessage("HTTP/SSE URL must be a valid URL.")
+      return null
+    }
+    let headers: Record<string, unknown> = {}
+    try {
+      headers = JSON.parse(httpHeadersText || "{}") as Record<string, unknown>
+      if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+        throw new Error("headers")
+      }
+    } catch {
+      setErrorMessage("Headers JSON must decode to an object.")
+      return null
+    }
+    return {
+      server_id: serverIdValue.trim(),
+      name: serverNameValue.trim(),
+      transport: "sse",
+      config: {
+        url: urlValue,
+        ...(Object.keys(headers).length > 0 ? { headers } : {})
+      },
+      owner_scope_type: ownerScopeType,
+      enabled: enabledValue
+    }
+  }
+
+  const getImportServerDraft = (): ManagedServerDraft | null => {
+    if (!importConfigText.trim()) {
+      setErrorMessage("Import config JSON is required.")
+      return null
+    }
+    try {
+      return getImportedManagedServerDraftFromText(importConfigText)
+    } catch {
+      return null
+    }
+  }
+
+  const getCreateServerDraft = (): ManagedServerDraft | null => {
+    switch (setupMode) {
+      case "stdio":
+        return getStdioServerDraft()
+      case "http":
+        return getHttpServerDraft()
+      case "import":
+        return getImportServerDraft()
+      case "advanced":
+      case "choice":
+        return getAdvancedServerDraft()
+    }
+  }
+
+  const handleSaveServer = async ({ discover = false }: { discover?: boolean } = {}) => {
+    setErrorMessage(null)
+    const draft = getCreateServerDraft()
+    if (!draft) {
       return
     }
-
     setServerSaving(true)
     setErrorMessage(null)
     setSuccessMessage(null)
     try {
       const payload = {
-        name: serverNameValue.trim(),
-        transport: transportValue,
-        config: parsedConfig,
-        owner_scope_type: ownerScopeType,
-        enabled: enabledValue
+        name: draft.name,
+        transport: draft.transport,
+        config: draft.config || {},
+        owner_scope_type: draft.owner_scope_type,
+        enabled: draft.enabled
       }
-      let refreshServerId: string | undefined
+      let savedServer: McpHubExternalServer
       if (editingServerId) {
-        await updateExternalServer(editingServerId, payload)
-        refreshServerId = enabledValue ? editingServerId : undefined
+        savedServer = await updateExternalServer(editingServerId, payload)
       } else {
-        const created = await createExternalServer({
-          server_id: serverIdValue.trim(),
+        savedServer = await createExternalServer({
+          server_id: draft.server_id,
           ...payload
         })
-        refreshServerId = enabledValue ? created.id : undefined
       }
-      resetServerForm()
-      const refreshResult = await refreshRuntimeDiscovery(refreshServerId)
+      let readinessResult: McpHubServerReadiness | null = null
+      if (discover) {
+        readinessResult = await refreshExternalServerDiscovery(savedServer.id)
+      }
+      const result = editingServerId
+        ? null
+        : {
+            serverId: savedServer.id,
+            serverName: savedServer.name,
+            discovered: discover,
+            readiness: readinessResult
+          }
+      resetServerForm({ keepResult: Boolean(result) })
       await loadServers()
-      const action = editingServerId ? "updated" : "created"
-      if (refreshResult.ok) {
-        setSuccessMessage(`Server ${action} and tools refreshed`)
-      } else {
-        setSuccessMessage(
-          `Server ${action}, but discovery refresh failed. Retry runtime refresh. ${getRuntimeRefreshFailureMessage(refreshResult)}`
-        )
+      setActiveServerId(savedServer.id)
+      if (result) {
+        setSetupResult(result)
       }
+      setSuccessMessage(editingServerId ? "Server updated" : result ? null : "Server created")
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error"
       setErrorMessage(editingServerId ? `Failed to update external server: ${msg}` : `Failed to create external server: ${msg}`)
@@ -694,15 +863,8 @@ export const ExternalServersTab = ({
         setSuccessMessage(null)
         try {
           await deleteExternalServer(server.id)
-          const refreshResult = await refreshRuntimeDiscovery()
           await loadServers()
-          if (refreshResult.ok) {
-            setSuccessMessage("Server deleted and tools refreshed")
-          } else {
-            setSuccessMessage(
-              `Server deleted, but discovery refresh failed. Retry runtime refresh. ${getRuntimeRefreshFailureMessage(refreshResult)}`
-            )
-          }
+          setSuccessMessage("Server deleted")
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Unknown error"
           setErrorMessage(`Failed to delete external server: ${msg}`)
@@ -734,16 +896,35 @@ export const ExternalServersTab = ({
     setErrorMessage(null)
     setSuccessMessage(null)
     try {
-      const refreshResult = await refreshRuntimeDiscovery(server.id)
-      if (!refreshResult.ok) {
-        setErrorMessage(`Failed to refresh tool discovery: ${getRuntimeRefreshFailureMessage(refreshResult)}`)
-        return
-      }
+      await refreshExternalServerDiscovery(server.id)
       await loadServers()
       setSuccessMessage("Tool discovery refreshed")
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error"
       setErrorMessage(`Failed to refresh tool discovery: ${msg}`)
+    } finally {
+      setRowActionLoadingKey(null)
+    }
+  }
+
+  const handleRefreshSetupResult = async () => {
+    if (!setupResult) {
+      return
+    }
+    const loadingKey = `${setupResult.serverId}:setup_refresh`
+    setRowActionLoadingKey(loadingKey)
+    setErrorMessage(null)
+    try {
+      const readinessResult = await refreshExternalServerDiscovery(setupResult.serverId)
+      await loadServers()
+      setSetupResult({
+        ...setupResult,
+        discovered: true,
+        readiness: readinessResult
+      })
+      setSuccessMessage("Tool discovery refreshed")
+    } catch (err) {
+      setErrorMessage(`Failed to refresh tool discovery: ${getErrorMessage(err)}`)
     } finally {
       setRowActionLoadingKey(null)
     }
@@ -1000,59 +1181,268 @@ export const ExternalServersTab = ({
         New Managed Server
       </Button>
 
+      {setupResult ? (
+        <StatePanel
+          state={setupResult.discovered ? "ready" : "setup_required"}
+          title={`${setupResult.serverName} saved`}
+          message={
+            setupResult.discovered
+              ? setupResult.readiness?.message || "Tool discovery ran for this server."
+              : "Tool discovery has not run for this server yet."
+          }
+          primaryAction={
+            onOpenToolCatalog
+              ? {
+                  label: "Tool Catalog",
+                  onClick: onOpenToolCatalog
+                }
+              : undefined
+          }
+          secondaryActions={
+            setupResult.discovered
+              ? []
+              : [
+                  {
+                    label: "Refresh discovery",
+                    loading: rowActionLoadingKey === `${setupResult.serverId}:setup_refresh`,
+                    onClick: () => void handleRefreshSetupResult()
+                  }
+                ]
+          }
+        />
+      ) : null}
+
       {serverFormOpen ? (
         <Card title={editingServerId ? "Edit Managed Server" : "Create Managed Server"}>
           <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-            {!editingServerId ? (
-              <Space orientation="vertical" style={{ width: "100%" }}>
-                <label htmlFor="mcp-external-server-id">Server ID</label>
-                <input
-                  id="mcp-external-server-id"
-                  aria-label="Server ID"
-                  value={serverIdValue}
-                  onChange={(event) => setServerIdValue(event.target.value)}
-                  placeholder="docs-managed"
-                />
-              </Space>
+            {!editingServerId && setupMode === "choice" ? (
+              <>
+                <Typography.Text type="secondary">
+                  Choose the fastest setup path. You can still switch to manual JSON if needed.
+                </Typography.Text>
+                <Space wrap>
+                  <Button onClick={() => setSetupMode("stdio")}>Local stdio</Button>
+                  <Button onClick={() => setSetupMode("http")}>HTTP/SSE</Button>
+                  <Button onClick={() => setSetupMode("import")}>Import config</Button>
+                  <Button onClick={() => setSetupMode("advanced")}>Advanced/manual</Button>
+                </Space>
+              </>
             ) : null}
 
-            <Space orientation="vertical" style={{ width: "100%" }}>
-              <label htmlFor="mcp-external-server-name">Name</label>
-              <input
-                id="mcp-external-server-name"
-                aria-label="Name"
-                value={serverNameValue}
-                onChange={(event) => setServerNameValue(event.target.value)}
-                placeholder="Docs Managed"
-              />
-            </Space>
+            {!editingServerId && setupMode !== "choice" ? (
+              <Button onClick={() => setSetupMode("choice")}>Change setup type</Button>
+            ) : null}
 
-            <Space>
-              <Space orientation="vertical">
-                <span className="flex items-center gap-1">
-                  <label htmlFor="mcp-external-server-transport">Transport</label>
-                  <Tooltip title="How to communicate with the server. Use 'stdio' for local processes, 'websocket' for remote servers.">
-                    <button
-                      type="button"
-                      aria-label="Connection mode help"
-                      style={{ border: 0, background: "transparent", padding: 0, cursor: "help", lineHeight: 1 }}
+            {!editingServerId && (setupMode === "stdio" || setupMode === "http") ? (
+              <>
+                <Space orientation="vertical" style={{ width: "100%" }}>
+                  <label htmlFor="mcp-external-server-id">Server ID</label>
+                  <input
+                    id="mcp-external-server-id"
+                    aria-label="Server ID"
+                    value={serverIdValue}
+                    onChange={(event) => setServerIdValue(event.target.value)}
+                    placeholder="docs-managed"
+                  />
+                </Space>
+
+                <Space orientation="vertical" style={{ width: "100%" }}>
+                  <label htmlFor="mcp-external-server-name">Name</label>
+                  <input
+                    id="mcp-external-server-name"
+                    aria-label="Name"
+                    value={serverNameValue}
+                    onChange={(event) => setServerNameValue(event.target.value)}
+                    placeholder="Docs Managed"
+                  />
+                </Space>
+              </>
+            ) : null}
+
+            {!editingServerId && setupMode === "stdio" ? (
+              <>
+                <Space orientation="vertical" style={{ width: "100%" }}>
+                  <label htmlFor="mcp-external-server-command">Command</label>
+                  <input
+                    id="mcp-external-server-command"
+                    aria-label="Command"
+                    value={stdioCommandValue}
+                    onChange={(event) => setStdioCommandValue(event.target.value)}
+                    placeholder="uvx"
+                  />
+                </Space>
+
+                <Space orientation="vertical" style={{ width: "100%" }}>
+                  <label htmlFor="mcp-external-server-args">Args</label>
+                  <input
+                    id="mcp-external-server-args"
+                    aria-label="Args"
+                    value={stdioArgsValue}
+                    onChange={(event) => setStdioArgsValue(event.target.value)}
+                    placeholder="mcp-server-docs --stdio"
+                  />
+                </Space>
+
+                <Space orientation="vertical" style={{ width: "100%" }}>
+                  <label htmlFor="mcp-external-server-cwd">Working Directory</label>
+                  <input
+                    id="mcp-external-server-cwd"
+                    aria-label="Working Directory"
+                    value={stdioCwdValue}
+                    onChange={(event) => setStdioCwdValue(event.target.value)}
+                    placeholder="/path/to/project"
+                  />
+                </Space>
+
+                <Space orientation="vertical" style={{ width: "100%" }}>
+                  <label htmlFor="mcp-external-server-env">Env vars</label>
+                  <textarea
+                    id="mcp-external-server-env"
+                    aria-label="Env vars"
+                    value={stdioEnvValue}
+                    onChange={(event) => setStdioEnvValue(event.target.value)}
+                    rows={3}
+                    placeholder="TOKEN=..."
+                  />
+                </Space>
+              </>
+            ) : null}
+
+            {!editingServerId && setupMode === "http" ? (
+              <>
+                <Space orientation="vertical" style={{ width: "100%" }}>
+                  <label htmlFor="mcp-external-server-url">URL</label>
+                  <input
+                    id="mcp-external-server-url"
+                    aria-label="URL"
+                    value={httpUrlValue}
+                    onChange={(event) => setHttpUrlValue(event.target.value)}
+                    placeholder="https://example.test/mcp"
+                  />
+                </Space>
+
+                <Space orientation="vertical" style={{ width: "100%" }}>
+                  <label htmlFor="mcp-external-server-headers">Headers JSON</label>
+                  <textarea
+                    id="mcp-external-server-headers"
+                    aria-label="Headers JSON"
+                    value={httpHeadersText}
+                    onChange={(event) => setHttpHeadersText(event.target.value)}
+                    rows={4}
+                  />
+                </Space>
+              </>
+            ) : null}
+
+            {!editingServerId && setupMode === "import" ? (
+              <>
+                <Space orientation="vertical" style={{ width: "100%" }}>
+                  <label htmlFor="mcp-external-server-import-config">Managed Config JSON</label>
+                  <textarea
+                    id="mcp-external-server-import-config"
+                    aria-label="Managed Config JSON"
+                    value={importConfigText}
+                    onChange={(event) => setImportConfigText(event.target.value)}
+                    rows={8}
+                    placeholder='{"server_id":"docs-http","name":"Docs HTTP","transport":"sse","config":{"url":"https://example.test/mcp"}}'
+                  />
+                </Space>
+                {importPreview?.draft ? (
+                  <StatePanel
+                    state="ready"
+                    title={`Preview: ${importPreview.draft.name}`}
+                    message={`Server ID: ${importPreview.draft.server_id}; Transport: ${importPreview.draft.transport}`}
+                  />
+                ) : importPreview?.error ? (
+                  <StatePanel state="error" title={importPreview.error} role="alert" />
+                ) : null}
+              </>
+            ) : null}
+
+            {(editingServerId || setupMode === "advanced") ? (
+              <>
+                {!editingServerId ? (
+                  <Space orientation="vertical" style={{ width: "100%" }}>
+                    <label htmlFor="mcp-external-server-id">Server ID</label>
+                    <input
+                      id="mcp-external-server-id"
+                      aria-label="Server ID"
+                      value={serverIdValue}
+                      onChange={(event) => setServerIdValue(event.target.value)}
+                      placeholder="docs-managed"
+                    />
+                  </Space>
+                ) : null}
+
+                <Space orientation="vertical" style={{ width: "100%" }}>
+                  <label htmlFor="mcp-external-server-name">Name</label>
+                  <input
+                    id="mcp-external-server-name"
+                    aria-label="Name"
+                    value={serverNameValue}
+                    onChange={(event) => setServerNameValue(event.target.value)}
+                    placeholder="Docs Managed"
+                  />
+                </Space>
+
+                <Space>
+                  <Space orientation="vertical">
+                    <span className="flex items-center gap-1">
+                      <label htmlFor="mcp-external-server-transport">Transport</label>
+                      <Tooltip title="How to communicate with the server. Use 'stdio' for local processes, 'websocket' for remote servers.">
+                        <button
+                          type="button"
+                          aria-label="Connection mode help"
+                          style={{ border: 0, background: "transparent", padding: 0, cursor: "help", lineHeight: 1 }}
+                        >
+                          <Typography.Text type="secondary">
+                            <QuestionCircleOutlined />
+                          </Typography.Text>
+                        </button>
+                      </Tooltip>
+                    </span>
+                    <select
+                      id="mcp-external-server-transport"
+                      aria-label="Transport"
+                      value={transportValue}
+                      onChange={(event) => setTransportValue(event.target.value)}
                     >
-                      <Typography.Text type="secondary">
-                        <QuestionCircleOutlined />
-                      </Typography.Text>
-                    </button>
-                  </Tooltip>
-                </span>
-                <select
-                  id="mcp-external-server-transport"
-                  aria-label="Transport"
-                  value={transportValue}
-                  onChange={(event) => setTransportValue(event.target.value)}
-                >
-                  <option value="stdio">stdio</option>
-                  <option value="websocket">websocket</option>
-                </select>
-              </Space>
+                      <option value="stdio">stdio</option>
+                      <option value="websocket">websocket</option>
+                    </select>
+                  </Space>
+                  <Space orientation="vertical">
+                    <label htmlFor="mcp-external-server-scope">Owner Scope</label>
+                    <select
+                      id="mcp-external-server-scope"
+                      aria-label="Owner Scope"
+                      value={ownerScopeType}
+                      onChange={(event) =>
+                        setOwnerScopeType(event.target.value as typeof ownerScopeType)
+                      }
+                    >
+                      <option value="global">Global</option>
+                      <option value="org">Org</option>
+                      <option value="team">Team</option>
+                      <option value="user">User</option>
+                    </select>
+                  </Space>
+                </Space>
+
+                <Space orientation="vertical" style={{ width: "100%" }}>
+                  <label htmlFor="mcp-external-server-config">Config JSON</label>
+                  <textarea
+                    id="mcp-external-server-config"
+                    aria-label="Config JSON"
+                    value={configText}
+                    onChange={(event) => setConfigText(event.target.value)}
+                    rows={6}
+                  />
+                </Space>
+              </>
+            ) : null}
+
+            {!editingServerId && (setupMode === "stdio" || setupMode === "http") ? (
               <Space orientation="vertical">
                 <label htmlFor="mcp-external-server-scope">Owner Scope</label>
                 <select
@@ -1069,28 +1459,41 @@ export const ExternalServersTab = ({
                   <option value="user">User</option>
                 </select>
               </Space>
-            </Space>
+            ) : null}
 
-            <Space orientation="vertical" style={{ width: "100%" }}>
-              <label htmlFor="mcp-external-server-config">Config JSON</label>
-              <textarea
-                id="mcp-external-server-config"
-                aria-label="Config JSON"
-                value={configText}
-                onChange={(event) => setConfigText(event.target.value)}
-                rows={6}
-              />
-            </Space>
-
-            <Checkbox checked={enabledValue} onChange={(event) => setEnabledValue(event.target.checked)}>
-              Enabled
-            </Checkbox>
+            {(setupMode !== "choice" && setupMode !== "import") || editingServerId ? (
+              <Checkbox checked={enabledValue} onChange={(event) => setEnabledValue(event.target.checked)}>
+                Enabled
+              </Checkbox>
+            ) : null}
 
             <Space>
-              <Button type="primary" onClick={handleSaveServer} loading={serverSaving || runtimeRefreshing}>
-                {editingServerId ? "Update Server" : "Save Server"}
-              </Button>
-              <Button onClick={resetServerForm}>Cancel</Button>
+              {editingServerId ? (
+                <Button
+                  type="primary"
+                  onClick={() => void handleSaveServer()}
+                  loading={serverSaving}
+                >
+                  Update Server
+                </Button>
+              ) : setupMode !== "choice" ? (
+                <>
+                  <Button
+                    type="primary"
+                    onClick={() => void handleSaveServer({ discover: true })}
+                    loading={serverSaving}
+                  >
+                    Save and discover tools
+                  </Button>
+                  <Button
+                    onClick={() => void handleSaveServer({ discover: false })}
+                    loading={serverSaving}
+                  >
+                    Save without discovery
+                  </Button>
+                </>
+              ) : null}
+              <Button onClick={() => resetServerForm()}>Cancel</Button>
             </Space>
           </Space>
         </Card>
@@ -1124,13 +1527,6 @@ export const ExternalServersTab = ({
         <>
           <Card size="small" title="Credential Slots" extra={<Button onClick={openCreateSlotForm}>Add Slot</Button>}>
             <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-              {activeServerHasNoCredentialRequirements ? (
-                <StatePanel
-                  state="ready"
-                  title="No credentials required"
-                  message="This local stdio server runs without brokered credentials, so no slot secret or server-level secret is needed."
-                />
-              ) : null}
               {slotFormOpen ? (
                 <Card size="small" title={editingSlotName ? "Edit Credential Slot" : "Create Credential Slot"}>
                   <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
@@ -1213,17 +1609,7 @@ export const ExternalServersTab = ({
               <List
                 bordered
                 dataSource={activeSlots}
-                locale={{
-                  emptyText: (
-                    <Empty
-                      description={
-                        activeServerHasNoCredentialRequirements
-                          ? "No credential slots required."
-                          : "No credential slots yet."
-                      }
-                    />
-                  )
-                }}
+                locale={{ emptyText: <Empty description="No credential slots yet." /> }}
                 renderItem={(slot) => {
                   const slotKey = `${activeManagedServer.id}:${slot.slot_name}`
                   return (
@@ -1297,9 +1683,7 @@ export const ExternalServersTab = ({
               )}
               <Space wrap size="small">
                 <Tag>{`Transport: ${activeManagedServer.transport}`}</Tag>
-                {activeServerHasNoCredentialRequirements ? (
-                  <Tag color="green">No credentials required</Tag>
-                ) : activeAuthTemplateTarget ? (
+                {activeAuthTemplateTarget ? (
                   <Tag color="blue">{`Template target: ${activeAuthTemplateTarget === "header" ? "header" : "env"}`}</Tag>
                 ) : (
                   <Tag color="red">Unsupported transport</Tag>
@@ -1393,16 +1777,14 @@ export const ExternalServersTab = ({
                   </Space>
                 </Card>
               ))}
-              {activeServerHasNoCredentialRequirements ? null : (
-                <Button
-                  type="primary"
-                  onClick={handleSaveAuthTemplate}
-                  disabled={!canSaveAuthTemplate}
-                  loading={authTemplateSaving || authTemplateLoading}
-                >
-                  Save Auth Template
-                </Button>
-              )}
+              <Button
+                type="primary"
+                onClick={handleSaveAuthTemplate}
+                disabled={!canSaveAuthTemplate}
+                loading={authTemplateSaving || authTemplateLoading}
+              >
+                Save Auth Template
+              </Button>
             </Space>
           </Card>
 
@@ -1473,7 +1855,7 @@ export const ExternalServersTab = ({
                 </Button>
               </Space>
             </Card>
-          ) : null}
+          )}
         </>
       ) : null}
 
@@ -1500,7 +1882,6 @@ export const ExternalServersTab = ({
           )
         }}
         renderItem={(server) => {
-          const serverHasNoCredentialRequirements = isNoAuthManagedStdioServer(server)
           const readiness = rowReadinessByServerId.get(server.id)
           const credentialTag = readiness ? CREDENTIAL_TAGS[readiness.credentialState] : null
           return (
@@ -1524,13 +1905,9 @@ export const ExternalServersTab = ({
                   ) : null}
                   {credentialTag ? (
                     <Tag color={credentialTag.color}>{credentialTag.label}</Tag>
-                  ) : serverHasNoCredentialRequirements ? (
-                    <Tag color="green">No credentials required</Tag>
                   ) : server.secret_configured ? (
                     <Tag color="green">secret configured</Tag>
-                  ) : (
-                    <Tag>no secret</Tag>
-                  )}
+                  ) : null}
                   {server.auth_template_valid ? (
                     <Tag color="green">template valid</Tag>
                   ) : server.auth_template_present ? (
@@ -1539,9 +1916,7 @@ export const ExternalServersTab = ({
                     </Tag>
                   ) : server.credential_slots?.length ? (
                     <Tag>template not configured</Tag>
-                  ) : serverHasNoCredentialRequirements ? null : (
-                    <Tag>{getExternalAuthTemplateBlockedReasonLabel(server.auth_template_blocked_reason) || "No auth template"}</Tag>
-                  )}
+                  ) : null}
                   {readiness?.message ? (
                     <Typography.Text type="secondary">{readiness.message}</Typography.Text>
                   ) : null}
@@ -1603,9 +1978,63 @@ export const ExternalServersTab = ({
               message={detailsReadiness.message}
             />
             <Typography.Text>{`Server ID: ${detailsServer.id}`}</Typography.Text>
+            <Typography.Text>{`Display state: ${
+              detailsBackendReadiness?.display_state ?? detailsReadiness.displayState
+            }`}</Typography.Text>
+            <Typography.Text>{`Primary reason: ${
+              detailsBackendReadiness?.primary_reason_code ??
+              detailsReadiness.primaryReasonCode ??
+              "none"
+            }`}</Typography.Text>
             <Typography.Text>{`Credential state: ${detailsReadiness.credentialState}`}</Typography.Text>
             <Typography.Text>{`Reason codes: ${detailsReadiness.reasonCodes.join(", ") || "none"}`}</Typography.Text>
+            <Typography.Text>{`Transport: ${detailsServer.transport}`}</Typography.Text>
             <Typography.Text>{`Tools: ${detailsReadiness.toolCount}`}</Typography.Text>
+            <Typography.Text>{`Last validation: ${formatDiagnosticTimestamp(
+              detailsBackendReadiness?.last_validation_at
+            )}`}</Typography.Text>
+            <Typography.Text>{`Last discovery: ${formatDiagnosticTimestamp(
+              detailsBackendReadiness?.last_discovery_at
+            )}`}</Typography.Text>
+            <Typography.Text>{`Last successful discovery: ${formatDiagnosticTimestamp(
+              detailsBackendReadiness?.last_successful_discovery_at
+            )}`}</Typography.Text>
+            <Typography.Text>{`Current operation: ${formatDiagnosticCurrentOperation(
+              detailsBackendReadiness?.current_operation
+            )}`}</Typography.Text>
+            <Typography.Text>{`Last error category: ${formatDiagnosticNullable(
+              detailsBackendReadiness?.last_error_category
+            )}`}</Typography.Text>
+            <Typography.Text>{`Last error message: ${formatDiagnosticNullable(
+              detailsBackendReadiness?.last_error_message
+            )}`}</Typography.Text>
+            <Typography.Text>{`Deployment mode: ${environmentDiagnostics.deploymentMode}`}</Typography.Text>
+            <Typography.Text>{`API origin: ${environmentDiagnostics.apiOrigin}`}</Typography.Text>
+            <Typography.Text>{`Health endpoint: ${environmentDiagnostics.healthEndpoint}`}</Typography.Text>
+            <Typography.Text>{`Latest health result: ${environmentDiagnostics.latestHealthResult}`}</Typography.Text>
+            <Typography.Text>
+              Audit details: Use the Governance Audit tab to inspect server changes and policy events.
+            </Typography.Text>
+            <Typography.Text>
+              Setup isolation: Use an isolated test database and temporary MCP server config for local walkthroughs and E2E runs before refreshing discovery.
+            </Typography.Text>
+            <Typography.Text strong>Sanitized config</Typography.Text>
+            <pre
+              data-testid="mcp-server-diagnostics-config"
+              style={{
+                background: "var(--ant-color-fill-quaternary)",
+                border: "1px solid var(--ant-color-border-secondary)",
+                borderRadius: 6,
+                margin: 0,
+                maxHeight: 240,
+                overflow: "auto",
+                padding: 12,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word"
+              }}
+            >
+              {detailsDiagnosticConfig}
+            </pre>
           </Space>
         ) : null}
       </Modal>

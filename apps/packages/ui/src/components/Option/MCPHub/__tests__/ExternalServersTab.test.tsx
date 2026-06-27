@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { Modal } from "antd"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const mocks = vi.hoisted(() => ({
-  invalidateQueries: vi.fn(),
   listExternalServers: vi.fn(),
   setExternalServerSecret: vi.fn(),
   setExternalServerSlotSecret: vi.fn(),
@@ -14,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   getMcpHubReadiness: vi.fn(),
   getToolRegistrySummary: vi.fn(),
   refreshExternalServerDiscovery: vi.fn(),
-  refreshExternalServerReadinessDiscovery: vi.fn(),
   validateExternalServer: vi.fn(),
   updateExternalServerAuthTemplate: vi.fn(),
   importExternalServer: vi.fn(),
@@ -26,20 +23,8 @@ const mocks = vi.hoisted(() => ({
   deleteExternalServerCredentialSlot: vi.fn()
 }))
 
-vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({
-    invalidateQueries: mocks.invalidateQueries
-  })
-}))
-
 vi.mock("@/services/tldw/mcp-hub", () => ({
   listExternalServers: (...args: unknown[]) => mocks.listExternalServers(...args),
-  describeExternalServerDiscoveryRefreshFailure: (result: { message?: string | null; errors?: Record<string, string> }) => {
-    const errorText = Object.entries(result.errors ?? {})
-      .map(([serverId, reason]) => `${serverId}: ${reason}`)
-      .join("; ")
-    return [result.message, errorText].filter(Boolean).join(" - ") || "Discovery refresh failed"
-  },
   setExternalServerSecret: (...args: unknown[]) => mocks.setExternalServerSecret(...args),
   setExternalServerSlotSecret: (...args: unknown[]) => mocks.setExternalServerSlotSecret(...args),
   clearExternalServerSlotSecret: (...args: unknown[]) => mocks.clearExternalServerSlotSecret(...args),
@@ -47,7 +32,6 @@ vi.mock("@/services/tldw/mcp-hub", () => ({
   getMcpHubReadiness: (...args: unknown[]) => mocks.getMcpHubReadiness(...args),
   getToolRegistrySummary: (...args: unknown[]) => mocks.getToolRegistrySummary(...args),
   refreshExternalServerDiscovery: (...args: unknown[]) => mocks.refreshExternalServerDiscovery(...args),
-  refreshExternalServerReadinessDiscovery: (...args: unknown[]) => mocks.refreshExternalServerReadinessDiscovery(...args),
   validateExternalServer: (...args: unknown[]) => mocks.validateExternalServer(...args),
   updateExternalServerAuthTemplate: (...args: unknown[]) => mocks.updateExternalServerAuthTemplate(...args),
   importExternalServer: (...args: unknown[]) => mocks.importExternalServer(...args),
@@ -132,10 +116,32 @@ const findServerRow = async (name: string) => {
   return row
 }
 
+const withClearedDiagnosticEnv = async (fn: () => Promise<void>) => {
+  const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+  const originalApiUrl = process.env.NEXT_PUBLIC_API_URL
+
+  try {
+    delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    delete process.env.NEXT_PUBLIC_API_URL
+    await fn()
+  } finally {
+    if (originalDeploymentMode === undefined) {
+      delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    } else {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = originalDeploymentMode
+    }
+
+    if (originalApiUrl === undefined) {
+      delete process.env.NEXT_PUBLIC_API_URL
+    } else {
+      process.env.NEXT_PUBLIC_API_URL = originalApiUrl
+    }
+  }
+}
+
 describe("ExternalServersTab", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.invalidateQueries.mockResolvedValue(undefined)
     mocks.listExternalServers.mockResolvedValue([
       {
         id: "docs-managed",
@@ -310,10 +316,6 @@ describe("ExternalServersTab", () => {
         }
       ]
     })
-    mocks.refreshExternalServerDiscovery.mockResolvedValue({
-      ok: true,
-      status: "refreshed"
-    })
     mocks.createExternalServerCredentialSlot.mockResolvedValue({
       server_id: "docs-managed",
       slot_name: "token_write",
@@ -335,10 +337,6 @@ describe("ExternalServersTab", () => {
     mocks.deleteExternalServerCredentialSlot.mockResolvedValue({ ok: true })
     mocks.deleteExternalServer.mockResolvedValue({ ok: true })
     vi.stubGlobal("confirm", vi.fn(() => true))
-  })
-
-  afterEach(() => {
-    Modal.destroyAll()
   })
 
   it("renders managed and legacy servers, supports import, and still saves managed secrets", async () => {
@@ -368,64 +366,6 @@ describe("ExternalServersTab", () => {
 
     await user.click(screen.getByRole("button", { name: /import to mcp hub/i }))
     expect(mocks.importExternalServer).toHaveBeenCalledWith("search-legacy")
-  })
-
-  it("renders no-auth local stdio servers as credential-complete", async () => {
-    mocks.listExternalServers.mockResolvedValueOnce([
-      {
-        id: "toy-stdio",
-        name: "Toy Stdio",
-        enabled: true,
-        owner_scope_type: "global",
-        transport: "stdio",
-        config: { command: "node", args: ["toy-server.mjs"], auth: { mode: "none" } },
-        secret_configured: false,
-        server_source: "managed",
-        binding_count: 0,
-        runtime_executable: true,
-        auth_template_present: false,
-        auth_template_valid: false,
-        auth_template_blocked_reason: "no_auth_template",
-        credential_slots: []
-      }
-    ])
-
-    render(<ExternalServersTab />)
-
-    expect((await screen.findAllByText("Toy Stdio")).length).toBeGreaterThan(0)
-    expect((await screen.findAllByText(/no credentials required/i)).length).toBeGreaterThan(0)
-    expect(screen.queryByText(/^No auth template$/i)).toBeNull()
-    expect(screen.queryByText(/^no secret$/i)).toBeNull()
-    expect(screen.queryByText(/legacy secret fallback/i)).toBeNull()
-    expect(screen.queryByText(/add at least one credential slot/i)).toBeNull()
-  })
-
-  it("keeps the legacy server-level secret fallback when auth is still configured without slots", async () => {
-    mocks.listExternalServers.mockResolvedValueOnce([
-      {
-        id: "docs-server-secret",
-        name: "Docs Server Secret",
-        enabled: true,
-        owner_scope_type: "global",
-        transport: "stdio",
-        config: { command: "node", args: ["docs-server.mjs"], auth: { mode: "bearer_token", env: "DOCS_TOKEN" } },
-        secret_configured: false,
-        server_source: "managed",
-        binding_count: 0,
-        runtime_executable: true,
-        auth_template_present: false,
-        auth_template_valid: false,
-        auth_template_blocked_reason: "no_auth_template",
-        credential_slots: []
-      }
-    ])
-
-    render(<ExternalServersTab />)
-
-    expect((await screen.findAllByText("Docs Server Secret")).length).toBeGreaterThan(0)
-    expect(await screen.findByText(/legacy secret fallback/i)).toBeTruthy()
-    expect(screen.getByLabelText(/^secret$/i)).toBeTruthy()
-    expect(screen.queryByText(/no credentials required/i)).toBeNull()
   })
 
   it("renders auth template readiness and saves transport-aware mappings", async () => {
@@ -553,10 +493,11 @@ describe("ExternalServersTab", () => {
     expect(mocks.deleteExternalServerCredentialSlot).toHaveBeenCalledWith("docs-managed", "token_readonly")
 
     await user.click(screen.getByRole("button", { name: /new managed server/i }))
+    await user.click(screen.getByRole("button", { name: /advanced\/manual/i }))
     await user.type(screen.getByLabelText(/server id/i), "new-managed")
     await user.type(screen.getByLabelText(/^name$/i), "New Managed")
-    await user.selectOptions(screen.getByRole("combobox", { name: /^transport$/i }), "websocket")
-    await user.click(screen.getByRole("button", { name: /save server/i }))
+    await user.selectOptions(screen.getByLabelText(/transport/i), "websocket")
+    await user.click(screen.getByRole("button", { name: /save without discovery/i }))
 
     expect(mocks.createExternalServer).toHaveBeenCalledWith({
       server_id: "new-managed",
@@ -586,111 +527,180 @@ describe("ExternalServersTab", () => {
     expect(mocks.deleteExternalServer).toHaveBeenCalledWith("docs-managed")
   }, 15000)
 
-  it("refreshes external discovery and MCP tool queries after managed server mutations", async () => {
+  it("shows guided setup choices before managed server fields", async () => {
     const user = userEvent.setup()
     render(<ExternalServersTab />)
 
     await screen.findByText("Docs Legacy")
-
     await user.click(screen.getByRole("button", { name: /new managed server/i }))
-    await user.type(screen.getByLabelText(/server id/i), "new-managed")
-    await user.type(screen.getByLabelText(/^name$/i), "New Managed")
-    await user.selectOptions(screen.getByRole("combobox", { name: /^transport$/i }), "websocket")
-    await user.click(screen.getByRole("button", { name: /save server/i }))
 
-    await waitFor(() => {
-      expect(mocks.createExternalServer).toHaveBeenCalled()
-    })
-    expect(mocks.refreshExternalServerDiscovery).toHaveBeenLastCalledWith("new-managed")
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tools"] })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-catalogs"] })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-modules"] })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-health"] })
-    expect(await screen.findByText(/server created and tools refreshed/i)).toBeTruthy()
-
-    await user.click(screen.getByRole("button", { name: /edit docs managed/i }))
-    const nameInput = screen.getByLabelText(/^name$/i)
-    await user.clear(nameInput)
-    await user.type(nameInput, "Docs Managed Updated")
-    await user.click(screen.getByRole("button", { name: /update server/i }))
-
-    await waitFor(() => {
-      expect(mocks.updateExternalServer).toHaveBeenCalledWith(
-        "docs-managed",
-        expect.objectContaining({ enabled: true })
-      )
-    })
-    expect(mocks.refreshExternalServerDiscovery).toHaveBeenLastCalledWith("docs-managed")
-    expect(await screen.findByText(/server updated and tools refreshed/i)).toBeTruthy()
-
-    await user.click(screen.getByRole("button", { name: /edit docs managed/i }))
-    await user.click(screen.getByRole("checkbox", { name: /enabled/i }))
-    await user.click(screen.getByRole("button", { name: /update server/i }))
-
-    await waitFor(() => {
-      expect(mocks.updateExternalServer).toHaveBeenLastCalledWith(
-        "docs-managed",
-        expect.objectContaining({ enabled: false })
-      )
-    })
-    expect(mocks.refreshExternalServerDiscovery).toHaveBeenLastCalledWith()
-
-    await user.click(screen.getByRole("button", { name: /import to mcp hub/i }))
-    await waitFor(() => {
-      expect(mocks.importExternalServer).toHaveBeenCalledWith("search-legacy")
-    })
-    expect(mocks.refreshExternalServerDiscovery).toHaveBeenLastCalledWith("search-legacy")
-    expect(await screen.findByText(/legacy server imported and tools refreshed/i)).toBeTruthy()
-
-    await user.click(screen.getByRole("button", { name: /delete docs managed/i }))
-    await user.click(await screen.findByRole("button", { name: /^delete$/i }))
-
-    await waitFor(() => {
-      expect(mocks.deleteExternalServer).toHaveBeenCalledWith("docs-managed")
-    })
-    expect(mocks.refreshExternalServerDiscovery).toHaveBeenLastCalledWith()
-    expect(await screen.findByText(/server deleted and tools refreshed/i)).toBeTruthy()
-  }, 20000)
-
-  it("keeps persistence success visible when runtime discovery refresh fails", async () => {
-    const user = userEvent.setup()
-    mocks.refreshExternalServerDiscovery.mockRejectedValueOnce(new Error("runtime unavailable"))
-    render(<ExternalServersTab />)
-
-    expect((await screen.findAllByText("Docs Managed")).length).toBeGreaterThan(0)
-    await user.click(screen.getByRole("button", { name: /new managed server/i }))
-    await user.type(screen.getByLabelText(/server id/i), "new-managed")
-    await user.type(screen.getByLabelText(/^name$/i), "New Managed")
-    await user.click(screen.getByRole("button", { name: /save server/i }))
-
-    expect(await screen.findByText(/server created, but discovery refresh failed/i)).toBeTruthy()
-    expect(screen.getByText(/retry runtime refresh/i)).toBeTruthy()
-    expect(mocks.listExternalServers).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole("button", { name: /local stdio/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /http\/sse/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /import config/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /advanced\/manual/i })).toBeTruthy()
+    expect(screen.queryByLabelText(/config json/i)).toBeNull()
   })
 
-  it("keeps persistence success visible when runtime discovery resolves with errors", async () => {
+  it("keeps the raw config create path behind Advanced/manual", async () => {
     const user = userEvent.setup()
-    mocks.refreshExternalServerDiscovery.mockResolvedValueOnce({
-      ok: false,
-      message: "Discovery refreshed with errors",
-      errors: { "new-managed": "external_server_discovery_failed" }
+    render(<ExternalServersTab />)
+
+    await screen.findByText("Docs Legacy")
+    await user.click(screen.getByRole("button", { name: /new managed server/i }))
+    await user.click(screen.getByRole("button", { name: /advanced\/manual/i }))
+
+    await user.type(screen.getByLabelText(/server id/i), "manual-managed")
+    await user.type(screen.getByLabelText(/^name$/i), "Manual Managed")
+    await user.selectOptions(screen.getByLabelText(/transport/i), "websocket")
+    await user.click(screen.getByRole("button", { name: /save without discovery/i }))
+
+    expect(mocks.createExternalServer).toHaveBeenCalledWith({
+      server_id: "manual-managed",
+      name: "Manual Managed",
+      transport: "websocket",
+      config: {},
+      owner_scope_type: "global",
+      enabled: true
+    })
+    expect(mocks.refreshExternalServerDiscovery).not.toHaveBeenCalled()
+  })
+
+  it("previews pasted managed config and blocks invalid import JSON", async () => {
+    const user = userEvent.setup()
+    render(<ExternalServersTab />)
+
+    await screen.findByText("Docs Legacy")
+    await user.click(screen.getByRole("button", { name: /new managed server/i }))
+    await user.click(screen.getByRole("button", { name: /import config/i }))
+
+    await user.type(screen.getByLabelText(/managed config json/i), "not json")
+    await user.click(screen.getByRole("button", { name: /save and discover tools/i }))
+
+    expect(await screen.findByText(/import config json must be valid json/i)).toBeTruthy()
+    expect(mocks.createExternalServer).not.toHaveBeenCalled()
+
+    await user.clear(screen.getByLabelText(/managed config json/i))
+    fireEvent.change(screen.getByLabelText(/managed config json/i), {
+      target: {
+        value: JSON.stringify({
+          server_id: "docs-http",
+          name: "Docs HTTP",
+          transport: "sse",
+          config: {
+            url: "https://example.test/mcp"
+          }
+        })
+      }
+    })
+
+    expect(await screen.findByText(/preview: docs http/i)).toBeTruthy()
+    expect(screen.getByText(/transport: sse/i)).toBeTruthy()
+  })
+
+  it("saves a guided stdio server, discovers tools, and shows next actions", async () => {
+    const user = userEvent.setup()
+    const onOpenToolCatalog = vi.fn()
+    mocks.createExternalServer.mockResolvedValueOnce({
+      id: "docs-local",
+      name: "Docs Local",
+      enabled: true,
+      owner_scope_type: "global",
+      transport: "stdio",
+      config: {},
+      secret_configured: false,
+      server_source: "managed",
+      binding_count: 0,
+      runtime_executable: true,
+      auth_template_present: false,
+      auth_template_valid: false,
+      auth_template_blocked_reason: "no_auth_template",
+      credential_slots: []
+    })
+    render(<ExternalServersTab onOpenToolCatalog={onOpenToolCatalog} />)
+
+    await screen.findByText("Docs Legacy")
+    await user.click(screen.getByRole("button", { name: /new managed server/i }))
+    await user.click(screen.getByRole("button", { name: /local stdio/i }))
+    await user.type(screen.getByLabelText(/server id/i), "docs-local")
+    await user.type(screen.getByLabelText(/^name$/i), "Docs Local")
+    await user.type(screen.getByLabelText(/command/i), "uvx")
+    await user.type(screen.getByLabelText(/args/i), "mcp-server-docs --stdio")
+    await user.type(screen.getByLabelText(/working directory/i), "/tmp/docs")
+    await user.type(screen.getByLabelText(/env vars/i), "DOCS_MODE=readonly")
+    await user.click(screen.getByRole("button", { name: /save and discover tools/i }))
+
+    expect(mocks.createExternalServer).toHaveBeenCalledWith({
+      server_id: "docs-local",
+      name: "Docs Local",
+      transport: "stdio",
+      config: {
+        command: "uvx",
+        args: ["mcp-server-docs", "--stdio"],
+        cwd: "/tmp/docs",
+        env: {
+          DOCS_MODE: "readonly"
+        }
+      },
+      owner_scope_type: "global",
+      enabled: true
+    })
+    expect(mocks.refreshExternalServerDiscovery).toHaveBeenCalledWith("docs-local")
+    expect(await screen.findByText(/docs local saved/i)).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: /tool catalog/i }))
+    expect(onOpenToolCatalog).toHaveBeenCalledTimes(1)
+  }, 15000)
+
+  it("saves a guided HTTP/SSE server with URL and headers", async () => {
+    const user = userEvent.setup()
+    mocks.createExternalServer.mockResolvedValueOnce({
+      id: "docs-http",
+      name: "Docs HTTP",
+      enabled: true,
+      owner_scope_type: "global",
+      transport: "sse",
+      config: {},
+      secret_configured: false,
+      server_source: "managed",
+      binding_count: 0,
+      runtime_executable: true,
+      auth_template_present: false,
+      auth_template_valid: false,
+      auth_template_blocked_reason: "no_auth_template",
+      credential_slots: []
     })
     render(<ExternalServersTab />)
 
-    expect((await screen.findAllByText("Docs Managed")).length).toBeGreaterThan(0)
+    await screen.findByText("Docs Legacy")
     await user.click(screen.getByRole("button", { name: /new managed server/i }))
-    await user.type(screen.getByLabelText(/server id/i), "new-managed")
-    await user.type(screen.getByLabelText(/^name$/i), "New Managed")
-    await user.click(screen.getByRole("button", { name: /save server/i }))
+    await user.click(screen.getByRole("button", { name: /http\/sse/i }))
+    await user.type(screen.getByLabelText(/server id/i), "docs-http")
+    await user.type(screen.getByLabelText(/^name$/i), "Docs HTTP")
+    await user.type(screen.getByLabelText(/^url$/i), "https://example.test/mcp")
+    fireEvent.change(screen.getByLabelText(/headers json/i), {
+      target: {
+        value: JSON.stringify({
+          Authorization: "Bearer test"
+        })
+      }
+    })
+    await user.click(screen.getByRole("button", { name: /save without discovery/i }))
 
-    expect(await screen.findByText(/server created, but discovery refresh failed/i)).toBeTruthy()
-    expect(screen.getByText(/external_server_discovery_failed/i)).toBeTruthy()
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tools"] })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-catalogs"] })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-modules"] })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-health"] })
-    expect(mocks.listExternalServers).toHaveBeenCalledTimes(2)
-  })
+    expect(mocks.createExternalServer).toHaveBeenCalledWith({
+      server_id: "docs-http",
+      name: "Docs HTTP",
+      transport: "sse",
+      config: {
+        url: "https://example.test/mcp",
+        headers: {
+          Authorization: "Bearer test"
+        }
+      },
+      owner_scope_type: "global",
+      enabled: true
+    })
+    expect(mocks.refreshExternalServerDiscovery).not.toHaveBeenCalled()
+  }, 15000)
 
   it("opens the managed server editor from a drill target", async () => {
     const onDrillHandled = vi.fn()
@@ -943,6 +953,108 @@ describe("ExternalServersTab", () => {
     expect(within(row).getByText(/^Stale$/i)).toBeTruthy()
     expect(within(row).getByText(/configuration changed/i)).toBeTruthy()
     expect(within(row).getByRole("button", { name: /refresh tools/i })).toBeTruthy()
+  })
+
+  it("opens diagnostics with readiness, environment, and redacted setup context", async () => {
+    await withClearedDiagnosticEnv(async () => {
+      const user = userEvent.setup()
+      mocks.listExternalServers.mockResolvedValueOnce([
+        {
+          id: "docs-managed",
+          name: "Docs Managed",
+          enabled: true,
+          owner_scope_type: "global",
+          transport: "stdio",
+          config: {
+            command: "uvx",
+            args: ["mcp-docs", "--token", "arg-secret", "--api-key=arg-key", "--mode", "readonly"],
+            env: {
+              API_TOKEN: "env-secret",
+              MODE: "readonly"
+            },
+            headers: {
+              Authorization: "Bearer header-secret",
+              "X-Trace": "trace-id"
+            },
+            endpoint: "https://example.test/mcp?api_key=url-secret&mode=readonly",
+            nested: [{ password: "nested-secret", label: "diagnostic-safe" }]
+          },
+          secret_configured: false,
+          server_source: "managed",
+          binding_count: 1,
+          runtime_executable: true,
+          auth_template_present: false,
+          auth_template_valid: false,
+          auth_template_blocked_reason: "no_auth_template",
+          credential_slots: []
+        }
+      ])
+      mocks.getMcpHubReadiness.mockResolvedValueOnce(
+        readinessResponse([
+          readinessServer({
+            display_state: "needs_attention",
+            credential_state: "required_missing",
+            tool_count: 2,
+            reason_codes: ["auth_missing", "discovery_failed"],
+            primary_reason_code: "auth_missing",
+            allowed_actions: ["open_credentials", "refresh_discovery", "view_details"],
+            message: "Credentials are required before this server can be used.",
+            current_operation: {
+              operation_type: "discovery",
+              started_at: "2026-06-27T08:00:00Z",
+              message: "Refreshing catalog"
+            },
+            last_validation_at: "2026-06-27T07:00:00Z",
+            last_discovery_at: "2026-06-27T07:10:00Z",
+            last_successful_discovery_at: "2026-06-27T06:00:00Z",
+            last_error_category: "auth",
+            last_error_message: "Missing token"
+          })
+        ])
+      )
+
+      render(<ExternalServersTab />)
+
+      const row = await findServerRow("Docs Managed")
+      await user.click(within(row).getByRole("button", { name: /details/i }))
+
+      const diagnosticsTitle = await screen.findByText(/docs managed readiness details/i)
+      const diagnosticsDialog = diagnosticsTitle.closest(".ant-modal") as HTMLElement | null
+      if (!diagnosticsDialog) {
+        throw new Error("Expected diagnostics modal container")
+      }
+      const diagnostics = within(diagnosticsDialog)
+      expect(await diagnostics.findByText(/display state: needs_attention/i)).toBeTruthy()
+      expect(diagnostics.getByText(/primary reason: auth_missing/i)).toBeTruthy()
+      expect(diagnostics.getByText(/reason codes: auth_missing, discovery_failed/i)).toBeTruthy()
+      expect(diagnostics.getByText(/credential state: required_missing/i)).toBeTruthy()
+      expect(diagnostics.getByText(/transport: stdio/i)).toBeTruthy()
+      expect(diagnostics.getByText(/tools: 2/i)).toBeTruthy()
+      expect(diagnostics.getByText(/last validation: 2026-06-27T07:00:00Z/i)).toBeTruthy()
+      expect(diagnostics.getByText(/last discovery: 2026-06-27T07:10:00Z/i)).toBeTruthy()
+      expect(diagnostics.getByText(/last successful discovery: 2026-06-27T06:00:00Z/i)).toBeTruthy()
+      expect(diagnostics.getByText(/current operation: discovery since 2026-06-27T08:00:00Z, Refreshing catalog/i)).toBeTruthy()
+      expect(diagnostics.getByText(/last error category: auth/i)).toBeTruthy()
+      expect(diagnostics.getByText(/last error message: Missing token/i)).toBeTruthy()
+      expect(diagnostics.getByText(/deployment mode: Not available in this client/i)).toBeTruthy()
+      expect(diagnostics.getByText(/api origin: Not available in this client/i)).toBeTruthy()
+      expect(diagnostics.getByText(/health endpoint: Not available in this client/i)).toBeTruthy()
+      expect(diagnostics.getByText(/latest health result: Not available in this client/i)).toBeTruthy()
+      expect(diagnostics.getByText(/audit details: use the governance audit tab/i)).toBeTruthy()
+      expect(diagnostics.getByText(/use an isolated test database and temporary MCP server config/i)).toBeTruthy()
+
+      const diagnosticsConfig = diagnostics.getByTestId("mcp-server-diagnostics-config").textContent ?? ""
+      expect(diagnosticsConfig).toContain("[redacted]")
+      expect(diagnosticsConfig).toContain('"MODE": "readonly"')
+      expect(diagnosticsConfig).toContain('"X-Trace": "trace-id"')
+      expect(diagnosticsConfig).toContain('"label": "diagnostic-safe"')
+      expect(diagnosticsConfig).not.toContain("arg-secret")
+      expect(diagnosticsConfig).not.toContain("arg-key")
+      expect(diagnosticsConfig).not.toContain("env-secret")
+      expect(diagnosticsConfig).not.toContain("header-secret")
+      expect(diagnosticsConfig).not.toContain("url-secret")
+      expect(diagnosticsConfig).not.toContain("nested-secret")
+    })
   })
 
   it("wires readiness recovery actions to real handlers", async () => {

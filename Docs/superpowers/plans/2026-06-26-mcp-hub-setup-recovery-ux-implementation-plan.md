@@ -1027,7 +1027,7 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
 - Modify: `apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx`
 - Modify: `apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx`
 
-- [ ] **Step 1: Write failing setup-choice tests**
+- [x] **Step 1: Write failing setup-choice tests**
 
   Add tests that open the create flow and assert these choices are available:
   - `Local stdio`
@@ -1035,15 +1035,15 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   - `Import config`
   - `Advanced/manual`
 
-- [ ] **Step 2: Write failing expert bypass test**
+- [x] **Step 2: Write failing expert bypass test**
 
   Assert that `Advanced/manual` exposes the existing raw Config JSON flow without requiring the guided fields.
 
-- [ ] **Step 3: Write failing import config test**
+- [x] **Step 3: Write failing import config test**
 
   Assert that `Import config` exposes a pasted JSON/config input, previews the decoded server ID/name/transport when valid, reports validation errors for invalid JSON, and does not save invalid input.
 
-- [ ] **Step 4: Write failing result-panel test**
+- [x] **Step 4: Write failing result-panel test**
 
   Mock create/import plus refresh. Assert that after `Save and discover tools` or a valid import:
   - the setup form closes or moves to a result panel;
@@ -1051,14 +1051,14 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   - the result panel reports discovery result/readiness;
   - the next actions include Tool Catalog and the valid recovery action for the returned readiness state.
 
-- [ ] **Step 5: Run tests to verify failure**
+- [x] **Step 5: Run tests to verify failure**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
   ```
 
-- [ ] **Step 6: Add setup mode state**
+- [x] **Step 6: Add setup mode state**
 
   Add local state:
 
@@ -1067,11 +1067,11 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   const [setupMode, setSetupMode] = useState<SetupMode>("choice")
   ```
 
-- [ ] **Step 7: Add starter choice UI**
+- [x] **Step 7: Add starter choice UI**
 
   When creating a new managed server, show the four setup choices first. Keep cards compact and work-focused. Avoid nested cards; use full-width rows or a simple segmented/button group inside the existing form area.
 
-- [ ] **Step 8: Add guided stdio fields**
+- [x] **Step 8: Add guided stdio fields**
 
   Add fields for:
   - display name, or reuse the existing name field in the same create form and
@@ -1084,7 +1084,7 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
 
   Convert them into the existing `config` object shape during save. Use the project’s observed external server config shape from Stage 0.
 
-- [ ] **Step 9: Add guided HTTP/SSE fields**
+- [x] **Step 9: Add guided HTTP/SSE fields**
 
   Add fields for:
   - display name, or reuse the existing name field in the same create form and
@@ -1095,14 +1095,14 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
 
   Convert them into the existing config object shape during save.
 
-- [ ] **Step 10: Add import config path**
+- [x] **Step 10: Add import config path**
 
   Implement pasted JSON import with preview and validation. Support the existing legacy import path separately from pasted managed config import:
   - pasted/imported managed config should produce the same payload shape as `createExternalServer`;
   - legacy row import still uses `importExternalServer(serverId)`;
   - invalid JSON or unsupported shape shows a validation error before save/import.
 
-- [ ] **Step 11: Add safe preflight checks**
+- [x] **Step 11: Add safe preflight checks**
 
   Before save, validate:
   - required fields;
@@ -1112,7 +1112,7 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
 
   Do not execute commands or contact URLs.
 
-- [ ] **Step 12: Implement save, refresh, and result panel**
+- [x] **Step 12: Implement save, refresh, and result panel**
 
   Use:
   - primary `Save and discover tools`
@@ -1120,19 +1120,23 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
 
   `Save and discover tools` must save/import, call the real refresh client selected or added in Task 2, reload servers/registry, and show a result panel. `Save without discovery` saves/imports, skips refresh, reloads server state, and shows a `discovery_not_run` result panel with `Refresh discovery` as the next action.
 
-- [ ] **Step 13: Run setup tests**
+- [x] **Step 13: Run setup tests**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
   ```
 
-- [ ] **Step 14: Commit setup guide**
+- [x] **Step 14: Commit setup guide**
 
   ```bash
   git add apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
   git commit -m "feat: add guided MCP Hub server setup"
   ```
+
+  Verification: focused MCP Hub Vitest suite passed with 90 tests; isolated
+  touched-file design-state guard passed with zero blocked findings. Bandit was
+  skipped because Task 5 touched only TSX/tests and plan/backlog markdown.
 
 ## Task 6: Add Diagnostics And Environment Context
 
