@@ -35,8 +35,8 @@ This audit covers the nine required domain areas and five required specialist pa
 | Security boundaries | `specialists/security-boundaries.md` | Complete | Confirmed/cross-linked existing security-boundary findings; no new SEC findings |
 | Reliability and async lifecycle | `specialists/reliability-lifecycle.md` | Complete | Added specialist candidate AUDIT-2026-06-27-REL-001; reconcile with AUDIT-2026-06-27-JOBS-001 during index finalization |
 | API and WebUI contract drift | `specialists/api-webui-contracts.md` | Complete | Added specialist candidate AUDIT-2026-06-27-APIWEB-001; escalates AUDIT-2026-06-27-WEBUI-002 beyond TTS |
-| Test coverage and verification gaps | `specialists/test-coverage-verification.md` | Not started | |
-| Dependency and static-analysis risk | `specialists/dependency-static-analysis.md` | Not started | |
+| Test coverage and verification gaps | `specialists/test-coverage-verification.md` | Complete | No new TESTS findings; recorded targeted coverage follow-up and focused pytest result |
+| Dependency and static-analysis risk | `specialists/dependency-static-analysis.md` | Complete | Added specialist candidates AUDIT-2026-06-27-DEPS-001 through AUDIT-2026-06-27-DEPS-003 |
 
 ## Inventory Summaries
 
@@ -99,6 +99,8 @@ Evidence file: `evidence/bandit-app-summary.txt`
 Summary: Bandit exited 1 with JSON output at `/tmp/tldw_repo_audit_bandit_app.json`, which is expected for a baseline containing findings. The JSON contains 4,818 results across 1,120,179 scanned LOC: 4,792 low-severity, 26 medium-severity, and 0 high-severity results.
 
 Limitation: this audit worktree did not contain `.venv`, so the scan used the existing parent repository virtual environment at `/Users/appledev/Documents/GitHub/tldw_server/.venv` without installing dependencies.
+
+Specialist follow-up evidence: `evidence/dependency-static-analysis-evidence.txt`
 
 ## Command Log
 

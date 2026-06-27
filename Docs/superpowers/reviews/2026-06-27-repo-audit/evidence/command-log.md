@@ -160,3 +160,38 @@ Verification result:
 - No production code, tests, configs, domain reports, findings index, or Backlog tasks were edited by specialist agents.
 - The two unrelated untracked watchlist template files remained untouched and unstaged.
 ```
+
+## Stage 6 Specialist Review Dispatch: Batch 2
+
+```text
+Batch 2 dispatched after specialist batch 1 commit 30912c89793980cb139b16280a15484cc8e10676.
+Parallelism cap: 2 specialist agents.
+Specialists: Test coverage and verification gaps; Dependency and static-analysis risk.
+
+Specialist outputs:
+- test-coverage-verification.md: no new TESTS findings; confirmed targeted coverage follow-up for existing normalized findings and first-batch specialist candidates AUDIT-2026-06-27-APIWEB-001 and AUDIT-2026-06-27-REL-001. Focused pytest run: `10 passed, 29 warnings`.
+- dependency-static-analysis.md: added specialist candidates AUDIT-2026-06-27-DEPS-001, AUDIT-2026-06-27-DEPS-002, and AUDIT-2026-06-27-DEPS-003. Added scoped evidence file `evidence/dependency-static-analysis-evidence.txt`.
+
+Review result:
+- Spec review approved the two reports and dependency evidence file.
+- Quality review requested two wording fixes: clarify that `jq` is not Python execution, and avoid implying Bandit high-severity records existed. Both were fixed, and quality re-review approved.
+
+Verification commands run for the batch:
+- placeholder-token scan against the two specialist reports and dependency evidence file.
+- git diff --check -- Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/test-coverage-verification.md Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/dependency-static-analysis.md
+- git diff --no-index --check /dev/null Docs/superpowers/reviews/2026-06-27-repo-audit/evidence/dependency-static-analysis-evidence.txt
+- required-section check for both specialist reports.
+- short-ID scan for backticked normalized finding aliases.
+- secret-pattern scan over the two reports and dependency evidence file.
+- git diff --name-only
+
+Verification result:
+- Placeholder scan returned no matches.
+- Diff whitespace checks passed.
+- Required sections are present in both reports.
+- Short-ID scan returned no matches.
+- Secret-pattern scan returned no matches.
+- Tracked diff was limited to the two batch-2 specialist reports before coordinator bookkeeping edits; the dependency evidence file was the only new scoped evidence file.
+- No production code, tests, configs, domain reports, findings index, or Backlog tasks were edited by specialist agents.
+- The two unrelated untracked watchlist template files remained untouched and unstaged.
+```
