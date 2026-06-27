@@ -4,7 +4,7 @@ title: 'Task 3: Add local-only CATS fuzz environment builder and OpenAPI export'
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-27 17:52'
+updated_date: '2026-06-27 17:58'
 labels:
   - cats
   - fuzzing
@@ -29,6 +29,8 @@ Implement Task 3 for the CATS API fuzzing harness: tests for local-only environm
 
 <!-- SECTION:NOTES:BEGIN -->
 TDD flow: added test_cats_fuzz_env.py first, then captured the initial red pytest collection failure before implementing env.py and openapi_export.py. Verification after implementation: focused pytest passed 6 tests; Black check passed; Bandit reported zero findings; OpenAPI export CLI smoke run exited 0 with digest 50653ad9c3414b434eba48de360b9e18c2e3b5d4820b0b831a011577656e0b2c.
+
+Review fix: split broad sensitive detection from default blocking so known local/tool variables (SINGLE_USER_API_KEY, SINGLE_USER_TEST_API_KEY, GITHUB_TOKEN, GH_TOKEN, NPM_TOKEN, CODEX_API_KEY) are sanitized or overwritten instead of rejecting normal developer shells. Added fake-FastAPI unit coverage for export_openapi cache clearing, deterministic bytes/digest, parent directory creation, and main() digest printing. Verification for fix: focused pytest passed 10 tests; Black check passed; Bandit reported zero findings in /tmp/bandit_cats_fuzz_env_export_fix.json.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

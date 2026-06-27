@@ -44,6 +44,17 @@ SENSITIVE_ENV_NAMES = frozenset(
     }
 )
 
+SANITIZE_ONLY_ENV_NAMES = frozenset(
+    {
+        "CODEX_API_KEY",
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "NPM_TOKEN",
+        "SINGLE_USER_API_KEY",
+        "SINGLE_USER_TEST_API_KEY",
+    }
+)
+
 
 def _is_sensitive_name(name: str) -> bool:
     upper_name = name.upper()
@@ -52,6 +63,14 @@ def _is_sensitive_name(name: str) -> bool:
 
 def find_sensitive_values(env: Mapping[str, str]) -> dict[str, str]:
     return {name: "set" for name, value in env.items() if value and _is_sensitive_name(name)}
+
+
+def _find_blocking_sensitive_values(env: Mapping[str, str]) -> dict[str, str]:
+    return {
+        name: "set"
+        for name, value in env.items()
+        if value and _is_sensitive_name(name) and name.upper() not in SANITIZE_ONLY_ENV_NAMES
+    }
 
 
 def _write_minimal_env_file(env_file: Path, runtime_dir: Path, user_db_dir: Path) -> None:
@@ -76,7 +95,7 @@ def build_child_env(
     allow_external: bool = False,
 ) -> dict[str, str]:
     source_env = dict(os.environ if parent_env is None else parent_env)
-    detected = find_sensitive_values(source_env)
+    detected = _find_blocking_sensitive_values(source_env)
     if detected and not allow_external:
         names = ", ".join(sorted(detected))
         raise ValueError(f"Refusing to build CATS fuzz env with real credentials: {names}")
@@ -88,7 +107,7 @@ def build_child_env(
     env_file = runtime_dir / ".env"
 
     child_env = dict(source_env)
-    for name in set(child_env).union(SENSITIVE_ENV_NAMES):
+    for name in set(child_env).union(SENSITIVE_ENV_NAMES, SANITIZE_ONLY_ENV_NAMES):
         if _is_sensitive_name(name):
             child_env[name] = ""
 
@@ -112,6 +131,7 @@ def build_child_env(
 
 
 __all__ = [
+    "SANITIZE_ONLY_ENV_NAMES",
     "SENSITIVE_ENV_NAMES",
     "SENSITIVE_NAME_SUBSTRINGS",
     "build_child_env",
