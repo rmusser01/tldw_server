@@ -1258,6 +1258,278 @@
       ],
       "recommendation": "Retain the reconnect WSBroadcaster and connection id in acp_session_stream, remove the connection and call stop in finally, and use a per-connection consumer id or a single shared session broadcaster. Add an endpoint-level reconnect-disconnect test that verifies the bus subscriber and broadcaster task are cleaned up.",
       "validation_status": "validated"
+    },
+    {
+      "id": "AUDIT-2026-06-27-REL-001",
+      "title": "Workflow continuation resumes are fire-and-forget tasks outside durable scheduler ownership",
+      "severity": "medium",
+      "confidence": "high",
+      "category": "reliability",
+      "evidence_tier": "likely_risk",
+      "evidence_strength": "static_confirmed",
+      "status": "open",
+      "owner_domain": "Reliability and async lifecycle",
+      "source_report": "Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/reliability-lifecycle.md",
+      "evidence": [
+        {
+          "summary": "Workflow run retry, approval, rejection, orphan requeue, and research checkpoint resume paths spawn engine.continue_run through local asyncio.create_task calls rather than durable Jobs or Scheduler ownership.",
+          "locations": [
+            "tldw_Server_API/app/api/v1/endpoints/workflows.py",
+            "tldw_Server_API/app/api/v1/endpoints/research_runs.py",
+            "tldw_Server_API/app/core/Workflows/engine.py",
+            "tldw_Server_API/app/core/Workflows/research_wait_bridge.py"
+          ]
+        },
+        {
+          "summary": "Existing tests cover successful continuation and pre-schedule bridge exceptions, but the specialist did not find coverage for accepted create_task continuations that later fail, are cancelled on shutdown, or are lost before execution.",
+          "locations": [
+            "tldw_Server_API/tests/Workflows/test_workflows_api.py",
+            "tldw_Server_API/tests/Workflows/test_versions_idempotency.py",
+            "tldw_Server_API/tests/Workflows/test_orphan_requeue_unit.py"
+          ]
+        },
+        {
+          "summary": "The specialist report records this as distinct from AUDIT-2026-06-27-JOBS-001 because these continuation paths bypass even the in-process WorkflowScheduler.submit handoff; both findings should be reconciled under one workflow execution ownership model.",
+          "locations": [
+            "Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/reliability-lifecycle.md"
+          ]
+        }
+      ],
+      "affected_paths": [
+        "tldw_Server_API/app/api/v1/endpoints/workflows.py",
+        "tldw_Server_API/app/api/v1/endpoints/research_runs.py",
+        "tldw_Server_API/app/core/Workflows/engine.py",
+        "tldw_Server_API/app/core/Workflows/research_wait_bridge.py",
+        "tldw_Server_API/tests/Workflows/test_workflows_api.py",
+        "tldw_Server_API/tests/Workflows/test_versions_idempotency.py",
+        "tldw_Server_API/tests/Workflows/test_orphan_requeue_unit.py"
+      ],
+      "recommendation": "Persist continuation intent and submit approvals, rejections, retries, orphan requeues, and research checkpoint resumes through Jobs or Scheduler with deterministic idempotency keys based on run ID, step ID, continuation cause, and target step. Reconcile the execution ownership model with AUDIT-2026-06-27-JOBS-001 and add tests for post-schedule failure, shutdown before execution, duplicate resume, and research wait retryability.",
+      "validation_status": "needs_reproduction"
+    },
+    {
+      "id": "AUDIT-2026-06-27-APIWEB-001",
+      "title": "Audio WebSocket query-token drift extends beyond Speech playground TTS to STT and voice chat",
+      "severity": "medium",
+      "confidence": "high",
+      "category": "api_contract",
+      "evidence_tier": "confirmed_issue",
+      "evidence_strength": "static_confirmed",
+      "status": "open",
+      "owner_domain": "API and WebUI contract drift",
+      "source_report": "Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/api-webui-contracts.md",
+      "evidence": [
+        {
+          "summary": "The extension STT bridge opens /api/v1/audio/stream/transcribe with a query token and sends audio frames without an initial auth frame.",
+          "locations": [
+            "apps/packages/ui/src/hooks/useTldwStt.ts:18",
+            "apps/packages/ui/src/hooks/useTldwStt.ts:24",
+            "apps/packages/ui/src/entries/background.ts:2802",
+            "apps/packages/ui/src/entries/background.ts:2817",
+            "apps/packages/ui/src/entries/background.ts:2818",
+            "apps/packages/ui/src/entries/background.ts:2852"
+          ]
+        },
+        {
+          "summary": "The voice-chat path builds /api/v1/audio/chat/stream with a query token, opens it directly, and sends config as the first structured message instead of auth.",
+          "locations": [
+            "apps/packages/ui/src/services/tldw/voice-conversation.ts:360",
+            "apps/packages/ui/src/hooks/useVoiceChatStream.tsx:476",
+            "apps/packages/ui/src/hooks/useVoiceChatStream.tsx:512",
+            "apps/packages/ui/src/hooks/useVoiceChatStream.tsx:571",
+            "apps/packages/ui/src/hooks/useVoiceChatStream.tsx:573"
+          ]
+        },
+        {
+          "summary": "The backend documents legacy query-token auth as disabled by default for transcribe, voice chat, and TTS WebSocket routes; the shared auth helper defaults _allow_query_token_auth() to false and then waits for an initial auth message.",
+          "locations": [
+            "tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:864",
+            "tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:871",
+            "tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:1546",
+            "tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:1557",
+            "tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:2955",
+            "tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py:2963",
+            "tldw_Server_API/app/core/Audio/streaming_service.py:92",
+            "tldw_Server_API/app/core/Audio/streaming_service.py:524",
+            "tldw_Server_API/app/core/Audio/streaming_service.py:719"
+          ]
+        },
+        {
+          "summary": "Existing backend tests prove default query-token-disabled behavior for the shared TTS helper, while several audio WebSocket tests explicitly enable the legacy fallback and therefore do not cover the browser clients' default production contract.",
+          "locations": [
+            "tldw_Server_API/tests/Audio/test_audio_streaming_service_core.py:37",
+            "tldw_Server_API/tests/Audio/test_audio_streaming_service_core.py:56",
+            "tldw_Server_API/tests/Audio/test_audio_streaming_service_core.py:67",
+            "tldw_Server_API/tests/Audio/test_audio_streaming_service_core.py:87",
+            "tldw_Server_API/tests/Audio/ws_test_helpers.py:12"
+          ]
+        }
+      ],
+      "affected_paths": [
+        "apps/packages/ui/src/entries/background.ts",
+        "apps/packages/ui/src/hooks/useTldwStt.ts",
+        "apps/packages/ui/src/services/tldw/voice-conversation.ts",
+        "apps/packages/ui/src/hooks/useVoiceChatStream.tsx",
+        "apps/packages/ui/src/components/Option/Speech/SpeechPlaygroundPage.tsx",
+        "tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py",
+        "tldw_Server_API/app/core/Audio/streaming_service.py",
+        "tldw_Server_API/tests/Audio/test_audio_streaming_service_core.py",
+        "tldw_Server_API/tests/Audio/ws_test_helpers.py"
+      ],
+      "recommendation": "Replace browser audio WebSocket URL builders with a shared helper that opens the bare route and sends the backend-supported initial auth frame before config, prompt, or audio frames. Add client and backend contract coverage for default query-token-disabled behavior on STT, voice chat, and TTS.",
+      "validation_status": "validated"
+    },
+    {
+      "id": "AUDIT-2026-06-27-DEPS-001",
+      "title": "Python runtime and release installs lack a committed lockfile or constraints",
+      "severity": "medium",
+      "confidence": "high",
+      "category": "dependency",
+      "evidence_tier": "likely_risk",
+      "evidence_strength": "static_confirmed",
+      "status": "open",
+      "owner_domain": "Dependency and static-analysis risk",
+      "source_report": "Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/dependency-static-analysis.md",
+      "evidence": [
+        {
+          "summary": "The tracked lock-like files cover Bun, mock OpenAI requirements, and the Go agent, but no root Python uv.lock, constraints file, Poetry lock, Pipfile lock, or backend requirements file was found.",
+          "locations": [
+            "apps/bun.lock",
+            "admin-ui/bun.lock",
+            "mock_openai_server/requirements.txt",
+            "tools/tldw-agent/go.sum"
+          ]
+        },
+        {
+          "summary": "The backend dependency graph lives in pyproject.toml with many open lower-bound ranges and unbounded package names.",
+          "locations": [
+            "pyproject.toml"
+          ]
+        },
+        {
+          "summary": "Production, worker, audio worker, required CI, security, publish, RC, and setup-python-deps installs resolve Python dependencies without a committed lock or constraints input.",
+          "locations": [
+            "Dockerfiles/Dockerfile.prod",
+            "Dockerfiles/Dockerfile.worker",
+            "Dockerfiles/Dockerfile.audio_gpu_worker",
+            ".github/actions/setup-python-deps/action.yml",
+            ".github/workflows/backend-required.yml",
+            ".github/workflows/security-required.yml",
+            ".github/workflows/pypi-package.yml",
+            ".github/workflows/publish-pypi.yml",
+            ".github/workflows/mcp-unified-rc.yml",
+            ".github/workflows/mcp-unified-publish.yml"
+          ]
+        }
+      ],
+      "affected_paths": [
+        "pyproject.toml",
+        "Dockerfiles/Dockerfile.prod",
+        "Dockerfiles/Dockerfile.worker",
+        "Dockerfiles/Dockerfile.audio_gpu_worker",
+        ".github/actions/setup-python-deps/action.yml",
+        ".github/workflows/backend-required.yml",
+        ".github/workflows/security-required.yml",
+        ".github/workflows/pypi-package.yml",
+        ".github/workflows/publish-pypi.yml",
+        ".github/workflows/mcp-unified-rc.yml",
+        ".github/workflows/mcp-unified-publish.yml"
+      ],
+      "recommendation": "Add a committed lock or constraints workflow for supported Python install profiles, then make production Docker builds, required backend/security gates, and publish/RC jobs install with locked or constrained resolution. Keep separate runtime and dev/test profiles if needed, and document any intentionally floating optional extras.",
+      "validation_status": "validated"
+    },
+    {
+      "id": "AUDIT-2026-06-27-DEPS-002",
+      "title": "Static-analysis and CI gates bootstrap mutable external tooling",
+      "severity": "medium",
+      "confidence": "high",
+      "category": "dependency",
+      "evidence_tier": "likely_risk",
+      "evidence_strength": "static_confirmed",
+      "status": "open",
+      "owner_domain": "Dependency and static-analysis risk",
+      "source_report": "Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/dependency-static-analysis.md",
+      "evidence": [
+        {
+          "summary": "The actionlint workflow executes a branch-head remote installer from raw.githubusercontent.com, so a workflow-lint gate runs mutable upstream shell code.",
+          "locations": [
+            ".github/workflows/actionlint.yml"
+          ]
+        },
+        {
+          "summary": "Security, pre-commit, and SBOM workflows install Bandit, PyYAML, pre-commit, pytest, CycloneDX, and Node SBOM tooling without pinned tool versions.",
+          "locations": [
+            ".github/workflows/security-required.yml",
+            ".github/workflows/pre-commit.yml",
+            ".github/workflows/sbom.yml"
+          ]
+        },
+        {
+          "summary": "Required setup workflows and the setup-python-deps action use moving action tags or unconstrained package installs, while publish workflows already demonstrate local SHA-pinning patterns for higher-risk release jobs.",
+          "locations": [
+            ".github/actions/setup-python-deps/action.yml",
+            ".github/workflows/backend-required.yml",
+            ".github/workflows/frontend-required.yml"
+          ]
+        }
+      ],
+      "affected_paths": [
+        ".github/workflows/actionlint.yml",
+        ".github/workflows/security-required.yml",
+        ".github/workflows/pre-commit.yml",
+        ".github/workflows/sbom.yml",
+        ".github/actions/setup-python-deps/action.yml",
+        ".github/workflows/backend-required.yml",
+        ".github/workflows/frontend-required.yml"
+      ],
+      "recommendation": "Replace branch-head remote installers with pinned releases and checksums or pinned action SHAs, pin static-analysis tool versions through the same constraints process as application dependencies, and pin third-party actions in required/static-analysis workflows with scheduled update automation.",
+      "validation_status": "validated"
+    },
+    {
+      "id": "AUDIT-2026-06-27-DEPS-003",
+      "title": "Bandit app baseline mixes production code with in-package tests",
+      "severity": "low",
+      "confidence": "high",
+      "category": "operations",
+      "evidence_tier": "improvement_opportunity",
+      "evidence_strength": "static_confirmed",
+      "status": "open",
+      "owner_domain": "Dependency and static-analysis risk",
+      "source_report": "Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/dependency-static-analysis.md",
+      "evidence": [
+        {
+          "summary": "The existing Bandit summary scanned tldw_Server_API/app and reported 4,818 results: 4,792 low, 26 medium, and 0 high.",
+          "locations": [
+            "Docs/superpowers/reviews/2026-06-27-repo-audit/evidence/bandit-app-summary.txt"
+          ]
+        },
+        {
+          "summary": "Most medium Bandit records are test-only paths under tldw_Server_API/app/core/MCP_unified/tests, which lives inside the app tree and is also listed in pyproject.toml pytest testpaths.",
+          "locations": [
+            "tldw_Server_API/app/core/MCP_unified/tests",
+            "pyproject.toml"
+          ]
+        },
+        {
+          "summary": ".bandit excludes virtualenvs and node_modules, but does not exclude in-package tests; production-looking B608 records and the admin E2E temp-dir record were source-reviewed and not promoted to new security findings.",
+          "locations": [
+            ".bandit",
+            "tldw_Server_API/app/core/DB_Management/ACP_Audit_DB.py",
+            "tldw_Server_API/app/core/DB_Management/ACP_Sessions_DB.py",
+            "tldw_Server_API/app/services/admin_e2e_support_service.py"
+          ]
+        }
+      ],
+      "affected_paths": [
+        ".bandit",
+        "tldw_Server_API/app/core/MCP_unified/tests",
+        "tldw_Server_API/app/core/DB_Management/ACP_Audit_DB.py",
+        "tldw_Server_API/app/core/DB_Management/ACP_Sessions_DB.py",
+        "tldw_Server_API/app/services/admin_e2e_support_service.py",
+        "Docs/superpowers/reviews/2026-06-27-repo-audit/evidence/bandit-app-summary.txt"
+      ],
+      "recommendation": "Split Bandit execution into a production profile that excludes in-package tests and a separate test-profile scan. Keep the reviewed B608 dynamic-SQL patterns under explicit allowlist or refactor them to helper builders so future Bandit deltas are easier to triage.",
+      "validation_status": "validated"
     }
   ]
 }
