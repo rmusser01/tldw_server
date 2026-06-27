@@ -18,15 +18,15 @@ This audit covers the nine required domain areas and five required specialist pa
 
 | Domain | Report | Status | Notes |
 | --- | --- | --- | --- |
-| AuthNZ and Admin | `domains/authnz-admin.md` | Not started | |
-| Media, Ingestion, and Storage | `domains/media-ingestion-storage.md` | Not started | |
-| Chat, RAG, and LLM | `domains/chat-rag-llm.md` | Not started | |
-| Jobs, Scheduler, and Workflows | `domains/jobs-scheduler-workflows.md` | Not started | |
-| MCP, Sandbox, and Agent Protocol | `domains/mcp-sandbox-agent-protocol.md` | Not started | |
-| DB, Migrations, and Data Durability | `domains/db-migrations-data-durability.md` | Not started | |
-| WebUI, Extension, and API Contracts | `domains/webui-extension-api-contracts.md` | Not started | |
-| Integrations and Providers | `domains/integrations-providers.md` | Not started | |
-| CI, Deployment, Operations, and Release Surfaces | `domains/ci-deployment-operations-release.md` | Not started | |
+| AuthNZ and Admin | `domains/authnz-admin.md` | Complete | 3 candidate findings |
+| Media, Ingestion, and Storage | `domains/media-ingestion-storage.md` | Complete | 4 candidate findings |
+| Chat, RAG, and LLM | `domains/chat-rag-llm.md` | Complete | 2 candidate findings |
+| Jobs, Scheduler, and Workflows | `domains/jobs-scheduler-workflows.md` | Complete | 2 candidate findings |
+| MCP, Sandbox, and Agent Protocol | `domains/mcp-sandbox-agent-protocol.md` | Complete | 2 candidate findings |
+| DB, Migrations, and Data Durability | `domains/db-migrations-data-durability.md` | Complete | 2 candidate findings |
+| WebUI, Extension, and API Contracts | `domains/webui-extension-api-contracts.md` | Complete | 2 candidate findings |
+| Integrations and Providers | `domains/integrations-providers.md` | Complete | 3 candidate findings |
+| CI, Deployment, Operations, and Release Surfaces | `domains/ci-deployment-operations-release.md` | Complete | 6 candidate findings |
 
 ## Specialist Coverage Map
 
