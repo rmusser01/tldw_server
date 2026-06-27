@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Button, Card, Checkbox, Empty, List, Modal, Space, Tag, Tooltip, Typography } from "antd"
 import { QuestionCircleOutlined } from "@ant-design/icons"
 import { useQueryClient } from "@tanstack/react-query"
-import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
+import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
+import { StatePanel } from "@/components/ui/state"
 
 import {
   clearExternalServerSlotSecret,
@@ -134,7 +135,7 @@ type ExternalServersTabProps = {
 const READINESS_DISPLAY_LABELS: Record<McpServerReadiness["displayState"], string> = {
   needs_setup: "Needs setup",
   checking: "Checking",
-  ready: "Ready",
+  ready: getDesignSystemState("ready").label,
   needs_attention: "Needs attention",
   no_tools: "No tools",
   stale: "Stale"
@@ -158,6 +159,18 @@ const CREDENTIAL_TAGS: Record<
   configured: { color: "green", label: "credentials configured" },
   legacy_fallback: { color: "orange", label: "Legacy Secret Fallback" },
   unknown: { label: "credential status unknown" }
+}
+
+const DESIGN_STATE_BY_READINESS_DISPLAY: Record<
+  McpServerReadiness["displayState"],
+  DesignSystemStateKey
+> = {
+  needs_setup: "setup_required",
+  checking: "loading",
+  ready: "ready",
+  needs_attention: "degraded",
+  no_tools: "degraded",
+  stale: "degraded"
 }
 
 const toMapperReadiness = (
@@ -934,8 +947,12 @@ export const ExternalServersTab = ({
         Managed external MCP servers are executable here. Legacy file or environment servers remain
         visible as read-only inventory until they are imported into MCP Hub.
       </Typography.Text>
-      {errorMessage ? <Alert type="error" title={errorMessage} showIcon /> : null}
-      {successMessage ? <Alert type="success" title={successMessage} showIcon /> : null}
+      {errorMessage ? (
+        <StatePanel state="error" title={errorMessage} role="alert" aria-live="assertive" />
+      ) : null}
+      {successMessage ? (
+        <StatePanel state="ready" title={successMessage} aria-live="polite" />
+      ) : null}
 
       <Button type="primary" onClick={openCreateForm}>
         New Managed Server
@@ -1054,11 +1071,10 @@ export const ExternalServersTab = ({
           </select>
         </Space>
       ) : (
-        <Alert
-          type="info"
-          showIcon
+        <StatePanel
+          state="setup_required"
           title="No external servers connected"
-          description="External MCP servers extend your AI assistant with tools like web search, code execution, and more. Click 'New Managed Server' above to add one, or import a legacy server from the list below."
+          message="External MCP servers extend your AI assistant with tools like web search, code execution, and more. Click 'New Managed Server' above to add one, or import a legacy server from the list below."
         />
       )}
 
@@ -1067,11 +1083,10 @@ export const ExternalServersTab = ({
           <Card size="small" title="Credential Slots" extra={<Button onClick={openCreateSlotForm}>Add Slot</Button>}>
             <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
               {activeServerHasNoCredentialRequirements ? (
-                <Alert
-                  type="success"
-                  showIcon
+                <StatePanel
+                  state="ready"
                   title="No credentials required"
-                  description="This local stdio server runs without brokered credentials, so no slot secret or server-level secret is needed."
+                  message="This local stdio server runs without brokered credentials, so no slot secret or server-level secret is needed."
                 />
               ) : null}
               {slotFormOpen ? (
@@ -1218,20 +1233,18 @@ export const ExternalServersTab = ({
           >
             <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
               {activeCredentialState === "not_required" ? (
-                <Alert
-                  type="success"
-                  showIcon
+                <StatePanel
+                  state="ready"
                   title="No credentials required"
-                  description="This server does not need runtime credentials or an auth template."
+                  message="This server does not need runtime credentials or an auth template."
                 />
               ) : activeManagedServer.auth_template_valid ? (
-                <Alert type="success" showIcon title="Template valid" />
+                <StatePanel state="ready" title="Template valid" />
               ) : (
-                <Alert
-                  type={activeManagedServer.auth_template_present ? "warning" : "info"}
-                  showIcon
+                <StatePanel
+                  state={activeManagedServer.auth_template_present ? "degraded" : "setup_required"}
                   title={activeAuthTemplateBlockedReason || "No auth template"}
-                  description={
+                  message={
                     activeSlots.length === 0
                       ? "Add credential slots before defining how this server hydrates runtime auth."
                       : activeManagedServer.auth_template_present
@@ -1392,11 +1405,10 @@ export const ExternalServersTab = ({
             </Card>
           ) : activeCredentialState === "not_required" ? (
             <Card size="small" title="No credentials required">
-              <Alert
-                type="success"
-                showIcon
+              <StatePanel
+                state="ready"
                 title="No credentials required"
-                description="This managed server can run without credential slots, auth templates, or a server-level secret."
+                message="This managed server can run without credential slots, auth templates, or a server-level secret."
               />
             </Card>
           ) : (
@@ -1543,11 +1555,10 @@ export const ExternalServersTab = ({
       >
         {detailsServer && detailsReadiness ? (
           <Space orientation="vertical" size="small" style={{ width: "100%" }}>
-            <Alert
-              type={detailsReadiness.displayState === "ready" ? "success" : "info"}
-              showIcon
+            <StatePanel
+              state={DESIGN_STATE_BY_READINESS_DISPLAY[detailsReadiness.displayState]}
               title={READINESS_DISPLAY_LABELS[detailsReadiness.displayState]}
-              description={detailsReadiness.message}
+              message={detailsReadiness.message}
             />
             <Typography.Text>{`Server ID: ${detailsServer.id}`}</Typography.Text>
             <Typography.Text>{`Credential state: ${detailsReadiness.credentialState}`}</Typography.Text>
