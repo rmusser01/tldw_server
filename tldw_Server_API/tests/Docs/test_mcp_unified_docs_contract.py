@@ -94,3 +94,17 @@ def test_unified_mcp_catalog_miss_recovery_is_documented() -> None:
         "catalog_fail_open" in docs,
         "Catalog docs should document the explicit diagnostic fail-open escape hatch.",
     )
+
+
+def test_unified_mcp_diagnostics_recovery_is_documented() -> None:
+    """Troubleshooting docs should point users to status diagnostics."""
+    guide = _read("Docs/MCP/Unified/User_Guide.md").lower()
+
+    for snippet in (
+        "problem_modules",
+        "config_warnings",
+        "invalid_safe_config",
+        "query auth",
+        "empty tool list",
+    ):
+        _require(snippet in guide, f"Diagnostics docs should mention {snippet}.")

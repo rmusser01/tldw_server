@@ -439,6 +439,33 @@ class TestMCPServer:
         assert [m["id"] for m in status["surface"]["tiers"]["local_files"]["modules"]] == ["filesystem"]
         assert [m["id"] for m in status["surface"]["tiers"]["local_process"]["modules"]] == ["run_command"]
 
+    async def test_server_status_includes_sanitized_problem_modules(self, monkeypatch):
+        """Server status should expose actionable, sanitized module problems."""
+        server = MCPServer()
+        server.initialized = True
+
+        async def _check_all_health():
+            return {
+                "media": ModuleHealth(status=HealthStatus.HEALTHY),
+                "broken": ModuleHealth(
+                    status=HealthStatus.UNHEALTHY,
+                    message="Health check failed at /private/authnz.db with api_key=secret-token",
+                ),
+            }
+
+        monkeypatch.setattr(server.module_registry, "check_all_health", _check_all_health)
+
+        status = await server.get_status()
+
+        assert status["problem_modules"] == [
+            {
+                "id": "broken",
+                "status": "unhealthy",
+                "reason": "Health check failed at <path> with api_key=****",
+                "next_action": "Check module configuration and dependencies, then restart or disable the module.",
+            }
+        ]
+
     async def test_server_metrics(self):
         """Test getting server metrics"""
         server = MCPServer()

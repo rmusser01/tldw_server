@@ -46,6 +46,31 @@ def _remove_mcp_logger_handlers() -> None:
         finally:
             _MCP_LOGGER_HANDLER_IDS.discard(handler_id)
 
+_CONFIG_WARNINGS: list[dict[str, str]] = []
+
+
+def _reset_config_warnings() -> None:
+    """Clear warnings for the next config load."""
+    _CONFIG_WARNINGS.clear()
+
+
+def _add_config_warning(*, code: str, message: str, next_action: str) -> None:
+    """Record one sanitized config warning, de-duplicated by code."""
+    if any(warning.get("code") == code for warning in _CONFIG_WARNINGS):
+        return
+    _CONFIG_WARNINGS.append(
+        {
+            "code": code,
+            "message": message,
+            "next_action": next_action,
+        }
+    )
+
+
+def get_config_warnings() -> list[dict[str, str]]:
+    """Return sanitized warnings from the most recent MCP config load."""
+    return [dict(warning) for warning in _CONFIG_WARNINGS]
+
 
 def _default_ws_allowed_origins() -> list[str]:
     """Safe local-only defaults for WS Origin allowlist.
@@ -391,9 +416,16 @@ class MCPConfig(BaseSettings):
             try:
                 import json as _json
                 data = _json.loads(v)
-                return data if isinstance(data, dict) else {}
+                if isinstance(data, dict):
+                    return data
             except (TypeError, ValueError, json.JSONDecodeError):
-                return {}
+                pass
+            _add_config_warning(
+                code="invalid_tool_category_map",
+                message="MCP_TOOL_CATEGORY_MAP must be a JSON object; using an empty category map.",
+                next_action='Provide valid JSON such as {"tool.name":"category"} or remove MCP_TOOL_CATEGORY_MAP.',
+            )
+            return {}
         return v
 
     def get_redis_connection_params(self) -> Optional[dict[str, Any]]:
@@ -490,6 +522,7 @@ class MCPConfig(BaseSettings):
 def get_config() -> MCPConfig:
     """Get cached configuration instance"""
     try:
+        _reset_config_warnings()
         config = MCPConfig()
         config.configure_logging()
         # Load tool category map from YAML file if provided
@@ -499,15 +532,32 @@ def get_config() -> MCPConfig:
 
                 import yaml as _yaml
                 if _os.path.exists(config.tool_category_map_file):
-                    with open(config.tool_category_map_file) as f:
+                    with open(config.tool_category_map_file, encoding="utf-8") as f:
                         data = _yaml.safe_load(f) or {}
                     if isinstance(data, dict):
                         # Expect top-level mapping { tool_name: category }
                         for k, v in data.items():
                             if isinstance(k, str) and isinstance(v, str):
                                 config.tool_category_map[k] = v
+                    else:
+                        _add_config_warning(
+                            code="invalid_tool_category_map_file",
+                            message="MCP_TOOL_CATEGORY_MAP_FILE must contain a top-level mapping; ignoring the file.",
+                            next_action="Provide a YAML mapping of tool names to categories or remove MCP_TOOL_CATEGORY_MAP_FILE.",
+                        )
+                else:
+                    _add_config_warning(
+                        code="missing_tool_category_map_file",
+                        message="MCP_TOOL_CATEGORY_MAP_FILE does not point to a readable file; ignoring the file.",
+                        next_action="Fix the file path or remove MCP_TOOL_CATEGORY_MAP_FILE.",
+                    )
         except _MCP_CONFIG_NONCRITICAL_EXCEPTIONS as _e:
-            logger.warning(f"Failed to load tool category map file: {_e}")
+            _add_config_warning(
+                code="invalid_tool_category_map_file",
+                message="Failed to load MCP_TOOL_CATEGORY_MAP_FILE; ignoring the file.",
+                next_action="Check that the YAML file is readable and contains a mapping of tool names to categories.",
+            )
+            logger.warning("Failed to load tool category map file: {}", _e.__class__.__name__)
         logger.info("MCP configuration loaded successfully")
         return config
     except Exception as e:

@@ -539,7 +539,7 @@ Expected: PASS.
 
 Observed: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py tldw_Server_API/app/core/MCP_unified/tests/test_mcp_discovery_module.py tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py -v` passed.
 
-- [ ] **Step 6: Commit Task 5**
+- [x] **Step 6: Commit Task 5**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/protocol.py tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py Docs/MCP/Unified/Client_Snippets.md Docs/MCP/Unified/User_Guide.md
@@ -555,13 +555,14 @@ git commit -m "fix: make mcp catalog misses explicit"
 **Files:**
 - Modify: `tldw_Server_API/app/core/MCP_unified/config.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/server.py`
-- Modify: `tldw_Server_API/app/core/MCP_unified/modules/registry.py`
 - Modify: `tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_config_safe_defaults.py`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py`
+- Modify: `tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py`
 - Modify: `Docs/MCP/Unified/User_Guide.md`
 
-- [ ] **Step 1: Write tests for invalid safe config**
+- [x] **Step 1: Write tests for invalid safe config**
 
 ```python
 def test_http_request_invalid_safe_config_returns_400(client):
@@ -578,11 +579,11 @@ def test_http_request_invalid_safe_config_returns_400(client):
 
 Adapt auth/client fixtures to the existing `test_http_mapping.py` patterns.
 
-- [ ] **Step 2: Write tests for status problem modules**
+- [x] **Step 2: Write tests for status problem modules**
 
 Add a focused test that registers or fakes one module with `ERROR` status and asserts status includes a sanitized `problem_modules` entry with `id`, `status`, `reason`, and `next_action`.
 
-- [ ] **Step 3: Run failing diagnostics tests**
+- [x] **Step 3: Run failing diagnostics tests**
 
 Run:
 
@@ -593,7 +594,9 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py
 
 Expected: FAIL for new diagnostics expectations.
 
-- [ ] **Step 4: Reject invalid request safe config**
+Observed: the focused diagnostics tests failed because invalid safe config still returned 200, config warning collection was missing, and status had no `problem_modules`.
+
+- [x] **Step 4: Reject invalid request safe config**
 
 In `mcp_unified_endpoint.py`, replace log-and-continue parsing behavior with:
 
@@ -610,7 +613,7 @@ raise HTTPException(
 
 Do not echo raw config values in responses or logs.
 
-- [ ] **Step 5: Add config warning collection**
+- [x] **Step 5: Add config warning collection**
 
 Expose sanitized warnings for invalid optional config inputs such as bad tool category map JSON. Prefer a small helper, for example:
 
@@ -621,7 +624,7 @@ def get_config_warnings() -> list[dict[str, str]]:
 
 Keep secret values out of warnings.
 
-- [ ] **Step 6: Add status diagnostics**
+- [x] **Step 6: Add status diagnostics**
 
 Add optional response fields:
 
@@ -630,7 +633,7 @@ Add optional response fields:
 
 Use registry `error_message` where already sanitized; otherwise map to a generic message.
 
-- [ ] **Step 7: Update troubleshooting docs**
+- [x] **Step 7: Update troubleshooting docs**
 
 Add symptom-driven rows:
 
@@ -641,7 +644,7 @@ Add symptom-driven rows:
 - Invalid safe config.
 - Empty tool list.
 
-- [ ] **Step 8: Re-run diagnostics tests**
+- [x] **Step 8: Re-run diagnostics tests**
 
 Run:
 
@@ -652,10 +655,12 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit Task 6**
+Observed: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py tldw_Server_API/app/core/MCP_unified/tests/test_config_safe_defaults.py tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py -v` passed.
+
+- [x] **Step 9: Commit Task 6**
 
 ```bash
-git add tldw_Server_API/app/core/MCP_unified/config.py tldw_Server_API/app/core/MCP_unified/server.py tldw_Server_API/app/core/MCP_unified/modules/registry.py tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py tldw_Server_API/app/core/MCP_unified/tests/test_config_safe_defaults.py tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py Docs/MCP/Unified/User_Guide.md
+git add tldw_Server_API/app/core/MCP_unified/config.py tldw_Server_API/app/core/MCP_unified/server.py tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py tldw_Server_API/app/core/MCP_unified/tests/test_config_safe_defaults.py tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py Docs/MCP/Unified/User_Guide.md
 git commit -m "feat: surface unified mcp diagnostics"
 ```
 

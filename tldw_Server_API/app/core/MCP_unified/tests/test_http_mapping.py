@@ -109,6 +109,22 @@ def test_initialize_request_sets_session_header(client: TestClient):
     assert result.get("serverInfo", {}).get("name") == "tldw-mcp-unified"
 
 
+def test_http_request_invalid_safe_config_returns_400(client: TestClient):
+    payload = {"jsonrpc": "2.0", "method": "initialize", "params": {}, "id": 1}
+
+    r = client.post(
+        "/api/v1/mcp/request",
+        json=payload,
+        params={"config": "not-base64-json"},
+    )
+
+    assert r.status_code == 400
+    body = r.json()
+    assert body["detail"]["code"] == "invalid_safe_config"
+    assert body["detail"]["next_action"]
+    assert "not-base64-json" not in json.dumps(body)
+
+
 def test_http_notification_returns_204(client: TestClient):
     payload = {"jsonrpc": "2.0", "method": "ping"}
     r = client.post("/api/v1/mcp/request", json=payload)

@@ -48,6 +48,8 @@ python -m uvicorn tldw_Server_API.app.main:app --reload
 curl http://127.0.0.1:8000/api/v1/mcp/status
 ```
 
+Check `problem_modules` and `config_warnings` in the response before digging through logs.
+
 Then check health:
 
 ```bash
@@ -514,6 +516,15 @@ There is no built-in autonomous multi-stage agent loop. The safe pattern is expl
 - Keep privileged operations behind admin-only identities.
 
 ## 12. Troubleshooting
+
+| Symptom | What to check | Recovery |
+| --- | --- | --- |
+| Auth rejected | Response `detail.message` and current auth mode | Use `Authorization: Bearer <token>` in multi-user mode or `X-API-KEY` in single-user mode. Regenerate expired tokens. |
+| Query auth ignored | WebSocket close reason or missing identity with `?token=`/`?api_key=` | Query auth is disabled by default. Move credentials to headers/subprotocol, or explicitly enable `MCP_WS_ALLOW_QUERY_AUTH` only for legacy clients. |
+| Catalog unresolved | `tools/list` `_meta.catalog.status=unresolved` | Check `/api/v1/mcp/tool_catalogs`, fix the name/id, or remove the catalog filter. |
+| Module degraded or unhealthy | `/api/v1/mcp/status` `problem_modules` | Follow `next_action`, check module config/dependencies, then restart or disable the module. |
+| Invalid safe config | HTTP 400 with `detail.code=invalid_safe_config` | Remove `config` or send base64url-encoded JSON object data only. |
+| Empty tool list | `/status` `modules`, `problem_modules`, `config_warnings`, and `/tool_catalogs` | Confirm modules are enabled, the catalog filter resolves, and the caller has discovery/execute permissions. |
 
 ### `503 Server not initialized` on `/health`
 

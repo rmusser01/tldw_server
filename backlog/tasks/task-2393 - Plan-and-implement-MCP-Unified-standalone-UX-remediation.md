@@ -4,7 +4,7 @@ title: Plan and implement MCP Unified standalone UX remediation
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-27 03:08'
+updated_date: '2026-06-27 04:04'
 labels:
   - mcp
   - ux
@@ -38,7 +38,7 @@ Address the UX/product review findings for Unified MCP standalone/embedded exper
 - [x] #4 Auth methods are described in one canonical matrix and primary examples avoid disabled-by-default query auth.
 - [x] #5 Effective enabled MCP surface is visible by module/risk tier.
 - [x] #6 Unresolved catalog filters do not silently broaden discovery.
-- [ ] #7 Status or diagnostics surface sanitized module/config problems with next actions.
+- [x] #7 Status or diagnostics surface sanitized module/config problems with next actions.
 - [ ] #8 Client installer can verify readiness or clearly reports missing credentials.
 - [ ] #9 Power-user MCP workflows have a compact command reference.
 - [ ] #10 Focused tests and Bandit touched-scope scan pass.
@@ -58,14 +58,16 @@ Docs/superpowers/plans/2026-06-26-mcp-unified-standalone-ux-remediation.md
 - 2026-06-26: Task 3 complete. Added User Guide Golden Path quickstart with supported auth header, initialize, `tools/list`, and read-only `tools/call`; added canonical auth matrix; aligned client snippets with header/subprotocol auth and strict catalog examples; expanded MCP env var docs; linked core README quickstart to the User Guide. Verified docs contract tests pass.
 - 2026-06-26: Task 4 complete. Added `module_surface.py` to group enabled MCP modules into user-facing risk tiers, exposed the additive `surface` status field, documented risk tiers/default examples, and added focused tests for helper/status behavior.
 - 2026-06-26: Task 5 complete. Changed catalog-scoped tools/resources discovery to fail closed by default on unresolved catalogs, added `_meta.catalog.status` (`resolved`, `unresolved`, or `fail_open`), exposed explicit `catalog_fail_open` through HTTP and `mcp.tools.list`, updated docs/snippets, and verified protocol/discovery/docs tests pass.
+
+- 2026-06-26: Task 6 complete. Added structured 400 responses for invalid safe config, sanitized config warnings for bad optional config inputs, `problem_modules`/`config_warnings` on MCP status, troubleshooting rows, and focused docs/runtime tests. Verified HTTP mapping, config defaults, basic MCP functionality, and docs contracts pass.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Pending until all remediation tasks are complete.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->

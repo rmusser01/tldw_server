@@ -91,6 +91,38 @@ def _normalize_optional_text(value: Any) -> str | None:
     return text or None
 
 
+def _parse_safe_config_query(config: str | None) -> dict[str, Any]:
+    """Parse base64url-encoded JSON safe config from a query parameter."""
+    if not config:
+        return {}
+    try:
+        import base64
+        import binascii
+        import json as _json
+
+        raw = config.strip()
+        padded = raw + ("=" * (-len(raw) % 4))
+        decoded = base64.b64decode(
+            padded.encode("ascii"),
+            altchars=b"-_",
+            validate=True,
+        ).decode("utf-8")
+        parsed = _json.loads(decoded)
+        if isinstance(parsed, dict):
+            return parsed
+        raise ValueError("safe config must decode to a JSON object")
+    except (binascii.Error, UnicodeError, ValueError, TypeError):
+        logger.debug("Failed to parse safe config")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_safe_config",
+                "message": "The config query parameter must be base64url-encoded JSON.",
+                "next_action": "Remove the config parameter or send a valid encoded JSON object.",
+            },
+        ) from None
+
+
 # Request/Response models
 class ServerStatusResponse(BaseModel):
     """Server status response"""
@@ -101,6 +133,8 @@ class ServerStatusResponse(BaseModel):
     connections: dict[str, int]
     modules: dict[str, int]
     surface: dict[str, Any] | None = None
+    problem_modules: list[dict[str, str]] | None = None
+    config_warnings: list[dict[str, str]] | None = None
 
 
 class ServerMetricsResponse(BaseModel):
@@ -890,19 +924,8 @@ async def mcp_request(
     # Derive user id from the authenticated token user when present.
     derived_user_id = _get_derived_user_id(auth.user)
 
-    # Parse optional safe config (base64-encoded JSON)
-    safe_config: dict[str, Any] = {}
-    if config:
-        try:
-            import base64
-            import json as _json
-
-            decoded = base64.b64decode(config).decode("utf-8")
-            cfg = _json.loads(decoded)
-            if isinstance(cfg, dict):
-                safe_config = cfg
-        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-            logger.debug("Failed to parse safe config")
+    # Parse optional safe config (base64url-encoded JSON)
+    safe_config = _parse_safe_config_query(config)
 
     # Session lifecycle: if initialize and no session id provided, generate one and return header
     try:
@@ -1000,18 +1023,7 @@ async def mcp_request_batch(
     derived_user_id = _get_derived_user_id(auth.user)
 
     # Optional safe config
-    safe_config: dict[str, Any] = {}
-    if config:
-        try:
-            import base64
-            import json as _json
-
-            decoded = base64.b64decode(config).decode("utf-8")
-            cfg = _json.loads(decoded)
-            if isinstance(cfg, dict):
-                safe_config = cfg
-        except _MCP_UNIFIED_NONCRITICAL_EXCEPTIONS:
-            logger.debug("Batch failed to parse safe config")
+    safe_config = _parse_safe_config_query(config)
 
     # If any initialize request is present and no session id was provided, generate one.
     try:
