@@ -85,7 +85,7 @@ When a command below starts with `source .venv/bin/activate`, run it from the wo
 - Modify: `tldw_Server_API/app/api/v1/endpoints/vector_stores_openai.py:1144-1161`
 - Create: `tldw_Server_API/tests/VectorStores/test_vector_stores_openapi_examples.py`
 
-- [ ] **Step 1: Write the failing OpenAPI example-shape test**
+- [x] **Step 1: Write the failing OpenAPI example-shape test**
 
 Create `tldw_Server_API/tests/VectorStores/test_vector_stores_openapi_examples.py`:
 
@@ -128,7 +128,7 @@ def test_vector_list_query_examples_are_cats_validate_compatible(monkeypatch: py
         assert "examples" in params[name] or isinstance(schema.get("examples"), list), name
 ```
 
-- [ ] **Step 2: Run the focused test to verify it fails**
+- [x] **Step 2: Run the focused test to verify it fails**
 
 Run:
 
@@ -139,7 +139,7 @@ python -m pytest tldw_Server_API/tests/VectorStores/test_vector_stores_openapi_e
 
 Expected: FAIL because `schema.examples` is currently a dict for `filter`, `order_by`, and `order_dir`.
 
-- [ ] **Step 3: Move the examples to OpenAPI parameter examples**
+- [x] **Step 3: Move the examples to OpenAPI parameter examples**
 
 In `tldw_Server_API/app/api/v1/endpoints/vector_stores_openai.py`, replace the three `examples=` arguments with `openapi_examples=`:
 
@@ -171,7 +171,7 @@ order_dir: str = Query(
 ),
 ```
 
-- [ ] **Step 4: Run the focused test to verify it passes**
+- [x] **Step 4: Run the focused test to verify it passes**
 
 Run:
 
@@ -182,7 +182,7 @@ python -m pytest tldw_Server_API/tests/VectorStores/test_vector_stores_openapi_e
 
 Expected: PASS.
 
-- [ ] **Step 5: Generate a temporary OpenAPI file and run CATS validation**
+- [x] **Step 5: Generate a temporary OpenAPI file and run CATS validation**
 
 Run:
 
@@ -201,7 +201,7 @@ cats validate -c /tmp/tldw_openapi_cats_fixed.json -j
 
 Expected: `cats validate` exits `0`. If unrelated validation issues remain, record them in `TASK-2370` and continue with the known-issues path rather than hiding them.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tldw_Server_API/app/api/v1/endpoints/vector_stores_openai.py tldw_Server_API/tests/VectorStores/test_vector_stores_openapi_examples.py
@@ -215,7 +215,7 @@ git commit -m "fix: make vector store OpenAPI examples CATS compatible"
 - Create: `Helper_Scripts/cats_fuzz/manifest.py`
 - Create: `tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_manifest.py`
 
-- [ ] **Step 1: Write manifest unit tests**
+- [x] **Step 1: Write manifest unit tests**
 
 Create `tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_manifest.py`:
 
@@ -261,7 +261,7 @@ def test_unknown_builtin_block_fails() -> None:
         get_builtin_block("missing")
 ```
 
-- [ ] **Step 2: Run tests to verify import failure**
+- [x] **Step 2: Run tests to verify import failure**
 
 Run:
 
@@ -272,7 +272,7 @@ python -m pytest tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_manifest.py
 
 Expected: FAIL because `Helper_Scripts.cats_fuzz` does not exist yet.
 
-- [ ] **Step 3: Implement the manifest module**
+- [x] **Step 3: Implement the manifest module**
 
 Create `Helper_Scripts/cats_fuzz/__init__.py`:
 
@@ -390,7 +390,7 @@ def get_builtin_block(name: str) -> CatsBlock:
     return get_builtin_manifest()[name]
 ```
 
-- [ ] **Step 4: Run manifest tests**
+- [x] **Step 4: Run manifest tests**
 
 Run:
 
@@ -401,7 +401,7 @@ python -m pytest tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_manifest.py
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Helper_Scripts/cats_fuzz/__init__.py Helper_Scripts/cats_fuzz/manifest.py tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_manifest.py
@@ -415,7 +415,7 @@ git commit -m "feat: add CATS fuzz block manifest"
 - Create: `Helper_Scripts/cats_fuzz/openapi_export.py`
 - Create: `tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_env.py`
 
-- [ ] **Step 1: Write env and OpenAPI command tests**
+- [x] **Step 1: Write env and OpenAPI command tests**
 
 Create `tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_env.py`:
 
@@ -465,7 +465,7 @@ def test_openapi_export_command_uses_module_and_output_path(tmp_path: Path) -> N
     assert str(output) in command
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -476,7 +476,7 @@ python -m pytest tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_env.py -q
 
 Expected: FAIL because the modules do not exist yet.
 
-- [ ] **Step 3: Implement `env.py`**
+- [x] **Step 3: Implement `env.py`**
 
 Create `Helper_Scripts/cats_fuzz/env.py`:
 
@@ -576,7 +576,7 @@ def build_child_env(
     return child
 ```
 
-- [ ] **Step 4: Implement `openapi_export.py`**
+- [x] **Step 4: Implement `openapi_export.py`**
 
 Create `Helper_Scripts/cats_fuzz/openapi_export.py`:
 
@@ -622,7 +622,7 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] **Step 5: Run env tests**
+- [x] **Step 5: Run env tests**
 
 Run:
 
@@ -633,7 +633,7 @@ python -m pytest tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_env.py -q
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Helper_Scripts/cats_fuzz/env.py Helper_Scripts/cats_fuzz/openapi_export.py tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_env.py
@@ -648,7 +648,7 @@ git commit -m "feat: isolate CATS fuzz runtime environment"
 - Create: `tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cats_cli.py`
 - Create: `tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_summary.py`
 
-- [ ] **Step 1: Write command and summary tests**
+- [x] **Step 1: Write command and summary tests**
 
 Create `tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cats_cli.py`:
 
@@ -737,7 +737,7 @@ def test_write_summary_persists_expected_shape(tmp_path: Path) -> None:
     assert data["command"] == ["cats", "--blackbox"]
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run:
 
@@ -748,7 +748,7 @@ python -m pytest tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cats_cli.py
 
 Expected: FAIL because modules do not exist.
 
-- [ ] **Step 3: Implement command builder**
+- [x] **Step 3: Implement command builder**
 
 Create `Helper_Scripts/cats_fuzz/cats_cli.py`:
 
@@ -857,7 +857,7 @@ def run_command(command: list[str], *, timeout_seconds: int, env: dict[str, str]
     return CatsProcessResult(command=command, exit_code=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
 ```
 
-- [ ] **Step 4: Implement summary writer**
+- [x] **Step 4: Implement summary writer**
 
 Create `Helper_Scripts/cats_fuzz/summary.py`:
 
@@ -903,7 +903,7 @@ def write_summary(summary: CatsRunSummary, output_path: Path) -> Path:
     return output_path
 ```
 
-- [ ] **Step 5: Run command and summary tests**
+- [x] **Step 5: Run command and summary tests**
 
 Run:
 
@@ -914,7 +914,7 @@ python -m pytest tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cats_cli.py
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Helper_Scripts/cats_fuzz/cats_cli.py Helper_Scripts/cats_fuzz/summary.py tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cats_cli.py tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_summary.py
@@ -928,7 +928,7 @@ git commit -m "feat: build CATS commands and run summaries"
 - Create: `Helper_Scripts/cats_fuzz/runner.py`
 - Create: `tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_runner.py`
 
-- [ ] **Step 1: Write mocked runner tests**
+- [x] **Step 1: Write mocked runner tests**
 
 Create `tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_runner.py`:
 
@@ -969,7 +969,7 @@ def test_contract_block_writes_summary_for_validate_and_stats(tmp_path: Path, mo
     assert (tmp_path / "out" / "contract" / "summary.json").exists()
 ```
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 Run:
 
@@ -980,7 +980,7 @@ python -m pytest tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_runner.py -
 
 Expected: FAIL because `runner.py` and `server.py` do not exist yet.
 
-- [ ] **Step 3: Implement server lifecycle**
+- [x] **Step 3: Implement server lifecycle**
 
 Create `Helper_Scripts/cats_fuzz/server.py`:
 
@@ -1053,7 +1053,7 @@ def stop_server(server: UvicornServer) -> None:
         server.process.wait(timeout=5)
 ```
 
-- [ ] **Step 4: Implement runner orchestration**
+- [x] **Step 4: Implement runner orchestration**
 
 Create `Helper_Scripts/cats_fuzz/runner.py`:
 
@@ -1186,7 +1186,7 @@ def get_default_runtime_block() -> CatsBlock:
     return get_builtin_block("public-read")
 ```
 
-- [ ] **Step 5: Run runner tests**
+- [x] **Step 5: Run runner tests**
 
 Run:
 
@@ -1197,7 +1197,7 @@ python -m pytest tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_runner.py -
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Helper_Scripts/cats_fuzz/server.py Helper_Scripts/cats_fuzz/runner.py tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_runner.py
@@ -1212,7 +1212,7 @@ git commit -m "feat: orchestrate CATS fuzz runs"
 - Create: `Docs/Development/CATS_Fuzzing.md`
 - Modify: `tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_runner.py` or create `tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cli.py`
 
-- [ ] **Step 1: Write CLI parser tests**
+- [x] **Step 1: Write CLI parser tests**
 
 Create `tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cli.py`:
 
@@ -1241,7 +1241,7 @@ def test_cli_accepts_existing_server_url() -> None:
     assert args.start_server is False
 ```
 
-- [ ] **Step 2: Run CLI tests to verify failure**
+- [x] **Step 2: Run CLI tests to verify failure**
 
 Run:
 
@@ -1252,7 +1252,7 @@ python -m pytest tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cli.py -q
 
 Expected: FAIL because `cli.py` does not exist.
 
-- [ ] **Step 3: Implement CLI**
+- [x] **Step 3: Implement CLI**
 
 Create `Helper_Scripts/cats_fuzz/cli.py`:
 
@@ -1353,7 +1353,7 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] **Step 4: Write usage docs**
+- [x] **Step 4: Write usage docs**
 
 Create `Docs/Development/CATS_Fuzzing.md`:
 
@@ -1387,7 +1387,7 @@ Artifacts are written under `artifacts/cats-fuzz/` by default:
 - Uses CATS blackbox mode so only `5xx` responses are gate failures for runtime blocks.
 ````
 
-- [ ] **Step 5: Run CLI tests**
+- [x] **Step 5: Run CLI tests**
 
 Run:
 
@@ -1398,7 +1398,7 @@ python -m pytest tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cli.py -q
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add Helper_Scripts/cats_fuzz/cli.py Helper_Scripts/cats_fuzz/__main__.py Docs/Development/CATS_Fuzzing.md tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cli.py
@@ -1410,7 +1410,7 @@ git commit -m "feat: add CATS fuzzing CLI"
 **Files:**
 - Modify: `backlog/tasks/task-2370 - Plan-CATS-API-fuzzing-harness-implementation.md` only for final notes if this plan task is still open, or the implementation task that owns execution.
 
-- [ ] **Step 1: Run all focused Python tests**
+- [x] **Step 1: Run all focused Python tests**
 
 Run:
 
@@ -1429,7 +1429,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run CATS contract block**
+- [x] **Step 2: Run CATS contract block**
 
 Run:
 
@@ -1440,7 +1440,7 @@ python -m Helper_Scripts.cats_fuzz --block contract --output /tmp/tldw-cats-cont
 
 Expected: exit `0`, `/tmp/tldw-cats-contract/contract/summary.json` has `"failure_class": "ok"`.
 
-- [ ] **Step 3: Run CATS public-read live block**
+- [x] **Step 3: Run CATS public-read live block**
 
 Run:
 
@@ -1451,7 +1451,7 @@ python -m Helper_Scripts.cats_fuzz --block contract --block public-read --output
 
 Expected: exit `0` or a non-zero exit only when `summary.json` clearly classifies an API `5xx` issue worth fixing. If CATS itself throws a tool/internal error, record stderr and either adjust command construction or add a documented fallback.
 
-- [ ] **Step 4: Run Bandit on touched executable harness scope**
+- [x] **Step 4: Run Bandit on touched executable harness scope**
 
 Run:
 
@@ -1462,7 +1462,7 @@ python -m bandit -r Helper_Scripts/cats_fuzz tldw_Server_API/app/api/v1/endpoint
 
 Expected: no new findings in touched code. If Bandit flags the deliberate local subprocess/urlopen calls, add tight `# nosec` comments with a local-only justification only where needed.
 
-- [ ] **Step 5: Run whitespace check**
+- [x] **Step 5: Run whitespace check**
 
 Run:
 
@@ -1472,7 +1472,7 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 6: Commit final verification notes if needed**
+- [x] **Step 6: Commit final verification notes if needed**
 
 If verification notes or docs changed:
 
@@ -1483,6 +1483,7 @@ git commit -m "docs: record CATS fuzzing verification"
 
 ## Known Risks And Follow-Ups
 
+- 2026-06-27 live verification: `contract` passed with `failure_class: ok` under `/tmp/tldw-cats-public-read-v4/contract/summary.json`; `public-read` started the isolated server and wrote `/tmp/tldw-cats-public-read-v4/public-read/summary.json` with `exit_code: 124`, `failure_class: tool`, and `stderr.log` recording `Command timed out after 300 seconds`. Split or narrow public-read before using it as a hard CI gate.
 - CATS `--dryRun` reached command parsing locally but threw a Java `ClassCastException` against the large tldw OpenAPI shape. Treat dry-run as helpful but not a hard preflight until proven stable with the finalized command.
 - The first implementation should not add broad CI yet. Start with local/manual usage and a small contract/public-read command that can later be wired into CI.
 - The worktree has no `.venv`; implementation must set up dependencies before running Python tests.
