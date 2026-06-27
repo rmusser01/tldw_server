@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -114,7 +115,7 @@ def test_validate_and_stats_commands_default_to_json_output(tmp_path: Path) -> N
 @pytest.mark.unit
 def test_run_command_captures_stdout_stderr_and_exit_code() -> None:
     command = [
-        "python",
+        sys.executable,
         "-c",
         "import sys; print('out'); print('err', file=sys.stderr); raise SystemExit(3)",
     ]

@@ -16,8 +16,11 @@ def _openapi_spec(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
     monkeypatch.setenv("PYTHONWARNINGS", "ignore")
 
-    from tldw_Server_API.app.main import app
+    from fastapi import FastAPI
+    from tldw_Server_API.app.api.v1.endpoints.vector_stores_openai import router
 
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
     app.openapi_schema = None
     return app.openapi()
 
