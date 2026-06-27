@@ -64,11 +64,11 @@ class MCPDiscoveryModule(BaseModule):
                         "catalog_id": {"type": "integer", "description": "Catalog id."},
                         "catalog_strict": {
                             "type": "boolean",
-                            "description": "Return empty tool list when catalog resolution fails.",
+                            "description": "Return empty tool list when catalog resolution fails; wins over fail-open.",
                         },
                         "catalog_fail_open": {
                             "type": "boolean",
-                            "description": "Return the RBAC-filtered tool list when catalog resolution fails.",
+                            "description": "Return the RBAC-filtered tool list when catalog resolution fails unless strict is true.",
                         },
                         "module": {"type": "string", "description": "Single module id filter."},
                         "modules": {

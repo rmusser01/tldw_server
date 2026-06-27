@@ -35,8 +35,8 @@ def test_unified_mcp_docs_state_embedded_today_standalone_planned() -> None:
         "Unified MCP docs should mention the standalone gateway mental model explicitly.",
     )
     _require(
-        "planned" in docs or "not yet shipped" in docs,
-        "Unified MCP docs should distinguish planned standalone work from shipped behavior.",
+        "standalone package/gateway is planned but not shipped" in docs,
+        "Unified MCP docs should explicitly tie the planned/not-shipped status to the standalone gateway.",
     )
 
 

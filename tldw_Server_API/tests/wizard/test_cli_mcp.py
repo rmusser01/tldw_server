@@ -127,6 +127,37 @@ def test_mcp_add_supports_api_key_env_dry_run():
         assert "${SINGLE_USER_API_KEY}" in action["diff"]
 
 
+def test_mcp_add_dry_run_masks_inline_api_key() -> None:
+    """Dry-run output should never serialize literal inline credentials."""
+    with runner.isolated_filesystem():
+        config_path = Path("cursor_settings.json")
+        original = "{}\n"
+        config_path.write_text(original, encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            [
+                "mcp",
+                "add",
+                "--client",
+                "cursor",
+                "--config-path",
+                str(config_path),
+                "--api-key",
+                "super-secret-key",
+                "--dry-run",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert config_path.read_text(encoding="utf-8") == original
+        assert "super-secret-key" not in result.output
+        payload = assert_wizard_json(result.output, command="mcp", status="ok")
+        action = next(item["mcp_client"] for item in payload["actions"] if "mcp_client" in item)
+        assert "<provided-api-key>" in action["diff"]
+
+
 def test_mcp_add_verify_success_prints_verified_usable(monkeypatch):
     with runner.isolated_filesystem():
         config_path = Path("cursor_settings.json")

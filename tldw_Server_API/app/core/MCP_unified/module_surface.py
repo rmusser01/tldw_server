@@ -23,9 +23,14 @@ MODULE_RISK_TIERS: dict[str, tuple[str, str]] = {
     "persona_visuals": ("write", "Manage persona visual assets."),
     "filesystem": ("local_files", "Read or write configured local file scopes."),
     "codegraph": ("local_files", "Index and inspect configured source workspaces."),
+    "git": ("local_process", "Inspect configured Git workspaces through allowlisted commands."),
     "external_federation": ("external_network", "Connect to external MCP servers."),
+    "web_fetch": ("external_network", "Fetch bounded external web content."),
+    "web_search": ("external_network", "Search configured external web providers."),
+    "web_research": ("external_network", "Compose bounded external search and fetch workflows."),
     "run_command": ("local_process", "Run configured local command families."),
     "sandbox": ("local_process", "Run code or workloads in configured sandboxes."),
+    "browser_cdp": ("local_process", "Control a configured browser over the Chrome DevTools Protocol."),
 }
 
 TIER_LABELS: dict[str, str] = {

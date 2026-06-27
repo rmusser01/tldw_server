@@ -74,10 +74,6 @@ Docs/superpowers/plans/2026-06-26-mcp-unified-standalone-ux-remediation.md
 Completed MCP Unified UX remediation for TASK-2393. The shipped docs now state embedded-vs-planned-standalone status, quarantine the MCP-specific Docker path as experimental, provide a complete authenticated first-run flow, consolidate auth guidance, explain effective module/risk-tier surface, fail closed on unresolved catalog filters, expose sanitized diagnostics, add client installer credential/readiness verification, and add a compact operator cheatsheet. Verification: focused remediation suite 48/48 passed; broader MCP smoke subset 48/48 passed; Bandit full planned scope reported no high findings and only pre-existing medium findings in unrelated MCP test files, with no medium-or-higher findings in remediation-touched MCP/API/wizard files. Known skips/blockers: none for this remediation slice; the future standalone gateway extraction remains out of scope by plan.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

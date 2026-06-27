@@ -1162,9 +1162,10 @@ async def get_prometheus_metrics(
         "  `team > org > global` based on the authenticated context (API key or JWT). When both\n"
         "  `catalog` and `catalog_id` are provided, `catalog_id` takes precedence.\n"
         "- `catalog_id`: Filter by tool catalog id directly.\n\n"
-        "- `catalog_strict`: Backward-compatible alias for fail-closed catalog resolution.\n"
+        "- `catalog_strict`: Backward-compatible alias for fail-closed catalog resolution;\n"
+        "  when combined with `catalog_fail_open`, strict fail-closed behavior wins.\n"
         "- `catalog_fail_open`: When true, unresolved catalogs fall back to the RBAC-filtered\n"
-        "  discovery set and return `_meta.catalog.status=fail_open`.\n\n"
+        "  discovery set and return `_meta.catalog.status=fail_open`, unless `catalog_strict=true`.\n\n"
         "Behavior:\n"
         "- If the catalog name/id cannot be resolved, the server returns an empty tool list and\n"
         "  `_meta.catalog.status=unresolved` by default.\n"
@@ -1178,7 +1179,7 @@ async def list_tools(
     catalog: Optional[str] = Query(None, description="Filter by tool catalog name"),
     catalog_id: Optional[int] = Query(None, description="Filter by tool catalog id"),
     catalog_strict: Optional[bool] = Query(None, description="Fail closed on unresolved catalogs"),
-    catalog_fail_open: Optional[bool] = Query(None, description="Fail open on unresolved catalogs"),
+    catalog_fail_open: Optional[bool] = Query(None, description="Fail open unless catalog_strict=true"),
     auth: McpAuthContext = Depends(get_mcp_auth_context),
     _guard: None = Depends(enforce_http_security),
 ):

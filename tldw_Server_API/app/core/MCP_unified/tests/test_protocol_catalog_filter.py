@@ -135,10 +135,15 @@ async def test_protocol_catalog_provider_failure_fails_closed_by_default() -> No
         {"catalog": "A", "catalog_strict": True},
         ctx,
     )
+    strict_fail_open = await proto._resolve_catalog_tool_names(  # noqa: SLF001
+        {"catalog": "A", "catalog_strict": True, "catalog_fail_open": True},
+        ctx,
+    )
 
     assert non_strict == set()
     assert fail_open is None
     assert strict == set()
+    assert strict_fail_open == set()
 
 
 @pytest.mark.unit
@@ -350,10 +355,10 @@ async def test_protocol_tools_list_unresolved_catalog_returns_empty_with_meta(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_protocol_catalog_fail_open_overrides_strict_for_unresolved_catalog(
+async def test_protocol_catalog_strict_overrides_fail_open_for_unresolved_catalog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fail-open should not forward strict lookup semantics to the catalog provider."""
+    """Strict catalog lookup should still fail closed when fail-open is also requested."""
     os.environ["TEST_MODE"] = "true"
 
     from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
@@ -379,12 +384,12 @@ async def test_protocol_catalog_fail_open_overrides_strict_for_unresolved_catalo
             return set() if strict else None
 
     class _ModuleStub:
-        """Module stub with tools that should survive fail-open discovery."""
+        """Module stub with tools that strict catalog lookup should hide."""
 
         name = "Media"
 
         async def get_tools(self) -> list[dict[str, Any]]:
-            """Return all tools available after fail-open catalog lookup."""
+            """Return tools that should be hidden when strict lookup cannot resolve."""
             return [
                 {"name": "media.search", "inputSchema": {"type": "object"}},
                 {"name": "ingest_media", "inputSchema": {"type": "object"}},
@@ -421,13 +426,13 @@ async def test_protocol_catalog_fail_open_overrides_strict_for_unresolved_catalo
         ctx,
     )
 
-    assert provider.strict_values == [False]
-    names = {tool.get("name") for tool in result.get("tools", [])}
-    assert names == {"media.search", "ingest_media"}
+    assert provider.strict_values == [True]
+    assert result.get("tools") == []
     assert result.get("_meta", {}).get("catalog") == {
-        "status": "fail_open",
-        "filtered": False,
-        "hint": "Catalog lookup was bypassed by catalog_fail_open=true.",
+        "status": "unresolved",
+        "filtered": True,
+        "toolCount": 0,
+        "hint": "Check catalog name/id or remove the catalog filter.",
     }
 
 

@@ -1327,7 +1327,7 @@ def mcp(
     verify_api_key: str | None = None
     credential_source = "placeholder"
     if api_key:
-        header_api_key = api_key
+        header_api_key = "<provided-api-key>" if dry_run else api_key
         verify_api_key = api_key
         credential_source = "api_key"
     elif api_key_env:
