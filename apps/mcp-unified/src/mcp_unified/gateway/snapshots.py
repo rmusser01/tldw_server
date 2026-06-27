@@ -78,9 +78,17 @@ class GatewayConfigSnapshotManagementError(RuntimeError):
 class GatewayConfigSnapshot(BaseModel):
     """Versioned gateway config snapshot without embedded secret values."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+        serialize_by_alias=True,
+    )
 
-    schema: Literal["mcp_unified.gateway.config_snapshot"] = SNAPSHOT_SCHEMA
+    snapshot_schema: Literal["mcp_unified.gateway.config_snapshot"] = Field(
+        default=SNAPSHOT_SCHEMA,
+        validation_alias="schema",
+        serialization_alias="schema",
+    )
     version: Literal[1] = SNAPSHOT_VERSION
     profiles: list[MCPProfile] = Field(default_factory=list)
     default_assignment: ProfileAssignment | None = None
