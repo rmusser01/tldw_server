@@ -14,6 +14,11 @@ import tldw_Server_API.app.core.Chat.chat_metrics as chat_metrics
 from tldw_Server_API.app.core.Chat.chat_metrics import get_chat_metrics
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 
+try:
+    from redis.exceptions import RedisError
+except ImportError:  # pragma: no cover - redis is an optional deployment dependency
+    RedisError = None
+
 router = APIRouter(tags=["metrics"])
 
 _METRICS_NONCRITICAL_EXCEPTIONS = (
@@ -27,6 +32,8 @@ _METRICS_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+if RedisError is not None:
+    _METRICS_NONCRITICAL_EXCEPTIONS = (*_METRICS_NONCRITICAL_EXCEPTIONS, RedisError)
 
 _PROMETHEUS_HEADERS = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -36,9 +43,23 @@ _PROMETHEUS_HEADERS = {
 _STAGE_FLAG_REFRESH_INTERVAL_SECONDS = 5.0
 _STAGE_FLAG_REFRESH_TIMEOUT_SECONDS = 0.5
 _last_stage_flag_refresh = 0.0
+_embeddings_worker_metrics_registered = False
 # Canonical list of embedding pipeline stages; kept in sync with the
 # embeddings module so new stages are picked up automatically.
 _EMBEDDING_STAGES = ("chunking", "embedding", "storage", "content")
+
+
+def _ensure_embeddings_worker_metrics_registered() -> None:
+    """Register embeddings worker histograms needed by the public metrics contract."""
+    global _embeddings_worker_metrics_registered  # noqa: PLW0603
+    if _embeddings_worker_metrics_registered:
+        return
+    try:
+        import tldw_Server_API.app.core.Embeddings.workers.base_worker  # noqa: F401
+    except _METRICS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("metrics: embeddings worker metrics unavailable for import")
+        return
+    _embeddings_worker_metrics_registered = True
 
 
 async def _refresh_embeddings_stage_flags_inner() -> None:
@@ -98,6 +119,7 @@ async def _refresh_embeddings_stage_flags() -> None:
 async def build_prometheus_metrics_response() -> Response:
     """Build the canonical text-format metrics response used by all surface routes."""
     registry = get_metrics_registry()
+    _ensure_embeddings_worker_metrics_registered()
     await _refresh_embeddings_stage_flags()
     prometheus_text = registry.export_prometheus_format() or ""
     try:
