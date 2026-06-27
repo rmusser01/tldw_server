@@ -256,18 +256,21 @@ async def test_request_sanitizes_safe_config_parse_log(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(base64, "b64decode", _raise_leaky_parse_error)
 
-    response = await mcp.mcp_request(
-        http_request=_json_request({"jsonrpc": "2.0", "method": "tools/list", "id": "req-1"}),
-        response=mcp.Response(),
-        client_id=None,
-        auth=_auth(),
-        mcp_session_id=None,
-        config="invalid-config",
-        _guard=None,
-    )
+    with pytest.raises(HTTPException) as excinfo:
+        await mcp.mcp_request(
+            http_request=_json_request({"jsonrpc": "2.0", "method": "tools/list", "id": "req-1"}),
+            response=mcp.Response(),
+            client_id=None,
+            auth=_auth(),
+            mcp_session_id=None,
+            config="invalid-config",
+            _guard=None,
+        )
 
-    payload = json.loads(response.body)
-    assert payload["result"] == {"ok": True}
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail["code"] == "invalid_safe_config"
+    assert "/private/mcp/config.json" not in str(excinfo.value.detail)
+    assert server.metadata is None
     assert logger.debug_messages == ["Failed to parse safe config"]
     assert "/private/mcp/config.json" not in logger.debug_messages[0]
 
@@ -284,19 +287,22 @@ async def test_batch_request_sanitizes_safe_config_parse_log(monkeypatch: pytest
 
     monkeypatch.setattr(base64, "b64decode", _raise_leaky_parse_error)
 
-    responses = await mcp.mcp_request_batch(
-        http_request=_json_request([{"jsonrpc": "2.0", "method": "tools/list", "id": "req-1"}]),
-        response=mcp.Response(),
-        client_id=None,
-        auth=_auth(),
-        mcp_session_id=None,
-        config="invalid-config",
-        _guard=None,
-    )
+    with pytest.raises(HTTPException) as excinfo:
+        await mcp.mcp_request_batch(
+            http_request=_json_request([{"jsonrpc": "2.0", "method": "tools/list", "id": "req-1"}]),
+            response=mcp.Response(),
+            client_id=None,
+            auth=_auth(),
+            mcp_session_id=None,
+            config="invalid-config",
+            _guard=None,
+        )
 
-    payload = json.loads(responses.body)
-    assert payload[0]["result"] == {"ok": True}
-    assert logger.debug_messages == ["Batch failed to parse safe config"]
+    assert excinfo.value.status_code == 400
+    assert excinfo.value.detail["code"] == "invalid_safe_config"
+    assert "/private/mcp/config.json" not in str(excinfo.value.detail)
+    assert server.metadata is None
+    assert logger.debug_messages == ["Failed to parse safe config"]
     assert "/private/mcp/config.json" not in logger.debug_messages[0]
 
 
