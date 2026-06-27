@@ -210,6 +210,36 @@ class FilesystemModule(BaseModule):
         )
         read_tool["inputSchema"]["additionalProperties"] = False
 
+        notebook_read_tool = create_tool_definition(
+            name="notebook.read",
+            description="Read bounded Jupyter notebook structure and optional cell source previews.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute .ipynb path"},
+                    "include_source": {"type": "boolean", "default": False},
+                    "cell_ids": {"type": "array", "items": {"type": "string"}},
+                    "max_source_chars": {"type": "integer", "minimum": 1},
+                    "max_total_source_chars": {"type": "integer", "minimum": 1},
+                    "include_receipt": {"type": "boolean", "default": True},
+                },
+                "required": ["path"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read", "notebook.read"],
+                "path_scope_action": "read",
+                **_file_policy_metadata("read"),
+                "eval": {
+                    "task_families": ["notebook_read"],
+                    "expected_result_kind": "structured_notebook_read",
+                    "success_signals": ["avoided_mutation"],
+                },
+                **shared_path_metadata,
+            },
+        )
+        notebook_read_tool["inputSchema"]["additionalProperties"] = False
+
         edit_tool = create_tool_definition(
             name="fs.edit",
             description="Replace exact UTF-8 text inside an existing workspace file after preimage checks.",
@@ -242,6 +272,42 @@ class FilesystemModule(BaseModule):
             },
         )
         edit_tool["inputSchema"]["additionalProperties"] = False
+
+        notebook_edit_tool = create_tool_definition(
+            name="notebook.edit_cell",
+            description="Replace, insert, or delete one Jupyter notebook cell by cell id after preimage checks.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute .ipynb path"},
+                    "mode": {"type": "string", "enum": ["replace", "insert", "delete"]},
+                    "cell_id": {"type": "string", "description": "Existing target cell id"},
+                    "insert_position": {"type": "string", "enum": ["before", "after"]},
+                    "new_cell_id": {"type": "string"},
+                    "cell_type": {"type": "string", "enum": ["code", "markdown", "raw"]},
+                    "source": {"type": "string"},
+                    "expected_sha256": {"type": "string"},
+                    "read_receipt": {"type": "string"},
+                    "lock_lease_id": {"type": "string"},
+                    "dry_run": {"type": "boolean", "default": False},
+                },
+                "required": ["path", "mode", "cell_id"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": True,
+                "capabilities": ["filesystem.edit", "notebook.edit"],
+                "path_scope_action": "edit",
+                **_file_policy_metadata("edit"),
+                "eval": {
+                    "task_families": ["notebook_edit"],
+                    "expected_result_kind": "structured_notebook_edit",
+                    "success_signals": ["completed_requested_mutation"],
+                },
+                **shared_path_metadata,
+            },
+        )
+        notebook_edit_tool["inputSchema"]["additionalProperties"] = False
 
         lock_acquire_tool = create_tool_definition(
             name="fs.lock_acquire",
@@ -523,7 +589,9 @@ class FilesystemModule(BaseModule):
         return [
             list_tool,
             read_tool,
+            notebook_read_tool,
             edit_tool,
+            notebook_edit_tool,
             lock_acquire_tool,
             lock_release_tool,
             read_text_tool,
@@ -894,6 +962,30 @@ class FilesystemModule(BaseModule):
             self._validate_bool_argument(arguments, "include_receipt")
             return
 
+        if tool_name == "notebook.read":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "include_source",
+                    "cell_ids",
+                    "max_source_chars",
+                    "max_total_source_chars",
+                    "include_receipt",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            self._validate_bool_argument(arguments, "include_source")
+            self._validate_bool_argument(arguments, "include_receipt")
+            self._validate_optional_string_list_argument(arguments, "cell_ids")
+            self._validate_positive_int_argument(arguments, "max_source_chars")
+            self._validate_positive_int_argument(arguments, "max_total_source_chars")
+            return
+
         if tool_name == "fs.lock_acquire":
             unknown = sorted(set(arguments) - {"path", "owner", "ttl_seconds", "lease_id"})
             if unknown:
@@ -956,6 +1048,63 @@ class FilesystemModule(BaseModule):
             self._validate_optional_nonempty_string_argument(arguments, "lock_lease_id")
             self._validate_bool_argument(arguments, "replace_all")
             self._validate_bool_argument(arguments, "dry_run")
+            return
+
+        if tool_name == "notebook.edit_cell":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "mode",
+                    "cell_id",
+                    "insert_position",
+                    "new_cell_id",
+                    "cell_type",
+                    "source",
+                    "expected_sha256",
+                    "read_receipt",
+                    "lock_lease_id",
+                    "dry_run",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            mode = arguments.get("mode")
+            cell_id = arguments.get("cell_id")
+            source = arguments.get("source")
+            cell_type = arguments.get("cell_type")
+            insert_position = arguments.get("insert_position")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            if not isinstance(mode, str) or not mode.strip():
+                raise ValueError("mode is required")
+            if mode not in {"replace", "insert", "delete"}:
+                raise ValueError("mode must be one of: replace, insert, delete")
+            if not isinstance(cell_id, str) or not cell_id.strip():
+                raise ValueError("cell_id is required")
+            if mode in {"replace", "insert"} and not isinstance(source, str):
+                raise ValueError("source is required")
+            if source is not None and not isinstance(source, str):
+                raise ValueError("source must be a string")
+            if mode == "insert":
+                if insert_position not in {"before", "after"}:
+                    raise ValueError("insert_position is required")
+                if cell_type not in {"code", "markdown", "raw"}:
+                    raise ValueError("cell_type is required" if cell_type is None else "cell_type must be one of: code, markdown, raw")
+            elif insert_position is not None and insert_position not in {"before", "after"}:
+                raise ValueError("insert_position must be one of: before, after")
+            if cell_type is not None and cell_type not in {"code", "markdown", "raw"}:
+                raise ValueError("cell_type must be one of: code, markdown, raw")
+            for key in ("new_cell_id", "lock_lease_id"):
+                self._validate_optional_nonempty_string_argument(arguments, key)
+            for key in ("expected_sha256", "read_receipt"):
+                value = arguments.get(key)
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"{key} must be a string")
+            self._validate_bool_argument(arguments, "dry_run")
+            if not arguments.get("expected_sha256") and not arguments.get("read_receipt"):
+                raise ValueError("edit_preimage_required")
             return
 
         if tool_name == "fs.patch":
@@ -1180,6 +1329,14 @@ class FilesystemModule(BaseModule):
         value = arguments.get(key)
         if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
             raise ValueError(f"{key} must be a positive integer")
+
+    @staticmethod
+    def _validate_optional_string_list_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is None:
+            return
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise ValueError(f"{key} must be a list of strings")
 
     @staticmethod
     def _validate_optional_string_map_argument(arguments: dict[str, Any], key: str) -> None:
