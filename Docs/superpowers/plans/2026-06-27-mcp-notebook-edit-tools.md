@@ -411,7 +411,7 @@ Update `USER_GUIDE.md` near the safe file read/patch/write section:
 
 Run profile preset tests. Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/mcp-unified/src/mcp_unified/profiles/presets.py \
@@ -425,7 +425,7 @@ git commit -m "docs: document notebook mcp tools"
 **Files:**
 - Modify: `backlog/tasks/task-2282 - Add-NotebookEdit-style-notebook-file-tools.md`
 
-- [ ] **Step 1: Run focused tests**
+- [x] **Step 1: Run focused tests**
 
 Run:
 
@@ -439,7 +439,7 @@ Run:
 
 Expected: pass.
 
-- [ ] **Step 2: Re-run existing filesystem baseline**
+- [x] **Step 2: Re-run existing filesystem baseline**
 
 Run:
 
@@ -449,7 +449,7 @@ Run:
 
 Expected: either the same pre-existing glob failure remains, or the file passes. If a new notebook-related failure appears, fix it before continuing.
 
-- [ ] **Step 3: Run Bandit on touched Python files**
+- [x] **Step 3: Run Bandit on touched Python files**
 
 Run:
 
@@ -463,7 +463,7 @@ Run:
 
 Expected: no new findings in touched code. If Bandit is unavailable, record the environment failure on `TASK-2282`.
 
-- [ ] **Step 4: Update Backlog task**
+- [x] **Step 4: Update Backlog task**
 
 Record:
 
@@ -473,7 +473,7 @@ Record:
 - Bandit result path;
 - known baseline filesystem glob failure if still present.
 
-- [ ] **Step 5: Final self-review**
+- [x] **Step 5: Final self-review**
 
 Run:
 
@@ -485,7 +485,7 @@ git log --oneline --decorate -5
 
 Expected: no whitespace errors, only intended files changed or clean after commit.
 
-- [ ] **Step 6: Commit task finalization**
+- [x] **Step 6: Commit task finalization**
 
 ```bash
 git add 'backlog/tasks/task-2282 - Add-NotebookEdit-style-notebook-file-tools.md'
