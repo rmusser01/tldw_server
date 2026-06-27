@@ -115,6 +115,7 @@ def test_llm_models_metadata_handles_local_discovery_policy_errors(monkeypatch, 
     monkeypatch.setattr(llm_providers, "_http_fetch", _raise_egress_policy)
     monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "*")
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "127.0.0.1,localhost")
 
     client = client_user_only
     response = client.get("/api/v1/llm/models/metadata")

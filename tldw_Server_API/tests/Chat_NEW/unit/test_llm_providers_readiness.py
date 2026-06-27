@@ -117,6 +117,7 @@ def test_llm_provider_readiness_marks_unreachable_local_endpoint_unavailable(
     monkeypatch.setenv("LLM_PROVIDER_READINESS_PROBE_ENDPOINTS", "1")
     monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "*")
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "127.0.0.1,localhost")
     parser = _config(
         {
             "Local-API": {
