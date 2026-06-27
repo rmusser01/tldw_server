@@ -12,8 +12,10 @@ references:
 - https://code.claude.com/docs/en/tools-reference
 documentation:
 - Docs/Design/2026-06-27-mcp-notebook-edit-tools-design.md
+- Docs/superpowers/plans/2026-06-27-mcp-notebook-edit-tools.md
 modified_files:
 - Docs/Design/2026-06-27-mcp-notebook-edit-tools-design.md
+- Docs/superpowers/plans/2026-06-27-mcp-notebook-edit-tools.md
 ---
 
 ## Description
@@ -29,7 +31,7 @@ Design and implement notebook-safe MCP tools modeled after Claude Code NotebookE
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Design approved with refinements: keep notebook parsing/editing in a focused helper, expose NotebookEdit-style read/edit tools through the MCP filesystem module, require path grants and preimage checks, clear stale code-cell outputs by default, reject missing/duplicate target cell ids, preserve notebook JSON shape where practical, keep source reads bounded and intentional, treat cell deletion as file-policy edit, and keep telemetry/error payloads redaction-safe.
+Design approved and committed. Implementation plan added at Docs/superpowers/plans/2026-06-27-mcp-notebook-edit-tools.md. Baseline before notebook edits: filesystem module tests had 103 passed and 1 pre-existing glob metadata failure.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
