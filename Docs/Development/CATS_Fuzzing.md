@@ -10,8 +10,11 @@ Do not run the default harness against production deployments or real provider
 credentials. The default runtime starts loopback uvicorn, uses deterministic long
 test API keys, isolates SQLite databases under the artifact runtime directory,
 generates a dedicated `TLDW_ENV_FILE`, and rejects inherited provider/webhook
-credentials unless `--allow-external` is passed. Runtime blocks use CATS blackbox
-mode and gate failures on 5xx responses.
+credentials unless `--allow-external` is passed. That flag permits the parent
+environment to contain real credentials, but known sensitive values are still
+scrubbed from the child environment and harness auth is overwritten with the
+deterministic test key. Runtime blocks use CATS blackbox mode and gate failures
+on 5xx responses.
 
 ## Setup
 
@@ -32,6 +35,12 @@ Run the default first-slice blocks explicitly:
 
 ```bash
 python -m Helper_Scripts.cats_fuzz --block contract --block public-read
+```
+
+Run a runtime block against an already-started local server:
+
+```bash
+python -m Helper_Scripts.cats_fuzz --block public-read --no-start-server --server-url http://127.0.0.1:8000
 ```
 
 Or use the Makefile target:

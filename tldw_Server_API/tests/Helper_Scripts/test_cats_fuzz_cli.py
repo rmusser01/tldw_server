@@ -53,9 +53,16 @@ def test_contract_only_run_exports_openapi_and_returns_contract_exit_code(
 
     calls: list[tuple[str, object]] = []
 
-    def fake_run(command: list[str], *, check: bool = False, env: dict[str, str] | None = None) -> object:
-        calls.append(("subprocess", (command, check, env)))
-        return SimpleNamespace(stdout="", stderr="")
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool = False,
+        capture_output: bool = False,
+        text: bool = False,
+        env: dict[str, str] | None = None,
+    ) -> object:
+        calls.append(("subprocess", (command, check, capture_output, text, env)))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     def fail_start_server(*args: object, **kwargs: object) -> None:
         raise AssertionError("contract-only run should not start a server")
@@ -80,7 +87,10 @@ def test_contract_only_run_exports_openapi_and_returns_contract_exit_code(
     result = cli.main(["--block", "contract", "--output", str(tmp_path)])
 
     assert result == 7
-    assert calls[0] == ("subprocess", (["python", "export", str(tmp_path / "openapi.json")], True, {"SAFE": "1"}))
+    assert calls[0] == (
+        "subprocess",
+        (["python", "export", str(tmp_path / "openapi.json")], False, True, True, {"SAFE": "1"}),
+    )
     assert calls[1] == ("contract", (tmp_path / "openapi.json", tmp_path, "cats 13.8.0", "cats"))
 
 
@@ -93,9 +103,16 @@ def test_runtime_default_blocks_start_server_use_started_url_and_stop_finally(
     events: list[tuple[str, object]] = []
     server = SimpleNamespace(url="http://127.0.0.1:9123")
 
-    def fake_run(command: list[str], *, check: bool = False, env: dict[str, str] | None = None) -> object:
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool = False,
+        capture_output: bool = False,
+        text: bool = False,
+        env: dict[str, str] | None = None,
+    ) -> object:
         events.append(("export", (command, check, env)))
-        return SimpleNamespace(stdout="", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     def fake_start_server(env: dict[str, str], *, log_dir: Path) -> SimpleNamespace:
         events.append(("start", (env, log_dir)))
@@ -190,7 +207,9 @@ def test_runtime_run_with_existing_server_url_does_not_start_server(
 
     monkeypatch.setattr(cli, "build_child_env", lambda output_dir, allow_external=False: {"SAFE": "1"})
     monkeypatch.setattr(cli, "build_openapi_export_command", lambda path: ["python", "export", str(path)])
-    monkeypatch.setattr(cli.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout="", stderr=""))
+    monkeypatch.setattr(
+        cli.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="", stderr="")
+    )
     monkeypatch.setattr(cli, "_cats_version", lambda cats_bin: "cats 13.8.0")
     monkeypatch.setattr(cli, "start_server", fail_start_server)
     monkeypatch.setattr(cli, "run_runtime_block", fake_run_runtime_block)
@@ -212,18 +231,61 @@ def test_runtime_run_with_existing_server_url_does_not_start_server(
 
 
 @pytest.mark.unit
-def test_runtime_without_server_url_and_no_start_server_raises_clear_error(
+def test_runtime_without_server_url_and_no_start_server_raises_before_env_or_export(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from Helper_Scripts.cats_fuzz import cli
 
-    monkeypatch.setattr(cli, "build_child_env", lambda output_dir, allow_external=False: {"SAFE": "1"})
-    monkeypatch.setattr(cli, "build_openapi_export_command", lambda path: ["python", "export", str(path)])
-    monkeypatch.setattr(cli.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout="", stderr=""))
-    monkeypatch.setattr(cli, "_cats_version", lambda cats_bin: "cats 13.8.0")
+    def fail_build_child_env(*args: object, **kwargs: object) -> None:
+        raise AssertionError("child env should not be built for invalid runtime invocation")
+
+    def fail_run(*args: object, **kwargs: object) -> None:
+        raise AssertionError("OpenAPI export should not run for invalid runtime invocation")
+
+    monkeypatch.setattr(cli, "build_child_env", fail_build_child_env)
+    monkeypatch.setattr(cli.subprocess, "run", fail_run)
 
     with pytest.raises(ValueError, match="public-read requires --server-url or --start-server"):
         cli.main(["--block", "public-read", "--no-start-server", "--output", str(tmp_path)])
+
+
+@pytest.mark.unit
+def test_openapi_export_failure_writes_logs_and_stops_before_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from Helper_Scripts.cats_fuzz import cli
+
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool = False,
+        capture_output: bool = False,
+        text: bool = False,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert command == ["python", "export", str(tmp_path / "openapi.json")]
+        assert check is False
+        assert capture_output is True
+        assert text is True
+        assert env == {"SAFE": "1"}
+        return subprocess.CompletedProcess(command, 9, stdout="export out", stderr="export err")
+
+    def fail_start_or_run(*args: object, **kwargs: object) -> None:
+        raise AssertionError("server and CATS blocks should not run after export failure")
+
+    monkeypatch.setattr(cli, "build_child_env", lambda output_dir, allow_external=False: {"SAFE": "1"})
+    monkeypatch.setattr(cli, "build_openapi_export_command", lambda path: ["python", "export", str(path)])
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "start_server", fail_start_or_run)
+    monkeypatch.setattr(cli, "run_contract_block", fail_start_or_run)
+    monkeypatch.setattr(cli, "run_runtime_block", fail_start_or_run)
+
+    result = cli.main(["--output", str(tmp_path)])
+
+    assert result == 9
+    assert (tmp_path / "openapi-export.stdout.log").read_text(encoding="utf-8") == "export out"
+    assert (tmp_path / "openapi-export.stderr.log").read_text(encoding="utf-8") == "export err"
+    assert f"OpenAPI export failed; see {tmp_path / 'openapi-export.stderr.log'}" in capsys.readouterr().err
 
 
 @pytest.mark.unit
@@ -253,7 +315,7 @@ def test_cats_version_falls_back_to_unknown(monkeypatch: pytest.MonkeyPatch) -> 
     from Helper_Scripts.cats_fuzz import cli
 
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(["cats", "--version"], 127, stdout="", stderr="")
+        return subprocess.CompletedProcess(["cats", "--version"], 127, stdout="", stderr="cats error")
 
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
 
