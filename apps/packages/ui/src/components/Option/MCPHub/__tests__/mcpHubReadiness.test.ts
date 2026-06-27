@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest"
 import {
   getMcpCredentialState,
   getMcpHubReadiness,
-  getMcpServerReadiness
+  getMcpServerReadiness,
+  type McpReadinessAction,
+  type McpReasonCode
 } from "../mcpHubReadiness"
 import type {
   McpHubExternalServer,
@@ -58,6 +60,28 @@ const registryEntry = (
   ...overrides
 })
 
+const expectSingleReasonActions = (
+  reasonCode: McpReasonCode,
+  allowedActions: McpReadinessAction[]
+) => {
+  const readiness = getMcpServerReadiness({
+    server: server(),
+    registryEntries: reasonCode === "discovery_not_run" ? [] : [registryEntry()],
+    readinessHint: {
+      preflightFailed: reasonCode === "preflight_failed",
+      unreachable: reasonCode === "unreachable",
+      discoveryFailed: reasonCode === "discovery_failed",
+      configChanged: reasonCode === "config_changed",
+      catalogExpired: reasonCode === "catalog_expired",
+      partialCapability: reasonCode === "partial_capability"
+    }
+  })
+
+  expect(readiness.primaryReasonCode).toBe(reasonCode)
+  expect(readiness.reasonCodes).toEqual([reasonCode])
+  expect(readiness.allowedActions).toEqual(allowedActions)
+}
+
 describe("mcpHubReadiness", () => {
   it("maps an empty hub to setup with an add server action", () => {
     expect(
@@ -75,7 +99,7 @@ describe("mcpHubReadiness", () => {
 
   it("marks no-auth stdio servers as not requiring credentials", () => {
     const readiness = getMcpServerReadiness({
-      server: server(),
+      server: server({ auth_template_blocked_reason: "no_auth_template" }),
       registryEntries: [registryEntry()]
     })
 
@@ -112,6 +136,14 @@ describe("mcpHubReadiness", () => {
     })
   })
 
+  it("uses the planned action contract for preflight_failed", () => {
+    expectSingleReasonActions("preflight_failed", [
+      "edit_config",
+      "validate",
+      "view_details"
+    ])
+  })
+
   it("maps missing required credential slots to auth_missing", () => {
     const readiness = getMcpServerReadiness({
       server: server({
@@ -127,6 +159,85 @@ describe("mcpHubReadiness", () => {
       reasonCodes: ["auth_missing"]
     })
     expect(readiness.allowedActions).toContain("open_credentials")
+  })
+
+  it("uses the planned action contract for auth_missing", () => {
+    const readiness = getMcpServerReadiness({
+      server: server({
+        credential_slots: [credentialSlot()]
+      }),
+      registryEntries: [registryEntry()]
+    })
+
+    expect(readiness.allowedActions).toEqual(["open_credentials", "view_details"])
+  })
+
+  it("maps configured credential slots to configured", () => {
+    expect(
+      getMcpCredentialState(
+        server({
+          credential_slots: [credentialSlot({ secret_configured: true })]
+        })
+      )
+    ).toBe("configured")
+  })
+
+  it("maps valid auth templates to configured", () => {
+    expect(
+      getMcpCredentialState(
+        server({
+          auth_template_present: true,
+          auth_template_valid: true,
+          credential_slots: []
+        })
+      )
+    ).toBe("configured")
+  })
+
+  it("maps non-stdio servers without credential signals to unknown", () => {
+    expect(
+      getMcpCredentialState(
+        server({
+          transport: "http",
+          auth_template_present: false,
+          auth_template_valid: false,
+          credential_slots: []
+        })
+      )
+    ).toBe("unknown")
+  })
+
+  it("maps invalid auth templates to preflight_failed even with matching tools", () => {
+    expect(
+      getMcpServerReadiness({
+        server: server({
+          auth_template_present: true,
+          auth_template_valid: false,
+          credential_slots: []
+        }),
+        registryEntries: [registryEntry()]
+      })
+    ).toMatchObject({
+      displayState: "needs_attention",
+      primaryReasonCode: "preflight_failed",
+      reasonCodes: ["preflight_failed"]
+    })
+  })
+
+  it("maps blocking auth template reasons to preflight_failed", () => {
+    expect(
+      getMcpServerReadiness({
+        server: server({
+          auth_template_blocked_reason: "missing_slot_mapping",
+          credential_slots: []
+        }),
+        registryEntries: [registryEntry()]
+      })
+    ).toMatchObject({
+      displayState: "needs_attention",
+      primaryReasonCode: "preflight_failed",
+      reasonCodes: ["preflight_failed"]
+    })
   })
 
   it("maps unavailable runtimes to runtime_unavailable", () => {
@@ -156,6 +267,14 @@ describe("mcpHubReadiness", () => {
     })
   })
 
+  it("uses the planned action contract for unreachable", () => {
+    expectSingleReasonActions("unreachable", [
+      "edit_config",
+      "refresh_discovery",
+      "view_details"
+    ])
+  })
+
   it("maps discovery failure hints to discovery_failed", () => {
     expect(
       getMcpServerReadiness({
@@ -177,10 +296,17 @@ describe("mcpHubReadiness", () => {
         registryEntries: []
       })
     ).toMatchObject({
-      displayState: "needs_setup",
+      displayState: "needs_attention",
       primaryReasonCode: "discovery_not_run",
       reasonCodes: ["discovery_not_run"]
     })
+  })
+
+  it("uses the planned action contract for discovery_not_run", () => {
+    expectSingleReasonActions("discovery_not_run", [
+      "refresh_discovery",
+      "edit_config"
+    ])
   })
 
   it("maps configChanged hints to stale with refresh discovery", () => {
@@ -198,22 +324,46 @@ describe("mcpHubReadiness", () => {
     expect(readiness.allowedActions).toContain("refresh_discovery")
   })
 
+  it("uses the planned action contract for config_changed", () => {
+    expectSingleReasonActions("config_changed", [
+      "refresh_discovery",
+      "edit_config"
+    ])
+  })
+
+  it("uses the planned action contract for catalog_expired", () => {
+    expectSingleReasonActions("catalog_expired", [
+      "refresh_discovery",
+      "view_details"
+    ])
+  })
+
   it("preserves multiple reasons and unions actions without duplicates", () => {
     const readiness = getMcpServerReadiness({
       server: server({
         credential_slots: [credentialSlot()]
       }),
       registryEntries: [registryEntry()],
-      readinessHint: { configChanged: true }
+      readinessHint: { preflightFailed: true, configChanged: true }
     })
 
-    expect(readiness.reasonCodes).toEqual(["auth_missing", "config_changed"])
+    expect(readiness.reasonCodes).toEqual([
+      "auth_missing",
+      "preflight_failed",
+      "config_changed"
+    ])
     expect(readiness.primaryReasonCode).toBe("auth_missing")
     expect(readiness.allowedActions).toEqual([
       ...new Set(readiness.allowedActions)
     ])
     expect(readiness.allowedActions).toEqual(
-      expect.arrayContaining(["open_credentials", "refresh_discovery"])
+      expect.arrayContaining([
+        "open_credentials",
+        "view_details",
+        "edit_config",
+        "validate",
+        "refresh_discovery"
+      ])
     )
   })
 
@@ -247,6 +397,27 @@ describe("mcpHubReadiness", () => {
       displayState: "ready",
       primaryReasonCode: "partial_capability",
       reasonCodes: ["partial_capability"]
+    })
+  })
+
+  it("uses the planned action contract for partial_capability", () => {
+    expectSingleReasonActions("partial_capability", [
+      "open_tool_catalog",
+      "view_details"
+    ])
+  })
+
+  it("does not add partial_capability when no tools are registered", () => {
+    expect(
+      getMcpServerReadiness({
+        server: server(),
+        registryEntries: [],
+        readinessHint: { partialCapability: true }
+      })
+    ).toMatchObject({
+      displayState: "needs_attention",
+      primaryReasonCode: "discovery_not_run",
+      reasonCodes: ["discovery_not_run"]
     })
   })
 

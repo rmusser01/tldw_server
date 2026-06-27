@@ -95,41 +95,30 @@ type ReadinessHintsByServerId =
 
 const REASON_PRIORITY: Record<McpReasonCode, number> = {
   not_configured: 0,
-  preflight_failed: 10,
-  auth_missing: 20,
-  runtime_unavailable: 30,
+  auth_missing: 10,
+  runtime_unavailable: 20,
+  preflight_failed: 30,
   unreachable: 40,
   discovery_failed: 50,
   config_changed: 60,
-  catalog_expired: 70,
-  discovery_not_run: 80,
-  no_tools_returned: 90,
+  discovery_not_run: 70,
+  no_tools_returned: 80,
+  catalog_expired: 90,
   partial_capability: 100
-}
-
-const ACTION_PRIORITY: Record<McpReadinessAction, number> = {
-  add_server: 0,
-  edit_config: 10,
-  open_credentials: 20,
-  refresh_discovery: 30,
-  validate: 40,
-  view_details: 50,
-  open_tool_catalog: 60,
-  open_audit: 70
 }
 
 const REASON_ACTIONS: Record<McpReasonCode, McpReadinessAction[]> = {
   not_configured: ["add_server"],
-  preflight_failed: ["validate", "view_details"],
-  discovery_not_run: ["refresh_discovery", "open_tool_catalog"],
-  auth_missing: ["open_credentials", "edit_config"],
+  preflight_failed: ["edit_config", "validate", "view_details"],
+  discovery_not_run: ["refresh_discovery", "edit_config"],
+  auth_missing: ["open_credentials", "view_details"],
   runtime_unavailable: ["edit_config", "view_details"],
-  unreachable: ["validate", "edit_config", "view_details"],
+  unreachable: ["edit_config", "refresh_discovery", "view_details"],
   discovery_failed: ["refresh_discovery", "view_details"],
   no_tools_returned: ["open_tool_catalog", "refresh_discovery", "view_details"],
-  config_changed: ["refresh_discovery", "validate"],
-  catalog_expired: ["refresh_discovery", "open_tool_catalog"],
-  partial_capability: ["open_tool_catalog", "open_audit"]
+  config_changed: ["refresh_discovery", "edit_config"],
+  catalog_expired: ["refresh_discovery", "view_details"],
+  partial_capability: ["open_tool_catalog", "view_details"]
 }
 
 const SERVER_READY_ACTIONS: McpReadinessAction[] = ["open_tool_catalog", "view_details"]
@@ -142,21 +131,28 @@ const sortReasonCodes = (reasonCodes: McpReasonCode[]): McpReasonCode[] =>
       REASON_PRIORITY[left] - REASON_PRIORITY[right] || left.localeCompare(right)
   )
 
-const sortActions = (actions: McpReadinessAction[]): McpReadinessAction[] =>
-  [...new Set(actions)].sort(
-    (left, right) =>
-      ACTION_PRIORITY[left] - ACTION_PRIORITY[right] || left.localeCompare(right)
-  )
+const uniqueActions = (actions: McpReadinessAction[]): McpReadinessAction[] => {
+  const seenActions = new Set<McpReadinessAction>()
+
+  return actions.filter((action) => {
+    if (seenActions.has(action)) {
+      return false
+    }
+
+    seenActions.add(action)
+    return true
+  })
+}
 
 const getActionsForReasons = (
   reasonCodes: McpReasonCode[],
   fallbackActions: McpReadinessAction[] = []
 ): McpReadinessAction[] => {
   if (reasonCodes.length === 0) {
-    return sortActions(fallbackActions)
+    return uniqueActions(fallbackActions)
   }
 
-  return sortActions(reasonCodes.flatMap((reasonCode) => REASON_ACTIONS[reasonCode]))
+  return uniqueActions(reasonCodes.flatMap((reasonCode) => REASON_ACTIONS[reasonCode]))
 }
 
 const getDisplayStateForReason = (
@@ -167,13 +163,13 @@ const getDisplayStateForReason = (
     case "partial_capability":
       return "ready"
     case "not_configured":
-    case "discovery_not_run":
       return "needs_setup"
     case "config_changed":
     case "catalog_expired":
       return "stale"
     case "no_tools_returned":
       return "no_tools"
+    case "discovery_not_run":
     case "preflight_failed":
     case "auth_missing":
     case "runtime_unavailable":
@@ -331,6 +327,15 @@ const getReadinessHint = (
   return readinessHintsByServerId[serverId]
 }
 
+const hasBlockingAuthTemplateIssue = (server: McpHubExternalServer): boolean => {
+  const blockedReason = server.auth_template_blocked_reason?.trim()
+
+  return (
+    (server.auth_template_present === true && server.auth_template_valid === false) ||
+    Boolean(blockedReason && blockedReason !== "no_auth_template")
+  )
+}
+
 export const getMcpCredentialState = (
   server: McpHubExternalServer
 ): McpCredentialState => {
@@ -376,7 +381,7 @@ export const getMcpServerReadiness = ({
   const toolCount = countMatchingTools(server, registryEntries)
   const unsortedReasonCodes: McpReasonCode[] = []
 
-  if (readinessHint?.preflightFailed) {
+  if (readinessHint?.preflightFailed || hasBlockingAuthTemplateIssue(server)) {
     unsortedReasonCodes.push("preflight_failed")
   }
 
@@ -412,7 +417,7 @@ export const getMcpServerReadiness = ({
     )
   }
 
-  if (readinessHint?.partialCapability) {
+  if (readinessHint?.partialCapability && toolCount > 0) {
     unsortedReasonCodes.push("partial_capability")
   }
 
