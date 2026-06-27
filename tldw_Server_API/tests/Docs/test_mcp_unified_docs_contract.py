@@ -38,3 +38,35 @@ def test_unified_mcp_docs_state_embedded_today_standalone_planned() -> None:
         "planned" in docs or "not yet shipped" in docs,
         "Unified MCP docs should distinguish planned standalone work from shipped behavior.",
     )
+
+
+def test_unified_mcp_quickstart_reaches_authenticated_tool_list() -> None:
+    """The user guide should lead users to one verified first success."""
+    guide = _read("Docs/MCP/Unified/User_Guide.md").lower()
+
+    _require("golden path" in guide, "User guide should name a golden path quickstart.")
+    _require(
+        "authorization: bearer" in guide or "x-api-key" in guide,
+        "Golden path should show a default supported auth header.",
+    )
+    _require("tools/list" in guide, "Golden path should include a tools/list request.")
+    _require("tools/call" in guide, "Golden path should include a tools/call request.")
+    _require(
+        "expected response" in guide,
+        "Golden path should include expected response shape so users can recognize success.",
+    )
+
+
+def test_unified_mcp_auth_matrix_exists() -> None:
+    """Auth docs should classify methods by use, status, and transport."""
+    guide = _read("Docs/MCP/Unified/User_Guide.md").lower()
+
+    for snippet in (
+        "auth method",
+        "best for",
+        "default status",
+        "recommended",
+        "disabled by default",
+        "query",
+    ):
+        _require(snippet in guide, f"Auth matrix should mention {snippet}.")

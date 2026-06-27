@@ -95,6 +95,8 @@ Current enterprise support matrix for this path:
 
 ## 🚀 Quick Start
 
+For an end-to-end first success, use the Golden Path Quickstart in `Docs/MCP/Unified/User_Guide.md`. The commands below are contributor-oriented runtime checks, not a standalone gateway install flow.
+
 ### 1. Set Required Environment Variables
 
 ```bash

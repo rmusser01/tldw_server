@@ -19,7 +19,7 @@ MCP Unified is the TLDW server's production Model Context Protocol surface. It s
 
 Main base path: `http://127.0.0.1:8000/api/v1/mcp`
 
-## 2. Getting Started
+## 2. Golden Path Quickstart
 
 ### Prerequisites
 
@@ -27,6 +27,9 @@ Main base path: `http://127.0.0.1:8000/api/v1/mcp`
 - Virtual environment created
 - Dependencies installed
 - TLDW server configured (including AuthNZ if required)
+- One usable credential:
+  - Single-user local mode: `SINGLE_USER_API_KEY`
+  - Multi-user mode: AuthNZ access token
 
 ### Step 1: Start the server
 
@@ -51,28 +54,74 @@ Then check health:
 curl http://127.0.0.1:8000/api/v1/mcp/health
 ```
 
-### Step 3: Authenticate
+### Step 3: Pick one default auth header
 
-Recommended in production: use an AuthNZ access token.
-
-```bash
-curl -H "Authorization: Bearer <authnz_access_token>" \
-  http://127.0.0.1:8000/api/v1/mcp/tools
-```
-
-HTTP API key option:
+Use a bearer token in multi-user mode:
 
 ```bash
-curl -H "X-API-KEY: <api_key>" \
-  http://127.0.0.1:8000/api/v1/mcp/tools
+export MCP_AUTH_HEADER="Authorization: Bearer <authnz_access_token>"
 ```
+
+Use an API key in local single-user mode:
+
+```bash
+export MCP_AUTH_HEADER="X-API-KEY: <api_key>"
+```
+
+### Step 4: Initialize MCP
+
+```bash
+curl -s \
+  -H "$MCP_AUTH_HEADER" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{"clientInfo":{"name":"docs-golden-path","version":"1.0.0"}}}' \
+  http://127.0.0.1:8000/api/v1/mcp/request
+```
+
+Expected response: a JSON-RPC response with `result.serverInfo` and `result.capabilities`.
+
+### Step 5: List available tools
+
+```bash
+curl -s \
+  -H "$MCP_AUTH_HEADER" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"tools-1","method":"tools/list","params":{}}' \
+  http://127.0.0.1:8000/api/v1/mcp/request
+```
+
+Expected response: `result.tools` is an array. Each tool includes a name and execution metadata such as `canExecute` when permissions are available.
+
+### Step 6: Call a read-only discovery tool
+
+The discovery module is enabled in the default module config. Use `mcp.modules.list` as the first safe tool call:
+
+```bash
+curl -s \
+  -H "$MCP_AUTH_HEADER" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"mcp.modules.list","arguments":{}}}' \
+  http://127.0.0.1:8000/api/v1/mcp/request
+```
+
+Expected response: `result.content` or `result.structuredContent` contains the visible MCP module list. If the response is a 403, the credential is valid but lacks the needed `tools.execute:mcp.modules.list` or wildcard execute permission.
 
 Demo token endpoint (`POST /auth/token`) exists only for debug/test workflows and is disabled unless explicitly enabled with:
 
 - `MCP_ENABLE_DEMO_AUTH=1`
 - `MCP_DEMO_AUTH_SECRET=<strong-secret>`
 
-## 3. Endpoint Quick Reference
+## 3. Authentication Matrix
+
+| Auth method | Best for | Default status | Where it is sent | Notes |
+|---|---|---|---|---|
+| AuthNZ JWT | Multi-user TLDW deployments | Recommended | `Authorization: Bearer ...` | Uses the main app identity and permissions. |
+| Single-user API key | Local single-user deployments | Supported | `X-API-KEY` | Keep out of URLs and logs. |
+| MCP JWT | Dedicated MCP integrations | Supported when configured | `Authorization: Bearer ...` or WebSocket subprotocol | Use when an MCP-only token lifecycle is desired. |
+| Demo token | Local demos only | Disabled unless explicitly enabled | Header/subprotocol | Never use for shared deployments. |
+| Query token/API key | Legacy/manual debugging only | Disabled by default | URL query string | Avoid because URLs are commonly logged. |
+
+## 4. Endpoint Quick Reference
 
 | Endpoint | Method | Purpose | Auth |
 |---|---|---|---|

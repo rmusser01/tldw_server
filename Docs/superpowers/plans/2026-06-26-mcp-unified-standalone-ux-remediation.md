@@ -229,7 +229,7 @@ git commit -m "docs: mark mcp docker path experimental"
 - Modify: `tldw_Server_API/app/core/MCP_unified/README.md`
 - Modify: `tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py`
 
-- [ ] **Step 1: Add failing docs tests for quickstart completeness and auth matrix**
+- [x] **Step 1: Add failing docs tests for quickstart completeness and auth matrix**
 
 ```python
 def test_unified_mcp_quickstart_reaches_authenticated_tool_list():
@@ -251,7 +251,7 @@ def test_unified_mcp_auth_matrix_exists():
     assert "query" in guide
 ```
 
-- [ ] **Step 2: Run the failing docs tests**
+- [x] **Step 2: Run the failing docs tests**
 
 Run:
 
@@ -262,7 +262,7 @@ python -m pytest tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py -v
 
 Expected: FAIL for new quickstart/auth expectations.
 
-- [ ] **Step 3: Add a "Golden Path" quickstart**
+- [x] **Step 3: Add a "Golden Path" quickstart**
 
 In `Docs/MCP/Unified/User_Guide.md`, add a first section that includes:
 
@@ -275,7 +275,7 @@ In `Docs/MCP/Unified/User_Guide.md`, add a first section that includes:
 - Show expected response shape.
 - Link to troubleshooting for auth, empty tool list, and degraded module status.
 
-- [ ] **Step 4: Add a canonical auth matrix**
+- [x] **Step 4: Add a canonical auth matrix**
 
 Use this structure:
 
@@ -289,11 +289,11 @@ Use this structure:
 | Query token/API key | Legacy/manual debugging only | Disabled by default | URL query string | Avoid because URLs are commonly logged. |
 ```
 
-- [ ] **Step 5: Align snippets and env var docs**
+- [x] **Step 5: Align snippets and env var docs**
 
 Update snippets so primary examples use header/subprotocol auth, not query auth. Add missing MCP env vars to `Docs/Operations/Env_Vars.md` with defaults and risk notes.
 
-- [ ] **Step 6: Re-run docs tests**
+- [x] **Step 6: Re-run docs tests**
 
 Run:
 
@@ -304,7 +304,7 @@ python -m pytest tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py -v
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 3**
+- [x] **Step 7: Commit Task 3**
 
 ```bash
 git add Docs/MCP/Unified/User_Guide.md Docs/MCP/Unified/Client_Snippets.md Docs/MCP/Unified/System_Admin_Guide.md Docs/Operations/Env_Vars.md tldw_Server_API/app/core/MCP_unified/README.md tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py

@@ -21,6 +21,8 @@ documentation:
 modified_files:
 - Docs/MCP/Unified/README.md
 - Docs/MCP/Unified/User_Guide.md
+- Docs/MCP/Unified/Client_Snippets.md
+- Docs/Operations/Env_Vars.md
 - Docs/Product/MCP-Unified-Extraction.md
 - Docs/superpowers/plans/2026-06-26-mcp-unified-standalone-ux-remediation.md
 - backlog/tasks/task-2393 - Plan-and-implement-MCP-Unified-standalone-UX-remediation.md
@@ -40,8 +42,8 @@ Address the UX/product review findings for Unified MCP standalone/embedded exper
 <!-- AC:BEGIN -->
 - [x] #1 Current embedded vs planned standalone state is clear in primary MCP docs.
 - [x] #2 Documented launch paths are either verified working or explicitly marked unsupported/experimental.
-- [ ] #3 Quickstart reaches a successful authenticated tools/list and read-only tool call.
-- [ ] #4 Auth methods are described in one canonical matrix and primary examples avoid disabled-by-default query auth.
+- [x] #3 Quickstart reaches a successful authenticated tools/list and read-only tool call.
+- [x] #4 Auth methods are described in one canonical matrix and primary examples avoid disabled-by-default query auth.
 - [ ] #5 Effective enabled MCP surface is visible by module/risk tier.
 - [ ] #6 Unresolved catalog filters do not silently broaden discovery.
 - [ ] #7 Status or diagnostics surface sanitized module/config problems with next actions.
@@ -61,6 +63,7 @@ Docs/superpowers/plans/2026-06-26-mcp-unified-standalone-ux-remediation.md
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-06-26: Task 1 complete in worktree `codex/mcp-unified-ux-remediation`. Added docs contract test for embedded-vs-standalone clarity, observed the expected red failure, added current-state banners to primary MCP docs, added PRD status note, and verified the focused test now passes.
 - 2026-06-26: Task 2 complete. Replaced brittle MCP-specific Dockerfile launch assertions with an explicit experimental-status contract, added `tldw_Server_API/app/core/MCP_unified/docker/README.md`, and added a warning to the core MCP README Docker section. Verified Docker contract tests pass.
+- 2026-06-26: Task 3 complete. Added User Guide Golden Path quickstart with supported auth header, initialize, `tools/list`, and read-only `tools/call`; added canonical auth matrix; aligned client snippets with header/subprotocol auth and strict catalog examples; expanded MCP env var docs; linked core README quickstart to the User Guide. Verified docs contract tests pass.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

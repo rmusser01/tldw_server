@@ -557,6 +557,14 @@ Quick start (local dev):
 - `MCP_JWT_SECRET`: Secret used by the MCP server for issuing/verifying tokens.
 - `MCP_API_KEY_SALT`: Salt used for API key hashing/derivation.
 - `MCP_LOG_LEVEL`: MCP module log level (`DEBUG|INFO|WARNING|ERROR`).
+- `MCP_ENABLE_DEMO_AUTH`: Enables demo token issuance only for local debug/test workflows. Keep disabled for shared deployments.
+- `MCP_DEMO_AUTH_SECRET`: Required when demo auth is enabled.
+- `MCP_WS_AUTH_REQUIRED`: Requires WebSocket authentication when true. Production deployments should keep this enabled.
+- `MCP_WS_ALLOW_QUERY_AUTH`: Allows token/API-key query parameters for WebSocket auth when true. Disabled by default because URLs are commonly logged.
+- `MCP_CORS_ORIGINS`: Allowed browser origins for MCP HTTP/WebSocket access.
+- `MCP_ALLOWED_IPS`: Optional comma-separated IP/CIDR allowlist for MCP access.
+- `MCP_TOOL_CATEGORY_MAP`: Optional JSON tool-to-rate-limit-category map.
+- `MCP_TOOL_CATEGORY_MAP_FILE`: Optional YAML file containing tool-to-rate-limit-category mappings.
 
 ## OCR - POINTS Reader (optional)
 - `POINTS_MODE`: `sglang` or `transformers` (default: auto).

@@ -6,6 +6,8 @@ Quick, copy-paste examples to authenticate, initialize, discover tools, and call
 - Server running with MCP Unified endpoints mounted at `/api/v1/mcp`
 - Auth token (preferred) or API key
 
+Primary examples use header or WebSocket subprotocol auth. Query-string tokens are disabled by default and should only be used for explicit legacy/debug workflows.
+
 ## JSON-RPC over HTTP (Initialize → Tools List → Tools Call)
 
 ```bash
@@ -15,7 +17,7 @@ curl -i -H "Authorization: Bearer <token>" \
   "http://127.0.0.1:8000/api/v1/mcp/request?config=$cfg" \
   -d '{"jsonrpc":"2.0","method":"initialize","params":{"clientInfo":{"name":"demo"}},"id":1}'
 
-# List tools (RBAC-filtered; add &catalog=... or &catalog_id=... if desired)
+# List tools (RBAC-filtered; add &catalog=...&catalog_strict=true or &catalog_id=... if desired)
 curl -H "Authorization: Bearer <token>" \
   "http://127.0.0.1:8000/api/v1/mcp/tools"
 
@@ -87,6 +89,6 @@ print(exec_resp.json())
 ```
 
 ## Notes
-- Tool discovery can be narrowed with catalogs: `GET /api/v1/mcp/tools?catalog=<name>` or `?catalog_id=<id>`.
+- Tool discovery can be narrowed with catalogs: `GET /api/v1/mcp/tools?catalog=<name>&catalog_strict=true` or `?catalog_id=<id>`.
 - Results include `canExecute` for each tool; catalog membership doesn’t grant execute permissions.
 - Prefer WS headers/subprotocol for auth; query-param tokens are disabled by default.
