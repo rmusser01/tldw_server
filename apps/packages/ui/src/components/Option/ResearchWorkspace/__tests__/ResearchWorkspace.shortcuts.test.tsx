@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { isMac } from "@/hooks/useKeyboardShortcuts"
 import { ResearchWorkspace } from "../index"
 
 const ONBOARDING_KEY = "tldw:research-workspace:onboarding-dismissed:v1"
@@ -208,6 +209,24 @@ describe("ResearchWorkspace keyboard shortcuts modal", () => {
     expect(screen.queryByText("Keyboard Shortcuts")).not.toBeInTheDocument()
   })
 
+  it("does not open global search when the primary search shortcut is pressed in an input", () => {
+    render(
+      <>
+        <input data-testid="external-input" />
+        <ResearchWorkspace />
+      </>
+    )
+
+    const input = screen.getByTestId("external-input")
+    input.focus()
+    fireEvent.keyDown(input, { key: "k", ctrlKey: true })
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(
+      screen.queryByPlaceholderText("Search sources, chat, and notes...")
+    ).not.toBeInTheDocument()
+  })
+
   it("shows all expected keyboard shortcuts in the modal", async () => {
     render(<ResearchWorkspace />)
 
@@ -218,6 +237,7 @@ describe("ResearchWorkspace keyboard shortcuts modal", () => {
     })
 
     expect(screen.getByText("Search workspace")).toBeInTheDocument()
+    expect(screen.getByText(isMac ? "Cmd+K" : "Ctrl+K")).toBeInTheDocument()
     expect(screen.getByText("Focus sources pane")).toBeInTheDocument()
     expect(screen.getByText("Focus chat pane")).toBeInTheDocument()
     expect(screen.getByText("Focus studio pane")).toBeInTheDocument()

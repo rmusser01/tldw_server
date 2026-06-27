@@ -29,6 +29,10 @@ import {
   Modal
 } from "antd"
 import { READY_STATE_LABEL, getDesignSystemState } from "@/design-system"
+import {
+  isWorkspaceSourcePartiallyQueryable,
+  isWorkspaceSourceSelectable
+} from "@/store/workspace-source-status"
 import { useWorkspaceStore } from "@/store/workspace"
 import type {
   WorkspaceSource,
@@ -47,6 +51,7 @@ import {
   scheduleWorkspaceUndoAction,
   undoWorkspaceAction
 } from "../undo-manager"
+import { renderWorkspaceMessageActionContent } from "../workspace-message-content"
 import {
   collectDescendantSourceIds,
   createWorkspaceOrganizationIndex,
@@ -435,6 +440,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   const restoreSource = useWorkspaceStore((s) => s.restoreSource)
   const reorderSource = useWorkspaceStore((s) => s.reorderSource)
   const createSourceFolder = useWorkspaceStore((s) => s.createSourceFolder) || null
+  const renameSourceFolder =
+    useWorkspaceStore((s) => s.renameSourceFolder) || (() => undefined)
   const assignSourceToFolders =
     useWorkspaceStore((s) => s.assignSourceToFolders) || (() => undefined)
   const getEffectiveSelectedSources =
@@ -449,6 +456,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     React.useState(420)
   const [confirmingRemovalSourceId, setConfirmingRemovalSourceId] =
     React.useState<string | null>(null)
+  const [editingFolderId, setEditingFolderId] = React.useState<string | null>(null)
+  const [editingFolderName, setEditingFolderName] = React.useState("")
   const [draggedSourceId, setDraggedSourceId] = React.useState<string | null>(null)
   const [previewSourceId, setPreviewSourceId] = React.useState<string | null>(null)
   const [statusDetailsSourceId, setStatusDetailsSourceId] = React.useState<
@@ -1032,8 +1041,34 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       return
     }
 
-    createSourceFolder("New folder", activeFolderId)
-  }, [activeFolderId, createSourceFolder])
+    const folder = createSourceFolder("New folder", activeFolderId)
+    if (folder?.id) {
+      setActiveFolder(folder.id)
+      setEditingFolderId(folder.id)
+      setEditingFolderName(folder.name || "New folder")
+    }
+  }, [
+    activeFolderId,
+    createSourceFolder,
+    setActiveFolder,
+    setEditingFolderId,
+    setEditingFolderName
+  ])
+
+  const handleCommitFolderRename = React.useCallback(
+    (folderId: string) => {
+      const trimmedName = editingFolderName.trim()
+      renameSourceFolder(folderId, trimmedName || "Untitled folder")
+      setEditingFolderId(null)
+      setEditingFolderName("")
+    },
+    [editingFolderName, renameSourceFolder]
+  )
+
+  const handleCancelFolderRename = React.useCallback(() => {
+    setEditingFolderId(null)
+    setEditingFolderName("")
+  }, [])
 
   const resetAnnotationEditor = React.useCallback(() => {
     setAnnotationQuoteDraft("")
@@ -1181,15 +1216,16 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       const maybeOpen = (
         messageApi as { open?: (config: unknown) => void }
       ).open
+      const removeContent = t(
+        "playground:sources.annotationRemoved",
+        "Annotation removed."
+      )
       const messageConfig = {
         key: undoMessageKey,
         type: "warning",
         duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-        content: t(
-          "playground:sources.annotationRemoved",
-          "Annotation removed."
-        ),
-        btn: (
+        content: renderWorkspaceMessageActionContent(
+          removeContent,
           <Button
             size="small"
             type="link"
@@ -1217,7 +1253,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           messageApi as { warning?: (content: string) => void }
         ).warning
         if (typeof maybeWarning === "function") {
-          maybeWarning(t("playground:sources.annotationRemoved", "Annotation removed."))
+          maybeWarning(removeContent)
         }
       }
     },
@@ -1256,15 +1292,17 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       const maybeOpen = (
         messageApi as { open?: (config: unknown) => void }
       ).open
+      const removeContent = t(
+        "playground:sources.undoRemoveNamed",
+        "{{title}} removed. You can undo this for a few seconds.",
+        { title: source.title }
+      )
       const messageConfig = {
         key: undoMessageKey,
         type: "warning",
         duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-        content: t(
-          "playground:sources.undoRemove",
-          "Source removed."
-        ),
-        btn: (
+        content: renderWorkspaceMessageActionContent(
+          removeContent,
           <Button
             size="small"
             type="link"
@@ -1288,7 +1326,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           messageApi as { warning?: (content: string) => void }
         ).warning
         if (typeof maybeWarning === "function") {
-          maybeWarning(t("playground:sources.undoRemove", "Source removed."))
+          maybeWarning(removeContent)
         }
       }
     },
@@ -1403,6 +1441,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     const isReady = sourceStatus === "ready"
     const isProcessing = sourceStatus === "processing"
     const isError = sourceStatus === "error"
+    const isPartiallyQueryable = isWorkspaceSourcePartiallyQueryable(source)
+    const isSelectable = isWorkspaceSourceSelectable(source)
     const canReorder = !isTemporarySortActive && isReady
     const processingStatusText =
       typeof source.statusMessage === "string" && source.statusMessage.trim().length > 0
@@ -1437,13 +1477,17 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     const isDropTarget = draggedSourceId != null && draggedSourceId !== source.id
     const assignedFolderIds = organizationIndex.folderIdsBySourceId.get(source.id) || []
     const sourceTypeLabel = t(`playground:sources.type.${source.type}`, source.type)
-    const sourceStatusLabel = isProcessing
-      ? t("playground:sources.statusProcessing", "Processing")
+    const sourceStatusLabel = isPartiallyQueryable
+      ? t("playground:sources.statusTextSearchable", "Text searchable")
+      : isProcessing
+        ? t("playground:sources.statusProcessing", "Processing")
       : isError
         ? t("playground:sources.statusErrorShort", "Error")
         : readyStateLabel
-    const sourceStatusClass = isProcessing
-      ? "border-primary/30 bg-primary/10 text-primary"
+    const sourceStatusClass = isPartiallyQueryable
+      ? "border-warning/30 bg-warning/10 text-warning"
+      : isProcessing
+        ? "border-primary/30 bg-primary/10 text-primary"
       : isError
         ? "border-error/30 bg-error/10 text-error"
         : "border-success/30 bg-success/10 text-success"
@@ -1512,7 +1556,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               title: source.title
             })}
             checked={isSelected}
-            disabled={!isReady}
+            disabled={!isSelectable}
             onChange={() => {
               if (selectionOrigin === "folder") {
                 return
@@ -1787,7 +1831,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             type="primary"
             size="small"
             icon={<Plus className="h-3.5 w-3.5" />}
-            onClick={() => openAddSourceModal("existing")}
+            onClick={() => openAddSourceModal("upload")}
           >
             {t("playground:sources.addSources", "Add Sources")}
           </Button>
@@ -1810,6 +1854,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       <div className="shrink-0 border-b border-border px-4 py-1.5">
         <Input
           data-testid="quick-url-input"
+          aria-label={t("playground:sources.quickUrlLabel", "Quick add URL")}
           placeholder={t(
             "playground:sources.quickUrlPlaceholder",
             "Paste a URL to add..."
@@ -1852,6 +1897,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           <div className="px-4 py-2">
             <Input
               prefix={<Search className="h-4 w-4 text-text-muted" />}
+              aria-label={t("playground:sources.searchSourcesLabel", "Search sources")}
               placeholder={t("playground:sources.searchPlaceholder", "Search sources...")}
               value={sourceSearchQuery}
               onChange={(e) => setSourceSearchQuery(e.target.value)}
@@ -1967,6 +2013,11 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           selectionStateByFolderId={selectionStateByFolderId}
           onClearFocus={() => setActiveFolder(null)}
           onCreateFolder={handleCreateSourceFolder}
+          editingFolderId={editingFolderId}
+          editingFolderName={editingFolderName}
+          onEditingFolderNameChange={setEditingFolderName}
+          onCommitFolderRename={handleCommitFolderRename}
+          onCancelFolderRename={handleCancelFolderRename}
           onFocusFolder={setActiveFolder}
           onToggleFolderSelection={toggleSourceFolderSelection}
         />
@@ -2000,9 +2051,37 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                     </p>
                   </div>
                 ) : (
-                  <span className="text-text-muted">
-                    {t("playground:sources.noResults", "No matching sources")}
-                  </span>
+                  <div className="space-y-2 text-center">
+                    <p className="text-text-muted">
+                      {t(
+                        "playground:sources.noResultsFiltered",
+                        "No sources match the current filters."
+                      )}
+                    </p>
+                    <p className="text-xs text-text-subtle">
+                      {t(
+                        "playground:sources.filteredCountSummary",
+                        "Showing {{filtered}} of {{total}} sources.",
+                        {
+                          filtered: filteredSources.length,
+                          total: sources.length
+                        }
+                      )}
+                    </p>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setSourceSearchQuery("")
+                        setActiveFolder(null)
+                        resetAdvancedSourceFilters()
+                      }}
+                    >
+                      {t(
+                        "playground:sources.clearSearchAndFilters",
+                        "Clear search and filters"
+                      )}
+                    </Button>
+                  </div>
                 )
               }
             >
@@ -2011,7 +2090,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                   type="primary"
                   size="small"
                   icon={<Plus className="h-3.5 w-3.5" />}
-                  onClick={() => openAddSourceModal("existing")}
+                  onClick={() => openAddSourceModal("upload")}
                 >
                   {t("playground:sources.addFirst", "Add your first source")}
                 </Button>

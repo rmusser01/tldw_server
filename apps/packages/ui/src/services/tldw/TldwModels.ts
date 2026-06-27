@@ -84,6 +84,9 @@ export interface ModelInfo {
   providerIsConfigured?: boolean
   providerEnabled?: boolean
   availability?: string
+  readinessReasonCode?: string
+  readinessMessage?: string
+  chatProvider?: string
   catalogOnly?: boolean
   modalities?: {
     input?: string[]
@@ -98,7 +101,7 @@ export class TldwModelsService {
   private readonly CACHE_DURATION = 15 * 60 * 1000 // 15 minutes
   private readonly FORCE_REFRESH_COOLDOWN = 30 * 1000
   private readonly CACHE_KEY = "tldwModelsCache"
-  private readonly CACHE_SCHEMA_VERSION = 3
+  private readonly CACHE_SCHEMA_VERSION = 4
   private storage = createSafeStorage({ area: "local" })
   private storageLoaded = false
   private storageInitPromise: Promise<void> | null = null
@@ -422,6 +425,12 @@ export class TldwModelsService {
     const provider = tldwModel.provider || inferred || "unknown"
     const toOptionalBoolean = (value: unknown): boolean | undefined =>
       typeof value === "boolean" ? value : undefined
+    const toOptionalString = (value: unknown): string | undefined => {
+      if (typeof value !== "string") return undefined
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : undefined
+    }
+    const rawModel = tldwModel as TldwModel & Record<string, unknown>
 
     return {
       id: tldwModel.id,
@@ -433,17 +442,30 @@ export class TldwModelsService {
       description: tldwModel.description,
       modalities: tldwModel.modalities,
       isConfigured: toOptionalBoolean(tldwModel.is_configured),
+      providerIsConfigured: toOptionalBoolean(
+        rawModel.provider_is_configured ?? rawModel.providerIsConfigured
+      ),
       providerEnabled: toOptionalBoolean(tldwModel.provider_enabled),
       availability:
         typeof tldwModel.availability === "string"
           ? tldwModel.availability
-          : undefined
+          : undefined,
+      readinessReasonCode: toOptionalString(
+        rawModel.readiness_reason_code ?? rawModel.readinessReasonCode
+      ),
+      readinessMessage: toOptionalString(
+        rawModel.readiness_message ?? rawModel.readinessMessage
+      ),
+      chatProvider: toOptionalString(
+        rawModel.chat_provider ?? rawModel.chatProvider
+      )
     }
   }
 
   private isSelectableChatModel(model: ModelInfo): boolean {
     if (model.type !== "chat") return false
     if (model.isConfigured === false) return false
+    if (model.providerIsConfigured === false) return false
     if (model.providerEnabled === false) return false
     const availability = model.availability?.trim().toLowerCase()
     if (

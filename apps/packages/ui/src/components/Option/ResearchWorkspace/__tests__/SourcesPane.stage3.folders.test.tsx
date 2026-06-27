@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { SourcesPane } from "../SourcesPane"
+import { SourceFolderTree } from "../SourcesPane/SourceFolderTree"
 
 const mockToggleSourceSelection = vi.fn()
 const mockSelectAllSources = vi.fn()
@@ -19,6 +20,7 @@ const mockAssignSourceToFolders = vi.fn()
 const mockGetEffectiveSelectedSources = vi.fn()
 const mockGetEffectiveSelectedMediaIds = vi.fn()
 const mockCreateSourceFolder = vi.fn()
+const mockRenameSourceFolder = vi.fn()
 
 const workspaceStoreState = {
   sources: [
@@ -81,6 +83,7 @@ const workspaceStoreState = {
   toggleSourceFolderSelection: mockToggleSourceFolderSelection,
   assignSourceToFolders: mockAssignSourceToFolders,
   createSourceFolder: mockCreateSourceFolder,
+  renameSourceFolder: mockRenameSourceFolder,
   getEffectiveSelectedSources: mockGetEffectiveSelectedSources,
   getEffectiveSelectedMediaIds: mockGetEffectiveSelectedMediaIds
 }
@@ -93,23 +96,23 @@ vi.mock("react-i18next", () => ({
         | string
         | {
             count?: number
+            title?: string
             defaultValue?: string
           },
       interpolationValues?: {
         count?: number
+        title?: string
       }
     ) => {
       if (typeof defaultValueOrOptions === "string") {
-        return defaultValueOrOptions.replace(
-          "{{count}}",
-          String(interpolationValues?.count ?? "")
-        )
+        return defaultValueOrOptions
+          .replace("{{count}}", String(interpolationValues?.count ?? ""))
+          .replace("{{title}}", String(interpolationValues?.title ?? ""))
       }
       if (defaultValueOrOptions?.defaultValue) {
-        return defaultValueOrOptions.defaultValue.replace(
-          "{{count}}",
-          String(defaultValueOrOptions.count ?? "")
-        )
+        return defaultValueOrOptions.defaultValue
+          .replace("{{count}}", String(defaultValueOrOptions.count ?? ""))
+          .replace("{{title}}", String(defaultValueOrOptions.title ?? ""))
       }
       return _key
     }
@@ -154,6 +157,7 @@ describe("SourcesPane Stage 3 source folders", () => {
     ]
     workspaceStoreState.selectedSourceIds = ["s1"]
     workspaceStoreState.selectedSourceFolderIds = ["folder-evidence"]
+    mockCreateSourceFolder.mockReturnValue(undefined)
     mockGetEffectiveSelectedSources.mockReturnValue([
       workspaceStoreState.sources[0],
       workspaceStoreState.sources[1]
@@ -220,6 +224,83 @@ describe("SourcesPane Stage 3 source folders", () => {
     expect(mockCreateSourceFolder).toHaveBeenCalledWith("New folder", null)
   })
 
+  it("puts a newly created folder into rename mode", () => {
+    workspaceStoreState.sourceFolders = []
+    workspaceStoreState.sourceFolderMemberships = []
+    workspaceStoreState.selectedSourceIds = []
+    workspaceStoreState.selectedSourceFolderIds = []
+    mockGetEffectiveSelectedSources.mockReturnValue([])
+    mockGetEffectiveSelectedMediaIds.mockReturnValue([])
+    mockCreateSourceFolder.mockImplementation((name: string) => {
+      const folder = {
+        id: "folder-new",
+        workspaceId: "workspace-1",
+        name,
+        parentFolderId: null,
+        createdAt: new Date("2026-03-11T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-11T00:00:00.000Z")
+      }
+      workspaceStoreState.sourceFolders = [folder]
+      return folder
+    })
+
+    const { rerender } = render(<SourcesPane />)
+
+    fireEvent.click(screen.getByRole("button", { name: "New folder" }))
+    rerender(<SourcesPane />)
+
+    const renameInput = screen.getByRole("textbox", {
+      name: "Rename folder New folder"
+    })
+    expect(renameInput).toHaveValue("New folder")
+
+    fireEvent.change(renameInput, { target: { value: "Field notes" } })
+    fireEvent.keyDown(renameInput, { key: "Enter" })
+
+    expect(mockRenameSourceFolder).toHaveBeenCalledWith(
+      "folder-new",
+      "Field notes"
+    )
+  })
+
+  it("cancels folder rename without committing a blurred draft", () => {
+    const onCancelFolderRename = vi.fn()
+    const onCommitFolderRename = vi.fn()
+
+    render(
+      <SourceFolderTree
+        nodes={[
+          {
+            id: "folder-new",
+            name: "New folder",
+            sourceCount: 0,
+            children: []
+          }
+        ]}
+        activeFolderId={null}
+        selectionStateByFolderId={{ "folder-new": "unchecked" }}
+        onClearFocus={vi.fn()}
+        onCreateFolder={vi.fn()}
+        editingFolderId="folder-new"
+        editingFolderName="Draft name"
+        onEditingFolderNameChange={vi.fn()}
+        onCommitFolderRename={onCommitFolderRename}
+        onCancelFolderRename={onCancelFolderRename}
+        onFocusFolder={vi.fn()}
+        onToggleFolderSelection={vi.fn()}
+      />
+    )
+
+    const renameInput = screen.getByRole("textbox", {
+      name: "Rename folder New folder"
+    })
+    fireEvent.keyDown(renameInput, { key: "Escape" })
+    fireEvent.blur(renameInput)
+
+    expect(onCancelFolderRename).toHaveBeenCalledTimes(1)
+    expect(onCommitFolderRename).not.toHaveBeenCalled()
+  })
+
   it("clears active folder focus back to all sources", () => {
     workspaceStoreState.activeFolderId = "folder-evidence"
 
@@ -266,6 +347,54 @@ describe("SourcesPane Stage 3 source folders", () => {
       screen.getByRole("button", { name: "Preview selected" })
     ).not.toBeDisabled()
     expect(screen.getByText("Remove (1)")).toBeInTheDocument()
+  })
+
+  it("applies selected-source batch removal and restores folders through undo", async () => {
+    render(<SourcesPane />)
+
+    fireEvent.click(screen.getByTestId("batch-remove-sources"))
+
+    expect(
+      await screen.findByText("Remove 2 selected sources?")
+    ).toBeInTheDocument()
+    const confirmButton = screen
+      .getAllByRole("button", { name: "Remove" })
+      .find((button) => button.className.includes("ant-btn-primary"))
+    expect(confirmButton).toBeTruthy()
+    if (confirmButton) {
+      fireEvent.click(confirmButton)
+    }
+
+    expect(mockRemoveSources).toHaveBeenCalledWith(["s1", "s2"])
+    expect(await screen.findByText("2 sources removed")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }))
+
+    expect(mockRestoreSource).toHaveBeenCalledWith(workspaceStoreState.sources[0], {
+      index: 0,
+      select: true
+    })
+    expect(mockRestoreSource).toHaveBeenCalledWith(workspaceStoreState.sources[1], {
+      index: 1,
+      select: false
+    })
+    expect(mockAssignSourceToFolders).toHaveBeenCalledWith("s1", [
+      "folder-evidence"
+    ])
+    expect(mockAssignSourceToFolders).toHaveBeenCalledWith("s2", [
+      "folder-quotes"
+    ])
+  })
+
+  it("names removed sources in the undo feedback", async () => {
+    render(<SourcesPane />)
+
+    fireEvent.click(screen.getByTestId("remove-source-s1"))
+
+    expect(
+      await screen.findByText("Source One removed. You can undo this for a few seconds.")
+    ).toBeInTheDocument()
+    expect(mockRemoveSource).toHaveBeenCalledWith("s1")
   })
 
   it("does not add direct selection when clicking a folder-derived source checkbox", () => {

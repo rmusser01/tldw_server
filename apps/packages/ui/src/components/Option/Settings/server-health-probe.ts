@@ -12,6 +12,8 @@ type ProbeServerHealthResult = {
   error?: string
 }
 
+const AUTHENTICATED_READINESS_PATH = "/api/v1/users/storage"
+
 const parseErrorBody = async (response: Response): Promise<string | undefined> => {
   try {
     const contentType = response.headers.get("content-type") || ""
@@ -63,6 +65,23 @@ export const probeServerHealth = async (
       signal: controller?.signal
     })
     if (response.ok) {
+      if (params.authMode === "single-user" && key.length > 0) {
+        const authResponse = await (params.fetchFn || fetch)(
+          `${baseUrl}${AUTHENTICATED_READINESS_PATH}`,
+          {
+            method: "GET",
+            headers,
+            signal: controller?.signal
+          }
+        )
+        if (!authResponse.ok) {
+          return {
+            ok: false,
+            status: authResponse.status,
+            error: await parseErrorBody(authResponse)
+          }
+        }
+      }
       return { ok: true, status: response.status }
     }
     return {

@@ -256,6 +256,16 @@ describe("App layout routing", () => {
     )
   })
 
+  it("bypasses the generic first-run splash for Research Workspace direct entry", () => {
+    renderApp("/research-workspace")
+
+    expect(screen.getByTestId("server-readiness-gate")).toBeInTheDocument()
+    expect(screen.getByTestId("first-run-gate")).toHaveAttribute(
+      "data-bypass",
+      "true"
+    )
+  })
+
   it("preserves explicit character-chat onboarding routes through first-run setup", async () => {
     renderApp(
       "/",

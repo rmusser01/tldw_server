@@ -178,7 +178,13 @@ vi.mock("../StudioPane", () => ({
 }))
 
 vi.mock("../WorkspaceStatusBar", () => ({
-  WorkspaceStatusBar: () => <div data-testid="workspace-status-bar" />
+  WorkspaceStatusBar: (props: any) => (
+    <div
+      data-testid="workspace-status-bar"
+      data-compact={String(Boolean(props.compact))}
+      aria-label={props["aria-label"]}
+    />
+  )
 }))
 
 vi.mock("antd", () => ({
@@ -337,6 +343,15 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     expect(studioLabel).toContainElement(studioCountBadge)
     expect(sourceCountBadge).toHaveClass("bg-surface2", "text-text")
     expect(studioCountBadge).toHaveClass("bg-surface2", "text-text")
+  })
+
+  it("uses compact status density on mobile while keeping status discoverable", () => {
+    testState.isMobile = true
+
+    render(<ResearchWorkspace />)
+
+    const statusBar = screen.getByTestId("workspace-status-bar")
+    expect(statusBar).toHaveAttribute("data-compact", "true")
   })
 
   it("opens Studio from the mobile ?tab=studio route state", () => {

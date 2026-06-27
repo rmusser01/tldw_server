@@ -341,6 +341,13 @@ const expandOutputTypesSection = () => {
   }
 }
 
+const expandGeneratedOutputsSection = () => {
+  const toggle = screen.getByRole("button", { name: /Generated Outputs/i })
+  if (toggle.getAttribute("aria-expanded") === "false") {
+    fireEvent.click(toggle)
+  }
+}
+
 const renderStudioPane = () => {
   const renderResult = render(
     <MemoryRouter>
@@ -348,6 +355,7 @@ const renderStudioPane = () => {
     </MemoryRouter>
   )
   expandOutputTypesSection()
+  expandGeneratedOutputsSection()
   return renderResult
 }
 

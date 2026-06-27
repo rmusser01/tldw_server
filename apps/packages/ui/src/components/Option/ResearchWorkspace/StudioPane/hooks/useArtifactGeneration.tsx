@@ -78,6 +78,15 @@ const TEXT_FAILURE_SENTINELS: Partial<Record<ArtifactType, string[]>> = {
   data_table: ["Data table generation failed"]
 }
 
+const normalizeStudioChatModelId = (value: unknown): string => {
+  if (typeof value !== "string") return ""
+  const trimmed = value.trim()
+  if (trimmed.toLowerCase().startsWith("tldw:")) {
+    return trimmed.slice(5).trim()
+  }
+  return trimmed
+}
+
 const KNOWN_ERROR_RESPONSE_TEXTS = new Set([
   "sorry, i encountered an error. please try again.",
   "i'm sorry, i encountered an error processing your request.",
@@ -2365,6 +2374,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
   // Chat models state
   const [chatModels, setChatModels] = useState<ModelInfo[]>([])
   const [loadingChatModels, setLoadingChatModels] = useState(false)
+  const [selectedUnavailableModel, setSelectedUnavailableModel] =
+    useState<ModelInfo | null>(null)
 
   // Slides visual styles state
   const [slidesVisualStyles, setSlidesVisualStyles] = useState<VisualStyleRecord[]>([])
@@ -2403,6 +2414,65 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    const selectedModelRaw =
+      typeof selectedModel === "string" ? selectedModel.trim() : ""
+    const selectedModelId = normalizeStudioChatModelId(selectedModelRaw)
+    if (!selectedModelId) {
+      setSelectedUnavailableModel(null)
+      return
+    }
+
+    const selectedMatchesSelectableModel = chatModels.some((model) => {
+      const modelId = normalizeStudioChatModelId(model.id)
+      return modelId.length > 0 && modelId === selectedModelId
+    })
+    if (selectedMatchesSelectableModel) {
+      setSelectedUnavailableModel(null)
+      return
+    }
+
+    const isUnavailableModel = (model: ModelInfo | null): model is ModelInfo => {
+      if (!model) return false
+      if (model.isConfigured === false) return true
+      if (model.providerEnabled === false) return true
+      const availability = model.availability?.trim().toLowerCase()
+      return Boolean(
+        availability &&
+          ["disabled", "failed", "not-configured", "unavailable"].includes(
+            availability
+          )
+      )
+    }
+
+    let cancelled = false
+    const candidateIds = Array.from(
+      new Set([selectedModelRaw, selectedModelId].filter(Boolean))
+    )
+
+    void (async () => {
+      for (const candidateId of candidateIds) {
+        try {
+          const model = await tldwModels.getModel(candidateId)
+          if (cancelled) return
+          if (isUnavailableModel(model)) {
+            setSelectedUnavailableModel(model)
+            return
+          }
+        } catch {
+          if (cancelled) return
+        }
+      }
+      if (!cancelled) {
+        setSelectedUnavailableModel(null)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [chatModels, selectedModel])
 
   // Load slides visual styles on mount
   useEffect(() => {
@@ -2477,10 +2547,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
         : undefined
 
     const pickRuntime = (models: ModelInfo[]) => {
-      const selectedModelId =
-        typeof selectedModel === "string" && selectedModel.trim().length > 0
-          ? selectedModel.trim()
-          : undefined
+      const selectedModelId = normalizeStudioChatModelId(selectedModel) || undefined
       const providerFiltered =
         normalizedApiProvider === "__auto__"
           ? models
@@ -2492,7 +2559,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       if (selectedModelId) {
         const matchedModel = models.find(
           (model) =>
-            typeof model.id === "string" && model.id.trim() === selectedModelId
+            typeof model.id === "string" &&
+            normalizeStudioChatModelId(model.id) === selectedModelId
         )
         return {
           model: selectedModelId,
@@ -3104,6 +3172,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
     generationPhase,
     chatModels,
     loadingChatModels,
+    selectedUnavailableModel,
     recentOutputTypes,
     slidesVisualStyles,
     slidesVisualStylesLoading,

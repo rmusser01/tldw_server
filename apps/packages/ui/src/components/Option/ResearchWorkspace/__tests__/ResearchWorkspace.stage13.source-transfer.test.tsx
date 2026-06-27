@@ -685,18 +685,14 @@ describe("ResearchWorkspace stage 13 source transfer", () => {
     expect(mockMessageApi.open).toHaveBeenCalledTimes(1)
 
     const undoMessageConfig = mockMessageApi.open.mock.calls[0]?.[0] as
-      | { btn?: React.ReactElement; key?: string; type?: string }
+      | { content?: React.ReactNode; key?: string; type?: string }
       | undefined
     expect(undoMessageConfig?.type).toBe("warning")
-    expect(undoMessageConfig?.btn).toBeTruthy()
 
-    if (React.isValidElement(undoMessageConfig?.btn)) {
-      act(() => {
-        undoMessageConfig.btn?.props?.onClick?.()
-      })
-    } else {
-      throw new Error("Expected the transfer undo button to be rendered")
-    }
+    const undoToast = render(<>{undoMessageConfig?.content}</>)
+    act(() => {
+      fireEvent.click(undoToast.getByRole("button", { name: "Undo" }))
+    })
 
     expect(mockRestoreUndoSnapshot).toHaveBeenCalledWith(mockUndoSnapshot)
     expect(mockMessageApi.success).toHaveBeenCalledWith("Transfer undone.")

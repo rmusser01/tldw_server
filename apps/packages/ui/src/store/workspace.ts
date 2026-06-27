@@ -74,6 +74,12 @@ import { createSourcesSlice } from "./workspace-slices/sources-slice"
 import { createStudioSlice } from "./workspace-slices/studio-slice"
 import { createUISlice } from "./workspace-slices/ui-slice"
 import { createWorkspaceListSlice } from "./workspace-slices/workspace-list-slice"
+import { isWorkspaceSourceSelectable } from "./workspace-source-status"
+
+export {
+  isWorkspaceSourceSelectable,
+  isWorkspaceSourcePartiallyQueryable
+} from "./workspace-source-status"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Storage Configuration
@@ -3873,14 +3879,14 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
           state.sources = reviveSources(
             Array.isArray(state.sources) ? state.sources : []
           )
-          const readySourceIds = new Set(
+          const selectableSourceIds = new Set(
             state.sources
-              .filter((source) => getWorkspaceSourceStatus(source) === "ready")
+              .filter((source) => isWorkspaceSourceSelectable(source))
               .map((source) => source.id)
           )
           state.selectedSourceIds = (
             Array.isArray(state.selectedSourceIds) ? state.selectedSourceIds : []
-          ).filter((id) => readySourceIds.has(id))
+          ).filter((id) => selectableSourceIds.has(id))
           const persistedArtifacts = Array.isArray(state.generatedArtifacts)
             ? state.generatedArtifacts
             : []

@@ -394,14 +394,16 @@ export const mediaMethods = {
 
   async updateMediaKeywords(
     mediaId: string | number,
-    payload: { keywords: string[]; mode?: "add" | "remove" | "set" }
+    payload: { keywords: string[]; mode?: "add" | "remove" | "set" },
+    options?: { suppressBackendUnavailableEvent?: boolean }
   ): Promise<{ media_id: number; keywords: string[] }> {
     const id = encodeURIComponent(String(mediaId))
     return await bgRequest<{ media_id: number; keywords: string[] }>({
       path: `/api/v1/media/${id}/keywords`,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })
   },
 
@@ -593,6 +595,7 @@ export const mediaMethods = {
       include_versions?: boolean
       include_version_content?: boolean
       signal?: AbortSignal
+      suppressBackendUnavailableEvent?: boolean
     }
   ): Promise<any> {
     const id = encodeURIComponent(String(mediaId))
@@ -604,7 +607,8 @@ export const mediaMethods = {
     return await bgRequest<any>({
       path: `/api/v1/media/${id}${query}`,
       method: "GET",
-      abortSignal: options?.signal
+      abortSignal: options?.signal,
+      suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })
   },
 

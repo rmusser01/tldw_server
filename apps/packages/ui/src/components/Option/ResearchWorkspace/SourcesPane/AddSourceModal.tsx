@@ -235,6 +235,25 @@ const toOptionalString = (value: unknown): string | undefined => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value)
 
+const isAuthRecoveryError = (error: unknown): boolean => {
+  const maybeError = error as { status?: unknown; message?: unknown } | null
+  const status = Number(maybeError?.status)
+  if (status === 401 || status === 403) return true
+
+  const messageText =
+    error instanceof Error
+      ? error.message
+      : typeof maybeError?.message === "string"
+        ? maybeError.message
+        : typeof error === "string"
+          ? error
+          : ""
+
+  return /unauthori[sz]ed|forbidden|api key|auth|sign in|permission/i.test(
+    messageText
+  )
+}
+
 const asMediaLibraryItem = (value: unknown): MediaLibraryItem | null =>
   isRecord(value) ? value : null
 
@@ -424,6 +443,21 @@ const UploadTab: React.FC<{
     () => formatSourceUploadSizeLimit(uploadSizeLimitBytes),
     [uploadSizeLimitBytes]
   )
+  const uploadSourceFilesLabel = t(
+    "playground:sources.uploadSourceFilesLabel",
+    "Upload source files"
+  )
+  const browseSourceFilesLabel = t(
+    "playground:sources.browseSourceFilesLabel",
+    "Browse source files"
+  )
+
+  React.useEffect(() => {
+    const uploadButton = draggerContainerRef.current?.querySelector<HTMLElement>(
+      ".ant-upload-btn[role='button']"
+    )
+    uploadButton?.setAttribute("aria-label", uploadSourceFilesLabel)
+  }, [uploadSourceFilesLabel])
 
   const beginProcessing = React.useCallback(() => {
     activeUploadCountRef.current += 1
@@ -596,7 +630,11 @@ const UploadTab: React.FC<{
   return (
     <div className="space-y-4">
       <div ref={draggerContainerRef}>
-        <Dragger {...uploadProps} className="bg-surface">
+        <Dragger
+          {...uploadProps}
+          aria-label={uploadSourceFilesLabel}
+          className="bg-surface"
+        >
           <p className="ant-upload-drag-icon">
             <UploadIcon className="mx-auto h-12 w-12 text-primary" />
           </p>
@@ -623,6 +661,7 @@ const UploadTab: React.FC<{
           className="w-full"
           onClick={openFilePicker}
           data-testid="mobile-browse-files-button"
+          aria-label={browseSourceFilesLabel}
         >
           {t("playground:sources.browseFiles", "Browse files")}
         </Button>
@@ -925,6 +964,7 @@ const UrlTab: React.FC<{
             </label>
             <Input
               prefix={<Link className="h-4 w-4 text-text-muted" />}
+              aria-label={t("playground:sources.sourceUrlLabel", "Source URL")}
               value={url}
               onChange={(e) => {
                 setUrl(e.target.value)
@@ -957,6 +997,7 @@ const UrlTab: React.FC<{
               {t("playground:sources.urlBatchLabel", "Add one URL per line")}
             </label>
             <TextArea
+              aria-label={t("playground:sources.sourceUrlsLabel", "Source URLs")}
               value={batchUrls}
               onChange={(event) => {
                 setBatchUrls(event.target.value)
@@ -1038,10 +1079,15 @@ const PasteTab: React.FC<{
   onAddSources: AddSourceHandler
   setProcessing: (p: boolean) => void
   setError: (e: string | null) => void
-}> = ({ onAddSources, setProcessing, setError }) => {
+  error?: string | null
+}> = ({ onAddSources, setProcessing, setError, error }) => {
   const { t } = useTranslation(["playground", "common"])
   const [title, setTitle] = React.useState("")
   const [content, setContent] = React.useState("")
+  const pasteAuthRecoveryError = t(
+    "playground:sources.pasteAuthRecoveryError",
+    "You need to finish server setup or sign in before adding sources. Your pasted text is still here."
+  )
 
   const handleAddText = async () => {
     if (!content.trim()) return
@@ -1084,7 +1130,11 @@ const PasteTab: React.FC<{
         setError(t("playground:sources.pasteError", "Failed to add text"))
       }
     } catch (err) {
-      setError(mapSourceIngestionError(err))
+      setError(
+        isAuthRecoveryError(err)
+          ? pasteAuthRecoveryError
+          : mapSourceIngestionError(err)
+      )
     } finally {
       setProcessing(false)
     }
@@ -1097,6 +1147,10 @@ const PasteTab: React.FC<{
           {t("playground:sources.titleLabel", "Title (optional)")}
         </label>
         <Input
+          aria-label={t(
+            "playground:sources.pastedSourceTitleLabel",
+            "Pasted source title"
+          )}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder={t("playground:sources.titlePlaceholder", "Give your content a title")}
@@ -1107,6 +1161,10 @@ const PasteTab: React.FC<{
           {t("playground:sources.contentLabel", "Content")}
         </label>
         <TextArea
+          aria-label={t(
+            "playground:sources.pastedSourceContentLabel",
+            "Pasted source content"
+          )}
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder={t(
@@ -1131,6 +1189,11 @@ const PasteTab: React.FC<{
       >
         {t("playground:sources.addText", "Add Text")}
       </Button>
+      {error === pasteAuthRecoveryError && (
+        <Button onClick={handleAddText} disabled={!content.trim()} className="w-full">
+          {t("playground:sources.retryAfterSetup", "Retry after setup")}
+        </Button>
+      )}
     </div>
   )
 }
@@ -1306,6 +1369,7 @@ const SearchTab: React.FC<{
       <div className="flex gap-2">
         <Input
           prefix={<Search className="h-4 w-4 text-text-muted" />}
+          aria-label={t("playground:sources.searchWebLabel", "Search the web")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onPressEnter={handleSearch}
@@ -1420,6 +1484,10 @@ const ExistingTab: React.FC<{
   setError: (e: string | null) => void
 }> = ({ onAddSources, setProcessing, setError }) => {
   const { t } = useTranslation(["playground", "common"])
+  const tRef = React.useRef(t)
+  React.useEffect(() => {
+    tRef.current = t
+  }, [t])
   const [searchQuery, setSearchQuery] = React.useState("")
   const [mediaTypeFilter, setMediaTypeFilter] = React.useState("all")
   const [keywordFilterInput, setKeywordFilterInput] = React.useState("")
@@ -1513,8 +1581,18 @@ const ExistingTab: React.FC<{
             cachedAt: Date.now()
           }
         }
-      } catch {
-        setLoadError("Unable to load media. Please try again.")
+      } catch (err) {
+        setLoadError(
+          isAuthRecoveryError(err)
+            ? tRef.current(
+                "playground:sources.mediaLibraryAuthRecovery",
+                "Sign in or finish server setup to browse your media library."
+              )
+            : tRef.current(
+                "playground:sources.mediaLibraryLoadError",
+                "Unable to load media. Please try again."
+              )
+        )
       } finally {
         if (shouldShowLoading) {
           setIsLoading(false)
@@ -1969,14 +2047,20 @@ export const AddSourceModal: React.FC = () => {
 
       // Tag media with workspace tag
       if (workspaceTag) {
-        try {
-          await tldwClient.updateMediaKeywords(source.mediaId, {
-            keywords: [workspaceTag],
-            mode: "add"
+        void tldwClient
+          .updateMediaKeywords(
+            source.mediaId,
+            {
+              keywords: [workspaceTag],
+              mode: "add"
+            },
+            {
+              suppressBackendUnavailableEvent: true
+            }
+          )
+          .catch(() => {
+            // Continue even if best-effort workspace tagging fails.
           })
-        } catch {
-          // Continue even if tagging fails
-        }
       }
     }
 
@@ -2048,6 +2132,7 @@ export const AddSourceModal: React.FC = () => {
           onAddSources={handleAddSources}
           setProcessing={setProcessing}
           setError={setError}
+          error={error}
         />
       )
     },

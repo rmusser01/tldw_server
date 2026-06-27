@@ -37,6 +37,46 @@ describe("probeServerHealth", () => {
     expect(options?.headers).toMatchObject({ "X-API-KEY": "abc123" })
   })
 
+  it("fails single-user readiness when an authenticated workspace storage endpoint rejects the API key", async () => {
+    const fetchFn = vi.fn(
+      async (input: RequestInfo | URL, _init?: RequestInit) => {
+        const url = String(input)
+        if (url.endsWith("/api/v1/health")) {
+          return new Response(null, { status: 200 })
+        }
+        if (url.endsWith("/api/v1/users/storage")) {
+          return new Response(
+            JSON.stringify({ detail: "Invalid or missing API Key" }),
+            {
+              status: 401,
+              statusText: "Unauthorized",
+              headers: { "content-type": "application/json" }
+            }
+          )
+        }
+        return new Response("unexpected endpoint", { status: 404 })
+      }
+    )
+
+    const resp = await probeServerHealth({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "bad-key",
+      fetchFn
+    })
+
+    expect(resp.ok).toBe(false)
+    expect(resp.status).toBe(401)
+    expect(resp.error).toContain("Invalid or missing API Key")
+    expect(fetchFn).toHaveBeenCalledTimes(2)
+    expect(fetchFn.mock.calls[1]?.[0]).toBe(
+      "http://127.0.0.1:8000/api/v1/users/storage"
+    )
+    expect(fetchFn.mock.calls[1]?.[1]?.headers).toMatchObject({
+      "X-API-KEY": "bad-key"
+    })
+  })
+
   it("returns backend error text for non-2xx responses", async () => {
     const fetchFn = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>

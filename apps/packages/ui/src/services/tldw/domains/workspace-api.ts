@@ -147,6 +147,9 @@ export interface WorkspaceSourceStatusApiResponse {
   progress_percent: number | null
   progress_message: string | null
   job: WorkspaceSourceJobStatus | null
+  next_action?: string | null
+  retry_eligible?: boolean
+  stale?: boolean
   updated_at: string | null
 }
 

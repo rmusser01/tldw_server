@@ -19,6 +19,7 @@ import {
   WifiOff
 } from "lucide-react"
 import { Modal, Tag, Tooltip, Input, Slider, Switch, Button, message } from "antd"
+import type { InputRef } from "antd"
 import {
   DEGRADED_STATE_LABEL,
   READY_STATE_LABEL,
@@ -26,6 +27,10 @@ import {
 } from "@/design-system"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildWorkspaceChatSessionKey } from "@/store/workspace-chat-session-key"
+import {
+  isWorkspaceSourcePartiallyQueryable,
+  isWorkspaceSourceSelectable
+} from "@/store/workspace-source-status"
 import { useWorkspaceStore } from "@/store/workspace"
 import { useStoreMessageOption } from "@/store/option"
 import type { Message } from "@/store/option"
@@ -77,6 +82,7 @@ import {
   getCapabilityCopy,
   type ResearchWorkspaceCapabilitiesResponse
 } from "../research-workspace-capabilities"
+import { renderWorkspaceMessageActionContent } from "../workspace-message-content"
 
 const { TextArea } = Input
 const VISIBLE_SOURCE_TAG_COUNT = 5
@@ -232,12 +238,17 @@ const isQueryableWorkspaceSource = (
   source: WorkspaceSource,
   statusGuardrailsEnabled = true
 ): boolean =>
-  getChatWorkspaceSourceStatus(source, statusGuardrailsEnabled) === "ready"
+  statusGuardrailsEnabled
+    ? isWorkspaceSourceSelectable(source)
+    : getChatWorkspaceSourceStatus(source, statusGuardrailsEnabled) === "ready"
 
 const getSourceStatusLabel = (
   source: WorkspaceSource,
   statusGuardrailsEnabled = true
 ): string => {
+  if (statusGuardrailsEnabled && isWorkspaceSourcePartiallyQueryable(source)) {
+    return "Text searchable"
+  }
   const status = getChatWorkspaceSourceStatus(source, statusGuardrailsEnabled)
   if (status === "processing") return "Processing"
   if (status === "error") return "Failed"
@@ -248,6 +259,9 @@ const getSourceTagColor = (
   source: WorkspaceSource,
   statusGuardrailsEnabled = true
 ): string => {
+  if (statusGuardrailsEnabled && isWorkspaceSourcePartiallyQueryable(source)) {
+    return "gold"
+  }
   const status = getChatWorkspaceSourceStatus(source, statusGuardrailsEnabled)
   if (status === "processing") return "gold"
   if (status === "error") return "red"
@@ -1155,10 +1169,14 @@ const SimpleChatInput: React.FC<{
   const [value, setValue] = React.useState("")
   const [showSlashMenu, setShowSlashMenu] = React.useState(false)
   const [slashMenuIndex, setSlashMenuIndex] = React.useState(0)
+  const inputRef = React.useRef<InputRef>(null)
 
   React.useEffect(() => {
     if (typeof seededValue !== "string") return
     setValue(seededValue)
+    window.setTimeout(() => {
+      inputRef.current?.focus({ cursor: "end" })
+    }, 0)
     onSeedConsumed?.()
   }, [onSeedConsumed, seededValue])
 
@@ -1304,6 +1322,8 @@ const SimpleChatInput: React.FC<{
             </div>
           )}
           <TextArea
+            ref={inputRef}
+            aria-label={t("playground:chat.messageInputLabel", "Chat message")}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -1464,8 +1484,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const chatFocusTarget = useWorkspaceStore((s) => s.chatFocusTarget)
   const clearChatFocusTarget = useWorkspaceStore((s) => s.clearChatFocusTarget)
   const openAddSourceModal = useWorkspaceStore((s) => s.openAddSourceModal)
-  const openExistingSourcesModal = React.useCallback(() => {
-    openAddSourceModal("existing")
+  const openAddSourcesModal = React.useCallback(() => {
+    openAddSourceModal("upload")
   }, [openAddSourceModal])
   const createNewWorkspace = useWorkspaceStore((s) => s.createNewWorkspace)
   const setCurrentNote = useWorkspaceStore((s) => s.setCurrentNote)
@@ -1632,12 +1652,61 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     0,
     sourceScopeSources.length - queryableSelectedSources.length
   )
+  const selectedBlockingProcessingSourceCount = React.useMemo(
+    () =>
+      sourceScopeSources.filter(
+        (source) =>
+          source.status === "processing" &&
+          !isQueryableWorkspaceSource(source, statusGuardrailsEnabled)
+      ).length,
+    [sourceScopeSources, statusGuardrailsEnabled]
+  )
+  const selectedFailedSourceCount = React.useMemo(
+    () =>
+      sourceScopeSources.filter(
+        (source) =>
+          (source.status === "error" ||
+            source.statusDetails?.lifecycleState === "failed") &&
+          !isQueryableWorkspaceSource(source, statusGuardrailsEnabled)
+      ).length,
+    [sourceScopeSources, statusGuardrailsEnabled]
+  )
   const sourceQueryabilityMessage =
     hasSelectedSources && !hasQueryableSelectedSources
-      ? t(
-          "playground:chat.selectedSourcesNotQueryable",
-          "Selected sources are not queryable yet. You can keep chatting generally while extraction and indexing finish."
-        )
+      ? selectedBlockingProcessingSourceCount > 0 &&
+        selectedFailedSourceCount === 0
+        ? selectedBlockingProcessingSourceCount === 1
+          ? t(
+              "playground:chat.selectedSourceStillIndexing",
+              "1 selected source is still indexing. Grounded mode will enable when extraction and indexing finish."
+            )
+          : t(
+              "playground:chat.selectedSourcesStillIndexing",
+              "{{count}} selected sources are still indexing. Grounded mode will enable when extraction and indexing finish.",
+              { count: selectedBlockingProcessingSourceCount }
+            )
+        : selectedFailedSourceCount > 0 &&
+          selectedBlockingProcessingSourceCount === 0
+          ? selectedFailedSourceCount === 1
+            ? t(
+                "playground:chat.selectedSourceFailed",
+                "1 selected source failed. Retry it from Sources or select another queryable source."
+              )
+            : t(
+                "playground:chat.selectedSourcesFailed",
+                "{{count}} selected sources failed. Retry them from Sources or select another queryable source.",
+                { count: selectedFailedSourceCount }
+              )
+          : selectedBlockingProcessingSourceCount > 0 &&
+            selectedFailedSourceCount > 0
+            ? t(
+                "playground:chat.selectedSourcesMixedUnavailable",
+                "Selected sources are still indexing or failed. Grounded mode needs at least one queryable selected source."
+              )
+            : t(
+                "playground:chat.selectedSourcesNotQueryable",
+                "Selected sources are not queryable yet. You can keep chatting generally while extraction and indexing finish."
+              )
       : hasQueryableSelectedSources && nonQueryableSelectedSourceCount > 0
         ? queryableSelectedSources.length === 1 &&
           nonQueryableSelectedSourceCount === 1
@@ -1926,6 +1995,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   React.useEffect(() => {
     if (!workspaceSessionId) return
+    if (workspaceSessionRef.current !== workspaceSessionId) return
 
     saveWorkspaceChatSession(workspaceSessionId, {
       messages,
@@ -2378,12 +2448,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         const maybeOpen = (
           messageApi as { open?: (config: unknown) => void }
         ).open
+        const clearContent = t("playground:chat.cleared", "Chat cleared.")
         const messageConfig = {
           key: undoMessageKey,
           type: "warning",
           duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-          content: t("playground:chat.cleared", "Chat cleared."),
-          btn: (
+          content: renderWorkspaceMessageActionContent(
+            clearContent,
             <Button
               size="small"
               type="link"
@@ -2407,7 +2478,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             messageApi as { warning?: (content: string) => void }
           ).warning
           if (typeof maybeWarning === "function") {
-            maybeWarning(t("playground:chat.cleared", "Chat cleared."))
+            maybeWarning(clearContent)
           }
         }
       }
@@ -2462,12 +2533,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       const maybeOpen = (
         messageApi as { open?: (config: unknown) => void }
       ).open
+      const deleteContent = t(
+        "playground:chat.messageDeleted",
+        "Message deleted."
+      )
       const messageConfig = {
         key: undoMessageKey,
         type: "warning",
         duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-        content: t("playground:chat.messageDeleted", "Message deleted."),
-        btn: (
+        content: renderWorkspaceMessageActionContent(
+          deleteContent,
           <Button
             size="small"
             type="link"
@@ -2491,7 +2566,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           messageApi as { warning?: (content: string) => void }
         ).warning
         if (typeof maybeWarning === "function") {
-          maybeWarning(t("playground:chat.messageDeleted", "Message deleted."))
+          maybeWarning(deleteContent)
         }
       }
     },
@@ -2902,6 +2977,21 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         "Select a chat model before sending."
       )
     : null
+  const ragModeDisabledMessage =
+    isChatCapabilityBlocked && chatCapabilityMessage
+      ? chatCapabilityMessage
+      : !hasQueryableSelectedSources
+        ? sourceQueryabilityMessage ||
+          t(
+            "playground:chat.ragModeRequiresSources",
+            "Select a source to enable grounded mode."
+          )
+        : isModelSelectionMissing
+          ? t(
+              "playground:chat.selectModelBeforeGroundedMode",
+              "Select a chat model to enable grounded mode."
+            )
+          : null
   const showConnectionBanner = isConnectionUnavailable
   const connectionDescription =
     submitError ||
@@ -3172,7 +3262,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   isMobile={isMobile}
                   layoutMode={contentWidthMode}
                   onExamplePromptSelect={(prompt) => setSeededPrompt(prompt)}
-                  onAddSource={openExistingSourcesModal}
+                  onAddSource={openAddSourcesModal}
                   onCreateFromTemplate={handleCreateFromTemplate}
                 />
               </div>
@@ -3264,23 +3354,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 {t("playground:chat.generalMode", "General chat")}
               </button>
               <Tooltip
-                title={
-                  hasQueryableSelectedSources
-                    ? undefined
-                    : hasSelectedSources
-                      ? t(
-                          "playground:chat.ragModeRequiresQueryableSources",
-                          "Grounded mode turns on when at least one selected source is queryable."
-                        )
-                      : t(
-                        "playground:chat.ragModeRequiresSources",
-                        "Select sources to enable RAG mode"
-                      )
-                }
+                title={ragModeDisabledMessage || undefined}
               >
                 <button
                   type="button"
-                  disabled={!hasQueryableSelectedSources}
+                  disabled={Boolean(ragModeDisabledMessage)}
                   onClick={() => setPreferredChatMode("rag")}
                   className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
                     effectiveChatMode === "rag"
@@ -3417,6 +3495,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                     <span className="font-medium text-text">{resolvedTopK}</span>
                   </div>
                   <Slider
+                    ariaLabelForHandle={t("playground:chat.ragTopK", "Top K")}
                     min={1}
                     max={50}
                     step={1}
@@ -3437,6 +3516,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                     </span>
                   </div>
                   <Slider
+                    ariaLabelForHandle={t(
+                      "playground:chat.ragSimilarityThreshold",
+                      "Similarity threshold"
+                    )}
                     min={0}
                     max={1}
                     step={0.01}

@@ -21,6 +21,7 @@ const {
   mockAckWorkspaceMigrationClientDelete,
   mockRunResearchWorkspaceMigration,
   mockChatPaneProps,
+  mockStatusBarProps,
   mockBgRequest
 } = vi.hoisted(() => ({
   mockGetMediaDetails: vi.fn(),
@@ -38,6 +39,16 @@ const {
   mockAckWorkspaceMigrationClientDelete: vi.fn(),
   mockRunResearchWorkspaceMigration: vi.fn(),
   mockChatPaneProps: [] as any[],
+  mockStatusBarProps: [] as Array<{
+    activeOperations?: string[]
+    statusMessages?: string[]
+    statusAction?: {
+      label: string
+      ariaLabel?: string
+      onClick: () => void
+    }
+    workspaceContextStatus?: unknown
+  }>,
   mockBgRequest: vi.fn()
 }))
 
@@ -181,11 +192,7 @@ vi.mock("../StudioPane", () => ({
 }))
 
 vi.mock("../WorkspaceStatusBar", () => ({
-  WorkspaceStatusBar: ({
-    activeOperations,
-    statusMessages,
-    statusAction
-  }: {
+  WorkspaceStatusBar: (props: {
     activeOperations?: string[]
     statusMessages?: string[]
     statusAction?: {
@@ -193,29 +200,44 @@ vi.mock("../WorkspaceStatusBar", () => ({
       ariaLabel?: string
       onClick: () => void
     }
-  }) => (
-    <div data-testid="workspace-status-bar">
-      {statusMessages && statusMessages.length > 0 && (
-        <div data-testid="workspace-statusbar-notice">
-          {statusMessages.join(" ")}
-        </div>
-      )}
-      {statusAction && (
-        <button
-          type="button"
-          aria-label={statusAction.ariaLabel || statusAction.label}
-          onClick={statusAction.onClick}
-        >
-          {statusAction.label}
-        </button>
-      )}
-      {activeOperations && activeOperations.length > 0 && (
-        <div data-testid="workspace-statusbar-activity">
-          {activeOperations.join(" \u2022 ")}
-        </div>
-      )}
-    </div>
-  )
+    workspaceContextStatus?: unknown
+  }) => {
+    const {
+      activeOperations,
+      statusMessages,
+      statusAction,
+      workspaceContextStatus
+    } = props
+    mockStatusBarProps.push(props)
+    return (
+      <div data-testid="workspace-status-bar">
+        {workspaceContextStatus ? (
+          <div data-testid="workspace-statusbar-context">
+            {JSON.stringify(workspaceContextStatus)}
+          </div>
+        ) : null}
+        {statusMessages && statusMessages.length > 0 && (
+          <div data-testid="workspace-statusbar-notice">
+            {statusMessages.join(" ")}
+          </div>
+        )}
+        {statusAction && (
+          <button
+            type="button"
+            aria-label={statusAction.ariaLabel || statusAction.label}
+            onClick={statusAction.onClick}
+          >
+            {statusAction.label}
+          </button>
+        )}
+        {activeOperations && activeOperations.length > 0 && (
+          <div data-testid="workspace-statusbar-activity">
+            {activeOperations.join(" \u2022 ")}
+          </div>
+        )}
+      </div>
+    )
+  }
 }))
 
 if (!(globalThis as any).ResizeObserver) {
@@ -224,6 +246,32 @@ if (!(globalThis as any).ResizeObserver) {
     unobserve() {}
     disconnect() {}
   }
+}
+
+const ensureLocalStorage = () => {
+  if (window.localStorage && typeof window.localStorage.clear === "function") {
+    window.localStorage.clear()
+    return
+  }
+
+  const storage = new Map<string, string>()
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      clear: () => storage.clear(),
+      getItem: (key: string) => storage.get(key) ?? null,
+      key: (index: number) => Array.from(storage.keys())[index] ?? null,
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      setItem: (key: string, value: string) => {
+        storage.set(key, String(value))
+      },
+      get length() {
+        return storage.size
+      }
+    }
+  })
 }
 
 const sourceStatusSummary = {
@@ -352,7 +400,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    window.localStorage.clear()
+    ensureLocalStorage()
     ;(tldwClient as unknown as { getWorkspaceContext?: unknown }).getWorkspaceContext =
       undefined
     mockRunResearchWorkspaceMigration.mockResolvedValue({
@@ -386,6 +434,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     testState.setSourceStatusByMediaId = vi.fn()
     testState.workspaceChatSessions = {}
     mockChatPaneProps.length = 0
+    mockStatusBarProps.length = 0
     testState.currentNote = {
       id: 7,
       title: "",
@@ -681,6 +730,9 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     await waitFor(() => {
       expect(mockRunResearchWorkspaceMigration).toHaveBeenCalledTimes(1)
     })
+    const loadingNotice = await screen.findByTestId("workspace-statusbar-notice")
+    expect(loadingNotice).toHaveTextContent("Checking local workspace data")
+    expect(loadingNotice).not.toHaveTextContent("Legacy workspace data found")
 
     await act(async () => {
       migrationDeferred.resolve({
@@ -715,15 +767,14 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
   it("opens and closes workspace search with keyboard shortcuts", async () => {
     render(<ResearchWorkspace />)
 
-    fireEvent.keyDown(window, { key: "k", altKey: true })
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true })
 
     const dialog = await screen.findByRole("dialog", { name: "Search workspace" })
     expect(dialog).toBeInTheDocument()
 
-    fireEvent.keyDown(
-      within(dialog).getByPlaceholderText("Search sources, chat, and notes..."),
-      { key: "Escape" }
-    )
+    fireEvent.keyDown(within(dialog).getByLabelText("Search workspace"), {
+      key: "Escape"
+    })
 
     await waitFor(() => {
       const dialog = screen.queryByRole("dialog", { name: "Search workspace" })
@@ -1044,7 +1095,8 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       expect(mockGetMediaDetails).toHaveBeenCalledWith(
         808,
         expect.objectContaining({
-          include_content: true
+          include_content: true,
+          suppressBackendUnavailableEvent: true
         })
       )
     })
@@ -1408,6 +1460,21 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
           sourceOfTruth: "workspace-status-projection"
         })
       )
+    })
+    await waitFor(() => {
+      expect(
+        mockStatusBarProps.some((props) => {
+          const status = props.workspaceContextStatus as
+            | { label?: string; detail?: string; severity?: string }
+            | null
+            | undefined
+          return (
+            status?.label === "Workspace degraded" &&
+            status.detail === "Capabilities unavailable" &&
+            status.severity === "warning"
+          )
+        })
+      ).toBe(true)
     })
   })
 

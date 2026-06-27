@@ -128,6 +128,20 @@ const mapTldwModelToUi = (model: any) => ({
       : undefined,
   catalog_only:
     typeof model.catalogOnly === "boolean" ? model.catalogOnly : undefined,
+  provider_enabled:
+    typeof model.providerEnabled === "boolean" ? model.providerEnabled : undefined,
+  availability:
+    typeof model.availability === "string" ? model.availability : undefined,
+  readiness_reason_code:
+    typeof model.readinessReasonCode === "string"
+      ? model.readinessReasonCode
+      : undefined,
+  readiness_message:
+    typeof model.readinessMessage === "string"
+      ? model.readinessMessage
+      : undefined,
+  chat_provider:
+    typeof model.chatProvider === "string" ? model.chatProvider : undefined,
   details: {
     provider: model.provider,
     capabilities: model.capabilities,
@@ -140,13 +154,36 @@ const mapTldwModelToUi = (model: any) => ({
         ? model.providerIsConfigured
         : undefined,
     catalog_only:
-      typeof model.catalogOnly === "boolean" ? model.catalogOnly : undefined
+      typeof model.catalogOnly === "boolean" ? model.catalogOnly : undefined,
+    provider_enabled:
+      typeof model.providerEnabled === "boolean"
+        ? model.providerEnabled
+        : undefined,
+    availability:
+      typeof model.availability === "string" ? model.availability : undefined,
+    readiness_reason_code:
+      typeof model.readinessReasonCode === "string"
+        ? model.readinessReasonCode
+        : undefined,
+    readiness_message:
+      typeof model.readinessMessage === "string"
+        ? model.readinessMessage
+        : undefined,
+    chat_provider:
+      typeof model.chatProvider === "string" ? model.chatProvider : undefined
   }
 })
 
 const CHAT_MODELS_CACHE_TTL_MS = 60_000
 let chatModelsCache: { value: any[]; expiresAt: number } | null = null
 let chatModelsInFlight: Promise<any[]> | null = null
+
+type ChatModelsCacheListenerState = {
+  clear: () => void
+  listenersAdded: boolean
+}
+
+const CHAT_MODELS_CACHE_LISTENER_KEY = "__tldwChatModelsCacheListeners"
 
 const dedupeChatModelsByModel = (models: any[]) => {
   const unique: any[] = []
@@ -220,6 +257,38 @@ const dedupeChatModelsByModel = (models: any[]) => {
 export const clearChatModelsCache = () => {
   chatModelsCache = null
   chatModelsInFlight = null
+}
+
+const getChatModelsCacheListenerState = (): ChatModelsCacheListenerState => {
+  const globalWindow = window as typeof window & {
+    [CHAT_MODELS_CACHE_LISTENER_KEY]?: ChatModelsCacheListenerState
+  }
+  const existing = globalWindow[CHAT_MODELS_CACHE_LISTENER_KEY]
+  if (existing) {
+    return existing
+  }
+  const created: ChatModelsCacheListenerState = {
+    clear: clearChatModelsCache,
+    listenersAdded: false
+  }
+  globalWindow[CHAT_MODELS_CACHE_LISTENER_KEY] = created
+  return created
+}
+
+if (typeof window !== "undefined") {
+  const listenerState = getChatModelsCacheListenerState()
+  listenerState.clear = clearChatModelsCache
+  if (!listenerState.listenersAdded) {
+    window.addEventListener("tldw:config-updated", () => {
+      listenerState.clear()
+    })
+    window.addEventListener("storage", (event) => {
+      if (!event.key || event.key === "tldwConfig") {
+        listenerState.clear()
+      }
+    })
+    listenerState.listenersAdded = true
+  }
 }
 
 export const getAllModels = async ({ returnEmpty = false }: { returnEmpty?: boolean }) => {

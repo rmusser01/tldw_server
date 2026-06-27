@@ -168,7 +168,10 @@ describe("TldwApiClient getModels normalization", () => {
               name: "anthropic",
               is_configured: false,
               enabled: false,
-              availability: "unavailable"
+              availability: "unavailable",
+              readiness_reason_code: "missing_credentials",
+              readiness_message: "Anthropic requires credentials before chat generation.",
+              chat_provider: "anthropic"
             }
           ]
         }
@@ -194,7 +197,10 @@ describe("TldwApiClient getModels normalization", () => {
         is_configured: false,
         provider_is_configured: false,
         provider_enabled: false,
-        availability: "unavailable"
+        availability: "unavailable",
+        readiness_reason_code: "missing_credentials",
+        readiness_message: "Anthropic requires credentials before chat generation.",
+        chat_provider: "anthropic"
       })
     )
   })

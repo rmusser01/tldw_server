@@ -93,13 +93,15 @@ vi.mock("react-i18next", () => ({
           },
       interpolationValues?: {
         count?: number
+        filtered?: number
+        total?: number
       }
     ) => {
       if (typeof defaultValueOrOptions === "string") {
-        return defaultValueOrOptions.replace(
-          "{{count}}",
-          String(interpolationValues?.count ?? "")
-        )
+        return defaultValueOrOptions
+          .replace("{{count}}", String(interpolationValues?.count ?? ""))
+          .replace("{{filtered}}", String(interpolationValues?.filtered ?? ""))
+          .replace("{{total}}", String(interpolationValues?.total ?? ""))
       }
       if (defaultValueOrOptions?.defaultValue) {
         return defaultValueOrOptions.defaultValue.replace(
@@ -185,6 +187,13 @@ describe("SourcesPane stage 4 filters and sort", () => {
     expect(screen.getByText(/Sort: Added date/)).toBeInTheDocument()
   })
 
+  it("labels quick-add and source search fields beyond placeholders", () => {
+    render(<ControlledSourcesPane />)
+
+    expect(screen.getByLabelText("Quick add URL")).toBeInTheDocument()
+    expect(screen.getByLabelText("Search sources")).toBeInTheDocument()
+  })
+
   it("applies advanced filters after search narrowing", () => {
     workspaceStoreState.sources = [
       {
@@ -217,6 +226,47 @@ describe("SourcesPane stage 4 filters and sort", () => {
 
     expect(screen.getByText("Alpha Ready")).toBeInTheDocument()
     expect(screen.queryByText("Alpha Error")).not.toBeInTheDocument()
+  })
+
+  it("shows filtered and total counts with a reset control when no sources match", () => {
+    const { rerender } = render(<ControlledSourcesPane />)
+
+    fireEvent.change(screen.getByPlaceholderText("Search sources..."), {
+      target: { value: "delta" }
+    })
+    rerender(<ControlledSourcesPane />)
+
+    expect(screen.getByText("No sources match the current filters.")).toBeInTheDocument()
+    expect(screen.getByText("Showing 0 of 2 sources.")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear search and filters" }))
+
+    expect(mockSetSourceSearchQuery).toHaveBeenCalledWith("")
+  })
+
+  it("clears the active folder when the no-match state is caused by an empty folder", () => {
+    workspaceStoreState.sourceFolders = [
+      {
+        id: "folder-empty",
+        workspaceId: "workspace-1",
+        name: "Empty folder",
+        parentFolderId: null,
+        createdAt: new Date("2026-03-13T00:00:00.000Z"),
+        updatedAt: new Date("2026-03-13T00:00:00.000Z")
+      }
+    ]
+    workspaceStoreState.sourceFolderMemberships = []
+    workspaceStoreState.activeFolderId = "folder-empty"
+    workspaceStoreState.sourceSearchQuery = "Alpha"
+
+    render(<ControlledSourcesPane />)
+
+    expect(screen.getByText("No sources match the current filters.")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear search and filters" }))
+
+    expect(mockSetSourceSearchQuery).toHaveBeenCalledWith("")
+    expect(mockSetActiveFolder).toHaveBeenCalledWith(null)
   })
 
   it("restores manual order when returning from a temporary sort", () => {

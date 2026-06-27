@@ -32,7 +32,36 @@ const snapshotKey = (workspaceId: string) =>
 const chatKey = (workspaceId: string) =>
   `${STORAGE_KEY}:workspace:${encodeURIComponent(workspaceId)}:chat`
 
+const ensureLocalStorage = () => {
+  if (
+    typeof localStorage?.removeItem === "function" &&
+    typeof localStorage?.clear === "function"
+  ) {
+    return
+  }
+
+  const storage = new Map<string, string>()
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      clear: () => storage.clear(),
+      getItem: (key: string) => storage.get(key) ?? null,
+      key: (index: number) => Array.from(storage.keys())[index] ?? null,
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      setItem: (key: string, value: string) => {
+        storage.set(key, String(value))
+      },
+      get length() {
+        return storage.size
+      }
+    }
+  })
+}
+
 const resetWorkspaceStore = () => {
+  ensureLocalStorage()
   localStorage.removeItem(STORAGE_KEY)
   localStorage.removeItem(STORAGE_SPLIT_FLAG_KEY)
   localStorage.removeItem(STORAGE_INDEXEDDB_FLAG_KEY)
@@ -266,6 +295,31 @@ describe("workspace store snapshot persistence", () => {
 
     expect(Object.keys(state.workspaceSnapshots)).toEqual(
       expect.arrayContaining([alphaId, betaId, gammaId])
+    )
+  })
+
+  it("keeps saved workspace labels and snapshots in sync when the active workspace is renamed", () => {
+    useWorkspaceStore.getState().initializeWorkspace("Draft Research")
+    const workspaceId = useWorkspaceStore.getState().workspaceId
+
+    useWorkspaceStore.getState().setWorkspaceName("Renamed Research")
+
+    const state = useWorkspaceStore.getState()
+    const savedWorkspace = state.savedWorkspaces.find(
+      (workspace) => workspace.id === workspaceId
+    )
+
+    expect(savedWorkspace).toEqual(
+      expect.objectContaining({
+        name: "Renamed Research",
+        tag: "workspace:renamed-research"
+      })
+    )
+    expect(state.workspaceSnapshots[workspaceId]).toEqual(
+      expect.objectContaining({
+        workspaceName: "Renamed Research",
+        workspaceTag: "workspace:renamed-research"
+      })
     )
   })
 
@@ -2012,6 +2066,62 @@ describe("workspace store snapshot persistence", () => {
     useWorkspaceStore.getState().selectAllSources()
     state = useWorkspaceStore.getState()
     expect(state.selectedSourceIds).toEqual([readySource.id])
+  })
+
+  it("allows text-search-ready partial sources in selected source scope", () => {
+    useWorkspaceStore.getState().initializeWorkspace("Partial Source Workspace")
+
+    const partialSource = useWorkspaceStore
+      .getState()
+      .addSource({
+        mediaId: 223,
+        title: "Text Search Ready Source",
+        type: "text",
+        status: "processing"
+      })
+    const processingSource = useWorkspaceStore
+      .getState()
+      .addSource({
+        mediaId: 224,
+        title: "Still Extracting Source",
+        type: "pdf",
+        status: "processing"
+      })
+
+    useWorkspaceStore.getState().setSourceStatusByMediaId(
+      223,
+      "processing",
+      "Text search is available while vector indexing continues.",
+      {
+        metadata_ready: true,
+        text_extracted: true,
+        fts_ready: true,
+        vector_ready: false,
+        citation_ready: false,
+        summary_ready: false,
+        tool_accessible: true
+      },
+      {
+        lifecycleState: "partially_queryable",
+        statusReason: "vector_index_pending",
+        sourceOfTruth: "workspace-status-projection",
+        retryEligible: false,
+        stale: false
+      }
+    )
+
+    useWorkspaceStore
+      .getState()
+      .setSelectedSourceIds([partialSource.id, processingSource.id])
+
+    let state = useWorkspaceStore.getState()
+    expect(state.selectedSourceIds).toEqual([partialSource.id])
+    expect(state.getSelectedMediaIds()).toEqual([223])
+    expect(state.getEffectiveSelectedMediaIds()).toEqual([223])
+
+    useWorkspaceStore.getState().selectAllSources()
+    state = useWorkspaceStore.getState()
+    expect(state.selectedSourceIds).toEqual([partialSource.id])
   })
 
   it("preserves selected source intent while a selected source is processing", () => {

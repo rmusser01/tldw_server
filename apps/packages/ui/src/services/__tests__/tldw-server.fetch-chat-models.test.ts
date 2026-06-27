@@ -75,4 +75,37 @@ describe("fetchChatModels", () => {
       })
     ])
   })
+
+  it("clears cached chat models when tldw settings update", async () => {
+    mocks.getChatModels
+      .mockResolvedValueOnce([
+        {
+          id: "openai/old-model",
+          name: "Old Model",
+          provider: "openai",
+          type: "chat"
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "openai/new-model",
+          name: "New Model",
+          provider: "openai",
+          type: "chat"
+        }
+      ])
+
+    const { fetchChatModels } = await importService()
+
+    await expect(fetchChatModels({ returnEmpty: true })).resolves.toEqual([
+      expect.objectContaining({ model: "tldw:openai/old-model" })
+    ])
+
+    window.dispatchEvent(new CustomEvent("tldw:config-updated"))
+
+    await expect(fetchChatModels({ returnEmpty: true })).resolves.toEqual([
+      expect.objectContaining({ model: "tldw:openai/new-model" })
+    ])
+    expect(mocks.getChatModels).toHaveBeenCalledTimes(2)
+  })
 })

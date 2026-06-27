@@ -261,6 +261,53 @@ const isStudioWorkspaceSourceUsable = (source: WorkspaceSource) => {
   return hasStudioUsableExtractedText(source)
 }
 
+const normalizeStudioChatModelId = (value: unknown): string => {
+  if (typeof value !== "string") return ""
+  const trimmed = value.trim()
+  if (trimmed.toLowerCase().startsWith("tldw:")) {
+    return trimmed.slice(5).trim()
+  }
+  return trimmed
+}
+
+const buildSelectedModelUnavailableMessage = (
+  model: {
+    readinessMessage?: string
+    readinessReasonCode?: string
+    availability?: string
+  } | null,
+  selectedModelValue: string
+) => {
+  const readinessMessage =
+    typeof model?.readinessMessage === "string"
+      ? model.readinessMessage.trim()
+      : ""
+  if (readinessMessage) return readinessMessage
+
+  const reasonCode =
+    typeof model?.readinessReasonCode === "string"
+      ? model.readinessReasonCode.trim().toLowerCase()
+      : ""
+  if (reasonCode === "egress_blocked") {
+    return "The selected Studio model is blocked by the server egress policy. Update the allowed endpoint or choose another configured model."
+  }
+  if (reasonCode === "missing_credentials") {
+    return "The selected Studio model needs provider credentials before Studio can generate outputs."
+  }
+  if (reasonCode === "endpoint_unreachable") {
+    return "The selected Studio model endpoint could not be reached. Start the local provider or choose another configured model."
+  }
+  if (reasonCode === "unsupported_chat_provider") {
+    return "The selected Studio model uses a provider that is not available for chat generation."
+  }
+
+  const availability =
+    typeof model?.availability === "string" ? model.availability.trim() : ""
+  return availability
+    ? `The selected Studio model (${selectedModelValue}) is ${availability}. Choose another configured model before generating outputs.`
+    : null
+}
+
 const isStudioTextReadyProcessingSource = (source: WorkspaceSource) =>
   getStudioWorkspaceSourceStatus(source) === "processing" &&
   hasStudioUsableExtractedText(source)
@@ -813,9 +860,11 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     blockingProcessingCount: selectedBlockingProcessingSourceCount,
     errorCount: selectedErrorSourceCount
   })
-  const hasSelectedModel =
-    typeof selectedModel === "string" && selectedModel.trim().length > 0
-  const modelPrerequisiteMessage = hasSelectedModel
+  const selectedModelValue =
+    typeof selectedModel === "string" ? selectedModel.trim() : ""
+  const hasSelectedModelValue = selectedModelValue.length > 0
+  const selectedModelCatalogKey = normalizeStudioChatModelId(selectedModelValue)
+  const baseModelPrerequisiteMessage = hasSelectedModelValue
     ? null
     : t(
         "playground:studio.selectModelFirst",
@@ -825,8 +874,6 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     selectedSourceReadinessNotice?.blocking
       ? selectedSourceReadinessNotice.description
       : null
-  const generationPrerequisiteMessage =
-    sourcePrerequisiteMessage || modelPrerequisiteMessage
   const normalizedApiProvider =
     typeof apiProvider === "string" && apiProvider.trim().length > 0
       ? apiProvider.trim().toLowerCase()
@@ -912,6 +959,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     generationPhase,
     chatModels: _chatModels,
     loadingChatModels,
+    selectedUnavailableModel,
     recentOutputTypes: _recentOutputTypes,
     slidesVisualStyles: _slidesVisualStyles,
     slidesVisualStylesLoading,
@@ -929,6 +977,54 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     handleCancelGeneration,
     loadFlashcardDecks,
   } = artifactGeneration
+
+  const selectedModelMatchesChatCatalog =
+    selectedModelCatalogKey.length > 0 &&
+    _chatModels.some(
+      (model) =>
+        typeof model.id === "string" &&
+        normalizeStudioChatModelId(model.id) === selectedModelCatalogKey
+    )
+  const selectedModelIsStaleTldw =
+    selectedModelValue.toLowerCase().startsWith("tldw:") &&
+    !selectedModelMatchesChatCatalog
+  const selectedModelLooksCatalogBacked =
+    selectedModelValue.includes("/") ||
+    selectedModelValue.toLowerCase().startsWith("tldw:")
+  const unavailableSelectedModelMessage =
+    hasSelectedModelValue && !selectedModelMatchesChatCatalog
+      ? buildSelectedModelUnavailableMessage(
+          selectedUnavailableModel,
+          selectedModelValue
+        )
+      : null
+  const staleTldwModelMessage = selectedModelIsStaleTldw && !unavailableSelectedModelMessage
+    ? t(
+        "playground:studio.staleTldwModel",
+        "The selected Studio model is no longer available. Choose a configured model in Studio Options before generating outputs."
+      )
+    : null
+  const catalogMissingModelMessage =
+    !loadingChatModels &&
+    hasSelectedModelValue &&
+    selectedModelLooksCatalogBacked &&
+    !selectedModelMatchesChatCatalog &&
+    !unavailableSelectedModelMessage &&
+    !staleTldwModelMessage
+      ? "The selected Studio model is not available in the current chat model catalog. Choose another configured model before generating outputs."
+      : null
+  const hasSelectedModel =
+    hasSelectedModelValue &&
+    !selectedModelIsStaleTldw &&
+    !unavailableSelectedModelMessage &&
+    !catalogMissingModelMessage
+  const modelPrerequisiteMessage =
+    baseModelPrerequisiteMessage ||
+    unavailableSelectedModelMessage ||
+    staleTldwModelMessage ||
+    catalogMissingModelMessage
+  const generationPrerequisiteMessage =
+    sourcePrerequisiteMessage || modelPrerequisiteMessage
 
   // Sync local slides style value with hook's local default when empty
   useEffect(() => {
@@ -1391,6 +1487,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                     {t("playground:studio.apiProvider", "API Provider")}
                   </label>
                   <Select
+                    aria-label={t("playground:studio.apiProvider", "API Provider")}
                     size={studioControlSize}
                     className="w-full"
                     value={normalizedApiProvider}
@@ -1418,6 +1515,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                     {t("playground:studio.modelSelection", "Model")}
                   </label>
                   <Select
+                    aria-label={t("playground:studio.modelSelection", "Model")}
                     size={studioControlSize}
                     className="w-full"
                     value={selectedModel ?? undefined}
@@ -1440,6 +1538,10 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                     </span>
                   </div>
                   <Slider
+                    ariaLabelForHandle={t(
+                      "playground:studio.temperature",
+                      "Temperature"
+                    )}
                     min={0}
                     max={2}
                     step={0.01}
@@ -1457,6 +1559,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                     </span>
                   </div>
                   <Slider
+                    ariaLabelForHandle={t("playground:studio.topP", "Top P")}
                     min={0}
                     max={1}
                     step={0.01}
@@ -1469,6 +1572,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                     {t("playground:studio.maxTokens", "Max Tokens")}
                   </label>
                   <Input
+                    aria-label={t("playground:studio.maxTokens", "Max Tokens")}
                     size={studioControlSize}
                     type="number"
                     min={1}
@@ -1507,6 +1611,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                     {t("playground:studio.ragSearchMode", "Search Mode")}
                   </label>
                   <Select
+                    aria-label={t("playground:studio.ragSearchMode", "Search Mode")}
                     size={studioControlSize}
                     className="w-full"
                     value={ragSearchMode}
@@ -1527,6 +1632,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                     <span className="font-medium text-text">{resolvedStudioTopK}</span>
                   </div>
                   <Slider
+                    ariaLabelForHandle={t("playground:studio.ragTopK", "Top K")}
                     min={1}
                     max={50}
                     step={1}
@@ -1548,6 +1654,10 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                     </span>
                   </div>
                   <Slider
+                    ariaLabelForHandle={t(
+                      "playground:studio.ragSimilarityThreshold",
+                      "Similarity threshold"
+                    )}
                     min={0}
                     max={1}
                     step={0.01}
@@ -1869,30 +1979,32 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             ...primaryButtons,
             ...(moreOutputsExpanded ? secondaryButtons : [])
           ]
-          const capabilityNotices = noticeTypes
-            .map((button) => ({
-              key: getArtifactCapabilityId(button.type),
-              message: getOutputCapabilityCopy(button.type, button.label),
-              mode: getOutputCapability(button.type)?.mode
-            }))
-            .filter(
-              (
-                item
-              ): item is {
-                key: ResearchWorkspaceCapabilityId
-                message: string
-                mode: Extract<ResearchWorkspaceCapabilityMode, "warn" | "block">
-              } =>
-                Boolean(item.message) &&
-                (item.mode === "warn" || item.mode === "block")
-            )
-            .filter(
-              (item, index, items) =>
-                items.findIndex((candidate) => candidate.key === item.key) === index
-            )
-            .sort((a, b) =>
-              a.mode === b.mode ? 0 : a.mode === "block" ? -1 : 1
-            )
+          const capabilityNotices = generationPrerequisiteMessage
+            ? []
+            : noticeTypes
+                .map((button) => ({
+                  key: getArtifactCapabilityId(button.type),
+                  message: getOutputCapabilityCopy(button.type, button.label),
+                  mode: getOutputCapability(button.type)?.mode
+                }))
+                .filter(
+                  (
+                    item
+                  ): item is {
+                    key: ResearchWorkspaceCapabilityId
+                    message: string
+                    mode: Extract<ResearchWorkspaceCapabilityMode, "warn" | "block">
+                  } =>
+                    Boolean(item.message) &&
+                    (item.mode === "warn" || item.mode === "block")
+                )
+                .filter(
+                  (item, index, items) =>
+                    items.findIndex((candidate) => candidate.key === item.key) === index
+                )
+                .sort((a, b) =>
+                  a.mode === b.mode ? 0 : a.mode === "block" ? -1 : 1
+                )
 
           return (
             <div className="space-y-2">
@@ -2112,6 +2224,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                   {t("playground:studio.ttsProvider", "TTS Provider")}
                 </label>
                 <Select
+                  aria-label={t("playground:studio.ttsProvider", "TTS Provider")}
                   size={studioControlSize}
                   className="w-full"
                   value={audioSettings.provider}
@@ -2127,6 +2240,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                     {t("playground:studio.ttsModel", "Model")}
                   </label>
                   <Select
+                    aria-label={t("playground:studio.ttsModel", "Model")}
                     size={studioControlSize}
                     className="w-full"
                     value={audioSettings.model}
@@ -2143,6 +2257,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                     {t("playground:studio.ttsVoice", "Voice")}
                   </label>
                   <Select
+                    aria-label={t("playground:studio.ttsVoice", "Voice")}
                     size={studioControlSize}
                     className="w-full"
                     value={audioSettings.voice}
@@ -2170,6 +2285,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                   {t("playground:studio.ttsSpeed", "Speed")}: {audioSettings.speed.toFixed(1)}x
                 </label>
                 <Slider
+                  ariaLabelForHandle={t("playground:studio.ttsSpeed", "Speed")}
                   data-testid="studio-tts-speed-slider"
                   className={mobileSliderClassName}
                   min={0.5}
@@ -2187,6 +2303,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                   {t("playground:studio.ttsFormat", "Output Format")}
                 </label>
                 <Select
+                  aria-label={t("playground:studio.ttsFormat", "Output Format")}
                   size={studioControlSize}
                   className="w-full"
                   value={audioSettings.format}
@@ -2209,6 +2326,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                   </Button>
                 </div>
                 <Select
+                  aria-label={t("playground:studio.flashcardDeck", "Flashcard Deck")}
                   size={studioControlSize}
                   className="w-full"
                   value={selectedFlashcardDeck}

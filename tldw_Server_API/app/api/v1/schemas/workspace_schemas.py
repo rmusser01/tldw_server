@@ -533,6 +533,9 @@ class WorkspaceSourceStatusResponse(BaseModel):
     progress_percent: float | None = None
     progress_message: str | None = None
     job: WorkspaceSourceJobStatus | None = None
+    next_action: str | None = None
+    retry_eligible: bool = False
+    stale: bool = False
     updated_at: str = ""
 
 

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { AddSourceTab } from "@/types/workspace"
 import { AddSourceModal } from "../SourcesPane/AddSourceModal"
 
 const mockCloseAddSourceModal = vi.fn()
@@ -12,7 +13,7 @@ let isMobile = false
 
 const workspaceStoreState = {
   addSourceModalOpen: true,
-  addSourceModalTab: "upload" as const,
+  addSourceModalTab: "upload" as AddSourceTab,
   addSourceProcessing: false,
   addSourceError: null as string | null,
   sources: [] as Array<{ mediaId: number }>,
@@ -105,5 +106,45 @@ describe("AddSourceModal Stage 1 mobile upload affordances", () => {
     expect(modal?.style.width).toBe("100%")
     expect(modalBody?.style.maxHeight).toBe("70vh")
     expect(modalBody?.style.overflowY).toBe("auto")
+  })
+
+  it("gives upload triggers specific accessible names", () => {
+    isMobile = false
+    const { unmount } = render(<AddSourceModal />)
+
+    expect(
+      screen.getByRole("button", { name: "Upload source files" })
+    ).toBeInTheDocument()
+
+    unmount()
+    isMobile = true
+    render(<AddSourceModal />)
+
+    expect(
+      screen.getByRole("button", { name: "Browse source files" })
+    ).toBeInTheDocument()
+  })
+
+  it("supplements add-source placeholder fields with accessible names", () => {
+    workspaceStoreState.addSourceModalTab = "url"
+    const { unmount } = render(<AddSourceModal />)
+
+    expect(screen.getByLabelText("Source URL")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Batch (one per line)" }))
+    expect(screen.getByLabelText("Source URLs")).toBeInTheDocument()
+
+    unmount()
+    workspaceStoreState.addSourceModalTab = "paste"
+    const pasteRender = render(<AddSourceModal />)
+
+    expect(screen.getByLabelText("Pasted source title")).toBeInTheDocument()
+    expect(screen.getByLabelText("Pasted source content")).toBeInTheDocument()
+
+    pasteRender.unmount()
+    workspaceStoreState.addSourceModalTab = "search"
+    render(<AddSourceModal />)
+
+    expect(screen.getByLabelText("Search the web")).toBeInTheDocument()
   })
 })

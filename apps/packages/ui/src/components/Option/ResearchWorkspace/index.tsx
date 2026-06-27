@@ -83,6 +83,7 @@ import {
   undoWorkspaceAction,
   undoLatestWorkspaceAction
 } from "./undo-manager"
+import { renderWorkspaceMessageActionContent } from "./workspace-message-content"
 import {
   buildWorkspaceGlobalSearchResults,
   type WorkspaceGlobalSearchNoteDocument,
@@ -204,6 +205,18 @@ const collectResearchWorkspaceLegacyLocalStorageKeys = (): string[] => {
     return []
   }
   return keys.sort()
+}
+
+const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName.toLowerCase()
+  return (
+    tag === "input" ||
+    tag === "textarea" ||
+    tag === "select" ||
+    target.isContentEditable ||
+    Boolean(target.closest("[contenteditable='true']"))
+  )
 }
 
 const jsonValueContainsOffloadPointer = (
@@ -801,11 +814,13 @@ const buildWorkspaceSourceStatusDetails = (
   statusReason: source.status_reason || undefined,
   sourceOfTruth: "workspace-status-projection",
   updatedAt: parseWorkspaceSourceStatusUpdatedAt(source.updated_at),
-  stale: false,
+  stale: source.stale ?? false,
   retryEligible:
-    source.state === "failed" ||
-    source.state === "missing_media" ||
-    source.state === "blocked_by_permissions",
+    source.retry_eligible ??
+    (source.state === "failed" ||
+      source.state === "missing_media" ||
+      source.state === "blocked_by_permissions"),
+  nextAction: source.next_action || undefined,
   progressPercent: source.progress_percent,
   progressMessage: source.progress_message,
   job: source.job
@@ -1186,6 +1201,8 @@ const ResearchWorkspaceBody: React.FC = () => {
   }, [])
   const onboardingInitializedRef = React.useRef(false)
   const [showTutorialPrompt, setShowTutorialPrompt] = React.useState(false)
+  const [tourLaunchNoticeVisible, setTourLaunchNoticeVisible] =
+    React.useState(false)
   const [showShortcutsModal, setShowShortcutsModal] = React.useState(false)
   const startTutorial = useTutorialStore((s) => s.startTutorial)
 
@@ -1490,10 +1507,19 @@ const ResearchWorkspaceBody: React.FC = () => {
     return operations
   }, [generatingOutputType, isGeneratingOutput, processingMediaIds.length, t])
 
+  const workspaceContextStatus = React.useMemo(() => {
+    if (!workspaceStatusProjectionError) return null
+    return {
+      label: t("playground:workspace.workspaceDegraded", "Workspace degraded"),
+      detail: workspaceStatusProjectionError,
+      severity: "warning" as const
+    }
+  }, [t, workspaceStatusProjectionError])
+
   const workspaceMigrationStatusMessages = React.useMemo(() => {
     if (!statusGuardrailsEnabled) return []
     if (workspaceMigrationLoading) {
-      return ["Legacy workspace data found"]
+      return ["Checking local workspace data"]
     }
     if (!workspaceMigrationResult) return []
 
@@ -2085,6 +2111,10 @@ const ResearchWorkspaceBody: React.FC = () => {
     setActiveSearchResultIndex(0)
   }, [])
 
+  const openGlobalSearch = React.useCallback(() => {
+    setGlobalSearchOpen(true)
+  }, [])
+
   const openTransferSourcesModal = React.useCallback(
     (request: TransferSourcesModalLaunchRequest) => {
       setTransferSourcesRequest(request)
@@ -2108,6 +2138,13 @@ const ResearchWorkspaceBody: React.FC = () => {
       // Ignore storage errors.
     })
   }, [])
+
+  const handleStartWorkspaceTour = React.useCallback(() => {
+    startTutorial("research-workspace-basics")
+    dismissOnboardingOverlay()
+    setShowTutorialPrompt(false)
+    setTourLaunchNoticeVisible(true)
+  }, [dismissOnboardingOverlay, startTutorial])
 
   useEffect(() => {
     const normalizedWorkspaceTag =
@@ -2398,12 +2435,13 @@ const ResearchWorkspaceBody: React.FC = () => {
 
     const undoMessageKey = `workspace-note-shortcut-undo-${undoHandle.id}`
     const maybeOpen = (messageApi as { open?: (config: unknown) => void }).open
+    const clearContent = t("playground:studio.noteCleared", "Note cleared.")
     const messageConfig = {
       key: undoMessageKey,
       type: "warning",
       duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-      content: t("playground:studio.noteCleared", "Note cleared."),
-      btn: (
+      content: renderWorkspaceMessageActionContent(
+        clearContent,
         <Button
           size="small"
           type="link"
@@ -2428,7 +2466,7 @@ const ResearchWorkspaceBody: React.FC = () => {
         messageApi as { warning?: (content: string) => void }
       ).warning
       if (typeof maybeWarning === "function") {
-        maybeWarning(t("playground:studio.noteCleared", "Note cleared."))
+        maybeWarning(clearContent)
       }
     }
   }, [clearCurrentNote, currentNote, focusNewNoteTitle, messageApi, setCurrentNote, t])
@@ -2686,10 +2724,21 @@ const ResearchWorkspaceBody: React.FC = () => {
     const handleKeyboardShortcut = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
       const hasPrimaryModifier = event.metaKey || event.ctrlKey
+      const editableTarget = isEditableKeyboardTarget(event.target)
+
+      if (editableTarget) {
+        return
+      }
+
+      if (!event.altKey && hasPrimaryModifier && !event.shiftKey && key === "k") {
+        event.preventDefault()
+        openGlobalSearch()
+        return
+      }
 
       if (event.altKey && !hasPrimaryModifier && !event.shiftKey && key === "k") {
         event.preventDefault()
-        setGlobalSearchOpen(true)
+        openGlobalSearch()
         return
       }
 
@@ -2768,16 +2817,6 @@ const ResearchWorkspaceBody: React.FC = () => {
         !hasPrimaryModifier &&
         !event.altKey
       ) {
-        const target = event.target as HTMLElement | null
-        const tag = target?.tagName?.toLowerCase()
-        if (
-          tag === "input" ||
-          tag === "textarea" ||
-          tag === "select" ||
-          target?.isContentEditable
-        ) {
-          return
-        }
         event.preventDefault()
         setShowShortcutsModal(true)
       }
@@ -2798,6 +2837,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     focusNewNoteTitle,
     focusWorkspaceNote,
     focusWorkspacePane,
+    openGlobalSearch,
     startNewNoteWithUndo,
     t
   ])
@@ -2956,7 +2996,8 @@ const ResearchWorkspaceBody: React.FC = () => {
             const detail = await tldwClient.getMediaDetails(mediaId, {
               include_content: true,
               include_versions: false,
-              include_version_content: false
+              include_version_content: false,
+              suppressBackendUnavailableEvent: true
             })
             if (cancelled) return
 
@@ -3218,19 +3259,32 @@ const ResearchWorkspaceBody: React.FC = () => {
   }
 
   const tutorialPromptBanner = showTutorialPrompt ? (
-    <div className="mx-4 mt-2 flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">
-      <span><strong>New here?</strong> Take a quick tour of the workspace.</span>
-      <div className="flex gap-2">
+    <div className="mx-4 mt-2 flex flex-col gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm md:flex-row md:items-center md:justify-between">
+      <div className="min-w-0">
+        <p className="font-semibold text-text">
+          {t("playground:workspace.firstUseTitle", "Research Workspace")}
+        </p>
+        <p className="text-xs text-text-muted">
+          {t(
+            "playground:workspace.firstUseDescription",
+            "Collect sources, ask questions, and turn findings into reusable outputs."
+          )}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => {
-            startTutorial("research-workspace-basics")
-            dismissOnboardingOverlay()
-            setShowTutorialPrompt(false)
-          }}
+          onClick={() => focusWorkspacePane("sources")}
+          className="rounded-md border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+        >
+          {t("playground:workspace.firstUseAddSources", "Add sources")}
+        </button>
+        <button
+          type="button"
+          onClick={handleStartWorkspaceTour}
           className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-white hover:bg-primaryStrong transition-colors"
         >
-          Start tour
+          {t("playground:workspace.startTour", "Start tour")}
         </button>
         <button
           type="button"
@@ -3240,9 +3294,21 @@ const ResearchWorkspaceBody: React.FC = () => {
           }}
           className="rounded-md border border-border px-3 py-1 text-xs text-text-muted hover:bg-surface2 transition-colors"
         >
-          Dismiss
+          {t("common:dismiss", "Dismiss")}
         </button>
       </div>
+    </div>
+  ) : null
+  const tourLaunchNotice = tourLaunchNoticeVisible ? (
+    <div
+      className="mx-4 mt-2 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-xs text-success"
+      role="status"
+      aria-live="polite"
+    >
+      {t(
+        "playground:workspace.tourStartedStatus",
+        "Tour started. Follow the highlighted steps."
+      )}
     </div>
   ) : null
   const deepResearchReturnSourceLabel =
@@ -3540,6 +3606,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             rightPaneOpen={false}
             onToggleLeftPane={handleToggleLeftPane}
             onToggleRightPane={handleToggleRightPane}
+            onOpenSearch={openGlobalSearch}
             onOpenSplitWorkspace={handleOpenSplitWorkspace}
             hideToggles
             storageUsedBytes={workspaceStorageUsage.usedBytes}
@@ -3550,6 +3617,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             storageAccountQuotaBytes={workspaceStorageUsage.accountQuotaBytes ?? undefined}
             provenanceEnabled={provenanceEnabled}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
+            serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
           />
 
           <WorkspaceBanner
@@ -3561,6 +3629,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           {deepResearchReturnBanner}
 
           {tutorialPromptBanner}
+          {tourLaunchNotice}
 
           <WorkspaceStatusBar
             storageUsedBytes={workspaceStorageUsage.usedBytes}
@@ -3569,6 +3638,8 @@ const ResearchWorkspaceBody: React.FC = () => {
             statusMessages={workspaceMigrationStatusMessages}
             statusAction={workspaceMigrationStatusAction}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
+            workspaceContextStatus={workspaceContextStatus}
+            compact
           />
 
           <Tabs
@@ -3593,6 +3664,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             rightPaneOpen={!!rightPaneOpen}
             onToggleLeftPane={handleToggleLeftPane}
             onToggleRightPane={handleToggleRightPane}
+            onOpenSearch={openGlobalSearch}
             onOpenSplitWorkspace={handleOpenSplitWorkspace}
             storageUsedBytes={workspaceStorageUsage.usedBytes}
             storageQuotaBytes={workspaceStorageUsage.quotaBytes}
@@ -3602,6 +3674,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             storageAccountQuotaBytes={workspaceStorageUsage.accountQuotaBytes ?? undefined}
             provenanceEnabled={provenanceEnabled}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
+            serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
           />
 
           <WorkspaceBanner
@@ -3613,6 +3686,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           {deepResearchReturnBanner}
 
           {tutorialPromptBanner}
+          {tourLaunchNotice}
 
           <div className="flex min-h-0 flex-1 gap-2 px-2 py-2">
             {!leftPaneOpen && (
@@ -3742,6 +3816,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             statusMessages={workspaceMigrationStatusMessages}
             statusAction={workspaceMigrationStatusAction}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
+            workspaceContextStatus={workspaceContextStatus}
           />
         </>
       )}
@@ -3768,6 +3843,7 @@ const ResearchWorkspaceBody: React.FC = () => {
         <div className="space-y-3">
           <Input
             ref={globalSearchInputRef}
+            aria-label={t("playground:search.workspaceLabel", "Search workspace")}
             value={globalSearchQuery}
             onChange={(event) => setGlobalSearchQuery(event.target.value)}
             onKeyDown={handleSearchInputKeyDown}

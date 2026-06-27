@@ -2,6 +2,9 @@ export type ProviderAvailability = {
   is_configured?: boolean
   provider_enabled?: boolean
   availability?: string
+  readiness_reason_code?: string
+  readiness_message?: string
+  chat_provider?: string
 }
 
 export type TldwProviderEntry =
@@ -15,6 +18,9 @@ export type TldwProviderEntry =
       provider_enabled?: unknown
       enabled?: unknown
       availability?: unknown
+      readiness_reason_code?: unknown
+      readiness_message?: unknown
+      chat_provider?: unknown
       [key: string]: unknown
     }
 
@@ -151,7 +157,13 @@ export const buildProviderAvailabilityMap = async (
           toOptionalProviderBoolean(record?.provider_enabled) ??
           toOptionalProviderBoolean(record?.enabled),
         availability:
-          toNonEmptyProviderString(record?.availability) ?? undefined
+          toNonEmptyProviderString(record?.availability) ?? undefined,
+        readiness_reason_code:
+          toNonEmptyProviderString(record?.readiness_reason_code) ?? undefined,
+        readiness_message:
+          toNonEmptyProviderString(record?.readiness_message) ?? undefined,
+        chat_provider:
+          toNonEmptyProviderString(record?.chat_provider) ?? undefined
       })
     } catch (error) {
       if (import.meta.env?.DEV) {
