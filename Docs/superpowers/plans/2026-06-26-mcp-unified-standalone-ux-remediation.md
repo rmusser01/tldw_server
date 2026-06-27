@@ -781,7 +781,7 @@ git commit -m "feat: verify mcp client installer readiness"
 - Modify: `Docs/MCP/Unified/Client_Snippets.md`
 - Modify: `tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py`
 
-- [ ] **Step 1: Add docs contract test for the cheatsheet**
+- [x] **Step 1: Add docs contract test for the cheatsheet**
 
 ```python
 def test_unified_mcp_operator_cheatsheet_covers_power_user_workflows():
@@ -800,7 +800,7 @@ def test_unified_mcp_operator_cheatsheet_covers_power_user_workflows():
         assert phrase in text
 ```
 
-- [ ] **Step 2: Run the failing docs test**
+- [x] **Step 2: Run the failing docs test**
 
 Run:
 
@@ -811,7 +811,7 @@ python -m pytest tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py::t
 
 Expected: FAIL because the cheatsheet does not exist yet.
 
-- [ ] **Step 3: Write `Operator_Cheatsheet.md`**
+- [x] **Step 3: Write `Operator_Cheatsheet.md`**
 
 Keep it compact. Include:
 
@@ -826,11 +826,11 @@ Keep it compact. Include:
 - client wizard dry-run and verify.
 - common failure codes and next action.
 
-- [ ] **Step 4: Link the cheatsheet from the docs index and snippets**
+- [x] **Step 4: Link the cheatsheet from the docs index and snippets**
 
 Add a single link from the top-level Unified docs index and from Client Snippets.
 
-- [ ] **Step 5: Re-run docs tests**
+- [x] **Step 5: Re-run docs tests**
 
 Run:
 
@@ -841,7 +841,7 @@ python -m pytest tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py -v
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 8**
+- [x] **Step 6: Commit Task 8**
 
 ```bash
 git add Docs/MCP/Unified/Operator_Cheatsheet.md Docs/MCP/Unified/README.md Docs/MCP/Unified/Client_Snippets.md tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py

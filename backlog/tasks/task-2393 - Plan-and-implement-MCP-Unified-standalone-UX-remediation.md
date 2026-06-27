@@ -4,7 +4,7 @@ title: Plan and implement MCP Unified standalone UX remediation
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-27 04:11'
+updated_date: '2026-06-27 04:14'
 labels:
   - mcp
   - ux
@@ -40,7 +40,7 @@ Address the UX/product review findings for Unified MCP standalone/embedded exper
 - [x] #6 Unresolved catalog filters do not silently broaden discovery.
 - [x] #7 Status or diagnostics surface sanitized module/config problems with next actions.
 - [x] #8 Client installer can verify readiness or clearly reports missing credentials.
-- [ ] #9 Power-user MCP workflows have a compact command reference.
+- [x] #9 Power-user MCP workflows have a compact command reference.
 - [ ] #10 Focused tests and Bandit touched-scope scan pass.
 <!-- AC:END -->
 
@@ -62,6 +62,8 @@ Docs/superpowers/plans/2026-06-26-mcp-unified-standalone-ux-remediation.md
 - 2026-06-26: Task 6 complete. Added structured 400 responses for invalid safe config, sanitized config warnings for bad optional config inputs, `problem_modules`/`config_warnings` on MCP status, troubleshooting rows, and focused docs/runtime tests. Verified HTTP mapping, config defaults, basic MCP functionality, and docs contracts pass.
 
 - 2026-06-26: Task 7 complete. Added --api-key, --api-key-env, and --verify to the MCP client installer; no-credential installs are reported as configured but not ready; verification surfaces usable/auth/server-unreachable states; updated wizard docs and tests.
+
+- 2026-06-26: Task 8 complete. Added `Docs/MCP/Unified/Operator_Cheatsheet.md` with compact variables, initialize/session reuse, strict catalog tools/list, tools/call, batch, WebSocket auth, status/health/metrics, wizard dry-run/verify, and common failure recovery. Linked it from README and Client Snippets. Verified docs contract tests pass.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

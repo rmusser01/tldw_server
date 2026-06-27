@@ -2,6 +2,8 @@
 
 Quick, copy-paste examples to authenticate, initialize, discover tools, and call tools against the MCP Unified API.
 
+For repeat operator workflows including batch calls, session headers, status, metrics, and failure recovery, see `Operator_Cheatsheet.md`.
+
 ## Prerequisites
 - Server running with MCP Unified endpoints mounted at `/api/v1/mcp`
 - Auth token (preferred) or API key

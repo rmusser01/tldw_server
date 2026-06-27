@@ -108,3 +108,20 @@ def test_unified_mcp_diagnostics_recovery_is_documented() -> None:
         "empty tool list",
     ):
         _require(snippet in guide, f"Diagnostics docs should mention {snippet}.")
+
+
+def test_unified_mcp_operator_cheatsheet_covers_power_user_workflows() -> None:
+    """The operator cheatsheet should cover common repeat-use MCP workflows."""
+    text = _read("Docs/MCP/Unified/Operator_Cheatsheet.md").lower()
+
+    for phrase in (
+        "tools/list",
+        "tools/call",
+        "batch",
+        "session",
+        "catalog",
+        "metrics",
+        "status",
+        "websocket",
+    ):
+        _require(phrase in text, f"Operator cheatsheet should mention {phrase}.")
