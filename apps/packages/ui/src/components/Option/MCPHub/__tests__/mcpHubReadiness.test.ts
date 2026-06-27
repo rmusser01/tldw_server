@@ -401,11 +401,11 @@ describe("mcpHubReadiness", () => {
     )
   })
 
-  it("matches registry tools by server module, external module, or external tool prefix", () => {
+  it("matches registry tools by external module or external tool prefix", () => {
     for (const entry of [
-      registryEntry({ module: "toy-server", tool_name: "search" }),
       registryEntry({ module: "external.toy-server", tool_name: "search" }),
-      registryEntry({ module: "other", tool_name: "ext.toy-server.search" })
+      registryEntry({ module: "other", tool_name: "ext.toy-server.search" }),
+      registryEntry({ module: "toy-server", tool_name: "ext.toy-server.search" })
     ]) {
       expect(
         getMcpServerReadiness({
@@ -418,6 +418,25 @@ describe("mcpHubReadiness", () => {
         reasonCodes: []
       })
     }
+  })
+
+  it("does not treat built-in module rows as external server tools when ids collide", () => {
+    const readiness = getMcpServerReadiness({
+      server: server({ id: "notes", name: "Notes" }),
+      registryEntries: [
+        registryEntry({
+          module: "notes",
+          tool_name: "notes.search"
+        })
+      ]
+    })
+
+    expect(readiness).toMatchObject({
+      displayState: "needs_attention",
+      primaryReasonCode: "discovery_not_run",
+      reasonCodes: ["discovery_not_run"],
+      toolCount: 0
+    })
   })
 
   it("keeps servers ready when the only reason is partial capability", () => {
@@ -513,6 +532,58 @@ describe("mcpHubReadiness", () => {
     expect(readiness.allowedActions).toEqual(
       expect.arrayContaining(["open_credentials", "refresh_discovery"])
     )
+  })
+
+  it("treats legacy-only hub input as no operational servers", () => {
+    expect(
+      getMcpHubReadiness({
+        servers: [server({ server_source: "legacy" })],
+        registryEntries: [registryEntry()]
+      })
+    ).toMatchObject({
+      displayState: "needs_setup",
+      primaryReasonCode: "not_configured",
+      reasonCodes: ["not_configured"],
+      allowedActions: ["add_server"],
+      servers: [],
+      totalServers: 0
+    })
+  })
+
+  it("treats superseded-only hub input as no operational servers", () => {
+    expect(
+      getMcpHubReadiness({
+        servers: [server({ superseded_by_server_id: "replacement-server" })],
+        registryEntries: [registryEntry()]
+      })
+    ).toMatchObject({
+      displayState: "needs_setup",
+      primaryReasonCode: "not_configured",
+      reasonCodes: ["not_configured"],
+      allowedActions: ["add_server"],
+      servers: [],
+      totalServers: 0
+    })
+  })
+
+  it("applies readiness hints supplied as a Map", () => {
+    const readiness = getMcpHubReadiness({
+      servers: [server()],
+      registryEntries: [registryEntry()],
+      readinessHintsByServerId: new Map([
+        ["toy-server", { configChanged: true }]
+      ])
+    })
+
+    expect(readiness).toMatchObject({
+      displayState: "stale",
+      primaryReasonCode: "config_changed",
+      reasonCodes: ["config_changed"]
+    })
+    expect(readiness.servers[0]).toMatchObject({
+      serverId: "toy-server",
+      primaryReasonCode: "config_changed"
+    })
   })
 
   it("limits hub actions to view details during current operations with other reasons", () => {

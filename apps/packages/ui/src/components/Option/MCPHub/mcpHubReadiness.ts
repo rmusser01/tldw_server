@@ -304,12 +304,13 @@ const countMatchingTools = (
   const externalModule = `external.${server.id}`
   const externalToolPrefix = `ext.${server.id}.`
 
-  return registryEntries.filter(
-    (entry) =>
-      entry.module === server.id ||
-      entry.module === externalModule ||
-      entry.tool_name.startsWith(externalToolPrefix)
-  ).length
+  return registryEntries.filter((entry) => {
+    const hasExternalToolName = entry.tool_name.startsWith(externalToolPrefix)
+
+    // Built-in modules can share ids with external servers; require an external
+    // namespace signal before counting a registry row for server readiness.
+    return hasExternalToolName || entry.module === externalModule
+  }).length
 }
 
 const getReadinessHint = (
@@ -347,6 +348,9 @@ const hasBlockingAuthTemplateIssue = (server: McpHubExternalServer): boolean => 
     !allowsNoAuthTemplate(server)
   )
 }
+
+const isOperationalManagedServer = (server: McpHubExternalServer): boolean =>
+  server.server_source !== "legacy" && !server.superseded_by_server_id
 
 export const getMcpCredentialState = (
   server: McpHubExternalServer
@@ -473,7 +477,9 @@ export const getMcpHubReadiness = ({
   registryEntries: McpHubToolRegistryEntry[]
   readinessHintsByServerId?: ReadinessHintsByServerId
 }): McpHubReadiness => {
-  if (servers.length === 0) {
+  const operationalServers = servers.filter(isOperationalManagedServer)
+
+  if (operationalServers.length === 0) {
     const reasonCodes = sortReasonCodes(["not_configured"])
     const primaryReasonCode = reasonCodes[0]
 
@@ -498,7 +504,7 @@ export const getMcpHubReadiness = ({
     }
   }
 
-  const serverReadiness = servers.map((server) =>
+  const serverReadiness = operationalServers.map((server) =>
     getMcpServerReadiness({
       server,
       registryEntries,
@@ -529,12 +535,12 @@ export const getMcpHubReadiness = ({
     message: getMessageForHub({
       displayState,
       primaryReasonCode,
-      totalServers: servers.length,
+      totalServers: operationalServers.length,
       readyServerCount,
       currentOperation
     }),
     servers: serverReadiness,
-    totalServers: servers.length,
+    totalServers: operationalServers.length,
     readyServerCount,
     checkingServerCount: serverReadiness.filter(
       (readiness) => readiness.displayState === "checking"
