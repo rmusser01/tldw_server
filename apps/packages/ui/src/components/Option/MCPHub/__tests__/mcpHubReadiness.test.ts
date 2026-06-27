@@ -287,6 +287,20 @@ describe("mcpHubReadiness", () => {
     })
   })
 
+  it("treats disabled servers as unavailable even when cached tools match", () => {
+    const readiness = getMcpServerReadiness({
+      server: server({ enabled: false }),
+      registryEntries: [registryEntry()]
+    })
+
+    expect(readiness).toMatchObject({
+      displayState: "needs_attention",
+      primaryReasonCode: "runtime_unavailable",
+      reasonCodes: ["runtime_unavailable"]
+    })
+    expect(readiness.displayState).not.toBe("ready")
+  })
+
   it("maps unreachable hints to unreachable", () => {
     expect(
       getMcpServerReadiness({
@@ -563,6 +577,24 @@ describe("mcpHubReadiness", () => {
       allowedActions: ["add_server"],
       servers: [],
       totalServers: 0
+    })
+  })
+
+  it("treats disabled-only hub input as no operational managed servers", () => {
+    expect(
+      getMcpHubReadiness({
+        servers: [server({ enabled: false })],
+        registryEntries: [registryEntry()]
+      })
+    ).toMatchObject({
+      displayState: "needs_setup",
+      primaryReasonCode: "not_configured",
+      reasonCodes: ["not_configured"],
+      allowedActions: ["add_server"],
+      servers: [],
+      totalServers: 0,
+      readyServerCount: 0,
+      attentionServerCount: 0
     })
   })
 

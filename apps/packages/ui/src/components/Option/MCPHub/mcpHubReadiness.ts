@@ -350,7 +350,9 @@ const hasBlockingAuthTemplateIssue = (server: McpHubExternalServer): boolean => 
 }
 
 const isOperationalManagedServer = (server: McpHubExternalServer): boolean =>
-  server.server_source !== "legacy" && !server.superseded_by_server_id
+  server.enabled !== false &&
+  server.server_source !== "legacy" &&
+  !server.superseded_by_server_id
 
 export const getMcpCredentialState = (
   server: McpHubExternalServer
@@ -406,7 +408,7 @@ export const getMcpServerReadiness = ({
     unsortedReasonCodes.push("auth_missing")
   }
 
-  if (server.runtime_executable === false) {
+  if (server.enabled === false || server.runtime_executable === false) {
     unsortedReasonCodes.push("runtime_unavailable")
   }
 
