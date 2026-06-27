@@ -299,6 +299,7 @@ export const chatRagMethods = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: request,
+      timeoutMs: options?.timeoutMs,
       abortSignal: options?.signal
     })
     // bgRequest returns parsed data; for non-streaming chat we expect a JSON structure or text. To keep existing consumers happy, wrap as Response-like

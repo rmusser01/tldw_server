@@ -146,6 +146,29 @@ describe("TldwApiClient chat mutations", () => {
     })
   })
 
+  it("forwards explicit chat completion timeouts to the request transport", async () => {
+    mocks.bgRequest.mockResolvedValue({ id: "resp-1", object: "chat.completion" })
+
+    const client = new TldwApiClient()
+    await client.createChatCompletion(
+      {
+        model: "auto",
+        messages: [{ role: "user", content: "hello" }]
+      },
+      { timeoutMs: 180_000 }
+    )
+
+    const request = mocks.bgRequest.mock.calls.at(-1)?.[0] as {
+      path?: string
+      method?: string
+      timeoutMs?: number
+    }
+
+    expect(request.path).toBe("/api/v1/chat/completions")
+    expect(request.method).toBe("POST")
+    expect(request.timeoutMs).toBe(180_000)
+  })
+
   it("sanitizes leaky background payload fields when creating a chat completion", async () => {
     mocks.bgRequest.mockResolvedValue({
       id: "resp-1",

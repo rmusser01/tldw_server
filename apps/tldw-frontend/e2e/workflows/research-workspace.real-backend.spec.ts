@@ -53,7 +53,12 @@ const selectRealBackendChatModel = async (
   page: Page,
   modelId: string
 ): Promise<void> => {
-  await page.evaluate((selectedModel) => {
+  const separatorIndex = modelId.indexOf(":")
+  const provider = separatorIndex > 0 ? modelId.slice(0, separatorIndex) : ""
+  const selectedModel =
+    provider === "llama.cpp" ? modelId.slice(separatorIndex + 1) : modelId
+
+  await page.evaluate(({ selectedModel, provider }) => {
     const store = (window as { __tldw_useStoreMessageOption?: unknown })
       .__tldw_useStoreMessageOption as
       | {
@@ -64,7 +69,18 @@ const selectRealBackendChatModel = async (
       throw new Error("Message option store is unavailable on window")
     }
     store.setState({ selectedModel })
-  }, modelId)
+
+    if (provider) {
+      const modelSettingsStore = (window as {
+        __tldw_useStoreChatModelSettings?: unknown
+      }).__tldw_useStoreChatModelSettings as
+        | {
+            setState?: (nextState: Record<string, unknown>) => void
+          }
+        | undefined
+      modelSettingsStore?.setState?.({ apiProvider: provider })
+    }
+  }, { selectedModel, provider })
 }
 
 type BootstrapResponse = {
@@ -335,7 +351,7 @@ const seedLiveWorkspaceDocument = async (
   body.append("media_type", "document")
   body.append("title", title)
   body.append("perform_analysis", "false")
-  body.append("perform_chunking", "false")
+  body.append("perform_chunking", "true")
   body.append("files", new Blob([content], { type: "text/plain" }), fileName)
 
   const response = await fetchWithApiKey(

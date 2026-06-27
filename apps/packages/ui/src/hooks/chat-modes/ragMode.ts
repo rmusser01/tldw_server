@@ -16,7 +16,10 @@ import { coerceBooleanOrNull } from "@/services/settings/registry"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { ActorSettings } from "@/types/actor"
 import { maybeInjectActorMessage } from "@/utils/actor"
-import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
+import {
+  parseProviderQualifiedModelSelection,
+  resolveApiProviderForModel
+} from "@/utils/resolve-api-provider"
 import type { ChatModelSettings } from "@/store/model"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
@@ -389,12 +392,18 @@ const buildRagOptions = async (
   // Delete false flags so the backend can apply its default behavior.
   if (ctx.ragEnableGeneration) {
     ragOptions.enable_generation = true
-    const selectedGenerationModel = ctx.selectedModel?.trim()
+    const rawSelectedGenerationModel = ctx.selectedModel?.trim()
+    const selectedModelSelection = parseProviderQualifiedModelSelection(
+      rawSelectedGenerationModel
+    )
+    const selectedGenerationModel = (
+      selectedModelSelection.modelId || rawSelectedGenerationModel
+    )?.trim()
     if (selectedGenerationModel) {
       ragOptions.generation_model = selectedGenerationModel
     }
     const selectedGenerationProvider = await resolveApiProviderForModel({
-      modelId: selectedGenerationModel,
+      modelId: rawSelectedGenerationModel,
       explicitProvider: ctx.currentChatModelSettings?.apiProvider
     })
     if (selectedGenerationProvider) {

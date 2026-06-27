@@ -199,6 +199,7 @@ export const QuizPlayground: React.FC = () => {
 
   const handleTabChange = React.useCallback((nextTabRaw: string) => {
     const nextTab = nextTabRaw as QuizTabKey
+    defaultTabResolved.current = true
     if (activeTab === "create" && nextTab !== "create" && createTabDirty) {
       const shouldLeave = window.confirm(
         t("option:quiz.unsavedCreateConfirm", {

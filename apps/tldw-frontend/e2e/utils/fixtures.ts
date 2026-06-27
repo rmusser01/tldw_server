@@ -186,9 +186,7 @@ export function extractUsableModelIds(payload: any): string[] {
       models.push(model)
       continue
     }
-    const provider = normalizeModelField(
-      model?.provider ?? model?.provider_key ?? model?.api_provider
-    )
+    const provider = normalizeModelProvider(model)
     const id = normalizeModelField(model?.id ?? model?.model ?? model?.name)
     if (!id) continue
     models.push(formatModelId(id, provider))
@@ -213,9 +211,9 @@ export function extractModelIds(payload: any): string[] {
   for (const provider of providers) {
     if (Array.isArray(provider?.models)) {
       const providerUsable = isRunnableModelDescriptor(provider)
-      const providerName = normalizeModelField(
-        provider?.name ?? provider?.id ?? provider?.provider
-      )
+      const providerName =
+        normalizeModelProvider(provider) ??
+        normalizeModelField(provider?.name ?? provider?.id ?? provider?.provider)
       for (const model of provider.models) {
         if (
           !providerUsable ||
@@ -226,9 +224,7 @@ export function extractModelIds(payload: any): string[] {
         if (typeof model === "string") {
           models.push(formatModelId(model, providerName))
         } else {
-          const providerOverride = normalizeModelField(
-            model?.provider ?? model?.provider_key ?? model?.api_provider
-          )
+          const providerOverride = normalizeModelProvider(model)
           const id = normalizeModelField(model?.id ?? model?.model ?? model?.name)
           if (id) models.push(formatModelId(id, providerOverride ?? providerName))
         }
@@ -243,9 +239,7 @@ export function extractModelIds(payload: any): string[] {
       if (typeof model === "string") {
         models.push(model)
       } else {
-        const provider = normalizeModelField(
-          model?.provider ?? model?.provider_key ?? model?.api_provider
-        )
+        const provider = normalizeModelProvider(model)
         const id = normalizeModelField(model?.id ?? model?.model ?? model?.name)
         if (id) models.push(formatModelId(id, provider))
       }
@@ -352,6 +346,18 @@ function normalizeModelField(value: unknown): string | null {
   if (typeof value !== "string" && typeof value !== "number") return null
   const trimmed = String(value).trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function normalizeModelProvider(value: any): string | null {
+  return normalizeModelField(
+    value?.chat_provider ??
+      value?.chatProvider ??
+      value?.api_provider ??
+      value?.apiProvider ??
+      value?.provider_key ??
+      value?.providerKey ??
+      value?.provider
+  )
 }
 
 function formatModelId(id: string, provider: string | null): string {

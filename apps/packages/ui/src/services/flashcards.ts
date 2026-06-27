@@ -21,7 +21,7 @@ const flashcardTagsClient = createResourceClient({
   basePath: "/api/v1/flashcards/tags" as AllowedPath
 })
 
-export const FLASHCARD_GENERATION_TIMEOUT_MS = 120000
+export const FLASHCARD_GENERATION_TIMEOUT_MS = 180000
 
 export type DeckSchedulerSettings = {
   new_steps_minutes: number[]

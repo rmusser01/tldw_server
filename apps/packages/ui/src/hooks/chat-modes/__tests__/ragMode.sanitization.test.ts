@@ -78,7 +78,24 @@ vi.mock("@/utils/actor", () => ({
 
 vi.mock("@/utils/resolve-api-provider", () => ({
   resolveApiProviderForModel: (...args: unknown[]) =>
-    mocks.resolveApiProviderForModel(...args)
+    mocks.resolveApiProviderForModel(...args),
+  parseProviderQualifiedModelSelection: (value: unknown) => {
+    const raw = String(value || "").trim()
+    if (!raw.startsWith("llama.cpp:")) {
+      return {
+        raw,
+        modelId: raw,
+        provider: undefined,
+        isProviderQualified: false
+      }
+    }
+    return {
+      raw,
+      modelId: raw.slice("llama.cpp:".length),
+      provider: "llama.cpp",
+      isProviderQualified: true
+    }
+  }
 }))
 
 vi.mock("../chatModePipeline", () => ({
@@ -219,6 +236,41 @@ describe("ragMode sanitizer", () => {
             text: expect.stringContaining("PASTE-EVIDENCE-ORION")
           })
         ]
+      })
+    )
+  })
+
+  it("sends raw generation_model when the selected RAG model is provider-qualified", async () => {
+    mocks.ragSearch.mockResolvedValue({
+      documents: [
+        {
+          content: "The llama.cpp provider accepted the raw GGUF model id.",
+          metadata: {
+            source: "media_db",
+            title: "llama.cpp runtime source",
+            type: "text"
+          }
+        }
+      ]
+    })
+    mocks.resolveApiProviderForModel.mockResolvedValue("llama.cpp")
+
+    await expect(
+      __testing__.ragModeDefinition.preflight?.(
+        createRagContext({
+          selectedModel:
+            "llama.cpp:gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+          currentChatModelSettings: { apiProvider: undefined }
+        })
+      )
+    ).resolves.toBeNull()
+
+    expect(mocks.ragSearch).toHaveBeenCalledWith(
+      "What phrase proves the selected source was used?",
+      expect.objectContaining({
+        generation_model:
+          "gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+        generation_provider: "llama.cpp"
       })
     )
   })
