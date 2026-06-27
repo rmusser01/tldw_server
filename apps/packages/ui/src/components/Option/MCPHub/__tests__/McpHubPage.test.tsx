@@ -35,12 +35,42 @@ vi.mock("../ApprovalPoliciesTab", () => ({
   ApprovalPoliciesTab: () => <div>approvals tab</div>
 }))
 vi.mock("../ToolCatalogsTab", () => ({
-  ToolCatalogsTab: () => <div>catalog tab</div>
+  ToolCatalogsTab: ({
+    onOpenServerSetup,
+    onOpenServerCredentials,
+    onOpenServerConfig
+  }: {
+    onOpenServerSetup?: () => void
+    onOpenServerCredentials?: (serverId: string) => void
+    onOpenServerConfig?: (serverId: string) => void
+  }) => (
+    <div>
+      catalog tab
+      <button type="button" onClick={onOpenServerSetup}>
+        catalog add server
+      </button>
+      <button type="button" onClick={() => onOpenServerCredentials?.("docs-managed")}>
+        catalog fix credentials
+      </button>
+      <button type="button" onClick={() => onOpenServerConfig?.("docs-managed")}>
+        catalog open config
+      </button>
+    </div>
+  )
 }))
 vi.mock("../ExternalServersTab", () => ({
-  ExternalServersTab: ({ onOpenToolCatalog }: { onOpenToolCatalog?: () => void }) => (
+  ExternalServersTab: ({
+    drillTarget,
+    onOpenToolCatalog
+  }: {
+    drillTarget?: { action?: string; object_id?: string } | null
+    onOpenToolCatalog?: () => void
+  }) => (
     <div>
       credentials tab
+      {drillTarget?.object_id ? (
+        <span>{`drill ${drillTarget.object_id} ${drillTarget.action}`}</span>
+      ) : null}
       <button type="button" onClick={onOpenToolCatalog}>
         open catalog from credentials row
       </button>
@@ -311,6 +341,34 @@ describe("McpHubPage", () => {
     )
     expect(screen.getByTestId("location-probe")).toHaveTextContent(
       "/mcp-hub?workflow=setup&view=tool-catalogs"
+    )
+  })
+
+  it("routes Tool Catalog recovery actions back to server setup and credentials", async () => {
+    const user = userEvent.setup()
+    renderMcpHubPage("/mcp-hub?workflow=setup&view=tool-catalogs")
+
+    await user.click(screen.getByRole("button", { name: /catalog add server/i }))
+
+    expect(screen.getByText("credentials tab")).toBeTruthy()
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/mcp-hub?workflow=setup&view=credentials"
+    )
+
+    await user.click(screen.getByRole("button", { name: /open catalog from credentials row/i }))
+    await user.click(screen.getByRole("button", { name: /catalog fix credentials/i }))
+
+    expect(screen.getByText("drill docs-managed focus")).toBeTruthy()
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/mcp-hub?workflow=setup&view=credentials"
+    )
+
+    await user.click(screen.getByRole("button", { name: /open catalog from credentials row/i }))
+    await user.click(screen.getByRole("button", { name: /catalog open config/i }))
+
+    expect(screen.getByText("drill docs-managed edit")).toBeTruthy()
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/mcp-hub?workflow=setup&view=credentials"
     )
   })
 })

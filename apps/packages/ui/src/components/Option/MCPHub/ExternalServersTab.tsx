@@ -452,7 +452,9 @@ export const ExternalServersTab = ({
       } else {
         setFocusedServerId(server.id)
         setActiveServerId(server.id)
-        openEditForm(server)
+        if (drillTarget.action === "edit") {
+          openEditForm(server)
+        }
       }
       onDrillHandled?.(drillTarget.request_id)
     }

@@ -1,9 +1,7 @@
 import { useMemo, useRef, useState, type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
-import { useQuery } from "@tanstack/react-query"
 import { Button, Tabs, Typography } from "antd"
-import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
-import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
+import { StatePanel } from "@/components/ui/state"
 
 import { ApprovalPoliciesTab } from "./ApprovalPoliciesTab"
 import { CapabilityMappingsTab } from "./CapabilityMappingsTab"
@@ -15,13 +13,11 @@ import { PolicyAssignmentsTab } from "./PolicyAssignmentsTab"
 import { SharedWorkspacesTab } from "./SharedWorkspacesTab"
 import { ToolCatalogsTab } from "./ToolCatalogsTab"
 import { ExternalServersTab } from "./ExternalServersTab"
-import { DeploymentDiagnosticsPanel } from "./DeploymentDiagnosticsPanel"
 import { WorkspaceSetsTab } from "./WorkspaceSetsTab"
-import {
-  getToolRegistrySummary,
-  type McpHubDrillAction,
-  type McpHubDrillTarget,
-  type McpHubGovernanceAuditNavigateTarget
+import type {
+  McpHubDrillAction,
+  McpHubDrillTarget,
+  McpHubGovernanceAuditNavigateTarget
 } from "@/services/tldw/mcp-hub"
 import {
   persistMcpHubExplainerDismissed,
@@ -38,22 +34,20 @@ import {
   type McpHubWorkflowKey
 } from "./mcpHubWorkflowConfig"
 
-type McpHubStatusItem = {
+type McpHubShortcutItem = {
   key: string
   title: string
   description: string
-  statusLabel: string
   workflow: McpHubWorkflowKey
   view: McpHubViewKey
   actionLabel: string
 }
 
-const MCP_HUB_STATUS_ITEMS: McpHubStatusItem[] = [
+const MCP_HUB_SHORTCUT_ITEMS: McpHubShortcutItem[] = [
   {
     key: "servers-credentials",
     title: "Servers & Credentials",
-    description: "External servers and credential slots load in the setup workflow.",
-    statusLabel: "Setup workflow",
+    description: "Add external servers, manage credential slots, and check local setup.",
     workflow: "setup",
     view: "credentials",
     actionLabel: "Open Servers & Credentials"
@@ -61,8 +55,7 @@ const MCP_HUB_STATUS_ITEMS: McpHubStatusItem[] = [
   {
     key: "policy-assignments",
     title: "Policy Assignments",
-    description: "User, group, and default access assignments live in the access workflow.",
-    statusLabel: "Access workflow",
+    description: "Review user, group, and default access assignments.",
     workflow: "access",
     view: "assignments",
     actionLabel: "Open Policy Assignments"
@@ -70,8 +63,7 @@ const MCP_HUB_STATUS_ITEMS: McpHubStatusItem[] = [
   {
     key: "approvals",
     title: "Approvals",
-    description: "Approval policies and governance packs live in the governance workflow.",
-    statusLabel: "Governance workflow",
+    description: "Manage approval policies and governance pack controls.",
     workflow: "governance",
     view: "approvals",
     actionLabel: "Open Approvals"
@@ -79,8 +71,7 @@ const MCP_HUB_STATUS_ITEMS: McpHubStatusItem[] = [
   {
     key: "workspace-boundaries",
     title: "Workspace Boundaries",
-    description: "Path scopes and shared workspace boundaries live in the workspaces workflow.",
-    statusLabel: "Workspaces workflow",
+    description: "Define path scopes and shared workspace boundaries.",
     workflow: "workspaces",
     view: "path-scopes",
     actionLabel: "Open Workspace Boundaries"
@@ -88,35 +79,12 @@ const MCP_HUB_STATUS_ITEMS: McpHubStatusItem[] = [
   {
     key: "audit-findings",
     title: "Audit Findings",
-    description: "Broken references and risky configuration findings live in the audit workflow.",
-    statusLabel: "Audit workflow",
+    description: "Inspect broken references and risky configuration findings.",
     workflow: "audit",
     view: "audit",
     actionLabel: "Open Audit Findings"
   }
 ]
-
-const MCP_HUB_CAPABILITY_ENDPOINT = "/api/v1/mcp/hub/tool-registry/summary"
-
-const buildMcpHubCapabilityState = (error: unknown) => {
-  const state = buildCapabilityState({
-    featureName: "MCP Hub",
-    capabilityName: "MCP Hub management",
-    endpoint: MCP_HUB_CAPABILITY_ENDPOINT,
-    method: "GET",
-    error
-  })
-
-  if (state.state === "auth_required" || state.state === "permission_denied") {
-    return state
-  }
-
-  return {
-    ...state,
-    title: "MCP Hub is unavailable on this server",
-    message: "The connected server does not advertise MCP Hub management."
-  }
-}
 
 export const McpHubPage = () => {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -125,12 +93,6 @@ export const McpHubPage = () => {
   )
   const [drillTarget, setDrillTarget] = useState<McpHubDrillTarget | null>(null)
   const requestIdRef = useRef(0)
-  const capabilityQuery = useQuery({
-    queryKey: ["mcp-hub", "capability-readiness"],
-    queryFn: getToolRegistrySummary,
-    staleTime: 30_000,
-    retry: false
-  })
 
   const routeState = useMemo(
     () =>
@@ -140,8 +102,6 @@ export const McpHubPage = () => {
       }),
     [searchParams]
   )
-  const focusWorkspaceId = searchParams.get("workspace_id")?.trim() || null
-  const focusSource = searchParams.get("source")?.trim() || null
 
   const updateRouteState = (nextState: McpHubRouteState) => {
     const nextParams = new URLSearchParams(searchParams)
@@ -208,15 +168,35 @@ export const McpHubPage = () => {
     })
   }
 
+  const handleOpenServerSetup = () => {
+    setDrillTarget(null)
+    updateRouteState({
+      workflow: workflowForMcpHubView("credentials"),
+      view: "credentials"
+    })
+  }
+
+  const handleOpenExternalServer = (serverId: string, action: McpHubDrillAction) => {
+    requestIdRef.current += 1
+    setDrillTarget({
+      tab: "credentials",
+      object_kind: "external_server",
+      object_id: serverId,
+      action,
+      request_id: requestIdRef.current
+    })
+    updateRouteState({
+      workflow: workflowForMcpHubView("credentials"),
+      view: "credentials"
+    })
+  }
+
   const tabContentByView: Record<McpHubViewKey, ReactNode> = {
     "tool-catalogs": (
       <ToolCatalogsTab
-        onAddServer={() =>
-          updateRouteState({
-            workflow: "setup",
-            view: "credentials"
-          })
-        }
+        onOpenServerSetup={handleOpenServerSetup}
+        onOpenServerCredentials={(serverId) => handleOpenExternalServer(serverId, "focus")}
+        onOpenServerConfig={(serverId) => handleOpenExternalServer(serverId, "edit")}
       />
     ),
     credentials: (
@@ -239,8 +219,6 @@ export const McpHubPage = () => {
     "workspace-sets": (
       <WorkspaceSetsTab
         drillTarget={drillTarget}
-        focusSource={focusSource}
-        focusWorkspaceId={focusWorkspaceId}
         onDrillHandled={handleDrillHandled}
       />
     ),
@@ -264,62 +242,27 @@ export const McpHubPage = () => {
     ),
     children: tabContentByView[view]
   }))
-  const capabilityErrorState =
-    capabilityQuery.isError && !capabilityQuery.data
-      ? buildMcpHubCapabilityState(capabilityQuery.error)
-      : null
-
-  if (capabilityErrorState) {
-    return (
-      <div className="flex h-full min-h-0 flex-col gap-4 p-4" data-testid="mcp-hub-shell">
-        <Typography.Title level={1} className="!mb-0 !text-2xl">
-          MCP Hub
-        </Typography.Title>
-        <Typography.Text type="secondary">
-          Manage external tool servers and governance policies for the Model Context Protocol (MCP).
-        </Typography.Text>
-        <RecoveryCallout
-          state={capabilityErrorState.state}
-          title={capabilityErrorState.title}
-          message={capabilityErrorState.message}
-          diagnostics={capabilityErrorState.diagnostics}
-          primaryAction={{
-            label: "Try again",
-            onClick: () => {
-              void capabilityQuery.refetch()
-            }
-          }}
-          data-testid="mcp-hub-capability-recovery"
-        />
-      </div>
-    )
-  }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-4" data-testid="mcp-hub-shell">
-      <Typography.Title level={1} className="!mb-0 !text-2xl">
+      <Typography.Title level={3} style={{ margin: 0 }}>
         MCP Hub
       </Typography.Title>
       <Typography.Text type="secondary">
         Manage external tool servers and governance policies for the Model Context Protocol (MCP).
       </Typography.Text>
-      <section
-        aria-label="MCP Hub status summary"
+      <nav
+        aria-label="MCP Hub workflow shortcuts"
         className="grid gap-3 md:grid-cols-2 xl:grid-cols-5"
-        data-testid="mcp-hub-status-summary"
+        data-testid="mcp-hub-workflow-shortcuts"
       >
-        {MCP_HUB_STATUS_ITEMS.map((item) => (
+        {MCP_HUB_SHORTCUT_ITEMS.map((item) => (
           <article
             key={item.key}
             className="rounded-lg border border-border bg-surface p-3 shadow-sm"
-            data-testid={`mcp-hub-status-${item.key}`}
+            data-testid={`mcp-hub-shortcut-${item.key}`}
           >
-            <div className="flex items-start justify-between gap-2">
-              <h2 className="text-sm font-semibold text-text">{item.title}</h2>
-              <span className="rounded-full border border-border bg-surface2 px-2 py-0.5 text-xs text-text-muted">
-                {item.statusLabel}
-              </span>
-            </div>
+            <h2 className="text-sm font-semibold text-text">{item.title}</h2>
             <p className="mt-2 text-xs text-text-muted">{item.description}</p>
             <Button
               className="mt-3"
@@ -335,16 +278,19 @@ export const McpHubPage = () => {
             </Button>
           </article>
         ))}
-      </section>
+      </nav>
       {!explainerDismissed && (
-        <Alert
+        <StatePanel
           data-testid="mcp-hub-explainer"
-          type="info"
-          showIcon
-          closable
-          onClose={handleExplainerClose}
+          state="empty"
           title="Getting Started with MCP Hub"
-          description="MCP Hub lets you connect external tool servers, manage permissions, and govern how AI models interact with outside services. Start by adding or checking Servers & Credentials, then use the Tool Catalog to verify available tools."
+          message="MCP Hub lets you connect external tool servers, manage permissions, and govern how AI models interact with outside services. Start by adding or checking Servers & Credentials, then use the Tool Catalog to verify available tools."
+          secondaryActions={[
+            {
+              label: "Dismiss",
+              onClick: handleExplainerClose
+            }
+          ]}
         />
       )}
       <div
@@ -375,7 +321,6 @@ export const McpHubPage = () => {
       >
         {activeWorkflow.description}
       </Typography.Text>
-      {routeState.workflow === "setup" ? <DeploymentDiagnosticsPanel /> : null}
       <Tabs
         data-testid="mcp-hub-tabs"
         activeKey={routeState.view}

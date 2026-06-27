@@ -888,9 +888,13 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
 **Files:**
 - Modify: `apps/packages/ui/src/components/Option/MCPHub/ToolCatalogsTab.tsx`
 - Modify: `apps/packages/ui/src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx`
+- Modify: `apps/packages/ui/src/components/Option/MCPHub/McpHubPage.tsx`
+- Modify: `apps/packages/ui/src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx`
+- Modify: `apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx`
+- Modify: `apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx`
 - Use: `apps/packages/ui/src/components/Option/MCPHub/mcpHubReadiness.ts`
 
-- [ ] **Step 1: Write failing empty-no-server test**
+- [x] **Step 1: Write failing empty-no-server test**
 
   Mock `getToolRegistrySummary()` to return no entries/modules and `listExternalServers()` to return `[]`.
 
@@ -898,7 +902,7 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   - `No MCP servers connected` or equivalent appears.
   - An `Add server` action appears.
 
-- [ ] **Step 2: Write failing configured-undiscovered test**
+- [x] **Step 2: Write failing configured-undiscovered test**
 
   Mock no tools, one managed enabled server, no credential blockers, and `runtime_executable: true`.
 
@@ -906,7 +910,7 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   - The empty state says the server is saved but discovery has not run.
   - `Refresh discovery` appears.
 
-- [ ] **Step 3: Write failing auth/runtime recovery tests**
+- [x] **Step 3: Write failing auth/runtime recovery tests**
 
   Add one test for required missing credentials and one for runtime unavailable.
 
@@ -914,7 +918,7 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   - Missing credentials offers `Fix credentials`.
   - Runtime unavailable offers `Open server config`.
 
-- [ ] **Step 4: Write failing operation/failure recovery tests**
+- [x] **Step 4: Write failing operation/failure recovery tests**
 
   Add tests for any Stage 0 readiness signals exposed by the frontend/backend contract:
   - `checking`: shows in-progress discovery/preflight copy and no duplicate refresh action;
@@ -923,21 +927,24 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   - `discovery_failed`: offers `Refresh discovery` and `View details`;
   - `partial_capability`: still allows Tool Catalog access and shows warning detail.
 
-- [ ] **Step 5: Write failing stale recovery test**
+- [x] **Step 5: Write failing stale recovery test**
 
   Mock one managed server with a Stage 0 readiness hint equivalent to `configChanged: true`, or the backend field selected in Stage 0. Assert:
   - the catalog recovery state says discovery is stale or config changed;
   - `Refresh discovery` appears;
   - `Open server config` appears.
 
-- [ ] **Step 6: Add no-tools test only if data supports it**
+- [x] **Step 6: Add no-tools test only if data supports it**
 
   If Stage 0 found a backend field that distinguishes successful zero-tool
   discovery from discovery not run, add a test asserting that `no_tools_returned`
   renders a `no_tools` display state with explanatory copy. Otherwise do not add
   this test in Phase 1.
 
-- [ ] **Step 7: Add permission-gated catalog test only if data supports it**
+  Phase 1 note: skipped because Stage 0 found no reliable successful-zero-tools
+  signal.
+
+- [x] **Step 7: Add permission-gated catalog test only if data supports it**
 
   If Stage 0 found a response shape that distinguishes a permission-gated Tool
   Catalog from an ordinary empty/error state, add a test asserting that the
@@ -945,24 +952,28 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   action, such as switching to Access/Policy Assignments or opening Details. If
   Stage 0 found no such signal, do not infer this state from generic failures.
 
-- [ ] **Step 8: Run tests to verify failure**
+  Phase 1 note: skipped because Stage 0 found no Tool Catalog response shape
+  that distinguishes permission-gated catalog access from generic empty/error
+  states.
+
+- [x] **Step 8: Run tests to verify failure**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx
   ```
 
-- [ ] **Step 9: Load external server state**
+- [x] **Step 9: Load external server state**
 
   In `ToolCatalogsTab.tsx`, import `listExternalServers` and store servers alongside registry entries/modules.
 
   Keep loading and error states independent enough that a registry failure still reports registry failure, while server-state failure reports recovery limitations.
 
-- [ ] **Step 10: Compute hub and server readiness**
+- [x] **Step 10: Compute hub and server readiness**
 
   Use `getMcpHubReadiness()` and `getMcpServerReadiness()` to derive empty-state copy and actions. Pass the same registry entries and Stage 0 readiness hints used by `ExternalServersTab` so rows and Tool Catalog agree.
 
-- [ ] **Step 11: Render actionable empty state**
+- [x] **Step 11: Render actionable empty state**
 
   Replace the passive `Empty` copy with state-driven content:
   - no servers: `Add server`
@@ -983,26 +994,31 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
 
   `Refresh discovery` must call the real client method selected or added in Task 2. Do not render a disabled placeholder or clickable no-op in the final implementation.
 
-- [ ] **Step 12: Run catalog tests**
+- [x] **Step 12: Run catalog tests**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx
   ```
 
-- [ ] **Step 13: Run first-slice frontend suite**
+- [x] **Step 13: Run first-slice frontend suite**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/mcpHubReadiness.test.ts src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx
   ```
 
-- [ ] **Step 14: Commit Tool Catalog recovery**
+- [x] **Step 14: Commit Tool Catalog recovery**
 
   ```bash
-  git add apps/packages/ui/src/components/Option/MCPHub/ToolCatalogsTab.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx
+  git add apps/packages/ui/src/components/Option/MCPHub/ToolCatalogsTab.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx apps/packages/ui/src/components/Option/MCPHub/McpHubPage.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
   git commit -m "feat: add MCP Hub tool catalog recovery states"
   ```
+
+  Verification: focused MCP Hub Vitest suite passed with 85 tests; isolated
+  touched-file design-state guard passed with zero blocked findings. Full
+  `bun run verify:design-system-state` still fails on existing repo-wide
+  product-state findings outside this slice.
 
 ## Task 5: Add First-Success Setup Guide
 

@@ -712,6 +712,26 @@ describe("ExternalServersTab", () => {
     expect(onDrillHandled).toHaveBeenCalledWith(12)
   })
 
+  it("focuses a managed server without opening config from a focus drill target", async () => {
+    const onDrillHandled = vi.fn()
+    render(
+      <ExternalServersTab
+        drillTarget={{
+          tab: "credentials",
+          object_kind: "external_server",
+          object_id: "docs-managed",
+          action: "focus",
+          request_id: 14
+        }}
+        onDrillHandled={onDrillHandled}
+      />
+    )
+
+    expect(await screen.findByText(/focused from audit/i)).toBeTruthy()
+    expect(screen.queryByLabelText(/^name$/i)).toBeNull()
+    expect(onDrillHandled).toHaveBeenCalledWith(14)
+  })
+
   it("falls back to visible focus for legacy servers from a drill target", async () => {
     const onDrillHandled = vi.fn()
     render(
