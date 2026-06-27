@@ -12,12 +12,15 @@ import {
   checkGovernancePackUpdates,
   dryRunGovernancePack,
   getEffectivePolicy,
+  getMcpHubReadiness,
   getGovernancePackTrustPolicy,
   listGovernancePacks,
   listCapabilityAdapterMappings,
   previewCapabilityAdapterMapping,
   refreshExternalServerDiscovery,
+  refreshExternalServerReadinessDiscovery,
   setExternalServerSecret,
+  validateExternalServer,
   updateGovernancePackTrustPolicy
 } from "../mcp-hub"
 
@@ -64,6 +67,131 @@ describe("mcp hub service client", () => {
         path: "/api/v1/mcp/hub/external-servers/refresh-discovery",
         method: "POST",
         body: { server_id: "docs" }
+      })
+    )
+  })
+
+  it("requests MCP Hub readiness through the dedicated readiness endpoint", async () => {
+    mocks.bgRequestClient.mockResolvedValueOnce({
+      display_state: "needs_attention",
+      reason_codes: ["discovery_not_run"],
+      primary_reason_code: "discovery_not_run",
+      allowed_actions: ["refresh_discovery"],
+      message: "Server is saved, but tool discovery has not run.",
+      servers: [],
+      total_servers: 0,
+      ready_server_count: 0,
+      checking_server_count: 0,
+      attention_server_count: 0,
+      no_tool_server_count: 0,
+      stale_server_count: 0
+    })
+
+    const out = await getMcpHubReadiness()
+
+    expect(out.display_state).toBe("needs_attention")
+    expect(mocks.bgRequestClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/mcp/hub/readiness",
+        method: "GET"
+      })
+    )
+  })
+
+  it("validates external server readiness through the dedicated validate endpoint", async () => {
+    mocks.bgRequestClient.mockResolvedValueOnce({
+      server_id: "docs",
+      server_name: "Docs",
+      display_state: "ready",
+      credential_state: "not_required",
+      tool_count: 1,
+      reason_codes: [],
+      primary_reason_code: null,
+      allowed_actions: ["open_tool_catalog", "view_details"],
+      message: "Ready."
+    })
+
+    const out = await validateExternalServer("docs")
+
+    expect(out.server_id).toBe("docs")
+    expect(mocks.bgRequestClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/mcp/hub/external-servers/docs/validate",
+        method: "POST"
+      })
+    )
+  })
+
+  it("refreshes external server discovery through the dedicated refresh endpoint", async () => {
+    mocks.bgRequestClient.mockResolvedValueOnce({
+      server_id: "docs",
+      server_name: "Docs",
+      display_state: "ready",
+      credential_state: "not_required",
+      tool_count: 1,
+      reason_codes: [],
+      primary_reason_code: null,
+      allowed_actions: ["open_tool_catalog", "view_details"],
+      message: "Ready.",
+      refresh_result: {
+        refreshed_servers: 1,
+        total_servers: 1,
+        virtual_tools: 1,
+        errors: {}
+      }
+    })
+
+    const out = await refreshExternalServerReadinessDiscovery("docs")
+
+    expect(out.refresh_result?.virtual_tools).toBe(1)
+    expect(mocks.bgRequestClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/mcp/hub/external-servers/docs/refresh-discovery",
+        method: "POST"
+      })
+    )
+  })
+
+  it("encodes server ids for validate and refresh-discovery requests", async () => {
+    mocks.bgRequestClient
+      .mockResolvedValueOnce({
+        server_id: "docs/team one",
+        server_name: "Docs",
+        display_state: "ready",
+        credential_state: "not_required",
+        tool_count: 1,
+        reason_codes: [],
+        primary_reason_code: null,
+        allowed_actions: ["open_tool_catalog", "view_details"],
+        message: "Ready."
+      })
+      .mockResolvedValueOnce({
+        server_id: "docs/team one",
+        server_name: "Docs",
+        display_state: "ready",
+        credential_state: "not_required",
+        tool_count: 1,
+        reason_codes: [],
+        primary_reason_code: null,
+        allowed_actions: ["open_tool_catalog", "view_details"],
+        message: "Ready."
+      })
+
+    await validateExternalServer("docs/team one")
+    await refreshExternalServerReadinessDiscovery("docs/team one")
+
+    expect(mocks.bgRequestClient).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        path: "/api/v1/mcp/hub/external-servers/docs%2Fteam%20one/validate",
+        method: "POST"
+      })
+    )
+    expect(mocks.bgRequestClient).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        path: "/api/v1/mcp/hub/external-servers/docs%2Fteam%20one/refresh-discovery",
+        method: "POST"
       })
     )
   })
