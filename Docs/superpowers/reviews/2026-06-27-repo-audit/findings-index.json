@@ -1,0 +1,152 @@
+{
+  "audit": {
+    "audit_id": "2026-06-27-repo-audit",
+    "backlog_task": "TASK-12050",
+    "baseline_sha": "59b42819623e35e57208e7928d6c2047d3442a91",
+    "branch": "codex/comprehensive-repo-audit-2026-06-27",
+    "description": "Canonical findings index for the comprehensive repository audit scaffold."
+  },
+  "schema": {
+    "schema_version": 1,
+    "finding_id_format": "AUDIT-YYYY-MM-DD-<DOMAIN>-NNN",
+    "finding_required_fields": [
+      "id",
+      "title",
+      "severity",
+      "confidence",
+      "category",
+      "evidence_tier",
+      "evidence_strength",
+      "status",
+      "owner_domain",
+      "source_report",
+      "evidence",
+      "affected_paths",
+      "recommendation",
+      "validation_status"
+    ],
+    "field_definitions": {
+      "id": {
+        "type": "string",
+        "description": "Stable finding identifier unique within this audit index."
+      },
+      "title": {
+        "type": "string",
+        "description": "Concise finding title describing the observed risk or defect."
+      },
+      "severity": {
+        "type": "string",
+        "description": "Impact level selected from schema.allowed_values.severity."
+      },
+      "confidence": {
+        "type": "string",
+        "description": "Reviewer confidence selected from schema.allowed_values.confidence."
+      },
+      "category": {
+        "type": "string",
+        "description": "Finding category selected from schema.allowed_values.category."
+      },
+      "evidence_tier": {
+        "type": "string",
+        "description": "Report section bucket selected from schema.allowed_values.evidence_tier."
+      },
+      "evidence_strength": {
+        "type": "string",
+        "description": "Proof strength selected from schema.allowed_values.evidence_strength."
+      },
+      "status": {
+        "type": "string",
+        "description": "Lifecycle state selected from schema.allowed_values.status."
+      },
+      "owner_domain": {
+        "type": "string",
+        "description": "Primary ownership area such as backend, frontend, docs, tests, security, operations, or infrastructure."
+      },
+      "source_report": {
+        "type": "string",
+        "description": "Relative path to the report file or review artifact where the finding was first recorded."
+      },
+      "evidence": {
+        "type": "array",
+        "description": "Evidence entries supporting the finding.",
+        "items": {
+          "type": "object",
+          "required_fields": [
+            "summary",
+            "locations"
+          ],
+          "fields": {
+            "summary": "Observed behavior, code fact, log excerpt summary, or verification result.",
+            "locations": "Array of relative repository paths, optionally with line references."
+          }
+        }
+      },
+      "affected_paths": {
+        "type": "array",
+        "description": "Relative repository paths affected by the finding."
+      },
+      "recommendation": {
+        "type": "string",
+        "description": "Actionable remediation or follow-up guidance."
+      },
+      "validation_status": {
+        "type": "string",
+        "description": "Validation state selected from schema.allowed_values.validation_status."
+      }
+    },
+    "allowed_values": {
+      "severity": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "informational"
+      ],
+      "confidence": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "category": [
+        "security",
+        "correctness",
+        "reliability",
+        "data_durability",
+        "api_contract",
+        "test_gap",
+        "dependency",
+        "operations",
+        "maintainability",
+        "documentation"
+      ],
+      "evidence_tier": [
+        "confirmed_issue",
+        "likely_risk",
+        "improvement_opportunity"
+      ],
+      "evidence_strength": [
+        "runtime_reproduced",
+        "test_reproduced",
+        "static_confirmed",
+        "source_linked",
+        "reasoned"
+      ],
+      "status": [
+        "open",
+        "in_review",
+        "accepted",
+        "deferred",
+        "remediated",
+        "false_positive"
+      ],
+      "validation_status": [
+        "unvalidated",
+        "validated",
+        "needs_reproduction",
+        "not_reproducible",
+        "invalid"
+      ]
+    }
+  },
+  "findings": []
+}
