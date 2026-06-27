@@ -675,7 +675,7 @@ git commit -m "feat: surface unified mcp diagnostics"
 - Modify: `tldw_Server_API/tests/wizard/test_cli_mcp.py`
 - Modify: `Docs/Development/Wizard.md`
 
-- [ ] **Step 1: Add tests for credential options**
+- [x] **Step 1: Add tests for credential options**
 
 ```python
 def test_mcp_add_accepts_api_key_option(tmp_path, monkeypatch, capsys):
@@ -700,11 +700,11 @@ def test_mcp_add_accepts_api_key_option(tmp_path, monkeypatch, capsys):
 
 Adapt to existing `test_cli_mcp.py` helpers.
 
-- [ ] **Step 2: Add tests for placeholder readiness messaging**
+- [x] **Step 2: Add tests for placeholder readiness messaging**
 
 Assert that when no credential is provided, output says `configured but not ready` and names the target config file.
 
-- [ ] **Step 3: Add tests for `--verify`**
+- [x] **Step 3: Add tests for `--verify`**
 
 Use monkeypatching to fake the HTTP health/list-tools call. Assert:
 
@@ -712,7 +712,7 @@ Use monkeypatching to fake the HTTP health/list-tools call. Assert:
 - auth failure prints missing/invalid credential guidance;
 - network failure prints server URL and next action.
 
-- [ ] **Step 4: Run failing wizard tests**
+- [x] **Step 4: Run failing wizard tests**
 
 Run:
 
@@ -723,7 +723,9 @@ python -m pytest tldw_Server_API/tests/wizard/test_cli_mcp.py -v
 
 Expected: FAIL for new CLI options/messages.
 
-- [ ] **Step 5: Implement CLI arguments**
+Observed: wizard tests failed on missing `--api-key`, `--api-key-env`, `--verify`, and missing configured-but-not-ready messaging.
+
+- [x] **Step 5: Implement CLI arguments**
 
 Add:
 
@@ -738,16 +740,16 @@ Rules:
 - no credential keeps the placeholder but prints `configured but not ready`.
 - `--verify` checks the MCP server URL and auth before claiming readiness.
 
-- [ ] **Step 6: Update wizard docs**
+- [x] **Step 6: Update wizard docs**
 
 Document:
 
 ```bash
-python -m tldw_Server_API.cli.wizard mcp add cursor --api-key "$SINGLE_USER_API_KEY" --verify
-python -m tldw_Server_API.cli.wizard mcp add cursor --api-key-env SINGLE_USER_API_KEY --dry-run
+python -m tldw_Server_API.cli.wizard mcp add --client cursor --api-key "$SINGLE_USER_API_KEY" --verify
+python -m tldw_Server_API.cli.wizard mcp add --client cursor --api-key-env SINGLE_USER_API_KEY --dry-run
 ```
 
-- [ ] **Step 7: Re-run wizard tests**
+- [x] **Step 7: Re-run wizard tests**
 
 Run:
 
@@ -758,7 +760,9 @@ python -m pytest tldw_Server_API/tests/wizard/test_cli_mcp.py -v
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit Task 7**
+Observed: `python -m pytest tldw_Server_API/tests/wizard/test_cli_mcp.py -v` passed.
+
+- [x] **Step 8: Commit Task 7**
 
 ```bash
 git add tldw_Server_API/cli/wizard/cli.py tldw_Server_API/tests/wizard/test_cli_mcp.py Docs/Development/Wizard.md

@@ -4,7 +4,7 @@ title: Plan and implement MCP Unified standalone UX remediation
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-27 04:04'
+updated_date: '2026-06-27 04:11'
 labels:
   - mcp
   - ux
@@ -39,7 +39,7 @@ Address the UX/product review findings for Unified MCP standalone/embedded exper
 - [x] #5 Effective enabled MCP surface is visible by module/risk tier.
 - [x] #6 Unresolved catalog filters do not silently broaden discovery.
 - [x] #7 Status or diagnostics surface sanitized module/config problems with next actions.
-- [ ] #8 Client installer can verify readiness or clearly reports missing credentials.
+- [x] #8 Client installer can verify readiness or clearly reports missing credentials.
 - [ ] #9 Power-user MCP workflows have a compact command reference.
 - [ ] #10 Focused tests and Bandit touched-scope scan pass.
 <!-- AC:END -->
@@ -60,6 +60,8 @@ Docs/superpowers/plans/2026-06-26-mcp-unified-standalone-ux-remediation.md
 - 2026-06-26: Task 5 complete. Changed catalog-scoped tools/resources discovery to fail closed by default on unresolved catalogs, added `_meta.catalog.status` (`resolved`, `unresolved`, or `fail_open`), exposed explicit `catalog_fail_open` through HTTP and `mcp.tools.list`, updated docs/snippets, and verified protocol/discovery/docs tests pass.
 
 - 2026-06-26: Task 6 complete. Added structured 400 responses for invalid safe config, sanitized config warnings for bad optional config inputs, `problem_modules`/`config_warnings` on MCP status, troubleshooting rows, and focused docs/runtime tests. Verified HTTP mapping, config defaults, basic MCP functionality, and docs contracts pass.
+
+- 2026-06-26: Task 7 complete. Added --api-key, --api-key-env, and --verify to the MCP client installer; no-credential installs are reported as configured but not ready; verification surfaces usable/auth/server-unreachable states; updated wizard docs and tests.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

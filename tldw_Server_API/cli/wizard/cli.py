@@ -374,6 +374,58 @@ def _check_endpoints(base_url: str) -> dict[str, dict[str, Any]]:
     }
 
 
+def _mcp_tools_url(server_url: str) -> str:
+    """Return the HTTP tools endpoint corresponding to an MCP server URL."""
+    parsed = urlsplit(server_url)
+    scheme = "https" if parsed.scheme in {"wss", "https"} else "http"
+    base_path = parsed.path.split("/api/v1/mcp", 1)[0]
+    return f"{scheme}://{parsed.netloc}{base_path}/api/v1/mcp/tools"
+
+
+def _verify_mcp_client_readiness(server_url: str, api_key: str | None) -> dict[str, str]:
+    """Verify that the configured MCP URL and credential can list tools."""
+    tools_url = _mcp_tools_url(server_url)
+    if not api_key or api_key == "YOUR_API_KEY" or api_key.startswith("${"):
+        return {
+            "status": "missing_credentials",
+            "message": "missing or invalid credential",
+            "url": tools_url,
+            "next_action": "Set SINGLE_USER_API_KEY or rerun with --api-key/--api-key-env.",
+        }
+
+    import httpx
+
+    try:
+        response = httpx.get(tools_url, headers={"X-API-KEY": api_key}, timeout=2.0)
+    except (httpx.HTTPError, OSError, TimeoutError, ValueError):
+        return {
+            "status": "server_unreachable",
+            "message": "server unreachable",
+            "url": tools_url,
+            "next_action": "Start TLDW Server and rerun --verify.",
+        }
+
+    if response.status_code in {401, 403}:
+        return {
+            "status": "invalid_credentials",
+            "message": "missing or invalid credential",
+            "url": tools_url,
+            "next_action": "Set SINGLE_USER_API_KEY or rerun with --api-key.",
+        }
+    if response.status_code >= 400:
+        return {
+            "status": "verification_failed",
+            "message": f"MCP tools endpoint returned HTTP {response.status_code}.",
+            "url": tools_url,
+            "next_action": "Check server logs and rerun --verify.",
+        }
+    return {
+        "status": "verified_usable",
+        "message": "verified usable",
+        "url": tools_url,
+    }
+
+
 def _start_ephemeral_server(port: int, env: dict[str, str]) -> subprocess.Popen:
     cmd = [
         sys.executable,
@@ -1230,6 +1282,9 @@ def mcp(
     clients: list[str] = typer.Option(None, "--client", "-c", help="Client(s) to configure"),
     config_path: Path | None = typer.Option(None, "--config-path", help="Override config path (single client)"),
     server_url: str | None = typer.Option(None, "--server-url", help="MCP server URL"),
+    api_key: str | None = typer.Option(None, "--api-key", help="Write this API key into the MCP client config"),
+    api_key_env: str | None = typer.Option(None, "--api-key-env", help="Write an environment-variable reference as the API key"),
+    verify: bool = typer.Option(False, "--verify", help="Verify MCP URL and credentials after writing config"),
     json_out: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing"),
     yes: bool = typer.Option(False, "--yes", "--no-input", help="Assume 'yes' for prompts (non-interactive)"),
@@ -1253,12 +1308,33 @@ def mcp(
         typer.echo("--config-path requires a single --client selection.")
         raise typer.Exit(2)
 
+    api_key = api_key.strip() if isinstance(api_key, str) else None
+    api_key_env = api_key_env.strip() if isinstance(api_key_env, str) else None
+    if api_key and api_key_env:
+        typer.echo("Use either --api-key or --api-key-env, not both.")
+        raise typer.Exit(2)
+    if api_key_env and not api_key_env.replace("_", "").isalnum():
+        typer.echo("--api-key-env must be an environment variable name.")
+        raise typer.Exit(2)
+
     server_url = server_url or os.getenv("TLDW_MCP_URL") or _DEFAULT_MCP_URL
     transport = "websocket" if server_url.startswith("ws") else "http"
+    header_api_key = "YOUR_API_KEY"
+    verify_api_key: str | None = None
+    credential_source = "placeholder"
+    if api_key:
+        header_api_key = api_key
+        verify_api_key = api_key
+        credential_source = "api_key"
+    elif api_key_env:
+        header_api_key = f"${{{api_key_env}}}"
+        verify_api_key = os.getenv(api_key_env)
+        credential_source = "api_key_env"
+
     entry = {
         "url": server_url,
         "transport": transport,
-        "headers": {"X-API-KEY": "YOUR_API_KEY"},
+        "headers": {"X-API-KEY": header_api_key},
     }
 
     if action == "remove" and not yes:
@@ -1392,6 +1468,18 @@ def mcp(
             "path": str(candidate_path),
             "status": status,
         }
+        if action == "add":
+            client_action["credential_source"] = credential_source
+            if credential_source == "placeholder":
+                client_action["readiness"] = "configured_but_not_ready"
+                client_action["message"] = (
+                    f"{label} configured but not ready: add an API key in {candidate_path} "
+                    "or rerun with --api-key/--api-key-env."
+                )
+                client_action["next_action"] = "Provide SINGLE_USER_API_KEY or another valid MCP API key."
+            else:
+                client_action["readiness"] = "configured_pending_check"
+                client_action["message"] = "Configured; run --verify to check server and credential readiness."
         if changed:
             if dry_run:
                 client_action["diff"] = _render_unified_diff(raw or "{}", new_content, label=str(candidate_path))
@@ -1403,6 +1491,14 @@ def mcp(
                 files_utils.atomic_write(candidate_path, new_content)
                 if backup_path:
                     client_action["backup"] = str(backup_path)
+        if action == "add" and verify:
+            verification = _verify_mcp_client_readiness(server_url, verify_api_key)
+            client_action["verification"] = verification
+            client_action["readiness"] = verification.get("status", "verification_failed")
+            if verification.get("message"):
+                client_action["message"] = verification["message"]
+            if verification.get("next_action"):
+                client_action["next_action"] = verification["next_action"]
         actions.append({"mcp_client": client_action})
 
     result = {"command": "mcp", "status": "ok", "actions": actions, "dry_run": dry_run}

@@ -27,8 +27,15 @@ This document describes the setup wizard CLI skeleton, usage patterns, and troub
   - Behavior: reads provider keys from environment variables, writes them into `.env` (masked in output), and optionally updates `config.txt` when `--write-config` is set. Provider checks remain offline/mock and only run when `--check-provider` or `TLDW_CHECK_PROVIDER=1` is set.
 
 - `mcp [add|remove]` — manage MCP client configs
-  - Options: `--json`, `--dry-run`, `--client`, `--config-path`, `--server-url`, `--yes/--no-input`
-  - Behavior: updates per-client JSON settings for Cursor/Claude/VS Code/Zed with a `mcpServers` entry, creating timestamped backups and providing unified diffs in dry-run mode. Removal prompts for confirmation unless `--yes` is provided. Override detection with `--config-path` (single client) and set `TLDW_MCP_URL` or `--server-url` to customize the target endpoint.
+  - Options: `--json`, `--dry-run`, `--client`, `--config-path`, `--server-url`, `--api-key`, `--api-key-env`, `--verify`, `--yes/--no-input`
+  - Behavior: updates per-client JSON settings for Cursor/Claude/VS Code/Zed with a `mcpServers` entry, creating timestamped backups and providing unified diffs in dry-run mode. Removal prompts for confirmation unless `--yes` is provided. Override detection with `--config-path` (single client) and set `TLDW_MCP_URL` or `--server-url` to customize the target endpoint. Without a credential the config is written with a placeholder and reported as configured but not ready.
+
+Examples:
+
+```bash
+python -m tldw_Server_API.cli.wizard mcp add --client cursor --api-key "$SINGLE_USER_API_KEY" --verify
+python -m tldw_Server_API.cli.wizard mcp add --client cursor --api-key-env SINGLE_USER_API_KEY --dry-run
+```
 
 - `verify` — run verification checks (scaffold)
   - Options: `--json`, `--check-provider`, `--dry-run`
@@ -85,7 +92,7 @@ Command-specific additions:
 - `db`: includes `validate_database_url`, `authnz_db`, `postgres_check`, and `sqlite_files` actions.
 - `verify`: includes `facts.server_mode`, `actions.server`, and `actions.endpoints` for each probed path.
 - `providers`: includes `actions.providers`, `set_env`, optional `config_txt`, and optional `provider_checks`.
-- `mcp`: includes `actions.mcp_client` entries with `path`, `status`, and optional `diff/backup`.
+- `mcp`: includes `actions.mcp_client` entries with `path`, `status`, `readiness`, `credential_source`, and optional `diff`, `backup`, or `verification`.
 - `doctor`: includes `actions.env`, `set_env`, `gitignore`, `ffmpeg`, and optional `validate_database_url` or `port` actions.
 
 Error responses keep the same envelope and set `status=error` plus an error-relevant action (for example `validate_database_url`).

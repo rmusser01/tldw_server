@@ -31,6 +31,46 @@ def test_mcp_add_writes_config_and_backup():
         assert backups
 
 
+def test_mcp_add_accepts_api_key_option():
+    with runner.isolated_filesystem():
+        config_path = Path("cursor_settings.json")
+        config_path.write_text("{}", encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            [
+                "mcp",
+                "add",
+                "--client",
+                "cursor",
+                "--config-path",
+                str(config_path),
+                "--api-key",
+                "test-key",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        assert data["mcpServers"]["tldw_server"]["headers"]["X-API-KEY"] == "test-key"
+        assert "verified" not in result.output.lower()
+
+
+def test_mcp_add_without_credential_reports_configured_not_ready():
+    with runner.isolated_filesystem():
+        config_path = Path("cursor_settings.json")
+        config_path.write_text("{}", encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            ["mcp", "add", "--client", "cursor", "--config-path", str(config_path)],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "configured but not ready" in result.output.lower()
+        assert str(config_path) in result.output
+
+
 def test_mcp_add_dry_run_does_not_write():
     with runner.isolated_filesystem():
         config_path = Path("cursor_settings.json")
@@ -56,6 +96,155 @@ def test_mcp_add_dry_run_does_not_write():
         assert config_path.read_text(encoding="utf-8") == original
         mcp_action = next(action["mcp_client"] for action in actions if "mcp_client" in action)
         assert "diff" in mcp_action
+
+
+def test_mcp_add_supports_api_key_env_dry_run():
+    with runner.isolated_filesystem():
+        config_path = Path("cursor_settings.json")
+        original = "{}\n"
+        config_path.write_text(original, encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            [
+                "mcp",
+                "add",
+                "--client",
+                "cursor",
+                "--config-path",
+                str(config_path),
+                "--api-key-env",
+                "SINGLE_USER_API_KEY",
+                "--dry-run",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert config_path.read_text(encoding="utf-8") == original
+        payload = assert_wizard_json(result.output, command="mcp", status="ok")
+        action = next(item["mcp_client"] for item in payload["actions"] if "mcp_client" in item)
+        assert "${SINGLE_USER_API_KEY}" in action["diff"]
+
+
+def test_mcp_add_verify_success_prints_verified_usable(monkeypatch):
+    with runner.isolated_filesystem():
+        config_path = Path("cursor_settings.json")
+        config_path.write_text("{}", encoding="utf-8")
+
+        def _fake_verify(server_url: str, api_key: str | None):
+            assert server_url == "ws://127.0.0.1:8000/api/v1/mcp/ws"
+            assert api_key == "test-key"
+            return {
+                "status": "verified_usable",
+                "message": "verified usable",
+                "url": "http://127.0.0.1:8000/api/v1/mcp/tools",
+            }
+
+        monkeypatch.setattr(
+            "tldw_Server_API.cli.wizard.cli._verify_mcp_client_readiness",
+            _fake_verify,
+            raising=False,
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "mcp",
+                "add",
+                "--client",
+                "cursor",
+                "--config-path",
+                str(config_path),
+                "--api-key",
+                "test-key",
+                "--verify",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "verified usable" in result.output.lower()
+
+
+def test_mcp_add_verify_auth_failure_guides_credentials(monkeypatch):
+    with runner.isolated_filesystem():
+        config_path = Path("cursor_settings.json")
+        config_path.write_text("{}", encoding="utf-8")
+
+        def _fake_verify(server_url: str, api_key: str | None):
+            assert api_key == "bad-key"
+            return {
+                "status": "invalid_credentials",
+                "message": "missing or invalid credential",
+                "next_action": "Set SINGLE_USER_API_KEY or pass --api-key.",
+            }
+
+        monkeypatch.setattr(
+            "tldw_Server_API.cli.wizard.cli._verify_mcp_client_readiness",
+            _fake_verify,
+            raising=False,
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "mcp",
+                "add",
+                "--client",
+                "cursor",
+                "--config-path",
+                str(config_path),
+                "--api-key",
+                "bad-key",
+                "--verify",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "missing or invalid credential" in result.output.lower()
+        assert "SINGLE_USER_API_KEY" in result.output
+
+
+def test_mcp_add_verify_network_failure_reports_server_url(monkeypatch):
+    with runner.isolated_filesystem():
+        config_path = Path("cursor_settings.json")
+        config_path.write_text("{}", encoding="utf-8")
+
+        def _fake_verify(server_url: str, api_key: str | None):
+            assert server_url == "ws://127.0.0.1:8000/api/v1/mcp/ws"
+            return {
+                "status": "server_unreachable",
+                "message": "server unreachable",
+                "url": "http://127.0.0.1:8000/api/v1/mcp/tools",
+                "next_action": "Start TLDW Server and rerun --verify.",
+            }
+
+        monkeypatch.setattr(
+            "tldw_Server_API.cli.wizard.cli._verify_mcp_client_readiness",
+            _fake_verify,
+            raising=False,
+        )
+
+        result = runner.invoke(
+            app,
+            [
+                "mcp",
+                "add",
+                "--client",
+                "cursor",
+                "--config-path",
+                str(config_path),
+                "--server-url",
+                "ws://127.0.0.1:8000/api/v1/mcp/ws",
+                "--api-key",
+                "test-key",
+                "--verify",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "http://127.0.0.1:8000/api/v1/mcp/tools" in result.output
+        assert "start tldw server" in result.output.lower()
 
 
 def test_mcp_remove_removes_entry():
