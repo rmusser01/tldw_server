@@ -2,7 +2,7 @@
 
 ## Scope
 
-- Baseline: `origin/dev` at `59b42819623e35e57208e7928d6c2047d3442a91`
+- Baseline: `origin/dev` at `669092178b0ba0fa1e840a37250b0deb55acd5a3`
 - Report owner: Chat, RAG, and LLM
 - In scope: chat completions, queueing, streaming, provider routing, prompt handling, RAG retrieval, embeddings, model/provider configuration, and related tests.
 - Out of scope: remediation implementation and provider feature expansion.

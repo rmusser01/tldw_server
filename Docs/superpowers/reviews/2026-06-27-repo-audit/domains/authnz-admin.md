@@ -2,7 +2,7 @@
 
 ## Scope
 
-- Baseline: `origin/dev` at `59b42819623e35e57208e7928d6c2047d3442a91`
+- Baseline: `origin/dev` at `669092178b0ba0fa1e840a37250b0deb55acd5a3`
 - Report owner: AuthNZ and Admin
 - In scope: authentication modes, JWT/API key flows, RBAC, org and tenant boundaries, admin endpoints, setup/debug surfaces, audit hooks, and tests.
 - Out of scope: remediation implementation and unrelated product UX changes.

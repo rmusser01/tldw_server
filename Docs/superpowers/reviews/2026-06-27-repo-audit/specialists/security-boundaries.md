@@ -2,7 +2,7 @@
 
 ## Scope
 
-- Baseline: `origin/dev` at `59b42819623e35e57208e7928d6c2047d3442a91`
+- Baseline: `origin/dev` at `669092178b0ba0fa1e840a37250b0deb55acd5a3`
 - Report owner: Security boundaries
 - In scope: auth/tenant isolation, file/path handling, SSRF/network egress, command execution, sandbox/tool execution, secret handling, admin/debug surfaces, and security-relevant domain findings.
 - Out of scope: remediation implementation and new security architecture.

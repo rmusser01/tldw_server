@@ -2,7 +2,7 @@
 
 ## Scope
 
-- Baseline: `origin/dev` at `59b42819623e35e57208e7928d6c2047d3442a91`
+- Baseline: `origin/dev` at `669092178b0ba0fa1e840a37250b0deb55acd5a3`
 - Report owner: Jobs, Scheduler, and Workflows
 - In scope: queue semantics, retries, lifecycle, idempotency, worker behavior, workflow orchestration, task isolation, and related tests.
 - Out of scope: remediation implementation and new job features.

@@ -2,7 +2,7 @@
 
 ## Scope
 
-- Baseline: `origin/dev` at `59b42819623e35e57208e7928d6c2047d3442a91`
+- Baseline: `origin/dev` at `669092178b0ba0fa1e840a37250b0deb55acd5a3`
 - Report owner: Integrations and Providers
 - In scope: outbound providers, web search and scraping, TTS/STT adapters, external API clients, rate limiting, egress, secret handling, and integration tests.
 - Out of scope: remediation implementation and new provider additions.

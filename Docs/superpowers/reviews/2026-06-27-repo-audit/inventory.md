@@ -3,10 +3,12 @@
 ## Baseline
 
 - Audit execution task: `TASK-12050`
-- Baseline SHA: `59b42819623e35e57208e7928d6c2047d3442a91`
+- Baseline SHA: `669092178b0ba0fa1e840a37250b0deb55acd5a3`
+- Audit branch HEAD after rebase: `d33aa41cd6d257e7d9cf46c63083f0f17ba82358`
 - Network refreshed: yes
 - Worktree: `.worktrees/comprehensive-repo-audit-2026-06-27`
 - Branch: `codex/comprehensive-repo-audit-2026-06-27`
+- Repeatable audit process: [repeatable-audit-process.md](repeatable-audit-process.md)
 
 ## Scope
 

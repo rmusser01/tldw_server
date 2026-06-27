@@ -2,7 +2,7 @@
 
 ## Scope
 
-- Baseline: `origin/dev` at `59b42819623e35e57208e7928d6c2047d3442a91`
+- Baseline: `origin/dev` at `669092178b0ba0fa1e840a37250b0deb55acd5a3`
 - Report owner: WebUI, Extension, and API Contracts
 - In scope: frontend API usage, auth persistence, setup flows, uploads, streaming, background jobs, error recovery, WebUI/backend contract drift, extension handoff paths, and dependency risk.
 - Out of scope: remediation implementation and visual redesign.

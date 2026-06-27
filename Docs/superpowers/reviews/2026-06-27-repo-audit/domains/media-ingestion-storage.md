@@ -2,7 +2,7 @@
 
 ## Scope
 
-- Baseline: `origin/dev` at `59b42819623e35e57208e7928d6c2047d3442a91`
+- Baseline: `origin/dev` at `669092178b0ba0fa1e840a37250b0deb55acd5a3`
 - Report owner: Media, Ingestion, and Storage
 - In scope: media endpoints, ingestion pipelines, upload/download flows, file/path handling, archive/document parsing, generated artifacts, quotas, and storage tests.
 - Out of scope: remediation implementation and unrelated UI polish.

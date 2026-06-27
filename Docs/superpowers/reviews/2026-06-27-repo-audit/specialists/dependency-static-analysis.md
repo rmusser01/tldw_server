@@ -2,7 +2,7 @@
 
 ## Scope
 
-- Baseline: `origin/dev` at `59b42819623e35e57208e7928d6c2047d3442a91`
+- Baseline: `origin/dev` at `669092178b0ba0fa1e840a37250b0deb55acd5a3`
 - Report owner: Dependency and static-analysis risk
 - In scope: Bandit summary, dependency manifests, frontend/backend supply-chain risk, noisy-tool triage, scan follow-up recommendations, and dependency/static-analysis-relevant domain findings.
 - Out of scope: remediation implementation, package installation, and networked package audits unless coordinator-approved.

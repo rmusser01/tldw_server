@@ -16,6 +16,7 @@ documentation:
   - >-
     /Users/appledev/Documents/GitHub/tldw_server/Docs/superpowers/plans/2026-06-27-comprehensive-repo-audit-implementation-plan.md
   - Docs/superpowers/reviews/2026-06-27-repo-audit/final-report.md
+  - Docs/superpowers/reviews/2026-06-27-repo-audit/repeatable-audit-process.md
 priority: high
 ---
 
@@ -38,7 +39,9 @@ Execute the approved comprehensive repository audit from one clean origin/dev wo
 
 <!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Execution task created from the approved comprehensive repository audit design and implementation plan. Baseline fetch succeeded; origin/dev is 59b42819623e35e57208e7928d6c2047d3442a91.
+Execution task created from the approved comprehensive repository audit design and implementation plan. Baseline fetch succeeded; origin/dev is 669092178b0ba0fa1e840a37250b0deb55acd5a3.
+
+Baseline refresh checkpoint complete. Refreshed origin/dev baseline is 669092178b0ba0fa1e840a37250b0deb55acd5a3. Audit branch HEAD after successful rebase is d33aa41cd6d257e7d9cf46c63083f0f17ba82358, kept distinct from the baseline SHA. The earlier checkpoint baseline is superseded and removed from active artifact references. Repeatable audit process documented at Docs/superpowers/reviews/2026-06-27-repo-audit/repeatable-audit-process.md. Direct task-file edit used because Backlog MCP cannot find TASK-12050 in this worktree and the CLI does not preserve final-summary markers; marker validation remains required after edits.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Task 2 scaffold complete. Created Docs/superpowers/reviews/2026-06-27-repo-audit with inventory, findings index, final report, remediation draft, nine domain report files, five specialist report files, and command log. Verification: scaffold file count is 19; placeholder scan returned no matches; git diff --check passed.

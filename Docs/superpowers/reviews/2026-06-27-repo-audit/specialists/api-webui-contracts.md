@@ -2,7 +2,7 @@
 
 ## Scope
 
-- Baseline: `origin/dev` at `59b42819623e35e57208e7928d6c2047d3442a91`
+- Baseline: `origin/dev` at `669092178b0ba0fa1e840a37250b0deb55acd5a3`
 - Report owner: API and WebUI contract drift
 - In scope: endpoint/client mismatch, auth/setup/upload/streaming/job status flows, error recovery, schema drift, and contract-relevant domain findings.
 - Out of scope: remediation implementation and visual redesign.

@@ -2,7 +2,7 @@
   "audit": {
     "audit_id": "2026-06-27-repo-audit",
     "backlog_task": "TASK-12050",
-    "baseline_sha": "59b42819623e35e57208e7928d6c2047d3442a91",
+    "baseline_sha": "669092178b0ba0fa1e840a37250b0deb55acd5a3",
     "branch": "codex/comprehensive-repo-audit-2026-06-27",
     "description": "Canonical findings index for the comprehensive repository audit scaffold."
   },
