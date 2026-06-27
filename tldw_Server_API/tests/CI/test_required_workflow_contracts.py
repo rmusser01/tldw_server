@@ -222,6 +222,7 @@ def test_watchlists_extension_e2e_uses_playwright_chromium() -> None:
     steps = job["steps"]
 
     assert "TLDW_E2E_PLAYWRIGHT_CHANNEL" not in env
+    assert "TLDW_E2E_EXTENSION_HEADLESS" not in env
     assert env["TLDW_E2E_EXTENSION_MINIMAL_LOCALES"] == "1"
     assert not any(step.get("name") == "Verify system Chrome" for step in steps)
 
