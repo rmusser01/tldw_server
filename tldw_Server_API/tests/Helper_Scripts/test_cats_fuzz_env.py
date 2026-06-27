@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI
 
 from Helper_Scripts.cats_fuzz import DEFAULT_TEST_API_KEY
+from Helper_Scripts.cats_fuzz import env as cats_env
 from Helper_Scripts.cats_fuzz.env import build_child_env, find_sensitive_values
 from Helper_Scripts.cats_fuzz.openapi_export import (
     build_openapi_export_command,
@@ -78,6 +79,41 @@ def test_build_child_env_blanks_sensitive_parent_values_when_external_allowed(tm
 
     assert env["SAFE"] == "value"
     assert env["OPENAI_API_KEY"] == ""
+
+
+@pytest.mark.unit
+def test_build_server_env_removes_guarded_test_flags_and_writes_safe_env_file(tmp_path: Path) -> None:
+    child_env = build_child_env(
+        tmp_path,
+        parent_env={
+            "SAFE": "value",
+            "TESTING": "true",
+            "TLDW_TEST_MODE": "1",
+        },
+    )
+    assert child_env["TEST_MODE"] == "true"
+
+    server_env = cats_env.build_server_env(tmp_path, child_env)
+
+    for flag in ("TEST_MODE", "TESTING", "TLDW_TEST_MODE"):
+        assert server_env.get(flag, "") == ""
+
+    assert server_env["SAFE"] == "value"
+    assert server_env["AUTH_MODE"] == "single_user"
+    assert server_env["SINGLE_USER_API_KEY"] == DEFAULT_TEST_API_KEY
+    assert server_env["SINGLE_USER_TEST_API_KEY"] == DEFAULT_TEST_API_KEY
+    assert server_env["DATABASE_URL"].startswith("sqlite:///")
+    assert server_env["USER_DB_BASE_DIR"] == child_env["USER_DB_BASE_DIR"]
+    assert server_env["MINIMAL_TEST_APP"] == "1"
+    assert server_env["MINIMAL_TEST_INCLUDE_AUDIO"] == "1"
+    assert server_env["TLDW_ENV_FILE"] != child_env["TLDW_ENV_FILE"]
+
+    server_env_file = Path(server_env["TLDW_ENV_FILE"])
+    assert server_env_file.exists()
+    server_env_text = server_env_file.read_text(encoding="utf-8")
+    assert "TEST_MODE" not in server_env_text
+    assert "TESTING" not in server_env_text
+    assert "TLDW_TEST_MODE" not in server_env_text
 
 
 @pytest.mark.unit

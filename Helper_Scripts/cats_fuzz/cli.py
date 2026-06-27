@@ -8,7 +8,7 @@ import subprocess  # nosec B404
 from pathlib import Path
 from collections.abc import Mapping
 
-from Helper_Scripts.cats_fuzz.env import build_child_env
+from Helper_Scripts.cats_fuzz.env import build_child_env, build_server_env
 from Helper_Scripts.cats_fuzz.manifest import get_builtin_block
 from Helper_Scripts.cats_fuzz.openapi_export import build_openapi_export_command
 from Helper_Scripts.cats_fuzz.runner import run_contract_block, run_runtime_block
@@ -134,7 +134,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if needs_runtime and args.start_server:
-            started_server = start_server(child_env, log_dir=output_dir / "server")
+            server_env = build_server_env(output_dir, child_env)
+            started_server = start_server(server_env, log_dir=output_dir / "server")
 
         for block_name in selected_blocks:
             if block_name == "contract":

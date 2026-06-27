@@ -55,6 +55,8 @@ SANITIZE_ONLY_ENV_NAMES = frozenset(
     }
 )
 
+SERVER_GUARDED_TEST_FLAGS = ("TEST_MODE", "TESTING", "TLDW_TEST_MODE")
+
 
 def _is_sensitive_name(name: str) -> bool:
     upper_name = name.upper()
@@ -86,6 +88,22 @@ def _write_minimal_env_file(env_file: Path, runtime_dir: Path, user_db_dir: Path
         "PYTHONWARNINGS=ignore",
         "LOGURU_LEVEL=ERROR",
     ]
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_server_env_file(env_file: Path, server_env: Mapping[str, str]) -> None:
+    names = (
+        "AUTH_MODE",
+        "SINGLE_USER_API_KEY",
+        "SINGLE_USER_TEST_API_KEY",
+        "DATABASE_URL",
+        "USER_DB_BASE_DIR",
+        "MINIMAL_TEST_APP",
+        "MINIMAL_TEST_INCLUDE_AUDIO",
+        "PYTHONWARNINGS",
+        "LOGURU_LEVEL",
+    )
+    lines = [f"{name}={server_env[name]}" for name in names]
     env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -130,10 +148,41 @@ def build_child_env(
     return child_env
 
 
+def build_server_env(work_dir: Path, child_env: Mapping[str, str]) -> dict[str, str]:
+    runtime_dir = work_dir / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    user_db_dir = runtime_dir / "user_databases"
+    user_db_dir.mkdir(parents=True, exist_ok=True)
+    env_file = runtime_dir / "cats-server.env"
+
+    server_env = dict(child_env)
+    for name in SERVER_GUARDED_TEST_FLAGS:
+        server_env.pop(name, None)
+
+    server_env.update(
+        {
+            "AUTH_MODE": child_env.get("AUTH_MODE", "single_user"),
+            "SINGLE_USER_API_KEY": child_env.get("SINGLE_USER_API_KEY", DEFAULT_TEST_API_KEY),
+            "SINGLE_USER_TEST_API_KEY": child_env.get("SINGLE_USER_TEST_API_KEY", DEFAULT_TEST_API_KEY),
+            "DATABASE_URL": child_env.get("DATABASE_URL", f"sqlite:///{runtime_dir / 'users.db'}"),
+            "USER_DB_BASE_DIR": child_env.get("USER_DB_BASE_DIR", str(user_db_dir)),
+            "TLDW_ENV_FILE": str(env_file),
+            "MINIMAL_TEST_APP": "1",
+            "MINIMAL_TEST_INCLUDE_AUDIO": "1",
+            "PYTHONWARNINGS": "ignore",
+            "LOGURU_LEVEL": "ERROR",
+        }
+    )
+    _write_server_env_file(env_file, server_env)
+    return server_env
+
+
 __all__ = [
     "SANITIZE_ONLY_ENV_NAMES",
+    "SERVER_GUARDED_TEST_FLAGS",
     "SENSITIVE_ENV_NAMES",
     "SENSITIVE_NAME_SUBSTRINGS",
     "build_child_env",
+    "build_server_env",
     "find_sensitive_values",
 ]

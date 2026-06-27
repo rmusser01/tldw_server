@@ -102,6 +102,15 @@ def test_runtime_default_blocks_start_server_use_started_url_and_stop_finally(
 
     events: list[tuple[str, object]] = []
     server = SimpleNamespace(url="http://127.0.0.1:9123")
+    child_env = {
+        "SAFE": "1",
+        "TEST_MODE": "true",
+        "TLDW_ENV_FILE": str(tmp_path / "runtime" / ".env"),
+    }
+    server_env = {
+        "SAFE": "1",
+        "TLDW_ENV_FILE": str(tmp_path / "runtime" / "cats-server.env"),
+    }
 
     def fake_run(
         command: list[str],
@@ -150,7 +159,13 @@ def test_runtime_default_blocks_start_server_use_started_url_and_stop_finally(
         )
         return _summary(getattr(block, "name"), 5)
 
-    monkeypatch.setattr(cli, "build_child_env", lambda output_dir, allow_external=False: {"SAFE": "1"})
+    def fake_build_server_env(output_dir: Path, env: dict[str, str]) -> dict[str, str]:
+        assert output_dir == tmp_path
+        assert env is child_env
+        return server_env
+
+    monkeypatch.setattr(cli, "build_child_env", lambda output_dir, allow_external=False: child_env)
+    monkeypatch.setattr(cli, "build_server_env", fake_build_server_env)
     monkeypatch.setattr(cli, "build_openapi_export_command", lambda path: ["python", "export", str(path)])
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
     monkeypatch.setattr(cli, "_cats_version", lambda cats_bin: "cats 13.8.0")
@@ -162,7 +177,15 @@ def test_runtime_default_blocks_start_server_use_started_url_and_stop_finally(
     result = cli.main(["--output", str(tmp_path)])
 
     assert result == 5
-    assert events[1] == ("start", ({"SAFE": "1"}, tmp_path / "server"))
+    assert events[0] == (
+        "export",
+        (["python", "export", str(tmp_path / "openapi.json")], False, child_env),
+    )
+    assert events[1] == ("start", (server_env, tmp_path / "server"))
+    started_env = events[1][1][0]
+    assert started_env is server_env
+    assert started_env.get("TEST_MODE", "") == ""
+    assert started_env["TLDW_ENV_FILE"] != child_env["TLDW_ENV_FILE"]
     assert events[2][0] == "contract"
     assert events[3] == (
         "runtime",
@@ -174,7 +197,7 @@ def test_runtime_default_blocks_start_server_use_started_url_and_stop_finally(
             "cats 13.8.0",
             "cats",
             False,
-            {"SAFE": "1"},
+            child_env,
         ),
     )
     assert events[-1] == ("stop", server)

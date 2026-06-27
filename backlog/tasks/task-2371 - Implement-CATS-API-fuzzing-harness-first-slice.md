@@ -45,6 +45,8 @@ Implement the first local-only CATS API fuzzing harness slice from the approved 
 2026-06-27 Task 6: added the CATS fuzzing CLI/module entrypoint, focused CLI parser/orchestration tests, developer documentation, and Makefile cats-fuzz target. Initial red test run failed on missing Helper_Scripts.cats_fuzz.cli as expected; final focused pytest, Black check, Bandit on cli.py, and git diff --check passed.
 
 2026-06-27 Task 7 verification fix: added a regression for `cats --version` banner output before changing `_cats_version()` to prefer `CATS version ...` lines ahead of generic first-line fallback. Red run failed on the banner border being returned; green run passed focused CLI tests. Verification: focused pytest, Black check, Bandit on cli.py, and git diff --check passed.
+
+2026-06-27 Task 7 live verification env fix: added failing regressions for server-safe CATS harness env generation and CLI uvicorn startup env selection. Red run failed on missing `build_server_env`; green run passed focused env/CLI tests after adding `runtime/cats-server.env` without guarded test flags (`TEST_MODE`, `TESTING`, `TLDW_TEST_MODE`) and routing only `start_server()` through that env while OpenAPI export/runtime CATS still use the raw child env.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
