@@ -222,10 +222,27 @@ type McpHubReadiness = {
 problem reason codes so no-auth stdio can render as an intentional
 `not_required` state instead of masquerading as a missing credential.
 
+Use this primary reason mapping for the first implementation:
+
+| Primary reason | Display state | Message intent | Primary actions |
+| --- | --- | --- | --- |
+| `not_configured` | `needs_setup` | No server has been added yet. | `add_server` |
+| `preflight_failed` | `needs_attention` | Configuration has static validation problems. | `edit_config`, `view_details` |
+| `discovery_not_run` | `needs_attention` | Server is saved, but tool discovery has not run. | `refresh_discovery`, `edit_config` |
+| `auth_missing` | `needs_attention` | Credentials are required before discovery/use can succeed. | `open_credentials`, `view_details` |
+| `runtime_unavailable` | `needs_attention` | Local runtime command is unavailable or cannot start. | `edit_config`, `view_details` |
+| `unreachable` | `needs_attention` | Remote endpoint cannot be reached. | `edit_config`, `refresh_discovery`, `view_details` |
+| `discovery_failed` | `needs_attention` | Discovery ran but failed. | `refresh_discovery`, `view_details` |
+| `no_tools_returned` | `no_tools` | Server responded but exposed no tools. | `refresh_discovery`, `view_details` |
+| `config_changed` | `stale` | Server config changed after the last successful discovery. | `refresh_discovery`, `edit_config` |
+| `catalog_expired` | `stale` | Catalog exceeded an explicit freshness threshold. | `refresh_discovery`, `view_details` |
+| `partial_capability` | `ready` | Server is usable with warnings or reduced capability. | `open_tool_catalog`, `view_details` |
+
 For Phase 1, `stale` should be emitted only for deterministic causes:
-`config_changed`, `discovery_not_run`, manual invalidation, or a failed refresh
-after a previous successful discovery. Do not emit `catalog_expired` until an
-explicit age threshold is chosen.
+`config_changed`, manual invalidation, or a failed refresh after a previous
+successful discovery. `discovery_not_run` is not stale; it maps to
+`needs_attention`. Do not emit `catalog_expired` until an explicit age threshold
+is chosen.
 
 ## Preflight Versus Discovery
 
@@ -270,7 +287,9 @@ The default create action should be `Save and discover tools`, with a secondary
 
 ## Recovery Actions
 
-Recovery should appear where the user hits the problem.
+Recovery should appear where the user hits the problem. Recovery copy and
+actions are keyed primarily by `primaryReasonCode`, with `displayState` used for
+visual grouping.
 
 Setup result panel:
 
@@ -369,7 +388,7 @@ This area must not expose API keys, JWTs, cookies, or secret-bearing headers.
 
 ### Phase 1: Discovery Checkpoint And Minimal Readiness Slice
 
-Start with an implementation discovery checkpoint:
+Start with a Stage 0 implementation discovery checkpoint:
 
 - confirm what existing APIs expose for managed servers and catalog summary;
 - decide whether first-pass readiness can be frontend-normalized;
@@ -492,6 +511,9 @@ Acceptance:
   document or verify setup isolation expectations in the implementation slice.
 
 ## Open Questions For Implementation Planning
+
+Treat these as Stage 0 planning questions. Implementation should not begin until
+the plan answers or scopes each one.
 
 - Can current management/catalog APIs support the first readiness mapper without
   backend changes?
