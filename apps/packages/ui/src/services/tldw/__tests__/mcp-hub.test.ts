@@ -168,7 +168,7 @@ describe("mcp hub service client", () => {
   it("encodes server ids for validate and refresh-discovery requests", async () => {
     mocks.bgRequestClient
       .mockResolvedValueOnce({
-        server_id: "docs/team one",
+        server_id: "docs team:one",
         server_name: "Docs",
         display_state: "ready",
         credential_state: "not_required",
@@ -179,7 +179,7 @@ describe("mcp hub service client", () => {
         message: "Ready."
       })
       .mockResolvedValueOnce({
-        server_id: "docs/team one",
+        server_id: "docs team:one",
         server_name: "Docs",
         display_state: "ready",
         credential_state: "not_required",
@@ -190,20 +190,20 @@ describe("mcp hub service client", () => {
         message: "Ready."
       })
 
-    await validateExternalServer("docs/team one")
-    await refreshExternalServerReadinessDiscovery("docs/team one")
+    await validateExternalServer("docs team:one")
+    await refreshExternalServerReadinessDiscovery("docs team:one")
 
     expect(mocks.bgRequestClient).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        path: "/api/v1/mcp/hub/external-servers/docs%2Fteam%20one/validate",
+        path: "/api/v1/mcp/hub/external-servers/docs%20team%3Aone/validate",
         method: "POST"
       })
     )
     expect(mocks.bgRequestClient).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        path: "/api/v1/mcp/hub/external-servers/docs%2Fteam%20one/refresh-discovery",
+        path: "/api/v1/mcp/hub/external-servers/docs%20team%3Aone/refresh-discovery",
         method: "POST"
       })
     )

@@ -1715,6 +1715,83 @@ async def test_mcp_hub_refresh_checks_visibility_executes_refresh_and_sanitizes_
 
 
 @pytest.mark.asyncio
+async def test_mcp_hub_refresh_rejects_non_operational_visible_servers_without_execution() -> None:
+    class _RefreshExecutor:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def __call__(self, server_id: str) -> dict[str, Any]:
+            self.calls.append(server_id)
+            return {"refreshed_servers": 1, "total_servers": 1, "virtual_tools": 1, "errors": {}}
+
+    blocked_rows = [
+        _external_server_row(server_id="disabled", enabled=False),
+        _external_server_row(server_id="superseded", superseded_by_server_id="replacement"),
+        _external_server_row(server_id="legacy", server_source="legacy"),
+        _external_server_row(server_id="missing-runtime", runtime_executable=False),
+    ]
+    refresh_executor = _RefreshExecutor()
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=_ConfigurableExternalServerService(blocked_rows),
+        registry=_FakeToolRegistry(),
+        refresh_executor=refresh_executor,
+    )
+
+    with TestClient(app) as client:
+        responses = [
+            client.post(f"/api/v1/mcp/hub/external-servers/{row['id']}/refresh-discovery")
+            for row in blocked_rows
+        ]
+
+    assert [response.status_code for response in responses] == [409, 409, 409, 409]
+    assert [
+        response.json()["detail"] for response in responses
+    ] == ["External server is not available for discovery refresh"] * 4
+    assert refresh_executor.calls == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_refresh_executor_initializes_server_before_module_lookup(monkeypatch) -> None:
+    class _RefreshModule:
+        async def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+            return {"tool_name": tool_name, "arguments": arguments}
+
+        async def execute_with_circuit_breaker(self, operation: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            return await operation(*args, **kwargs)
+
+    class _ModuleRegistry:
+        def __init__(self, server: "_McpServer") -> None:
+            self.server = server
+            self.lookup_before_initialize = False
+
+        async def find_module_for_tool(self, tool_name: str) -> _RefreshModule:
+            assert tool_name == "external.tools.refresh"
+            self.lookup_before_initialize = not self.server.initialized
+            return _RefreshModule()
+
+    class _McpServer:
+        def __init__(self) -> None:
+            self.initialized = False
+            self.initialize_calls = 0
+            self.module_registry = _ModuleRegistry(self)
+
+        async def initialize(self) -> None:
+            self.initialize_calls += 1
+            self.initialized = True
+
+    server = _McpServer()
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server)
+
+    result = await mcp_hub_management._execute_external_refresh_tool("docs")
+
+    assert server.initialize_calls == 1
+    assert server.module_registry.lookup_before_initialize is False
+    assert result["arguments"] == {"server_id": "docs"}
+
+
+@pytest.mark.asyncio
 async def test_mcp_hub_refresh_serializes_same_server_concurrent_requests() -> None:
     class _RefreshExecutor:
         def __init__(self) -> None:

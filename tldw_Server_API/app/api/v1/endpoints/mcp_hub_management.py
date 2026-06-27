@@ -282,6 +282,8 @@ async def get_mcp_hub_tool_registry_dep() -> McpHubToolRegistryService:
 async def _execute_external_refresh_tool(server_id: str) -> dict[str, Any]:
     """Execute the existing external federation discovery refresh tool."""
     server = get_mcp_server()
+    if not getattr(server, "initialized", False):
+        await server.initialize()
     module = await server.module_registry.find_module_for_tool(_MCP_HUB_REFRESH_TOOL_NAME)
     if module is None:
         raise HTTPException(status_code=503, detail="External discovery refresh tool is unavailable")
@@ -1398,6 +1400,10 @@ def _is_operational_managed_external_row(row: dict[str, Any]) -> bool:
     )
 
 
+def _is_available_for_discovery_refresh(row: dict[str, Any]) -> bool:
+    return _is_operational_managed_external_row(row) and row.get("runtime_executable") is True
+
+
 async def _list_visible_external_server_rows(
     *,
     principal: AuthPrincipal,
@@ -1993,11 +1999,13 @@ async def refresh_external_server_discovery(
 ) -> McpServerReadinessResponse:
     """Refresh external-server tool discovery through the existing federation runtime."""
     _require_mutation_permission(principal)
-    await _get_visible_external_server_row_or_404(
+    row = await _get_visible_external_server_row_or_404(
         server_id=server_id,
         principal=principal,
         svc=svc,
     )
+    if not _is_available_for_discovery_refresh(row):
+        raise HTTPException(status_code=409, detail="External server is not available for discovery refresh")
     lock = await _get_refresh_lock(server_id)
     try:
         await asyncio.wait_for(lock.acquire(), timeout=_MCP_HUB_REFRESH_LOCK_TIMEOUT_SECONDS)
