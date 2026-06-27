@@ -36,3 +36,11 @@ $ git rev-parse HEAD
 $ git status --short --branch
 ## codex/comprehensive-repo-audit-2026-06-27...origin/dev [ahead 3]
 ```
+
+## Domain Review Dispatch
+
+```text
+Batch 1 dispatched after inventory commit aacb27c4552002e5e15d18c4997a5f89fea58d9a.
+Parallelism cap: 4 domain agents.
+Domains: AuthNZ and Admin; DB, Migrations, and Data Durability; WebUI, Extension, and API Contracts; CI, Deployment, Operations, and Release Surfaces.
+```
