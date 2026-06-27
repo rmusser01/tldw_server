@@ -186,7 +186,10 @@ class TestFileLockResidualFiles:
         lock_path = tmp_path / "locked-dead-pid.lock"
         holder = FileLock(lock_path, timeout=2, stale_timeout=9999)
         assert holder.acquire() is True
-        lock_path.write_text("999999999\n")
+        assert holder._fd is not None
+        os.lseek(holder._fd, 0, os.SEEK_SET)
+        os.ftruncate(holder._fd, 0)
+        os.write(holder._fd, b"999999999\n")
 
         try:
             contender = FileLock(lock_path, timeout=0.2, stale_timeout=0.01)

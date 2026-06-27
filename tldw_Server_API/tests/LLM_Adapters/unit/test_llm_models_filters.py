@@ -113,6 +113,8 @@ def test_llm_models_metadata_handles_local_discovery_policy_errors(monkeypatch, 
     monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {})
     monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", _fake_image_models)
     monkeypatch.setattr(llm_providers, "_http_fetch", _raise_egress_policy)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "*")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
 
     client = client_user_only
     response = client.get("/api/v1/llm/models/metadata")

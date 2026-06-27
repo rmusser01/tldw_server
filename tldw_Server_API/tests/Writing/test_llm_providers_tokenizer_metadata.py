@@ -1,7 +1,7 @@
 import configparser
 
 
-def _fake_config() -> configparser.ConfigParser:
+def _fake_config(mlx_model_path: str = "/tmp/mlx-model") -> configparser.ConfigParser:
     cfg = configparser.ConfigParser()
     cfg.add_section("API")
     cfg.set("API", "openai_api_key", "sk-test")
@@ -28,7 +28,7 @@ def _fake_config() -> configparser.ConfigParser:
     cfg.set("Local-API", "ollama_model", "llama3.2")
 
     cfg.add_section("MLX")
-    cfg.set("MLX", "mlx_model_path", "/tmp/mlx-model")
+    cfg.set("MLX", "mlx_model_path", mlx_model_path)
     return cfg
 
 
@@ -42,15 +42,26 @@ def _fake_openai_only_config() -> configparser.ConfigParser:
     return cfg
 
 
-def test_llm_providers_tokenizer_metadata_mirrors_strict_fields(monkeypatch):
+def test_llm_providers_tokenizer_metadata_mirrors_strict_fields(monkeypatch, tmp_path):
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
 
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config)
+    mlx_model_dir = tmp_path / "mlx-model"
+    mlx_model_dir.mkdir()
+    monkeypatch.setattr(
+        llm_endpoints,
+        "load_comprehensive_config",
+        lambda: _fake_config(str(mlx_model_dir)),
+    )
     monkeypatch.setattr(llm_endpoints, "list_provider_models", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(llm_endpoints, "apply_llm_provider_overrides_to_listing", lambda result: result)
     monkeypatch.setattr(llm_endpoints, "get_api_keys", lambda: {})
     monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(llm_endpoints, "_llm_registry_capability_envelopes", lambda: {})
+    monkeypatch.setattr(
+        llm_endpoints,
+        "ALL_SUPPORTED_PROVIDER_NAMES_LIST",
+        [*llm_endpoints.ALL_SUPPORTED_PROVIDER_NAMES_LIST, "mlx"],
+    )
 
     def _fake_tokenizer_metadata(provider, model, **_kwargs):
         key = (provider.strip().lower(), model.strip())
@@ -76,6 +87,11 @@ def test_llm_providers_tokenizer_metadata_mirrors_strict_fields(monkeypatch):
         }
 
     monkeypatch.setattr(llm_endpoints, "resolve_tokenizer_metadata", _fake_tokenizer_metadata)
+    monkeypatch.setattr(
+        llm_endpoints,
+        "_resolve_model_tokenizer_support",
+        lambda provider, model, _config: _fake_tokenizer_metadata(provider, model),
+    )
 
     payload = llm_endpoints.get_configured_providers(include_deprecated=False)
     providers = {p["name"]: p for p in payload["providers"]}
@@ -98,16 +114,27 @@ def test_llm_providers_tokenizer_metadata_mirrors_strict_fields(monkeypatch):
         assert "strict_mode_effective" in model_info
 
 
-def test_llm_providers_tokenizer_metadata_reflects_strict_runtime_env(monkeypatch):
+def test_llm_providers_tokenizer_metadata_reflects_strict_runtime_env(monkeypatch, tmp_path):
     import tldw_Server_API.app.api.v1.endpoints.llm_providers as llm_endpoints
 
     monkeypatch.setenv("STRICT_TOKEN_COUNTING", "true")
-    monkeypatch.setattr(llm_endpoints, "load_comprehensive_config", _fake_config)
+    mlx_model_dir = tmp_path / "mlx-model"
+    mlx_model_dir.mkdir()
+    monkeypatch.setattr(
+        llm_endpoints,
+        "load_comprehensive_config",
+        lambda: _fake_config(str(mlx_model_dir)),
+    )
     monkeypatch.setattr(llm_endpoints, "list_provider_models", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(llm_endpoints, "apply_llm_provider_overrides_to_listing", lambda result: result)
     monkeypatch.setattr(llm_endpoints, "get_api_keys", lambda: {})
     monkeypatch.setattr(llm_endpoints, "list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(llm_endpoints, "_llm_registry_capability_envelopes", lambda: {})
+    monkeypatch.setattr(
+        llm_endpoints,
+        "ALL_SUPPORTED_PROVIDER_NAMES_LIST",
+        [*llm_endpoints.ALL_SUPPORTED_PROVIDER_NAMES_LIST, "mlx"],
+    )
 
     def _fake_tokenizer_metadata(provider, model, **kwargs):  # noqa: ARG001
         strict_effective = bool(kwargs.get("strict_mode_effective"))
@@ -122,6 +149,19 @@ def test_llm_providers_tokenizer_metadata_reflects_strict_runtime_env(monkeypatc
         }
 
     monkeypatch.setattr(llm_endpoints, "resolve_tokenizer_metadata", _fake_tokenizer_metadata)
+
+    def _fake_model_tokenizer_support(provider, model, _config):
+        return _fake_tokenizer_metadata(
+            provider,
+            model,
+            strict_mode_effective=llm_endpoints._strict_token_counting_enabled_shared(default=False),
+        )
+
+    monkeypatch.setattr(
+        llm_endpoints,
+        "_resolve_model_tokenizer_support",
+        _fake_model_tokenizer_support,
+    )
 
     payload = llm_endpoints.get_configured_providers(include_deprecated=False)
     providers = {p["name"]: p for p in payload["providers"]}

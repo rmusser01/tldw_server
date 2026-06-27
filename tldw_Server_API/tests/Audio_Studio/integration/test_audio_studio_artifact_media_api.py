@@ -238,7 +238,7 @@ def test_artifact_media_rejects_invalid_relative_or_url_storage_paths(
 ) -> None:
     client, _tmp_path = client_audio_studio_media
     project = _create_project(client)
-    artifact = _create_artifact(project, storage_path=storage_path)
+    artifact = _create_artifact(project, storage_path=storage_path, normalize_storage_path=False)
 
     response = client.get(_media_url(project["project_id"], artifact["artifact_id"]))
 

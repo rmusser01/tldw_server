@@ -115,6 +115,8 @@ def test_llm_provider_readiness_marks_unreachable_local_endpoint_unavailable(
 ) -> None:
     """Opt-in endpoint probes mark unreachable local endpoints unavailable."""
     monkeypatch.setenv("LLM_PROVIDER_READINESS_PROBE_ENDPOINTS", "1")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "*")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
     parser = _config(
         {
             "Local-API": {

@@ -221,12 +221,14 @@ def test_watchlists_extension_e2e_uses_playwright_chromium() -> None:
     env = job["env"]
     steps = job["steps"]
 
-    assert env["TLDW_E2E_PLAYWRIGHT_CHANNEL"] == "chrome"
+    assert "TLDW_E2E_PLAYWRIGHT_CHANNEL" not in env
     assert env["TLDW_E2E_EXTENSION_MINIMAL_LOCALES"] == "1"
-    assert not any(step.get("name") == "Install Playwright Chromium" for step in steps)
+    assert not any(step.get("name") == "Verify system Chrome" for step in steps)
 
-    verify_step = _get_step(steps, "Verify system Chrome")
-    assert verify_step["run"] == "google-chrome --version"
+    install_step = _get_step(steps, "Install Playwright Chromium")
+    assert install_step["working-directory"] == "apps/extension"
+    assert install_step["timeout-minutes"] == 10
+    assert install_step["run"] == "../node_modules/.bin/playwright install --with-deps chromium"
 
 
 def test_frontend_e2e_tiers_install_portaudio_before_backend_dependency_setup() -> None:

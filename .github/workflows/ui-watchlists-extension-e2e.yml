@@ -68,7 +68,7 @@ jobs:
       - name: Setup Node.js (LTS)
         uses: actions/setup-node@v6
         with:
-          node-version: "lts/*"
+          node-version: "20"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -85,7 +85,8 @@ jobs:
 
       - name: Install Playwright Chromium
         working-directory: apps/extension
-        run: bunx playwright install --with-deps chromium
+        timeout-minutes: 10
+        run: ../node_modules/.bin/playwright install --with-deps chromium
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg

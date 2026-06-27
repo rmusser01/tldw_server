@@ -453,7 +453,7 @@ class TestExponentialBackoff:
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
         assert cb._current_recovery_timeout == 0.05  # no backoff on first trip from CLOSED
-        time.sleep(0.06)
+        cb.force_half_open()
         assert cb.is_half_open
         # Fail again in half-open → re-opens with backoff
         with pytest.raises(TransientError):
@@ -474,7 +474,7 @@ class TestExponentialBackoff:
         )
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
-        time.sleep(0.06)
+        cb.force_half_open()
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
         assert cb._current_recovery_timeout == pytest.approx(0.5)
@@ -491,7 +491,7 @@ class TestExponentialBackoff:
         )
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
-        time.sleep(0.06)
+        cb.force_half_open()
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
         assert cb._current_recovery_timeout == pytest.approx(0.05)
@@ -508,11 +508,11 @@ class TestExponentialBackoff:
         )
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
-        time.sleep(0.06)
+        cb.force_half_open()
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
         assert cb._current_recovery_timeout == pytest.approx(0.10)
-        time.sleep(0.11)
+        cb.force_half_open()
         cb.call(_succeed)
         assert cb.is_closed
         assert cb._current_recovery_timeout == pytest.approx(0.05)

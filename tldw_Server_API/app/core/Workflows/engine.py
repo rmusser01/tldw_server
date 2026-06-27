@@ -538,6 +538,7 @@ class WorkflowEngine:
         _r = self.db.get_run(run_id)
         _tenant_for_notify = _r.tenant_id if _r else self.config.tenant_id
         _wf_for_notify = _r.workflow_id if _r else None
+        _scheduler_for_notify = WorkflowScheduler.instance()
 
         def _finalize(keep: bool = False) -> None:
             try:
@@ -547,7 +548,7 @@ class WorkflowEngine:
                 logger.debug(f"WorkflowEngine: pop_run_secrets failed for {run_id}: {e}")
             self._clear_tenant_cache(run_id)
             with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
-                WorkflowScheduler.instance().notify_finished(_tenant_for_notify, _wf_for_notify, run_id=run_id)
+                _scheduler_for_notify.notify_finished(_tenant_for_notify, _wf_for_notify, run_id=run_id)
 
         keep_secrets = False
         finalized = False
@@ -1117,7 +1118,7 @@ class WorkflowEngine:
                 )
             self._clear_tenant_cache(run_id)
             try:
-                WorkflowScheduler.instance().notify_finished(_tenant_for_notify, _wf_for_notify)
+                WorkflowScheduler.instance().notify_finished(_tenant_for_notify, _wf_for_notify, run_id=run_id)
             except _WF_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(
                     f"WorkflowEngine: continue_run notify_finished failed run_id={run_id}: {e}",
@@ -2243,8 +2244,12 @@ class WorkflowScheduler:
                 self._active_runs.discard(run_id)
             if tenant:
                 self._active_tenant[tenant] = max(0, self._active_tenant.get(tenant, 0) - 1)
+                if self._active_tenant.get(tenant, 0) <= 0:
+                    self._active_tenant.pop(tenant, None)
             if workflow_id is not None:
                 self._active_workflow[workflow_id] = max(0, self._active_workflow.get(workflow_id, 0) - 1)
+                if self._active_workflow.get(workflow_id, 0) <= 0:
+                    self._active_workflow.pop(workflow_id, None)
             # Try to launch next admissible queued item (fair FIFO scan)
             for _ in range(len(self._queue)):
                 engine, run_id, mode, t, wf = self._queue[0]

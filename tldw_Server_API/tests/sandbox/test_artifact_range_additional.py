@@ -67,9 +67,10 @@ def _seed_run_and_artifact(client: TestClient) -> tuple[str, str]:
 
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
 
+    artifact_path = "range-out.txt"
     payload = b"0123456789"
-    sb._service._orch.store_artifacts(run_id, {"out.txt": payload})  # type: ignore[attr-defined]
-    return run_id, "out.txt"
+    sb._service._orch.store_artifacts(run_id, {artifact_path: payload})  # type: ignore[attr-defined]
+    return run_id, artifact_path
 
 
 def test_artifact_download_multiple_ranges_unsupported(monkeypatch) -> None:
