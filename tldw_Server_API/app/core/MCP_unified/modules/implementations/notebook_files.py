@@ -5,8 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import secrets
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
+
+
+_VALID_CELL_TYPES = frozenset({"code", "markdown", "raw"})
+_CELL_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +32,17 @@ class ParsedNotebook:
     sha256: str
     size: int
     format: NotebookFormat
+
+
+@dataclass(frozen=True, slots=True)
+class NotebookEditResult:
+    """Result of one in-memory notebook cell edit."""
+
+    document: dict[str, Any]
+    data: bytes
+    sha256_after: str
+    bytes_after: int
+    summary: dict[str, Any]
 
 
 def parse_notebook_payload(payload: bytes, *, max_bytes: int | None = None) -> ParsedNotebook:
@@ -125,6 +142,109 @@ def summarize_notebook(
     }
 
 
+def apply_cell_edit(
+    notebook: ParsedNotebook,
+    *,
+    mode: str,
+    cell_id: str,
+    source: str | None = None,
+    cell_type: str | None = None,
+    insert_position: str | None = None,
+    new_cell_id: str | None = None,
+) -> NotebookEditResult:
+    """Apply one bounded cell edit to a parsed notebook document."""
+
+    normalized_mode = str(mode or "").strip()
+    if normalized_mode not in {"replace", "insert", "delete"}:
+        raise ValueError("notebook_invalid_mode")
+
+    cells = _notebook_cells(notebook.document)
+    target_index = _find_cell_index(cells, cell_id)
+    target_cell = cells[target_index]
+    document = deepcopy(notebook.document)
+    editable_cells = _notebook_cells(document)
+    editable_target = editable_cells[target_index]
+
+    cell_count_before = len(cells)
+    source_before = _cell_source_text(target_cell)
+    output_count_before = _cell_output_count(target_cell)
+    summary: dict[str, Any] = {
+        "mode": normalized_mode,
+        "cell_id": cell_id,
+        "index_before": target_index,
+        "cell_count_before": cell_count_before,
+        "source_line_count_before": _source_line_count(source_before),
+        "source_char_count_before": len(source_before),
+        "output_count_before": output_count_before,
+    }
+
+    if normalized_mode == "replace":
+        if source is None:
+            raise ValueError("notebook_source_required")
+        replacement_type = _normalized_cell_type(cell_type) if cell_type is not None else None
+        if replacement_type is not None:
+            editable_target["cell_type"] = replacement_type
+        _set_cell_source(editable_target, source, original_cell=target_cell)
+        if editable_target.get("cell_type") == "code":
+            editable_target["outputs"] = []
+            editable_target["execution_count"] = None
+        source_after = _cell_source_text(editable_target)
+        summary.update(
+            {
+                "index_after": target_index,
+                "cell_count_after": len(editable_cells),
+                "source_line_count_after": _source_line_count(source_after),
+                "source_char_count_after": len(source_after),
+                "output_count_after": _cell_output_count(editable_target),
+            }
+        )
+    elif normalized_mode == "insert":
+        if source is None:
+            raise ValueError("notebook_source_required")
+        if insert_position not in {"before", "after"}:
+            raise ValueError("notebook_insert_position_required")
+        inserted_cell_id = _unique_new_cell_id(editable_cells, new_cell_id)
+        inserted_cell_type = _normalized_cell_type(cell_type)
+        insert_index = target_index if insert_position == "before" else target_index + 1
+        inserted_cell = _new_cell(
+            cell_id=inserted_cell_id,
+            cell_type=inserted_cell_type,
+            source=source,
+        )
+        editable_cells.insert(insert_index, inserted_cell)
+        summary.update(
+            {
+                "insert_position": insert_position,
+                "inserted_cell_id": inserted_cell_id,
+                "index_after": insert_index,
+                "cell_count_after": len(editable_cells),
+                "source_line_count_after": _source_line_count(source),
+                "source_char_count_after": len(source),
+                "output_count_after": _cell_output_count(inserted_cell),
+            }
+        )
+    else:
+        del editable_cells[target_index]
+        summary.update(
+            {
+                "index_after": None,
+                "cell_count_after": len(editable_cells),
+                "source_line_count_after": 0,
+                "source_char_count_after": 0,
+                "output_count_after": 0,
+            }
+        )
+
+    data = _serialize_notebook(document, notebook.format)
+    return NotebookEditResult(
+        document=document,
+        data=data,
+        sha256_after=hashlib.sha256(data).hexdigest(),
+        bytes_after=len(data),
+        summary=summary,
+    )
+
+
 def _cell_source_text(cell: dict[str, Any]) -> str:
     """Return a normalized source string for one notebook cell."""
 
@@ -134,6 +254,95 @@ def _cell_source_text(cell: dict[str, Any]) -> str:
     if isinstance(source, list) and all(isinstance(item, str) for item in source):
         return "".join(source)
     raise ValueError("notebook_cell_source_invalid")
+
+
+def _notebook_cells(document: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the validated notebook cell list."""
+
+    cells = document.get("cells")
+    if not isinstance(cells, list) or not all(isinstance(cell, dict) for cell in cells):
+        raise ValueError("notebook_cells_required")
+    return cells
+
+
+def _find_cell_index(cells: list[dict[str, Any]], cell_id: str) -> int:
+    """Find one target cell id or fail closed."""
+
+    for index, cell in enumerate(cells):
+        if cell.get("id") == cell_id:
+            return index
+    raise ValueError("notebook_cell_id_not_found")
+
+
+def _cell_output_count(cell: dict[str, Any]) -> int:
+    """Return code-cell output count metadata."""
+
+    outputs = cell.get("outputs")
+    return len(outputs) if isinstance(outputs, list) else 0
+
+
+def _normalized_cell_type(cell_type: str | None) -> str:
+    """Validate and normalize a notebook cell type."""
+
+    normalized = str(cell_type or "").strip()
+    if normalized not in _VALID_CELL_TYPES:
+        raise ValueError("notebook_invalid_cell_type")
+    return normalized
+
+
+def _unique_new_cell_id(cells: list[dict[str, Any]], requested_cell_id: str | None) -> str:
+    """Return a valid cell id that does not collide with existing ids."""
+
+    existing_ids = {str(cell.get("id") or "") for cell in cells}
+    if requested_cell_id is not None:
+        normalized = str(requested_cell_id).strip()
+        if not _CELL_ID_RE.fullmatch(normalized):
+            raise ValueError("notebook_invalid_cell_id")
+        if normalized in existing_ids:
+            raise ValueError("notebook_duplicate_cell_id")
+        return normalized
+
+    for _attempt in range(100):
+        candidate = f"cell-{secrets.token_hex(8)}"
+        if candidate not in existing_ids:
+            return candidate
+    raise ValueError("notebook_cell_id_generation_failed")
+
+
+def _new_cell(*, cell_id: str, cell_type: str, source: str) -> dict[str, Any]:
+    """Build a minimal Jupyter cell object."""
+
+    cell: dict[str, Any] = {
+        "cell_type": cell_type,
+        "id": cell_id,
+        "metadata": {},
+        "source": source,
+    }
+    if cell_type == "code":
+        cell["execution_count"] = None
+        cell["outputs"] = []
+    return cell
+
+
+def _set_cell_source(cell: dict[str, Any], source: str, *, original_cell: dict[str, Any]) -> None:
+    """Set source while preserving the original source container shape."""
+
+    original_source = original_cell.get("source", "")
+    if isinstance(original_source, list):
+        cell["source"] = source.splitlines(keepends=True)
+        if source and not cell["source"]:
+            cell["source"] = [source]
+        return
+    cell["source"] = source
+
+
+def _serialize_notebook(document: dict[str, Any], notebook_format: NotebookFormat) -> bytes:
+    """Serialize edited notebook JSON while preserving basic input shape."""
+
+    text = json.dumps(document, indent=notebook_format.indent, ensure_ascii=False)
+    if notebook_format.trailing_newline:
+        text += "\n"
+    return text.encode("utf-8")
 
 
 def _source_line_count(source: str) -> int:
