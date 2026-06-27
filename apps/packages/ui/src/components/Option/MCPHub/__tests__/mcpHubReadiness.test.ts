@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  formatMcpDiagnosticValue,
   getMcpCredentialState,
   getMcpHubReadiness,
   getMcpServerReadiness,
+  redactMcpDiagnosticValue,
   type McpReadinessAction,
   type McpReasonCode
 } from "../mcpHubReadiness"
@@ -83,6 +85,48 @@ const expectSingleReasonActions = (
 }
 
 describe("mcpHubReadiness", () => {
+  it("redacts diagnostic secrets recursively while preserving useful setup facts", () => {
+    const diagnosticValue = {
+      command: "uvx",
+      args: ["mcp-server", "--token", "token-from-arg", "--api-key=arg-key", "--mode", "readonly"],
+      env: {
+        API_TOKEN: "token-from-env",
+        MODE: "readonly"
+      },
+      headers: {
+        Authorization: "Bearer header-token",
+        "X-Trace": "trace-id"
+      },
+      endpoint: "https://example.test/mcp?api_key=url-key&mode=readonly",
+      nested: [{ password: "nested-password", label: "safe-label" }]
+    }
+
+    expect(redactMcpDiagnosticValue("config", diagnosticValue)).toEqual({
+      command: "uvx",
+      args: ["mcp-server", "--token", "[redacted]", "--api-key=[redacted]", "--mode", "readonly"],
+      env: {
+        API_TOKEN: "[redacted]",
+        MODE: "readonly"
+      },
+      headers: {
+        Authorization: "[redacted]",
+        "X-Trace": "trace-id"
+      },
+      endpoint: "https://example.test/mcp?api_key=[redacted]&mode=readonly",
+      nested: [{ password: "[redacted]", label: "safe-label" }]
+    })
+
+    const formatted = formatMcpDiagnosticValue("config", diagnosticValue)
+    expect(formatted).toContain('"MODE": "readonly"')
+    expect(formatted).toContain("[redacted]")
+    expect(formatted).not.toContain("token-from-arg")
+    expect(formatted).not.toContain("arg-key")
+    expect(formatted).not.toContain("token-from-env")
+    expect(formatted).not.toContain("header-token")
+    expect(formatted).not.toContain("url-key")
+    expect(formatted).not.toContain("nested-password")
+  })
+
   it("maps an empty hub to setup with an add server action", () => {
     expect(
       getMcpHubReadiness({

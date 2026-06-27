@@ -1146,7 +1146,7 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
 - Modify: `apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx`
 - Optional Modify: `apps/packages/ui/src/services/tldw/mcp-hub.ts`
 
-- [ ] **Step 1: Write failing diagnostics tests**
+- [x] **Step 1: Write failing diagnostics tests**
 
   Add tests for:
   - details action opens diagnostics;
@@ -1157,14 +1157,14 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   - diagnostics show API origin/health endpoint/deployment mode if the data source exists, or an explicit unavailable message if not;
   - diagnostics show setup isolation guidance or a link/copy explaining how local walkthrough/E2E setup should avoid unintended runtime database writes.
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
   ```
 
-- [ ] **Step 3: Add redaction helper**
+- [x] **Step 3: Add redaction helper**
 
   Put the helper in `mcpHubReadiness.ts` or a new pure helper file if it grows:
 
@@ -1199,7 +1199,7 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
     JSON.stringify(redactMcpDiagnosticValue(key, value), null, 2)
   ```
 
-- [ ] **Step 4: Add diagnostics UI**
+- [x] **Step 4: Add diagnostics UI**
 
   Add a details drawer or modal that shows:
   - display state;
@@ -1213,11 +1213,11 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   - last sanitized error category/message;
   - Audit tab link or copy explaining where audit details live.
 
-- [ ] **Step 5: Add environment diagnostics**
+- [x] **Step 5: Add environment diagnostics**
 
   Show effective deployment mode, frontend API origin, health endpoint, latest health result, and setup isolation guidance. If a field is unavailable in this client, show `Not available in this client` for that exact field and ensure the Stage 0 Backlog note records whether a later shared diagnostics provider is needed.
 
-- [ ] **Step 6: Add backend RBAC/audit verification if Task 2 touched backend**
+- [x] **Step 6: Add backend RBAC/audit verification if Task 2 touched backend**
 
   If Task 2 added or modified backend validation/discovery routes, add or update tests proving:
   - validation/discovery actions require the selected MCP Hub permission;
@@ -1225,21 +1225,21 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   - audit payloads and error responses redact nested env, headers, URL query,
     args, and raw config secrets.
 
-- [ ] **Step 7: Run diagnostics tests**
+- [x] **Step 7: Run diagnostics tests**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
   ```
 
-- [ ] **Step 8: Run backend diagnostics tests if backend changed**
+- [x] **Step 8: Run backend diagnostics tests if backend changed**
 
   ```bash
   source .venv/bin/activate
   python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py -k "readiness or refresh or audit" -v
   ```
 
-- [ ] **Step 9: Commit diagnostics**
+- [x] **Step 9: Commit diagnostics**
 
   ```bash
   git add apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py
@@ -1247,6 +1247,22 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   ```
 
   Only stage backend test files if they were changed.
+
+Task 6 completion notes:
+- Added diagnostics to the existing readiness Details modal instead of creating a separate drawer.
+- Added sanitized diagnostic config formatting in `mcpHubReadiness.ts`, including recursive object redaction, URL query redaction, and stdio args redaction.
+- Diagnostics now show display state, primary reason, reason codes, credential state, transport, tool count, validation/discovery timestamps, current operation, last error category/message, deployment mode, API origin, health endpoint, latest health result, audit-location copy, and setup-isolation guidance.
+- Environment fields render `Not available in this client` when no reliable client source exists; a later shared diagnostics provider can replace those values without changing the row-level Details entry point.
+- Task 6 did not change backend route/audit behavior. Existing MCP Hub backend management tests were rerun against the branch.
+- Verification:
+  - Red run: `bunx vitest run src/components/Option/MCPHub/__tests__/mcpHubReadiness.test.ts src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx` failed for missing redaction helper and missing diagnostics fields.
+  - Follow-up red run: `bunx vitest run src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx` failed for missing latest health result/audit copy.
+  - Green runs: focused diagnostics/component tests passed.
+  - Focused MCP Hub frontend suite passed: 5 files, 92 tests.
+  - Touched-file design-state guard summary: exitCode 0, blocked 0, baselineErrors 0.
+  - Backend MCP Hub management API tests passed: 39 tests.
+  - `git diff --check` passed.
+  - Bandit skipped for Task 6 because only frontend TypeScript/tests and plan/backlog markdown changed.
 
 ## Task 7: Make Status Summary Truthful
 

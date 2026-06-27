@@ -124,6 +124,10 @@ const REASON_ACTIONS: Record<McpReasonCode, McpReadinessAction[]> = {
 const SERVER_READY_ACTIONS: McpReadinessAction[] = ["open_tool_catalog", "view_details"]
 const HUB_READY_ACTIONS: McpReadinessAction[] = ["open_tool_catalog"]
 const CHECKING_ACTIONS: McpReadinessAction[] = ["view_details"]
+const SECRET_KEY_PATTERN = /(token|secret|password|authorization|api[_-]?key)/i
+const SECRET_ARG_PATTERN = /^--?[^=]*(token|secret|password|authorization|api[-_]?key)[^=]*(?:=.*)?$/i
+const URL_SECRET_QUERY_PATTERN = /([?&][^=]*(token|key|secret|password|authorization|api[_-]?key)[^=]*=)[^&]+/gi
+const REDACTED_VALUE = "[redacted]"
 
 const sortReasonCodes = (reasonCodes: McpReasonCode[]): McpReasonCode[] =>
   [...new Set(reasonCodes)].sort(
@@ -143,6 +147,65 @@ const uniqueActions = (actions: McpReadinessAction[]): McpReadinessAction[] => {
     return true
   })
 }
+
+const redactUrlSecrets = (value: string): string =>
+  value.replace(URL_SECRET_QUERY_PATTERN, `$1${REDACTED_VALUE}`)
+
+const redactDiagnosticArgArray = (key: string, values: unknown[]): unknown[] => {
+  let redactNextValue = false
+
+  return values.map((value, index) => {
+    if (redactNextValue) {
+      redactNextValue = false
+      return REDACTED_VALUE
+    }
+
+    if (typeof value === "string" && SECRET_ARG_PATTERN.test(value)) {
+      const separatorIndex = value.indexOf("=")
+      if (separatorIndex >= 0) {
+        return `${value.slice(0, separatorIndex + 1)}${REDACTED_VALUE}`
+      }
+      redactNextValue = true
+      return value
+    }
+
+    return redactMcpDiagnosticValue(`${key}.${index}`, value)
+  })
+}
+
+export const redactMcpDiagnosticValue = (key: string, value: unknown): unknown => {
+  if (SECRET_KEY_PATTERN.test(key)) {
+    return REDACTED_VALUE
+  }
+
+  if (typeof value === "string") {
+    return redactUrlSecrets(value)
+  }
+
+  if (Array.isArray(value)) {
+    if (/args|argv/i.test(key)) {
+      return redactDiagnosticArgArray(key, value)
+    }
+
+    return value.map((entry, index) =>
+      redactMcpDiagnosticValue(`${key}.${index}`, entry)
+    )
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([nestedKey, nestedValue]) => [
+        nestedKey,
+        redactMcpDiagnosticValue(nestedKey, nestedValue)
+      ])
+    )
+  }
+
+  return value
+}
+
+export const formatMcpDiagnosticValue = (key: string, value: unknown): string =>
+  JSON.stringify(redactMcpDiagnosticValue(key, value), null, 2)
 
 const getActionsForReasons = (
   reasonCodes: McpReasonCode[],
