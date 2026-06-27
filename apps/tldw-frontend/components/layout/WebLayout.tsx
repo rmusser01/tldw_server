@@ -223,7 +223,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
       const detail = (event as CustomEvent<BackendUnreachableDetail | undefined>)?.detail;
       if (!detail || typeof detail !== 'object') return;
       setBackendUnavailableDetail(detail);
-      void checkOnce().catch(() => undefined);
+      void checkOnce({ force: true }).catch(() => undefined);
     };
 
     window.addEventListener(BACKEND_UNREACHABLE_EVENT, onBackendUnreachable as EventListener);
@@ -233,10 +233,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   }, [checkOnce, suppressBackendUnavailableModal]);
 
   React.useEffect(() => {
-    if (isConnected && phase === ConnectionPhase.CONNECTED) {
+    if (!isChecking && isConnected && phase === ConnectionPhase.CONNECTED) {
       setBackendUnavailableDetail(null);
     }
-  }, [isConnected, phase]);
+  }, [isChecking, isConnected, phase]);
 
   const closeBackendUnavailableModal = React.useCallback(() => {
     setBackendUnavailableDetail(null);
@@ -248,7 +248,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   }, [navigate]);
 
   const retryConnectionCheck = React.useCallback(() => {
-    void checkOnce().catch(() => undefined);
+    void checkOnce({ force: true }).catch(() => undefined);
   }, [checkOnce]);
 
   // Create toggle function for sidebar

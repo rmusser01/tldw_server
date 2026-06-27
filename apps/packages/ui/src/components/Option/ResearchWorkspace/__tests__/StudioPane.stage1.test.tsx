@@ -1,9 +1,10 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import type { AudioGenerationSettings, WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
+import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
 
 const {
   mockAddArtifact,
@@ -14,6 +15,7 @@ const {
   mockMessageSuccess,
   mockMessageError,
   mockMessageInfo,
+  mockMessageOpen,
   mockGenerateFlashcardsService,
   mockCreateFlashcardsBulk,
   mockRagSearch,
@@ -24,6 +26,7 @@ const {
   mockGetMediaDetails,
   mockUpsertWorkspace,
   mockGetChatModels,
+  mockGetModel,
   messageOptionStoreState,
   chatModelSettingsStoreState,
   baseAudioSettings,
@@ -38,6 +41,7 @@ const {
   const messageSuccess = vi.fn()
   const messageError = vi.fn()
   const messageInfo = vi.fn()
+  const messageOpen = vi.fn()
   const generateFlashcardsService = vi.fn()
   const createFlashcardsBulk = vi.fn()
   const ragSearch = vi.fn()
@@ -48,6 +52,7 @@ const {
   const getMediaDetails = vi.fn()
   const upsertWorkspace = vi.fn()
   const getChatModels = vi.fn()
+  const getModel = vi.fn()
   const defaultAudioSettings: AudioGenerationSettings = {
     provider: "browser",
     model: "kokoro",
@@ -128,6 +133,7 @@ const {
     mockMessageSuccess: messageSuccess,
     mockMessageError: messageError,
     mockMessageInfo: messageInfo,
+    mockMessageOpen: messageOpen,
     mockGenerateFlashcardsService: generateFlashcardsService,
     mockCreateFlashcardsBulk: createFlashcardsBulk,
     mockRagSearch: ragSearch,
@@ -138,6 +144,7 @@ const {
     mockGetMediaDetails: getMediaDetails,
     mockUpsertWorkspace: upsertWorkspace,
     mockGetChatModels: getChatModels,
+    mockGetModel: getModel,
     messageOptionStoreState: messageOptionState,
     chatModelSettingsStoreState: chatModelSettingsState,
     baseAudioSettings: defaultAudioSettings,
@@ -217,6 +224,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 vi.mock("@/services/tldw", () => ({
   tldwModels: {
     getChatModels: mockGetChatModels,
+    getModel: mockGetModel,
     getProviderDisplayName: (provider: string) => provider
   }
 }))
@@ -246,7 +254,7 @@ vi.mock("antd", async () => {
     message: {
       useMessage: () => [
         {
-          open: vi.fn(),
+          open: mockMessageOpen,
           warning: vi.fn(),
           destroy: vi.fn(),
           success: mockMessageSuccess,
@@ -308,8 +316,8 @@ const createChatCompletionResponse = (
     }
   )
 
-const renderStudioPane = () => {
-  const renderResult = render(<StudioPane />)
+const renderStudioPane = (props: React.ComponentProps<typeof StudioPane> = {}) => {
+  const renderResult = render(<StudioPane {...props} />)
   expandOutputTypesSection()
   const moreOutputsToggle = screen.queryByRole("button", {
     name: /More outputs/i
@@ -324,7 +332,9 @@ const renderStudioPane = () => {
 describe("StudioPane Stage 1 generation lifecycle control", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    localStorage.removeItem("tldw:research-workspace:recent-output-types:v1")
+    if (typeof localStorage.removeItem === "function") {
+      localStorage.removeItem("tldw:research-workspace:recent-output-types:v1")
+    }
 
     workspaceStoreState.selectedSourceIds = ["source-1"]
     workspaceStoreState.selectedSourceFolderIds = []
@@ -427,6 +437,32 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       created_at: "2026-02-18T00:00:00.000Z"
     })
     mockGetChatModels.mockResolvedValue([])
+    mockGetModel.mockResolvedValue(null)
+  })
+
+  it("exposes accessible names for studio option controls", () => {
+    renderStudioPane()
+
+    fireEvent.click(screen.getByRole("button", { name: /Studio Options/i }))
+
+    const modelRuntime = screen.getByRole("region", { name: "Model Runtime" })
+    expect(within(modelRuntime).getByLabelText("API Provider")).toBeInTheDocument()
+    expect(within(modelRuntime).getByLabelText("Model")).toBeInTheDocument()
+    expect(
+      within(modelRuntime).getByRole("slider", { name: "Temperature" })
+    ).toBeInTheDocument()
+    expect(within(modelRuntime).getByRole("slider", { name: "Top P" })).toBeInTheDocument()
+    expect(within(modelRuntime).getByLabelText("Max Tokens")).toBeInTheDocument()
+
+    const ragSettings = screen.getByRole("region", { name: "RAG Settings" })
+    expect(within(ragSettings).getByLabelText("Search Mode")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /Audio Settings/i }))
+    const audioSettings = screen.getByTestId("studio-audio-settings-accordion")
+    expect(within(audioSettings).getByLabelText("TTS Provider")).toBeInTheDocument()
+    expect(within(audioSettings).getByRole("slider", { name: "Speed" })).toBeInTheDocument()
+    expect(within(audioSettings).getByLabelText("Output Format")).toBeInTheDocument()
+    expect(within(audioSettings).getByLabelText("Flashcard Deck")).toBeInTheDocument()
   })
 
   it("shows cancel control during generation and aborts active run", async () => {
@@ -716,6 +752,28 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     renderStudioPane()
 
     expect(screen.getByText(/select a chat model/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Summary" })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+  })
+
+  it("shows provider-specific Studio capability blocks before generation", () => {
+    const capabilities = buildUnknownResearchWorkspaceCapabilities()
+    capabilities.capabilities.artifact_text_generation = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "provider_unavailable"
+    }
+
+    renderStudioPane({ researchWorkspaceCapabilities: capabilities })
+
+    expect(
+      screen.getByText(
+        "Summary is unavailable because the model provider is unavailable. Open model settings or retry status."
+      )
+    ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Summary" })).toBeDisabled()
     fireEvent.click(screen.getByRole("button", { name: "Summary" }))
     expect(mockAddArtifact).not.toHaveBeenCalled()
@@ -1309,6 +1367,133 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(mockCreateChatCompletion).not.toHaveBeenCalled()
   })
 
+  it("gates stale tldw model selections before summary generation", async () => {
+    messageOptionStoreState.selectedModel = "tldw:gemma3:1b"
+    mockGetChatModels.mockResolvedValue([
+      {
+        id: "ollama/gemma3:1b",
+        name: "gemma3:1b",
+        provider: "ollama",
+        type: "chat"
+      }
+    ])
+    const capabilities = buildUnknownResearchWorkspaceCapabilities()
+
+    renderStudioPane({ researchWorkspaceCapabilities: capabilities })
+
+    await waitFor(() => {
+      expect(mockGetChatModels).toHaveBeenCalled()
+    })
+
+    expect(
+      screen.getByText(/selected Studio model is no longer available/i)
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Summary may be degraded\. You can still try it\./i)
+    ).not.toBeInTheDocument()
+
+    const summaryButton = screen.getByRole("button", { name: "Summary" })
+    expect(summaryButton).toBeDisabled()
+
+    fireEvent.click(summaryButton)
+
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+  })
+
+  it("shows readiness details when the selected Studio model is unavailable", async () => {
+    messageOptionStoreState.selectedModel = "ollama/gemma3:1b"
+    mockGetChatModels.mockResolvedValue([])
+    mockGetModel.mockResolvedValue({
+      id: "ollama/gemma3:1b",
+      name: "gemma3:1b",
+      provider: "ollama",
+      type: "chat",
+      providerEnabled: false,
+      availability: "unavailable",
+      readinessReasonCode: "egress_blocked",
+      readinessMessage: "Ollama is configured, but the endpoint is blocked by server egress policy: Port not allowed: 11434.",
+      chatProvider: "ollama"
+    })
+
+    renderStudioPane()
+
+    await waitFor(() => {
+      expect(mockGetModel).toHaveBeenCalledWith("ollama/gemma3:1b")
+    })
+
+    expect(
+      screen.getByText(/endpoint is blocked by server egress policy/i)
+    ).toBeInTheDocument()
+
+    const summaryButton = screen.getByRole("button", { name: "Summary" })
+    expect(summaryButton).toBeDisabled()
+
+    fireEvent.click(summaryButton)
+
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+  })
+
+  it("keeps provider-qualified unavailable selections blocked while readiness details load", async () => {
+    messageOptionStoreState.selectedModel = "ollama/gemma3:1b"
+    mockGetChatModels.mockResolvedValue([])
+    mockGetModel.mockImplementation(() => new Promise(() => {}))
+
+    renderStudioPane()
+
+    await waitFor(() => {
+      expect(mockGetModel).toHaveBeenCalledWith("ollama/gemma3:1b")
+    })
+
+    expect(
+      screen.getByText(/not available in the current chat model catalog/i)
+    ).toBeInTheDocument()
+
+    const summaryButton = screen.getByRole("button", { name: "Summary" })
+    expect(summaryButton).toBeDisabled()
+
+    fireEvent.click(summaryButton)
+
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    expect(mockUpdateArtifactStatus).not.toHaveBeenCalled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+  })
+
+  it("keeps configured provider-qualified model selections available for summary generation", async () => {
+    messageOptionStoreState.selectedModel = "ollama/gemma3:1b"
+    mockGetChatModels.mockResolvedValue([
+      {
+        id: "ollama/gemma3:1b",
+        name: "gemma3:1b",
+        provider: "ollama",
+        type: "chat"
+      }
+    ])
+
+    renderStudioPane()
+
+    await waitFor(() => {
+      expect(mockGetChatModels).toHaveBeenCalled()
+    })
+
+    const summaryButton = screen.getByRole("button", { name: "Summary" })
+    expect(summaryButton).not.toBeDisabled()
+
+    fireEvent.click(summaryButton)
+
+    await waitFor(() => {
+      expect(mockCreateChatCompletion).toHaveBeenCalled()
+    })
+
+    expect(mockCreateChatCompletion.mock.calls[0]?.[0]).toMatchObject({
+      model: "ollama/gemma3:1b",
+      api_provider: "ollama"
+    })
+  })
+
   it("passes the selected model runtime through to slides generation", async () => {
     messageOptionStoreState.selectedModel = "llama-3.1-8b"
     chatModelSettingsStoreState.apiProvider = "ollama"
@@ -1634,6 +1819,18 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
 
     expect(confirmSpy).toHaveBeenCalledTimes(1)
     expect(mockRemoveArtifact).toHaveBeenCalledWith("artifact-failed")
+
+    const openConfig = mockMessageOpen.mock.calls.at(-1)?.[0] as
+      | { content: React.ReactNode; btn?: unknown; type?: string }
+      | undefined
+    expect(openConfig?.type).toBe("warning")
+
+    const undoToast = render(<>{openConfig?.content}</>)
+    expect(undoToast.getByText("Output deleted.")).toBeInTheDocument()
+    expect(
+      undoToast.getByRole("button", { name: "Undo" })
+    ).toBeInTheDocument()
+    expect(openConfig).not.toHaveProperty("btn")
   })
 
   it("regenerates in replace mode without creating a new artifact", async () => {

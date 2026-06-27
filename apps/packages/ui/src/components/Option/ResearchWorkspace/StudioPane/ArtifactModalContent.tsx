@@ -24,6 +24,7 @@ import {
   undoWorkspaceAction,
 } from "../undo-manager"
 import { buildProposalDeepResearchVerificationSections } from "./proposal-deep-research-verification"
+import { renderWorkspaceMessageActionContent } from "../workspace-message-content"
 
 const MAX_DISPLAYED_UNRESOLVED_QUESTIONS = 3
 
@@ -134,6 +135,7 @@ export const DataTableArtifactViewer: React.FC<{
     <div className="flex max-h-[70vh] flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <Input
+          aria-label="Filter table rows"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Filter table rows"
@@ -303,15 +305,16 @@ export const FlashcardArtifactEditor: React.FC<{
       const maybeOpen = (
         messageApi as { open?: (config: unknown) => void }
       ).open
+      const removeContent = t(
+        "playground:studio.flashcardRemoved",
+        "Flashcard removed."
+      )
       const messageConfig = {
         key: undoMessageKey,
         type: "warning",
         duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-        content: t(
-          "playground:studio.flashcardRemoved",
-          "Flashcard removed."
-        ),
-        btn: (
+        content: renderWorkspaceMessageActionContent(
+          removeContent,
           <Button
             size="small"
             type="link"
@@ -335,12 +338,12 @@ export const FlashcardArtifactEditor: React.FC<{
       if (typeof maybeOpen === "function") {
         maybeOpen(messageConfig)
       } else {
-        const maybeWarning = (
-          messageApi as { warning?: (content: string) => void }
-        ).warning
-        if (typeof maybeWarning === "function") {
-          maybeWarning(t("playground:studio.flashcardRemoved", "Flashcard removed."))
-        }
+      const maybeWarning = (
+        messageApi as { warning?: (content: string) => void }
+      ).warning
+      if (typeof maybeWarning === "function") {
+          maybeWarning(removeContent)
+      }
       }
     },
     [draftCards, messageApi, t]
@@ -374,6 +377,7 @@ export const FlashcardArtifactEditor: React.FC<{
               </Button>
             </div>
             <Input.TextArea
+              aria-label={`Flashcard front ${index + 1}`}
               value={card.front}
               onChange={(event) => updateCard(index, { front: event.target.value })}
               rows={2}
@@ -381,6 +385,7 @@ export const FlashcardArtifactEditor: React.FC<{
               className="mb-2"
             />
             <Input.TextArea
+              aria-label={`Flashcard back ${index + 1}`}
               value={card.back}
               onChange={(event) => updateCard(index, { back: event.target.value })}
               rows={3}
@@ -453,15 +458,16 @@ export const QuizArtifactEditor: React.FC<{
       const maybeOpen = (
         messageApi as { open?: (config: unknown) => void }
       ).open
+      const removeContent = t(
+        "playground:studio.quizQuestionRemoved",
+        "Question removed."
+      )
       const messageConfig = {
         key: undoMessageKey,
         type: "warning",
         duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-        content: t(
-          "playground:studio.quizQuestionRemoved",
-          "Question removed."
-        ),
-        btn: (
+        content: renderWorkspaceMessageActionContent(
+          removeContent,
           <Button
             size="small"
             type="link"
@@ -489,9 +495,7 @@ export const QuizArtifactEditor: React.FC<{
           messageApi as { warning?: (content: string) => void }
         ).warning
         if (typeof maybeWarning === "function") {
-          maybeWarning(
-            t("playground:studio.quizQuestionRemoved", "Question removed.")
-          )
+          maybeWarning(removeContent)
         }
       }
     },
@@ -531,6 +535,7 @@ export const QuizArtifactEditor: React.FC<{
               </Button>
             </div>
             <Input.TextArea
+              aria-label={`Question prompt ${index + 1}`}
               value={question.question}
               onChange={(event) =>
                 updateQuestion(index, { question: event.target.value })
@@ -540,6 +545,7 @@ export const QuizArtifactEditor: React.FC<{
               className="mb-2"
             />
             <Input.TextArea
+              aria-label={`Question options ${index + 1}`}
               value={question.options.join("\n")}
               onChange={(event) =>
                 updateQuestion(index, {
@@ -554,6 +560,7 @@ export const QuizArtifactEditor: React.FC<{
               className="mb-2"
             />
             <Input
+              aria-label={`Correct answer ${index + 1}`}
               value={question.answer}
               onChange={(event) =>
                 updateQuestion(index, { answer: event.target.value })
@@ -562,6 +569,7 @@ export const QuizArtifactEditor: React.FC<{
               className="mb-2"
             />
             <Input.TextArea
+              aria-label={`Question explanation ${index + 1}`}
               value={question.explanation || ""}
               onChange={(event) =>
                 updateQuestion(index, { explanation: event.target.value })

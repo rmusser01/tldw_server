@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
@@ -45,6 +46,17 @@ const workspaceContextMocks = vi.hoisted(() => ({
 }))
 const translationMock = vi.hoisted(() => ({
   keys: [] as string[]
+}))
+const { mockStartTutorial, mockMessageApi } = vi.hoisted(() => ({
+  mockStartTutorial: vi.fn(),
+  mockMessageApi: {
+    success: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+    open: vi.fn(),
+    destroy: vi.fn()
+  }
 }))
 
 const now = new Date("2026-02-18T12:00:00.000Z")
@@ -238,6 +250,16 @@ const makeActiveWorkspaceHookResult = (
   refresh: vi.fn()
 })
 
+const interpolateTranslation = (
+  value: string,
+  interpolationValues?: Record<string, unknown>
+) =>
+  Object.entries(interpolationValues ?? {}).reduce(
+    (text, [name, replacement]) =>
+      text.split(`{{${name}}}`).join(String(replacement)),
+    value
+  )
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -246,10 +268,13 @@ vi.mock("react-i18next", () => ({
         | string
         | {
             defaultValue?: string
-          }
+          },
+      interpolationValues?: Record<string, unknown>
     ) => {
       translationMock.keys.push(key)
-      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
+      if (typeof defaultValueOrOptions === "string") {
+        return interpolateTranslation(defaultValueOrOptions, interpolationValues)
+      }
       if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
       return key
     }
@@ -260,10 +285,27 @@ vi.mock("react-router-dom", () => ({
   useNavigate: () => mockNavigate
 }))
 
+vi.mock("antd", async () => {
+  const actual = await vi.importActual<typeof import("antd")>("antd")
+  return {
+    ...actual,
+    message: {
+      ...actual.message,
+      useMessage: () => [mockMessageApi, null] as const
+    }
+  }
+})
+
 vi.mock("@/store/workspace", () => ({
   useWorkspaceStore: (
     selector: (state: typeof mockStoreState) => unknown
   ) => selector(mockStoreState)
+}))
+
+vi.mock("@/store/tutorials", () => ({
+  useTutorialStore: (
+    selector: (state: { startTutorial: typeof mockStartTutorial }) => unknown
+  ) => selector({ startTutorial: mockStartTutorial })
 }))
 
 vi.mock("@/store/connection", () => ({
@@ -364,6 +406,31 @@ if (!(globalThis as unknown as { ResizeObserver?: unknown }).ResizeObserver) {
   }
 }
 
+const ensureLocalStorage = () => {
+  if (window.localStorage && typeof window.localStorage.clear === "function") {
+    return
+  }
+
+  const storage = new Map<string, string>()
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      clear: () => storage.clear(),
+      getItem: (key: string) => storage.get(key) ?? null,
+      key: (index: number) => Array.from(storage.keys())[index] ?? null,
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      setItem: (key: string, value: string) => {
+        storage.set(key, String(value))
+      },
+      get length() {
+        return storage.size
+      }
+    }
+  })
+}
+
 describe("WorkspaceHeader workspace browser modal", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -371,6 +438,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     workspaceContextMocks.useActiveWorkspaceContext.mockReturnValue(
       makeActiveWorkspaceHookResult()
     )
+    ensureLocalStorage()
     window.localStorage.clear()
     clearWorkspaceUndoActionsForTests()
     registryStateOverrides.missingDegraded = false
@@ -605,6 +673,56 @@ describe("WorkspaceHeader workspace browser modal", () => {
     )
   })
 
+  it("shows feedback when replaying the workspace tour from the header", () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("workspace-help-tour-button"))
+
+    expect(mockStartTutorial).toHaveBeenCalledWith("research-workspace-basics")
+    expect(mockMessageApi.info).toHaveBeenCalledWith(
+      "Tour started. Follow the highlighted steps."
+    )
+  })
+
+  it("exposes workspace search as a first-class header action without credentials", () => {
+    const onOpenSearch = vi.fn()
+    connectionConfigState.config = {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "",
+      accessToken: ""
+    }
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+        onOpenSearch={onOpenSearch}
+        hideToggles
+      />
+    )
+
+    const searchButton = screen.getByRole("button", {
+      name: /search workspace/i
+    })
+
+    expect(searchButton).toBeVisible()
+    expect(searchButton).toHaveTextContent(/K/)
+
+    fireEvent.click(searchButton)
+
+    expect(onOpenSearch).toHaveBeenCalledTimes(1)
+  })
+
   it("renders server-authoritative workspace context", async () => {
     render(
       <WorkspaceHeader
@@ -628,6 +746,28 @@ describe("WorkspaceHeader workspace browser modal", () => {
     )
     expect(workspaceContextMocks.useActiveWorkspaceContext).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: "workspace-alpha" })
+    )
+  })
+
+  it("passes the server context refresh version into the workspace context hook", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+        serverContextRefreshVersion={7}
+      />
+    )
+
+    expect(
+      await screen.findByText("Server Workspace")
+    ).toBeInTheDocument()
+    expect(workspaceContextMocks.useActiveWorkspaceContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace-alpha",
+        refreshKey: 7
+      })
     )
   })
 
@@ -749,9 +889,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(within(modal).getByText("Beta Deep Dive")).toBeInTheDocument()
     expect(within(modal).getByText("Gamma Notes")).toBeInTheDocument()
 
-    const searchInput = within(modal).getByPlaceholderText(
-      "Search workspaces by name or tag"
-    )
+    const searchInput = within(modal).getByLabelText("Search workspaces")
     fireEvent.change(searchInput, { target: { value: "gamma" } })
 
     await waitFor(() => {
@@ -853,7 +991,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
 
     fireEvent.change(
-      within(modal).getByPlaceholderText("New collection name"),
+      within(modal).getByLabelText("New collection name"),
       { target: { value: "Topic B" } }
     )
     fireEvent.click(within(modal).getByRole("button", { name: "Add collection" }))
@@ -868,6 +1006,16 @@ describe("WorkspaceHeader workspace browser modal", () => {
   })
 
   it("exports workspace bundle from the settings menu", async () => {
+    const createObjectUrlSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:workspace-export-zip")
+    const anchorClickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined)
+    const revokeObjectUrlSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => undefined)
+
     render(
       <WorkspaceHeader
         leftPaneOpen={true}
@@ -884,7 +1032,13 @@ describe("WorkspaceHeader workspace browser modal", () => {
       expect(mockExportWorkspaceBundle).toHaveBeenCalledWith("workspace-alpha")
       expect(mockCreateWorkspaceExportZipBlob).toHaveBeenCalledTimes(1)
       expect(mockCreateWorkspaceExportZipFilename).toHaveBeenCalledTimes(1)
+      expect(createObjectUrlSpy).toHaveBeenCalled()
     })
+    expect(anchorClickSpy).toHaveBeenCalledTimes(1)
+    expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:workspace-export-zip")
+    expect(mockMessageApi.success).toHaveBeenCalledWith(
+      "Workspace exported: alpha.workspace.zip"
+    )
   })
 
   it("opens the canonical Workspaces manager from the settings menu", async () => {
@@ -921,6 +1075,63 @@ describe("WorkspaceHeader workspace browser modal", () => {
     fireEvent.click(await screen.findByText("Split workspace"))
 
     expect(onOpenSplitWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports duplicate workspace identity and offers a path back to the original", async () => {
+    mockDuplicateWorkspace.mockReturnValue("workspace-alpha-copy")
+
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Duplicate Current Workspace"))
+
+    expect(mockDuplicateWorkspace).toHaveBeenCalledWith("workspace-alpha")
+    expect(mockMessageApi.open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "success"
+      })
+    )
+
+    const openConfig = mockMessageApi.open.mock.calls.at(-1)?.[0] as {
+      content: ReactNode
+    }
+    const duplicateToast = render(<>{openConfig.content}</>)
+    expect(
+      duplicateToast.getByText("Duplicated Alpha Research. You are editing the new copy.")
+    ).toBeInTheDocument()
+    fireEvent.click(
+      duplicateToast.getByRole("button", { name: "Open original" })
+    )
+
+    expect(mockSwitchWorkspace).toHaveBeenCalledWith("workspace-alpha")
+  })
+
+  it("dismisses the workspaces menu when opening workspace settings", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }))
+    expect(await screen.findByText("View all workspaces")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    expect(await screen.findByText("Import Workspace")).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(screen.getByText("View all workspaces")).not.toBeVisible()
+    })
   })
 
   it("hides the split workspace menu item when no split callback is provided", async () => {
@@ -992,6 +1203,11 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
     expect(createObjectUrlSpy).toHaveBeenCalledTimes(1)
     expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:workspace-bibtex")
+    expect(mockMessageApi.success).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^Citations exported: alpha-research-citations-\d{8}\.bib$/
+      )
+    )
   })
 
   it("creates a workspace from a template and seeds starter note content", async () => {
@@ -1018,6 +1234,121 @@ describe("WorkspaceHeader workspace browser modal", () => {
     )
   })
 
+  it.each([
+    {
+      label: "Literature Review",
+      workspaceName: "Literature Review Workspace",
+      noteTitle: "Literature Review Plan",
+      keyword: "literature",
+      prompt: "Compare the strongest and weakest evidence across selected sources.",
+      studioPreset: "Literature matrix"
+    },
+    {
+      label: "Interview Analysis",
+      workspaceName: "Interview Analysis Workspace",
+      noteTitle: "Interview Findings",
+      keyword: "interviews",
+      prompt: "Summarize recurring themes and unresolved follow-ups.",
+      studioPreset: "Theme synthesis"
+    },
+    {
+      label: "Product Brief",
+      workspaceName: "Product Brief Workspace",
+      noteTitle: "Product Brief Draft",
+      keyword: "product",
+      prompt: "Draft a decision-ready product brief from the selected sources.",
+      studioPreset: "Executive brief"
+    }
+  ])(
+    "applies a documented scaffold for $label templates",
+    async ({ label, workspaceName, noteTitle, keyword, prompt, studioPreset }) => {
+      render(
+        <WorkspaceHeader
+          leftPaneOpen={true}
+          rightPaneOpen={true}
+          onToggleLeftPane={vi.fn()}
+          onToggleRightPane={vi.fn()}
+        />
+      )
+
+      fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+      fireEvent.click(await screen.findByText(label))
+
+      expect(mockCreateNewWorkspace).toHaveBeenCalledWith(workspaceName)
+      expect(mockSetCurrentNote).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: noteTitle,
+          keywords: expect.arrayContaining([keyword, "template"]),
+          isDirty: true,
+          content: expect.stringContaining("## Source checklist")
+        })
+      )
+
+      const scaffoldNote = mockSetCurrentNote.mock.calls.at(-1)?.[0] as {
+        content: string
+      }
+      expect(scaffoldNote.content).toContain("## Suggested prompts")
+      expect(scaffoldNote.content).toContain(prompt)
+      expect(scaffoldNote.content).toContain("## Studio recommendations")
+      expect(scaffoldNote.content).toContain(studioPreset)
+      expect(scaffoldNote.content).toContain("## Next steps")
+
+      expect(mockMessageApi.open).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "success"
+        })
+      )
+
+      const openConfig = mockMessageApi.open.mock.calls.at(-1)?.[0] as {
+        content: ReactNode
+      }
+      const templateToast = render(<>{openConfig.content}</>)
+      expect(
+        templateToast.getByText(
+          `${label} template applied. Added outline, source checklist, suggested prompts, and Studio recommendations.`
+        )
+      ).toBeInTheDocument()
+      fireEvent.click(
+        templateToast.getByRole("button", { name: "Start over" })
+      )
+
+      expect(mockCreateNewWorkspace).toHaveBeenLastCalledWith()
+    }
+  )
+
+  it("replays a different template by replacing the scaffold note state", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Literature Review"))
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Product Brief"))
+
+    expect(mockCreateNewWorkspace).toHaveBeenNthCalledWith(
+      1,
+      "Literature Review Workspace"
+    )
+    expect(mockCreateNewWorkspace).toHaveBeenNthCalledWith(
+      2,
+      "Product Brief Workspace"
+    )
+    const latestNote = mockSetCurrentNote.mock.calls.at(-1)?.[0] as {
+      title: string
+      content: string
+    }
+    expect(latestNote.title).toBe("Product Brief Draft")
+    expect(latestNote.content).toContain("## Studio recommendations")
+    expect(latestNote.content).toContain("Executive brief")
+    expect(latestNote.content).not.toContain("Literature matrix")
+  })
+
   it("imports workspace bundle file from the workspace menu", async () => {
     render(
       <WorkspaceHeader
@@ -1041,6 +1372,52 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
   })
 
+  it("opens a visible import dialog, rejects unsafe files, and names imported workspaces", async () => {
+    render(
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Import Workspace"))
+
+    const modal = await screen.findByRole("dialog", {
+      name: "Import Workspace"
+    })
+    const fileInput = within(modal).getByLabelText("Workspace bundle file")
+    expect(fileInput).toHaveAttribute(
+      "accept",
+      ".json,.workspace.json,.zip,.workspace.zip"
+    )
+
+    const unsafeFile = new File(["plain"], "notes.txt", {
+      type: "text/plain"
+    })
+    fireEvent.change(fileInput, { target: { files: [unsafeFile] } })
+
+    expect(mockMessageApi.error).toHaveBeenCalledWith(
+      "Choose a .workspace.zip or workspace JSON export."
+    )
+    expect(mockParseWorkspaceImportFile).not.toHaveBeenCalled()
+
+    const validFile = new File(["{}"], "workspace.workspace.json", {
+      type: "application/json"
+    })
+    fireEvent.change(fileInput, { target: { files: [validFile] } })
+
+    await waitFor(() => {
+      expect(mockParseWorkspaceImportFile).toHaveBeenCalledWith(validFile)
+      expect(mockImportWorkspaceBundle).toHaveBeenCalledTimes(1)
+    })
+    expect(mockMessageApi.success).toHaveBeenCalledWith(
+      "Workspace imported: Imported"
+    )
+  })
+
   it("opens Customize banner modal from settings menu", async () => {
     render(
       <WorkspaceHeader
@@ -1058,11 +1435,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
       name: "Customize banner"
     })
     expect(modal).toBeInTheDocument()
-    expect(within(modal).getByTestId("workspace-banner-title-input")).toHaveValue(
-      "Alpha Banner"
-    )
+    expect(within(modal).getByLabelText("Banner title")).toHaveValue("Alpha Banner")
     expect(
-      within(modal).getByTestId("workspace-banner-subtitle-input")
+      within(modal).getByLabelText("Banner subtitle")
     ).toHaveValue("Alpha subtitle")
   })
 
@@ -1092,11 +1467,11 @@ describe("WorkspaceHeader workspace browser modal", () => {
     const modal = await screen.findByRole("dialog", {
       name: "Customize banner"
     })
-    fireEvent.change(within(modal).getByTestId("workspace-banner-title-input"), {
+    fireEvent.change(within(modal).getByLabelText("Banner title"), {
       target: { value: "Updated Banner" }
     })
     fireEvent.change(
-      within(modal).getByTestId("workspace-banner-subtitle-input"),
+      within(modal).getByLabelText("Banner subtitle"),
       {
         target: { value: "Updated subtitle" }
       }
@@ -1178,6 +1553,18 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(confirmSpy).toHaveBeenCalled()
     expect(mockArchiveWorkspace).toHaveBeenCalledWith("workspace-alpha")
     expect(getWorkspaceUndoPendingCount()).toBeGreaterThan(0)
+
+    const openConfig = mockMessageApi.open.mock.calls.at(-1)?.[0] as
+      | { content: ReactNode; btn?: unknown; type?: string }
+      | undefined
+    expect(openConfig?.type).toBe("warning")
+
+    const undoToast = render(<>{openConfig?.content}</>)
+    expect(undoToast.getByText("Workspace archived.")).toBeInTheDocument()
+    expect(
+      undoToast.getByRole("button", { name: "Undo" })
+    ).toBeInTheDocument()
+    expect(openConfig).not.toHaveProperty("btn")
   })
 
   it("accepts ZIP workspace imports via the hidden file input", async () => {

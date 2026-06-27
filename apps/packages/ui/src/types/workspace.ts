@@ -60,6 +60,7 @@ export interface WorkspaceSourceStatusDetails {
   updatedAt?: Date
   stale?: boolean
   retryEligible?: boolean
+  nextAction?: string
   progressPercent?: number | null
   progressMessage?: string | null
   job?: WorkspaceSourceJobStatus | null

@@ -208,10 +208,15 @@ def test_workspace_sources_status_reports_readiness_and_missing_media(
     assert sources["src-indexing"]["readiness"]["fts_ready"] is True
     assert sources["src-indexing"]["readiness"]["vector_ready"] is False
     assert sources["src-indexing"]["status_reason"] == "vector_index_pending"
+    assert sources["src-indexing"]["next_action"] == "vector_indexing_pending"
+    assert sources["src-indexing"]["retry_eligible"] is False
+    assert sources["src-indexing"]["stale"] is False
 
     assert sources["src-missing"]["state"] == "missing_media"
     assert sources["src-missing"]["readiness"]["text_extracted"] is False
     assert sources["src-missing"]["status_reason"] == "media_not_found"
+    assert sources["src-missing"]["next_action"] == "restore_or_readd_media"
+    assert sources["src-missing"]["retry_eligible"] is True
 
 
 @pytest.mark.integration
@@ -297,6 +302,80 @@ def test_workspace_capabilities_fail_closed_without_queryable_sources(
     assert payload["workspace_services"]["mcp"]["management_surface"] == "mcp_hub"
     assert payload["workspace_services"]["acp"]["state"] == "not_configured"
     assert payload["workspace_services"]["sandbox"]["state"] == "not_configured"
+
+
+@pytest.mark.integration
+def test_workspace_capabilities_allow_grounded_questions_for_partial_text_sources(
+    workspace_status_app,
+    tmp_path,
+    monkeypatch,
+):
+    db = CharactersRAGDB(
+        db_path=str(tmp_path / "partial-capabilities.db"),
+        client_id="user-1",
+    )
+    db.upsert_workspace("ws-partial", "Partial Workspace")
+    db.add_workspace_source(
+        "ws-partial",
+        {
+            "id": "src-partial",
+            "media_id": 2,
+            "title": "Text ready source",
+            "source_type": "text",
+            "position": 0,
+            "selected": True,
+        },
+    )
+    media_db = _MediaStatusDB(
+        {
+            2: {
+                "id": 2,
+                "title": "Text ready source",
+                "type": "text",
+                "content": "Text search evidence is available before vectors finish.",
+                "chunking_status": "completed",
+                "vector_processing": 0,
+            },
+        }
+    )
+
+    async def _service_capabilities(
+        *,
+        workspace_id: str,
+        user_id: int | str | None,
+    ) -> dict[str, Any]:
+        _ = (workspace_id, user_id)
+        return {
+            "workspace_services": {
+                "provider": {
+                    "state": "available",
+                    "reason_code": None,
+                    "management_surface": "model_settings",
+                },
+            },
+        }
+
+    monkeypatch.setattr(
+        workspaces_endpoint,
+        "collect_workspace_service_capabilities",
+        _service_capabilities,
+        raising=False,
+    )
+    _install_overrides(workspace_status_app, db, media_db)
+    try:
+        with TestClient(workspace_status_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-partial/capabilities")
+    finally:
+        _clear_overrides(workspace_status_app)
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["source_summary"]["queryable"] == 0
+    assert payload["source_summary"]["partially_queryable"] == 1
+    assert payload["allowed_actions"]["ask_grounded_questions"] == {
+        "allowed": True,
+        "reason_code": None,
+    }
 
 
 @pytest.mark.integration
@@ -607,7 +686,10 @@ def test_workspace_sources_status_prefers_extracted_media_over_workspace_lifecyc
     assert source["state"] == "partially_queryable"
     assert source["status_reason"] == "vector_index_pending"
     assert source["readiness"]["text_extracted"] is True
-    assert source["job"] is None
+    assert source["stale"] is True
+    assert source["next_action"] == "vector_indexing_pending"
+    assert source["job"]["id"] == 84
+    assert source["job"]["uuid"] == "job-84"
 
 
 @pytest.mark.integration

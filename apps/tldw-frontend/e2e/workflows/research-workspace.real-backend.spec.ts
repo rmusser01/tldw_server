@@ -22,7 +22,10 @@ import {
   TEST_CONFIG,
   generateTestId
 } from "../utils/helpers"
-import { ResearchWorkspacePage } from "../utils/page-objects/ResearchWorkspacePage"
+import {
+  ResearchWorkspacePage,
+  startResearchWorkspaceUatDiagnostics
+} from "../utils/page-objects/ResearchWorkspacePage"
 import { QuizPage } from "../utils/page-objects/QuizPage"
 import { FlashcardsPage } from "../utils/page-objects/FlashcardsPage"
 
@@ -495,23 +498,6 @@ const listFlashcardRecords = async (
   return await fetchJsonWithApiKey<FlashcardListResponse>(`/api/v1/flashcards${suffix}`)
 }
 
-const waitForGeneratedArtifactRecord = async (
-  workspacePage: ResearchWorkspacePage,
-  artifactType: "quiz" | "flashcards"
-) => {
-  await expect
-    .poll(async () => workspacePage.getGeneratedArtifactRecord(artifactType), {
-      timeout: 120_000,
-      message: `Workspace ${artifactType} artifact never exposed a persisted record`
-    })
-    .not.toBeNull()
-  const artifact = await workspacePage.getGeneratedArtifactRecord(artifactType)
-  if (!artifact) {
-    throw new Error(`Workspace ${artifactType} artifact record missing after completion`)
-  }
-  return artifact
-}
-
 const waitForPersistedWorkspaceArtifact = async (
   workspacePage: ResearchWorkspacePage,
   artifactType: "quiz" | "flashcards"
@@ -577,6 +563,90 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
   test.beforeEach(async ({ page }) => {
     await seedAuth(page)
     await page.setViewportSize(DESKTOP_VIEWPORT)
+  })
+
+  test("captures separate beginner and power-user UAT entry evidence", async ({
+    browser,
+    serverInfo
+  }, testInfo) => {
+    skipIfServerUnavailable(serverInfo)
+
+    const beginnerContext = await browser.newContext({
+      viewport: DESKTOP_VIEWPORT
+    })
+    const powerContext = await browser.newContext({
+      viewport: DESKTOP_VIEWPORT
+    })
+
+    try {
+      const beginnerPage = await beginnerContext.newPage()
+      const beginnerDiagnostics = startResearchWorkspaceUatDiagnostics(beginnerPage)
+      try {
+        const beginnerWorkspace = new ResearchWorkspacePage(beginnerPage)
+        const beginnerTiming = await beginnerWorkspace.gotoWithTiming()
+        const beginnerEvidence = await beginnerWorkspace.captureUatEvidence(
+          "beginner-no-key-entry",
+          testInfo,
+          {
+            diagnostics: beginnerDiagnostics.snapshot(),
+            routeTiming: beginnerTiming,
+            persona: "beginner-no-key"
+          }
+        )
+
+        expect(beginnerEvidence.persona).toBe("beginner-no-key")
+        expect(beginnerEvidence.routeTiming.durationMs).toBeGreaterThanOrEqual(0)
+        expect(beginnerEvidence.url).toContain("/research-workspace")
+        expect(
+          await beginnerPage.evaluate(() => localStorage.getItem("tldwConfig"))
+        ).toBeNull()
+      } finally {
+        beginnerDiagnostics.dispose()
+      }
+
+      const powerPage = await powerContext.newPage()
+      await seedAuth(powerPage)
+      const powerDiagnostics = startResearchWorkspaceUatDiagnostics(powerPage)
+      try {
+        const powerWorkspace = new ResearchWorkspacePage(powerPage)
+        const powerColdTiming = await powerWorkspace.gotoWithTiming()
+        await powerWorkspace.waitForReady()
+        const powerWarmTiming = await powerWorkspace.gotoWithTiming()
+        await powerWorkspace.waitForReady()
+        const powerEvidence = await powerWorkspace.captureUatEvidence(
+          "power-api-key-entry",
+          testInfo,
+          {
+            diagnostics: powerDiagnostics.snapshot(),
+            routeTiming: powerColdTiming,
+            warmRouteTiming: powerWarmTiming,
+            persona: "power-api-key"
+          }
+        )
+
+        expect(powerEvidence.persona).toBe("power-api-key")
+        expect(powerEvidence.routeTiming.durationMs).toBeGreaterThanOrEqual(0)
+        expect(powerEvidence.warmRouteTiming?.durationMs).toBeGreaterThanOrEqual(0)
+        expect(powerEvidence.url).toContain("/research-workspace")
+        expect(
+          await powerPage.evaluate(() => {
+            const raw = localStorage.getItem("tldwConfig")
+            if (!raw) return false
+            try {
+              const parsed = JSON.parse(raw)
+              return Boolean(parsed?.apiKey)
+            } catch {
+              return false
+            }
+          })
+        ).toBe(true)
+      } finally {
+        powerDiagnostics.dispose()
+      }
+    } finally {
+      await beginnerContext.close()
+      await powerContext.close()
+    }
   })
 
   test("keeps research-workspace canonical and workspace-playground removed", async ({

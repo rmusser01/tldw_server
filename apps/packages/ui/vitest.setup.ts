@@ -38,20 +38,37 @@ class MemoryStorage implements Storage {
   }
 }
 
+const REQUIRED_STORAGE_METHODS = [
+  "clear",
+  "getItem",
+  "key",
+  "removeItem",
+  "setItem"
+] as const
+
+const hasCompleteStorageApi = (storage: unknown): storage is Storage => {
+  if (!storage || typeof storage !== "object") return false
+  const candidate = storage as Partial<
+    Record<(typeof REQUIRED_STORAGE_METHODS)[number], unknown>
+  >
+  return REQUIRED_STORAGE_METHODS.every(
+    (method) => typeof candidate[method] === "function"
+  )
+}
+
+const getWindowLocalStorage = (): Storage | null => {
+  try {
+    return hasCompleteStorageApi(window.localStorage) ? window.localStorage : null
+  } catch {
+    return null
+  }
+}
+
 const ensureLocalStorage = (): void => {
-  const isStorageLike = (value: unknown): value is Storage =>
-    !!value &&
-    typeof (value as Storage).clear === "function" &&
-    typeof (value as Storage).getItem === "function" &&
-    typeof (value as Storage).key === "function" &&
-    typeof (value as Storage).removeItem === "function" &&
-    typeof (value as Storage).setItem === "function"
+  const windowStorage = getWindowLocalStorage()
+  const storage = windowStorage ?? new MemoryStorage()
 
-  const storage = isStorageLike(window.localStorage)
-    ? window.localStorage
-    : new MemoryStorage()
-
-  if (!isStorageLike(window.localStorage)) {
+  if (!windowStorage) {
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: storage,
@@ -59,11 +76,13 @@ const ensureLocalStorage = (): void => {
     })
   }
 
-  Object.defineProperty(globalThis, "localStorage", {
-    configurable: true,
-    value: storage,
-    writable: true
-  })
+  if (!hasCompleteStorageApi(globalThis.localStorage)) {
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: storage,
+      writable: true
+    })
+  }
 }
 
 ensureLocalStorage()

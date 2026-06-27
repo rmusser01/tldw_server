@@ -26,6 +26,7 @@
     "e2e:onboarding:uat": "node scripts/onboarding-uat/run.mjs",
     "e2e:research-workspace:parity": "playwright test e2e/workflows/research-workspace.parity.spec.ts --reporter=line",
     "e2e:research-workspace:real": "playwright test e2e/workflows/research-workspace.real-backend.spec.ts --reporter=line",
+    "e2e:research-workspace:uat": "node scripts/research-workspace-uat-runner.mjs",
     "e2e:smoke": "playwright test e2e/smoke/all-pages.spec.ts --reporter=list",
     "e2e:smoke:all-pages:gate": "playwright test e2e/smoke/all-pages.spec.ts --reporter=line --grep \"Smoke Tests - All Pages\" --workers=1 --global-timeout=1800000",
     "e2e:nextgen-composer": "playwright test e2e/smoke/composer-*.spec.ts e2e/smoke/playground-nextgen-*.spec.ts e2e/smoke/sidepanel-nextgen-*.spec.ts --reporter=line --workers=1",

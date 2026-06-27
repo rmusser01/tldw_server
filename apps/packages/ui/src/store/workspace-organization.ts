@@ -3,6 +3,7 @@ import type {
   WorkspaceSourceFolder,
   WorkspaceSourceFolderMembership
 } from "@/types/workspace"
+import { isWorkspaceSourceSelectable } from "./workspace-source-status"
 
 export type FolderSelectionState = "unchecked" | "checked" | "indeterminate"
 export type SourceSelectionOrigin = "none" | "direct" | "folder" | "both"
@@ -25,8 +26,6 @@ export interface WorkspaceOrganizationIndex {
   sourceIdsByFolderId: Map<string, string[]>
   folderIdsBySourceId: Map<string, string[]>
 }
-
-const getSourceStatus = (source: WorkspaceSource): string => source.status || "ready"
 
 export const createWorkspaceOrganizationIndex = ({
   sources,
@@ -58,7 +57,7 @@ export const createWorkspaceOrganizationIndex = ({
   const readySourceIds = new Set(
     sourceIdsInOrder.filter((sourceId) => {
       const source = sourceById.get(sourceId)
-      return Boolean(source) && getSourceStatus(source) === "ready"
+      return Boolean(source) && isWorkspaceSourceSelectable(source)
     })
   )
 

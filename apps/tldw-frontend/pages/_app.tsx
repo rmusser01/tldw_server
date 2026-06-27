@@ -320,6 +320,7 @@ export default function App({ Component, pageProps }: AppProps) {
   const shouldBypassFirstRunOverlay =
     !shouldBypassGates &&
     (routePath === "/" ||
+      routePath === "/research-workspace" ||
       firstRunEntryIntent === CHARACTER_CHAT_ONBOARDING_INTENT)
 
   const handleStartSetup = React.useCallback(() => {

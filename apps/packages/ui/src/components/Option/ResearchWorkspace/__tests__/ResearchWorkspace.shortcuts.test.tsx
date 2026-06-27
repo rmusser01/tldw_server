@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { isMac } from "@/hooks/useKeyboardShortcuts"
 import { ResearchWorkspace } from "../index"
 
 const ONBOARDING_KEY = "tldw:research-workspace:onboarding-dismissed:v1"
@@ -218,6 +219,7 @@ describe("ResearchWorkspace keyboard shortcuts modal", () => {
     })
 
     expect(screen.getByText("Search workspace")).toBeInTheDocument()
+    expect(screen.getByText(isMac ? "Cmd+K" : "Ctrl+K")).toBeInTheDocument()
     expect(screen.getByText("Focus sources pane")).toBeInTheDocument()
     expect(screen.getByText("Focus chat pane")).toBeInTheDocument()
     expect(screen.getByText("Focus studio pane")).toBeInTheDocument()

@@ -36,7 +36,8 @@ import {
   CircleHelp,
   Bot,
   History,
-  ShieldAlert
+  ShieldAlert,
+  Search
 } from "lucide-react"
 import type {
   SavedWorkspace,
@@ -67,6 +68,7 @@ import {
 import {
   WORKSPACE_TEMPLATE_PRESETS,
   buildWorkspaceBibtex,
+  buildWorkspaceTemplateNoteContent,
   createWorkspaceBibtexFilename,
   filterSavedWorkspaces,
   formatWorkspaceLastAccessed,
@@ -96,12 +98,14 @@ import { WorkspaceACPHistoryModal } from "./WorkspaceACPHistoryModal"
 import { WorkspaceSandboxDiagnosticsPanel } from "./WorkspaceSandboxDiagnosticsPanel"
 import { WORKSPACES_PATH } from "@/routes/route-paths"
 import { useActiveWorkspaceContext } from "@/services/workspace-context"
+import { renderWorkspaceMessageActionContent } from "./workspace-message-content"
 
 interface WorkspaceHeaderProps {
   leftPaneOpen: boolean
   rightPaneOpen: boolean
   onToggleLeftPane: () => void
   onToggleRightPane: () => void
+  onOpenSearch?: () => void
   onOpenSplitWorkspace?: () => void
   /** Hide pane toggle buttons (for mobile layout) */
   hideToggles?: boolean
@@ -121,6 +125,8 @@ interface WorkspaceHeaderProps {
   provenanceEnabled?: boolean
   /** Rollout gate for status/guardrails surfaces (connectivity/quota/conflict state). */
   statusGuardrailsEnabled?: boolean
+  /** Increment when page-level workspace reconciliation has fresh server context. */
+  serverContextRefreshVersion?: number
 }
 
 const TELEMETRY_EVENT_ORDER: ResearchWorkspaceTelemetryEventType[] = [
@@ -153,6 +159,17 @@ const WORKSPACE_ROLLOUT_CONTROL_ORDER: WorkspaceRolloutControlKey[] = [
   "research_workspace_status_guardrails_v1"
 ]
 const WORKSPACE_ROLLOUT_PRESET_PERCENTAGES = [0, 10, 50, 100] as const
+const WORKSPACE_IMPORT_ACCEPT = ".json,.workspace.json,.zip,.workspace.zip"
+
+const isSupportedWorkspaceImportFile = (file: File): boolean => {
+  const name = file.name.toLowerCase()
+  return (
+    name.endsWith(".json") ||
+    name.endsWith(".workspace.json") ||
+    name.endsWith(".zip") ||
+    name.endsWith(".workspace.zip")
+  )
+}
 
 const getServerWorkspaceContextStatusCopy = (
   context: ReturnType<typeof useActiveWorkspaceContext>["context"],
@@ -210,6 +227,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   rightPaneOpen,
   onToggleLeftPane,
   onToggleRightPane,
+  onOpenSearch,
   onOpenSplitWorkspace,
   hideToggles = false,
   storageUsedBytes,
@@ -219,15 +237,27 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   storageAccountUsedBytes,
   storageAccountQuotaBytes,
   provenanceEnabled = true,
-  statusGuardrailsEnabled = true
+  statusGuardrailsEnabled = true,
+  serverContextRefreshVersion
 }) => {
   const { t } = useTranslation(["playground", "option", "common"])
   const navigate = useNavigate()
   const startTutorial = useTutorialStore((s) => s.startTutorial)
   const [messageApi, messageContextHolder] = message.useMessage()
+  const handleStartWorkspaceTour = React.useCallback(() => {
+    startTutorial("research-workspace-basics")
+    messageApi.info(
+      t(
+        "playground:workspace.tourStarted",
+        "Tour started. Follow the highlighted steps."
+      )
+    )
+  }, [messageApi, startTutorial, t])
   const [isEditing, setIsEditing] = React.useState(false)
   const [editName, setEditName] = React.useState("")
   const [workspaceBrowserOpen, setWorkspaceBrowserOpen] = React.useState(false)
+  const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = React.useState(false)
+  const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = React.useState(false)
   const [shortcutsModalOpen, setShortcutsModalOpen] = React.useState(false)
   const [agentTaskModalOpen, setAgentTaskModalOpen] = React.useState(false)
   const [acpHistoryModalOpen, setAcpHistoryModalOpen] = React.useState(false)
@@ -276,6 +306,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     })
   }, [])
   const [shareDialogOpen, setShareDialogOpen] = React.useState(false)
+  const [importDialogOpen, setImportDialogOpen] = React.useState(false)
   const [bannerModalOpen, setBannerModalOpen] = React.useState(false)
   const [bannerTitleDraft, setBannerTitleDraft] = React.useState("")
   const [bannerSubtitleDraft, setBannerSubtitleDraft] = React.useState("")
@@ -491,7 +522,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const {
     context: serverWorkspaceContext,
     loading: serverWorkspaceContextLoading
-  } = useActiveWorkspaceContext({ workspaceId })
+  } = useActiveWorkspaceContext({
+    workspaceId,
+    refreshKey: serverContextRefreshVersion
+  })
   const workspaceBanner = useWorkspaceStore((s) => s.workspaceBanner) || {
     title: "",
     subtitle: "",
@@ -630,18 +664,42 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     setCurrentNote({
       id: undefined,
       title: template.noteTitle,
-      content: template.noteContent,
-      keywords: [...template.keywords],
+      content: buildWorkspaceTemplateNoteContent(template),
+      keywords: Array.from(new Set([...template.keywords, "template"])),
       version: undefined,
       isDirty: true
     })
 
-    messageApi.success(
-      t("playground:workspace.templateCreated", {
-        defaultValue: "Created workspace from template: {{template}}",
-        template: template.label
-      })
+    const templateMessageKey = `workspace-template-${template.id}`
+    const content = t(
+      "playground:workspace.templateAppliedDetailed",
+      "{{template}} template applied. Added outline, source checklist, suggested prompts, and Studio recommendations.",
+      { template: template.label }
     )
+    const maybeOpen = (messageApi as { open?: (config: unknown) => void }).open
+    const messageConfig = {
+      key: templateMessageKey,
+      type: "success",
+      duration: 8,
+      content: renderWorkspaceMessageActionContent(
+        content,
+        <Button
+          type="link"
+          size="small"
+          onClick={() => {
+            createNewWorkspace()
+            messageApi.destroy(templateMessageKey)
+          }}
+        >
+          {t("playground:workspace.startOver", "Start over")}
+        </Button>
+      )
+    }
+    if (typeof maybeOpen === "function") {
+      maybeOpen(messageConfig)
+    } else {
+      messageApi.success(content)
+    }
   }
 
   const handleSwitchWorkspace = (id: string) => {
@@ -1061,15 +1119,16 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     const undoMessageKey = `workspace-delete-undo-${undoHandle.id}`
     const maybeOpen = (messageApi as { open?: (config: unknown) => void })
       .open
+    const deletedContent = t(
+      "playground:workspace.deleted",
+      "Workspace deleted."
+    )
     const messageConfig = {
       key: undoMessageKey,
       type: "warning",
       duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-      content: t(
-        "playground:workspace.deleted",
-        "Workspace deleted."
-      ),
-      btn: (
+      content: renderWorkspaceMessageActionContent(
+        deletedContent,
         <button
           type="button"
           className="rounded border border-border px-2 py-0.5 text-xs font-medium hover:bg-surface2"
@@ -1096,14 +1155,58 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         messageApi as { warning?: (content: string) => void }
       ).warning
       if (typeof maybeWarning === "function") {
-        maybeWarning(t("playground:workspace.deleted", "Workspace deleted."))
+        maybeWarning(deletedContent)
       }
     }
   }
 
   const handleDuplicateCurrentWorkspace = () => {
     if (!workspaceId) return
-    duplicateWorkspace(workspaceId)
+    const originalWorkspaceId = workspaceId
+    const originalWorkspaceName =
+      workspaceName?.trim() ||
+      t("playground:workspace.currentWorkspace", "current workspace")
+    const duplicatedWorkspaceId = duplicateWorkspace(originalWorkspaceId)
+    if (!duplicatedWorkspaceId) {
+      messageApi.warning(
+        t(
+          "playground:workspace.duplicateFailed",
+          "Workspace could not be duplicated."
+        )
+      )
+      return
+    }
+
+    const messageKey = `workspace-duplicate-${duplicatedWorkspaceId}`
+    const content = t(
+      "playground:workspace.duplicateSuccessNamed",
+      "Duplicated {{name}}. You are editing the new copy.",
+      { name: originalWorkspaceName }
+    )
+    const maybeOpen = (messageApi as { open?: (config: unknown) => void }).open
+    const messageConfig = {
+      key: messageKey,
+      type: "success",
+      duration: 6,
+      content: renderWorkspaceMessageActionContent(
+        content,
+        <button
+          type="button"
+          className="rounded border border-border px-2 py-0.5 text-xs font-medium hover:bg-surface2"
+          onClick={() => {
+            switchWorkspace(originalWorkspaceId)
+            messageApi.destroy(messageKey)
+          }}
+        >
+          {t("playground:workspace.openOriginal", "Open original")}
+        </button>
+      )
+    }
+    if (typeof maybeOpen === "function") {
+      maybeOpen(messageConfig)
+    } else {
+      messageApi.success(content)
+    }
   }
 
   const handleArchiveCurrentWorkspace = () => {
@@ -1131,15 +1234,16 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         const undoMessageKey = `workspace-archive-undo-${undoHandle.id}`
         const maybeOpen = (messageApi as { open?: (config: unknown) => void })
           .open
+        const archiveContent = t(
+          "playground:workspace.archived",
+          "Workspace archived."
+        )
         const messageConfig = {
           key: undoMessageKey,
           type: "warning",
           duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-          content: t(
-            "playground:workspace.archived",
-            "Workspace archived."
-          ),
-          btn: (
+          content: renderWorkspaceMessageActionContent(
+            archiveContent,
             <Button
               size="small"
               type="link"
@@ -1163,7 +1267,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             messageApi as { warning?: (content: string) => void }
           ).warning
           if (typeof maybeWarning === "function") {
-            maybeWarning(t("playground:workspace.archived", "Workspace archived."))
+            maybeWarning(archiveContent)
           }
         }
       },
@@ -1267,7 +1371,11 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       )
       triggerFileDownload(zipBlob, zipFilename)
       messageApi.success(
-        t("playground:workspace.exportSuccessZip", "Workspace exported (.zip)")
+        t(
+          "playground:workspace.exportSuccessNamed",
+          "Workspace exported: {{filename}}",
+          { filename: zipFilename }
+        )
       )
       return
     } catch {
@@ -1282,13 +1390,17 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         )
       )
       messageApi.success(
-        t("playground:workspace.exportSuccess", "Workspace exported")
+        t(
+          "playground:workspace.exportSuccessNamed",
+          "Workspace exported: {{filename}}",
+          { filename }
+        )
       )
     }
   }
 
   const handleOpenImportWorkspace = () => {
-    importFileInputRef.current?.click()
+    setImportDialogOpen(true)
   }
 
   const handleExportWorkspaceCitations = () => {
@@ -1327,7 +1439,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     messageApi.success(
       t(
         "playground:workspace.exportCitationsSuccess",
-        "Citations exported (BibTeX)"
+        "Citations exported: {{filename}}",
+        { filename }
       )
     )
   }
@@ -1338,6 +1451,15 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     const file = event.target.files?.[0]
     event.target.value = ""
     if (!file) return
+    if (!isSupportedWorkspaceImportFile(file)) {
+      messageApi.error(
+        t(
+          "playground:workspace.importUnsupportedFile",
+          "Choose a .workspace.zip or workspace JSON export."
+        )
+      )
+      return
+    }
 
     try {
       const parsed = await parseWorkspaceImportFile(file)
@@ -1346,9 +1468,21 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         throw new Error("import-failed")
       }
 
+      const importedName =
+        typeof parsed.workspace?.name === "string" && parsed.workspace.name.trim()
+          ? parsed.workspace.name.trim()
+          : t(
+              "playground:workspace.importedWorkspaceFallback",
+              "Imported workspace"
+            )
       messageApi.success(
-        t("playground:workspace.importSuccess", "Workspace imported")
+        t(
+          "playground:workspace.importSuccessNamed",
+          "Workspace imported: {{name}}",
+          { name: importedName }
+        )
       )
+      setImportDialogOpen(false)
     } catch {
       messageApi.error(
         t(
@@ -1687,7 +1821,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       key: "replay-tour",
       icon: <FlaskConical className="h-4 w-4" />,
       label: t("playground:workspace.replayTour", "Replay tour"),
-      onClick: () => startTutorial("research-workspace-basics")
+      onClick: handleStartWorkspaceTour
     },
     {
       key: "keyboard-shortcuts",
@@ -1728,6 +1862,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           {isEditing ? (
             <div className="flex items-center gap-1">
               <Input
+                aria-label={t(
+                  "playground:workspace.nameInputLabel",
+                  "Workspace name"
+                )}
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -1858,11 +1996,46 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           </Tooltip>
         )}
 
+        {onOpenSearch && (
+          <Tooltip
+            title={t(
+              "playground:workspace.openSearchShortcut",
+              `Search workspace (${shortcutModifierLabel}+K)`
+            )}
+          >
+            <button
+              type="button"
+              data-testid="workspace-search-button"
+              onClick={onOpenSearch}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 text-sm font-medium text-text transition hover:bg-surface2"
+              aria-label={t(
+                "playground:workspace.openSearchShortcut",
+                `Search workspace (${shortcutModifierLabel}+K)`
+              )}
+            >
+              <Search className="h-4 w-4 text-text-muted" />
+              <span className="hidden sm:inline">
+                {t("playground:workspace.search", "Search")}
+              </span>
+              <kbd className="rounded bg-surface2 px-1 py-0.5 text-[10px] font-semibold leading-none text-text-muted">
+                {shortcutModifierLabel}+K
+              </kbd>
+            </button>
+          </Tooltip>
+        )}
+
         {/* Workspace Switcher Dropdown */}
         <Dropdown
           menu={{ items: workspaceSwitcherItems }}
           trigger={["click"]}
           placement="bottomRight"
+          destroyOnHidden
+          open={workspaceSwitcherOpen}
+          styles={workspaceSwitcherOpen ? undefined : { root: { display: "none" } }}
+          onOpenChange={(open) => {
+            setWorkspaceSwitcherOpen(open)
+            if (open) setWorkspaceSettingsOpen(false)
+          }}
         >
           <button
             type="button"
@@ -1894,7 +2067,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           <button
             type="button"
             data-testid="workspace-help-tour-button"
-            onClick={() => startTutorial("research-workspace-basics")}
+            onClick={handleStartWorkspaceTour}
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text"
             aria-label={t("playground:workspace.takeTour", "Take a tour of the workspace")}
           >
@@ -1907,6 +2080,13 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           menu={{ items: workspaceSettingsItems }}
           trigger={["click"]}
           placement="bottomRight"
+          destroyOnHidden
+          open={workspaceSettingsOpen}
+          styles={workspaceSettingsOpen ? undefined : { root: { display: "none" } }}
+          onOpenChange={(open) => {
+            setWorkspaceSettingsOpen(open)
+            if (open) setWorkspaceSwitcherOpen(false)
+          }}
         >
           <Tooltip title={t("playground:workspace.workspaceSettings", "Workspace settings")}>
             <button
@@ -1962,13 +2142,52 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       <input
         ref={importFileInputRef}
         type="file"
-        accept=".json,.workspace.json,.zip,.workspace.zip"
+        accept={WORKSPACE_IMPORT_ACCEPT}
         className="hidden"
         data-testid="workspace-import-input"
         onChange={(event) => {
           void handleImportWorkspaceFile(event)
         }}
       />
+
+      <Modal
+        title={t("playground:workspace.importWorkspace", "Import Workspace")}
+        open={importDialogOpen}
+        onCancel={() => setImportDialogOpen(false)}
+        footer={null}
+        destroyOnHidden
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-text-muted">
+            {t(
+              "playground:workspace.importWorkspaceHelp",
+              "Choose a Research Workspace JSON or .workspace.zip export to import."
+            )}
+          </p>
+          <label
+            htmlFor="workspace-import-visible-input"
+            className="block text-sm font-medium text-text"
+          >
+            {t(
+              "playground:workspace.importWorkspaceFileLabel",
+              "Workspace bundle file"
+            )}
+          </label>
+          <input
+            id="workspace-import-visible-input"
+            type="file"
+            accept={WORKSPACE_IMPORT_ACCEPT}
+            className="block w-full rounded border border-border bg-surface px-3 py-2 text-sm text-text"
+            aria-label={t(
+              "playground:workspace.importWorkspaceFileLabel",
+              "Workspace bundle file"
+            )}
+            onChange={(event) => {
+              void handleImportWorkspaceFile(event)
+            }}
+          />
+        </div>
+      </Modal>
 
       <input
         ref={bannerFileInputRef}
@@ -2009,6 +2228,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       >
         <div className="space-y-3">
           <Input
+            aria-label={t(
+              "playground:workspace.bannerTitleLabel",
+              "Banner title"
+            )}
             value={bannerTitleDraft}
             onChange={(event) => setBannerTitleDraft(event.target.value)}
             placeholder={t(
@@ -2019,6 +2242,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             data-testid="workspace-banner-title-input"
           />
           <Input.TextArea
+            aria-label={t(
+              "playground:workspace.bannerSubtitleLabel",
+              "Banner subtitle"
+            )}
             value={bannerSubtitleDraft}
             onChange={(event) => setBannerSubtitleDraft(event.target.value)}
             placeholder={t(
@@ -2090,6 +2317,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       >
         <div className="space-y-3">
           <Input
+            aria-label={t(
+              "playground:workspace.searchWorkspacesLabel",
+              "Search workspaces"
+            )}
             value={workspaceSearchQuery}
             onChange={(event) => setWorkspaceSearchQuery(event.target.value)}
             placeholder={t(
@@ -2132,6 +2363,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
             <div className="flex min-w-[240px] flex-1 items-center gap-2">
               <Input
+                aria-label={t(
+                  "playground:workspace.collectionCreateLabel",
+                  "New collection name"
+                )}
                 value={workspaceCollectionDraft}
                 onChange={(event) =>
                   setWorkspaceCollectionDraft(event.target.value)
@@ -2712,6 +2947,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
                 )}
               </p>
               <Input
+                aria-label={t(
+                  "playground:workspace.deleteConfirmLabel",
+                  "Confirm workspace deletion"
+                )}
                 value={deleteConfirmInput}
                 onChange={(e) => setDeleteConfirmInput(e.target.value)}
                 placeholder={deleteTargetWorkspace.name}

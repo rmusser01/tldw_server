@@ -159,7 +159,16 @@ export function normalizeTldwModels(
       availability:
         toNonEmptyProviderString(m.availability) ??
         inheritedAvailability?.availability,
-      catalog_only: toOptionalProviderBoolean(m.catalog_only)
+      catalog_only: toOptionalProviderBoolean(m.catalog_only),
+      readiness_reason_code:
+        toNonEmptyProviderString(m.readiness_reason_code) ??
+        inheritedAvailability?.readiness_reason_code,
+      readiness_message:
+        toNonEmptyProviderString(m.readiness_message) ??
+        inheritedAvailability?.readiness_message,
+      chat_provider:
+        toNonEmptyProviderString(m.chat_provider) ??
+        inheritedAvailability?.chat_provider
     }
   })
 }

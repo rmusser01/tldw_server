@@ -859,7 +859,7 @@ describe("StudioPane Stage 2 workflows", () => {
     renderStudioPane()
     fireEvent.click(screen.getByRole("button", { name: "View" }))
 
-    fireEvent.change(await screen.findByPlaceholderText("Filter table rows"), {
+    fireEvent.change(await screen.findByLabelText("Filter table rows"), {
       target: { value: "Bob" }
     })
 
@@ -903,10 +903,10 @@ describe("StudioPane Stage 2 workflows", () => {
     renderStudioPane()
     fireEvent.click(screen.getByTestId("studio-artifact-edit-artifact-flashcards"))
 
-    fireEvent.change(await screen.findByPlaceholderText("Front (question or term)"), {
+    fireEvent.change(await screen.findByLabelText("Flashcard front 1"), {
       target: { value: "Updated front" }
     })
-    fireEvent.change(await screen.findByPlaceholderText("Back (answer or definition)"), {
+    fireEvent.change(await screen.findByLabelText("Flashcard back 1"), {
       target: { value: "Updated back" }
     })
     const flashcardSaveButtons = screen.getAllByRole("button", { name: "Save changes" })
@@ -1000,16 +1000,16 @@ describe("StudioPane Stage 2 workflows", () => {
     renderStudioPane()
     fireEvent.click(screen.getByTestId("studio-artifact-edit-artifact-quiz"))
 
-    fireEvent.change(await screen.findByPlaceholderText("Question prompt"), {
+    fireEvent.change(await screen.findByLabelText("Question prompt 1"), {
       target: { value: "Updated question" }
     })
-    fireEvent.change(await screen.findByPlaceholderText("Options (one per line)"), {
+    fireEvent.change(await screen.findByLabelText("Question options 1"), {
       target: { value: "Option A\nOption B" }
     })
-    fireEvent.change(await screen.findByPlaceholderText("Correct answer"), {
+    fireEvent.change(await screen.findByLabelText("Correct answer 1"), {
       target: { value: "Option A" }
     })
-    fireEvent.change(await screen.findByPlaceholderText("Explanation (optional)"), {
+    fireEvent.change(await screen.findByLabelText("Question explanation 1"), {
       target: { value: "Updated explanation" }
     })
     const quizSaveButtons = screen.getAllByRole("button", { name: "Save changes" })

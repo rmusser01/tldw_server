@@ -331,6 +331,39 @@ describe("TldwModelsService caching", () => {
     expect(chatModels.map((model) => model.id)).toEqual(["openai/gpt-4o-mini"])
   })
 
+  it("preserves readiness details on unavailable models for Studio prerequisites", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "ollama/gemma3:1b",
+        name: "gemma3:1b",
+        provider: "ollama",
+        type: "chat",
+        is_configured: true,
+        provider_enabled: false,
+        availability: "unavailable",
+        readiness_reason_code: "egress_blocked",
+        readiness_message: "Port not allowed: 11434",
+        chat_provider: "ollama"
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const models = await service.getModels(true)
+
+    expect(models[0]).toEqual(
+      expect.objectContaining({
+        id: "ollama/gemma3:1b",
+        providerEnabled: false,
+        availability: "unavailable",
+        readinessReasonCode: "egress_blocked",
+        readinessMessage: "Port not allowed: 11434",
+        chatProvider: "ollama"
+      })
+    )
+  })
+
   it("keeps legacy chat models when provider availability metadata is absent", async () => {
     mocks.getModels.mockResolvedValue([
       {
@@ -351,7 +384,7 @@ describe("TldwModelsService caching", () => {
 
   it("returns cached chat models without fetching provider metadata again", async () => {
     mocks.storageGet.mockResolvedValue({
-      version: 3,
+      version: 4,
       timestamp: Date.now(),
       scope: "http://127.0.0.1:8000|single-user|key|none",
       models: [

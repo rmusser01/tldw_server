@@ -95,6 +95,19 @@ const workspaceStoreState = {
     type: string
     status?: "processing" | "ready" | "error"
     statusMessage?: string
+    readiness?: {
+      metadata_ready: boolean
+      text_extracted: boolean
+      fts_ready: boolean
+      vector_ready: boolean
+      citation_ready: boolean
+      summary_ready: boolean
+      tool_accessible: boolean
+    }
+    statusDetails?: {
+      lifecycleState?: string
+      statusReason?: string
+    }
   }>,
   sourceFolders: [] as Array<{ id: string; parentFolderId: string | null }>,
   sourceFolderMemberships: [] as Array<{ sourceId: string; folderId: string }>,
@@ -389,6 +402,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     renderChatPane()
 
     const textarea = screen.getByPlaceholderText("Type a message...")
+    expect(screen.getByLabelText("Chat message")).toBe(textarea)
     fireEvent.change(textarea, { target: { value: "Shortcut submission" } })
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true })
 
@@ -419,6 +433,18 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(textarea).toHaveValue("Summarize this source")
   })
 
+  it("puts empty-state prompt chips into the composer and focuses it", async () => {
+    renderChatPane()
+
+    fireEvent.click(screen.getByTestId("workspace-chat-empty-prompt-chip-0"))
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    await waitFor(() => {
+      expect(textarea).toHaveValue("Help me frame a research question on this topic")
+    })
+    expect(textarea).toHaveFocus()
+  })
+
   it("keeps selected-source RAG context intact when model selection blocks send", () => {
     messageOptionStoreState.selectedModel = null
     workspaceStoreState.sources = [
@@ -439,7 +465,9 @@ describe("ChatPane Stage 1 reliability and controls", () => {
 
     renderChatPane()
 
-    expect(screen.getByRole("button", { name: "RAG mode" })).toHaveAttribute(
+    const ragModeButton = screen.getByRole("button", { name: "RAG mode" })
+    expect(ragModeButton).toBeDisabled()
+    expect(ragModeButton).toHaveAttribute(
       "aria-pressed",
       "true"
     )
@@ -454,6 +482,34 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(mockOnSubmit).not.toHaveBeenCalled()
     expect(mockSetRagMediaIds).not.toHaveBeenLastCalledWith(null)
     expect(textarea).toHaveValue("What evidence supports this?")
+  })
+
+  it("labels advanced RAG controls for keyboard and screen-reader users", () => {
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 42,
+        title: "NotebookLM export",
+        type: "pdf",
+        status: "ready"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-1", title: "NotebookLM export" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [42]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
+
+    renderChatPane()
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced RAG settings" }))
+
+    expect(screen.getByRole("slider", { name: "Top K" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("slider", { name: "Similarity threshold" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Enable reranking" })).toBeInTheDocument()
   })
 
   it("keeps selected processing sources visible while grounded mode waits for queryable sources", async () => {
@@ -478,7 +534,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(screen.getByText("Processing")).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Selected sources are not queryable yet. You can keep chatting generally while extraction and indexing finish."
+        "1 selected source is still indexing. Grounded mode will enable when extraction and indexing finish."
       )
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "RAG mode" })).toBeDisabled()
@@ -540,6 +596,48 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(mockSetRagMediaIds).toHaveBeenLastCalledWith([42])
   })
 
+  it("uses partially queryable text-search-ready sources for grounded scope", () => {
+    workspaceStoreState.sources = [
+      {
+        id: "source-partial",
+        mediaId: 72,
+        title: "Partial Text Source",
+        type: "text",
+        status: "processing",
+        statusMessage: "Text search is available while vector indexing continues.",
+        readiness: {
+          metadata_ready: true,
+          text_extracted: true,
+          fts_ready: true,
+          vector_ready: false,
+          citation_ready: false,
+          summary_ready: false,
+          tool_accessible: true
+        },
+        statusDetails: {
+          lifecycleState: "partially_queryable",
+          statusReason: "vector_index_pending"
+        }
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-partial"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-partial", title: "Partial Text Source" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [72]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [72]
+
+    renderChatPane()
+
+    expect(screen.getByText("Partial Text Source")).toBeInTheDocument()
+    expect(screen.queryByText("Processing")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "RAG mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(mockSetRagMediaIds).toHaveBeenLastCalledWith([72])
+  })
+
   it("keeps selected failed sources visible without enabling grounded mode", () => {
     workspaceStoreState.sources = [
       {
@@ -562,7 +660,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(screen.getByText("Failed")).toBeInTheDocument()
     expect(
       screen.getByText(
-        "Selected sources are not queryable yet. You can keep chatting generally while extraction and indexing finish."
+        "1 selected source failed. Retry it from Sources or select another queryable source."
       )
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "RAG mode" })).toBeDisabled()
@@ -643,6 +741,62 @@ describe("ChatPane Stage 1 reliability and controls", () => {
 
     expect(mockUseMessageOption).toHaveBeenCalledWith({
       scope: { type: "workspace", workspaceId: "workspace-a" }
+    })
+  })
+
+  it("loads imported workspace chat before autosaving empty local state", () => {
+    workspaceSessions.set("workspace-a", {
+      messages: [
+        {
+          isBot: false,
+          name: "You",
+          message: "Imported chat question",
+          sources: []
+        },
+        {
+          isBot: true,
+          name: "Assistant",
+          message: "Imported chat answer",
+          sources: []
+        }
+      ],
+      history: [
+        { role: "user", content: "Imported chat question" },
+        { role: "assistant", content: "Imported chat answer" }
+      ],
+      historyId: "history-imported",
+      serverChatId: null
+    })
+
+    renderChatPane()
+
+    expect(mockSetMessages).toHaveBeenCalledWith([
+      {
+        isBot: false,
+        name: "You",
+        message: "Imported chat question",
+        sources: []
+      },
+      {
+        isBot: true,
+        name: "Assistant",
+        message: "Imported chat answer",
+        sources: []
+      }
+    ])
+    expect(mockSetHistory).toHaveBeenCalledWith([
+      { role: "user", content: "Imported chat question" },
+      { role: "assistant", content: "Imported chat answer" }
+    ])
+    expect(mockSetHistoryId).toHaveBeenCalledWith("history-imported", {
+      preserveServerChatId: true
+    })
+    expect(mockSetServerChatId).toHaveBeenCalledWith(null)
+    expect(mockSaveWorkspaceChatSession).not.toHaveBeenCalledWith("workspace-a", {
+      messages: [],
+      history: [],
+      historyId: null,
+      serverChatId: null
     })
   })
 
@@ -897,6 +1051,59 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(
       screen.getByRole("button", { name: /Chat unavailable/i })
     ).toBeDisabled()
+  })
+
+  it("explains provider-specific chat capability blocks", () => {
+    const capabilities = buildUnknownResearchWorkspaceCapabilities()
+    capabilities.capabilities.chat = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "provider_unavailable"
+    }
+
+    renderChatPane({ researchWorkspaceCapabilities: capabilities })
+
+    expect(
+      screen.getByText(
+        "Chat is unavailable because the model provider is unavailable. Open model settings or retry status."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("textbox")).toBeDisabled()
+  })
+
+  it("disables grounded mode when chat provider capability is blocked", () => {
+    const capabilities = buildUnknownResearchWorkspaceCapabilities()
+    capabilities.capabilities.chat = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "provider_unavailable"
+    }
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 42,
+        title: "Ready Notebook Export",
+        type: "pdf",
+        status: "ready"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-1", title: "Ready Notebook Export" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [42]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
+
+    renderChatPane({ researchWorkspaceCapabilities: capabilities })
+
+    expect(screen.getByRole("button", { name: "RAG mode" })).toBeDisabled()
+    expect(
+      screen.getByText(
+        "Chat is unavailable because the model provider is unavailable. Open model settings or retry status."
+      )
+    ).toBeInTheDocument()
   })
 
   it("surfaces workspace service remediation inside the composer", () => {

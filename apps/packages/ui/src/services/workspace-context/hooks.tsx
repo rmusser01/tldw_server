@@ -27,6 +27,7 @@ export interface WorkspaceMembershipClient {
 export interface UseActiveWorkspaceContextOptions {
   workspaceId?: string | null
   client?: WorkspaceContextClient
+  refreshKey?: unknown
 }
 
 export interface UseActiveWorkspaceContextResult {
@@ -59,7 +60,8 @@ const toError = (error: unknown): Error =>
 
 export const useActiveWorkspaceContext = ({
   workspaceId,
-  client
+  client,
+  refreshKey
 }: UseActiveWorkspaceContextOptions): UseActiveWorkspaceContextResult => {
   const defaultClient = useTldwApiClient() as WorkspaceContextClient
   const resolvedClient = client ?? defaultClient
@@ -127,7 +129,7 @@ export const useActiveWorkspaceContext = ({
       mountedRef.current = false
       requestIdRef.current += 1
     }
-  }, [loadContext])
+  }, [loadContext, refreshKey])
 
   return {
     context,

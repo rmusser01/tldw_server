@@ -21,7 +21,7 @@ export const WorkspaceShortcutsModal: React.FC<WorkspaceShortcutsModalProps> = (
     const rows = [
       {
         action: t("playground:workspace.shortcutSearch", "Search workspace"),
-        combo: "Alt+K",
+        combo: `${modifierLabel}+K`,
       },
       {
         action: t("playground:workspace.shortcutFocusSources", "Focus sources pane"),

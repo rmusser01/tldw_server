@@ -2365,6 +2365,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
   // Chat models state
   const [chatModels, setChatModels] = useState<ModelInfo[]>([])
   const [loadingChatModels, setLoadingChatModels] = useState(false)
+  const [selectedUnavailableModel, setSelectedUnavailableModel] =
+    useState<ModelInfo | null>(null)
 
   // Slides visual styles state
   const [slidesVisualStyles, setSlidesVisualStyles] = useState<VisualStyleRecord[]>([])
@@ -2403,6 +2405,71 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    const selectedModelId =
+      typeof selectedModel === "string" && selectedModel.trim().length > 0
+        ? selectedModel.trim()
+        : ""
+    if (!selectedModelId) {
+      setSelectedUnavailableModel(null)
+      return
+    }
+
+    const selectedMatchesSelectableModel = chatModels.some((model) => {
+      const modelId =
+        typeof model.id === "string" && model.id.trim().length > 0
+          ? model.id.trim()
+          : ""
+      return modelId === selectedModelId || `tldw:${modelId}` === selectedModelId
+    })
+    if (selectedMatchesSelectableModel) {
+      setSelectedUnavailableModel(null)
+      return
+    }
+
+    const isUnavailableModel = (model: ModelInfo | null): model is ModelInfo => {
+      if (!model) return false
+      if (model.isConfigured === false) return true
+      if (model.providerEnabled === false) return true
+      const availability = model.availability?.trim().toLowerCase()
+      return Boolean(
+        availability &&
+          ["disabled", "failed", "not-configured", "unavailable"].includes(
+            availability
+          )
+      )
+    }
+
+    let cancelled = false
+    const candidateIds = [selectedModelId]
+    if (selectedModelId.toLowerCase().startsWith("tldw:")) {
+      const unprefixed = selectedModelId.slice(5).trim()
+      if (unprefixed) candidateIds.push(unprefixed)
+    }
+
+    void (async () => {
+      for (const candidateId of candidateIds) {
+        try {
+          const model = await tldwModels.getModel(candidateId)
+          if (cancelled) return
+          if (isUnavailableModel(model)) {
+            setSelectedUnavailableModel(model)
+            return
+          }
+        } catch {
+          if (cancelled) return
+        }
+      }
+      if (!cancelled) {
+        setSelectedUnavailableModel(null)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [chatModels, selectedModel])
 
   // Load slides visual styles on mount
   useEffect(() => {
@@ -3104,6 +3171,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
     generationPhase,
     chatModels,
     loadingChatModels,
+    selectedUnavailableModel,
     recentOutputTypes,
     slidesVisualStyles,
     slidesVisualStylesLoading,

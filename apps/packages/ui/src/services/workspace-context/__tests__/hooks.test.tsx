@@ -221,6 +221,41 @@ describe("useActiveWorkspaceContext", () => {
     })
   })
 
+  it("refetches failed context when the caller refresh key changes", async () => {
+    const getWorkspaceContext = vi.fn()
+      .mockRejectedValueOnce(new Error("auth missing"))
+      .mockResolvedValueOnce(
+        contextFixture({
+          workspace: workspaceFixture({ id: "ws-1", name: "Recovered" })
+        })
+      )
+
+    const { result, rerender } = renderHook(
+      ({ refreshKey }: { refreshKey: number }) =>
+        useActiveWorkspaceContext({
+          workspaceId: "ws-1",
+          refreshKey,
+          client: { getWorkspaceContext }
+        }),
+      {
+        initialProps: { refreshKey: 0 }
+      }
+    )
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+      expect(result.current.context.state).toBe("error")
+    })
+
+    rerender({ refreshKey: 1 })
+
+    await waitFor(() => {
+      expect(result.current.context.state).toBe("ready")
+      expect(result.current.context.workspace?.label).toBe("Recovered")
+    })
+    expect(getWorkspaceContext).toHaveBeenCalledTimes(2)
+  })
+
   it("keeps the latest refresh result when workspace requests overlap", async () => {
     const firstRequest = deferred<WorkspaceContextResponse>()
     const secondRequest = deferred<WorkspaceContextResponse>()

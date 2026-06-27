@@ -145,6 +145,22 @@ describe("WorkspaceStatusBar", () => {
     expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("degraded")
   })
 
+  it("prioritizes degraded workspace context over a healthy backend connection", () => {
+    render(
+      <WorkspaceStatusBar
+        workspaceContextStatus={{
+          label: "Workspace unavailable",
+          detail: "Server context unavailable",
+          severity: "warning"
+        }}
+      />
+    )
+
+    const status = screen.getByTestId("workspace-statusbar-connection")
+    expect(status).toHaveTextContent("Workspace unavailable")
+    expect(status).not.toHaveTextContent("Connected")
+  })
+
   it("renders an actionable status details control when provided", () => {
     const onClick = vi.fn()
 
@@ -164,5 +180,13 @@ describe("WorkspaceStatusBar", () => {
     )
 
     expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("labels the status region and supports compact mobile density", () => {
+    render(<WorkspaceStatusBar compact />)
+
+    const statusBar = screen.getByTestId("workspace-status-bar")
+    expect(statusBar).toHaveAccessibleName("Workspace status")
+    expect(statusBar).toHaveClass("min-h-6", "px-2")
   })
 })

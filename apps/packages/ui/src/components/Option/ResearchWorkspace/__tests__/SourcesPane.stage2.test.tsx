@@ -117,9 +117,35 @@ vi.mock("../undo-manager", () => ({
   undoWorkspaceAction: mockUndoWorkspaceAction
 }))
 
+const ensureLocalStorage = () => {
+  if (window.localStorage && typeof window.localStorage.clear === "function") {
+    return
+  }
+
+  const storage = new Map<string, string>()
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      clear: () => storage.clear(),
+      getItem: (key: string) => storage.get(key) ?? null,
+      key: (index: number) => Array.from(storage.keys())[index] ?? null,
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      setItem: (key: string, value: string) => {
+        storage.set(key, String(value))
+      },
+      get length() {
+        return storage.size
+      }
+    }
+  })
+}
+
 describe("SourcesPane Stage 2 source highlighting", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    ensureLocalStorage()
     window.localStorage.clear()
     mockGetWorkspaceSourcePreview.mockResolvedValue({
       workspace_id: "workspace-1",
@@ -180,12 +206,12 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     })
   })
 
-  it("labels the primary source intake action as Add Sources", () => {
+  it("opens the upload workflow from the primary source intake action", () => {
     render(<SourcesPane />)
 
     fireEvent.click(screen.getByRole("button", { name: "Add Sources" }))
 
-    expect(mockOpenAddSourceModal).toHaveBeenCalledWith("existing")
+    expect(mockOpenAddSourceModal).toHaveBeenCalledWith("upload")
   })
 
   it("surfaces partial workspace context errors as a compact source warning", () => {
@@ -434,6 +460,48 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     ) as HTMLInputElement | null
     expect(checkboxInput).toBeTruthy()
     expect(checkboxInput?.disabled).toBe(true)
+  })
+
+  it("allows selection for text-search-ready partially queryable sources", () => {
+    workspaceStoreState.sources = [
+      {
+        ...defaultSources[1],
+        id: "s-partial",
+        mediaId: 22,
+        title: "Partial Text Source",
+        type: "text" as const,
+        status: "processing" as const,
+        statusMessage: "Text search is available while vector indexing continues.",
+        readiness: {
+          metadata_ready: true,
+          text_extracted: true,
+          fts_ready: true,
+          vector_ready: false,
+          citation_ready: false,
+          summary_ready: false,
+          tool_accessible: true
+        },
+        statusDetails: {
+          lifecycleState: "partially_queryable",
+          statusReason: "vector_index_pending"
+        }
+      }
+    ]
+
+    render(<SourcesPane />)
+
+    expect(
+      screen.getByText("Text search is available while vector indexing continues.")
+    ).toBeInTheDocument()
+    const partialHitArea = screen.getByTestId("source-checkbox-hitarea-s-partial")
+    const checkboxInput = partialHitArea.querySelector(
+      "input[type='checkbox']"
+    ) as HTMLInputElement | null
+    expect(checkboxInput).toBeTruthy()
+    expect(checkboxInput?.disabled).toBe(false)
+
+    fireEvent.click(checkboxInput as HTMLInputElement)
+    expect(mockToggleSourceSelection).toHaveBeenCalledWith("s-partial")
   })
 
   it("surfaces backend processing detail text when available", () => {

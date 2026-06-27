@@ -15,6 +15,12 @@ type ConnectionTone = {
   dotClass: string
 }
 
+type WorkspaceContextStatus = {
+  label: string
+  detail: string
+  severity: "info" | "warning" | "error"
+}
+
 interface WorkspaceStatusBarProps {
   /** Approximate persisted workspace payload bytes in local storage */
   storageUsedBytes?: number
@@ -33,14 +39,33 @@ interface WorkspaceStatusBarProps {
   }
   /** Rollout gate for status/guardrails surfaces */
   statusGuardrailsEnabled?: boolean
+  /** Workspace/server-context state layered on top of raw backend connectivity. */
+  workspaceContextStatus?: WorkspaceContextStatus | null
+  /** Render a denser variant for constrained mobile layouts. */
+  compact?: boolean
 }
 
 const deriveConnectionTone = (
-  connectionState: ReturnType<typeof useConnectionStore.getState>["state"]
+  connectionState: ReturnType<typeof useConnectionStore.getState>["state"],
+  workspaceContextStatus?: WorkspaceContextStatus | null
 ): ConnectionTone => {
   const ux = deriveConnectionUxState(connectionState)
 
   if (ux === "connected_ok") {
+    if (
+      workspaceContextStatus &&
+      workspaceContextStatus.severity !== "info"
+    ) {
+      const isError = workspaceContextStatus.severity === "error"
+      return {
+        label: workspaceContextStatus.label,
+        detail: workspaceContextStatus.detail,
+        description: "",
+        toneClass: isError ? "text-error" : "text-warning",
+        dotClass: isError ? "bg-error" : "bg-warning"
+      }
+    }
+
     return {
       label: "Connected",
       detail: "Connection healthy",
@@ -79,11 +104,13 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
   activeOperations = [],
   statusMessages = [],
   statusAction,
-  statusGuardrailsEnabled = true
+  statusGuardrailsEnabled = true,
+  workspaceContextStatus = null,
+  compact = false
 }) => {
   const { t } = useTranslation(["playground", "common"])
   const connectionState = useConnectionStore((s) => s.state)
-  const connection = deriveConnectionTone(connectionState)
+  const connection = deriveConnectionTone(connectionState, workspaceContextStatus)
   const connectionUxState: ConnectionUxState = deriveConnectionUxState(connectionState)
   const [storageModalOpen, setStorageModalOpen] = React.useState(false)
   const canRetryConnection =
@@ -148,9 +175,12 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
   return (
     <footer
       data-testid="workspace-status-bar"
-      className="flex h-7 shrink-0 items-center justify-between border-t border-border/60 bg-surface px-3 text-[11px] text-text-muted"
+      aria-label={t("playground:workspace.statusLabel", "Workspace status")}
+      className={`flex shrink-0 items-center justify-between border-t border-border/60 bg-surface text-[11px] text-text-muted ${
+        compact ? "min-h-6 px-2" : "h-7 px-3"
+      }`}
     >
-      <div className="flex items-center gap-3">
+      <div className={`flex min-w-0 items-center ${compact ? "gap-2" : "gap-3"}`}>
         {/* Connection indicator */}
         <Tooltip title={connection.detail}>
           <span
@@ -180,7 +210,9 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
             <button
               type="button"
               data-testid="workspace-statusbar-storage"
-              className="inline-flex items-center gap-1.5 hover:text-text"
+              className={`items-center gap-1.5 hover:text-text ${
+                compact ? "hidden sm:inline-flex" : "inline-flex"
+              }`}
               onClick={() => setStorageModalOpen(true)}
             >
               <span className="relative inline-block h-1.5 w-16 overflow-hidden rounded-full bg-border/60">
@@ -196,13 +228,15 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
       </div>
 
       {/* Active operations */}
-      <div className="flex items-center gap-3">
+      <div className={`flex min-w-0 items-center ${compact ? "gap-2" : "gap-3"}`}>
         {statusMessages.length > 0 && (
           <div
             data-testid="workspace-statusbar-notice"
             role="status"
             aria-live="polite"
-            className="flex max-w-[42vw] items-center gap-2 overflow-hidden text-warning"
+            className={`flex items-center gap-2 overflow-hidden text-warning ${
+              compact ? "max-w-[38vw]" : "max-w-[42vw]"
+            }`}
           >
             {statusMessages.map((message, index) => (
               <span key={`${message}-${index}`} className="truncate">
@@ -227,7 +261,7 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
             data-testid="workspace-statusbar-activity"
             role="status"
             aria-live="polite"
-            className="flex items-center gap-3"
+            className={`flex min-w-0 items-center ${compact ? "gap-1.5" : "gap-3"}`}
           >
             <Loader2 className="h-3 w-3 animate-spin text-primary" />
             {activeOperations.map((op, i) => (

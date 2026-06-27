@@ -557,6 +557,9 @@ export interface TldwModel {
   provider_is_configured?: boolean
   provider_enabled?: boolean
   availability?: string
+  readiness_reason_code?: string
+  readiness_message?: string
+  chat_provider?: string
   catalog_only?: boolean
   modalities?: {
     input?: string[]
@@ -2865,14 +2868,16 @@ export class TldwApiClientBase {
 
   async updateMediaKeywords(
     mediaId: string | number,
-    payload: { keywords: string[]; mode?: "add" | "remove" | "set" }
+    payload: { keywords: string[]; mode?: "add" | "remove" | "set" },
+    options?: { suppressBackendUnavailableEvent?: boolean }
   ): Promise<{ media_id: number; keywords: string[] }> {
     const id = encodeURIComponent(String(mediaId))
     return await bgRequest<{ media_id: number; keywords: string[] }>({
       path: `/api/v1/media/${id}/keywords`,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })
   }
 
@@ -3064,6 +3069,7 @@ export class TldwApiClientBase {
       include_versions?: boolean
       include_version_content?: boolean
       signal?: AbortSignal
+      suppressBackendUnavailableEvent?: boolean
     }
   ): Promise<any> {
     const id = encodeURIComponent(String(mediaId))
@@ -3075,7 +3081,8 @@ export class TldwApiClientBase {
     return await bgRequest<any>({
       path: `/api/v1/media/${id}${query}`,
       method: "GET",
-      abortSignal: options?.signal
+      abortSignal: options?.signal,
+      suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })
   }
 

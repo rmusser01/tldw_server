@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import OptionLayout from '../../../components/layout/WebLayout';
@@ -84,6 +84,9 @@ const featureFlagState = vi.hoisted(() => ({
   showChatSidebar: false,
 }));
 const chatSidebarMockState = vi.hoisted(() => ({
+  props: [] as Array<Record<string, unknown>>,
+}));
+const backendUnavailableGateState = vi.hoisted(() => ({
   props: [] as Array<Record<string, unknown>>,
 }));
 
@@ -302,7 +305,12 @@ vi.mock('@/components/Common/BackendRecoveryUiContext', () => ({
 }));
 
 vi.mock('@web/components/layout/BackendUnavailableModalGate', () => ({
-  BackendUnavailableModalGate: () => null,
+  BackendUnavailableModalGate: (props: Record<string, unknown>) => {
+    backendUnavailableGateState.props.push(props);
+    return props.backendUnavailableDetail ? (
+      <div data-testid="backend-unavailable-modal" />
+    ) : null;
+  },
 }));
 
 vi.mock('@web/lib/api/notifications', () => ({
@@ -353,11 +361,62 @@ describe('WebLayout /chat scroll contract', () => {
     storageState.stickyChatInput = true;
     featureFlagState.showChatSidebar = false;
     chatSidebarMockState.props = [];
+    backendUnavailableGateState.props = [];
+    connectionState.value.checkOnce = vi.fn(async () => undefined);
+    connectionState.value.phase = 'connected';
+    connectionState.value.isConnected = true;
+    connectionState.value.isChecking = false;
   });
 
   afterEach(() => {
     cleanup();
     delete (globalThis as typeof globalThis & { __tldwOptionShell?: unknown }).__tldwOptionShell;
+  });
+
+  it('clears backend-unreachable detail after forced recovery finishes connected', async () => {
+    const { rerender } = render(
+      <OptionLayout>
+        <div data-testid="route-content">Research workspace route</div>
+      </OptionLayout>
+    );
+
+    await act(async () => undefined);
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('tldw:backend-unreachable', {
+          detail: {
+            method: 'GET',
+            path: '/api/v1/llm/models/metadata',
+            message: 'Failed to fetch',
+            source: 'direct',
+            timestamp: Date.now(),
+          },
+        })
+      );
+    });
+
+    expect(connectionState.value.checkOnce).toHaveBeenCalledWith({ force: true });
+    expect(screen.getByTestId('backend-unavailable-modal')).toBeInTheDocument();
+
+    connectionState.value.isChecking = true;
+    rerender(
+      <OptionLayout>
+        <div data-testid="route-content">Research workspace route</div>
+      </OptionLayout>
+    );
+    expect(screen.getByTestId('backend-unavailable-modal')).toBeInTheDocument();
+
+    connectionState.value.isChecking = false;
+    rerender(
+      <OptionLayout>
+        <div data-testid="route-content">Research workspace route</div>
+      </OptionLayout>
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('backend-unavailable-modal')).toBeNull();
+    });
   });
 
   it('marks the /chat route shell as transcript-owned when sticky chat input is active', () => {

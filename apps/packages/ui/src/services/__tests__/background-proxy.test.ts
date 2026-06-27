@@ -192,6 +192,220 @@ describe("background proxy fallback safety", () => {
     expect(detail?.source).toBe("direct")
   })
 
+  it("keeps workspace migration chunk network failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/workspaces/migrations/mig-1/chunks/chunk-1",
+          method: "PUT",
+          body: { sha256: "a".repeat(64), byte_count: 1 }
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps workspace source refresh network failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/workspaces/ws-1/sources",
+          method: "GET"
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps workspace upsert reconciliation failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/workspaces/ws-1",
+          method: "PUT",
+          body: { name: "Recovered workspace" }
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps Research Workspace chat command bootstrap failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/chat/commands",
+          method: "GET"
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps optional audio voice bootstrap failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/audio/voices/catalog?provider=kitten_tts",
+          method: "GET"
+        })
+      ).rejects.toMatchObject({ status: 0 })
+      await expect(
+        bgRequest({
+          path: "/api/v1/audio/voices",
+          method: "GET"
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps optional ingestion-source capability bootstrap failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/ingestion-sources/capabilities",
+          method: "GET"
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps caller-handled best-effort failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/media/3/keywords",
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: { keywords: ["workspace:test"], mode: "add" },
+          suppressBackendUnavailableEvent: true
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
   it("classifies aborted direct fallback requests as AbortError", async () => {
     mocks.sendMessage.mockRejectedValue(
       new Error("Could not establish connection. Receiving end does not exist.")

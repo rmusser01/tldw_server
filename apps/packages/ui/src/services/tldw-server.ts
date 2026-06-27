@@ -128,6 +128,20 @@ const mapTldwModelToUi = (model: any) => ({
       : undefined,
   catalog_only:
     typeof model.catalogOnly === "boolean" ? model.catalogOnly : undefined,
+  provider_enabled:
+    typeof model.providerEnabled === "boolean" ? model.providerEnabled : undefined,
+  availability:
+    typeof model.availability === "string" ? model.availability : undefined,
+  readiness_reason_code:
+    typeof model.readinessReasonCode === "string"
+      ? model.readinessReasonCode
+      : undefined,
+  readiness_message:
+    typeof model.readinessMessage === "string"
+      ? model.readinessMessage
+      : undefined,
+  chat_provider:
+    typeof model.chatProvider === "string" ? model.chatProvider : undefined,
   details: {
     provider: model.provider,
     capabilities: model.capabilities,
@@ -140,7 +154,23 @@ const mapTldwModelToUi = (model: any) => ({
         ? model.providerIsConfigured
         : undefined,
     catalog_only:
-      typeof model.catalogOnly === "boolean" ? model.catalogOnly : undefined
+      typeof model.catalogOnly === "boolean" ? model.catalogOnly : undefined,
+    provider_enabled:
+      typeof model.providerEnabled === "boolean"
+        ? model.providerEnabled
+        : undefined,
+    availability:
+      typeof model.availability === "string" ? model.availability : undefined,
+    readiness_reason_code:
+      typeof model.readinessReasonCode === "string"
+        ? model.readinessReasonCode
+        : undefined,
+    readiness_message:
+      typeof model.readinessMessage === "string"
+        ? model.readinessMessage
+        : undefined,
+    chat_provider:
+      typeof model.chatProvider === "string" ? model.chatProvider : undefined
   }
 })
 
@@ -220,6 +250,15 @@ const dedupeChatModelsByModel = (models: any[]) => {
 export const clearChatModelsCache = () => {
   chatModelsCache = null
   chatModelsInFlight = null
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("tldw:config-updated", clearChatModelsCache)
+  window.addEventListener("storage", (event) => {
+    if (!event.key || event.key === "tldwConfig") {
+      clearChatModelsCache()
+    }
+  })
 }
 
 export const getAllModels = async ({ returnEmpty = false }: { returnEmpty?: boolean }) => {

@@ -328,6 +328,37 @@ describe("connection store stability", () => {
     )
   })
 
+  it("can force a fresh health check after a recent connected state", async () => {
+    setConnectionState({
+      phase: ConnectionPhase.CONNECTED,
+      isConnected: true,
+      isChecking: false,
+      lastCheckedAt: Date.now(),
+      consecutiveFailures: 1,
+      errorKind: "partial",
+      lastError: "previous transient failure"
+    })
+    mockedApiSend.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { status: "alive" }
+    })
+
+    await useConnectionStore.getState().checkOnce({ force: true })
+
+    const state = useConnectionStore.getState().state
+    expect(mockedApiSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/health/live",
+        method: "GET"
+      })
+    )
+    expect(state.phase).toBe(ConnectionPhase.CONNECTED)
+    expect(state.isConnected).toBe(true)
+    expect(state.consecutiveFailures).toBe(0)
+    expect(state.lastError).toBeNull()
+  })
+
   it("surfaces a CORS hint for cross-origin network-blocked health checks", async () => {
     setConnectionState({
       phase: ConnectionPhase.SEARCHING,

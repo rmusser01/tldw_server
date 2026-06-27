@@ -34,6 +34,18 @@ const ABSOLUTE_URL_BLOCK_ERROR =
   "Direct stream fallback is allowed only for allowlisted absolute URLs."
 const BACKEND_UNREACHABLE_PATTERN =
   /(networkerror|failed to fetch|network error|load failed|err_connection|could not establish connection|receiving end does not exist)/i
+const WORKSPACE_MIGRATION_CHUNK_PATH_PATTERN =
+  /\/api\/v1\/workspaces\/migrations\/[^/?#]+\/chunks\/[^/?#]+/
+const WORKSPACE_CONTEXT_REFRESH_PATH_PATTERN =
+  /\/api\/v1\/workspaces\/(?!migrations(?:\/|$))[^/?#]+\/(?:context|sources)(?:[?#]|$)/
+const WORKSPACE_UPSERT_RECONCILE_PATH_PATTERN =
+  /\/api\/v1\/workspaces\/(?!migrations(?:[/?#]|$))[^/?#]+(?:[?#]|$)/
+const RESEARCH_WORKSPACE_CHAT_COMMANDS_BOOTSTRAP_PATH_PATTERN =
+  /\/api\/v1\/chat\/commands(?:[?#]|$)/
+const OPTIONAL_AUDIO_VOICE_BOOTSTRAP_PATH_PATTERN =
+  /\/api\/v1\/audio\/voices(?:\/catalog)?(?:[?#]|$)/
+const OPTIONAL_INGESTION_SOURCE_CAPABILITIES_PATH_PATTERN =
+  /\/api\/v1\/ingestion-sources\/capabilities(?:[?#]|$)/
 const errorLogHistory = new Map<string, number>()
 let lastBackendUnreachableEventAt = 0
 let lastStreamRuntimeHealthCheckAt = 0
@@ -335,6 +347,20 @@ const shouldNotifyBackendUnavailable = (entry: {
   const path = String(entry.path || "")
   // Restrict notifications to API requests only.
   if (!path.includes("/api/")) return false
+  if (WORKSPACE_MIGRATION_CHUNK_PATH_PATTERN.test(path)) return false
+  const method = String(entry.method || "GET").toUpperCase()
+  if (
+    (method === "GET" && WORKSPACE_CONTEXT_REFRESH_PATH_PATTERN.test(path)) ||
+    (method === "GET" &&
+      RESEARCH_WORKSPACE_CHAT_COMMANDS_BOOTSTRAP_PATH_PATTERN.test(path)) ||
+    (method === "GET" &&
+      OPTIONAL_AUDIO_VOICE_BOOTSTRAP_PATH_PATTERN.test(path)) ||
+    (method === "GET" &&
+      OPTIONAL_INGESTION_SOURCE_CAPABILITIES_PATH_PATTERN.test(path)) ||
+    (method === "PUT" && WORKSPACE_UPSERT_RECONCILE_PATH_PATTERN.test(path))
+  ) {
+    return false
+  }
   if (entry.status === 0) return true
   return BACKEND_UNREACHABLE_PATTERN.test(String(entry.error || ""))
 }
@@ -389,6 +415,7 @@ export interface BgRequestInit<
   responseType?: "json" | "text" | "arrayBuffer"
   returnResponse?: boolean
   preferDirect?: boolean
+  suppressBackendUnavailableEvent?: boolean
 }
 
 // In-flight coalescing for idempotent GET requests: when several callers issue
@@ -410,7 +437,8 @@ export async function bgRequest<
     !init.abortSignal &&
     !init.returnResponse &&
     !init.responseType &&
-    !init.preferDirect
+    !init.preferDirect &&
+    !init.suppressBackendUnavailableEvent
   if (!coalescable) {
     return bgRequestImpl<T, P, M>(init)
   }
@@ -434,6 +462,9 @@ export async function bgRequest<
     noAuth: Object.prototype.hasOwnProperty.call(init, "noAuth")
       ? Boolean(init.noAuth)
       : "__unset__",
+    suppressBackendUnavailableEvent: Boolean(
+      init.suppressBackendUnavailableEvent
+    ),
     timeoutMs: typeof init.timeoutMs === "number" ? init.timeoutMs : null
   })
   const existing = inFlightGetRequests.get(key)
@@ -466,7 +497,8 @@ async function bgRequestImpl<
     abortSignal,
     responseType,
     returnResponse,
-    preferDirect = false
+    preferDirect = false,
+    suppressBackendUnavailableEvent = false
   } = init
   const path = normalizeKnownPathQuirks(rawPath)
   const isAbsoluteUrl = typeof path === "string" && /^https?:/i.test(path)
@@ -582,13 +614,15 @@ async function bgRequestImpl<
           error: msg,
           source: "direct"
         })
-        notifyBackendUnavailable({
-          method: String(method),
-          path: String(path),
-          status: resp?.status,
-          error: msg,
-          source: "direct"
-        })
+        if (!suppressBackendUnavailableEvent) {
+          notifyBackendUnavailable({
+            method: String(method),
+            path: String(path),
+            status: resp?.status,
+            error: msg,
+            source: "direct"
+          })
+        }
       }
       const error = buildRequestError(msg, resp?.status, resp?.data)
       if (!returnResponse) {
@@ -644,13 +678,15 @@ async function bgRequestImpl<
               error: msg,
               source: "background"
             })
-            notifyBackendUnavailable({
-              method: String(method),
-              path: String(path),
-              status: resp?.status,
-              error: msg,
-              source: "background"
-            })
+            if (!suppressBackendUnavailableEvent) {
+              notifyBackendUnavailable({
+                method: String(method),
+                path: String(path),
+                status: resp?.status,
+                error: msg,
+                source: "background"
+              })
+            }
           }
           const error = buildRequestError(msg, resp?.status, resp?.data)
           if (!returnResponse) {
@@ -744,13 +780,15 @@ async function bgRequestImpl<
             error: msg,
             source: "background"
           })
-          notifyBackendUnavailable({
-            method: String(method),
-            path: String(path),
-            status: resp?.status,
-            error: msg,
-            source: "background"
-          })
+          if (!suppressBackendUnavailableEvent) {
+            notifyBackendUnavailable({
+              method: String(method),
+              path: String(path),
+              status: resp?.status,
+              error: msg,
+              source: "background"
+            })
+          }
         }
         const error = buildRequestError(msg, resp?.status, resp?.data)
         if (!returnResponse) {
@@ -832,13 +870,15 @@ async function bgRequestImpl<
         error: msg,
         source: "direct"
       })
-      notifyBackendUnavailable({
-        method: String(method),
-        path: String(path),
-        status: resp?.status,
-        error: msg,
-        source: "direct"
-      })
+      if (!suppressBackendUnavailableEvent) {
+        notifyBackendUnavailable({
+          method: String(method),
+          path: String(path),
+          status: resp?.status,
+          error: msg,
+          source: "direct"
+        })
+      }
     }
     const error = buildRequestError(msg, resp?.status, resp?.data)
     if (!returnResponse) {

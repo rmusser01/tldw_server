@@ -124,6 +124,9 @@ export function getCapabilityCopy(
   if (capability.mode === "allow") return null
   const label = actionLabel.trim() || "This action"
   if (capability.mode === "block") {
+    if (capability.reason_code === "provider_unavailable") {
+      return `${label} is unavailable because the model provider is unavailable. Open model settings or retry status.`
+    }
     return `${label} is unavailable while required services are offline.`
   }
   return `${label} may be degraded. You can still try it.`

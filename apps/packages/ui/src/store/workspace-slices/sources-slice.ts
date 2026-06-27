@@ -10,9 +10,9 @@ import {
   generateWorkspaceId,
   getUniqueSourceFolderName,
   createWorkspaceOrganizationStateIndex,
-  getWorkspaceSourceStatus,
   reviveDateOrNull
 } from '../workspace'
+import { isWorkspaceSourceSelectable } from '../workspace-source-status'
 
 import {
   collectDescendantFolderIds,
@@ -340,7 +340,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
   toggleSourceSelection: (id) =>
     set((state) => {
       const source = state.sources.find((entry) => entry.id === id)
-      if (!source || getWorkspaceSourceStatus(source) !== "ready") {
+      if (!source || !isWorkspaceSourceSelectable(source)) {
         return state
       }
       const isSelected = state.selectedSourceIds.includes(id)
@@ -354,7 +354,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
   selectAllSources: () =>
     set((state) => ({
       selectedSourceIds: state.sources
-        .filter((source) => getWorkspaceSourceStatus(source) === "ready")
+        .filter((source) => isWorkspaceSourceSelectable(source))
         .map((source) => source.id)
     })),
 
@@ -362,13 +362,13 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
 
   setSelectedSourceIds: (ids) =>
     set((state) => {
-      const readySourceIds = new Set(
+      const selectableSourceIds = new Set(
         state.sources
-          .filter((source) => getWorkspaceSourceStatus(source) === "ready")
+          .filter((source) => isWorkspaceSourceSelectable(source))
           .map((source) => source.id)
       )
       return {
-        selectedSourceIds: ids.filter((id) => readySourceIds.has(id))
+        selectedSourceIds: ids.filter((id) => selectableSourceIds.has(id))
       }
     }),
 
@@ -494,7 +494,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
 
       const shouldSelect =
         options?.select === true &&
-        getWorkspaceSourceStatus(source) === "ready"
+        isWorkspaceSourceSelectable(source)
 
       return {
         sources: nextSources,
@@ -509,7 +509,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
     const selectedSet = new Set(state.selectedSourceIds)
     return state.sources.filter(
       (source) =>
-        selectedSet.has(source.id) && getWorkspaceSourceStatus(source) === "ready"
+        selectedSet.has(source.id) && isWorkspaceSourceSelectable(source)
     )
   },
 
@@ -520,7 +520,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       .filter(
         (source) =>
           selectedSet.has(source.id) &&
-          getWorkspaceSourceStatus(source) === "ready"
+          isWorkspaceSourceSelectable(source)
       )
       .map((s) => s.mediaId)
   },

@@ -76,7 +76,9 @@ def build_workspace_capability_projection(
 ) -> dict[str, Any]:
     """Build conservative capability gates for Research Workspace clients."""
     summary = dict(status_projection.get("summary") or {})
-    has_queryable_sources = _has_queryable_selected_sources(status_projection)
+    has_retrieval_capable_sources = _has_retrieval_capable_selected_sources(
+        status_projection
+    )
     workspace_services = {
         "migration": {
             "state": "available",
@@ -128,7 +130,7 @@ def build_workspace_capability_projection(
                 if isinstance(value, dict)
             }
     ask_action = _grounded_question_action(
-        has_queryable_sources=has_queryable_sources,
+        has_queryable_sources=has_retrieval_capable_sources,
         provider_service=workspace_services.get("provider") or {},
     )
     allowed_actions = {
@@ -174,19 +176,25 @@ def build_workspace_capability_projection(
     }
 
 
-def _has_queryable_selected_sources(status_projection: dict[str, Any]) -> bool:
-    """Return whether the user's selected source scope contains queryable sources."""
+def _has_retrieval_capable_selected_sources(status_projection: dict[str, Any]) -> bool:
+    """Return whether selected sources can support a grounded retrieval path."""
     statuses = status_projection.get("sources")
     if isinstance(statuses, list):
         return any(
             isinstance(status, dict)
             and bool(status.get("selected"))
-            and str(status.get("state") or "").strip().lower() == "queryable"
+            and (
+                str(status.get("state") or "").strip().lower() == "queryable"
+                or _supports_text_search(status)
+            )
             for status in statuses
         )
 
     summary = dict(status_projection.get("summary") or {})
-    return int(summary.get("queryable") or 0) > 0
+    return (
+        int(summary.get("queryable") or 0) > 0
+        or int(summary.get("partially_queryable") or 0) > 0
+    )
 
 
 def _build_source_status(
@@ -204,6 +212,8 @@ def _build_source_status(
         else None
     )
     if media_status is not None and _should_prefer_media_status_over_job(matched_job, media_status):
+        if matched_job and _is_active_job(matched_job):
+            return _attach_stale_job(media_status, matched_job)
         return media_status
 
     if matched_job and _is_active_job(matched_job):
@@ -339,6 +349,7 @@ def _base_status(
     progress_message: str | None = None,
     job: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    resolved_readiness = readiness or _empty_readiness()
     return {
         "id": source["id"],
         "workspace_id": source["workspace_id"],
@@ -349,10 +360,17 @@ def _base_status(
         "selected": bool(source.get("selected", True)),
         "state": state,
         "status_reason": reason,
-        "readiness": readiness or _empty_readiness(),
+        "readiness": resolved_readiness,
         "progress_percent": progress_percent,
         "progress_message": progress_message,
         "job": job,
+        "next_action": _next_action_for_status(
+            state=state,
+            reason=reason,
+            readiness=resolved_readiness,
+        ),
+        "retry_eligible": _retry_eligible_for_status(state=state, reason=reason),
+        "stale": False,
         "updated_at": str(source.get("added_at", "")),
     }
 
@@ -367,6 +385,57 @@ def _empty_readiness() -> dict[str, bool]:
         "summary_ready": False,
         "tool_accessible": False,
     }
+
+
+def _supports_text_search(status: dict[str, Any]) -> bool:
+    readiness = status.get("readiness") or {}
+    return (
+        str(status.get("state") or "").strip().lower() == "partially_queryable"
+        and bool(readiness.get("text_extracted"))
+        and bool(readiness.get("fts_ready"))
+        and bool(readiness.get("tool_accessible"))
+    )
+
+
+def _next_action_for_status(
+    *,
+    state: str,
+    reason: str,
+    readiness: dict[str, bool],
+) -> str:
+    if state == "queryable":
+        return "ask_grounded_questions"
+    if state == "partially_queryable":
+        if reason == "vector_index_failed":
+            return "retry_vector_indexing"
+        if _supports_text_search({"state": state, "readiness": readiness}):
+            return "vector_indexing_pending"
+        return "refresh_source_status"
+    if state == "queued":
+        return "wait_for_ingestion_start"
+    if state == "ingesting":
+        return "wait_for_ingestion"
+    if state == "extracting":
+        return "wait_for_text_extraction"
+    if state == "chunking":
+        return "wait_for_chunking"
+    if state == "indexing":
+        return "wait_for_indexing"
+    if state == "retrying":
+        return "wait_for_retry"
+    if state == "failed":
+        return "retry_ingestion_or_readd_source"
+    if state == "missing_media":
+        return "restore_or_readd_media"
+    if state == "blocked_by_permissions":
+        return "check_source_permissions"
+    return "refresh_source_status"
+
+
+def _retry_eligible_for_status(*, state: str, reason: str) -> bool:
+    if state in {"failed", "missing_media", "blocked_by_permissions"}:
+        return True
+    return state == "partially_queryable" and reason == "vector_index_failed"
 
 
 def _summarize_sources(statuses: list[dict[str, Any]]) -> dict[str, int]:
@@ -582,6 +651,17 @@ def _job_payload(job: dict[str, Any]) -> dict[str, Any]:
         "progress_percent": _coerce_float(job.get("progress_percent")),
         "progress_message": job.get("progress_message"),
         "error_message": job.get("error_message") or _job_result_error(job),
+    }
+
+
+def _attach_stale_job(
+    status: dict[str, Any],
+    job: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        **status,
+        "job": _job_payload(job),
+        "stale": True,
     }
 
 
