@@ -1,6 +1,8 @@
 # MCP Unified - User Guide
 
 > Part of the MCP Unified documentation set. See `Docs/MCP/Unified/README.md` for the full guide index.
+>
+> **Current state:** Unified MCP is embedded in TLDW Server today. The standalone package/gateway is planned but not shipped in this tree yet. Use the TLDW Server launch path below unless a future release explicitly says the standalone gateway is available.
 
 This guide is for users and integrators who want to run MCP Unified, connect clients, configure modules, and extend MCP with new modules/tools.
 

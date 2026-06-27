@@ -1,5 +1,7 @@
 # MCP Unified Module - Production Ready
 
+> **Current state:** Unified MCP is embedded in TLDW Server today. The standalone package/gateway is planned but not shipped in this tree yet. Use the TLDW Server launch path unless a future release explicitly says the standalone gateway is available.
+
 ## 1. Descriptive of Current Feature Set
 
 - Purpose: Secure, production-ready Model Context Protocol (MCP) server with HTTP + WebSocket transport, JWT/RBAC, rate limiting, idempotency, module system, and Prometheus metrics.
