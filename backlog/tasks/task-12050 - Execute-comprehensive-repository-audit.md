@@ -32,7 +32,7 @@ Execute the approved comprehensive repository audit from one clean origin/dev wo
 - [x] #2 All nine domain reports and five specialist reports are completed or explicitly marked blocked with residual risk.
 - [x] #3 Every accepted finding has a stable ID, evidence tier, severity, confidence, owner domain, and source report.
 - [x] #4 Every high/critical finding is coordinator-validated before final publication.
-- [ ] #5 Final report and remediation-backlog draft are produced without production-code changes.
+- [x] #5 Final report and remediation-backlog draft are produced without production-code changes.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -63,6 +63,8 @@ Task 6 specialist batch 1 complete. Security Boundaries confirmed and cross-link
 Task 6 specialist batch 2 complete. Test Coverage and Verification Gaps added no new TESTS rows, recorded targeted coverage follow-up for existing normalized findings plus AUDIT-2026-06-27-APIWEB-001 and AUDIT-2026-06-27-REL-001, and ran a focused pytest slice with 10 passed and 29 warnings. Dependency and Static Analysis Risk added specialist candidates AUDIT-2026-06-27-DEPS-001 through AUDIT-2026-06-27-DEPS-003 and scoped evidence at Docs/superpowers/reviews/2026-06-27-repo-audit/evidence/dependency-static-analysis-evidence.txt. Spec review approved the batch. Quality review requested two wording fixes in dependency/static-analysis artifacts; both were fixed and quality re-review approved. Inventory now marks all five specialist passes complete. Verification: placeholder and short-ID scans returned no matches, secret-pattern scan returned no matches, required report sections are present, git diff --check passed, and production/source code tracked diffs remained untouched. Bandit was not rerun because this checkpoint changed audit documentation/evidence artifacts only, not production code.
 
 Stage 7 coordinator validation and findings-index reconciliation complete. Added five accepted specialist candidates to Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json without merging them: AUDIT-2026-06-27-REL-001, AUDIT-2026-06-27-APIWEB-001, AUDIT-2026-06-27-DEPS-001, AUDIT-2026-06-27-DEPS-002, and AUDIT-2026-06-27-DEPS-003. Final finding count is 31. Populated the final-report high/critical coordinator validation table for AUDIT-2026-06-27-AUTH-002, AUDIT-2026-06-27-DB-001, AUDIT-2026-06-27-MEDIA-001, and AUDIT-2026-06-27-MEDIA-002 after coordinator re-read confirmation of each source report, affected paths, evidence strength, and remediation recommendation. Verification recorded in the shared command log: JSON parse passed, count is 31, required-field and allowed-value checks passed, duplicate ID check passed, high validation table includes all four high IDs, final-summary markers remain exactly one begin and one end marker, git diff --check passed, and tracked changes remain limited to the allowed Stage 7 audit artifacts plus this Backlog task. AC #5 remains open for the next final synthesis/remediation-backlog stage.
+
+Stage 8 final synthesis complete. Replaced scaffold text in Docs/superpowers/reviews/2026-06-27-repo-audit/final-report.md and Docs/superpowers/reviews/2026-06-27-repo-audit/remediation-backlog-draft.md. The final report records baseline SHA 669092178b0ba0fa1e840a37250b0deb55acd5a3, network refreshed yes, 31 accepted findings, 4 high, 0 critical, all nine domain reports complete, all five specialist reports complete, and production code unchanged. The remediation backlog draft groups all 31 accepted finding IDs into reviewable Critical/High, Medium, and Low/Improvement slices without creating Backlog tasks. Stage 8 verification is recorded in Docs/superpowers/reviews/2026-06-27-repo-audit/evidence/command-log.md. Bandit was not rerun for these audit-document-only final edits; prior audit Bandit summaries remain referenced. The two unrelated untracked watchlist templates remained untouched and unstaged.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -73,10 +75,10 @@ Stage 7 coordinator validation and findings-index reconciliation complete. Added
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

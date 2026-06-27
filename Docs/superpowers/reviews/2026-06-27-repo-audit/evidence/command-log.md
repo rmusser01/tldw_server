@@ -232,3 +232,38 @@ Verification result:
 - Diff whitespace check passed.
 - Git status showed only the four intended Stage 7 modified files plus the two known unrelated untracked watchlist templates.
 ```
+
+## Stage 8 Final Report And Remediation Backlog Synthesis
+
+```text
+Synthesis summary:
+- Final accepted finding count: 31.
+- Severity counts: 0 critical, 4 high, 22 medium, 5 low.
+- Evidence tier counts: 17 confirmed_issue, 10 likely_risk, 4 improvement_opportunity.
+- Final report produced: Docs/superpowers/reviews/2026-06-27-repo-audit/final-report.md.
+- Remediation backlog draft produced: Docs/superpowers/reviews/2026-06-27-repo-audit/remediation-backlog-draft.md.
+- Quality review follow-up linked the repeatable audit process from the final report and clarified that the release-verification remediation slice should run after the supply-chain/tooling slice.
+- Backlog task updated: backlog/tasks/task-12050 - Execute-comprehensive-repository-audit.md.
+- Production code, tests, runtime configs, and unrelated docs were not edited by Stage 8.
+- The two known unrelated untracked watchlist templates remained untouched and unstaged.
+
+Verification commands run for Stage 8:
+- jq empty Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json
+- jq '.findings | length' Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json
+- placeholder-token scan over final-report.md, remediation-backlog-draft.md, TASK-12050 Stage 8 note, and this command-log Stage 8 section
+- comm-based checks comparing all finding IDs in findings-index.json against IDs present in final-report.md and remediation-backlog-draft.md
+- final-summary marker count check on backlog/tasks/task-12050 - Execute-comprehensive-repository-audit.md
+- git diff --check -- Docs/superpowers/reviews/2026-06-27-repo-audit/final-report.md Docs/superpowers/reviews/2026-06-27-repo-audit/remediation-backlog-draft.md Docs/superpowers/reviews/2026-06-27-repo-audit/evidence/command-log.md "backlog/tasks/task-12050 - Execute-comprehensive-repository-audit.md"
+- git status --short
+
+Verification result:
+- JSON parse passed.
+- Finding count is 31.
+- Placeholder scans returned no matches for the final report, remediation backlog draft, command log Stage 8 section, and TASK-12050 Stage 8 note.
+- All 31 finding IDs appear at least once in final-report.md.
+- All 31 finding IDs appear at least once in remediation-backlog-draft.md.
+- Backlog final-summary markers remain exactly one begin marker and one end marker.
+- Diff whitespace check passed.
+- Git status after Stage 8 shows only the four allowed modified files plus the two known unrelated untracked watchlist templates.
+- Bandit was not rerun because Stage 8 changed audit documentation and the Backlog task record only; prior audit Bandit summaries remain referenced by the final report.
+```
