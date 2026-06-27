@@ -23,6 +23,7 @@ import {
   validateExternalServer,
   updateGovernancePackTrustPolicy
 } from "../mcp-hub"
+import type { McpHubServerReadiness } from "../mcp-hub"
 
 describe("mcp hub service client", () => {
   beforeEach(() => {
@@ -72,17 +73,28 @@ describe("mcp hub service client", () => {
   })
 
   it("requests MCP Hub readiness through the dedicated readiness endpoint", async () => {
+    const unknownCredentialServer: McpHubServerReadiness = {
+      server_id: "remote-docs",
+      server_name: "Remote Docs",
+      display_state: "needs_attention",
+      credential_state: "unknown",
+      tool_count: 0,
+      reason_codes: ["discovery_not_run"],
+      primary_reason_code: "discovery_not_run",
+      allowed_actions: ["refresh_discovery", "edit_config"],
+      message: "Server is saved, but tool discovery has not run."
+    }
     mocks.bgRequestClient.mockResolvedValueOnce({
       display_state: "needs_attention",
       reason_codes: ["discovery_not_run"],
       primary_reason_code: "discovery_not_run",
       allowed_actions: ["refresh_discovery"],
       message: "Server is saved, but tool discovery has not run.",
-      servers: [],
-      total_servers: 0,
+      servers: [unknownCredentialServer],
+      total_servers: 1,
       ready_server_count: 0,
       checking_server_count: 0,
-      attention_server_count: 0,
+      attention_server_count: 1,
       no_tool_server_count: 0,
       stale_server_count: 0
     })
@@ -90,6 +102,7 @@ describe("mcp hub service client", () => {
     const out = await getMcpHubReadiness()
 
     expect(out.display_state).toBe("needs_attention")
+    expect(out.servers[0]?.credential_state).toBe("unknown")
     expect(mocks.bgRequestClient).toHaveBeenCalledWith(
       expect.objectContaining({
         path: "/api/v1/mcp/hub/readiness",

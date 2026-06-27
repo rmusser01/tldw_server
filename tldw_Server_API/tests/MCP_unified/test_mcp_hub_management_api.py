@@ -1488,9 +1488,75 @@ async def test_mcp_hub_readiness_maps_invalid_auth_template_to_preflight_failed(
 
     assert resp.status_code == 200
     server = resp.json()["servers"][0]
+    assert server["credential_state"] == "unknown"
     assert server["primary_reason_code"] == "preflight_failed"
     assert "preflight_failed" in server["reason_codes"]
     assert "validate" in server["allowed_actions"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_readiness_maps_non_stdio_without_auth_state_as_unknown() -> None:
+    service = _ConfigurableExternalServerService(
+        [
+            _external_server_row(
+                server_id="remote-docs",
+                transport="websocket",
+                secret_configured=False,
+                auth_template_present=False,
+                auth_template_valid=False,
+                auth_template_blocked_reason=None,
+                credential_slots=[],
+            )
+        ]
+    )
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    server = resp.json()["servers"][0]
+    assert server["credential_state"] == "unknown"
+    assert server["primary_reason_code"] == "discovery_not_run"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_readiness_maps_configured_optional_slot_as_configured() -> None:
+    service = _ConfigurableExternalServerService(
+        [
+            _external_server_row(
+                auth_template_present=False,
+                auth_template_valid=False,
+                auth_template_blocked_reason=None,
+                credential_slots=[
+                    _required_slot(
+                        slot_name="optional_token",
+                        secret_configured=True,
+                        is_required=False,
+                    )
+                ],
+            )
+        ]
+    )
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    server = resp.json()["servers"][0]
+    assert server["credential_state"] == "configured"
+    assert server["primary_reason_code"] == "discovery_not_run"
 
 
 @pytest.mark.asyncio

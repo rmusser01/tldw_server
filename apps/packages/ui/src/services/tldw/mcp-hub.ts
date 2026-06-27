@@ -532,6 +532,7 @@ export type McpHubCredentialState =
   | "required_missing"
   | "configured"
   | "legacy_fallback"
+  | "unknown"
 
 export type McpHubCurrentOperation = {
   operation_type: "validation" | "discovery"

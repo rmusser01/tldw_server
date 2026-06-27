@@ -1214,11 +1214,20 @@ def _credential_state_for_external_row(row: dict[str, Any]) -> str:
     required_slots = [slot for slot in slots if bool(slot.get("is_required", True))]
     if any(not bool(slot.get("secret_configured")) for slot in required_slots):
         return "required_missing"
-    if required_slots or bool(row.get("auth_template_present")):
+    if any(bool(slot.get("secret_configured")) for slot in slots) or row.get("auth_template_valid") is True:
         return "configured"
-    if bool(row.get("secret_configured")):
+    has_auth_template = bool(row.get("auth_template_present"))
+    if bool(row.get("secret_configured")) and not has_auth_template and not slots:
         return "legacy_fallback"
-    return "not_required"
+    blocked_reason = str(row.get("auth_template_blocked_reason") or "").strip()
+    if (
+        str(row.get("transport") or "").strip().lower() == "stdio"
+        and not has_auth_template
+        and not slots
+        and blocked_reason in {"", "no_auth_template"}
+    ):
+        return "not_required"
+    return "unknown"
 
 
 def _is_authoritative_external_tool(entry: dict[str, Any], server_id: str) -> bool:

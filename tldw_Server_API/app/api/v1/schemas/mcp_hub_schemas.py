@@ -631,7 +631,13 @@ McpHubReadinessAction = Literal[
     "open_tool_catalog",
     "open_audit",
 ]
-McpHubCredentialState = Literal["not_required", "required_missing", "configured", "legacy_fallback"]
+McpHubCredentialState = Literal[
+    "not_required",
+    "required_missing",
+    "configured",
+    "legacy_fallback",
+    "unknown",
+]
 McpHubOperationType = Literal["validation", "discovery"]
 
 
