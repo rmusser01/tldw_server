@@ -4,7 +4,7 @@ title: Fix PR 1982 current backend CI shard failures
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-27 15:48'
+updated_date: '2026-06-27 16:22'
 labels:
   - ci
   - pr-1982
@@ -42,6 +42,8 @@ Track the current PR #1982 CI failures after the full matrix appeared on head 93
 - Remaining action: commit and push fixes so GitHub re-runs the failed matrix against the patched branch.
 
 2026-06-27 post-push Watchlists E2E follow-up: live PR run 28293474837/job 83829303188 reached the strict Watchlists Playwright spec and timed out in the first test after 120s; this is no longer the Chromium install failure. Root cause: workflow target wait was 90s and each test only had a 120s budget, leaving too little room for extension target discovery, storage/React/connection waits, and backend startup/model warmup. Changed the workflow target wait back to 30s, preserved .watchlists-e2e-report.json into test-results even when the strict command fails, and raised the Watchlists spec timeout constant to 180s. Verification: workflow YAML parse passed; CI workflow contract test passed; apps/extension bun run compile passed; Watchlists Playwright --list parsed and listed all 14 tests; git diff --check passed. Vitest utility tests were not used as a gate because this worktree has no extension-local Vitest config and both Bun test and inherited monorepo Vitest discovery resolve the wrong runner/config for those files.
+
+2026-06-27 PR #1982 head b3695d3a4f follow-up: after PR #2534 merged into dev, pre-commit failed on run 28294733263/job 83832583693 because Black reformatted tldw_Server_API/cli/wizard/cli.py around the new --api-key-env Typer option. Current check scan before push showed only this one failed check (pre-commit), with 11 pass, 33 pending, and 3 skipped. Applied Black to cli.py only. Verification: python -m black --check tldw_Server_API/cli/wizard/cli.py passed; python -m pre_commit run black --files tldw_Server_API/cli/wizard/cli.py passed; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

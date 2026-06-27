@@ -1287,7 +1287,9 @@ def mcp(
     config_path: Path | None = typer.Option(None, "--config-path", help="Override config path (single client)"),
     server_url: str | None = typer.Option(None, "--server-url", help="MCP server URL"),
     api_key: str | None = typer.Option(None, "--api-key", help="Write this API key into the MCP client config"),
-    api_key_env: str | None = typer.Option(None, "--api-key-env", help="Write an environment-variable reference as the API key"),
+    api_key_env: str | None = typer.Option(
+        None, "--api-key-env", help="Write an environment-variable reference as the API key"
+    ),
     verify: bool = typer.Option(False, "--verify", help="Verify MCP URL and credentials after writing config"),
     json_out: bool = typer.Option(False, "--json", help="Emit machine-readable JSON output"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without writing"),
