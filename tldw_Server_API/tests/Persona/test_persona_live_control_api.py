@@ -1184,7 +1184,8 @@ def test_persona_stream_user_message_preserves_private_live_control_preferences(
                 lambda data: data.get("event") == "tool_plan" and data.get("session_id") == session_id,
             )
 
-    row = persona_db.get_persona_session(session_id, user_id="1", include_deleted=False)
+            row = persona_db.get_persona_session(session_id, user_id="1", include_deleted=False)
+
     assert row is not None
     live_preferences = row["preferences"]["persona_live_control"]
     assert live_preferences["create_idempotency_key"] == "preserve-private-key"
