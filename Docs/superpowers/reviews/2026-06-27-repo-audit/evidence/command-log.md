@@ -43,4 +43,8 @@ $ git status --short --branch
 Batch 1 dispatched after inventory commit aacb27c4552002e5e15d18c4997a5f89fea58d9a.
 Parallelism cap: 4 domain agents.
 Domains: AuthNZ and Admin; DB, Migrations, and Data Durability; WebUI, Extension, and API Contracts; CI, Deployment, Operations, and Release Surfaces.
+
+Batch 2 dispatched after domain batch 1 commit 6b2cce0a351429f2d5e46e8e738f38a4bb4fa0c4.
+Parallelism cap: 4 domain agents.
+Domains: Media, Ingestion, and Storage; Chat, RAG, and LLM; Jobs, Scheduler, and Workflows; Integrations and Providers.
 ```
