@@ -139,7 +139,7 @@ git commit -m "docs: clarify unified mcp embedded status"
 - Modify: `tldw_Server_API/app/core/MCP_unified/README.md`
 - Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_docker_packaging_contract.py`
 
-- [ ] **Step 1: Replace brittle Dockerfile text assertions with status assertions**
+- [x] **Step 1: Replace brittle Dockerfile text assertions with status assertions**
 
 Update or add tests that assert the Docker directory has an explicit experimental status and that primary docs do not present it as the quickstart path.
 
@@ -168,7 +168,7 @@ def test_primary_mcp_readme_does_not_present_experimental_docker_as_quickstart()
 
 Adjust `ROOT` to match the existing test file's location if needed.
 
-- [ ] **Step 2: Run the failing Docker contract tests**
+- [x] **Step 2: Run the failing Docker contract tests**
 
 Run:
 
@@ -179,7 +179,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_docker_packagin
 
 Expected: FAIL until the README/status is added and old assumptions are updated.
 
-- [ ] **Step 3: Add Docker status README**
+- [x] **Step 3: Add Docker status README**
 
 Create `tldw_Server_API/app/core/MCP_unified/docker/README.md`:
 
@@ -193,11 +193,11 @@ Unified MCP is embedded in TLDW Server today. Use the repository-level TLDW Serv
 The future standalone gateway work should replace this with a smoke-tested image that starts, imports the correct app target, and passes `/api/v1/mcp/health`.
 ```
 
-- [ ] **Step 4: Remove Docker from primary quickstart language**
+- [x] **Step 4: Remove Docker from primary quickstart language**
 
 Ensure the core MCP README points to the TLDW Server launch path and references the Docker subdirectory only as experimental.
 
-- [ ] **Step 5: Re-run Docker contract tests**
+- [x] **Step 5: Re-run Docker contract tests**
 
 Run:
 
@@ -208,7 +208,7 @@ python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_docker_packagin
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 6: Commit Task 2**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/docker/README.md tldw_Server_API/app/core/MCP_unified/README.md tldw_Server_API/app/core/MCP_unified/tests/test_docker_packaging_contract.py

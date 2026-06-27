@@ -23,7 +23,10 @@ modified_files:
 - Docs/MCP/Unified/User_Guide.md
 - Docs/Product/MCP-Unified-Extraction.md
 - Docs/superpowers/plans/2026-06-26-mcp-unified-standalone-ux-remediation.md
+- backlog/tasks/task-2393 - Plan-and-implement-MCP-Unified-standalone-UX-remediation.md
 - tldw_Server_API/app/core/MCP_unified/README.md
+- tldw_Server_API/app/core/MCP_unified/docker/README.md
+- tldw_Server_API/app/core/MCP_unified/tests/test_docker_packaging_contract.py
 - tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py
 ---
 
@@ -36,7 +39,7 @@ Address the UX/product review findings for Unified MCP standalone/embedded exper
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Current embedded vs planned standalone state is clear in primary MCP docs.
-- [ ] #2 Documented launch paths are either verified working or explicitly marked unsupported/experimental.
+- [x] #2 Documented launch paths are either verified working or explicitly marked unsupported/experimental.
 - [ ] #3 Quickstart reaches a successful authenticated tools/list and read-only tool call.
 - [ ] #4 Auth methods are described in one canonical matrix and primary examples avoid disabled-by-default query auth.
 - [ ] #5 Effective enabled MCP surface is visible by module/risk tier.
@@ -57,6 +60,7 @@ Docs/superpowers/plans/2026-06-26-mcp-unified-standalone-ux-remediation.md
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-06-26: Task 1 complete in worktree `codex/mcp-unified-ux-remediation`. Added docs contract test for embedded-vs-standalone clarity, observed the expected red failure, added current-state banners to primary MCP docs, added PRD status note, and verified the focused test now passes.
+- 2026-06-26: Task 2 complete. Replaced brittle MCP-specific Dockerfile launch assertions with an explicit experimental-status contract, added `tldw_Server_API/app/core/MCP_unified/docker/README.md`, and added a warning to the core MCP README Docker section. Verified Docker contract tests pass.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

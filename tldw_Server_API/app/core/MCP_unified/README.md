@@ -610,6 +610,9 @@ Notes
 See also: Ops tuning guide at Docs/Deployment/Operations/MCP_Rate_Limits_Tuning.md
 
 ### Docker Deployment
+
+> **Experimental:** This MCP-specific Dockerfile is not the supported standalone gateway. Unified MCP is embedded in TLDW Server today; use the repository-level TLDW Server Docker or local server launch path for supported MCP usage.
+
 ```bash
 docker build -f docker/Dockerfile -t mcp-unified .
 docker run -d \
