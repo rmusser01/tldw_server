@@ -54,7 +54,7 @@ Use the existing root virtualenv while working in the worktree:
 - Create: `tldw_Server_API/app/core/MCP_unified/modules/implementations/notebook_files.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_notebook_files.py`
 
-- [ ] **Step 1: Write failing helper tests for valid read summaries**
+- [x] **Step 1: Write failing helper tests for valid read summaries**
 
 Add tests that build small notebook JSON payloads as bytes and assert:
 
@@ -68,7 +68,7 @@ assert "source_preview" not in summary["cells"][0]
 
 Also test `include_source=True`, `cell_ids=["code-1"]`, `max_source_chars`, and `max_total_source_chars`.
 
-- [ ] **Step 2: Run tests to verify red**
+- [x] **Step 2: Run tests to verify red**
 
 Run:
 
@@ -78,7 +78,7 @@ Run:
 
 Expected: fail because `notebook_files.py` does not exist.
 
-- [ ] **Step 3: Implement minimal parser and summary helpers**
+- [x] **Step 3: Implement minimal parser and summary helpers**
 
 Implement stdlib-only helpers:
 
@@ -120,11 +120,11 @@ Validation requirements:
 - Missing ids raise `ValueError("notebook_cell_id_required")`.
 - Source may be string, list of strings, or absent.
 
-- [ ] **Step 4: Run tests to verify green**
+- [x] **Step 4: Run tests to verify green**
 
 Run the same pytest command. Expected: all helper read tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/modules/implementations/notebook_files.py \
@@ -138,7 +138,7 @@ git commit -m "feat: add notebook file read helpers"
 - Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/notebook_files.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_notebook_files.py`
 
-- [ ] **Step 1: Write failing tests for replace, insert, delete, and serialization**
+- [x] **Step 1: Write failing tests for replace, insert, delete, and serialization**
 
 Test behavior:
 
@@ -165,7 +165,7 @@ assert result.summary["output_count_after"] == 0
 assert result.document["cells"][1]["execution_count"] is None
 ```
 
-- [ ] **Step 2: Run tests to verify red**
+- [x] **Step 2: Run tests to verify red**
 
 Run:
 
@@ -175,7 +175,7 @@ Run:
 
 Expected: fail because mutation helpers are missing.
 
-- [ ] **Step 3: Implement mutation helpers**
+- [x] **Step 3: Implement mutation helpers**
 
 Add:
 
@@ -209,11 +209,11 @@ Use `copy.deepcopy()` before mutation. Raise stable `ValueError` reason codes:
 - `notebook_invalid_cell_type`
 - `notebook_duplicate_cell_id`
 
-- [ ] **Step 4: Run tests to verify green**
+- [x] **Step 4: Run tests to verify green**
 
 Run helper tests. Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/modules/implementations/notebook_files.py \
@@ -227,7 +227,7 @@ git commit -m "feat: add notebook cell edit helpers"
 - Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_module.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_notebook_tools.py`
 
-- [ ] **Step 1: Write failing tool metadata and validation tests**
+- [x] **Step 1: Write failing tool metadata and validation tests**
 
 Create tests that instantiate `FilesystemModule` and assert:
 
@@ -237,7 +237,7 @@ Create tests that instantiate `FilesystemModule` and assert:
 - `notebook.edit_cell` has `write_capable=True`, `path_scope_action="edit"`, and file-policy `edit`.
 - Validation rejects unknown args, non-string `path`, invalid modes, missing source for replace/insert, missing `insert_position` for insert, invalid booleans, and missing preimage for edit.
 
-- [ ] **Step 2: Run tests to verify red**
+- [x] **Step 2: Run tests to verify red**
 
 Run:
 
@@ -247,7 +247,7 @@ Run:
 
 Expected: fail because tools are not defined.
 
-- [ ] **Step 3: Add tool definitions and validators**
+- [x] **Step 3: Add tool definitions and validators**
 
 In `get_tools()`, add `notebook.read` near `fs.read` and `notebook.edit_cell` near `fs.edit`.
 
@@ -280,11 +280,11 @@ and:
 
 Extend `validate_tool_arguments()` with dedicated branches for both tools.
 
-- [ ] **Step 4: Run tests to verify green**
+- [x] **Step 4: Run tests to verify green**
 
 Run the notebook tool test file. Expected: metadata and validation tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_module.py \
@@ -298,7 +298,7 @@ git commit -m "feat: register notebook mcp tools"
 - Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_module.py`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_notebook_tools.py`
 
-- [ ] **Step 1: Write failing execution tests**
+- [x] **Step 1: Write failing execution tests**
 
 Use a fake workspace root resolver and temp `.ipynb` files. Assert:
 
@@ -312,7 +312,7 @@ Use a fake workspace root resolver and temp `.ipynb` files. Assert:
 - Invalid JSON raises `ValueError("notebook_invalid_json")`.
 - Code cell replacement clears outputs and execution count.
 
-- [ ] **Step 2: Run tests to verify red**
+- [x] **Step 2: Run tests to verify red**
 
 Run:
 
@@ -322,7 +322,7 @@ Run:
 
 Expected: execution tests fail because dispatch is missing.
 
-- [ ] **Step 3: Implement execution dispatch**
+- [x] **Step 3: Implement execution dispatch**
 
 Add branches in `execute_tool()`:
 
@@ -349,11 +349,11 @@ build_execution_eval_metadata(
 
 and similarly `notebook.edit_cell` / `notebook_edit`.
 
-- [ ] **Step 4: Run tests to verify green**
+- [x] **Step 4: Run tests to verify green**
 
 Run the notebook tool test file. Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_module.py \
@@ -368,7 +368,7 @@ git commit -m "feat: execute notebook mcp tools"
 - Modify: `apps/mcp-unified/src/mcp_unified/USER_GUIDE.md`
 - Test: `tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py`
 
-- [ ] **Step 1: Write failing preset tests**
+- [x] **Step 1: Write failing preset tests**
 
 Update tests to assert:
 
@@ -380,7 +380,7 @@ assert "notebook.edit_cell" in presets._FILES_WRITE_TOOLS
 
 Also assert legacy read/write lists are unchanged.
 
-- [ ] **Step 2: Run tests to verify red**
+- [x] **Step 2: Run tests to verify red**
 
 Run:
 
@@ -390,7 +390,7 @@ Run:
 
 Expected: fail because presets do not include notebook tools.
 
-- [ ] **Step 3: Update presets and user guide**
+- [x] **Step 3: Update presets and user guide**
 
 Add:
 
@@ -407,7 +407,7 @@ Update `USER_GUIDE.md` near the safe file read/patch/write section:
 - state that path grants do not grant the tool itself;
 - state code-cell source replacement clears stale outputs.
 
-- [ ] **Step 4: Run tests to verify green**
+- [x] **Step 4: Run tests to verify green**
 
 Run profile preset tests. Expected: pass.
 

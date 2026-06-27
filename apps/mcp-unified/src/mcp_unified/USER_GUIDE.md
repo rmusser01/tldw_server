@@ -176,6 +176,14 @@ content plus file size, newline style, SHA-256 when available, truncation state,
 and a short-lived read receipt for complete hashed reads when the filesystem
 module has a stable `read_receipt_secret` configured.
 
+For Jupyter notebooks, use `notebook.read` instead of `fs.read` when the caller
+needs notebook structure rather than raw JSON. It returns notebook metadata,
+cell ids, cell types, execution counts, output counts, byte size, SHA-256, and
+an optional read receipt. Source is omitted by default. Callers can pass
+`include_source=true` for bounded source previews, narrow the response with
+`cell_ids`, and tune `max_source_chars` or `max_total_source_chars` within the
+module limits.
+
 For existing-file edits, prefer `fs.patch` over whole-file replacement. It
 accepts unified diff text, derives affected paths before execution for path
 policy checks, validates context in memory, and only writes after preimage
@@ -187,6 +195,15 @@ and it also requires either `expected_sha256` or a valid `read_receipt` from
 `fs.write` `mode="create"` fails if the file already exists. `mode="replace"`
 requires either `expected_sha256` or a valid `read_receipt` from `fs.read`.
 
+For notebook edits, use `notebook.edit_cell` instead of `fs.write`. It performs
+one cell-scoped operation by stable cell id: `mode="replace"` updates the target
+cell source, `mode="insert"` adds a `code`, `markdown`, or `raw` cell before or
+after the target, and `mode="delete"` removes the target cell. Replacing a code
+cell clears stored outputs and execution count so stale execution artifacts are
+not preserved. Like file edits, notebook edits require either
+`expected_sha256` or a valid read receipt from `notebook.read`, and they can use
+`dry_run=true` before writing.
+
 This read-before-mutate flow protects against stale edits: if a file changes
 after the model read it, the expected hash or receipt no longer matches and the
 write is rejected instead of silently overwriting newer content.
@@ -194,11 +211,12 @@ write is rejected instead of silently overwriting newer content.
 For concurrent editing workflows, `fs.lock_acquire` and `fs.lock_release`
 provide advisory leases for workspace-relative file paths. A successful acquire
 returns a `lease_id` that callers can pass to `fs.edit` and `fs.write` as
-`lock_lease_id`, or to `fs.patch` as `lock_lease_id_by_path`. Leases do not
-replace hashes or read receipts; mutation tools still run their normal preimage
-checks. Operators can set `require_lock_for_mutation=true` on the filesystem
-module when they want mutations to fail with `lock_required` unless the caller
-supplies a matching active lease.
+`lock_lease_id`, to `notebook.edit_cell` as `lock_lease_id`, or to `fs.patch` as
+`lock_lease_id_by_path`. Leases do not replace hashes or read receipts;
+mutation tools still run their normal preimage checks. Operators can set
+`require_lock_for_mutation=true` on the filesystem module when they want
+mutations to fail with `lock_required` unless the caller supplies a matching
+active lease.
 
 The packaged lock manager supports `lock_manager_backend` values of `memory`,
 `in_memory`, or `sqlite`. The memory and in-memory backends are process-local
@@ -232,12 +250,19 @@ profile with `write` can use `fs.write` and patch-created files when policy also
 allows creation. Deny grants take precedence over broader allow grants, so a
 private subtree can remain read-only or blocked under a writable parent.
 
+Tool allow lists and path grants are separate checks. A profile must allow
+`notebook.read` or `notebook.edit_cell` as tools, and the target path must also
+have the matching `read` or `edit` path action. The shorthand mental model is
+`NotebookRead(path)` for a read action and `NotebookEdit(path)` for an edit
+action; these are policy concepts, not extra executable tool names.
+
 The file-policy action vocabulary is broader than the tools currently shipped.
 The executable filesystem actions today are:
 
 - `read`: inspect file content, directory listings, search results, and path
-  metadata.
-- `edit`: bounded existing-file edits through `fs.patch` or `fs.edit`.
+  metadata, including notebook structure through `notebook.read`.
+- `edit`: bounded existing-file edits through `fs.patch`, `fs.edit`, or
+  `notebook.edit_cell`.
 - `write`: deliberate whole-file create or replace through `fs.write`.
 - `lock`: acquire or release advisory path locks through `fs.lock_acquire` and
   `fs.lock_release`.
