@@ -43,6 +43,8 @@ Implement the first local-only CATS API fuzzing harness slice from the approved 
 2026-06-27: Starting subagent-driven execution from Docs/superpowers/plans/2026-06-27-cats-api-fuzzing-harness-implementation-plan.md in worktree codex/cats-api-fuzzing-harness.
 
 2026-06-27 Task 6: added the CATS fuzzing CLI/module entrypoint, focused CLI parser/orchestration tests, developer documentation, and Makefile cats-fuzz target. Initial red test run failed on missing Helper_Scripts.cats_fuzz.cli as expected; final focused pytest, Black check, Bandit on cli.py, and git diff --check passed.
+
+2026-06-27 Task 7 verification fix: added a regression for `cats --version` banner output before changing `_cats_version()` to prefer `CATS version ...` lines ahead of generic first-line fallback. Red run failed on the banner border being returned; green run passed focused CLI tests. Verification: focused pytest, Black check, Bandit on cli.py, and git diff --check passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

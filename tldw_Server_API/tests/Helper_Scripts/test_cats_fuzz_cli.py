@@ -292,6 +292,14 @@ def test_openapi_export_failure_writes_logs_and_stops_before_blocks(
 def test_cats_version_uses_first_output_line(monkeypatch: pytest.MonkeyPatch) -> None:
     from Helper_Scripts.cats_fuzz import cli
 
+    cats_banner_output = """# # # # # # # # # # # # # # # # # # # # # # # # # #
+#             _____   ___ _____ _____             #
+# # # # # # # # # # # # # # # # # # # # # # # # # #
+
+CATS version 13.8.0
+Built on: 2026-04-01 17:42:27 UTC
+"""
+
     def fake_run(
         command: list[str],
         *,
@@ -303,11 +311,11 @@ def test_cats_version_uses_first_output_line(monkeypatch: pytest.MonkeyPatch) ->
         assert check is False
         assert capture_output is True
         assert text is True
-        return subprocess.CompletedProcess(command, 0, stdout="cats 13.8.0\nextra\n", stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout=cats_banner_output, stderr="")
 
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
 
-    assert cli._cats_version("cats") == "cats 13.8.0"
+    assert cli._cats_version("cats") == "CATS version 13.8.0"
 
 
 @pytest.mark.unit

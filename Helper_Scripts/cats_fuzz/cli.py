@@ -55,6 +55,14 @@ def _first_output_line(value: str) -> str | None:
     return None
 
 
+def _cats_version_line(value: str) -> str | None:
+    for line in value.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("CATS version "):
+            return stripped
+    return None
+
+
 def _cats_version(cats_bin: str) -> str:
     try:
         # Fixed argv, shell=False; cats_bin selects the local CATS executable.
@@ -69,7 +77,13 @@ def _cats_version(cats_bin: str) -> str:
 
     if result.returncode != 0:
         return "unknown"
-    return _first_output_line(result.stdout) or _first_output_line(result.stderr) or "unknown"
+    return (
+        _cats_version_line(result.stdout)
+        or _cats_version_line(result.stderr)
+        or _first_output_line(result.stdout)
+        or _first_output_line(result.stderr)
+        or "unknown"
+    )
 
 
 def _first_runtime_block(selected_blocks: list[str]) -> str | None:
