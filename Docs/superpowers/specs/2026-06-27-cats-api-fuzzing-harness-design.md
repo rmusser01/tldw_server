@@ -124,6 +124,14 @@ webhook destinations in the environment. Examples include `OPENAI_API_KEY`,
 and webhook URLs. A deliberate override flag can be added later for controlled
 external-provider fuzzing, but the default behavior must be local-only.
 
+Credential scrubbing must account for the app configuration loader. The server
+loads `TLDW_ENV_FILE` and canonical repo `.env` files with `override=False`, so
+unsetting a key can allow a real value from `.env` to be loaded later. The
+runner should build an explicit child process environment that pre-sets known
+provider, webhook, and social integration variables to empty or inert sentinel
+values, points `TLDW_ENV_FILE` at a temporary minimal fuzzing env file, and
+verifies the effective child environment before starting uvicorn.
+
 ## CATS Invocation Shape
 
 Each block should resolve to a deterministic CATS command similar to:
@@ -140,10 +148,14 @@ cats \
   --connectionTimeout <seconds> \
   --readTimeout <seconds> \
   --writeTimeout <seconds> \
-  --reportFormat HTML_ONLY,JSON \
+  --reportFormat HTML_ONLY,JUNIT \
   --output <artifact-dir>/<block-name> \
   --path <comma-separated-path-allowlist>
 ```
+
+The compact JSON summary is owned by the runner. CATS 13.8.0 does not expose a
+JSON report format; supported report formats include `HTML_ONLY`, `HTML_JS`,
+`HTML_JS_CLUSTERS`, and `JUNIT`.
 
 The first implementation should prefer path allowlists because the current tag
 set is very large and tag cohesion is uneven. Tag-based blocks can be added
@@ -193,6 +205,9 @@ summary should include:
 - skipped paths and reasons.
 - request count, warnings, errors, and `5xx` count.
 - random seed and replay references where CATS provides them.
+- CATS exit code and failure class, separating API failures from CATS/tooling
+  failures.
+- masked command arguments plus stdout and stderr artifact paths.
 
 Failure triage should group results by `method + path + status + fuzzer`, not
 only by raw request count. This keeps broad blocks readable when many payloads
@@ -200,10 +215,14 @@ hit the same underlying issue.
 
 ## CI And Scheduling
 
-PR CI:
+PR CI after OpenAPI validation is clean:
 
 - `contract`
 - `public-read`
+
+Until the known vector store OpenAPI examples issue is fixed, `contract` should
+run only as an advisory local/manual check or use an explicit known-issues file
+that keeps the non-blocking failure visible.
 
 Nightly CI:
 
@@ -217,9 +236,9 @@ Manual or scheduled security sweeps:
 - `broad-nightly`
 - future `multi-user-auth`
 
-Nightly and manual runs should upload CATS HTML/JSON reports as artifacts.
-PR CI should keep reports small and avoid starting provider-backed or
-long-running workers.
+Nightly and manual runs should upload CATS HTML/JUnit reports plus the
+runner-owned summary JSON as artifacts. PR CI should keep reports small and
+avoid starting provider-backed or long-running workers.
 
 ## Known Issues
 
@@ -236,12 +255,18 @@ The first implementation should either fix those examples before enabling the
 `contract` gate or record the issue in a known-issues file so the gate remains
 transparent. The preferred path is to fix the OpenAPI examples as a small
 pre-harness cleanup task if the file is not owned by another active change.
+Until one of those paths is complete, `contract` must not be a blocking PR gate.
 
 ## Security And Safety
 
 Default fuzzing must be local-only. The runner should:
 
-- scrub sensitive environment variables before starting the server;
+- pre-set sensitive environment variables to empty or inert sentinel values
+  before starting the server so dotenv fallback files cannot reintroduce real
+  credentials;
+- set `TLDW_ENV_FILE` to a temporary minimal fuzzing env file;
+- verify the effective child process environment before importing or starting
+  the app;
 - reject runs with real credentials unless explicitly overridden;
 - default `allows_network` to false;
 - skip web scraping, research provider, social integration, webhook, and LLM
@@ -252,7 +277,8 @@ Default fuzzing must be local-only. The runner should:
 
 ## Rollout Plan
 
-1. Implement the block manifest and runner with `contract` and `public-read`.
+1. Fix or explicitly known-issue the vector store OpenAPI examples, then
+   implement the block manifest and runner with `contract` and `public-read`.
 2. Add isolated authenticated server startup and `auth-read`.
 3. Add seed helpers and `auth-crud-isolated` for one or two stable route
    families.
@@ -268,7 +294,9 @@ The design and implementation should be verified with:
 - `cats --version`.
 - `cats validate -c <generated-openapi.json>`.
 - `cats stats -c <generated-openapi.json>`.
-- CATS dry-run for each enabled block.
+- CATS dry-run for each enabled block where stable. If a CATS dry-run fails due
+  to a tool-level error, capture the exit code and stderr, then fall back to
+  command-construction tests plus a tiny live run against the isolated server.
 - One live `public-read` run against an isolated local server.
 - One live `auth-read` run after env scrubbing is implemented.
 - `python -m pytest` for runner/unit helpers when they exist.
@@ -278,8 +306,14 @@ The design and implementation should be verified with:
 ## Open Questions
 
 - Which CI workflow should eventually own nightly fuzzing artifacts.
-- Whether the runner should start uvicorn itself or require an existing server
-  for the first implementation slice.
 - Which CRUD route family should be the first seeded stateful block.
 - Whether to fix the vector store OpenAPI examples in the same PR as the first
   harness slice or as a separate cleanup PR.
+
+## Implementation Decision
+
+The first implementation slice should start uvicorn itself by default. This
+keeps credential isolation, temporary database paths, port allocation, and
+cleanup under the runner's control. A later `--server-url` mode can support
+manual runs against an already-started server, but it should be opt-in because
+the runner cannot fully verify an external server's environment.
