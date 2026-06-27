@@ -4,7 +4,7 @@ title: Fix PR 1982 current backend CI shard failures
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-27 17:31'
+updated_date: '2026-06-27 18:11'
 labels:
   - ci
   - pr-1982
@@ -46,6 +46,10 @@ Track the current PR #1982 CI failures after the full matrix appeared on head 93
 2026-06-27 PR #1982 head b3695d3a4f follow-up: after PR #2534 merged into dev, pre-commit failed on run 28294733263/job 83832583693 because Black reformatted tldw_Server_API/cli/wizard/cli.py around the new --api-key-env Typer option. Current check scan before push showed only this one failed check (pre-commit), with 11 pass, 33 pending, and 3 skipped. Applied Black to cli.py only. Verification: python -m black --check tldw_Server_API/cli/wizard/cli.py passed; python -m pre_commit run black --files tldw_Server_API/cli/wizard/cli.py passed; git diff --check passed.
 
 2026-06-27 Watchlists headless launch follow-up: current head 6ccc7340ca failed UI Watchlists Extension E2E run 28294893523/job 83833000391 after all 14 tests skipped. The preserved JSON report showed every skip came from launchWithExtensionOrSkip catching browserType.launchPersistentContext Timeout 90000ms while the workflow forced TLDW_E2E_EXTENSION_HEADLESS=0 under xvfb. Setup, extension build, Playwright Chromium install, backend start, and health check all succeeded; failure was specifically headed persistent-context launch. Removed the workflow's headed override so the helper uses its CI-headless default, and added a workflow contract assertion that Watchlists E2E must not set TLDW_E2E_EXTENSION_HEADLESS. Verification: workflow YAML parse passed; test_required_workflow_contracts.py::test_watchlists_extension_e2e_uses_playwright_chromium passed; Watchlists Playwright --list parsed all 14 tests; git diff --check passed. Current check scan before push showed only this one failed check, with the full matrix expanded at 56 pass, 710 pending, 3 skipped.
+
+2026-06-27 Watchlists E2E root-cause update: current head 59b4281962 failed because headless Chromium could start but could not load/open the extension page (no service worker and page.goto chrome-extension://.../options.html returned ERR_BLOCKED_BY_CLIENT in the saved report). Comparing the passing Extension Research Workspace Parity workflow on the same head showed it uses headed Chromium plus launchWithBuiltExtensionOrSkip, whose built-extension launcher seeds storage before page load and does not wait for backend connection during launch. Watchlists still uses launchWithExtensionOrSkip, which waits for connected/offline state inside launch and converts launch/connection timeouts into skips, causing the strict no-skip job to burn all 14 tests and fail with little detail. Next fix: move Watchlists to the built-extension launcher with allowOffline, restore headed CI mode, and contract-test the workflow/spec wiring.
+
+2026-06-27 Watchlists built-launcher fix applied: changed the Watchlists spec from launchWithExtensionOrSkip plus explicit .output/chrome-mv3 path to launchWithBuiltExtensionOrSkip via a local allowOffline wrapper, and restored the workflow to headed Playwright Chromium with TLDW_E2E_EXTENSION_TARGET_WAIT_MS=5000. Added CI contract coverage for the headed env, target wait, and built-extension launcher usage. Verification before push: focused pytest contract checks passed (2 passed); workflow YAML parsed successfully; bun run compile passed in apps/extension; bun run test:e2e:watchlists -- --list found all 14 tests; git diff --check passed; Bandit with B101 excluded found no non-assert issues in the touched pytest contract file. Raw Bandit still reports existing pytest assert_used findings across the contract file. Live PR check immediately before push showed one failed check, UI Watchlists Extension E2E / Watchlists Extension E2E (No Skips), with 125 passed, 640 pending, and 4 skipped.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

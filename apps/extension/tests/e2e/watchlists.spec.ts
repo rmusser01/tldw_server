@@ -1,6 +1,5 @@
 import { test, expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
-import { launchWithExtensionOrSkip } from "./utils/real-server"
-import path from 'path'
+import { launchWithBuiltExtensionOrSkip } from "./utils/real-server"
 
 const serverUrl = process.env.TLDW_E2E_SERVER_URL || 'http://127.0.0.1:8000'
 const apiKey = process.env.TLDW_E2E_API_KEY || ''
@@ -15,6 +14,15 @@ const seededWatchlistsConfig = {
 }
 
 const WATCHLISTS_E2E_TEST_TIMEOUT_MS = 180_000
+
+const launchWatchlistsExtensionOrSkip = (
+  testArg: Parameters<typeof launchWithBuiltExtensionOrSkip>[0],
+  options: Parameters<typeof launchWithBuiltExtensionOrSkip>[1] = {}
+) =>
+  launchWithBuiltExtensionOrSkip(testArg, {
+    ...(options || {}),
+    allowOffline: true
+  })
 
 const installWatchlistsRuntimeBridge = async (context: BrowserContext) => {
   await context.addInitScript(() => {
@@ -345,8 +353,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('loads tabs and key flows', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
@@ -784,8 +791,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('activity tab cancel action updates run status to cancelled', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
@@ -922,8 +928,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('activity run-details remediation can retry a failed run', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
@@ -1116,8 +1121,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('overview health and failed-run click-through', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
@@ -1294,8 +1298,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('overview quick setup callout drives first tab transition', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
@@ -1378,8 +1381,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('guided quick setup creates feed and monitor in three steps', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
@@ -1579,8 +1581,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('creates a monitor without opening advanced sections', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
@@ -1754,8 +1755,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('articles batch triage controls handle 50+ items efficiently', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig,
       seedLocalStorage: {
         'watchlists:items:page-size': '50',
@@ -2005,8 +2005,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('articles keyboard shortcuts support mouse-free triage flow', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
@@ -2227,8 +2226,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('feed delete warns when active monitors depend on the feed', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
@@ -2364,8 +2362,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('feeds bulk disable shows impact summary before commit', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
@@ -2503,8 +2500,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('feeds OPML import supports retry failed only recovery flow', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
@@ -2677,8 +2673,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('watchlists help links and guided-tour resume are discoverable', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
@@ -2850,8 +2845,7 @@ test.describe('Watchlists playground smoke', () => {
 
   test('strict demo readiness route renders Activity and Reports without crashing on output errors', async () => {
     test.setTimeout(WATCHLISTS_E2E_TEST_TIMEOUT_MS)
-    const extPath = path.resolve('.output/chrome-mv3')
-    const { context, page: basePage, optionsUrl } = await launchWithExtensionOrSkip(test, extPath, {
+    const { context, page: basePage, optionsUrl } = await launchWatchlistsExtensionOrSkip(test, {
       seedConfig: seededWatchlistsConfig
     })
     await installWatchlistsRuntimeBridge(context)
