@@ -337,7 +337,9 @@ describe("ShareDialog", () => {
       onOk?: (close?: () => void) => Promise<void>
     }
     const closeShareConfirm = vi.fn()
-    await revokeShareConfig.onOk?.(closeShareConfirm)
+    await expect(revokeShareConfig.onOk?.(closeShareConfirm)).rejects.toThrow(
+      "Team revoke failed"
+    )
 
     expect(mockMessage.error).toHaveBeenCalledWith("Team revoke failed")
     expect(closeShareConfirm).not.toHaveBeenCalled()
@@ -349,7 +351,9 @@ describe("ShareDialog", () => {
       onOk?: (close?: () => void) => Promise<void>
     }
     const closeTokenConfirm = vi.fn()
-    await revokeTokenConfig.onOk?.(closeTokenConfirm)
+    await expect(revokeTokenConfig.onOk?.(closeTokenConfirm)).rejects.toThrow(
+      "Token revoke failed"
+    )
 
     expect(mockMessage.error).toHaveBeenCalledWith("Token revoke failed")
     expect(closeTokenConfirm).not.toHaveBeenCalled()

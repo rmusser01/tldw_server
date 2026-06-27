@@ -2,7 +2,6 @@
 import asyncio
 import json
 import os
-import re
 import time
 from functools import partial
 from typing import Any, Optional
@@ -38,6 +37,11 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     PROVIDER_CAPABILITIES,
     provider_requires_api_key,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
+    configured_endpoint_probe_enabled as _configured_endpoint_probe_enabled,
+    normalize_catalog_provider_for_chat as _normalize_catalog_provider_for_chat,
+    provider_readiness as _provider_readiness,
+)
 from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
     discover_openrouter_models as _discover_openrouter_models_shared,
 )
@@ -51,7 +55,6 @@ from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     resolve_tokenizer_metadata,
     strict_token_counting_enabled as _strict_token_counting_enabled_shared,
 )
-from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
 from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 
 #######################################################################################################################
@@ -1177,179 +1180,6 @@ def _truthy(value: Any) -> bool:
     return False
 
 
-_CHAT_PROVIDER_ALIASES = {
-    "custom_openai_api": "custom-openai-api",
-    "customopenaiapi": "custom-openai-api",
-    "custom_openai_api_2": "custom-openai-api-2",
-    "custom_openai_api2": "custom-openai-api-2",
-    "customopenaiapi2": "custom-openai-api-2",
-    "llama": "llama.cpp",
-    "llamacpp": "llama.cpp",
-    "llama_cpp": "llama.cpp",
-    "llama-cpp": "llama.cpp",
-    "tabby": "tabbyapi",
-}
-_UNAVAILABLE_PROVIDER_HEALTH_STATES = {
-    "circuit_open",
-    "disabled",
-    "failed",
-    "open",
-    "unavailable",
-    "unhealthy",
-}
-_UNAVAILABLE_PROVIDER_AVAILABILITY_STATES = {
-    "disabled",
-    "failed",
-    "not-configured",
-    "unavailable",
-}
-
-
-def _normalize_catalog_provider_for_chat(provider_name: str) -> str:
-    raw = (provider_name or "").strip().lower()
-    compact = raw.replace(".", "_").replace("-", "_")
-    alias = _CHAT_PROVIDER_ALIASES.get(raw) or _CHAT_PROVIDER_ALIASES.get(compact)
-    if alias:
-        return alias
-
-    match = re.fullmatch(r"custom_openai(?:_api)?_?(\d{1,2})", compact)
-    if match:
-        return f"custom-openai-api-{match.group(1)}"
-    return raw
-
-
-def _custom_openai_endpoint_requires_credentials(
-    chat_provider: str,
-    endpoint_url: str | None,
-    api_key_value: str | None,
-) -> bool:
-    if api_key_value:
-        return False
-    if not chat_provider.startswith("custom-openai-api"):
-        return False
-    try:
-        host = (urlparse((endpoint_url or "").strip()).hostname or "").lower()
-    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
-        return False
-    return host == "api.openai.com" or host.endswith(".api.openai.com")
-
-
-def _configured_endpoint_probe_enabled() -> bool:
-    return _truthy(os.getenv("LLM_PROVIDER_READINESS_PROBE_ENDPOINTS", "1"))
-
-
-def _provider_readiness(
-    *,
-    provider_name: str,
-    provider_info: dict[str, Any],
-    is_configured: bool,
-    endpoint_url: str | None,
-    api_key_value: str | None,
-    model_discovery: str | None,
-    current_availability: Any,
-    health_entry: Any,
-) -> dict[str, Any]:
-    chat_provider = _normalize_catalog_provider_for_chat(provider_name)
-    provider_enabled = bool(is_configured)
-    availability = (
-        str(current_availability).strip().lower()
-        if isinstance(current_availability, str) and current_availability.strip()
-        else ("enabled" if is_configured else "not-configured")
-    )
-    reason_code: str | None = None
-    message: str | None = None
-
-    if not is_configured:
-        provider_enabled = False
-        availability = "not-configured"
-        reason_code = "provider_not_configured"
-        message = "Provider is not configured."
-    elif chat_provider not in ALL_SUPPORTED_PROVIDER_NAMES_LIST:
-        provider_enabled = False
-        availability = "unavailable"
-        reason_code = "unsupported_chat_provider"
-        message = (
-            f"Provider '{provider_name}' is not supported by chat completions. "
-            "Choose a provider that can be used with /api/v1/chat/completions."
-        )
-    elif _custom_openai_endpoint_requires_credentials(
-        chat_provider,
-        endpoint_url,
-        api_key_value,
-    ):
-        provider_enabled = False
-        availability = "not-configured"
-        reason_code = "missing_credentials"
-        message = (
-            f"{provider_info.get('display_name') or provider_name} requires credentials "
-            "for this endpoint before chat generation can run."
-        )
-    elif endpoint_url:
-        try:
-            policy = evaluate_url_policy(endpoint_url)
-        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as exc:
-            provider_enabled = False
-            availability = "unavailable"
-            reason_code = "egress_policy_unavailable"
-            message = f"Provider endpoint egress policy could not be evaluated: {exc}"
-        else:
-            if not policy.allowed:
-                provider_enabled = False
-                availability = "unavailable"
-                reason_code = "egress_blocked"
-                message = (
-                    "Provider endpoint is blocked by the server egress policy"
-                    + (f": {policy.reason}" if policy.reason else ".")
-                )
-
-    if provider_enabled and isinstance(health_entry, dict):
-        health_status = str(health_entry.get("status") or "").strip().lower()
-        if health_status in _UNAVAILABLE_PROVIDER_HEALTH_STATES:
-            provider_enabled = False
-            availability = "unavailable"
-            reason_code = "provider_health_unavailable"
-            message = (
-                f"Provider health is {health_status}. Check provider settings "
-                "before generating."
-            )
-
-    if (
-        provider_enabled
-        and provider_info.get("type") == "local"
-        and endpoint_url
-        and model_discovery
-        and _configured_endpoint_probe_enabled()
-    ):
-        discovered_models = discover_models_from_endpoint(
-            provider_name,
-            endpoint_url,
-            model_discovery,
-            api_key_value,
-        )
-        if not discovered_models:
-            provider_enabled = False
-            availability = "unavailable"
-            reason_code = "endpoint_unreachable"
-            message = (
-                f"{provider_info.get('display_name') or provider_name} endpoint "
-                "could not be reached or did not return models."
-            )
-
-    if provider_enabled and availability in _UNAVAILABLE_PROVIDER_AVAILABILITY_STATES:
-        provider_enabled = False
-        if not reason_code:
-            reason_code = "provider_unavailable"
-            message = "Provider is unavailable."
-
-    return {
-        "availability": availability,
-        "provider_enabled": provider_enabled,
-        "readiness_reason_code": reason_code,
-        "readiness_message": message,
-        "chat_provider": chat_provider,
-    }
-
-
 def _resolve_model_tokenizer_support(
     provider_name: str,
     model_name: str,
@@ -1759,6 +1589,8 @@ def get_configured_providers(
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             health_report = {}
         registry_capability_envelopes = _llm_registry_capability_envelopes()
+        supported_chat_providers = set(ALL_SUPPORTED_PROVIDER_NAMES_LIST)
+        endpoint_probe_enabled = _configured_endpoint_probe_enabled()
 
         # Process each provider
         for provider_name, provider_info in provider_mappings.items():
@@ -1838,6 +1670,9 @@ def get_configured_providers(
                     else None
                 ),
                 health_entry=health_report.get(provider_name),
+                supported_chat_providers=supported_chat_providers,
+                discover_models_from_endpoint=discover_models_from_endpoint,
+                endpoint_probe_enabled=endpoint_probe_enabled,
             )
 
             # Augment or seed with models from the pricing catalog for commercial providers.

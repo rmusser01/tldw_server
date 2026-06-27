@@ -1462,8 +1462,51 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(mockCreateChatCompletion).not.toHaveBeenCalled()
   })
 
+  it("does not show catalog-missing model warnings while chat models are loading", () => {
+    messageOptionStoreState.selectedModel = "ollama/gemma3:1b"
+    mockGetChatModels.mockImplementation(() => new Promise(() => {}))
+
+    renderStudioPane()
+
+    expect(
+      screen.queryByText(/not available in the current chat model catalog/i)
+    ).not.toBeInTheDocument()
+  })
+
   it("keeps configured provider-qualified model selections available for summary generation", async () => {
     messageOptionStoreState.selectedModel = "ollama/gemma3:1b"
+    mockGetChatModels.mockResolvedValue([
+      {
+        id: "ollama/gemma3:1b",
+        name: "gemma3:1b",
+        provider: "ollama",
+        type: "chat"
+      }
+    ])
+
+    renderStudioPane()
+
+    await waitFor(() => {
+      expect(mockGetChatModels).toHaveBeenCalled()
+    })
+
+    const summaryButton = screen.getByRole("button", { name: "Summary" })
+    expect(summaryButton).not.toBeDisabled()
+
+    fireEvent.click(summaryButton)
+
+    await waitFor(() => {
+      expect(mockCreateChatCompletion).toHaveBeenCalled()
+    })
+
+    expect(mockCreateChatCompletion.mock.calls[0]?.[0]).toMatchObject({
+      model: "ollama/gemma3:1b",
+      api_provider: "ollama"
+    })
+  })
+
+  it("normalizes configured tldw-prefixed model selections before summary generation", async () => {
+    messageOptionStoreState.selectedModel = "tldw:ollama/gemma3:1b"
     mockGetChatModels.mockResolvedValue([
       {
         id: "ollama/gemma3:1b",

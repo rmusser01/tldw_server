@@ -347,6 +347,7 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
           message.error(
             err instanceof Error ? err.message : "Failed to revoke share"
           )
+          throw err
         }
       }
     })
@@ -368,6 +369,7 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
           message.error(
             err instanceof Error ? err.message : "Failed to revoke share link"
           )
+          throw err
         }
       }
     })

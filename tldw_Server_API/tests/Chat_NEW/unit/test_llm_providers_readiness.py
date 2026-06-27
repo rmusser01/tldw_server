@@ -1,3 +1,5 @@
+"""Tests for LLM provider readiness metadata surfaced to clients."""
+
 from __future__ import annotations
 
 from configparser import ConfigParser
@@ -11,11 +13,15 @@ from tldw_Server_API.app.api.v1.endpoints import llm_providers
 
 
 class _EmptyProviderManager:
+    """Provider manager stub that reports no provider health state."""
+
     def get_health_report(self) -> dict[str, object]:
+        """Return an empty health report for readiness tests."""
         return {}
 
 
 def _config(sections: dict[str, dict[str, str]]) -> ConfigParser:
+    """Build a minimal ConfigParser from section dictionaries."""
     parser = ConfigParser()
     for section, values in sections.items():
         parser.add_section(section)
@@ -25,6 +31,7 @@ def _config(sections: dict[str, dict[str, str]]) -> ConfigParser:
 
 
 def _client_for_config(monkeypatch: pytest.MonkeyPatch, parser: ConfigParser) -> TestClient:
+    """Create a FastAPI test client with provider dependencies patched."""
     async def _configured_providers(*args, **kwargs):
         return await llm_providers.get_configured_providers_async(*args, **kwargs)
 
@@ -43,6 +50,7 @@ def _client_for_config(monkeypatch: pytest.MonkeyPatch, parser: ConfigParser) ->
 
 
 def _provider(data: dict[str, object], name: str) -> dict[str, object]:
+    """Return one provider entry from a providers response payload."""
     providers = data.get("providers")
     assert isinstance(providers, list)
     found = next((item for item in providers if item.get("name") == name), None)
@@ -51,6 +59,7 @@ def _provider(data: dict[str, object], name: str) -> dict[str, object]:
 
 
 def _model(data: dict[str, object], provider: str, name: str) -> dict[str, object]:
+    """Return one model entry from a model metadata response payload."""
     models = data.get("models")
     assert isinstance(models, list)
     found = next(
@@ -67,7 +76,10 @@ def _model(data: dict[str, object], provider: str, name: str) -> dict[str, objec
 
 
 @pytest.mark.unit
-def test_llm_provider_readiness_marks_egress_blocked_ollama_unavailable(monkeypatch):
+def test_llm_provider_readiness_marks_egress_blocked_ollama_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Egress-blocked local endpoints are reported as unavailable."""
     monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443")
     parser = _config(
         {
@@ -98,7 +110,11 @@ def test_llm_provider_readiness_marks_egress_blocked_ollama_unavailable(monkeypa
 
 
 @pytest.mark.unit
-def test_llm_provider_readiness_marks_unreachable_local_endpoint_unavailable(monkeypatch):
+def test_llm_provider_readiness_marks_unreachable_local_endpoint_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opt-in endpoint probes mark unreachable local endpoints unavailable."""
+    monkeypatch.setenv("LLM_PROVIDER_READINESS_PROBE_ENDPOINTS", "1")
     parser = _config(
         {
             "Local-API": {
@@ -125,7 +141,10 @@ def test_llm_provider_readiness_marks_unreachable_local_endpoint_unavailable(mon
 
 
 @pytest.mark.unit
-def test_llm_provider_readiness_marks_external_custom_openai_without_key_unavailable(monkeypatch):
+def test_llm_provider_readiness_marks_external_custom_openai_without_key_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """External custom OpenAI-compatible endpoints require credentials."""
     parser = _config(
         {
             "API": {
@@ -148,7 +167,10 @@ def test_llm_provider_readiness_marks_external_custom_openai_without_key_unavail
 
 
 @pytest.mark.unit
-def test_llm_provider_readiness_marks_unsupported_catalog_alias_unavailable(monkeypatch):
+def test_llm_provider_readiness_marks_unsupported_catalog_alias_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catalog providers unsupported by chat completions are unavailable."""
     parser = _config(
         {
             "API": {},

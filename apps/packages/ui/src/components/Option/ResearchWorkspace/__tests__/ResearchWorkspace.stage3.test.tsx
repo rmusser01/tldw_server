@@ -250,6 +250,7 @@ if (!(globalThis as any).ResizeObserver) {
 
 const ensureLocalStorage = () => {
   if (window.localStorage && typeof window.localStorage.clear === "function") {
+    window.localStorage.clear()
     return
   }
 
@@ -400,7 +401,6 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     ensureLocalStorage()
-    window.localStorage.clear()
     ;(tldwClient as unknown as { getWorkspaceContext?: unknown }).getWorkspaceContext =
       undefined
     mockRunResearchWorkspaceMigration.mockResolvedValue({

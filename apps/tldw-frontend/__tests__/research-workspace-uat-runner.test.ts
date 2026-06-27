@@ -1,12 +1,28 @@
-import { describe, expect, it } from "vitest"
+import { EventEmitter } from "node:events"
+import os from "node:os"
+import path from "node:path"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+const mocks = vi.hoisted(() => ({
+  spawn: vi.fn()
+}))
+
+vi.mock("node:child_process", () => ({
+  spawn: mocks.spawn
+}))
 
 import {
   buildRunnerConfig,
   classifyPlaywrightRun,
   createEvidence,
+  runPlaywright,
 } from "../scripts/research-workspace-uat-runner.mjs"
 
 describe("research-workspace-uat-runner", () => {
+  beforeEach(() => {
+    mocks.spawn.mockReset()
+  })
+
   it("defaults to localhost-safe startup and the focused Research Workspace specs", () => {
     const config = buildRunnerConfig({ argv: [], env: {} })
 
@@ -118,5 +134,37 @@ describe("research-workspace-uat-runner", () => {
     expect(evidence.failureScope).toBe("environment")
     expect(evidence.requiredSetup).toContain("Local network permission")
     expect(evidence.fallback).toContain("in-app browser/CDP")
+    expect(evidence.evidencePath).toContain(
+      "test-results/research-workspace-final-uat-evidence.json"
+    )
+  })
+
+  it("resolves with captured stderr when Playwright cannot be spawned", async () => {
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter
+      stderr: EventEmitter
+    }
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    mocks.spawn.mockReturnValue(child)
+
+    const tempDir = path.join(os.tmpdir(), `rw-uat-${Date.now()}`)
+    const config = buildRunnerConfig({
+      argv: [
+        "--report",
+        path.join(tempDir, "report.json"),
+        "--evidence",
+        path.join(tempDir, "evidence.json")
+      ],
+      env: {}
+    })
+
+    const resultPromise = runPlaywright(config)
+    child.emit("error", new Error("spawn bunx ENOENT"))
+
+    await expect(resultPromise).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("spawn bunx ENOENT")
+    })
   })
 })

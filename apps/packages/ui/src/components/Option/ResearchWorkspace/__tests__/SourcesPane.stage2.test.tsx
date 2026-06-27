@@ -117,35 +117,9 @@ vi.mock("../undo-manager", () => ({
   undoWorkspaceAction: mockUndoWorkspaceAction
 }))
 
-const ensureLocalStorage = () => {
-  if (window.localStorage && typeof window.localStorage.clear === "function") {
-    return
-  }
-
-  const storage = new Map<string, string>()
-  Object.defineProperty(window, "localStorage", {
-    configurable: true,
-    value: {
-      clear: () => storage.clear(),
-      getItem: (key: string) => storage.get(key) ?? null,
-      key: (index: number) => Array.from(storage.keys())[index] ?? null,
-      removeItem: (key: string) => {
-        storage.delete(key)
-      },
-      setItem: (key: string, value: string) => {
-        storage.set(key, String(value))
-      },
-      get length() {
-        return storage.size
-      }
-    }
-  })
-}
-
 describe("SourcesPane Stage 2 source highlighting", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    ensureLocalStorage()
     window.localStorage.clear()
     mockGetWorkspaceSourcePreview.mockResolvedValue({
       workspace_id: "workspace-1",

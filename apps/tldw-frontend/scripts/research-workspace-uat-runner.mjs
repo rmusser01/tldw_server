@@ -34,6 +34,9 @@ const readJsonIfPresent = (filePath) => {
   return JSON.parse(fs.readFileSync(filePath, "utf8"))
 }
 
+const resolveOutputPath = (filePath) =>
+  path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath)
+
 const splitList = (value) =>
   String(value || "")
     .split(",")
@@ -272,7 +275,8 @@ export const createEvidence = ({
   playwrightExitCode: exitCode,
   productPassed: classification.status === "passed",
   reasons: classification.reasons,
-  reportPath: config.reportPath,
+  evidencePath: resolveOutputPath(config.evidencePath),
+  reportPath: resolveOutputPath(config.reportPath),
   requiredSetup: [
     "Local network permission",
     "Local network permission for 127.0.0.1 WebUI/backend access",
@@ -312,10 +316,12 @@ Environment:
 `)
 }
 
-const runPlaywright = (config) =>
+export const runPlaywright = (config) =>
   new Promise((resolve) => {
-    const reportDir = path.dirname(config.reportPath)
-    const evidenceDir = path.dirname(config.evidencePath)
+    const reportPath = resolveOutputPath(config.reportPath)
+    const evidencePath = resolveOutputPath(config.evidencePath)
+    const reportDir = path.dirname(reportPath)
+    const evidenceDir = path.dirname(evidencePath)
     fs.mkdirSync(reportDir, { recursive: true })
     fs.mkdirSync(evidenceDir, { recursive: true })
 
@@ -326,7 +332,7 @@ const runPlaywright = (config) =>
       env: {
         ...process.env,
         NEXT_PUBLIC_API_URL: config.apiUrl,
-        PLAYWRIGHT_JSON_OUTPUT_NAME: config.reportPath,
+        PLAYWRIGHT_JSON_OUTPUT_NAME: reportPath,
         TLDW_E2E_SERVER_URL: config.apiUrl,
         TLDW_WEB_AUTOSTART: config.shouldAutostart,
         TLDW_WEB_CMD: config.webCommand,
@@ -337,19 +343,34 @@ const runPlaywright = (config) =>
 
     let stdout = ""
     let stderr = ""
+    let settled = false
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      resolve(result)
+    }
 
-    child.stdout.on("data", (chunk) => {
+    child.stdout?.on("data", (chunk) => {
       const text = String(chunk)
       stdout += text
       process.stdout.write(text)
     })
-    child.stderr.on("data", (chunk) => {
+    child.stderr?.on("data", (chunk) => {
       const text = String(chunk)
       stderr += text
       process.stderr.write(text)
     })
+    child.on("error", (error) => {
+      const message = error instanceof Error ? error.message : String(error)
+      stderr += `\n[research-workspace-uat] Failed to start Playwright: ${message}\n`
+      finish({
+        exitCode: 1,
+        stderr,
+        stdout,
+      })
+    })
     child.on("close", (code) => {
-      resolve({
+      finish({
         exitCode: typeof code === "number" ? code : 1,
         stderr,
         stdout,
@@ -367,9 +388,11 @@ export const main = async ({ argv = process.argv.slice(2), env = process.env } =
   const startedAt = new Date().toISOString()
   const result = await runPlaywright(config)
   const finishedAt = new Date().toISOString()
+  const reportPath = resolveOutputPath(config.reportPath)
+  const evidencePath = resolveOutputPath(config.evidencePath)
   let report = null
   try {
-    report = readJsonIfPresent(config.reportPath)
+    report = readJsonIfPresent(reportPath)
   } catch (error) {
     result.stderr += `\n[research-workspace-uat] Unable to parse JSON report: ${
       error instanceof Error ? error.message : String(error)
@@ -390,10 +413,10 @@ export const main = async ({ argv = process.argv.slice(2), env = process.env } =
     report,
     startedAt,
   })
-  fs.writeFileSync(config.evidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
+  fs.writeFileSync(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`)
 
   console.log(
-    `[research-workspace-uat] status=${classification.status} scope=${classification.failureScope} reasons=${classification.reasons.join(",") || "none"} evidence=${config.evidencePath}`
+    `[research-workspace-uat] status=${classification.status} scope=${classification.failureScope} reasons=${classification.reasons.join(",") || "none"} evidence=${evidencePath}`
   )
 
   if (classification.status === "passed") return 0

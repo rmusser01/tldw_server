@@ -207,6 +207,18 @@ const collectResearchWorkspaceLegacyLocalStorageKeys = (): string[] => {
   return keys.sort()
 }
 
+const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName.toLowerCase()
+  return (
+    tag === "input" ||
+    tag === "textarea" ||
+    tag === "select" ||
+    target.isContentEditable ||
+    Boolean(target.closest("[contenteditable='true']"))
+  )
+}
+
 const jsonValueContainsOffloadPointer = (
   value: unknown,
   offloadType: string
@@ -2712,6 +2724,11 @@ const ResearchWorkspaceBody: React.FC = () => {
     const handleKeyboardShortcut = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
       const hasPrimaryModifier = event.metaKey || event.ctrlKey
+      const editableTarget = isEditableKeyboardTarget(event.target)
+
+      if (editableTarget) {
+        return
+      }
 
       if (!event.altKey && hasPrimaryModifier && !event.shiftKey && key === "k") {
         event.preventDefault()
@@ -2800,16 +2817,6 @@ const ResearchWorkspaceBody: React.FC = () => {
         !hasPrimaryModifier &&
         !event.altKey
       ) {
-        const target = event.target as HTMLElement | null
-        const tag = target?.tagName?.toLowerCase()
-        if (
-          tag === "input" ||
-          tag === "textarea" ||
-          tag === "select" ||
-          target?.isContentEditable
-        ) {
-          return
-        }
         event.preventDefault()
         setShowShortcutsModal(true)
       }

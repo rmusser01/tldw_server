@@ -78,6 +78,15 @@ const TEXT_FAILURE_SENTINELS: Partial<Record<ArtifactType, string[]>> = {
   data_table: ["Data table generation failed"]
 }
 
+const normalizeStudioChatModelId = (value: unknown): string => {
+  if (typeof value !== "string") return ""
+  const trimmed = value.trim()
+  if (trimmed.toLowerCase().startsWith("tldw:")) {
+    return trimmed.slice(5).trim()
+  }
+  return trimmed
+}
+
 const KNOWN_ERROR_RESPONSE_TEXTS = new Set([
   "sorry, i encountered an error. please try again.",
   "i'm sorry, i encountered an error processing your request.",
@@ -2407,21 +2416,17 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
   }, [])
 
   useEffect(() => {
-    const selectedModelId =
-      typeof selectedModel === "string" && selectedModel.trim().length > 0
-        ? selectedModel.trim()
-        : ""
+    const selectedModelRaw =
+      typeof selectedModel === "string" ? selectedModel.trim() : ""
+    const selectedModelId = normalizeStudioChatModelId(selectedModelRaw)
     if (!selectedModelId) {
       setSelectedUnavailableModel(null)
       return
     }
 
     const selectedMatchesSelectableModel = chatModels.some((model) => {
-      const modelId =
-        typeof model.id === "string" && model.id.trim().length > 0
-          ? model.id.trim()
-          : ""
-      return modelId === selectedModelId || `tldw:${modelId}` === selectedModelId
+      const modelId = normalizeStudioChatModelId(model.id)
+      return modelId.length > 0 && modelId === selectedModelId
     })
     if (selectedMatchesSelectableModel) {
       setSelectedUnavailableModel(null)
@@ -2442,11 +2447,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
     }
 
     let cancelled = false
-    const candidateIds = [selectedModelId]
-    if (selectedModelId.toLowerCase().startsWith("tldw:")) {
-      const unprefixed = selectedModelId.slice(5).trim()
-      if (unprefixed) candidateIds.push(unprefixed)
-    }
+    const candidateIds = Array.from(
+      new Set([selectedModelRaw, selectedModelId].filter(Boolean))
+    )
 
     void (async () => {
       for (const candidateId of candidateIds) {
@@ -2544,10 +2547,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
         : undefined
 
     const pickRuntime = (models: ModelInfo[]) => {
-      const selectedModelId =
-        typeof selectedModel === "string" && selectedModel.trim().length > 0
-          ? selectedModel.trim()
-          : undefined
+      const selectedModelId = normalizeStudioChatModelId(selectedModel) || undefined
       const providerFiltered =
         normalizedApiProvider === "__auto__"
           ? models
@@ -2559,7 +2559,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       if (selectedModelId) {
         const matchedModel = models.find(
           (model) =>
-            typeof model.id === "string" && model.id.trim() === selectedModelId
+            typeof model.id === "string" &&
+            normalizeStudioChatModelId(model.id) === selectedModelId
         )
         return {
           model: selectedModelId,

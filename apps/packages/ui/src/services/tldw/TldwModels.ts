@@ -442,6 +442,9 @@ export class TldwModelsService {
       description: tldwModel.description,
       modalities: tldwModel.modalities,
       isConfigured: toOptionalBoolean(tldwModel.is_configured),
+      providerIsConfigured: toOptionalBoolean(
+        rawModel.provider_is_configured ?? rawModel.providerIsConfigured
+      ),
       providerEnabled: toOptionalBoolean(tldwModel.provider_enabled),
       availability:
         typeof tldwModel.availability === "string"
@@ -462,6 +465,7 @@ export class TldwModelsService {
   private isSelectableChatModel(model: ModelInfo): boolean {
     if (model.type !== "chat") return false
     if (model.isConfigured === false) return false
+    if (model.providerIsConfigured === false) return false
     if (model.providerEnabled === false) return false
     const availability = model.availability?.trim().toLowerCase()
     if (

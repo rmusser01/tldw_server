@@ -209,6 +209,24 @@ describe("ResearchWorkspace keyboard shortcuts modal", () => {
     expect(screen.queryByText("Keyboard Shortcuts")).not.toBeInTheDocument()
   })
 
+  it("does not open global search when the primary search shortcut is pressed in an input", () => {
+    render(
+      <>
+        <input data-testid="external-input" />
+        <ResearchWorkspace />
+      </>
+    )
+
+    const input = screen.getByTestId("external-input")
+    input.focus()
+    fireEvent.keyDown(input, { key: "k", ctrlKey: true })
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(
+      screen.queryByPlaceholderText("Search sources, chat, and notes...")
+    ).not.toBeInTheDocument()
+  })
+
   it("shows all expected keyboard shortcuts in the modal", async () => {
     render(<ResearchWorkspace />)
 

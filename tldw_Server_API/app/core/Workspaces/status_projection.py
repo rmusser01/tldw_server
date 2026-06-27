@@ -191,6 +191,9 @@ def _has_retrieval_capable_selected_sources(status_projection: dict[str, Any]) -
         )
 
     summary = dict(status_projection.get("summary") or {})
+    # Summary-only payloads cannot express the text_extracted/FTS/tool gates.
+    # Treat partial queryability as a conservative fallback only when per-source
+    # records are unavailable.
     return (
         int(summary.get("queryable") or 0) > 0
         or int(summary.get("partially_queryable") or 0) > 0
@@ -388,6 +391,7 @@ def _empty_readiness() -> dict[str, bool]:
 
 
 def _supports_text_search(status: dict[str, Any]) -> bool:
+    """Return whether a partial source still has enough text readiness for FTS."""
     readiness = status.get("readiness") or {}
     return (
         str(status.get("state") or "").strip().lower() == "partially_queryable"
@@ -403,6 +407,7 @@ def _next_action_for_status(
     reason: str,
     readiness: dict[str, bool],
 ) -> str:
+    """Map source state and readiness into the next user-facing recovery action."""
     if state == "queryable":
         return "ask_grounded_questions"
     if state == "partially_queryable":
@@ -433,6 +438,7 @@ def _next_action_for_status(
 
 
 def _retry_eligible_for_status(*, state: str, reason: str) -> bool:
+    """Return whether the UI should expose retry for a projected source status."""
     if state in {"failed", "missing_media", "blocked_by_permissions"}:
         return True
     return state == "partially_queryable" and reason == "vector_index_failed"

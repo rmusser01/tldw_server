@@ -275,6 +275,32 @@ describe("TldwModelsService caching", () => {
     expect(chatModels.map((model) => model.id)).toEqual(["openai/gpt-4o-mini"])
   })
 
+  it("filters chat models when provider-level configuration is unavailable", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "openai/gpt-4o-mini",
+        name: "openai/gpt-4o-mini",
+        provider: "openai",
+        type: "chat",
+        provider_is_configured: true
+      },
+      {
+        id: "anthropic/claude-sonnet-4",
+        name: "anthropic/claude-sonnet-4",
+        provider: "anthropic",
+        type: "chat",
+        provider_is_configured: false
+      }
+    ])
+
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const chatModels = await service.getChatModels(true)
+
+    expect(chatModels.map((model) => model.id)).toEqual(["openai/gpt-4o-mini"])
+  })
+
   it("filters chat models from explicitly disabled providers", async () => {
     mocks.getModels.mockResolvedValue([
       {

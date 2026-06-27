@@ -57,7 +57,7 @@ export const createWorkspaceOrganizationIndex = ({
   const readySourceIds = new Set(
     sourceIdsInOrder.filter((sourceId) => {
       const source = sourceById.get(sourceId)
-      return Boolean(source) && isWorkspaceSourceSelectable(source)
+      return source !== undefined && isWorkspaceSourceSelectable(source)
     })
   )
 

@@ -261,6 +261,15 @@ const isStudioWorkspaceSourceUsable = (source: WorkspaceSource) => {
   return hasStudioUsableExtractedText(source)
 }
 
+const normalizeStudioChatModelId = (value: unknown): string => {
+  if (typeof value !== "string") return ""
+  const trimmed = value.trim()
+  if (trimmed.toLowerCase().startsWith("tldw:")) {
+    return trimmed.slice(5).trim()
+  }
+  return trimmed
+}
+
 const buildSelectedModelUnavailableMessage = (
   model: {
     readinessMessage?: string
@@ -854,6 +863,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   const selectedModelValue =
     typeof selectedModel === "string" ? selectedModel.trim() : ""
   const hasSelectedModelValue = selectedModelValue.length > 0
+  const selectedModelCatalogKey = normalizeStudioChatModelId(selectedModelValue)
   const baseModelPrerequisiteMessage = hasSelectedModelValue
     ? null
     : t(
@@ -969,11 +979,11 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   } = artifactGeneration
 
   const selectedModelMatchesChatCatalog =
-    selectedModelValue.length > 0 &&
+    selectedModelCatalogKey.length > 0 &&
     _chatModels.some(
       (model) =>
         typeof model.id === "string" &&
-        model.id.trim() === selectedModelValue
+        normalizeStudioChatModelId(model.id) === selectedModelCatalogKey
     )
   const selectedModelIsStaleTldw =
     selectedModelValue.toLowerCase().startsWith("tldw:") &&
@@ -995,6 +1005,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
       )
     : null
   const catalogMissingModelMessage =
+    !loadingChatModels &&
     hasSelectedModelValue &&
     selectedModelLooksCatalogBacked &&
     !selectedModelMatchesChatCatalog &&
