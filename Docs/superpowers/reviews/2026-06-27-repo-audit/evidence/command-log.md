@@ -267,3 +267,37 @@ Verification result:
 - Git status after Stage 8 shows only the four allowed modified files plus the two known unrelated untracked watchlist templates.
 - Bandit was not rerun because Stage 8 changed audit documentation and the Backlog task record only; prior audit Bandit summaries remain referenced by the final report.
 ```
+
+## Stage 9 Task Closure Verification
+
+```text
+Closure summary:
+- TASK-12050 was marked Done after the final report stage commit `fac97acfdd`.
+- Final summary was added between the existing Backlog final-summary markers.
+- Definition of Done item 5 was checked.
+- No production code, tests, runtime configs, or source assets were edited for task closure.
+- The two known unrelated untracked watchlist templates remained untouched and unstaged.
+
+Verification commands run for task closure:
+- jq empty Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json
+- jq '.findings | length' Docs/superpowers/reviews/2026-06-27-repo-audit/findings-index.json
+- Python finding coverage check across final-report.md and remediation-backlog-draft.md
+- placeholder-token scan over final-report.md, remediation-backlog-draft.md, command-log.md, and TASK-12050
+- final-summary begin/end marker count check on TASK-12050
+- git diff --check -- Docs/superpowers/reviews/2026-06-27-repo-audit/evidence/command-log.md "backlog/tasks/task-12050 - Execute-comprehensive-repository-audit.md"
+- git status --short --branch
+- git diff --name-only
+
+Verification result:
+- JSON parse passed.
+- Finding count is 31.
+- Severity counts are 0 critical, 4 high, 22 medium, and 5 low.
+- All 31 finding IDs appear at least once in final-report.md.
+- All 31 finding IDs appear at least once in remediation-backlog-draft.md.
+- Placeholder scan returned no matches.
+- Backlog final-summary markers remain exactly one begin marker and one end marker.
+- Diff whitespace check passed.
+- Tracked diff before the closure commit was limited to TASK-12050; after recording this closure note, tracked diff is limited to this command log and TASK-12050.
+- Git status also showed the two known unrelated untracked watchlist templates.
+- Bandit was not rerun because task closure changed audit documentation and the Backlog task record only.
+```
