@@ -1,10 +1,10 @@
 ---
 id: TASK-2393
 title: Plan and implement MCP Unified standalone UX remediation
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-27 04:14'
+updated_date: '2026-06-27 04:16'
 labels:
   - mcp
   - ux
@@ -41,7 +41,7 @@ Address the UX/product review findings for Unified MCP standalone/embedded exper
 - [x] #7 Status or diagnostics surface sanitized module/config problems with next actions.
 - [x] #8 Client installer can verify readiness or clearly reports missing credentials.
 - [x] #9 Power-user MCP workflows have a compact command reference.
-- [ ] #10 Focused tests and Bandit touched-scope scan pass.
+- [x] #10 Focused tests and Bandit touched-scope scan pass.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -64,12 +64,14 @@ Docs/superpowers/plans/2026-06-26-mcp-unified-standalone-ux-remediation.md
 - 2026-06-26: Task 7 complete. Added --api-key, --api-key-env, and --verify to the MCP client installer; no-credential installs are reported as configured but not ready; verification surfaces usable/auth/server-unreachable states; updated wizard docs and tests.
 
 - 2026-06-26: Task 8 complete. Added `Docs/MCP/Unified/Operator_Cheatsheet.md` with compact variables, initialize/session reuse, strict catalog tools/list, tools/call, batch, WebSocket auth, status/health/metrics, wizard dry-run/verify, and common failure recovery. Linked it from README and Client Snippets. Verified docs contract tests pass.
+
+- 2026-06-26: Task 9 verification complete. Focused remediation suite passed 48/48. Broader MCP smoke subset passed 48/48. Manual journey review covered discovery/current state, supported embedded launch, auth, tools/list, tools/call, surface/risk tiers, diagnostics, and operator cheatsheet. Bandit touched-scope scan wrote `/tmp/bandit_mcp_unified_ux.json`; full planned scope exited 1 due existing MCP test baseline findings (0 high, 17 medium in unrelated test files). Filtered medium-or-higher results for remediation-touched MCP/API/wizard files were empty (`[]`).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Pending until all remediation tasks are complete.
+Completed MCP Unified UX remediation for TASK-2393. The shipped docs now state embedded-vs-planned-standalone status, quarantine the MCP-specific Docker path as experimental, provide a complete authenticated first-run flow, consolidate auth guidance, explain effective module/risk-tier surface, fail closed on unresolved catalog filters, expose sanitized diagnostics, add client installer credential/readiness verification, and add a compact operator cheatsheet. Verification: focused remediation suite 48/48 passed; broader MCP smoke subset 48/48 passed; Bandit full planned scope reported no high findings and only pre-existing medium findings in unrelated MCP test files, with no medium-or-higher findings in remediation-touched MCP/API/wizard files. Known skips/blockers: none for this remediation slice; the future standalone gateway extraction remains out of scope by plan.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
@@ -78,10 +80,10 @@ Pending until all remediation tasks are complete.
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

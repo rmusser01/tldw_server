@@ -857,7 +857,7 @@ git commit -m "docs: add unified mcp operator cheatsheet"
 **Files:**
 - Modify: `backlog/tasks/task-2367 - Plan-and-implement-MCP-Unified-standalone-UX-remediation.md`
 
-- [ ] **Step 1: Run focused test suite**
+- [x] **Step 1: Run focused test suite**
 
 ```bash
 source .venv/bin/activate
@@ -873,7 +873,7 @@ python -m pytest \
 
 Expected: PASS.
 
-- [ ] **Step 2: Run a broader MCP smoke subset**
+- [x] **Step 2: Run a broader MCP smoke subset**
 
 ```bash
 source .venv/bin/activate
@@ -887,7 +887,7 @@ python -m pytest \
 
 Expected: PASS, or document unrelated pre-existing failures with evidence.
 
-- [ ] **Step 3: Run Bandit on touched code**
+- [x] **Step 3: Run Bandit on touched code**
 
 ```bash
 source .venv/bin/activate
@@ -900,7 +900,7 @@ python -m bandit -r \
 
 Expected: PASS with no new high/medium findings in touched code. Fix new findings before finishing.
 
-- [ ] **Step 4: Review docs as a user journey**
+- [x] **Step 4: Review docs as a user journey**
 
 Manually walk:
 
@@ -914,11 +914,11 @@ Manually walk:
 
 Record gaps in `TASK-2393` if any remain.
 
-- [ ] **Step 5: Update Backlog task**
+- [x] **Step 5: Update Backlog task**
 
 Add touched files, verification results, known skips, and final summary to `TASK-2393`.
 
-- [ ] **Step 6: Commit final task update**
+- [x] **Step 6: Commit final task update**
 
 ```bash
 git add "backlog/tasks/task-2393 - Plan-and-implement-MCP-Unified-standalone-UX-remediation.md"
