@@ -216,7 +216,14 @@ class TestRBACPolicy:
         assert policy.check_permission(
             "test_user",
             Resource.TOOL,
-            Action.EXECUTE
+            Action.EXECUTE,
+            "search_media"
+        )
+        assert not policy.check_permission(
+            "test_user",
+            Resource.TOOL,
+            Action.EXECUTE,
+            "definitely_missing_tool"
         )
         assert policy.check_permission(
             "test_user",

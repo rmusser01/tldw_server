@@ -42,6 +42,10 @@ def _protocol_dependencies(*, tool_catalog_provider: Any) -> SimpleNamespace:
         telemetry_provider=_NoopTelemetry(),
         redis_client_factory=lambda **_kwargs: None,
         tool_catalog_provider=tool_catalog_provider,
+        effective_policy_resolver=object(),
+        approval_evaluator=object(),
+        path_scope_enforcer=object(),
+        external_access_evaluator=object(),
     )
 
 
