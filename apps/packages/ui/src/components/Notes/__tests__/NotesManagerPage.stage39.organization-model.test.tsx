@@ -167,6 +167,19 @@ const renderPage = () => {
   )
 }
 
+const selectKeywordPickerOption = async (pickerDialog: HTMLElement, keywordSegment: string) => {
+  const option = within(pickerDialog).getByTestId(`notes-keyword-picker-option-${keywordSegment}`)
+  const checkbox =
+    option instanceof HTMLInputElement && option.type === "checkbox"
+      ? option
+      : option.querySelector<HTMLInputElement>('input[type="checkbox"]')
+  expect(checkbox).toBeTruthy()
+  fireEvent.click(checkbox as HTMLInputElement)
+  await waitFor(() => {
+    expect(checkbox).toBeChecked()
+  })
+}
+
 let seededNotebookSettings: Array<{ id: number; name: string; keywords: string[] }> = []
 let seededServerNotebooks: Array<{ id: number; name: string; keywords: string[] }> = []
 
@@ -345,7 +358,7 @@ describe("NotesManagerPage stage 39 organization model", () => {
       (modalBody.closest(".ant-modal") as HTMLElement | null) ??
       (modalBody.closest(".ant-modal-root") as HTMLElement | null) ??
       document.body
-    fireEvent.click(within(pickerDialog).getByText(/^research\b/i))
+    await selectKeywordPickerOption(pickerDialog, "research")
     fireEvent.click(within(pickerDialog).getByRole("button", { name: "Apply filters" }))
     await waitFor(() => {
       expect(screen.getByTestId("notes-save-notebook")).not.toBeDisabled()
