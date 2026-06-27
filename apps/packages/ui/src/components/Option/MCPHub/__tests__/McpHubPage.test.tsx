@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, useLocation } from "react-router-dom"
 
@@ -15,18 +14,7 @@ vi.mock("../PathScopesTab", () => ({
   PathScopesTab: () => <div>path scopes tab</div>
 }))
 vi.mock("../WorkspaceSetsTab", () => ({
-  WorkspaceSetsTab: ({
-    focusWorkspaceId
-  }: {
-    focusWorkspaceId?: string | null
-  }) => (
-    <div>
-      workspace sets tab
-      <span data-testid="workspace-sets-focus">
-        {focusWorkspaceId ?? "no workspace context"}
-      </span>
-    </div>
-  )
+  WorkspaceSetsTab: () => <div>workspace sets tab</div>
 }))
 vi.mock("../SharedWorkspacesTab", () => ({
   SharedWorkspacesTab: () => <div>shared workspaces tab</div>
@@ -77,9 +65,6 @@ vi.mock("../ExternalServersTab", () => ({
     </div>
   )
 }))
-vi.mock("../DeploymentDiagnosticsPanel", () => ({
-  DeploymentDiagnosticsPanel: () => <div>deployment diagnostics</div>
-}))
 vi.mock("../GovernanceAuditTab", () => ({
   GovernanceAuditTab: ({ onOpen }: { onOpen?: (target: { tab: string; object_kind: string; object_id: string }) => void }) => (
     <button
@@ -103,14 +88,6 @@ vi.mock("../CapabilityMappingsTab", () => ({
   CapabilityMappingsTab: () => <div>capability mappings tab</div>
 }))
 
-const serviceMocks = vi.hoisted(() => ({
-  getToolRegistrySummary: vi.fn()
-}))
-
-vi.mock("@/services/tldw/mcp-hub", () => ({
-  getToolRegistrySummary: serviceMocks.getToolRegistrySummary
-}))
-
 import { McpHubPage } from "../McpHubPage"
 
 const LocationProbe = () => {
@@ -118,95 +95,42 @@ const LocationProbe = () => {
   return <div data-testid="location-probe">{`${location.pathname}${location.search}`}</div>
 }
 
-const renderMcpHubPage = (initialEntry = "/mcp-hub") => {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false
-      }
-    }
-  })
-
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <McpHubPage />
-        <LocationProbe />
-      </MemoryRouter>
-    </QueryClientProvider>
+const renderMcpHubPage = (initialEntry = "/mcp-hub") =>
+  render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <McpHubPage />
+      <LocationProbe />
+    </MemoryRouter>
   )
-}
 
 describe("McpHubPage", () => {
-  beforeEach(() => {
-    serviceMocks.getToolRegistrySummary.mockResolvedValue({
-      total_tools: 0,
-      modules: []
-    })
-  })
-
-  afterEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it("renders a shared recovery state when MCP Hub is unavailable", async () => {
-    const user = userEvent.setup()
-    serviceMocks.getToolRegistrySummary.mockRejectedValueOnce(
-      Object.assign(new Error("Request failed: 404"), {
-        response: { status: 404 }
-      })
-    )
-
+  it("renders workflow shortcuts without implying live readiness", () => {
     renderMcpHubPage()
 
-    const recovery = await screen.findByTestId("mcp-hub-capability-recovery")
-
-    expect(recovery).toHaveAttribute("data-ds-component", "RecoveryCallout")
-    expect(
-      within(recovery).getByRole("heading", {
-        name: "MCP Hub is unavailable on this server"
-      })
-    ).toBeTruthy()
-    expect(
-      within(recovery).getByText(
-        "The connected server does not advertise MCP Hub management."
-      )
-    ).toBeTruthy()
-    const diagnostics = within(recovery).getByLabelText("Diagnostics")
-    expect(diagnostics).toHaveTextContent("[server-endpoint]")
-    expect(diagnostics).toHaveTextContent("404")
-    expect(diagnostics).toHaveTextContent("Request failed: 404")
-    expect(diagnostics).not.toHaveTextContent(
-      "/api/v1/mcp/hub/tool-registry/summary"
-    )
-
-    await user.click(
-      within(recovery).getByRole("button", { name: "Try again" })
-    )
-
-    await waitFor(() => {
-      expect(serviceMocks.getToolRegistrySummary).toHaveBeenCalledTimes(2)
+    expect(screen.queryByLabelText("MCP Hub status summary")).toBeNull()
+    const shortcuts = screen.getByRole("navigation", {
+      name: "MCP Hub workflow shortcuts"
     })
-  })
-
-  it("renders a compact status summary before workflow detail", () => {
-    renderMcpHubPage()
-
-    const summary = screen.getByTestId("mcp-hub-status-summary")
     const workflows = screen.getByTestId("mcp-hub-workflows")
 
-    expect(summary.compareDocumentPosition(workflows)).toBe(
+    expect(shortcuts.compareDocumentPosition(workflows)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     )
-    expect(within(summary).getByText("Servers & Credentials")).toBeTruthy()
-    expect(within(summary).getByText("Policy Assignments")).toBeTruthy()
-    expect(within(summary).getByText("Approvals")).toBeTruthy()
-    expect(within(summary).getByText("Workspace Boundaries")).toBeTruthy()
-    expect(within(summary).getByText("Audit Findings")).toBeTruthy()
+    expect(within(shortcuts).getByText("Servers & Credentials")).toBeTruthy()
+    expect(within(shortcuts).getByText("Policy Assignments")).toBeTruthy()
+    expect(within(shortcuts).getByText("Approvals")).toBeTruthy()
+    expect(within(shortcuts).getByText("Workspace Boundaries")).toBeTruthy()
+    expect(within(shortcuts).getByText("Audit Findings")).toBeTruthy()
+    expect(
+      within(shortcuts).queryByText(/ready|healthy|configured|degraded/i)
+    ).toBeNull()
+    expect(
+      within(shortcuts).queryByText(/setup workflow|access workflow|governance workflow|workspaces workflow|audit workflow/i)
+    ).toBeNull()
     expect(screen.getByTestId("mcp-hub-workflow-setup")).toBeTruthy()
   })
 
-  it("opens existing workflow views from status summary actions", async () => {
+  it("opens existing workflow views from shortcut actions", async () => {
     const user = userEvent.setup()
     renderMcpHubPage()
 
@@ -249,12 +173,6 @@ describe("McpHubPage", () => {
     )
   })
 
-  it("shows deployment diagnostics in the Setup workflow", () => {
-    renderMcpHubPage()
-
-    expect(screen.getByText("deployment diagnostics")).toBeTruthy()
-  })
-
   it("derives the active workflow and view from query state", () => {
     renderMcpHubPage("/mcp-hub?workflow=access&view=assignments")
 
@@ -263,19 +181,6 @@ describe("McpHubPage", () => {
       "aria-pressed",
       "true"
     )
-  })
-
-  it("passes research workspace query context into Workspace Sets", () => {
-    renderMcpHubPage(
-      "/mcp-hub?workflow=setup&view=workspace-sets&workspace_id=rw-1&source=research-workspace"
-    )
-
-    expect(screen.getByText("workspace sets tab")).toBeTruthy()
-    expect(screen.getByTestId("mcp-hub-workflow-workspaces")).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    )
-    expect(screen.getByTestId("workspace-sets-focus")).toHaveTextContent("rw-1")
   })
 
   it("updates query state when selecting a workflow", async () => {

@@ -1271,15 +1271,15 @@ Task 6 completion notes:
 - Modify: `apps/packages/ui/src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx`
 - Use: `apps/packages/ui/src/components/Option/MCPHub/mcpHubReadiness.ts`
 
-- [ ] **Step 1: Write failing status-card test**
+- [x] **Step 1: Write failing status-card test**
 
   Add a test proving status cards do not imply readiness when no readiness data is available.
 
-- [ ] **Step 2: Decide data-backed versus navigation**
+- [x] **Step 2: Decide data-backed versus navigation**
 
   If `McpHubPage` can cheaply access external servers and registry summary without duplicating fetches or causing load churn, make the cards data-backed. Otherwise demote static cards to plain navigation.
 
-- [ ] **Step 3: Implement the chosen path**
+- [x] **Step 3: Implement the chosen path**
 
   For data-backed cards:
   - consume shared readiness object;
@@ -1289,19 +1289,31 @@ Task 6 completion notes:
   - remove readiness-like color/copy;
   - use plain section descriptions and links only.
 
-- [ ] **Step 4: Run page tests**
+- [x] **Step 4: Run page tests**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx
   ```
 
-- [ ] **Step 5: Commit status truthfulness**
+- [x] **Step 5: Commit status truthfulness**
 
   ```bash
   git add apps/packages/ui/src/components/Option/MCPHub/McpHubPage.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx
   git commit -m "fix: make MCP Hub status summary truthful"
   ```
+
+Task 7 completion notes:
+- Chose the navigation path because `McpHubPage` should not duplicate child-tab readiness fetches.
+- Replaced the top `MCP Hub status summary` section with `MCP Hub workflow shortcuts` navigation.
+- Removed status-like workflow pills and rewrote shortcut copy so the cards do not imply live readiness, health, or configuration status.
+- Verification:
+  - Red run: `bunx vitest run src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx` failed because the old status summary still rendered.
+  - Page tests passed: 11 tests.
+  - Focused MCP Hub frontend suite passed: 5 files, 92 tests.
+  - Touched-file design-state guard summary: exitCode 0, blocked 0, baselineErrors 0.
+  - `git diff --check` passed.
+  - Bandit skipped for Task 7 because only frontend TSX/tests and plan/backlog markdown changed.
 
 ## Task 8: Responsive, Design-System, And Final Verification
 
