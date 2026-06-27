@@ -51,6 +51,7 @@ from ...tool_observability import build_execution_eval_metadata
 from ..base import BaseModule, ModuleConfig, create_tool_definition
 from .filesystem_diff import FilesystemPatchError, PatchFile, apply_patch_to_text, parse_unified_diff
 from .filesystem_receipts import ReadReceiptError, ReadReceiptManager
+from .notebook_files import apply_cell_edit, parse_notebook_payload, summarize_notebook
 
 
 def _first_nonempty(*values: Any) -> str | None:
@@ -610,6 +611,11 @@ class FilesystemModule(BaseModule):
                 key: value if key in {"old_string", "new_string"} else self.sanitize_input(value)
                 for key, value in raw_args.items()
             }
+        elif tool_name == "notebook.edit_cell":
+            args = {
+                key: value if key == "source" else self.sanitize_input(value)
+                for key, value in raw_args.items()
+            }
         elif tool_name == "fs.patch":
             args = {
                 key: self._sanitize_patch_diff(value) if key == "diff" else self.sanitize_input(value)
@@ -685,6 +691,29 @@ class FilesystemModule(BaseModule):
             )
             return result
 
+        if tool_name == "notebook.read":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return await asyncio.to_thread(
+                self._read_notebook,
+                workspace_root,
+                target,
+                bool(args.get("include_source", False)),
+                self._string_list_argument(args.get("cell_ids")),
+                self._bounded_positive_int(
+                    args.get("max_source_chars"),
+                    self._setting_positive_int("notebook_default_max_source_chars", 4_000),
+                    maximum=self._setting_positive_int("notebook_max_source_chars", 20_000),
+                ),
+                self._bounded_positive_int(
+                    args.get("max_total_source_chars"),
+                    self._setting_positive_int("notebook_default_max_total_source_chars", 20_000),
+                    maximum=self._setting_positive_int("notebook_max_total_source_chars", 100_000),
+                ),
+                self._setting_positive_int("notebook_read_max_bytes", 5_000_000),
+                bool(args.get("include_receipt", True)),
+                context,
+            )
+
         if tool_name == "fs.lock_acquire":
             return await asyncio.to_thread(
                 self._acquire_lock_for_path,
@@ -719,6 +748,27 @@ class FilesystemModule(BaseModule):
                 bool(args.get("dry_run", False)),
                 self._setting_positive_int("edit_preimage_max_bytes", 5_000_000),
                 self._setting_positive_int("edit_write_max_bytes", 5_000_000),
+                context,
+            )
+
+        if tool_name == "notebook.edit_cell":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return await asyncio.to_thread(
+                self._edit_notebook_cell,
+                workspace_root,
+                target,
+                str(args.get("mode")),
+                str(args.get("cell_id")),
+                args.get("source"),
+                args.get("cell_type"),
+                args.get("insert_position"),
+                args.get("new_cell_id"),
+                args.get("expected_sha256"),
+                args.get("read_receipt"),
+                args.get("lock_lease_id"),
+                bool(args.get("dry_run", False)),
+                self._setting_positive_int("notebook_preimage_max_bytes", 5_000_000),
+                self._setting_positive_int("notebook_write_max_bytes", 5_000_000),
                 context,
             )
 
@@ -1329,6 +1379,14 @@ class FilesystemModule(BaseModule):
         value = arguments.get(key)
         if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
             raise ValueError(f"{key} must be a positive integer")
+
+    @staticmethod
+    def _string_list_argument(value: Any) -> list[str] | None:
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            return None
+        return [str(item) for item in value]
 
     @staticmethod
     def _validate_optional_string_list_argument(arguments: dict[str, Any], key: str) -> None:
@@ -2615,6 +2673,131 @@ class FilesystemModule(BaseModule):
             or hashlib.sha256(payload).hexdigest() != expected_sha256
         ):
             raise ValueError("preimage_changed_during_commit")
+
+    def _read_notebook(
+        self,
+        workspace_root: Path,
+        target: Path,
+        include_source: bool,
+        cell_ids: list[str] | None,
+        max_source_chars: int,
+        max_total_source_chars: int,
+        max_bytes: int,
+        include_receipt: bool,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        """Read a notebook structure summary without exposing full notebook JSON."""
+
+        if target.suffix.lower() != ".ipynb":
+            raise ValueError("notebook_path_required")
+        payload, _file_stat = self._read_existing_regular_file_no_follow(target, max_bytes=max_bytes)
+        parsed = parse_notebook_payload(payload, max_bytes=max_bytes)
+        rel_path = self._to_workspace_relative_path(workspace_root, target)
+        result = {
+            "path": rel_path,
+            **summarize_notebook(
+                parsed,
+                include_source=include_source,
+                cell_ids=cell_ids,
+                max_source_chars=max_source_chars,
+                max_total_source_chars=max_total_source_chars,
+            ),
+        }
+        if include_receipt and self._read_receipts.enabled:
+            result["read_receipt"] = self._read_receipts.issue(
+                path=rel_path,
+                sha256=parsed.sha256,
+                size=parsed.size,
+                workspace_id=self._context_metadata_value(context, "workspace_id"),
+                session_id=_first_nonempty(
+                    getattr(context, "session_id", None),
+                    self._context_metadata_value(context, "session_id"),
+                ),
+            )
+        result["eval"] = build_execution_eval_metadata(
+            tool_name="notebook.read",
+            tool_prompt_id="mcp.notebook.read.v1",
+            tool_prompt_version="2026.06.27",
+            action_family="notebook_read",
+            result_kind="structured_notebook_read",
+            path_filter_used=True,
+            truncated=bool(result.get("source_preview_truncated", False)),
+        )
+        return result
+
+    def _edit_notebook_cell(
+        self,
+        workspace_root: Path,
+        target: Path,
+        mode: str,
+        cell_id: str,
+        source: Any,
+        cell_type: Any,
+        insert_position: Any,
+        new_cell_id: Any,
+        expected_sha256: Any,
+        read_receipt: Any,
+        lock_lease_id: Any,
+        dry_run: bool,
+        preimage_max_bytes: int,
+        write_max_bytes: int,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        """Apply one preimage-protected notebook cell edit."""
+
+        if target.suffix.lower() != ".ipynb":
+            raise ValueError("notebook_path_required")
+        rel_path = self._to_workspace_relative_path(workspace_root, target)
+        self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
+        payload, file_stat = self._read_existing_regular_file_no_follow(target, max_bytes=preimage_max_bytes)
+        parsed = parse_notebook_payload(payload, max_bytes=preimage_max_bytes)
+        self._authorize_edit_preimage(
+            rel_path,
+            parsed.sha256,
+            parsed.size,
+            expected_sha256,
+            read_receipt,
+            context,
+        )
+        edit_result = apply_cell_edit(
+            parsed,
+            mode=mode,
+            cell_id=cell_id,
+            source=source,
+            cell_type=cell_type,
+            insert_position=insert_position,
+            new_cell_id=new_cell_id,
+        )
+        if edit_result.bytes_after > write_max_bytes:
+            raise ValueError("notebook_write_too_large")
+
+        if not dry_run:
+            self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
+            self._assert_edit_preimage_unchanged_no_follow(target, parsed.sha256, parsed.size, file_stat)
+            self._atomic_write_text_file(target, edit_result.data.decode("utf-8"))
+
+        result: dict[str, Any] = {
+            "path": rel_path,
+            "edited": not dry_run,
+            "dry_run": dry_run,
+            "bytes_before": parsed.size,
+            "bytes_after": edit_result.bytes_after,
+            "sha256_before": parsed.sha256,
+            "sha256_after": edit_result.sha256_after,
+            **edit_result.summary,
+            "eval": build_execution_eval_metadata(
+                tool_name="notebook.edit_cell",
+                tool_prompt_id="mcp.notebook.edit_cell.v1",
+                tool_prompt_version="2026.06.27",
+                action_family="notebook_edit",
+                result_kind="structured_notebook_edit",
+                path_filter_used=True,
+                truncated=False,
+            ),
+        }
+        if not dry_run:
+            result["bytes_written"] = edit_result.bytes_after
+        return result
 
     @staticmethod
     def _find_overlapping_matches(text: str, old_string: str) -> list[int]:

@@ -1,11 +1,63 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module import (
     FilesystemModule,
 )
+from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+
+
+class _FakeWorkspaceRootResolver:
+    def __init__(self, workspace_root: Path) -> None:
+        self.workspace_root = workspace_root
+
+    async def resolve_for_context(self, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "workspace_root": str(self.workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "test",
+            "reason": None,
+        }
+
+
+def _context() -> RequestContext:
+    return RequestContext(
+        request_id="req-notebook",
+        session_id="session-1",
+        user_id="user-1",
+        metadata={"workspace_id": "workspace-1", "session_id": "session-1", "user_id": "user-1"},
+    )
+
+
+def _module(workspace_root: Path, *, settings: dict[str, object] | None = None) -> FilesystemModule:
+    return FilesystemModule(
+        ModuleConfig(
+            name="filesystem",
+            settings={"read_receipt_secret": "notebook-test-secret", **dict(settings or {})},
+        ),
+        workspace_root_resolver=_FakeWorkspaceRootResolver(workspace_root),
+    )
+
+
+def _write_notebook(path: Path, cells: list[dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "cells": cells,
+        "metadata": {"language_info": {"name": "python"}},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _read_notebook(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 @pytest.mark.asyncio
@@ -178,3 +230,219 @@ def test_notebook_edit_argument_validation_rejects_invalid_arguments(
 
     with pytest.raises(ValueError, match=reason):
         mod.validate_tool_arguments("notebook.edit_cell", arguments)
+
+
+@pytest.mark.asyncio
+async def test_notebook_read_returns_structure_and_receipt(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    notebook_path = workspace / "analysis.ipynb"
+    _write_notebook(
+        notebook_path,
+        [
+            {"cell_type": "markdown", "id": "intro", "metadata": {}, "source": "# Intro\n"},
+            {
+                "cell_type": "code",
+                "execution_count": 1,
+                "id": "code-1",
+                "metadata": {},
+                "outputs": [{"output_type": "stream", "text": "old\n"}],
+                "source": "print('old')\n",
+            },
+        ],
+    )
+    mod = _module(workspace)
+
+    result = await mod.execute_tool("notebook.read", {"path": "analysis.ipynb"}, context=_context())
+
+    assert result["path"] == "analysis.ipynb"  # nosec B101
+    assert result["cell_count"] == 2  # nosec B101
+    assert result["cells"][0]["id"] == "intro"  # nosec B101
+    assert "source_preview" not in result["cells"][0]  # nosec B101
+    assert result["cells"][1]["output_count"] == 1  # nosec B101
+    assert isinstance(result["sha256"], str)  # nosec B101
+    assert isinstance(result["read_receipt"], str)  # nosec B101
+    assert result["eval"]["result_kind"] == "structured_notebook_read"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_notebook_read_returns_bounded_source_preview(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    notebook_path = workspace / "analysis.ipynb"
+    _write_notebook(
+        notebook_path,
+        [
+            {"cell_type": "markdown", "id": "intro", "metadata": {}, "source": "alpha beta"},
+            {"cell_type": "markdown", "id": "details", "metadata": {}, "source": "gamma delta"},
+        ],
+    )
+    mod = _module(workspace)
+
+    result = await mod.execute_tool(
+        "notebook.read",
+        {
+            "path": "analysis.ipynb",
+            "include_source": True,
+            "cell_ids": ["details"],
+            "max_source_chars": 5,
+            "max_total_source_chars": 5,
+        },
+        context=_context(),
+    )
+
+    assert "source_preview" not in result["cells"][0]  # nosec B101
+    assert result["cells"][1]["source_preview"] == "gamma"  # nosec B101
+    assert result["cells"][1]["source_preview_truncated"] is True  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_notebook_edit_replace_updates_cell_and_clears_code_outputs(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    notebook_path = workspace / "analysis.ipynb"
+    _write_notebook(
+        notebook_path,
+        [
+            {"cell_type": "markdown", "id": "intro", "metadata": {}, "source": "# Intro\n"},
+            {
+                "cell_type": "code",
+                "execution_count": 3,
+                "id": "code-1",
+                "metadata": {},
+                "outputs": [{"output_type": "stream", "text": "stale\n"}],
+                "source": "print('old')\n",
+            },
+        ],
+    )
+    mod = _module(workspace)
+    read_result = await mod.execute_tool("notebook.read", {"path": "analysis.ipynb"}, context=_context())
+
+    edit_result = await mod.execute_tool(
+        "notebook.edit_cell",
+        {
+            "path": "analysis.ipynb",
+            "mode": "replace",
+            "cell_id": "code-1",
+            "source": "print('new')\n",
+            "expected_sha256": read_result["sha256"],
+        },
+        context=_context(),
+    )
+    stored = _read_notebook(notebook_path)
+
+    assert edit_result["edited"] is True  # nosec B101
+    assert edit_result["mode"] == "replace"  # nosec B101
+    assert edit_result["sha256_before"] == read_result["sha256"]  # nosec B101
+    assert stored["cells"][1]["source"] == "print('new')\n"  # nosec B101
+    assert stored["cells"][1]["outputs"] == []  # nosec B101
+    assert stored["cells"][1]["execution_count"] is None  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_notebook_edit_insert_and_delete_cells(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    notebook_path = workspace / "analysis.ipynb"
+    _write_notebook(
+        notebook_path,
+        [
+            {"cell_type": "markdown", "id": "first", "metadata": {}, "source": "first"},
+            {"cell_type": "markdown", "id": "second", "metadata": {}, "source": "second"},
+        ],
+    )
+    mod = _module(workspace)
+    read_result = await mod.execute_tool("notebook.read", {"path": "analysis.ipynb"}, context=_context())
+
+    insert_result = await mod.execute_tool(
+        "notebook.edit_cell",
+        {
+            "path": "analysis.ipynb",
+            "mode": "insert",
+            "cell_id": "second",
+            "insert_position": "before",
+            "cell_type": "markdown",
+            "source": "inserted",
+            "new_cell_id": "inserted-cell",
+            "expected_sha256": read_result["sha256"],
+        },
+        context=_context(),
+    )
+    delete_result = await mod.execute_tool(
+        "notebook.edit_cell",
+        {
+            "path": "analysis.ipynb",
+            "mode": "delete",
+            "cell_id": "first",
+            "expected_sha256": insert_result["sha256_after"],
+        },
+        context=_context(),
+    )
+    stored = _read_notebook(notebook_path)
+
+    assert insert_result["inserted_cell_id"] == "inserted-cell"  # nosec B101
+    assert delete_result["mode"] == "delete"  # nosec B101
+    assert [cell["id"] for cell in stored["cells"]] == ["inserted-cell", "second"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_notebook_edit_dry_run_does_not_write(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    notebook_path = workspace / "analysis.ipynb"
+    _write_notebook(
+        notebook_path,
+        [{"cell_type": "markdown", "id": "intro", "metadata": {}, "source": "old"}],
+    )
+    before_text = notebook_path.read_text(encoding="utf-8")
+    mod = _module(workspace)
+    read_result = await mod.execute_tool("notebook.read", {"path": "analysis.ipynb"}, context=_context())
+
+    edit_result = await mod.execute_tool(
+        "notebook.edit_cell",
+        {
+            "path": "analysis.ipynb",
+            "mode": "replace",
+            "cell_id": "intro",
+            "source": "new",
+            "expected_sha256": read_result["sha256"],
+            "dry_run": True,
+        },
+        context=_context(),
+    )
+
+    assert edit_result["edited"] is False  # nosec B101
+    assert notebook_path.read_text(encoding="utf-8") == before_text  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_notebook_edit_rejects_stale_preimage(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    notebook_path = workspace / "analysis.ipynb"
+    _write_notebook(
+        notebook_path,
+        [{"cell_type": "markdown", "id": "intro", "metadata": {}, "source": "old"}],
+    )
+    mod = _module(workspace)
+
+    with pytest.raises(ValueError, match="edit_preimage_mismatch"):
+        await mod.execute_tool(
+            "notebook.edit_cell",
+            {
+                "path": "analysis.ipynb",
+                "mode": "replace",
+                "cell_id": "intro",
+                "source": "new",
+                "expected_sha256": "0" * 64,
+            },
+            context=_context(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_notebook_tools_reject_non_notebook_and_invalid_json(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "notes.txt").write_text("hello", encoding="utf-8")
+    (workspace / "bad.ipynb").write_text("{not json", encoding="utf-8")
+    mod = _module(workspace)
+
+    with pytest.raises(ValueError, match="notebook_path_required"):
+        await mod.execute_tool("notebook.read", {"path": "notes.txt"}, context=_context())
+    with pytest.raises(ValueError, match="notebook_invalid_json"):
+        await mod.execute_tool("notebook.read", {"path": "bad.ipynb"}, context=_context())
