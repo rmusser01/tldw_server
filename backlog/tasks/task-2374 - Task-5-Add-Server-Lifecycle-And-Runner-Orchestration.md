@@ -4,7 +4,7 @@ title: 'Task 5: Add Server Lifecycle And Runner Orchestration'
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-27 18:18'
+updated_date: '2026-06-27 18:23'
 labels:
   - cats-fuzz
   - task-5
@@ -31,6 +31,8 @@ dependencies: []
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Implemented Task 5 server lifecycle and CATS runner orchestration with TDD. Initial red run failed on missing Helper_Scripts.cats_fuzz.runner import before implementation. Verification: pytest test_cats_fuzz_runner.py passed 13 tests; black --check passed; bandit JSON report passed at /tmp/bandit_cats_fuzz_runner.json.
+
+Code-quality review fix: tightened health/readiness success to 2xx-only, added readiness fallback coverage for 404/503, and changed uvicorn output handling to DEVNULL by default or explicit log files closed by stop_server. Verification: pytest test_cats_fuzz_runner.py passed 19 tests; black --check passed; bandit server report passed at /tmp/bandit_cats_fuzz_server_fix.json.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

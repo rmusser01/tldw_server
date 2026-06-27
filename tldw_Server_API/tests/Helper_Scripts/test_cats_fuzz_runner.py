@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,13 @@ from Helper_Scripts.cats_fuzz.runner import (
     run_contract_block,
     run_runtime_block,
 )
-from Helper_Scripts.cats_fuzz.server import wait_for_health, wait_for_readiness
+from Helper_Scripts.cats_fuzz.server import (
+    UvicornServer,
+    start_server,
+    stop_server,
+    wait_for_health,
+    wait_for_readiness,
+)
 
 
 @pytest.mark.unit
@@ -213,8 +220,8 @@ class _Response:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("status", [200, 302, 404])
-def test_wait_for_health_accepts_non_5xx_status(status: int, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("status", [200, 204])
+def test_wait_for_health_accepts_2xx_status(status: int, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "Helper_Scripts.cats_fuzz.server.urlopen",
         lambda request, timeout: _Response(status),
@@ -224,10 +231,11 @@ def test_wait_for_health_accepts_non_5xx_status(status: int, monkeypatch: pytest
 
 
 @pytest.mark.unit
-def test_wait_for_health_rejects_5xx_status(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("status", [404, 503])
+def test_wait_for_health_rejects_non_2xx_status(status: int, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "Helper_Scripts.cats_fuzz.server.urlopen",
-        lambda request, timeout: _Response(503),
+        lambda request, timeout: _Response(status),
     )
     monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.time.sleep", lambda seconds: None)
 
@@ -258,15 +266,127 @@ def test_wait_for_readiness_uses_ready_before_health_ready(
 
 
 @pytest.mark.unit
-def test_wait_for_readiness_rejects_all_5xx(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("ready_status", [404, 503])
+def test_wait_for_readiness_falls_back_from_ready_to_health_ready(
+    ready_status: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    requested_urls: list[str] = []
+
+    def fake_urlopen(request: Any, timeout: float) -> _Response:
+        requested_urls.append(request.full_url)
+        if request.full_url == "http://127.0.0.1:8000/ready":
+            return _Response(ready_status)
+        return _Response(204)
+
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.urlopen", fake_urlopen)
+
+    wait_for_readiness("http://127.0.0.1:8000", timeout_seconds=0.01)
+
+    assert requested_urls == [
+        "http://127.0.0.1:8000/ready",
+        "http://127.0.0.1:8000/health/ready",
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("status", [404, 500])
+def test_wait_for_readiness_rejects_all_non_2xx_statuses(status: int, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "Helper_Scripts.cats_fuzz.server.urlopen",
-        lambda request, timeout: _Response(500),
+        lambda request, timeout: _Response(status),
     )
     monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.time.sleep", lambda seconds: None)
 
     with pytest.raises(TimeoutError):
         wait_for_readiness("http://127.0.0.1:8000", timeout_seconds=0.01)
+
+
+class _FakeProcess:
+    def __init__(self, exited: bool = False) -> None:
+        self.exited = exited
+        self.terminated = False
+        self.killed = False
+
+    def poll(self) -> int | None:
+        return 0 if self.exited else None
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.exited = True
+
+    def kill(self) -> None:
+        self.killed = True
+        self.exited = True
+
+    def wait(self, timeout: int) -> int:
+        self.exited = True
+        return 0
+
+
+@pytest.mark.unit
+def test_start_server_discards_output_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    popen_calls: list[dict[str, Any]] = []
+    fake_process = _FakeProcess()
+
+    def fake_popen(command: list[str], **kwargs: Any) -> _FakeProcess:
+        popen_calls.append(kwargs)
+        return fake_process
+
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.wait_for_health", lambda url: None)
+
+    server = start_server(env={"AUTH_MODE": "single_user"}, port=1234)
+
+    assert server.process is fake_process
+    assert popen_calls[0]["stdout"] == subprocess.DEVNULL
+    assert popen_calls[0]["stderr"] == subprocess.DEVNULL
+
+
+@pytest.mark.unit
+def test_start_server_with_log_dir_redirects_output_and_stop_closes_streams(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    popen_calls: list[dict[str, Any]] = []
+    fake_process = _FakeProcess()
+
+    def fake_popen(command: list[str], **kwargs: Any) -> _FakeProcess:
+        popen_calls.append(kwargs)
+        return fake_process
+
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.wait_for_health", lambda url: None)
+
+    server = start_server(env={"AUTH_MODE": "single_user"}, port=1234, log_dir=tmp_path)
+
+    assert (tmp_path / "uvicorn.stdout.log").exists()
+    assert (tmp_path / "uvicorn.stderr.log").exists()
+    assert popen_calls[0]["stdout"] is server.stdout_stream
+    assert popen_calls[0]["stderr"] is server.stderr_stream
+    assert server.stdout_stream is not None
+    assert server.stderr_stream is not None
+
+    stop_server(server)
+
+    assert fake_process.terminated is True
+    assert server.stdout_stream.closed is True
+    assert server.stderr_stream.closed is True
+
+
+@pytest.mark.unit
+def test_stop_server_closes_streams_for_already_exited_process(tmp_path: Path) -> None:
+    stdout_stream = (tmp_path / "stdout.log").open("w", encoding="utf-8")
+    stderr_stream = (tmp_path / "stderr.log").open("w", encoding="utf-8")
+    server = UvicornServer(
+        process=_FakeProcess(exited=True),
+        url="http://127.0.0.1:1234",
+        stdout_stream=stdout_stream,
+        stderr_stream=stderr_stream,
+    )
+
+    stop_server(server)
+
+    assert stdout_stream.closed is True
+    assert stderr_stream.closed is True
 
 
 @pytest.mark.unit

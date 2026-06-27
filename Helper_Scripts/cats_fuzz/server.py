@@ -8,6 +8,8 @@ import sys
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TextIO
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -17,6 +19,8 @@ from urllib.request import Request, urlopen
 class UvicornServer:
     process: subprocess.Popen[str]
     url: str
+    stdout_stream: TextIO | None = None
+    stderr_stream: TextIO | None = None
 
 
 def find_free_port() -> int:
@@ -49,7 +53,7 @@ def wait_for_health(base_url: str, timeout_seconds: float = 30.0) -> None:
     while time.monotonic() <= deadline:
         try:
             status = _poll_url(health_url)
-            if status < 500:
+            if 200 <= status < 300:
                 return
             last_error = f"{health_url} returned HTTP {status}"
         except Exception as exc:  # noqa: BLE001 - retain last transient startup error.
@@ -71,7 +75,7 @@ def wait_for_readiness(base_url: str, timeout_seconds: float = 30.0) -> None:
         for readiness_url in readiness_urls:
             try:
                 status = _poll_url(readiness_url)
-                if status < 500:
+                if 200 <= status < 300:
                     return
                 last_error = f"{readiness_url} returned HTTP {status}"
             except Exception as exc:  # noqa: BLE001 - retain last transient startup error.
@@ -83,7 +87,17 @@ def wait_for_readiness(base_url: str, timeout_seconds: float = 30.0) -> None:
     )
 
 
-def start_server(env: Mapping[str, str], port: int | None = None) -> UvicornServer:
+def _close_server_streams(server: UvicornServer) -> None:
+    for stream in (server.stdout_stream, server.stderr_stream):
+        if stream is not None and not stream.closed:
+            stream.close()
+
+
+def start_server(
+    env: Mapping[str, str],
+    port: int | None = None,
+    log_dir: Path | None = None,
+) -> UvicornServer:
     selected_port = port if port is not None else find_free_port()
     url = f"http://127.0.0.1:{selected_port}"
     command = [
@@ -96,15 +110,44 @@ def start_server(env: Mapping[str, str], port: int | None = None) -> UvicornServ
         "--port",
         str(selected_port),
     ]
+    stdout_target: int | TextIO
+    stderr_target: int | TextIO
+    stdout_stream: TextIO | None = None
+    stderr_stream: TextIO | None = None
+    if log_dir is None:
+        stdout_target = subprocess.DEVNULL
+        stderr_target = subprocess.DEVNULL
+    else:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stdout_stream = (log_dir / "uvicorn.stdout.log").open("w", encoding="utf-8")
+        try:
+            stderr_stream = (log_dir / "uvicorn.stderr.log").open("w", encoding="utf-8")
+        except Exception:
+            stdout_stream.close()
+            raise
+        stdout_target = stdout_stream
+        stderr_target = stderr_stream
+
     # Fixed argv, shell=False, local harness only.
-    process = subprocess.Popen(  # nosec B603
-        command,
-        env=dict(env),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+    try:
+        process = subprocess.Popen(  # nosec B603
+            command,
+            env=dict(env),
+            stdout=stdout_target,
+            stderr=stderr_target,
+            text=True,
+        )
+    except Exception:
+        for stream in (stdout_stream, stderr_stream):
+            if stream is not None and not stream.closed:
+                stream.close()
+        raise
+    server = UvicornServer(
+        process=process,
+        url=url,
+        stdout_stream=stdout_stream,
+        stderr_stream=stderr_stream,
     )
-    server = UvicornServer(process=process, url=url)
     try:
         wait_for_health(url)
     except Exception:
@@ -114,15 +157,18 @@ def start_server(env: Mapping[str, str], port: int | None = None) -> UvicornServ
 
 
 def stop_server(server: UvicornServer) -> None:
-    if server.process.poll() is not None:
-        return
-
-    server.process.terminate()
     try:
-        server.process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        server.process.kill()
-        server.process.wait(timeout=10)
+        if server.process.poll() is not None:
+            return
+
+        server.process.terminate()
+        try:
+            server.process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            server.process.kill()
+            server.process.wait(timeout=10)
+    finally:
+        _close_server_streams(server)
 
 
 __all__ = [
