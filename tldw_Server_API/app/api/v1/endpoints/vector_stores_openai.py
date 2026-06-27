@@ -1147,7 +1147,7 @@ async def list_vectors(
     filter: str | None = Query(
         None,
         description="Optional JSON metadata filter",
-        examples={
+        openapi_examples={
             "simple": {"summary": "Simple equality", "value": "{\"genre\":\"a\"}"},
             "and_numeric": {"summary": "AND with numeric", "value": "{\"$and\":[{\"genre\":\"a\"},{\"score\":{\"$gte\":0.8}}]}"}
         }
@@ -1155,12 +1155,12 @@ async def list_vectors(
     order_by: str | None = Query(
         "id",
         description="Order field: 'id' or 'metadata.<key>'",
-        examples={"metadata": {"summary": "Order by metadata.score desc", "value": "metadata.score"}}
+        openapi_examples={"metadata": {"summary": "Order by metadata.score desc", "value": "metadata.score"}}
     ),
     order_dir: str = Query(
         "asc",
         pattern="^(?i)(asc|desc)$",
-        examples={"desc": {"summary": "Descending", "value": "desc"}}
+        openapi_examples={"desc": {"summary": "Descending", "value": "desc"}}
     ),
     current_user: User = Depends(get_request_user)
 ):
