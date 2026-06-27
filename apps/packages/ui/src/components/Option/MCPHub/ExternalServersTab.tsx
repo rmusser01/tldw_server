@@ -126,6 +126,9 @@ const normalizeAuthTemplateMapping = (
   required: mapping.required !== false
 })
 
+const getErrorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : "Unknown error"
+
 type ExternalServersTabProps = {
   drillTarget?: McpHubDrillTarget | null
   onDrillHandled?: (requestId: number) => void
@@ -232,6 +235,7 @@ export const ExternalServersTab = ({
   const [importingServerId, setImportingServerId] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [readinessWarningMessage, setReadinessWarningMessage] = useState<string | null>(null)
   const [serverFormOpen, setServerFormOpen] = useState(false)
   const [editingServerId, setEditingServerId] = useState<string | null>(null)
   const [serverIdValue, setServerIdValue] = useState("")
@@ -342,16 +346,43 @@ export const ExternalServersTab = ({
   const loadServers = async () => {
     setLoading(true)
     setErrorMessage(null)
+    setReadinessWarningMessage(null)
     try {
-      const [rows, registrySummary, readiness] = await Promise.all([
+      const [rowsResult, registrySummaryResult, readinessResult] = await Promise.allSettled([
         listExternalServers(),
         getToolRegistrySummary(),
         fetchMcpHubReadiness()
       ])
-      const nextServers = Array.isArray(rows) ? rows : []
+      if (rowsResult.status === "rejected") {
+        throw rowsResult.reason
+      }
+
+      const warningDetails: string[] = []
+      const registrySummary =
+        registrySummaryResult.status === "fulfilled" ? registrySummaryResult.value : null
+      if (registrySummaryResult.status === "rejected") {
+        warningDetails.push(
+          `tool registry metadata could not be loaded (${getErrorMessage(registrySummaryResult.reason)})`
+        )
+      }
+
+      const readiness =
+        readinessResult.status === "fulfilled" ? readinessResult.value : null
+      if (readinessResult.status === "rejected") {
+        warningDetails.push(
+          `readiness details could not be loaded (${getErrorMessage(readinessResult.reason)})`
+        )
+      }
+
+      const nextServers = Array.isArray(rowsResult.value) ? rowsResult.value : []
       setServers(nextServers)
-      setRegistryEntries(Array.isArray(registrySummary.entries) ? registrySummary.entries : [])
+      setRegistryEntries(
+        registrySummary && Array.isArray(registrySummary.entries) ? registrySummary.entries : []
+      )
       setHubReadiness(readiness)
+      if (warningDetails.length > 0) {
+        setReadinessWarningMessage(`${warningDetails.join("; ")}.`)
+      }
       const managedRows = getManagedExternalServers(nextServers)
       if (managedRows.some((server) => server.id === activeServerId)) {
         return
@@ -361,9 +392,9 @@ export const ExternalServersTab = ({
       setServers([])
       setRegistryEntries([])
       setHubReadiness(null)
+      setReadinessWarningMessage(null)
       setActiveServerId("")
-      const msg = err instanceof Error ? err.message : "Unknown error"
-      setErrorMessage(`Failed to load external servers: ${msg}`)
+      setErrorMessage(`Failed to load external servers: ${getErrorMessage(err)}`)
     } finally {
       setLoading(false)
       setServersLoaded(true)
@@ -952,6 +983,15 @@ export const ExternalServersTab = ({
       ) : null}
       {successMessage ? (
         <StatePanel state="ready" title={successMessage} aria-live="polite" />
+      ) : null}
+      {readinessWarningMessage ? (
+        <StatePanel
+          state="degraded"
+          title="Readiness details are limited"
+          message={readinessWarningMessage}
+          role="status"
+          aria-live="polite"
+        />
       ) : null}
 
       <Button type="primary" onClick={openCreateForm}>

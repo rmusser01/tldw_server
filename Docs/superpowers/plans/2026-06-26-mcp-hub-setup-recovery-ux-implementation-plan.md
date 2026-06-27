@@ -780,7 +780,7 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
 - Modify: `apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx`
 - Use: `apps/packages/ui/src/components/Option/MCPHub/mcpHubReadiness.ts`
 
-- [ ] **Step 1: Write failing no-auth row test**
+- [x] **Step 1: Write failing no-auth row test**
 
   Add a test where a managed stdio server has no auth template, no secret, no slots, and `runtime_executable: true`.
 
@@ -789,7 +789,7 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   - `no secret` is not shown for that server.
   - `No auth template` is not used as the primary status.
 
-- [ ] **Step 2: Write failing legacy fallback row test**
+- [x] **Step 2: Write failing legacy fallback row test**
 
   Add a server with `secret_configured: true`, no template, and no slots.
 
@@ -797,14 +797,14 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   - `Legacy Secret Fallback` or `legacy secret fallback` appears only for that server.
   - It does not appear for the no-auth stdio server.
 
-- [ ] **Step 3: Run tests to verify failure**
+- [x] **Step 3: Run tests to verify failure**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx
   ```
 
-- [ ] **Step 4: Load registry/readiness inputs for rows**
+- [x] **Step 4: Load registry/readiness inputs for rows**
 
   In `ExternalServersTab.tsx`, import the registry client and readiness mapper:
 
@@ -818,11 +818,11 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
 
   Add state for registry entries and any backend readiness hints selected in Stage 0. Load them in the same refresh path as `loadServers()` so server rows and Tool Catalog can derive the same readiness state. Do not pass `[]` registry entries as a permanent shortcut.
 
-- [ ] **Step 5: Add row/catalog consistency test**
+- [x] **Step 5: Add row/catalog consistency test**
 
   Add a test where a managed server has a matching registry tool and assert the server row shows `Ready` or equivalent ready copy, not `discovery_not_run`. Add a second test where Stage 0 readiness hints mark `configChanged` and assert the row shows stale/refresh copy.
 
-- [ ] **Step 6: Write failing row recovery-action tests**
+- [x] **Step 6: Write failing row recovery-action tests**
 
   Add tests that row-level actions are present and wired from `allowedActions`:
   - `validate` renders `Validate` and calls the real validation/preflight client selected in Task 2;
@@ -835,7 +835,7 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   Tests must assert that these controls are not clickable no-ops. Mock the service
   method or parent view callback and verify the exact method/callback is invoked.
 
-- [ ] **Step 7: Replace misleading credential tags**
+- [x] **Step 7: Replace misleading credential tags**
 
   Replace unconditional `no secret` and `No auth template` tags for managed servers with tags derived from `credentialState`:
   - `not_required`: green or neutral `No credentials required`
@@ -844,11 +844,11 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   - `legacy_fallback`: orange `Legacy Secret Fallback`
   - `unknown`: neutral `credential status unknown`
 
-- [ ] **Step 8: Preserve expert detail without making it primary**
+- [x] **Step 8: Preserve expert detail without making it primary**
 
   Keep template validity and slot counts visible where useful, but do not present `No auth template` as an error for no-auth stdio. If retaining the raw template tag, make it secondary text or tooltip detail.
 
-- [ ] **Step 9: Render row recovery actions**
+- [x] **Step 9: Render row recovery actions**
 
   Add a compact row action group derived from `readiness.allowedActions`. Required mappings:
   - `validate` -> `Validate`, calls validation/preflight;
@@ -863,11 +863,11 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
   existing route with a different name, wire to that selected route instead of
   rendering a disabled placeholder.
 
-- [ ] **Step 10: Fix literal color tokens**
+- [x] **Step 10: Fix literal color tokens**
 
   Replace both `QuestionCircleOutlined style={{ color: "rgba(0,0,0,0.45)" }}` usages with an existing token/class. Prefer Ant Design token access if already used nearby; otherwise use `Typography.Text type="secondary"` wrapping or a local CSS class that maps to the design system.
 
-- [ ] **Step 11: Run row tests**
+- [x] **Step 11: Run row tests**
 
   ```bash
   cd apps/packages/ui
@@ -876,7 +876,7 @@ Do this task after Stage 0. If Stage 0 finds existing endpoints and fields that 
 
   Expected: pass.
 
-- [ ] **Step 12: Commit server-row readiness**
+- [x] **Step 12: Commit server-row readiness**
 
   ```bash
   git add apps/packages/ui/src/components/Option/MCPHub/ExternalServersTab.tsx apps/packages/ui/src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx

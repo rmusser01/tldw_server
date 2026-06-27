@@ -891,6 +891,17 @@ describe("ExternalServersTab", () => {
     expect(within(row).queryByText(/run discovery/i)).toBeNull()
   })
 
+  it("keeps server inventory visible when readiness metadata fails to load", async () => {
+    mocks.getMcpHubReadiness.mockRejectedValueOnce(new Error("readiness unavailable"))
+
+    render(<ExternalServersTab />)
+
+    const row = await findServerRow("Docs Managed")
+    expect(within(row).getByText(/credentials required/i)).toBeTruthy()
+    expect(await screen.findByText(/readiness details are limited/i)).toBeTruthy()
+    expect(screen.queryByText(/no external servers configured/i)).toBeNull()
+  })
+
   it("shows stale refresh copy when backend readiness reports config changes", async () => {
     mocks.getMcpHubReadiness.mockResolvedValueOnce(
       readinessResponse([
