@@ -11,6 +11,8 @@ import {
   deleteExternalServer,
   deleteExternalServerCredentialSlot,
   getExternalServerAuthTemplate,
+  getMcpHubReadiness as fetchMcpHubReadiness,
+  getToolRegistrySummary,
   importExternalServer,
   listExternalServers,
   describeExternalServerDiscoveryRefreshFailure,
@@ -21,9 +23,14 @@ import {
   updateExternalServer,
   updateExternalServerAuthTemplate,
   updateExternalServerCredentialSlot,
+  validateExternalServer,
   type McpHubExternalServer,
   type McpHubExternalServerAuthTemplateMapping,
-  type McpHubExternalServerCredentialSlot
+  type McpHubExternalServerCredentialSlot,
+  type McpHubReadiness,
+  type McpHubReadinessAction,
+  type McpHubServerReadiness,
+  type McpHubToolRegistryEntry
 } from "@/services/tldw/mcp-hub"
 
 import {
@@ -32,6 +39,11 @@ import {
   getManagedExternalServerSlots
 } from "./policyHelpers"
 import { invalidateMcpRuntimeQueries } from "./runtimeRefresh"
+import {
+  getMcpServerReadiness,
+  type McpReadinessAction,
+  type McpServerReadiness
+} from "./mcpHubReadiness"
 
 const DEFAULT_SLOT_SECRET_KIND = "bearer_token"
 const DEFAULT_SLOT_PRIVILEGE_CLASS = "read"
@@ -116,6 +128,70 @@ const normalizeAuthTemplateMapping = (
 type ExternalServersTabProps = {
   drillTarget?: McpHubDrillTarget | null
   onDrillHandled?: (requestId: number) => void
+  onOpenToolCatalog?: () => void
+}
+
+const READINESS_DISPLAY_LABELS: Record<McpServerReadiness["displayState"], string> = {
+  needs_setup: "Needs setup",
+  checking: "Checking",
+  ready: "Ready",
+  needs_attention: "Needs attention",
+  no_tools: "No tools",
+  stale: "Stale"
+}
+
+const READINESS_DISPLAY_COLORS: Record<McpServerReadiness["displayState"], string> = {
+  needs_setup: "blue",
+  checking: "processing",
+  ready: "green",
+  needs_attention: "orange",
+  no_tools: "gold",
+  stale: "gold"
+}
+
+const CREDENTIAL_TAGS: Record<
+  McpServerReadiness["credentialState"],
+  { color?: string; label: string }
+> = {
+  not_required: { color: "green", label: "No credentials required" },
+  required_missing: { color: "orange", label: "Credentials required" },
+  configured: { color: "green", label: "credentials configured" },
+  legacy_fallback: { color: "orange", label: "Legacy Secret Fallback" },
+  unknown: { label: "credential status unknown" }
+}
+
+const toMapperReadiness = (
+  server: McpHubExternalServer,
+  backendReadiness: McpHubServerReadiness | undefined,
+  registryEntries: McpHubToolRegistryEntry[]
+): McpServerReadiness => {
+  if (!backendReadiness) {
+    return getMcpServerReadiness({ server, registryEntries })
+  }
+
+  return {
+    serverId: backendReadiness.server_id,
+    serverName: backendReadiness.server_name,
+    displayState: backendReadiness.display_state,
+    credentialState: backendReadiness.credential_state,
+    toolCount: backendReadiness.tool_count,
+    reasonCodes: backendReadiness.reason_codes,
+    primaryReasonCode: backendReadiness.primary_reason_code ?? undefined,
+    allowedActions: backendReadiness.allowed_actions,
+    message: backendReadiness.message,
+    ...(backendReadiness.current_operation
+      ? {
+          currentOperation: {
+            operation: backendReadiness.current_operation.operation_type,
+            label:
+              backendReadiness.current_operation.message ||
+              backendReadiness.current_operation.operation_type,
+            startedAt: backendReadiness.current_operation.started_at ?? null,
+            serverId: backendReadiness.server_id
+          }
+        }
+      : {})
+  }
 }
 
 type RuntimeRefreshResult = { ok: true } | { ok: false; message: string }
@@ -125,13 +201,18 @@ const getRuntimeRefreshFailureMessage = (result: RuntimeRefreshResult) =>
 
 export const ExternalServersTab = ({
   drillTarget = null,
-  onDrillHandled
+  onDrillHandled,
+  onOpenToolCatalog
 }: ExternalServersTabProps) => {
   const queryClient = useQueryClient()
   const handledDrillRequestRef = useRef<number | null>(null)
   const [servers, setServers] = useState<McpHubExternalServer[]>([])
+  const [registryEntries, setRegistryEntries] = useState<McpHubToolRegistryEntry[]>([])
+  const [hubReadiness, setHubReadiness] = useState<McpHubReadiness | null>(null)
   const [serversLoaded, setServersLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [rowActionLoadingKey, setRowActionLoadingKey] = useState<string | null>(null)
+  const [detailsServerId, setDetailsServerId] = useState<string | null>(null)
   const [activeServerId, setActiveServerId] = useState<string>("")
   const [secretValue, setSecretValue] = useState("")
   const [saving, setSaving] = useState(false)
@@ -193,6 +274,33 @@ export const ExternalServersTab = ({
     () => shouldShowLegacySecretFallback(activeManagedServer),
     [activeManagedServer]
   )
+  const backendReadinessByServerId = useMemo(() => {
+    const nextReadiness = new Map<string, McpHubServerReadiness>()
+    for (const readiness of hubReadiness?.servers ?? []) {
+      nextReadiness.set(readiness.server_id, readiness)
+    }
+    return nextReadiness
+  }, [hubReadiness])
+  const rowReadinessByServerId = useMemo(() => {
+    const nextReadiness = new Map<string, McpServerReadiness>()
+    for (const server of servers) {
+      if (server.server_source === "legacy") {
+        continue
+      }
+      nextReadiness.set(
+        server.id,
+        toMapperReadiness(server, backendReadinessByServerId.get(server.id), registryEntries)
+      )
+    }
+    return nextReadiness
+  }, [backendReadinessByServerId, registryEntries, servers])
+  const detailsServer = useMemo(
+    () => servers.find((server) => server.id === detailsServerId) || null,
+    [detailsServerId, servers]
+  )
+  const detailsReadiness = detailsServerId
+    ? rowReadinessByServerId.get(detailsServerId)
+    : undefined
 
   const canSave = useMemo(
     () => activeServerId.trim().length > 0 && secretValue.trim().length > 0 && !saving,
@@ -218,9 +326,15 @@ export const ExternalServersTab = ({
     setLoading(true)
     setErrorMessage(null)
     try {
-      const rows = await listExternalServers()
+      const [rows, registrySummary, readiness] = await Promise.all([
+        listExternalServers(),
+        getToolRegistrySummary(),
+        fetchMcpHubReadiness()
+      ])
       const nextServers = Array.isArray(rows) ? rows : []
       setServers(nextServers)
+      setRegistryEntries(Array.isArray(registrySummary.entries) ? registrySummary.entries : [])
+      setHubReadiness(readiness)
       const managedRows = getManagedExternalServers(nextServers)
       if (managedRows.some((server) => server.id === activeServerId)) {
         return
@@ -228,6 +342,8 @@ export const ExternalServersTab = ({
       setActiveServerId(managedRows[0]?.id || "")
     } catch (err) {
       setServers([])
+      setRegistryEntries([])
+      setHubReadiness(null)
       setActiveServerId("")
       const msg = err instanceof Error ? err.message : "Unknown error"
       setErrorMessage(`Failed to load external servers: ${msg}`)
@@ -545,6 +661,109 @@ export const ExternalServersTab = ({
     })
   }
 
+  const handleValidateServer = async (server: McpHubExternalServer) => {
+    const loadingKey = `${server.id}:validate`
+    setRowActionLoadingKey(loadingKey)
+    setErrorMessage(null)
+    setSuccessMessage(null)
+    try {
+      await validateExternalServer(server.id)
+      await loadServers()
+      setSuccessMessage("Server validated")
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      setErrorMessage(`Failed to validate external server: ${msg}`)
+    } finally {
+      setRowActionLoadingKey(null)
+    }
+  }
+
+  const handleRefreshServerDiscovery = async (server: McpHubExternalServer) => {
+    const loadingKey = `${server.id}:refresh_discovery`
+    setRowActionLoadingKey(loadingKey)
+    setErrorMessage(null)
+    setSuccessMessage(null)
+    try {
+      const refreshResult = await refreshRuntimeDiscovery(server.id)
+      if (!refreshResult.ok) {
+        setErrorMessage(`Failed to refresh tool discovery: ${getRuntimeRefreshFailureMessage(refreshResult)}`)
+        return
+      }
+      await loadServers()
+      setSuccessMessage("Tool discovery refreshed")
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error"
+      setErrorMessage(`Failed to refresh tool discovery: ${msg}`)
+    } finally {
+      setRowActionLoadingKey(null)
+    }
+  }
+
+  const handleOpenCredentials = (server: McpHubExternalServer) => {
+    setFocusedServerId(server.id)
+    setActiveServerId(server.id)
+  }
+
+  const renderReadinessAction = (
+    action: McpReadinessAction | McpHubReadinessAction,
+    server: McpHubExternalServer
+  ) => {
+    switch (action) {
+      case "validate":
+        return (
+          <Button
+            key={action}
+            size="small"
+            loading={rowActionLoadingKey === `${server.id}:validate`}
+            onClick={() => void handleValidateServer(server)}
+          >
+            Validate
+          </Button>
+        )
+      case "refresh_discovery":
+        return (
+          <Button
+            key={action}
+            size="small"
+            loading={rowActionLoadingKey === `${server.id}:refresh_discovery`}
+            onClick={() => void handleRefreshServerDiscovery(server)}
+          >
+            Refresh tools
+          </Button>
+        )
+      case "edit_config":
+        return (
+          <Button key={action} size="small" onClick={() => openEditForm(server)}>
+            Edit config
+          </Button>
+        )
+      case "open_credentials":
+        return (
+          <Button key={action} size="small" onClick={() => handleOpenCredentials(server)}>
+            Credentials
+          </Button>
+        )
+      case "view_details":
+        return (
+          <Button key={action} size="small" onClick={() => setDetailsServerId(server.id)}>
+            Details
+          </Button>
+        )
+      case "open_tool_catalog":
+        if (!onOpenToolCatalog) {
+          return null
+        }
+        return (
+          <Button key={action} size="small" onClick={onOpenToolCatalog}>
+            Tool Catalog
+          </Button>
+        )
+      case "add_server":
+      case "open_audit":
+        return null
+    }
+  }
+
   const openCreateSlotForm = () => {
     resetSlotForm()
     setSlotFormOpen(true)
@@ -752,10 +971,12 @@ export const ExternalServersTab = ({
                   <Tooltip title="How to communicate with the server. Use 'stdio' for local processes, 'websocket' for remote servers.">
                     <button
                       type="button"
-                      aria-label="Transport help"
+                      aria-label="Connection mode help"
                       style={{ border: 0, background: "transparent", padding: 0, cursor: "help", lineHeight: 1 }}
                     >
-                      <QuestionCircleOutlined style={{ color: "rgba(0,0,0,0.45)" }} />
+                      <Typography.Text type="secondary">
+                        <QuestionCircleOutlined />
+                      </Typography.Text>
                     </button>
                   </Tooltip>
                 </span>
@@ -884,7 +1105,9 @@ export const ExternalServersTab = ({
                               aria-label="Secret kind help"
                               style={{ border: 0, background: "transparent", padding: 0, cursor: "help", lineHeight: 1 }}
                             >
-                              <QuestionCircleOutlined style={{ color: "rgba(0,0,0,0.45)" }} />
+                              <Typography.Text type="secondary">
+                                <QuestionCircleOutlined />
+                              </Typography.Text>
                             </button>
                           </Tooltip>
                         </span>
@@ -1210,6 +1433,8 @@ export const ExternalServersTab = ({
         }}
         renderItem={(server) => {
           const serverHasNoCredentialRequirements = isNoAuthManagedStdioServer(server)
+          const readiness = rowReadinessByServerId.get(server.id)
+          const credentialTag = readiness ? CREDENTIAL_TAGS[readiness.credentialState] : null
           return (
             <List.Item>
               <Space wrap size="small" style={{ width: "100%", justifyContent: "space-between" }}>
@@ -1221,16 +1446,37 @@ export const ExternalServersTab = ({
                   ) : (
                     <Tag color="green">managed</Tag>
                   )}
-                  {serverHasNoCredentialRequirements ? (
+                  {readiness ? (
+                    <>
+                      <Tag color={READINESS_DISPLAY_COLORS[readiness.displayState]}>
+                        {READINESS_DISPLAY_LABELS[readiness.displayState]}
+                      </Tag>
+                      <Tag>{`${readiness.toolCount} ${readiness.toolCount === 1 ? "tool" : "tools"}`}</Tag>
+                    </>
+                  ) : null}
+                  {credentialTag ? (
+                    <Tag color={credentialTag.color}>{credentialTag.label}</Tag>
+                  ) : serverHasNoCredentialRequirements ? (
                     <Tag color="green">No credentials required</Tag>
-                  ) : server.auth_template_valid ? (
-                    <Tag color="green">template valid</Tag>
+                  ) : server.secret_configured ? (
+                    <Tag color="green">secret configured</Tag>
                   ) : (
-                    <Tag color={server.auth_template_present ? "orange" : "default"}>
-                      {getExternalAuthTemplateBlockedReasonLabel(server.auth_template_blocked_reason) || "No auth template"}
-                    </Tag>
+                    <Tag>no secret</Tag>
                   )}
-                  {serverHasNoCredentialRequirements ? null : server.secret_configured ? <Tag color="green">secret configured</Tag> : <Tag>no secret</Tag>}
+                  {server.auth_template_valid ? (
+                    <Tag color="green">template valid</Tag>
+                  ) : server.auth_template_present ? (
+                    <Tag color="orange">
+                      {getExternalAuthTemplateBlockedReasonLabel(server.auth_template_blocked_reason) || "Template needs review"}
+                    </Tag>
+                  ) : server.credential_slots?.length ? (
+                    <Tag>template not configured</Tag>
+                  ) : serverHasNoCredentialRequirements ? null : (
+                    <Tag>{getExternalAuthTemplateBlockedReasonLabel(server.auth_template_blocked_reason) || "No auth template"}</Tag>
+                  )}
+                  {readiness?.message ? (
+                    <Typography.Text type="secondary">{readiness.message}</Typography.Text>
+                  ) : null}
                   {server.runtime_executable ? <Tag color="green">runtime executable</Tag> : <Tag>inventory only</Tag>}
                   <Tag>{`${server.binding_count || 0} ${(server.binding_count || 0) === 1 ? "binding" : "bindings"}`}</Tag>
                   {server.credential_slots?.length ? (
@@ -1249,7 +1495,10 @@ export const ExternalServersTab = ({
                     Import to MCP Hub
                   </Button>
                 ) : server.server_source !== "legacy" ? (
-                  <Space>
+                  <Space wrap size="small">
+                    {readiness?.allowedActions.map((action) =>
+                      renderReadinessAction(action, server)
+                    )}
                     <Button
                       size="small"
                       aria-label={`Edit ${server.name}`}
@@ -1272,6 +1521,27 @@ export const ExternalServersTab = ({
           )
         }}
       />
+      <Modal
+        title={detailsServer ? `${detailsServer.name} readiness details` : "Server readiness details"}
+        open={Boolean(detailsServer)}
+        onCancel={() => setDetailsServerId(null)}
+        footer={<Button onClick={() => setDetailsServerId(null)}>Close</Button>}
+      >
+        {detailsServer && detailsReadiness ? (
+          <Space orientation="vertical" size="small" style={{ width: "100%" }}>
+            <Alert
+              type={detailsReadiness.displayState === "ready" ? "success" : "info"}
+              showIcon
+              title={READINESS_DISPLAY_LABELS[detailsReadiness.displayState]}
+              description={detailsReadiness.message}
+            />
+            <Typography.Text>{`Server ID: ${detailsServer.id}`}</Typography.Text>
+            <Typography.Text>{`Credential state: ${detailsReadiness.credentialState}`}</Typography.Text>
+            <Typography.Text>{`Reason codes: ${detailsReadiness.reasonCodes.join(", ") || "none"}`}</Typography.Text>
+            <Typography.Text>{`Tools: ${detailsReadiness.toolCount}`}</Typography.Text>
+          </Space>
+        ) : null}
+      </Modal>
     </Space>
   )
 }

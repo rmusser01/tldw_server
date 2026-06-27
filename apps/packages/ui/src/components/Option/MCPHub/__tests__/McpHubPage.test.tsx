@@ -38,7 +38,14 @@ vi.mock("../ToolCatalogsTab", () => ({
   ToolCatalogsTab: () => <div>catalog tab</div>
 }))
 vi.mock("../ExternalServersTab", () => ({
-  ExternalServersTab: () => <div>credentials tab</div>
+  ExternalServersTab: ({ onOpenToolCatalog }: { onOpenToolCatalog?: () => void }) => (
+    <div>
+      credentials tab
+      <button type="button" onClick={onOpenToolCatalog}>
+        open catalog from credentials row
+      </button>
+    </div>
+  )
 }))
 vi.mock("../DeploymentDiagnosticsPanel", () => ({
   DeploymentDiagnosticsPanel: () => <div>deployment diagnostics</div>
@@ -288,6 +295,22 @@ describe("McpHubPage", () => {
     expect(screen.getByTestId("mcp-hub-workflow-access")).toHaveAttribute(
       "aria-pressed",
       "true"
+    )
+  })
+
+  it("routes from external server row actions to the Tool Catalog view", async () => {
+    const user = userEvent.setup()
+    renderMcpHubPage()
+
+    await user.click(screen.getByRole("button", { name: /open catalog from credentials row/i }))
+
+    expect(screen.getByText("catalog tab")).toBeTruthy()
+    expect(screen.getByTestId("mcp-hub-workflow-setup")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/mcp-hub?workflow=setup&view=tool-catalogs"
     )
   })
 })

@@ -201,6 +201,13 @@ export const McpHubPage = () => {
     })
   }
 
+  const handleOpenToolCatalog = () => {
+    updateRouteState({
+      workflow: workflowForMcpHubView("tool-catalogs"),
+      view: "tool-catalogs"
+    })
+  }
+
   const tabContentByView: Record<McpHubViewKey, ReactNode> = {
     "tool-catalogs": (
       <ToolCatalogsTab
@@ -216,6 +223,7 @@ export const McpHubPage = () => {
       <ExternalServersTab
         drillTarget={drillTarget}
         onDrillHandled={handleDrillHandled}
+        onOpenToolCatalog={handleOpenToolCatalog}
       />
     ),
     profiles: <PermissionProfilesTab />,

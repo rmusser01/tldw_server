@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const mocks = vi.hoisted(() => ({
@@ -11,12 +11,16 @@ const mocks = vi.hoisted(() => ({
   setExternalServerSlotSecret: vi.fn(),
   clearExternalServerSlotSecret: vi.fn(),
   getExternalServerAuthTemplate: vi.fn(),
+  getMcpHubReadiness: vi.fn(),
+  getToolRegistrySummary: vi.fn(),
+  refreshExternalServerDiscovery: vi.fn(),
+  refreshExternalServerReadinessDiscovery: vi.fn(),
+  validateExternalServer: vi.fn(),
   updateExternalServerAuthTemplate: vi.fn(),
   importExternalServer: vi.fn(),
   createExternalServer: vi.fn(),
   updateExternalServer: vi.fn(),
   deleteExternalServer: vi.fn(),
-  refreshExternalServerDiscovery: vi.fn(),
   createExternalServerCredentialSlot: vi.fn(),
   updateExternalServerCredentialSlot: vi.fn(),
   deleteExternalServerCredentialSlot: vi.fn()
@@ -40,18 +44,93 @@ vi.mock("@/services/tldw/mcp-hub", () => ({
   setExternalServerSlotSecret: (...args: unknown[]) => mocks.setExternalServerSlotSecret(...args),
   clearExternalServerSlotSecret: (...args: unknown[]) => mocks.clearExternalServerSlotSecret(...args),
   getExternalServerAuthTemplate: (...args: unknown[]) => mocks.getExternalServerAuthTemplate(...args),
+  getMcpHubReadiness: (...args: unknown[]) => mocks.getMcpHubReadiness(...args),
+  getToolRegistrySummary: (...args: unknown[]) => mocks.getToolRegistrySummary(...args),
+  refreshExternalServerDiscovery: (...args: unknown[]) => mocks.refreshExternalServerDiscovery(...args),
+  refreshExternalServerReadinessDiscovery: (...args: unknown[]) => mocks.refreshExternalServerReadinessDiscovery(...args),
+  validateExternalServer: (...args: unknown[]) => mocks.validateExternalServer(...args),
   updateExternalServerAuthTemplate: (...args: unknown[]) => mocks.updateExternalServerAuthTemplate(...args),
   importExternalServer: (...args: unknown[]) => mocks.importExternalServer(...args),
   createExternalServer: (...args: unknown[]) => mocks.createExternalServer(...args),
   updateExternalServer: (...args: unknown[]) => mocks.updateExternalServer(...args),
   deleteExternalServer: (...args: unknown[]) => mocks.deleteExternalServer(...args),
-  refreshExternalServerDiscovery: (...args: unknown[]) => mocks.refreshExternalServerDiscovery(...args),
   createExternalServerCredentialSlot: (...args: unknown[]) => mocks.createExternalServerCredentialSlot(...args),
   updateExternalServerCredentialSlot: (...args: unknown[]) => mocks.updateExternalServerCredentialSlot(...args),
   deleteExternalServerCredentialSlot: (...args: unknown[]) => mocks.deleteExternalServerCredentialSlot(...args)
 }))
 
 import { ExternalServersTab } from "../ExternalServersTab"
+
+const toolEntry = (serverId: string, toolName = "search") => ({
+  tool_name: `ext.${serverId}.${toolName}`,
+  display_name: toolName,
+  description: null,
+  module: `external.${serverId}`,
+  module_display_name: serverId,
+  category: "external",
+  risk_class: "low",
+  capabilities: [],
+  mutates_state: false,
+  uses_filesystem: false,
+  uses_processes: false,
+  uses_network: false,
+  uses_credentials: false,
+  supports_arguments_preview: false,
+  path_boundable: false,
+  path_argument_hints: [],
+  metadata_source: "explicit",
+  metadata_warnings: []
+})
+
+const readinessServer = (overrides: Record<string, unknown>) => ({
+  server_id: "docs-managed",
+  server_name: "Docs Managed",
+  display_state: "needs_attention",
+  credential_state: "required_missing",
+  tool_count: 0,
+  reason_codes: ["auth_missing", "discovery_not_run"],
+  primary_reason_code: "auth_missing",
+  allowed_actions: ["open_credentials", "view_details"],
+  message: "Credentials are required before this server can be used.",
+  current_operation: null,
+  last_validation_at: null,
+  last_discovery_at: null,
+  last_successful_discovery_at: null,
+  last_error_category: null,
+  last_error_message: null,
+  refresh_result: null,
+  ...overrides
+})
+
+const readinessResponse = (servers: Array<Record<string, unknown>>) => ({
+  display_state: servers.some((server) => server.display_state === "stale")
+    ? "stale"
+    : servers.every((server) => server.display_state === "ready")
+      ? "ready"
+      : "needs_attention",
+  reason_codes: servers.flatMap((server) => server.reason_codes as string[]),
+  primary_reason_code: (servers[0]?.primary_reason_code as string | null | undefined) ?? null,
+  allowed_actions: [],
+  message: "MCP Hub readiness loaded.",
+  servers,
+  total_servers: servers.length,
+  ready_server_count: servers.filter((server) => server.display_state === "ready").length,
+  checking_server_count: 0,
+  attention_server_count: servers.filter((server) => server.display_state === "needs_attention").length,
+  no_tool_server_count: 0,
+  stale_server_count: servers.filter((server) => server.display_state === "stale").length
+})
+
+const findServerRow = async (name: string) => {
+  const matches = await screen.findAllByText(name)
+  const row = matches
+    .map((match) => match.closest(".ant-list-item"))
+    .find((item): item is HTMLElement => Boolean(item))
+  if (!row) {
+    throw new Error(`Expected to find server row for ${name}`)
+  }
+  return row
+}
 
 describe("ExternalServersTab", () => {
   beforeEach(() => {
@@ -128,6 +207,40 @@ describe("ExternalServersTab", () => {
         mappings: []
       }
     })
+    mocks.getMcpHubReadiness.mockResolvedValue(
+      readinessResponse([
+        readinessServer({
+          server_id: "docs-managed",
+          server_name: "Docs Managed"
+        })
+      ])
+    )
+    mocks.getToolRegistrySummary.mockResolvedValue({
+      entries: [],
+      modules: []
+    })
+    mocks.validateExternalServer.mockResolvedValue(
+      readinessServer({
+        display_state: "ready",
+        credential_state: "configured",
+        tool_count: 1,
+        reason_codes: [],
+        primary_reason_code: null,
+        allowed_actions: ["open_tool_catalog", "view_details"],
+        message: "Server is ready."
+      })
+    )
+    mocks.refreshExternalServerDiscovery.mockResolvedValue(
+      readinessServer({
+        display_state: "ready",
+        credential_state: "configured",
+        tool_count: 1,
+        reason_codes: [],
+        primary_reason_code: null,
+        allowed_actions: ["open_tool_catalog", "view_details"],
+        message: "Server is ready."
+      })
+    )
     mocks.updateExternalServerAuthTemplate.mockImplementation(async (_serverId: string, payload: unknown) => payload)
     mocks.setExternalServerSecret.mockResolvedValue({
       server_id: "docs-managed",
@@ -618,4 +731,225 @@ describe("ExternalServersTab", () => {
     expect(await screen.findByText(/focused from audit/i)).toBeTruthy()
     expect(onDrillHandled).toHaveBeenCalledWith(13)
   })
+
+  it("renders no-auth managed stdio rows as not requiring credentials", async () => {
+    mocks.listExternalServers.mockResolvedValueOnce([
+      {
+        id: "local-docs",
+        name: "Local Docs",
+        enabled: true,
+        owner_scope_type: "global",
+        transport: "stdio",
+        config: {},
+        secret_configured: false,
+        server_source: "managed",
+        binding_count: 0,
+        runtime_executable: true,
+        auth_template_present: false,
+        auth_template_valid: false,
+        auth_template_blocked_reason: "no_auth_template",
+        credential_slots: []
+      }
+    ])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse([
+        readinessServer({
+          server_id: "local-docs",
+          server_name: "Local Docs",
+          credential_state: "not_required",
+          reason_codes: ["discovery_not_run"],
+          primary_reason_code: "discovery_not_run",
+          allowed_actions: ["refresh_discovery", "edit_config"],
+          message: "Run discovery to populate this server's tool catalog. No credentials required."
+        })
+      ])
+    )
+
+    render(<ExternalServersTab />)
+
+    const row = await findServerRow("Local Docs")
+    expect(within(row).getAllByText(/no credentials required/i).length).toBeGreaterThan(0)
+    expect(within(row).queryByText(/^no secret$/i)).toBeNull()
+    expect(within(row).queryByText(/^no auth template$/i)).toBeNull()
+  })
+
+  it("renders legacy secret fallback only for managed rows that use server-level secrets", async () => {
+    mocks.listExternalServers.mockResolvedValueOnce([
+      {
+        id: "local-docs",
+        name: "Local Docs",
+        enabled: true,
+        owner_scope_type: "global",
+        transport: "stdio",
+        config: {},
+        secret_configured: false,
+        server_source: "managed",
+        binding_count: 0,
+        runtime_executable: true,
+        auth_template_present: false,
+        auth_template_valid: false,
+        auth_template_blocked_reason: "no_auth_template",
+        credential_slots: []
+      },
+      {
+        id: "legacy-secret-managed",
+        name: "Legacy Secret Managed",
+        enabled: true,
+        owner_scope_type: "global",
+        transport: "websocket",
+        config: {},
+        secret_configured: true,
+        server_source: "managed",
+        binding_count: 0,
+        runtime_executable: true,
+        auth_template_present: false,
+        auth_template_valid: false,
+        auth_template_blocked_reason: "no_auth_template",
+        credential_slots: []
+      }
+    ])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse([
+        readinessServer({
+          server_id: "local-docs",
+          server_name: "Local Docs",
+          credential_state: "not_required",
+          reason_codes: ["discovery_not_run"],
+          primary_reason_code: "discovery_not_run"
+        }),
+        readinessServer({
+          server_id: "legacy-secret-managed",
+          server_name: "Legacy Secret Managed",
+          credential_state: "legacy_fallback",
+          reason_codes: ["discovery_not_run"],
+          primary_reason_code: "discovery_not_run",
+          message: "Run discovery to populate this server's tool catalog. Legacy Secret Fallback is configured."
+        })
+      ])
+    )
+
+    render(<ExternalServersTab />)
+
+    const noAuthRow = await findServerRow("Local Docs")
+    const fallbackRow = await findServerRow("Legacy Secret Managed")
+    expect(within(noAuthRow).queryByText(/legacy secret fallback/i)).toBeNull()
+    expect(within(fallbackRow).getAllByText(/legacy secret fallback/i).length).toBeGreaterThan(0)
+  })
+
+  it("uses readiness and registry data so ready rows do not look undiscovered", async () => {
+    mocks.listExternalServers.mockResolvedValueOnce([
+      {
+        id: "docs-managed",
+        name: "Docs Managed",
+        enabled: true,
+        owner_scope_type: "global",
+        transport: "stdio",
+        config: {},
+        secret_configured: false,
+        server_source: "managed",
+        binding_count: 1,
+        runtime_executable: true,
+        auth_template_present: true,
+        auth_template_valid: true,
+        auth_template_blocked_reason: null,
+        credential_slots: []
+      }
+    ])
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [toolEntry("docs-managed")],
+      modules: []
+    })
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse([
+        readinessServer({
+          display_state: "ready",
+          credential_state: "configured",
+          tool_count: 1,
+          reason_codes: [],
+          primary_reason_code: null,
+          allowed_actions: ["open_tool_catalog", "view_details"],
+          message: "Server is ready with 1 available tool. Credentials are configured."
+        })
+      ])
+    )
+
+    render(<ExternalServersTab />)
+
+    const row = await findServerRow("Docs Managed")
+    expect(within(row).getByText(/^Ready$/i)).toBeTruthy()
+    expect(within(row).getByText(/1 tool/i)).toBeTruthy()
+    expect(within(row).queryByText(/discovery_not_run/i)).toBeNull()
+    expect(within(row).queryByText(/run discovery/i)).toBeNull()
+  })
+
+  it("shows stale refresh copy when backend readiness reports config changes", async () => {
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse([
+        readinessServer({
+          display_state: "stale",
+          credential_state: "configured",
+          tool_count: 2,
+          reason_codes: ["config_changed"],
+          primary_reason_code: "config_changed",
+          allowed_actions: ["refresh_discovery", "edit_config", "view_details"],
+          message: "Configuration changed after the last discovery run."
+        })
+      ])
+    )
+
+    render(<ExternalServersTab />)
+
+    const row = await findServerRow("Docs Managed")
+    expect(within(row).getByText(/^Stale$/i)).toBeTruthy()
+    expect(within(row).getByText(/configuration changed/i)).toBeTruthy()
+    expect(within(row).getByRole("button", { name: /refresh tools/i })).toBeTruthy()
+  })
+
+  it("wires readiness recovery actions to real handlers", async () => {
+    const user = userEvent.setup()
+    const onOpenToolCatalog = vi.fn()
+    mocks.getMcpHubReadiness.mockResolvedValue(
+      readinessResponse([
+        readinessServer({
+          credential_state: "required_missing",
+          reason_codes: ["auth_missing", "config_changed"],
+          primary_reason_code: "auth_missing",
+          allowed_actions: [
+            "validate",
+            "refresh_discovery",
+            "edit_config",
+            "open_credentials",
+            "view_details",
+            "open_tool_catalog"
+          ],
+          message: "Credentials are required before this server can be used."
+        })
+      ])
+    )
+
+    render(<ExternalServersTab onOpenToolCatalog={onOpenToolCatalog} />)
+
+    const row = await findServerRow("Docs Managed")
+
+    await user.click(within(row).getByRole("button", { name: /validate/i }))
+    expect(mocks.validateExternalServer).toHaveBeenCalledWith("docs-managed")
+
+    await user.click(within(row).getByRole("button", { name: /refresh tools/i }))
+    expect(mocks.refreshExternalServerDiscovery).toHaveBeenCalledWith("docs-managed")
+    expect(mocks.listExternalServers).toHaveBeenCalledTimes(3)
+
+    await user.click(within(row).getByRole("button", { name: /details/i }))
+    expect(await screen.findByText(/server id: docs-managed/i)).toBeTruthy()
+    const closeButtons = screen.getAllByRole("button", { name: /^close$/i })
+    await user.click(closeButtons[closeButtons.length - 1])
+
+    await user.click(within(row).getByRole("button", { name: /edit config/i }))
+    expect(await screen.findByLabelText(/^name$/i)).toHaveValue("Docs Managed")
+
+    await user.click(within(row).getByRole("button", { name: /^credentials$/i }))
+    expect(screen.getByLabelText(/slot secret/i)).toBeTruthy()
+
+    await user.click(within(row).getByRole("button", { name: /tool catalog/i }))
+    expect(onOpenToolCatalog).toHaveBeenCalledTimes(1)
+  }, 15000)
 })
