@@ -41,8 +41,8 @@ standalone extraction work explicitly keeps the first stage inside
 - Make first-run MCP server setup task-led instead of raw-config-led.
 - Preserve expert/manual configuration paths from the first setup screen.
 - Separate safe preflight validation from explicit runtime discovery.
-- Provide consistent readiness state across Setup, server rows, status summary,
-  and Tool Catalog.
+- Provide consistent readiness state across Setup, server rows, Tool Catalog,
+  and any status summary that presents readiness.
 - Put recovery actions where users encounter the problem.
 - Treat no-auth stdio as intentionally complete when credentials are not
   required.
@@ -108,8 +108,10 @@ next valid action.
 
 The UI should not infer readiness separately in each component. Introduce one
 shared normalized readiness model. It may be backend-owned or frontend-normalized
-from existing APIs in the first pass, but Setup, server rows, status summary, and
-Tool Catalog must consume the same object.
+from existing APIs in the first pass. Setup, server rows, and Tool Catalog must
+consume the same object. Status summary cards must consume the same object only
+if they present readiness; if they stay as navigation, they must not use visual
+treatment or copy that implies live readiness.
 
 Use a small set of user-facing display states:
 
@@ -124,6 +126,7 @@ Preserve detailed machine-readable reasons under the display state:
 
 - `not_configured`
 - `preflight_failed`
+- `discovery_not_run`
 - `auth_missing`
 - `runtime_unavailable`
 - `unreachable`
@@ -161,6 +164,7 @@ type McpDisplayState =
 type McpReasonCode =
   | "not_configured"
   | "preflight_failed"
+  | "discovery_not_run"
   | "auth_missing"
   | "runtime_unavailable"
   | "unreachable"
@@ -218,6 +222,11 @@ type McpHubReadiness = {
 problem reason codes so no-auth stdio can render as an intentional
 `not_required` state instead of masquerading as a missing credential.
 
+For Phase 1, `stale` should be emitted only for deterministic causes:
+`config_changed`, `discovery_not_run`, manual invalidation, or a failed refresh
+after a previous successful discovery. Do not emit `catalog_expired` until an
+explicit age threshold is chosen.
+
 ## Preflight Versus Discovery
 
 Separate two operations:
@@ -266,6 +275,8 @@ Recovery should appear where the user hits the problem.
 Setup result panel:
 
 - `ready`: link to Tool Catalog and any safe downstream use location.
+- `discovery_not_run`: explain that the server is saved but tools have not been
+  discovered yet; offer refresh discovery.
 - `no_tools`: explain that the server responded but exposed no tools; offer
   details and refresh.
 - `auth_missing`: offer credentials.
@@ -294,7 +305,8 @@ Status summary:
 
 - Prefer data-backed readiness cards.
 - If data-backed cards are too large for this slice, demote static cards to
-  navigation and keep real readiness in Setup/server rows/Tool Catalog.
+  navigation. Demoted cards must not use readiness labels, colors, or copy, and
+  real readiness remains in Setup/server rows/Tool Catalog.
 
 ## No-Auth Stdio Copy
 
@@ -375,6 +387,8 @@ Acceptance:
 
 - the same server has the same readiness state in server rows and Tool Catalog;
 - stale/empty Tool Catalog states offer valid actions;
+- configured-but-undiscovered servers map to `discovery_not_run` and offer
+  refresh discovery;
 - no-auth stdio does not render as missing credentials;
 - mapper tests cover display state, primary reason, secondary reasons, and
   allowed actions;
@@ -436,7 +450,8 @@ Complete product polish:
 
 Acceptance:
 
-- status summary no longer implies false readiness;
+- status summary either consumes the shared readiness object or is visibly plain
+  navigation with no readiness claims;
 - no-auth copy is consistent across setup, server row, credentials, and details;
 - Tool Catalog recovery is available from empty and stale states;
 - first-run setup browser smoke passes;
