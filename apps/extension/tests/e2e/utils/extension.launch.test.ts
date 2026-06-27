@@ -13,6 +13,104 @@ afterEach(() => {
 })
 
 describe("launchWithExtension", () => {
+  it("honors the configured target wait when a deterministic manifest key is staged", async () => {
+    vi.useFakeTimers()
+    process.env.TLDW_E2E_EXTENSION_TARGET_WAIT_MS = "90000"
+    process.env.TLDW_E2E_EXTENSION_MINIMAL_LOCALES = "1"
+
+    const extensionId = "a".repeat(32)
+    const seedConfig = {
+      __tldw_first_run_complete: true,
+      tldwConfig: { serverUrl: "http://127.0.0.1:8000", apiKey: "test-key" },
+    }
+    const resolveExtensionId = vi.fn().mockResolvedValue(extensionId)
+
+    const serviceWorker = {
+      url: vi.fn(() => `chrome-extension://${extensionId}/background.js`),
+      on: vi.fn(),
+      evaluate: vi.fn().mockResolvedValue(undefined),
+    }
+    let serviceWorkerReady = false
+
+    const page = {
+      waitForTimeout: vi.fn().mockResolvedValue(undefined),
+      goto: vi.fn().mockResolvedValue(undefined),
+      evaluate: vi.fn().mockResolvedValue(undefined),
+      waitForFunction: vi.fn().mockResolvedValue(undefined),
+    }
+
+    const context = {
+      serviceWorkers: vi.fn(() => (serviceWorkerReady ? [serviceWorker] : [])),
+      backgroundPages: vi.fn(() => []),
+      waitForEvent: vi.fn((eventName: string) => {
+        if (eventName !== "serviceworker") {
+          return new Promise(() => {})
+        }
+
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            serviceWorkerReady = true
+            resolve(serviceWorker)
+          }, 6000)
+        })
+      }),
+      addInitScript: vi.fn().mockResolvedValue(undefined),
+      newPage: vi.fn().mockResolvedValue(page),
+    }
+
+    const launchPersistentContext = vi.fn().mockResolvedValue(context)
+
+    vi.doMock("@playwright/test", () => ({
+      BrowserContext: class BrowserContext {},
+      Page: class Page {},
+      chromium: {
+        launchPersistentContext,
+      },
+    }))
+
+    vi.doMock("./extension-id", () => ({
+      resolveExtensionId,
+    }))
+
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-extension-launch-"))
+    const extensionDir = path.join(tempRoot, "chrome-mv3")
+    fs.mkdirSync(path.join(extensionDir, "_locales", "en"), { recursive: true })
+    fs.writeFileSync(
+      path.join(extensionDir, "manifest.json"),
+      JSON.stringify({
+        manifest_version: 3,
+        name: "__MSG_appName__",
+        version: "1.0.0",
+        default_locale: "en",
+      }),
+      "utf8",
+    )
+    fs.writeFileSync(path.join(extensionDir, "background.js"), "// background", "utf8")
+    fs.writeFileSync(path.join(extensionDir, "options.html"), "<html></html>", "utf8")
+    fs.writeFileSync(path.join(extensionDir, "sidepanel.html"), "<html></html>", "utf8")
+    fs.writeFileSync(
+      path.join(extensionDir, "_locales", "en", "messages.json"),
+      JSON.stringify({ appName: { message: "tldw Assistant" } }),
+      "utf8",
+    )
+
+    try {
+      const { launchWithExtension } = await import("./extension")
+
+      const launchPromise = launchWithExtension(extensionDir, { seedConfig })
+      await vi.advanceTimersByTimeAsync(6000)
+      await launchPromise
+
+      expect(serviceWorker.evaluate).toHaveBeenCalledWith(
+        expect.any(Function),
+        seedConfig,
+      )
+    } finally {
+      vi.useRealTimers()
+      fs.rmSync(tempRoot, { recursive: true, force: true })
+    }
+  })
+
   it("passes userDataDir to resolveExtensionId when extension targets are unavailable", async () => {
     process.env.TLDW_E2E_EXTENSION_TARGET_WAIT_MS = "1"
 

@@ -94,17 +94,6 @@ function isExtensionBuildDir(dir: string): boolean {
   return fs.existsSync(backgroundPath) && (fs.existsSync(optionsPath) || fs.existsSync(sidepanelPath))
 }
 
-function hasManifestKey(dir: string): boolean {
-  try {
-    const manifest = JSON.parse(
-      fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')
-    ) as { key?: unknown }
-    return typeof manifest.key === 'string' && manifest.key.trim().length > 0
-  } catch {
-    return false
-  }
-}
-
 function resolveChromiumExecutablePath(explicitPath?: string): string | undefined {
   const fromEnv = String(explicitPath || '').trim()
   if (fromEnv) {
@@ -286,10 +275,6 @@ export async function launchWithExtension(
     Number.isFinite(configuredTargetWait) && configuredTargetWait > 0
       ? configuredTargetWait
       : 30000
-  const backgroundTargetProbeWaitMs = hasManifestKey(launchExtPath)
-    ? Math.min(targetWaitMs, 5000)
-    : targetWaitMs
-
   // Wait for background targets to appear (service worker or background page)
   const waitForTargets = async () => {
     // Already present?
@@ -297,7 +282,7 @@ export async function launchWithExtension(
     await Promise.race([
       context.waitForEvent('serviceworker').catch(() => null),
       context.waitForEvent('backgroundpage').catch(() => null),
-      new Promise((r) => setTimeout(r, backgroundTargetProbeWaitMs))
+      new Promise((r) => setTimeout(r, targetWaitMs))
     ])
   }
   await waitForTargets()

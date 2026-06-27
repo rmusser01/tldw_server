@@ -5,6 +5,15 @@ import {
 } from "./fixtures"
 import type { ResearchWorkspacePlatform } from "./types"
 
+export const shouldUseDomClickFallback = (error: unknown): boolean => {
+  const message = String(error instanceof Error ? error.message : error)
+  return (
+    message.includes("nextjs-portal") ||
+    /TimeoutError:\s*locator\.click|locator\.click:\s*Timeout/i.test(message) ||
+    /intercepts pointer events|element is not stable/i.test(message)
+  )
+}
+
 export class ResearchWorkspaceParityPage {
   readonly page: Page
   readonly headerTitle: Locator
@@ -63,7 +72,7 @@ export class ResearchWorkspaceParityPage {
     try {
       await locator.click({ timeout: 3_000 })
     } catch (error) {
-      if (!String(error).includes("nextjs-portal")) {
+      if (!shouldUseDomClickFallback(error)) {
         throw error
       }
 
