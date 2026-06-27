@@ -25,6 +25,15 @@ export type MCPHubViewKey =
   | "tool-catalogs"
   | "credentials"
 
+export type MCPHubLocalStdioServerInput = {
+  serverId: string
+  name: string
+  command: string
+  args?: string
+  cwd?: string
+  env?: string
+}
+
 const VIEW_TO_WORKFLOW: Record<MCPHubViewKey, MCPHubWorkflowKey> = {
   profiles: "access",
   assignments: "access",
@@ -66,6 +75,10 @@ export class MCPHubPage extends BasePage {
 
   get workflows(): Locator {
     return this.page.getByTestId("mcp-hub-workflows")
+  }
+
+  get workflowShortcuts(): Locator {
+    return this.page.getByTestId("mcp-hub-workflow-shortcuts")
   }
 
   workflowButton(workflow: MCPHubWorkflowKey): Locator {
@@ -125,6 +138,14 @@ export class MCPHubPage extends BasePage {
     return this.viewTab("credentials")
   }
 
+  get newManagedServerButton(): Locator {
+    return this.page.getByRole("button", { name: "New Managed Server" })
+  }
+
+  get saveAndDiscoverToolsButton(): Locator {
+    return this.page.getByRole("button", { name: "Save and discover tools" })
+  }
+
   // -- Helpers ---------------------------------------------------------------
 
   static readonly WORKFLOW_KEYS = [
@@ -171,6 +192,70 @@ export class MCPHubPage extends BasePage {
   /** Backward-compatible helper for older tests. Prefer selectView(). */
   async switchToTab(tab: MCPHubViewKey): Promise<void> {
     await this.selectView(tab)
+  }
+
+  setupChoice(name: "Local stdio" | "HTTP/SSE" | "Import config" | "Advanced/manual"): Locator {
+    return this.page.getByRole("button", { name })
+  }
+
+  async openCreateManagedServer(): Promise<void> {
+    await this.newManagedServerButton.click()
+    await expect(this.page.getByText("Create Managed Server")).toBeVisible()
+  }
+
+  async expectSetupChoicesVisible(): Promise<void> {
+    await expect(this.setupChoice("Local stdio")).toBeVisible()
+    await expect(this.setupChoice("HTTP/SSE")).toBeVisible()
+    await expect(this.setupChoice("Import config")).toBeVisible()
+    await expect(this.setupChoice("Advanced/manual")).toBeVisible()
+  }
+
+  async chooseLocalStdio(): Promise<void> {
+    await this.setupChoice("Local stdio").click()
+    await expect(this.page.getByLabel("Server ID")).toBeVisible()
+    await expect(this.page.getByLabel("Command")).toBeVisible()
+  }
+
+  async fillLocalStdioServer(input: MCPHubLocalStdioServerInput): Promise<void> {
+    await this.page.getByLabel("Server ID").fill(input.serverId)
+    await this.page.getByLabel("Name").fill(input.name)
+    await this.page.getByLabel("Command").fill(input.command)
+    if (input.args) {
+      await this.page.getByLabel("Args").fill(input.args)
+    }
+    if (input.cwd) {
+      await this.page.getByLabel("Working Directory").fill(input.cwd)
+    }
+    if (input.env) {
+      await this.page.getByLabel("Env vars").fill(input.env)
+    }
+  }
+
+  async saveAndDiscoverTools(): Promise<void> {
+    await this.saveAndDiscoverToolsButton.click()
+  }
+
+  async openServerDetails(serverName: string): Promise<void> {
+    const row = this.page
+      .getByText(serverName, { exact: true })
+      .locator(
+        "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-list-item ')][1]"
+      )
+    await expect(row).toBeVisible()
+    await row.getByRole("button", { name: "Details" }).click()
+    await expect(this.page.getByText(`${serverName} readiness details`)).toBeVisible()
+  }
+
+  async closeServerDetails(): Promise<void> {
+    await this.page.getByRole("button", { name: "Close" }).last().click()
+  }
+
+  async expectNoHorizontalOverflow(): Promise<void> {
+    const overflowPixels = await this.page.evaluate(() => {
+      const root = document.documentElement
+      return Math.ceil(root.scrollWidth) - Math.ceil(root.clientWidth)
+    })
+    expect(overflowPixels).toBeLessThanOrEqual(1)
   }
 
   // -- Interactive elements for assertAllButtonsWired() ----------------------

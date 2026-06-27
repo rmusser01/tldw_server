@@ -1327,42 +1327,42 @@ Task 7 completion notes:
   - relevant tests
 - Modify: `backlog/tasks/task-223.2 - PR-2-MCP-Hub-setup-polish-and-diagnostics.md`
 
-- [ ] **Step 1: Run focused MCP Hub test suite**
+- [x] **Step 1: Run focused MCP Hub test suite**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/components/Option/MCPHub/__tests__/mcpHubReadiness.test.ts src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx
   ```
 
-- [ ] **Step 2: Run service tests if client changed**
+- [x] **Step 2: Run service tests if client changed**
 
   ```bash
   cd apps/packages/ui
   bunx vitest run src/services/tldw/__tests__/mcp-hub.test.ts
   ```
 
-- [ ] **Step 3: Run backend tests if backend changed**
+- [x] **Step 3: Run backend tests if backend changed**
 
   ```bash
   source .venv/bin/activate
   python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py -v
   ```
 
-- [ ] **Step 4: Run Bandit if backend changed**
+- [x] **Step 4: Run Bandit if backend changed**
 
   ```bash
   source .venv/bin/activate
   python -m bandit -r tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py tldw_Server_API/app/api/v1/schemas/mcp_hub_schemas.py tldw_Server_API/app/services -f json -o /tmp/bandit_mcp_hub_setup_recovery.json
   ```
 
-- [ ] **Step 5: Run design-system check**
+- [x] **Step 5: Run design-system check**
 
   ```bash
   cd apps/packages/ui
   bun run verify:design-system-state
   ```
 
-- [ ] **Step 6: Check literal color cleanup**
+- [x] **Step 6: Check literal color cleanup**
 
   ```bash
   rg "rgba\\(0,0,0,0\\.45\\)" apps/packages/ui/src/components/Option/MCPHub
@@ -1370,7 +1370,7 @@ Task 7 completion notes:
 
   Expected: no matches.
 
-- [ ] **Step 7: Perform responsive/manual visual check**
+- [x] **Step 7: Perform responsive/manual visual check**
 
   Start the local frontend if needed and inspect MCP Hub at desktop and mobile widths. Verify:
   - setup choices do not overflow;
@@ -1379,7 +1379,7 @@ Task 7 completion notes:
   - diagnostics drawer/modal does not hide controls;
   - Tool Catalog recovery actions are reachable.
 
-- [ ] **Step 8: Add or update first-run browser smoke**
+- [x] **Step 8: Add or update first-run browser smoke**
 
   In `apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts`, add a focused smoke test using route mocks unless Stage 0 found a safe toy MCP server path. The test must avoid writing to the developer's normal runtime database.
 
@@ -1396,7 +1396,7 @@ Task 7 completion notes:
 
   Use the existing `MCPHubPage` page object. Add helpers there instead of duplicating selectors in the spec when the helper will be reused by later MCP Hub E2E tests.
 
-- [ ] **Step 9: Add responsive screenshot assertions**
+- [x] **Step 9: Add responsive screenshot assertions**
 
   In the same Playwright spec, add a screenshot-oriented test that runs MCP Hub at:
   - desktop: `1440x900`
@@ -1410,7 +1410,7 @@ Task 7 completion notes:
   - assert `document.documentElement.scrollWidth <= document.documentElement.clientWidth`;
   - attach screenshots with names such as `mcp-hub-setup-desktop.png` and `mcp-hub-setup-mobile.png` using Playwright `testInfo.attach`.
 
-- [ ] **Step 10: Run first-run browser smoke and capture evidence**
+- [x] **Step 10: Run first-run browser smoke and capture evidence**
 
   ```bash
   cd apps/tldw-frontend
@@ -1419,7 +1419,7 @@ Task 7 completion notes:
 
   Expected: pass. Record the command, outcome, and screenshot artifact locations in `TASK-223.2`.
 
-- [ ] **Step 11: Record explicit smoke skips only when unavoidable**
+- [x] **Step 11: Record explicit smoke skips only when unavoidable**
 
   If the full `Save and discover tools` smoke cannot run because no stable toy MCP server or safe mocked backend path exists, do not silently omit it. Record in `TASK-223.2`:
   - exact missing dependency;
@@ -1429,11 +1429,11 @@ Task 7 completion notes:
 
   Even when the full save/discovery smoke is skipped, the plan still requires a browser test for setup choices, recovery copy, no horizontal overflow, and desktop/mobile screenshots.
 
-- [ ] **Step 12: Update Backlog task**
+- [x] **Step 12: Update Backlog task**
 
   Add verification results, known skips, and final summary to `TASK-223.2`.
 
-- [ ] **Step 13: Final commit**
+- [x] **Step 13: Final commit**
 
   ```bash
   git add apps/packages/ui/src/components/Option/MCPHub apps/packages/ui/src/services/tldw/mcp-hub.ts apps/packages/ui/src/services/tldw/__tests__/mcp-hub.test.ts apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts apps/tldw-frontend/e2e/utils/page-objects/MCPHubPage.ts tldw_Server_API/app/api/v1/endpoints/mcp_hub_management.py tldw_Server_API/app/api/v1/schemas/mcp_hub_schemas.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py "backlog/tasks/task-223.2 - PR-2-MCP-Hub-setup-polish-and-diagnostics.md"
@@ -1441,6 +1441,17 @@ Task 7 completion notes:
   ```
 
   Only stage files that were actually changed.
+
+- Verification:
+  - Focused MCP Hub frontend suite passed: `bunx vitest run src/components/Option/MCPHub/__tests__/mcpHubReadiness.test.ts src/components/Option/MCPHub/__tests__/ExternalServersTab.test.tsx src/components/Option/MCPHub/__tests__/ToolCatalogsTab.test.tsx src/components/Option/MCPHub/__tests__/McpHubPage.test.tsx src/services/tldw/__tests__/mcp-hub.test.ts` -> 5 files, 92 tests.
+  - Backend MCP Hub management API tests passed: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/test_mcp_hub_management_api.py -v` -> 39 passed.
+  - Playwright MCP Hub tier-2 spec passed with webpack fallback after sandbox/Turbopack startup failures: `TLDW_WEB_CMD='bun run dev:webpack -- -p 8080' bun run e2e:pw -- e2e/workflows/tier-2-features/mcp-hub.spec.ts --project=tier-2 --reporter=line` -> 5 passed, 5 skipped live-backend API checks.
+  - The route-mocked first-run smoke covers empty setup state, guided setup choices, local stdio minimum fields, `Save and discover tools`, mocked refresh readiness, result panel, and Tool Catalog ready state without runtime DB writes.
+  - Responsive Playwright coverage ran desktop `1440x900` and mobile `390x844`, opened guided setup choices and diagnostics, switched to Tool Catalog, asserted no document-level horizontal overflow, and attached `mcp-hub-setup-*` / `mcp-hub-catalog-*` screenshots during the run.
+  - Full `bun run verify:design-system-state` still fails on existing repo-wide baseline findings outside this slice. MCP Hub file-scoped guard summary: exitCode 0, blocked 0, baselineErrors 0, staleBaseline 507.
+  - `rg "rgba\\(0,0,0,0\\.45\\)" apps/packages/ui/src/components/Option/MCPHub` returned no matches.
+  - `git diff --check` passed.
+  - Broad Bandit command wrote `/tmp/bandit_mcp_hub_setup_recovery.json` and exited 1 due existing unrelated findings in `admin_e2e_support_service.py`, `admin_guardrails_service.py`, and `quality_eval_scheduler.py`; no Task 8 Python files changed.
 
 ## Implementation Notes
 

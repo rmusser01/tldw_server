@@ -8,9 +8,7 @@
  *
  * Run: npx playwright test e2e/workflows/tier-2-features/mcp-hub.spec.ts
  */
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import type { Page, Route, TestInfo } from "@playwright/test"
 import {
   test,
   expect,
@@ -19,155 +17,268 @@ import {
 } from "../../utils/fixtures"
 import { MCPHubPage } from "../../utils/page-objects/MCPHubPage"
 import { expectApiCall } from "../../utils/api-assertions"
-import { fetchWithApiKey, seedAuth, TEST_CONFIG } from "../../utils/helpers"
+import { seedAuth } from "../../utils/helpers"
 
-const TOY_MCP_SERVER_SCRIPT = `\
-import readline from "node:readline";
+const MOCK_SERVER_ID = "docs-managed"
+const MOCK_SERVER_NAME = "Docs Managed"
+const MOCK_TIMESTAMP = "2026-06-27T12:00:00Z"
 
-const rl = readline.createInterface({ input: process.stdin });
-
-function send(payload) {
-  process.stdout.write(JSON.stringify(payload) + "\\n");
+type MockMcpHubState = {
+  serverCreated: boolean
+  discoveryRan: boolean
 }
 
-rl.on("line", (line) => {
-  if (!line.trim()) return;
-  let message;
-  try {
-    message = JSON.parse(line);
-  } catch {
-    return;
-  }
-
-  const id = message.id;
-  const method = message.method;
-  const params = message.params || {};
-
-  if (method === "initialize") {
-    send({
-      jsonrpc: "2.0",
-      id,
-      result: {
-        protocolVersion: "2024-11-05",
-        capabilities: { tools: {} },
-        serverInfo: { name: "toy-e2e-mcp", version: "1.0.0" },
-      },
-    });
-    return;
-  }
-
-  if (method === "notifications/initialized") {
-    return;
-  }
-
-  if (method === "tools/list") {
-    send({
-      jsonrpc: "2.0",
-      id,
-      result: {
-        tools: [
-          {
-            name: "toy.echo",
-            description: "Echoes a short message for MCP Hub E2E smoke tests.",
-            inputSchema: {
-              type: "object",
-              properties: { text: { type: "string" } },
-            },
-            metadata: { category: "diagnostic", readOnlyHint: true },
-          },
-        ],
-      },
-    });
-    return;
-  }
-
-  if (method === "tools/call") {
-    send({
-      jsonrpc: "2.0",
-      id,
-      result: {
-        content: [{ type: "text", text: String((params.arguments || {}).text || "toy-ok") }],
-        isError: false,
-      },
-    });
-    return;
-  }
-
-  send({
-    jsonrpc: "2.0",
-    id,
-    error: { code: -32601, message: \`unknown method: \${method}\` },
-  });
-});
-`
-
-async function writeToyMcpServer(): Promise<{ dir: string; scriptPath: string }> {
-  const dir = await mkdtemp(join(tmpdir(), "tldw-toy-mcp-"))
-  const scriptPath = join(dir, "toy-mcp-server.mjs")
-  await writeFile(scriptPath, TOY_MCP_SERVER_SCRIPT, "utf8")
-  return { dir, scriptPath }
-}
-
-type ApiResult = {
-  status: number
-  body: unknown
-  text: string
-}
-
-const apiBaseUrl = (): string => {
-  const raw = TEST_CONFIG.serverUrl.replace(/\/$/, "")
-  return /^https?:\/\//i.test(raw) ? raw : `http://${raw}`
-}
-
-function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
-  if (!headers) {
-    return {}
-  }
-  if (headers instanceof Headers) {
-    return Object.fromEntries([...headers.entries()])
-  }
-  if (Array.isArray(headers)) {
-    return Object.fromEntries(headers.map(([key, value]) => [key, String(value)]))
-  }
-  return Object.fromEntries(Object.entries(headers).map(([key, value]) => [key, String(value)]))
-}
-
-async function apiRequest(path: string, init: RequestInit = {}): Promise<ApiResult> {
-  const headers: Record<string, string> = {
-    ...(init.body ? { "content-type": "application/json" } : {}),
-    ...normalizeHeaders(init.headers),
-  }
-  const response = await fetchWithApiKey(`${apiBaseUrl()}${path}`, TEST_CONFIG.apiKey, {
-    ...init,
-    headers,
+const fulfillJson = async (
+  route: Route,
+  payload: unknown,
+  status = 200
+): Promise<void> => {
+  await route.fulfill({
+    status,
+    contentType: "application/json",
+    body: JSON.stringify(payload),
   })
-  const text = await response.text()
-  let body: unknown = null
-  if (text) {
-    try {
-      body = JSON.parse(text)
-    } catch {
-      body = text
+}
+
+const getMockExternalServer = () => ({
+  id: MOCK_SERVER_ID,
+  name: MOCK_SERVER_NAME,
+  enabled: true,
+  owner_scope_type: "global",
+  owner_scope_id: null,
+  transport: "stdio",
+  config: {
+    command: "node",
+    args: ["mock-docs-server", "--stdio"],
+    env: {
+      API_TOKEN: "fake-e2e-token",
+    },
+  },
+  secret_configured: false,
+  key_hint: null,
+  server_source: "managed",
+  legacy_source_ref: null,
+  superseded_by_server_id: null,
+  binding_count: 0,
+  runtime_executable: true,
+  auth_template_present: false,
+  auth_template_valid: true,
+  auth_template_blocked_reason: null,
+  credential_slots: [],
+  created_by: null,
+  updated_by: null,
+  created_at: MOCK_TIMESTAMP,
+  updated_at: MOCK_TIMESTAMP,
+})
+
+const getMockServerReadiness = (ready: boolean) => ({
+  server_id: MOCK_SERVER_ID,
+  server_name: MOCK_SERVER_NAME,
+  display_state: ready ? "ready" : "needs_setup",
+  credential_state: "not_required",
+  tool_count: ready ? 1 : 0,
+  reason_codes: ready ? [] : ["discovery_not_run"],
+  primary_reason_code: ready ? null : "discovery_not_run",
+  allowed_actions: ready
+    ? ["view_details", "open_tool_catalog", "refresh_discovery"]
+    : ["refresh_discovery", "view_details"],
+  message: ready
+    ? "Server is ready. 1 tool discovered."
+    : "Run discovery to populate the tool catalog.",
+  current_operation: null,
+  last_validation_at: MOCK_TIMESTAMP,
+  last_discovery_at: ready ? MOCK_TIMESTAMP : null,
+  last_successful_discovery_at: ready ? MOCK_TIMESTAMP : null,
+  last_error_category: null,
+  last_error_message: null,
+  refresh_result: ready
+    ? {
+        refreshed_servers: 1,
+        total_servers: 1,
+        virtual_tools: 1,
+        errors: {},
+      }
+    : null,
+})
+
+const getMockReadiness = (state: MockMcpHubState) => {
+  if (!state.serverCreated) {
+    return {
+      display_state: "needs_setup",
+      reason_codes: ["not_configured"],
+      primary_reason_code: "not_configured",
+      allowed_actions: ["add_server"],
+      message: "No external MCP servers are configured.",
+      servers: [],
+      total_servers: 0,
+      ready_server_count: 0,
+      checking_server_count: 0,
+      attention_server_count: 0,
+      no_tool_server_count: 0,
+      stale_server_count: 0,
     }
   }
-  return { status: response.status, body, text }
-}
 
-function assertMutableApiAvailable(result: ApiResult, label: string): void {
-  if ([401, 403, 404].includes(result.status)) {
-    test.skip(true, `${label} unavailable in this live run: HTTP ${result.status}`)
+  const ready = state.discoveryRan
+  return {
+    display_state: ready ? "ready" : "needs_setup",
+    reason_codes: ready ? [] : ["discovery_not_run"],
+    primary_reason_code: ready ? null : "discovery_not_run",
+    allowed_actions: ready ? ["open_tool_catalog"] : ["refresh_discovery"],
+    message: ready
+      ? "All configured external MCP servers are ready."
+      : `${MOCK_SERVER_NAME} is saved, but tool discovery has not run.`,
+    servers: [getMockServerReadiness(ready)],
+    total_servers: 1,
+    ready_server_count: ready ? 1 : 0,
+    checking_server_count: 0,
+    attention_server_count: 0,
+    no_tool_server_count: 0,
+    stale_server_count: 0,
   }
 }
 
-function expectSuccessfulApiResult<T extends Record<string, unknown>>(
-  result: ApiResult,
-  label: string
-): T {
-  assertMutableApiAvailable(result, label)
-  expect(result.status, `${label}: ${result.text}`).toBeGreaterThanOrEqual(200)
-  expect(result.status, `${label}: ${result.text}`).toBeLessThan(300)
-  expect(result.body && typeof result.body === "object", `${label}: ${result.text}`).toBe(true)
-  return result.body as T
+const getMockToolEntry = () => ({
+  tool_name: "ext.docs-managed.search",
+  display_name: "Docs Search",
+  description: "Search the managed documentation corpus.",
+  module: "external.docs-managed",
+  module_display_name: MOCK_SERVER_NAME,
+  category: "external",
+  risk_class: "low",
+  capabilities: ["search.query"],
+  mutates_state: false,
+  uses_filesystem: false,
+  uses_processes: false,
+  uses_network: false,
+  uses_credentials: false,
+  supports_arguments_preview: false,
+  path_boundable: false,
+  path_argument_hints: [],
+  metadata_source: "explicit",
+  metadata_warnings: [],
+})
+
+const getMockToolSummary = (hasTools: boolean) => {
+  const entries = hasTools ? [getMockToolEntry()] : []
+  return {
+    entries,
+    modules: hasTools
+      ? [
+          {
+            module: "external.docs-managed",
+            display_name: MOCK_SERVER_NAME,
+            tool_count: 1,
+            risk_summary: { low: 1, medium: 0, high: 0 },
+            metadata_warnings: [],
+          },
+        ]
+      : [],
+  }
+}
+
+const mockMcpHubFirstRunApi = async (
+  page: Page,
+  initialState: Partial<MockMcpHubState> = {}
+): Promise<MockMcpHubState> => {
+  const state: MockMcpHubState = {
+    serverCreated: Boolean(initialState.serverCreated),
+    discoveryRan: Boolean(initialState.discoveryRan),
+  }
+
+  await page.route(/\/api\/v1\/mcp\/hub(\/.*)?/, async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    const { pathname } = url
+    const method = request.method()
+
+    if (method === "GET" && pathname.endsWith("/readiness")) {
+      await fulfillJson(route, getMockReadiness(state))
+      return
+    }
+
+    if (method === "GET" && pathname.endsWith("/tool-registry/summary")) {
+      await fulfillJson(route, getMockToolSummary(state.discoveryRan))
+      return
+    }
+
+    if (method === "GET" && pathname.endsWith("/tool-registry")) {
+      await fulfillJson(route, state.discoveryRan ? [getMockToolEntry()] : [])
+      return
+    }
+
+    if (method === "GET" && pathname.endsWith("/external-servers")) {
+      await fulfillJson(route, state.serverCreated ? [getMockExternalServer()] : [])
+      return
+    }
+
+    if (method === "POST" && pathname.endsWith("/external-servers")) {
+      const payload = request.postDataJSON() as {
+        server_id?: unknown
+        name?: unknown
+        transport?: unknown
+        config?: {
+          command?: unknown
+          args?: unknown
+          env?: Record<string, unknown>
+        }
+      }
+      const args = Array.isArray(payload?.config?.args) ? payload.config.args : []
+      const env = payload?.config?.env as Record<string, unknown> | undefined
+      if (
+        payload?.server_id !== MOCK_SERVER_ID ||
+        payload?.name !== MOCK_SERVER_NAME ||
+        payload?.transport !== "stdio" ||
+        payload?.config?.command !== "node" ||
+        args.join(" ") !== "mock-docs-server --stdio" ||
+        env?.API_TOKEN !== "fake-e2e-token"
+      ) {
+        await fulfillJson(route, { detail: "Unexpected mocked create payload" }, 400)
+        return
+      }
+      state.serverCreated = true
+      state.discoveryRan = false
+      await fulfillJson(route, getMockExternalServer(), 201)
+      return
+    }
+
+    if (
+      method === "GET" &&
+      pathname.endsWith(`/external-servers/${MOCK_SERVER_ID}/auth-template`)
+    ) {
+      await fulfillJson(route, { mode: "template", mappings: [] })
+      return
+    }
+
+    if (
+      method === "POST" &&
+      pathname.endsWith(`/external-servers/${MOCK_SERVER_ID}/refresh-discovery`)
+    ) {
+      state.serverCreated = true
+      state.discoveryRan = true
+      await fulfillJson(route, getMockServerReadiness(true))
+      return
+    }
+
+    await fulfillJson(
+      route,
+      { detail: `Unhandled mocked MCP Hub endpoint: ${method} ${pathname}` },
+      404
+    )
+  })
+
+  return state
+}
+
+const attachScreenshot = async (
+  page: Page,
+  testInfo: TestInfo,
+  name: string
+): Promise<void> => {
+  await testInfo.attach(name, {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  })
 }
 
 test.describe("MCP Hub", () => {
@@ -187,14 +298,22 @@ test.describe("MCP Hub", () => {
       authedPage,
       diagnostics,
     }) => {
+      await mockMcpHubFirstRunApi(authedPage, {
+        serverCreated: true,
+        discoveryRan: true,
+      })
+
       mcpHub = new MCPHubPage(authedPage)
       await mcpHub.goto()
       await mcpHub.assertPageReady()
 
-      const headingVisible = await mcpHub.heading.isVisible().catch(() => false)
-      expect(headingVisible).toBe(true)
+      await expect(mcpHub.heading.first()).toBeVisible()
 
-      await expect(authedPage.getByTestId("mcp-hub-status-summary")).toBeVisible()
+      await expect(
+        authedPage.getByRole("navigation", { name: "MCP Hub workflow shortcuts" })
+      ).toBeVisible()
+      await expect(mcpHub.workflowShortcuts).toBeVisible()
+      await expect(authedPage.getByTestId("mcp-hub-status-summary")).toHaveCount(0)
       await expect(
         authedPage.getByRole("button", { name: "Open Policy Assignments" })
       ).toBeVisible()
@@ -250,221 +369,95 @@ test.describe("MCP Hub", () => {
 
       await assertNoCriticalErrors(diagnostics)
     })
+  })
 
-    test("should hydrate Research Workspace context in Workspace Sets", async ({
+  test.describe("Mocked Setup Smoke", () => {
+    test("should complete first-run local stdio setup and show discovered tools", async ({
       authedPage,
-      serverInfo,
       diagnostics,
     }) => {
-      skipIfServerUnavailable(serverInfo)
+      await mockMcpHubFirstRunApi(authedPage)
 
       mcpHub = new MCPHubPage(authedPage)
-      await mcpHub.goto(
-        "/mcp-hub?workflow=setup&view=workspace-sets&workspace_id=rw-e2e-context&source=research-workspace"
-      )
+      await mcpHub.goto("/mcp-hub?workflow=setup&view=credentials")
       await mcpHub.assertPageReady()
 
-      await mcpHub.expectWorkflowSelected("workspaces")
-      await mcpHub.expectViewSelected("workspace-sets")
+      await expect(authedPage.getByText("No external servers connected")).toBeVisible()
 
-      const contextStatus = authedPage.getByTestId("mcp-workspace-context-status")
-      await expect(contextStatus).toBeVisible({ timeout: 15_000 })
-      await expect(contextStatus).toContainText(/rw-e2e-context/)
-      await expect(contextStatus).toContainText(
-        /included in .* MCP workspace set|No MCP workspace set includes/i
-      )
+      await mcpHub.openCreateManagedServer()
+      await mcpHub.expectSetupChoicesVisible()
+      await mcpHub.chooseLocalStdio()
+      await mcpHub.fillLocalStdioServer({
+        serverId: MOCK_SERVER_ID,
+        name: MOCK_SERVER_NAME,
+        command: "node",
+        args: "mock-docs-server --stdio",
+        env: "API_TOKEN=fake-e2e-token",
+      })
+      await mcpHub.saveAndDiscoverTools()
+
+      await expect(authedPage.getByText(`${MOCK_SERVER_NAME} saved`)).toBeVisible()
+      await expect(
+        authedPage.getByText("Server is ready. 1 tool discovered.").first()
+      ).toBeVisible()
+      await authedPage.getByRole("button", { name: "Tool Catalog" }).first().click()
+      await mcpHub.expectViewSelected("tool-catalogs")
+      await expect(authedPage.getByText("Docs Search")).toBeVisible()
+      await expect(authedPage.getByText("1 tools").first()).toBeVisible()
 
       await assertNoCriticalErrors(diagnostics)
     })
 
-    test("binds a Research Workspace into an MCP workspace set and resolves policy evidence", async ({
+    test("should keep setup, diagnostics, and catalog states responsive", async ({
       authedPage,
-      serverInfo,
       diagnostics,
     }, testInfo) => {
-      skipIfServerUnavailable(serverInfo)
+      await mockMcpHubFirstRunApi(authedPage, {
+        serverCreated: true,
+        discoveryRan: true,
+      })
 
-      const suffix = `${Date.now().toString(36)}-${testInfo.workerIndex}`
-      const workspaceId = `rw-mcp-e2e-${suffix}`
-      const personaId = `rw-mcp-persona-${suffix}`
-      const teamId = 1
-      const workspaceRoot = await mkdtemp(join(tmpdir(), "tldw-rw-mcp-"))
-      let policyAssignmentId: number | null = null
-      let workspaceSetObjectId: number | null = null
-      let sharedWorkspaceId: number | null = null
+      const viewports = [
+        { name: "desktop", width: 1440, height: 900 },
+        { name: "mobile", width: 390, height: 844 },
+      ] as const
 
-      try {
-        const workspace = expectSuccessfulApiResult<Record<string, unknown>>(
-          await apiRequest(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}`, {
-            method: "PUT",
-            body: JSON.stringify({
-              name: `RW MCP E2E ${suffix}`,
-              study_materials_policy: "general",
-            }),
-          }),
-          "create Research Workspace"
-        )
-        expect(workspace.id).toBe(workspaceId)
-
-        const sharedWorkspace = expectSuccessfulApiResult<Record<string, unknown>>(
-          await apiRequest("/api/v1/mcp/hub/shared-workspaces", {
-            method: "POST",
-            body: JSON.stringify({
-              workspace_id: workspaceId,
-              display_name: `RW MCP Shared ${suffix}`,
-              absolute_root: workspaceRoot,
-              owner_scope_type: "team",
-              owner_scope_id: teamId,
-              is_active: true,
-            }),
-          }),
-          "create MCP Hub Shared Workspace"
-        )
-        sharedWorkspaceId = Number(sharedWorkspace.id)
-        expect(Number.isFinite(sharedWorkspaceId), JSON.stringify(sharedWorkspace)).toBe(true)
-        expect(sharedWorkspace.workspace_id).toBe(workspaceId)
-
-        const workspaceSet = expectSuccessfulApiResult<Record<string, unknown>>(
-          await apiRequest("/api/v1/mcp/hub/workspace-set-objects", {
-            method: "POST",
-            body: JSON.stringify({
-              name: `RW MCP Set ${suffix}`,
-              description: "E2E Research Workspace handoff validation",
-              owner_scope_type: "team",
-              owner_scope_id: teamId,
-              is_active: true,
-            }),
-          }),
-          "create MCP Hub workspace set"
-        )
-        workspaceSetObjectId = Number(workspaceSet.id)
-        expect(Number.isFinite(workspaceSetObjectId), JSON.stringify(workspaceSet)).toBe(true)
-        expect(workspaceSet.owner_scope_type).toBe("team")
-
-        const workspaceSetMember = expectSuccessfulApiResult<Record<string, unknown>>(
-          await apiRequest(`/api/v1/mcp/hub/workspace-set-objects/${workspaceSetObjectId}/members`, {
-            method: "POST",
-            body: JSON.stringify({ workspace_id: workspaceId }),
-          }),
-          "add Research Workspace ID to MCP workspace set"
-        )
-        expect(workspaceSetMember.workspace_id).toBe(workspaceId)
-
-        const policyAssignment = expectSuccessfulApiResult<Record<string, unknown>>(
-          await apiRequest("/api/v1/mcp/hub/policy-assignments", {
-            method: "POST",
-            body: JSON.stringify({
-              target_type: "persona",
-              target_id: personaId,
-              owner_scope_type: "team",
-              owner_scope_id: teamId,
-              workspace_source_mode: "named",
-              workspace_set_object_id: workspaceSetObjectId,
-              inline_policy_document: {
-                allowed_tools: ["run"],
-                approval_mode: "allow_silently",
-              },
-              is_active: true,
-            }),
-          }),
-          "create MCP Hub named workspace-set policy assignment"
-        )
-        policyAssignmentId = Number(policyAssignment.id)
-        expect(Number.isFinite(policyAssignmentId), JSON.stringify(policyAssignment)).toBe(true)
-        expect(policyAssignment.workspace_source_mode).toBe("named")
-        expect(policyAssignment.workspace_set_object_id).toBe(workspaceSetObjectId)
-
-        const effectivePolicy = expectSuccessfulApiResult<Record<string, unknown>>(
-          await apiRequest(
-            `/api/v1/mcp/hub/effective-policy?persona_id=${encodeURIComponent(personaId)}&team_id=${teamId}`,
-            { method: "GET" }
-          ),
-          "resolve MCP Hub effective policy"
-        )
-        expect(effectivePolicy.enabled).toBe(true)
-        expect(effectivePolicy.selected_workspace_source_mode).toBe("named")
-        expect(effectivePolicy.selected_workspace_set_object_id).toBe(workspaceSetObjectId)
-        expect(effectivePolicy.selected_workspace_trust_source).toBe("shared_registry")
-        expect(effectivePolicy.selected_assignment_workspace_ids).toEqual(
-          expect.arrayContaining([workspaceId])
-        )
-        expect(effectivePolicy.allowed_tools).toEqual(expect.arrayContaining(["run"]))
-
-        const toolExecution = await apiRequest("/api/v1/mcp/tools/execute", {
-          method: "POST",
-          headers: {
-            "x-tldw-workspace-id": workspaceId,
-            "x-tldw-cwd": workspaceRoot,
-          },
-          body: JSON.stringify({
-            tool_name: "run",
-            arguments: { command: "help" },
-          }),
+      for (const viewport of viewports) {
+        await authedPage.setViewportSize({
+          width: viewport.width,
+          height: viewport.height,
         })
-        await testInfo.attach("mcp-tool-execution-probe.json", {
-          body: JSON.stringify(
-            {
-              status: toolExecution.status,
-              body: toolExecution.body,
-            },
-            null,
-            2
-          ),
-          contentType: "application/json",
-        })
-        assertMutableApiAvailable(toolExecution, "execute MCP tool under Research Workspace headers")
-        expect(toolExecution.status, toolExecution.text).toBeGreaterThanOrEqual(200)
-        expect(toolExecution.status, toolExecution.text).toBeLessThan(300)
-        expect(toolExecution.body && typeof toolExecution.body === "object", toolExecution.text).toBe(
-          true
-        )
-        expect((toolExecution.body as { result?: unknown }).result, toolExecution.text).toEqual(
-          expect.stringContaining("Virtual CLI commands available")
-        )
 
         mcpHub = new MCPHubPage(authedPage)
-        await mcpHub.goto(
-          `/mcp-hub?workflow=setup&view=workspace-sets&workspace_id=${encodeURIComponent(workspaceId)}&source=research-workspace`
-        )
+        await mcpHub.goto("/mcp-hub?workflow=setup&view=credentials")
         await mcpHub.assertPageReady()
 
-        expect(authedPage.url()).toContain("source=research-workspace")
-        expect(authedPage.url()).not.toContain("workspace-playground")
-        await mcpHub.expectWorkflowSelected("workspaces")
-        await mcpHub.expectViewSelected("workspace-sets")
+        await mcpHub.openCreateManagedServer()
+        await mcpHub.expectSetupChoicesVisible()
+        await mcpHub.openServerDetails(MOCK_SERVER_NAME)
+        await expect(authedPage.getByText("Sanitized config")).toBeVisible()
+        await expect(
+          authedPage.getByTestId("mcp-server-diagnostics-config")
+        ).not.toContainText("fake-e2e-token")
+        await mcpHub.expectNoHorizontalOverflow()
+        await attachScreenshot(
+          authedPage,
+          testInfo,
+          `mcp-hub-setup-${viewport.name}.png`
+        )
 
-        const contextStatus = authedPage.getByTestId("mcp-workspace-context-status")
-        await expect(contextStatus).toBeVisible({ timeout: 15_000 })
-        await expect(contextStatus).toContainText(workspaceId)
-        await expect(contextStatus).toContainText(/included in .* MCP workspace set/i)
-        await expect(contextStatus).not.toContainText(/workspace-playground/i)
-
-        await assertNoCriticalErrors(diagnostics)
-      } finally {
-        if (policyAssignmentId != null) {
-          await apiRequest(`/api/v1/mcp/hub/policy-assignments/${policyAssignmentId}`, {
-            method: "DELETE",
-          }).catch(() => {})
-        }
-        if (workspaceSetObjectId != null) {
-          await apiRequest(
-            `/api/v1/mcp/hub/workspace-set-objects/${workspaceSetObjectId}/members/${encodeURIComponent(workspaceId)}`,
-            { method: "DELETE" }
-          ).catch(() => {})
-          await apiRequest(`/api/v1/mcp/hub/workspace-set-objects/${workspaceSetObjectId}`, {
-            method: "DELETE",
-          }).catch(() => {})
-        }
-        if (sharedWorkspaceId != null) {
-          await apiRequest(`/api/v1/mcp/hub/shared-workspaces/${sharedWorkspaceId}`, {
-            method: "DELETE",
-          }).catch(() => {})
-        }
-        await apiRequest(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}`, {
-          method: "DELETE",
-        }).catch(() => {})
-        await rm(workspaceRoot, { recursive: true, force: true }).catch(() => {})
+        await mcpHub.closeServerDetails()
+        await mcpHub.selectView("tool-catalogs")
+        await expect(authedPage.getByText("Docs Search")).toBeVisible()
+        await mcpHub.expectNoHorizontalOverflow()
+        await attachScreenshot(
+          authedPage,
+          testInfo,
+          `mcp-hub-catalog-${viewport.name}.png`
+        )
       }
+
+      await assertNoCriticalErrors(diagnostics)
     })
   })
 
@@ -603,81 +596,6 @@ test.describe("MCP Hub", () => {
       }
 
       await assertNoCriticalErrors(diagnostics)
-    })
-  })
-
-  test.describe("Toy MCP walkthrough smoke", () => {
-    test("can configure a temporary no-auth stdio server through MCP Hub when the live API can see the temp file", async ({
-      authedPage,
-      serverInfo,
-      diagnostics,
-    }) => {
-      skipIfServerUnavailable(serverInfo)
-
-      const { dir, scriptPath } = await writeToyMcpServer()
-      const suffix = Date.now().toString(36)
-      const serverId = `toy-stdio-${suffix}`
-      const serverName = `Toy Stdio ${suffix}`
-      let createdServer = false
-
-      mcpHub = new MCPHubPage(authedPage)
-      try {
-        await mcpHub.goto()
-        await mcpHub.assertPageReady()
-        await mcpHub.selectView("credentials")
-
-        await authedPage.getByRole("button", { name: /new managed server/i }).click()
-        await authedPage.getByLabel(/server id/i).fill(serverId)
-        await authedPage.getByLabel(/^name$/i).fill(serverName)
-        await authedPage.getByRole("combobox", { name: /^transport$/i }).selectOption("stdio")
-        await authedPage.getByLabel(/config json/i).fill(JSON.stringify({
-          stdio: {
-            command: process.execPath,
-            args: [scriptPath],
-          },
-          auth: { mode: "none" },
-          policy: { allow_tool_patterns: ["toy.*"], allow_writes: false },
-          timeouts: { connect_seconds: 2, request_seconds: 5 },
-        }, null, 2))
-
-        const createResponsePromise = authedPage.waitForResponse(
-          (response) =>
-            response.url().includes("/api/v1/mcp/hub/external-servers") &&
-            response.request().method() === "POST",
-          { timeout: 15_000 }
-        ).catch(() => null)
-
-        await authedPage.getByRole("button", { name: /save server/i }).click()
-        const createResponse = await createResponsePromise
-        if (!createResponse || [401, 403, 404].includes(createResponse.status())) {
-          test.skip(true, "Live API does not allow MCP Hub external-server mutations in this run")
-        }
-        expect(createResponse.status()).toBeLessThan(300)
-        createdServer = true
-
-        await expect(authedPage.getByLabel(/^server$/i)).toBeVisible({ timeout: 15_000 })
-        await authedPage.getByLabel(/^server$/i).selectOption(serverId)
-        await expect(authedPage.getByText(/no credentials required/i).first()).toBeVisible({ timeout: 10_000 })
-
-        await mcpHub.selectView("tool-catalogs")
-        await authedPage.getByRole("button", { name: /refresh discovery|refresh tools/i }).first().click()
-        const toyTool = authedPage.getByText(/toy\.echo/i).first()
-        const toyToolVisible = await toyTool.isVisible({ timeout: 15_000 }).catch(() => false)
-        if (!toyToolVisible) {
-          test.skip(true, "Toy MCP server was configured in UI, but live runtime discovery could not execute the temp stdio server")
-        }
-        await expect(toyTool).toBeVisible()
-
-        await assertNoCriticalErrors(diagnostics)
-      } finally {
-        if (createdServer) {
-          await mcpHub.selectView("credentials").catch(() => {})
-          await authedPage.getByLabel(/^server$/i).selectOption(serverId).catch(() => {})
-          await authedPage.getByRole("button", { name: new RegExp(`delete ${serverName}`, "i") }).click().catch(() => {})
-          await authedPage.getByRole("button", { name: /^delete$/i }).click().catch(() => {})
-        }
-        await rm(dir, { recursive: true, force: true }).catch(() => {})
-      }
     })
   })
 
