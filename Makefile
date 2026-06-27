@@ -34,6 +34,7 @@ help:
 	@echo "Testing:"
 	@echo "  make tooling-install         Install test/smoke extras"
 	@echo "  make tooling-smoke           Run unified smoke checks"
+	@echo "  make cats-fuzz               Run local CATS contract/public-read fuzz blocks"
 	@echo "  make mcp-unified-build       Build MCP Unified standalone RC artifacts"
 	@echo "  make mcp-unified-check       Run MCP Unified RC artifact gates"
 	@echo "  make mcp-unified-uat         Run MCP Unified RC UAT checks"
@@ -59,7 +60,7 @@ help:
 # -----------------------------------------------------------------------------
 # Quickstart targets (first-time setup)
 # -----------------------------------------------------------------------------
-.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check pypi-check-contents tooling-install tooling-smoke show-api-key release release-patch release-minor mcp-unified-build mcp-unified-check mcp-unified-uat mcp-unified-rc mcp-unified-publish-dry-run
+.PHONY: setup-wizard-tools setup-docker-single start-docker-single verify-docker-single setup-docker-multi start-docker-multi verify-docker-multi install-local setup-local-single start-local-single verify-local-single quickstart quickstart-install quickstart-prereqs quickstart-local quickstart-docker quickstart-docker-bootstrap quickstart-docker-webui model-cycle verify pypi-build pypi-check pypi-check-contents tooling-install tooling-smoke cats-fuzz show-api-key release release-patch release-minor mcp-unified-build mcp-unified-check mcp-unified-uat mcp-unified-rc mcp-unified-publish-dry-run
 
 PYTHON ?= python3
 VENV_DIR ?= .venv
@@ -207,6 +208,9 @@ tooling-install:
 	@echo "[tooling-install] Installing tooling extras into $(VENV_DIR)..."
 	@$(VENV_PYTHON) -m pip install --upgrade pip setuptools wheel
 	@$(VENV_PYTHON) -m pip install -e ".[tooling]"
+
+cats-fuzz:
+	$(VENV_PYTHON) -m Helper_Scripts.cats_fuzz --block contract --block public-read
 
 release:
 	@$(MAKE) release-patch RELEASE_DRY_RUN=$(RELEASE_DRY_RUN)
