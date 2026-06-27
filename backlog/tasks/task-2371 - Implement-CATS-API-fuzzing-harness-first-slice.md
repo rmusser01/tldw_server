@@ -20,6 +20,8 @@ modified_files:
 - tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_runner.py
 - tldw_Server_API/tests/Helper_Scripts/test_cats_fuzz_cli.py
 - Docs/Development/CATS_Fuzzing.md
+references:
+- https://github.com/rmusser01/tldw_server/pull/2538
 ---
 
 ## Description
