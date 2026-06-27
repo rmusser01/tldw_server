@@ -32,9 +32,9 @@ This audit covers the nine required domain areas and five required specialist pa
 
 | Specialist Pass | Report | Status | Notes |
 | --- | --- | --- | --- |
-| Security boundaries | `specialists/security-boundaries.md` | Not started | |
-| Reliability and async lifecycle | `specialists/reliability-lifecycle.md` | Not started | |
-| API and WebUI contract drift | `specialists/api-webui-contracts.md` | Not started | |
+| Security boundaries | `specialists/security-boundaries.md` | Complete | Confirmed/cross-linked existing security-boundary findings; no new SEC findings |
+| Reliability and async lifecycle | `specialists/reliability-lifecycle.md` | Complete | Added specialist candidate AUDIT-2026-06-27-REL-001; reconcile with AUDIT-2026-06-27-JOBS-001 during index finalization |
+| API and WebUI contract drift | `specialists/api-webui-contracts.md` | Complete | Added specialist candidate AUDIT-2026-06-27-APIWEB-001; escalates AUDIT-2026-06-27-WEBUI-002 beyond TTS |
 | Test coverage and verification gaps | `specialists/test-coverage-verification.md` | Not started | |
 | Dependency and static-analysis risk | `specialists/dependency-static-analysis.md` | Not started | |
 

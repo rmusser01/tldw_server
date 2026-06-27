@@ -127,3 +127,36 @@ Verification result:
 - Final-summary markers remain exactly one begin marker and one end marker.
 - Git status showed only intended audit files changed plus the two known unrelated untracked watchlist templates.
 ```
+
+## Stage 6 Specialist Review Dispatch: Batch 1
+
+```text
+Batch 1 dispatched after normalization commit cac4f3c8a49f479c08c1f478ef64bdcd76e83b91.
+Parallelism cap: 3 specialist agents.
+Specialists: Security boundaries; Reliability and async lifecycle; API and WebUI contract drift.
+
+Specialist outputs:
+- security-boundaries.md: no new SEC findings; confirmed and cross-linked existing security-boundary findings, with shared remediation themes for scoped-token enforcement, media tenant boundaries, and outbound-network policy.
+- reliability-lifecycle.md: added specialist candidate AUDIT-2026-06-27-REL-001 for fire-and-forget workflow continuation resumes outside durable scheduler ownership. The report recommends reconciliation with AUDIT-2026-06-27-JOBS-001 during final index validation.
+- api-webui-contracts.md: added specialist candidate AUDIT-2026-06-27-APIWEB-001 for audio WebSocket query-token drift extending beyond Speech playground TTS to STT and voice chat. The report records this as an escalation of AUDIT-2026-06-27-WEBUI-002.
+
+Review result:
+- Spec review initially requested concrete APIWEB index-mapping details and replacement of short REL/JOBS aliases with full canonical IDs. Both were fixed, and spec re-review approved.
+- Quality review approved all three reports, including the distinction between REL-001 and JOBS-001 and between APIWEB-001 and WEBUI-002.
+
+Verification commands run for the batch:
+- placeholder-token scan against the three specialist reports.
+- git diff --check -- Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/security-boundaries.md Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/reliability-lifecycle.md Docs/superpowers/reviews/2026-06-27-repo-audit/specialists/api-webui-contracts.md
+- required-section check for Scope, Findings Table, Index Mapping, Confirmed Issues, Likely Risks, Improvement Opportunities, Coverage And Evidence, Files Inspected, Tests Or Scans Run, Blocked Or Unverified Areas, and Evidence Notes.
+- stale template and short-ID scan for `Use finding IDs like`, `Set evidence_tier`, short REL/JOBS aliases, and `AUDIT-2026-06-27-INT-`.
+- git diff --name-only
+
+Verification result:
+- Placeholder scan returned no matches.
+- Diff whitespace check passed.
+- Required sections are present in all three reports.
+- Stale template and short-ID scan returned no matches.
+- Tracked diff was limited to the three batch-1 specialist reports before coordinator bookkeeping edits.
+- No production code, tests, configs, domain reports, findings index, or Backlog tasks were edited by specialist agents.
+- The two unrelated untracked watchlist template files remained untouched and unstaged.
+```
