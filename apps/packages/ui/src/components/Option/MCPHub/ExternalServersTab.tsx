@@ -301,6 +301,10 @@ export const ExternalServersTab = ({
   const detailsReadiness = detailsServerId
     ? rowReadinessByServerId.get(detailsServerId)
     : undefined
+  const activeManagedServerReadiness = activeManagedServer
+    ? rowReadinessByServerId.get(activeManagedServer.id)
+    : undefined
+  const activeCredentialState = activeManagedServerReadiness?.credentialState
 
   const canSave = useMemo(
     () => activeServerId.trim().length > 0 && secretValue.trim().length > 0 && !saving,
@@ -1204,20 +1208,21 @@ export const ExternalServersTab = ({
             size="small"
             title="Auth Template"
             extra={
-              activeServerHasNoCredentialRequirements ? null : (
-              <Button onClick={handleAddAuthTemplateMapping} disabled={!activeAuthTemplateTarget || activeSlots.length === 0}>
+              <Button
+                onClick={handleAddAuthTemplateMapping}
+                disabled={activeCredentialState === "not_required" || !activeAuthTemplateTarget || activeSlots.length === 0}
+              >
                 Add Mapping
               </Button>
-              )
             }
           >
             <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-              {activeServerHasNoCredentialRequirements ? (
+              {activeCredentialState === "not_required" ? (
                 <Alert
                   type="success"
                   showIcon
-                  title="Auth template not required"
-                  description="No auth material is brokered into this stdio process."
+                  title="No credentials required"
+                  description="This server does not need runtime credentials or an auth template."
                 />
               ) : activeManagedServer.auth_template_valid ? (
                 <Alert type="success" showIcon title="Template valid" />
@@ -1245,7 +1250,7 @@ export const ExternalServersTab = ({
                   <Tag color="red">Unsupported transport</Tag>
                 )}
               </Space>
-              {activeServerHasNoCredentialRequirements ? null : activeSlots.length === 0 ? (
+              {activeCredentialState === "not_required" ? null : activeSlots.length === 0 ? (
                 <Empty description="Add at least one credential slot before creating an auth template." />
               ) : authTemplateMappings.length === 0 && !authTemplateLoading ? (
                 <Empty description="No auth template mappings configured." />
@@ -1385,7 +1390,16 @@ export const ExternalServersTab = ({
                 </Space>
               </Space>
             </Card>
-          ) : showLegacySecretFallback ? (
+          ) : activeCredentialState === "not_required" ? (
+            <Card size="small" title="No credentials required">
+              <Alert
+                type="success"
+                showIcon
+                title="No credentials required"
+                description="This managed server can run without credential slots, auth templates, or a server-level secret."
+              />
+            </Card>
+          ) : (
             <Card size="small" title="Legacy Secret Fallback">
               <Space orientation="vertical" style={{ width: "100%" }}>
                 <Typography.Text type="secondary">

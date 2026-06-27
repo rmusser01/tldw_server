@@ -771,6 +771,10 @@ describe("ExternalServersTab", () => {
     expect(within(row).getAllByText(/no credentials required/i).length).toBeGreaterThan(0)
     expect(within(row).queryByText(/^no secret$/i)).toBeNull()
     expect(within(row).queryByText(/^no auth template$/i)).toBeNull()
+    expect(screen.getAllByText(/no credentials required/i).length).toBeGreaterThan(1)
+    expect(screen.queryByText(/^No auth template$/i)).toBeNull()
+    expect(screen.queryByText(/^Legacy Secret Fallback$/i)).toBeNull()
+    expect(screen.queryByLabelText(/^Secret$/i)).toBeNull()
   })
 
   it("renders legacy secret fallback only for managed rows that use server-level secrets", async () => {
@@ -834,6 +838,11 @@ describe("ExternalServersTab", () => {
     const fallbackRow = await findServerRow("Legacy Secret Managed")
     expect(within(noAuthRow).queryByText(/legacy secret fallback/i)).toBeNull()
     expect(within(fallbackRow).getAllByText(/legacy secret fallback/i).length).toBeGreaterThan(0)
+
+    await userEvent.setup().selectOptions(screen.getByLabelText(/^Server$/i), "legacy-secret-managed")
+
+    expect(screen.getAllByText(/^Legacy Secret Fallback$/i).length).toBeGreaterThan(1)
+    expect(screen.getByLabelText(/^Secret$/i)).toBeTruthy()
   })
 
   it("uses readiness and registry data so ready rows do not look undiscovered", async () => {
