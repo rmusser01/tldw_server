@@ -44,29 +44,61 @@ This audit covers the nine required domain areas and five required specialist pa
 
 Evidence file: `evidence/endpoint-inventory.txt`
 
+Line count: 2,598
+
+Source scope: route decorators matching `@router.(get|post|put|patch|delete|websocket)(...)` under `tldw_Server_API/app/api/v1/endpoints`.
+
 ### Backend Tests
 
 Evidence file: `evidence/backend-test-inventory.txt`
+
+Line count: 4,073
+
+Source scope: test file paths under `tldw_Server_API/tests`.
 
 ### Frontend API Clients
 
 Evidence file: `evidence/frontend-api-client-inventory.txt`
 
+Line count: 6,583
+
+Source scope: API and streaming client usage matching `fetch(`, `axios`, `apiClient`, `/api/v1`, `WebSocket`, or `EventSource` in TS/TSX/JS/JSX/MJS/CJS files under `apps/tldw-frontend`, `apps/extension`, and `apps/packages`. The evidence records file, line, and matched API token.
+
+Skipped paths: none; all requested frontend scan roots existed.
+
 ### Dependency Manifests
 
 Evidence file: `evidence/dependency-manifest-inventory.txt`
+
+Line count: 14
+
+Source scope: tracked dependency manifests and lockfiles across the repository, with `node_modules` excluded.
 
 ### DB Migrations
 
 Evidence file: `evidence/db-migration-inventory.txt`
 
+Line count: 240
+
+Source scope: DB-relevant tracked paths under `tldw_Server_API/Databases`, `tldw_Server_API/app/core/DB_Management`, optional scheduler migrations, and SQL/Alembic/migration candidates under `tldw_Server_API` while excluding API and test schema directories.
+
 ### CI, Deployment, And Operations
 
 Evidence file: `evidence/ci-deploy-ops-inventory.txt`
 
+Line count: 201
+
+Source scope: tracked files under `.github`, `Dockerfiles`, `Docs/Operations`, `Docs/Deployment`, and `Helper_Scripts/Samples`.
+
+Skipped paths: none; all requested CI, deployment, and operations scan roots existed.
+
 ### Static Scan Baseline
 
 Evidence file: `evidence/bandit-app-summary.txt`
+
+Summary: Bandit exited 1 with JSON output at `/tmp/tldw_repo_audit_bandit_app.json`, which is expected for a baseline containing findings. The JSON contains 4,818 results across 1,120,179 scanned LOC: 4,792 low-severity, 26 medium-severity, and 0 high-severity results.
+
+Limitation: this audit worktree did not contain `.venv`, so the scan used the existing parent repository virtual environment at `/Users/appledev/Documents/GitHub/tldw_server/.venv` without installing dependencies.
 
 ## Command Log
 

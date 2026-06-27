@@ -24,3 +24,15 @@ fetch: git fetch origin dev
 rebase: git rebase origin/dev
 result: audit branch rebased onto refreshed origin/dev with no conflicts
 ```
+
+## Task 3 Starting State Commands
+
+Observed before Task 3 inventory file generation. This HEAD is the pre-inventory task-start HEAD, not the `origin/dev` baseline SHA or the immediate post-rebase audit branch HEAD recorded above.
+
+```text
+$ git rev-parse HEAD
+6099dac1d71c9adc0ac9980fa8ac305aa30f938a
+
+$ git status --short --branch
+## codex/comprehensive-repo-audit-2026-06-27...origin/dev [ahead 3]
+```
