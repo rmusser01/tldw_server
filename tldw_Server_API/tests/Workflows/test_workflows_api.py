@@ -1815,6 +1815,8 @@ def test_artifact_manifest_verify_mismatch(monkeypatch, client_with_workflows_db
     d = {"name": "manifest", "version": 1, "steps": [{"id": "s1", "type": "prompt", "config": {"template": "ok"}}]}
     wid = client.post("/api/v1/workflows", json=d).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {}}).json()["run_id"]
+    terminal = _wait_for_run_terminal_data(client, run_id)
+    assert terminal["status"] == "succeeded", terminal
 
     # Create temp artifact with wrong checksum
     import os, tempfile

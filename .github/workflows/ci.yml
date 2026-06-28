@@ -366,7 +366,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'platform-services-core' }}
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing') }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -1516,19 +1516,21 @@ jobs:
               tldw_Server_API/tests/Services/test_kanban_*.py
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
-              tldw_Server_API/tests/Services/test_main_*.py
               tldw_Server_API/tests/Services/test_media_*.py
-              tldw_Server_API/tests/Services/test_openapi_*.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
-              tldw_Server_API/tests/Services/test_router_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
               tldw_Server_API/tests/Services/test_tts_*.py
               tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py
               tldw_Server_API/tests/Services/test_workflows_*.py
               tldw_Server_API/tests/Services/test_xml_*.py
+          - name: platform-services-main-routing
+            paths: >-
+              tldw_Server_API/tests/Services/test_main_*.py
+              tldw_Server_API/tests/Services/test_openapi_*.py
+              tldw_Server_API/tests/Services/test_router_*.py
           - name: platform-sandbox-admin-artifacts
             paths: >-
               tldw_Server_API/tests/sandbox/test_admin_*.py
@@ -1623,7 +1625,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'platform-services-core' }}
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing') }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -2892,19 +2894,21 @@ jobs:
               tldw_Server_API/tests/Services/test_kanban_*.py
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
-              tldw_Server_API/tests/Services/test_main_*.py
               tldw_Server_API/tests/Services/test_media_*.py
-              tldw_Server_API/tests/Services/test_openapi_*.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
-              tldw_Server_API/tests/Services/test_router_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
               tldw_Server_API/tests/Services/test_tts_*.py
               tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py
               tldw_Server_API/tests/Services/test_workflows_*.py
               tldw_Server_API/tests/Services/test_xml_*.py
+          - name: platform-services-main-routing
+            paths: >-
+              tldw_Server_API/tests/Services/test_main_*.py
+              tldw_Server_API/tests/Services/test_openapi_*.py
+              tldw_Server_API/tests/Services/test_router_*.py
           - name: platform-sandbox-admin-artifacts
             paths: >-
               tldw_Server_API/tests/sandbox/test_admin_*.py
@@ -2999,7 +3003,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'platform-services-core' }}
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing') }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -4141,19 +4145,21 @@ jobs:
               tldw_Server_API/tests/Services/test_kanban_*.py
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
-              tldw_Server_API/tests/Services/test_main_*.py
               tldw_Server_API/tests/Services/test_media_*.py
-              tldw_Server_API/tests/Services/test_openapi_*.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
-              tldw_Server_API/tests/Services/test_router_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
               tldw_Server_API/tests/Services/test_tts_*.py
               tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py
               tldw_Server_API/tests/Services/test_workflows_*.py
               tldw_Server_API/tests/Services/test_xml_*.py
+          - name: platform-services-main-routing
+            paths: >-
+              tldw_Server_API/tests/Services/test_main_*.py
+              tldw_Server_API/tests/Services/test_openapi_*.py
+              tldw_Server_API/tests/Services/test_router_*.py
           - name: platform-sandbox-admin-artifacts
             paths: >-
               tldw_Server_API/tests/sandbox/test_admin_*.py
@@ -4224,7 +4230,7 @@ jobs:
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
         with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'platform-services-core' }}
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing') }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -5314,19 +5320,21 @@ jobs:
               tldw_Server_API/tests/Services/test_kanban_*.py
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
-              tldw_Server_API/tests/Services/test_main_*.py
               tldw_Server_API/tests/Services/test_media_*.py
-              tldw_Server_API/tests/Services/test_openapi_*.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
-              tldw_Server_API/tests/Services/test_router_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
               tldw_Server_API/tests/Services/test_tts_*.py
               tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py
               tldw_Server_API/tests/Services/test_workflows_*.py
               tldw_Server_API/tests/Services/test_xml_*.py
+          - name: platform-services-main-routing
+            paths: >-
+              tldw_Server_API/tests/Services/test_main_*.py
+              tldw_Server_API/tests/Services/test_openapi_*.py
+              tldw_Server_API/tests/Services/test_router_*.py
           - name: platform-sandbox-admin-artifacts
             paths: >-
               tldw_Server_API/tests/sandbox/test_admin_*.py
@@ -5397,7 +5405,7 @@ jobs:
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
         with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'platform-services-core' }}
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing') }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -6488,19 +6496,21 @@ jobs:
               tldw_Server_API/tests/Services/test_kanban_*.py
               tldw_Server_API/tests/Services/test_lifecycle_*.py
               tldw_Server_API/tests/Services/test_loop_*.py
-              tldw_Server_API/tests/Services/test_main_*.py
               tldw_Server_API/tests/Services/test_media_*.py
-              tldw_Server_API/tests/Services/test_openapi_*.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
-              tldw_Server_API/tests/Services/test_router_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
               tldw_Server_API/tests/Services/test_tts_*.py
               tldw_Server_API/tests/Services/test_writing_annotation_review_jobs_worker.py
               tldw_Server_API/tests/Services/test_workflows_*.py
               tldw_Server_API/tests/Services/test_xml_*.py
+          - name: platform-services-main-routing
+            paths: >-
+              tldw_Server_API/tests/Services/test_main_*.py
+              tldw_Server_API/tests/Services/test_openapi_*.py
+              tldw_Server_API/tests/Services/test_router_*.py
           - name: platform-sandbox-admin-artifacts
             paths: >-
               tldw_Server_API/tests/sandbox/test_admin_*.py
@@ -6571,7 +6581,7 @@ jobs:
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
         with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'platform-services-core' }}
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing') }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)

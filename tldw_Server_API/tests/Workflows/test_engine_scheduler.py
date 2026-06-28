@@ -8,6 +8,7 @@ from loguru import logger
 logger.remove()
 
 import asyncio
+import sqlite3
 import time
 from pathlib import Path
 
@@ -86,10 +87,14 @@ def _wait_for_status(db: WorkflowsDatabase, run_id: str, timeout: float = 10.0) 
     deadline = time.time() + timeout
     last_status = None
     while time.time() < deadline:
-        run = db.get_run(run_id)
-        last_status = getattr(run, "status", None) if run else None
-        if run and run.status in TERMINAL_STATES.union({"waiting_human", "waiting_approval"}):
-            return run.status
+        with sqlite3.connect(db.db_path) as read_conn:
+            row = read_conn.execute(
+                "SELECT status FROM workflow_runs WHERE run_id = ?",
+                (str(run_id),),
+            ).fetchone()
+        last_status = row[0] if row else None
+        if last_status in TERMINAL_STATES.union({"waiting_human", "waiting_approval"}):
+            return str(last_status)
         time.sleep(0.05)
     raise AssertionError(
         "Run did not reach a terminal or waiting state within the timeout "
