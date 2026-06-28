@@ -181,6 +181,25 @@ describe("ToolCatalogsTab", () => {
     expect(screen.queryByText(/no mcp servers connected/i)).toBeNull()
   })
 
+  it("falls back to server inventory when readiness metadata omits servers", async () => {
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [],
+      modules: []
+    })
+    mocks.listExternalServers.mockResolvedValueOnce([externalServer()])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse({
+        servers: undefined,
+        total_servers: 0
+      })
+    )
+
+    render(<ToolCatalogsTab />)
+
+    expect(await screen.findByText(/no tools registered yet/i)).toBeTruthy()
+    expect(screen.queryByText(/no mcp servers connected/i)).toBeNull()
+  })
+
   it("shows refresh discovery recovery when a saved server has no catalog yet", async () => {
     const user = userEvent.setup()
     mocks.getToolRegistrySummary.mockResolvedValueOnce({

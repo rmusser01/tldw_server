@@ -1991,7 +1991,7 @@ export const ExternalServersTab = ({
             <Typography.Text>{`Reason codes: ${detailsReadiness.reasonCodes.join(", ") || "none"}`}</Typography.Text>
             <Typography.Text>{`Transport: ${detailsServer.transport}`}</Typography.Text>
             <Typography.Text>{`Tools: ${detailsReadiness.toolCount}`}</Typography.Text>
-            <Typography.Text>{`Last validation: ${formatDiagnosticTimestamp(
+            <Typography.Text>{`Last stored validation: ${formatDiagnosticTimestamp(
               detailsBackendReadiness?.last_validation_at
             )}`}</Typography.Text>
             <Typography.Text>{`Last discovery: ${formatDiagnosticTimestamp(

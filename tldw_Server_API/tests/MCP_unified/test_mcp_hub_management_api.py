@@ -1716,6 +1716,40 @@ async def test_mcp_hub_refresh_checks_visibility_executes_refresh_and_sanitizes_
 
 
 @pytest.mark.unit
+async def test_mcp_hub_refresh_success_clears_stale_discovery_error_state() -> None:
+    class _RefreshExecutor:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def __call__(self, server_id: str) -> dict[str, Any]:
+            self.calls.append(server_id)
+            return {"refreshed_servers": 1, "total_servers": 1, "virtual_tools": 0, "errors": {}}
+
+    row = _external_server_row(server_id="docs")
+    row["last_error_category"] = "discovery_failed"
+    row["last_error_message"] = "Previous discovery failure with secret detail"
+    service = _ConfigurableExternalServerService([row])
+    refresh_executor = _RefreshExecutor()
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+        refresh_executor=refresh_executor,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/mcp/hub/external-servers/docs/refresh-discovery")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert refresh_executor.calls == ["docs"]
+    assert "discovery_failed" not in payload["reason_codes"]
+    assert payload["last_error_category"] is None
+    assert payload["last_error_message"] is None
+
+
+@pytest.mark.unit
 async def test_mcp_hub_refresh_rejects_non_operational_visible_servers_without_execution() -> None:
     class _RefreshExecutor:
         def __init__(self) -> None:

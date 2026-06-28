@@ -1,3 +1,5 @@
+"""MCP Hub readiness policy helpers with sanitized response payload builders."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -244,10 +246,14 @@ def build_server_readiness_payload(
     last_error_category = row.get("last_error_category")
     last_error_message = row.get("last_error_message")
     refresh_errors = refresh_result.get("errors") if isinstance(refresh_result, dict) else {}
-    if refresh_result is not None and isinstance(refresh_errors, dict) and server_id in refresh_errors:
-        reasons.append("discovery_failed")
-        last_error_category = "discovery_failed"
-        last_error_message = "Discovery refresh failed."
+    if refresh_result is not None:
+        if isinstance(refresh_errors, dict) and server_id in refresh_errors:
+            reasons.append("discovery_failed")
+            last_error_category = "discovery_failed"
+            last_error_message = "Discovery refresh failed."
+        elif last_error_category == "discovery_failed":
+            last_error_category = None
+            last_error_message = None
     elif last_error_category == "discovery_failed":
         reasons.append("discovery_failed")
         last_error_message = "Discovery refresh failed."

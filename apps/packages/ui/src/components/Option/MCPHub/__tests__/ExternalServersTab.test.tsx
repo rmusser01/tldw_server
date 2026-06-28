@@ -1092,7 +1092,7 @@ describe("ExternalServersTab", () => {
       expect(diagnostics.getByText(/credential state: required_missing/i)).toBeTruthy()
       expect(diagnostics.getByText(/transport: stdio/i)).toBeTruthy()
       expect(diagnostics.getByText(/tools: 2/i)).toBeTruthy()
-      expect(diagnostics.getByText(/last validation: 2026-06-27T07:00:00Z/i)).toBeTruthy()
+      expect(diagnostics.getByText(/last stored validation: 2026-06-27T07:00:00Z/i)).toBeTruthy()
       expect(diagnostics.getByText(/last discovery: 2026-06-27T07:10:00Z/i)).toBeTruthy()
       expect(diagnostics.getByText(/last successful discovery: 2026-06-27T06:00:00Z/i)).toBeTruthy()
       expect(diagnostics.getByText(/current operation: discovery since 2026-06-27T08:00:00Z, Refreshing catalog/i)).toBeTruthy()
