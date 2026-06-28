@@ -59,9 +59,9 @@ Plan review loop completed: reviewer approved with no blocking issues or recomme
 Implementation completed in staged commits. Task 1 added backend summary/context version exposure and delete API coverage. Task 2 added the frontend API client `If-Match` header guard. Task 3 wired row versions through the Skills manager delete confirmation, added stale-conflict recovery copy, and tightened conflict detection after review to avoid treating arbitrary messages containing `409` as conflicts. Final branch review follow-up made handled stale conflicts resolve the confirmation flow so users are not left in a stale delete modal after recovery feedback, while generic delete failures still reject.
 
 Verification completed:
-- Backend focused pytest: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Skills/integration/test_skills_api.py tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py -k "list_skills or delete_skill or get_context_payload or async_variant_uses_async_context_payload" -v` -> 21 passed, 55 deselected.
+- Backend focused pytest: `python -m pytest tldw_Server_API/tests/Skills/integration/test_skills_api.py tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py -k "list_skills or delete_skill or get_context_payload or async_variant_uses_async_context_payload" -v` -> 21 passed, 55 deselected.
 - Frontend focused Vitest: `bunx vitest run src/services/tldw/domains/__tests__/workspace-api.skills.test.ts src/components/Option/Skills/__tests__/Manager.test.tsx --reporter=dot` -> 2 files passed, 39 tests passed.
-- Bandit: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/api/v1/schemas/skills_schemas.py tldw_Server_API/app/core/Skills/skills_service.py -f json -o /tmp/bandit_task_530_10.json` -> 0 results.
+- Bandit: `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/api/v1/schemas/skills_schemas.py tldw_Server_API/app/core/Skills/skills_service.py -f json -o /tmp/bandit_task_530_10.json` -> 0 results.
 
 Known skip: no full frontend build/typecheck was run; focused backend/API-client/manager suites cover this task slice.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
