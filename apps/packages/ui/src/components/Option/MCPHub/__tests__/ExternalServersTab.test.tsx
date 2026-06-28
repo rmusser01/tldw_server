@@ -454,6 +454,67 @@ describe("ExternalServersTab", () => {
     })
   })
 
+  it("uses header targets for SSE auth templates", async () => {
+    const user = userEvent.setup()
+    mocks.listExternalServers.mockResolvedValueOnce([
+      {
+        id: "docs-sse",
+        name: "Docs SSE",
+        enabled: true,
+        owner_scope_type: "global",
+        transport: "sse",
+        config: {},
+        secret_configured: false,
+        server_source: "managed",
+        binding_count: 1,
+        runtime_executable: true,
+        auth_template_present: false,
+        auth_template_valid: false,
+        auth_template_blocked_reason: "no_auth_template",
+        credential_slots: [
+          {
+            server_id: "docs-sse",
+            slot_name: "token_readonly",
+            display_name: "Read-only token",
+            secret_kind: "bearer_token",
+            privilege_class: "read",
+            is_required: true,
+            secret_configured: false
+          }
+        ]
+      }
+    ])
+    mocks.getExternalServerAuthTemplate.mockResolvedValueOnce({
+      mode: "template",
+      mappings: []
+    })
+
+    render(<ExternalServersTab />)
+
+    expect((await screen.findAllByText("Docs SSE")).length).toBeGreaterThan(0)
+    expect(screen.getByText(/template target: header/i)).toBeTruthy()
+    expect(screen.queryByText(/unsupported transport/i)).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: /add mapping/i }))
+    await user.type(screen.getByLabelText(/target name 1/i), "Authorization")
+    await user.type(screen.getByLabelText(/prefix 1/i), "Bearer ")
+    await user.click(screen.getByRole("button", { name: /save auth template/i }))
+
+    expect(mocks.updateExternalServerAuthTemplate).toHaveBeenCalledWith("docs-sse", {
+      mode: "template",
+      mappings: [
+        {
+          slot_name: "token_readonly",
+          target_type: "header",
+          target_name: "Authorization",
+          prefix: "Bearer ",
+          suffix: "",
+          required: true
+        }
+      ]
+    })
+  })
+
   it("creates, edits, and deletes managed servers and credential slots", async () => {
     const user = userEvent.setup()
     render(<ExternalServersTab />)
@@ -1084,7 +1145,7 @@ describe("ExternalServersTab", () => {
 
     const row = await findServerRow("Docs Managed")
 
-    await user.click(within(row).getByRole("button", { name: /validate/i }))
+    await user.click(within(row).getByRole("button", { name: /check readiness/i }))
     expect(mocks.validateExternalServer).toHaveBeenCalledWith("docs-managed")
 
     await user.click(within(row).getByRole("button", { name: /refresh tools/i }))

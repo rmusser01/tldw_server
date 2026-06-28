@@ -40,8 +40,8 @@ export const ToolCatalogsTab = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [metadataWarningMessage, setMetadataWarningMessage] = useState<string | null>(null)
   const groupedModules = useMemo(() => getToolEntriesByModule(entries, modules), [entries, modules])
-  const hasNoExternalServers =
-    !metadataWarningMessage && (readiness?.total_servers ?? servers.length) === 0
+  const visibleServerCount = Math.max(readiness?.servers.length ?? 0, servers.length)
+  const hasNoExternalServers = !metadataWarningMessage && visibleServerCount === 0
   const recoveryReadiness =
     readiness?.servers.find((server) => server.display_state !== "ready") ??
     readiness?.servers?.[0] ??

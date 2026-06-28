@@ -642,12 +642,16 @@ McpHubOperationType = Literal["validation", "discovery"]
 
 
 class McpHubCurrentOperationResponse(BaseModel):
+    """In-flight MCP Hub readiness operation shown without secret material."""
+
     operation_type: McpHubOperationType
     started_at: datetime | str | None = None
     message: str | None = None
 
 
 class McpHubDiscoveryRefreshResultResponse(BaseModel):
+    """Sanitized result summary for an external-server discovery refresh."""
+
     refreshed_servers: int = 0
     total_servers: int = 0
     virtual_tools: int = 0
@@ -655,6 +659,8 @@ class McpHubDiscoveryRefreshResultResponse(BaseModel):
 
 
 class McpServerReadinessResponse(BaseModel):
+    """Per-server MCP Hub setup and tool-catalog readiness state."""
+
     server_id: str
     server_name: str
     display_state: McpHubDisplayState
@@ -674,6 +680,8 @@ class McpServerReadinessResponse(BaseModel):
 
 
 class McpHubReadinessResponse(BaseModel):
+    """Aggregate MCP Hub readiness summary for the caller's visible servers."""
+
     display_state: McpHubDisplayState
     reason_codes: list[McpHubReasonCode] = Field(default_factory=list)
     primary_reason_code: McpHubReasonCode | None = None
