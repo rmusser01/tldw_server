@@ -569,6 +569,24 @@ export const SkillsManager: React.FC = () => {
     }
   })
 
+  const confirmSeedOverwrite = () => {
+    Modal.confirm({
+      title: t("option:skills.seedOverwriteConfirmTitle", {
+        defaultValue: "Overwrite existing built-in skills?"
+      }),
+      content: t("option:skills.seedOverwriteConfirmContent", {
+        defaultValue:
+          "This replaces existing skill copies that match built-in skill names. Custom skills with other names are not changed."
+      }),
+      okText: t("option:skills.seedOverwriteConfirmOk", {
+        defaultValue: "Overwrite built-ins"
+      }),
+      okButtonProps: { danger: true },
+      cancelText: t("common:cancel", { defaultValue: "Cancel" }),
+      onOk: () => seedBuiltinsMutation.mutateAsync(true)
+    })
+  }
+
   const handleNew = () => {
     setSuccessAction(null)
     setEditingSkill(null)
@@ -912,7 +930,7 @@ export const SkillsManager: React.FC = () => {
       label: t("option:skills.seedBuiltinsOverwrite", {
         defaultValue: "Seed and Overwrite Existing"
       }),
-      onClick: () => seedBuiltinsMutation.mutate(true)
+      onClick: confirmSeedOverwrite
     }
   ]
 
