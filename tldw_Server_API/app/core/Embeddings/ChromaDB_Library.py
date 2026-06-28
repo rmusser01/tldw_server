@@ -74,7 +74,7 @@ from tldw_Server_API.app.core.Embeddings.audit_adapter import (
     log_security_violation,
 )
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze  # Assuming this is correct
-from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_truthy
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Utils.Utils import logger  # Assuming this is 'logging' aliased or a custom logger
 
@@ -331,12 +331,14 @@ class ChromaDBManager:
             backend = str(chroma_client_settings_config.get("backend", "persistent")).lower()
             # Honor explicit config, and also support CHROMADB_FORCE_STUB for tests/CI
             _env_force_stub = env_flag_enabled("CHROMADB_FORCE_STUB")
-            use_stub = bool(
-                chroma_client_settings_config.get("use_in_memory_stub", False)
+            use_stub = (
+                is_truthy(str(chroma_client_settings_config.get("use_in_memory_stub", "")).strip())
                 or backend == "stub"
                 or _env_force_stub
             )
-            allow_stub_fallback = bool(chroma_client_settings_config.get("allow_stub_fallback", False))
+            allow_stub_fallback = is_truthy(
+                str(chroma_client_settings_config.get("allow_stub_fallback", "")).strip()
+            )
 
             if use_stub:
                 # Scope the stub client key by user and base dir to avoid cross-config leakage

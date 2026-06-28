@@ -15,6 +15,7 @@ Metadata: card_id, board_id, list_id, due_date, priority, labels, created_at
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 from typing import Any
@@ -331,12 +332,22 @@ class KanbanVectorSearch:
             stage_payload["parent_job_uuid"] = root_uuid
             stage_payload["user_id"] = str(self.user_id)
 
-            redis_pipeline.enqueue_content_job(
-                payload=stage_payload,
-                root_job_uuid=root_uuid,
-                force_regenerate=False,
-                require_redis=not redis_pipeline.allow_stub(),
-            )
+            try:
+                redis_pipeline.enqueue_content_job(
+                    payload=stage_payload,
+                    root_job_uuid=root_uuid,
+                    force_regenerate=False,
+                    require_redis=not redis_pipeline.allow_stub(),
+                )
+            except Exception:
+                with contextlib.suppress(Exception):
+                    jm.fail_job(
+                        int(root_job["id"]),
+                        error="Failed to enqueue kanban embeddings job to Redis",
+                        retryable=False,
+                        enforce=False,
+                    )
+                raise
 
             logger.debug(f"Queued embeddings for card {card_id} (user {self.user_id})")
             return True

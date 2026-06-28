@@ -401,20 +401,16 @@ class APIKeyManager:
 
 
 # Global instances
-_request_signer: Optional[RequestSigner] = None
 _nonce_manager: Optional[NonceManager] = None
 _api_key_manager: Optional[APIKeyManager] = None
 
 
-def get_request_signer() -> RequestSigner:
-    """Get or create the global request signer."""
-    global _request_signer
-    if _request_signer is None:
-        secret_key = (os.getenv("EMBEDDINGS_REQUEST_SIGNING_SECRET") or "").strip()
-        if not secret_key:
-            raise RuntimeError("Embeddings request signing secret is not configured")
-        _request_signer = RequestSigner(secret_key=secret_key)
-    return _request_signer
+def get_request_signer(secret_key: str | None = None) -> RequestSigner:
+    """Create a request signer from explicit or environment configuration."""
+    resolved_secret = (secret_key or os.getenv("EMBEDDINGS_REQUEST_SIGNING_SECRET") or "").strip()
+    if not resolved_secret:
+        raise RuntimeError("Embeddings request signing secret is not configured")
+    return RequestSigner(secret_key=resolved_secret)
 
 
 def get_nonce_manager() -> NonceManager:

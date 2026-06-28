@@ -281,6 +281,46 @@ class TestKanbanVectorSearchHelpers:
         assert stage_payload["card_id"] == 10
         assert stage_payload["card_version"] == 7
 
+    def test_index_card_fails_root_job_when_enqueue_fails(self, monkeypatch):
+        from tldw_Server_API.app.core.DB_Management import kanban_vector_search as kvs
+
+        instance = kvs.KanbanVectorSearch(
+            user_id="1",
+            embedding_config={"embedding_model": "test-model", "embedding_provider": "test-provider"},
+        )
+        instance._available = True
+        instance._manager = object()
+
+        captured: dict[str, object] = {}
+
+        class _StubJobManager:
+            def create_job(self, **_kwargs):
+                return {"id": 99, "uuid": "root-uuid"}
+
+            def fail_job(self, job_id, **kwargs):
+                captured["failed_job_id"] = job_id
+                captured["fail_kwargs"] = kwargs
+
+        def _raise_enqueue_error(**_kwargs):
+            raise kvs.redis_pipeline.RedisEnqueueError("redis unavailable")
+
+        monkeypatch.setattr(kvs, "_jobs_manager", lambda: _StubJobManager())
+        monkeypatch.setattr(kvs.redis_pipeline, "enqueue_content_job", _raise_enqueue_error)
+        monkeypatch.setattr(kvs.redis_pipeline, "allow_stub", lambda: False)
+        monkeypatch.delenv("TEST_MODE", raising=False)
+
+        card = {
+            "id": 10,
+            "title": "Queue Test",
+            "description": "Queue content",
+            "board_id": 1,
+            "list_id": 2,
+            "version": 7,
+        }
+        assert instance.index_card(card) is False
+        assert captured["failed_job_id"] == 99
+        assert captured["fail_kwargs"]["retryable"] is False
+
     def test_index_card_returns_false_when_unavailable(self, vector_search_instance):
 
         """Test that index_card returns False when vector search is unavailable."""

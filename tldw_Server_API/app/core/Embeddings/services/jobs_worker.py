@@ -349,14 +349,19 @@ def _resolve_artifact_path(
     default_path: Path,
 ) -> Path:
     raw_value = payload.get(key)
-    candidate = Path(raw_value) if raw_value else default_path
-    if not candidate.is_absolute():
-        candidate = artifact_dir / candidate
-    artifact_root = artifact_dir.resolve()
-    resolved = candidate.resolve()
     try:
+        if raw_value in (None, ""):
+            candidate = default_path
+        elif isinstance(raw_value, (str, os.PathLike)):
+            candidate = Path(raw_value)
+        else:
+            raise TypeError(f"{key} must be a filesystem path string")
+        if not candidate.is_absolute():
+            candidate = artifact_dir / candidate
+        artifact_root = artifact_dir.resolve()
+        resolved = candidate.resolve()
         resolved.relative_to(artifact_root)
-    except ValueError as exc:
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
         raise EmbeddingsJobError(f"Invalid embeddings artifact path for {key}", retryable=False) from exc
     return resolved
 

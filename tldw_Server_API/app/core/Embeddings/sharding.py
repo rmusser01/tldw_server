@@ -477,19 +477,12 @@ class EmbeddingShardManager:
         logger.info("Shard manager shutdown complete")
 
 
-# Global shard manager
-_shard_manager: Optional[EmbeddingShardManager] = None
-
-
 def get_shard_manager() -> EmbeddingShardManager:
-    """Get or create the global shard manager."""
-    global _shard_manager
+    """Create an experimental shard manager when explicitly enabled."""
     enabled = str(os.getenv("EMBEDDINGS_ENABLE_EXPERIMENTAL_SHARDING") or "").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
         raise RuntimeError("Embeddings experimental sharding is disabled")
-    if _shard_manager is None:
-        _shard_manager = EmbeddingShardManager()
-    return _shard_manager
+    return EmbeddingShardManager()
 
 
 # Example configuration for sharding

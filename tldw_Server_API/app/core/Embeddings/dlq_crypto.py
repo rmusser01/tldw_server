@@ -124,11 +124,10 @@ def encrypt_payload_if_configured(payload_obj: dict[str, Any]) -> str | None:
         obj = _aesgcm_encrypt(raw, key)
         if obj.get("alg") != "AESGCM":
             raise DLQEncryptionError("DLQ encryption unavailable: AES-GCM support is required")
-        if obj.get("alg") == "AESGCM":
-            obj["kdf"] = kdf_used
-            if kdf_used == "scrypt":
-                obj["salt"] = base64.b64encode(salt).decode("utf-8")
-                obj["kdf_params"] = _SCRYPT_PARAMS
+        obj["kdf"] = kdf_used
+        if kdf_used == "scrypt":
+            obj["salt"] = base64.b64encode(salt).decode("utf-8")
+            obj["kdf_params"] = _SCRYPT_PARAMS
         return json.dumps(obj)
     except (MemoryError, OSError, TypeError, ValueError) as exc:
         raise DLQEncryptionError("DLQ encryption failed") from exc

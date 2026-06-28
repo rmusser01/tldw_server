@@ -68,6 +68,22 @@ async def test_chunking_job_rejects_payload_artifact_path_escape(monkeypatch, tm
 
 
 @pytest.mark.unit
+def test_artifact_path_rejects_non_string_payload_value(tmp_path):
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+
+    with pytest.raises(jobs_worker.EmbeddingsJobError, match="artifact path") as exc_info:
+        jobs_worker._resolve_artifact_path(
+            artifact_dir,
+            {"chunks_path": 42},
+            "chunks_path",
+            artifact_dir / "chunks.json",
+        )
+
+    assert exc_info.value.retryable is False
+
+
+@pytest.mark.unit
 def test_embeddings_jobs_adapter_fails_root_when_idempotency_write_fails(monkeypatch, tmp_path):
     db_path = _setup_jobs_db(monkeypatch, tmp_path)
 
@@ -167,7 +183,7 @@ def test_shard_manager_requires_explicit_experimental_flag(monkeypatch):
     from tldw_Server_API.app.core.Embeddings import sharding
 
     monkeypatch.delenv("EMBEDDINGS_ENABLE_EXPERIMENTAL_SHARDING", raising=False)
-    monkeypatch.setattr(sharding, "_shard_manager", None)
+    monkeypatch.setattr(sharding, "_shard_manager", None, raising=False)
     monkeypatch.setattr(sharding, "EmbeddingShardManager", lambda: object())
 
     with pytest.raises(RuntimeError, match="experimental sharding"):
@@ -175,14 +191,40 @@ def test_shard_manager_requires_explicit_experimental_flag(monkeypatch):
 
 
 @pytest.mark.unit
-def test_request_signer_singleton_requires_configured_secret(monkeypatch):
+def test_shard_manager_factory_does_not_reuse_global_singleton(monkeypatch):
+    from tldw_Server_API.app.core.Embeddings import sharding
+
+    monkeypatch.setenv("EMBEDDINGS_ENABLE_EXPERIMENTAL_SHARDING", "1")
+    monkeypatch.setattr(sharding, "_shard_manager", None, raising=False)
+    monkeypatch.setattr(sharding, "EmbeddingShardManager", lambda: object())
+
+    assert sharding.get_shard_manager() is not sharding.get_shard_manager()
+
+
+@pytest.mark.unit
+def test_request_signer_requires_configured_secret(monkeypatch):
     from tldw_Server_API.app.core.Embeddings import request_signing
 
     monkeypatch.delenv("EMBEDDINGS_REQUEST_SIGNING_SECRET", raising=False)
-    monkeypatch.setattr(request_signing, "_request_signer", None)
+    monkeypatch.setattr(request_signing, "_request_signer", None, raising=False)
 
     with pytest.raises(RuntimeError, match="request signing secret"):
         request_signing.get_request_signer()
+
+
+@pytest.mark.unit
+def test_request_signer_factory_does_not_reuse_global_singleton(monkeypatch):
+    from tldw_Server_API.app.core.Embeddings import request_signing
+
+    monkeypatch.setenv("EMBEDDINGS_REQUEST_SIGNING_SECRET", "configured-secret")
+    monkeypatch.setattr(request_signing, "_request_signer", None, raising=False)
+
+    first = request_signing.get_request_signer()
+    second = request_signing.get_request_signer()
+
+    assert first is not second
+    assert first.secret_key == "configured-secret"
+    assert second.secret_key == "configured-secret"
 
 
 @pytest.mark.unit

@@ -107,6 +107,47 @@ def test_persistent_client_init_failure_fails_closed_by_default(monkeypatch, tmp
         ChromaDBManager(user_id="fail_closed", user_embedding_config=user_cfg)
 
 
+def test_string_false_does_not_enable_in_memory_stub(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    def _raise_persistent_client(**_kwargs):
+        raise ValueError("persistent init attempted")
+
+    monkeypatch.setattr(cdl.chromadb, "PersistentClient", _raise_persistent_client)
+    user_cfg = {
+        "USER_DB_BASE_DIR": str(tmp_path),
+        "embedding_config": {"default_model_id": "unused", "models": {}},
+        "chroma_client_settings": {
+            "backend": "persistent",
+            "use_in_memory_stub": "false",
+            "allow_stub_fallback": False,
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="ChromaDB client initialization failed"):
+        ChromaDBManager(user_id="string_false_stub", user_embedding_config=user_cfg)
+
+
+def test_string_false_does_not_enable_stub_fallback(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    def _raise_persistent_client(**_kwargs):
+        raise ValueError("persistent init failed")
+
+    monkeypatch.setattr(cdl.chromadb, "PersistentClient", _raise_persistent_client)
+    user_cfg = {
+        "USER_DB_BASE_DIR": str(tmp_path),
+        "embedding_config": {"default_model_id": "unused", "models": {}},
+        "chroma_client_settings": {
+            "backend": "persistent",
+            "allow_stub_fallback": "false",
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="ChromaDB client initialization failed"):
+        ChromaDBManager(user_id="string_false_fallback", user_embedding_config=user_cfg)
+
+
 def test_list_collections_propagates(mock_chroma_client, tmp_path):
 
 
