@@ -27,7 +27,10 @@ os.environ["ROUTES_DISABLE"] = ",".join(sorted(_routes_disable))
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
-from tldw_Server_API.app.api.v1.endpoints.skills import MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES
+from tldw_Server_API.app.api.v1.endpoints.skills import (
+    MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES,
+    _metadata_to_summary,
+)
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.Context_Integrity.resolver import clear_global_context_integrity_resolver
@@ -342,7 +345,8 @@ class TestListSkills:
         assert data["has_more"] is False
         assert data["next_offset"] is None
 
-    def test_list_skills_includes_version(self, client):
+    def test_list_skills_includes_version(self, client: TestClient) -> None:
+        """List summaries expose the registry version for optimistic deletes."""
         create_resp = client.post(
             f"{SKILLS_PREFIX}/",
             json={"name": "listed-version", "content": "content"},
@@ -353,6 +357,22 @@ class TestListSkills:
         assert r.status_code == 200, r.text
         listed = {skill["name"]: skill for skill in r.json()["skills"]}
         assert listed["listed-version"]["version"] == create_resp.json()["version"]
+
+    def test_metadata_summary_defaults_missing_version(self) -> None:
+        """Legacy metadata without a version still produces a valid summary."""
+        metadata = SimpleNamespace(
+            name="legacy-version",
+            description=None,
+            argument_hint=None,
+            user_invocable=True,
+            disable_model_invocation=False,
+            context="inline",
+            version=None,
+        )
+
+        summary = _metadata_to_summary(metadata)
+
+        assert summary.version == 1
 
     def test_list_skills_search_filters_before_pagination(self, client):
         for i in range(12):
@@ -614,7 +634,8 @@ class TestDeleteSkill:
         r = client.get(f"{SKILLS_PREFIX}/del-skill")
         assert r.status_code == 404
 
-    def test_delete_skill_accepts_matching_if_match(self, client):
+    def test_delete_skill_accepts_matching_if_match(self, client: TestClient) -> None:
+        """Deletes with a matching If-Match version remove the skill."""
         create_resp = client.post(
             f"{SKILLS_PREFIX}/",
             json={"name": "del-versioned", "content": "content"},
@@ -631,7 +652,11 @@ class TestDeleteSkill:
         missing = client.get(f"{SKILLS_PREFIX}/del-versioned")
         assert missing.status_code == 404
 
-    def test_delete_skill_stale_if_match_returns_409_and_keeps_skill(self, client):
+    def test_delete_skill_stale_if_match_returns_409_and_keeps_skill(
+        self,
+        client: TestClient,
+    ) -> None:
+        """Stale If-Match deletes return 409 without deleting the current skill."""
         create_resp = client.post(
             f"{SKILLS_PREFIX}/",
             json={"name": "del-stale", "content": "v1"},
