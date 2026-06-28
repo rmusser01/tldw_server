@@ -9,6 +9,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from ..backends.fish_s2_base import FishS2Backend
+from ..backends.fish_s2_commercial_api import FishS2CommercialApiBackend
 from ..backends.fish_s2_native_http import FishS2NativeHttpBackend
 from ..tts_exceptions import (
     TTSProviderInitializationError,
@@ -61,6 +62,8 @@ _SUPPORTED_LANGUAGES = {
 
 def _build_backend(config: dict[str, Any]) -> FishS2Backend:
     backend_name = str(config.get("backend", "native_http")).strip().lower()
+    if backend_name in {"commercial_api", "hosted", "fish_audio"}:
+        return FishS2CommercialApiBackend(config)
     if backend_name == "native_http":
         return FishS2NativeHttpBackend(config)
     if backend_name == "local_runtime":
@@ -79,7 +82,7 @@ class FishS2Adapter(TTSAdapter):
     """Registry-facing adapter for Fish Audio S2."""
 
     PROVIDER_KEY = "fish_s2"
-    SUPPORTED_FORMATS = {AudioFormat.WAV, AudioFormat.MP3, AudioFormat.PCM}
+    SUPPORTED_FORMATS = {AudioFormat.WAV, AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.PCM}
 
     def __init__(self, config: Optional[dict[str, Any]] = None):
         super().__init__(config)
@@ -200,6 +203,8 @@ class FishS2Adapter(TTSAdapter):
         reference_id: str,
         audio_b64: str,
         reference_text: str,
+        title: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         if not await self.ensure_initialized():
             raise TTSProviderNotConfiguredError(
@@ -215,6 +220,8 @@ class FishS2Adapter(TTSAdapter):
             reference_id=reference_id,
             audio_b64=audio_b64,
             reference_text=reference_text,
+            title=title,
+            description=description,
         )
 
     async def delete_reference(self, *, reference_id: str) -> bool:
@@ -242,9 +249,12 @@ class FishS2Adapter(TTSAdapter):
 
         return replace(request, voice=voice, extra_params=extras)
 
-    def _resolve_reference_id(self, request: TTSRequest) -> str | None:
+    def _resolve_reference_id(self, request: TTSRequest) -> str | list[str] | None:
         extras = request.extra_params if isinstance(request.extra_params, dict) else {}
         explicit_reference_id = extras.get("reference_id")
+        if isinstance(explicit_reference_id, list):
+            reference_ids = [str(value).strip() for value in explicit_reference_id if str(value).strip()]
+            return reference_ids or None
         if explicit_reference_id:
             return str(explicit_reference_id)
 
@@ -267,8 +277,17 @@ class FishS2Adapter(TTSAdapter):
             backend_extra_params["use_memory_cache"] = self.default_use_memory_cache
 
         for key in (
+            "condition_on_previous_chunks",
             "chunk_length",
+            "early_stop_threshold",
+            "latency",
+            "max_new_tokens",
+            "min_chunk_length",
+            "mp3_bitrate",
             "normalize",
+            "opus_bitrate",
+            "prosody",
+            "sample_rate",
             "seed",
             "top_p",
             "temperature",

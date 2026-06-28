@@ -23,7 +23,7 @@ class _FakeBackend:
         text: str,
         response_format: str,
         streaming: bool,
-        reference_id: str | None,
+        reference_id: str | list[str] | None,
         extra_params: dict[str, object] | None,
     ) -> bytes | AsyncIterator[bytes]:
         self.calls.append(
@@ -44,6 +44,25 @@ class _FakeBackend:
         return self._response
 
 
+def test_build_backend_supports_commercial_api():
+    from tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter import _build_backend
+    from tldw_Server_API.app.core.TTS.backends.fish_s2_commercial_api import FishS2CommercialApiBackend
+
+    backend = _build_backend(
+        {
+            "backend": "commercial_api",
+            "base_url": "https://api.fish.audio",
+            "api_key": "secret",
+            "model": "s2-pro",
+        }
+    )
+
+    assert isinstance(backend, FishS2CommercialApiBackend)
+    assert backend.base_url == "https://api.fish.audio"
+    assert backend.api_key == "secret"
+    assert backend.model == "s2-pro"
+
+
 @pytest.mark.asyncio
 async def test_adapter_initializes_native_http_backend(monkeypatch):
     from tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter import FishS2Adapter
@@ -62,6 +81,24 @@ async def test_adapter_initializes_native_http_backend(monkeypatch):
     assert adapter.capabilities.supports_streaming is True
     assert adapter.capabilities.supports_voice_cloning is True
     assert adapter.capabilities.supports_multi_speaker is False
+
+
+@pytest.mark.asyncio
+async def test_adapter_capabilities_include_fish_audio_formats(monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter import FishS2Adapter
+
+    backend = _FakeBackend()
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter._build_backend",
+        lambda config: backend,
+    )
+
+    adapter = FishS2Adapter({"backend": "commercial_api", "api_key": "secret"})
+
+    assert await adapter.ensure_initialized() is True
+    assert adapter.capabilities is not None
+    assert AudioFormat.OPUS in adapter.capabilities.supported_formats
+    assert adapter.capabilities.default_format == AudioFormat.WAV
 
 
 @pytest.mark.asyncio
@@ -127,6 +164,57 @@ async def test_adapter_maps_request_and_merges_defaults(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_adapter_preserves_reference_lists_and_commercial_params(monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter import FishS2Adapter
+
+    backend = _FakeBackend(response=b"fish-audio")
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter._build_backend",
+        lambda config: backend,
+    )
+
+    adapter = FishS2Adapter({"backend": "commercial_api", "api_key": "secret"})
+    await adapter.ensure_initialized()
+
+    await adapter.generate(
+        TTSRequest(
+            text="hello",
+            format=AudioFormat.OPUS,
+            stream=False,
+            extra_params={
+                "reference_id": ["voice-a", "voice-b"],
+                "sample_rate": 44100,
+                "opus_bitrate": 32000,
+                "latency": "balanced",
+                "prosody": {"speed": 1.1},
+                "condition_on_previous_chunks": False,
+                "early_stop_threshold": 0.7,
+                "max_new_tokens": 1024,
+                "min_chunk_length": 80,
+                "ignored": "value",
+            },
+        )
+    )
+
+    assert backend.calls[-1] == {
+        "text": "hello",
+        "response_format": "opus",
+        "streaming": False,
+        "reference_id": ["voice-a", "voice-b"],
+        "extra_params": {
+            "sample_rate": 44100,
+            "opus_bitrate": 32000,
+            "latency": "balanced",
+            "prosody": {"speed": 1.1},
+            "condition_on_previous_chunks": False,
+            "early_stop_threshold": 0.7,
+            "max_new_tokens": 1024,
+            "min_chunk_length": 80,
+        },
+    }
+
+
+@pytest.mark.asyncio
 async def test_adapter_returns_streaming_response(monkeypatch):
     from tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter import FishS2Adapter
 
@@ -163,12 +251,14 @@ async def test_adapter_add_and_delete_reference_delegate_to_backend(monkeypatch)
             self.add_calls = []
             self.delete_calls = []
 
-        async def add_reference(self, *, reference_id, audio_b64, reference_text):
+        async def add_reference(self, *, reference_id, audio_b64, reference_text, title=None, description=None):
             self.add_calls.append(
                 {
                     "reference_id": reference_id,
                     "audio_b64": audio_b64,
                     "reference_text": reference_text,
+                    "title": title,
+                    "description": description,
                 }
             )
             return {"reference_id": reference_id}
@@ -190,6 +280,8 @@ async def test_adapter_add_and_delete_reference_delegate_to_backend(monkeypatch)
         reference_id="tldw_u1_voice-1",
         audio_b64="QUJD",
         reference_text="hello there",
+        title="Voice One",
+        description="private clone",
     )
     deleted = await adapter.delete_reference(reference_id="tldw_u1_voice-1")
 
@@ -200,6 +292,8 @@ async def test_adapter_add_and_delete_reference_delegate_to_backend(monkeypatch)
             "reference_id": "tldw_u1_voice-1",
             "audio_b64": "QUJD",
             "reference_text": "hello there",
+            "title": "Voice One",
+            "description": "private clone",
         }
     ]
     assert backend.delete_calls == ["tldw_u1_voice-1"]

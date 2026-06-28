@@ -17,7 +17,7 @@ provider_priority:
   - higgs       # Advanced multi-lingual
   - index_tts   # IndexTTS2 (local, expressive zero-shot)
   - qwen3_tts   # Qwen3-TTS (local, multilingual; disabled by default)
-  - fish_s2     # Fish Audio S2 via upstream HTTP server (disabled by default)
+  - fish_s2     # Fish Audio S2 hosted API or self-hosted HTTP server (disabled by default)
 
 # Provider-specific configurations
 providers:
@@ -322,12 +322,16 @@ providers:
       idle_shutdown_seconds: 900
       resident_mode: false
 
-  # Fish Audio S2 Configuration (remote Fish HTTP server)
+  # Fish Audio S2 Configuration
+  # Hosted commercial API: set backend to "commercial_api" and provide
+  # FISH_AUDIO_API_KEY (or FISH_API_KEY) in the environment.
+  # Self-hosted Fish Speech server: set backend to "native_http" and base_url
+  # to your local server, for example "http://127.0.0.1:8080".
   fish_s2:
     enabled: false
-    backend: "native_http"
-    base_url: "http://127.0.0.1:8080"
-    api_key: null
+    backend: "commercial_api"
+    base_url: "https://api.fish.audio"
+    api_key: ${FISH_AUDIO_API_KEY}
     timeout: 120
     verify_api_key_on_init: false
     model: "s2-pro"

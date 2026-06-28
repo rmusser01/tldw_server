@@ -941,7 +941,7 @@ async def test_create_fish_s2_reference_persists_remote_mapping(tts_service, mon
             saved["metadata"] = metadata
 
     class _FakeAdapter:
-        async def add_reference(self, *, reference_id, audio_b64, reference_text):
+        async def add_reference(self, *, reference_id, audio_b64, reference_text, title=None, description=None):
             return {"reference_id": reference_id}
 
     monkeypatch.setattr(
@@ -961,6 +961,72 @@ async def test_create_fish_s2_reference_persists_remote_mapping(tts_service, mon
     assert result["remote_reference_id"] == "tldw_u1_voice-1"
     metadata = saved["metadata"]
     assert metadata.provider_artifacts["fish_s2"]["remote_reference_id"] == "tldw_u1_voice-1"
+    assert metadata.provider_artifacts["fish_s2"]["reference_text"] == "stored text"
+
+
+@pytest.mark.unit
+async def test_create_fish_s2_reference_uses_hosted_remote_id(tts_service, monkeypatch):
+    saved = {}
+
+    class _FakeVoiceManager:
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(voice_id=voice_id, reference_text="stored text")
+
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            return b"audio-bytes"
+
+        async def save_reference_metadata(self, user_id, metadata):
+            saved["metadata"] = metadata
+
+    class _FakeAdapter:
+        def __init__(self):
+            self.add_calls = []
+
+        async def add_reference(self, *, reference_id, audio_b64, reference_text, title=None, description=None):
+            self.add_calls.append(
+                {
+                    "reference_id": reference_id,
+                    "audio_b64": audio_b64,
+                    "reference_text": reference_text,
+                    "title": title,
+                    "description": description,
+                }
+            )
+            return {
+                "reference_id": "fish-hosted-model-id",
+                "remote_reference_id": "fish-hosted-model-id",
+            }
+
+    adapter = _FakeAdapter()
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+    monkeypatch.setattr(tts_service, "_get_adapter", AsyncMock(return_value=adapter))
+
+    result = await tts_service.create_fish_s2_reference(
+        user_id=1,
+        voice_id="voice-1",
+        name="Voice One",
+        description="private clone",
+        reference_text="stored text",
+    )
+
+    assert result["reference_id"] == "voice-1"
+    assert result["remote_reference_id"] == "fish-hosted-model-id"
+    assert adapter.add_calls == [
+        {
+            "reference_id": "tldw_u1_voice-1",
+            "audio_b64": base64.b64encode(b"audio-bytes").decode("ascii"),
+            "reference_text": "stored text",
+            "title": "Voice One",
+            "description": "private clone",
+        }
+    ]
+    metadata = saved["metadata"]
+    assert metadata.provider_artifacts["fish_s2"]["remote_reference_id"] == "fish-hosted-model-id"
+    assert metadata.provider_artifacts["fish_s2"]["local_reference_id"] == "tldw_u1_voice-1"
     assert metadata.provider_artifacts["fish_s2"]["reference_text"] == "stored text"
 
 

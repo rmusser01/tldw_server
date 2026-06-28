@@ -60,7 +60,7 @@ class FishS2NativeHttpBackend(FishS2Backend):
         text: str,
         response_format: str,
         streaming: bool,
-        reference_id: str | None,
+        reference_id: str | list[str] | None,
         extra_params: dict[str, Any] | None,
     ) -> FishS2SynthesisResult:
         payload = self._build_tts_payload(
@@ -94,6 +94,8 @@ class FishS2NativeHttpBackend(FishS2Backend):
         reference_id: str,
         audio_b64: str,
         reference_text: str,
+        title: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         try:
             audio_bytes = base64.b64decode(audio_b64, validate=True)
@@ -159,7 +161,7 @@ class FishS2NativeHttpBackend(FishS2Backend):
         text: str,
         response_format: str,
         streaming: bool,
-        reference_id: str | None,
+        reference_id: str | list[str] | None,
         extra_params: dict[str, Any] | None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {

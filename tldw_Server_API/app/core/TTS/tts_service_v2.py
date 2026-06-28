@@ -2835,19 +2835,29 @@ class TTSServiceV2:
         if adapter is None or not hasattr(adapter, "add_reference"):
             raise TTSProviderNotConfiguredError("Fish S2 adapter is not available", provider="fish_s2")
 
-        remote_reference_id = self._build_fish_s2_remote_reference_id(user_id, resolved_voice_id)
+        local_reference_id = self._build_fish_s2_remote_reference_id(user_id, resolved_voice_id)
         if force and existing_remote_reference_id and hasattr(adapter, "delete_reference"):
             with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
                 await adapter.delete_reference(reference_id=str(existing_remote_reference_id))
 
-        await adapter.add_reference(
-            reference_id=remote_reference_id,
+        adapter_result = await adapter.add_reference(
+            reference_id=local_reference_id,
             audio_b64=base64.b64encode(voice_bytes).decode("ascii"),
             reference_text=resolved_reference_text,
+            title=name or resolved_voice_id,
+            description=description,
         )
+        remote_reference_id = local_reference_id
+        if isinstance(adapter_result, dict):
+            remote_reference_id = str(
+                adapter_result.get("remote_reference_id")
+                or adapter_result.get("reference_id")
+                or local_reference_id
+            )
 
         metadata.provider_artifacts["fish_s2"] = {
             "remote_reference_id": remote_reference_id,
+            "local_reference_id": local_reference_id,
             "reference_text": resolved_reference_text,
         }
         await voice_manager.save_reference_metadata(user_id, metadata)

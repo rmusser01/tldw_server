@@ -24,10 +24,45 @@ ELEVENLABS_API_KEY=your-api-key-here
 
 ### Fish Audio S2
 
-Fish Audio S2 is currently supported through the upstream Fish HTTP server.
-The tldw provider key is `fish_s2`, and v1 expects the `native_http` backend.
+Fish Audio S2 is available under the tldw provider key `fish_s2`. The provider
+supports two backend modes:
 
-#### Upstream Server
+- `commercial_api` for the hosted Fish Audio API at `https://api.fish.audio`
+- `native_http` for a self-hosted Fish Speech HTTP server
+
+#### Hosted Commercial API
+
+Set `FISH_AUDIO_API_KEY` in the environment. `FISH_API_KEY` is also accepted as
+an alias.
+
+```bash
+FISH_AUDIO_API_KEY=your-fish-audio-api-key
+```
+
+Enable `fish_s2` in `tldw_Server_API/Config_Files/tts_providers_config.yaml`:
+
+```yaml
+providers:
+  fish_s2:
+    enabled: true
+    backend: "commercial_api"
+    base_url: "https://api.fish.audio"
+    api_key: ${FISH_AUDIO_API_KEY}
+    timeout: 120
+    model: "s2-pro"
+    sample_rate: 24000
+    max_text_length: 5000
+    extra_params:
+      default_chunk_length: 200
+      default_normalize: true
+```
+
+The hosted backend sends `POST /v1/tts` with the Fish `model` request header and
+creates reusable private voices through `POST /model`. Fish returns a hosted
+model ID for managed voices; tldw stores that ID in the local voice metadata and
+uses it as `reference_id` for later speech requests.
+
+#### Self-Hosted Native HTTP
 
 Start Fish Speech's API server separately and expose its `/v1/tts` and
 `/v1/references/*` routes. A typical local deployment uses:
@@ -36,9 +71,7 @@ Start Fish Speech's API server separately and expose its `/v1/tts` and
 python tools/api_server.py --host 127.0.0.1 --port 8080
 ```
 
-#### Configuration (YAML)
-
-Enable `fish_s2` in `tldw_Server_API/Config_Files/tts_providers_config.yaml`:
+Then configure `native_http`:
 
 ```yaml
 providers:
@@ -60,13 +93,17 @@ providers:
 #### Request Notes
 
 - Model aliases include `fish_s2`, `fish-s2-pro`, `s2-pro`, and `fishaudio/s2-pro`.
-- Streaming is WAV-only for the native Fish server path.
+- Supported response formats include `wav`, `mp3`, `opus`, and `pcm`.
+- Hosted commercial requests may pass Fish-specific fields through `extra_params`,
+  including `reference_id`, `references`, `sample_rate`, `mp3_bitrate`,
+  `opus_bitrate`, `latency`, `prosody`, `chunk_length`, `normalize`,
+  `max_new_tokens`, `repetition_penalty`, and chunk-control options.
 - Managed references are user-scoped through:
   - `POST /api/v1/audio/providers/fish_s2/references`
   - `GET /api/v1/audio/providers/fish_s2/references`
   - `DELETE /api/v1/audio/providers/fish_s2/references/{reference_id}`
 - `extra_params.reference_id` uses the local stored `voice_id`, not the backend
-  Fish reference ID.
+  Fish reference/model ID; tldw resolves it to the stored remote ID when present.
 - `voice=custom:<voice_id>` reuses existing Fish metadata when present and falls
   back to an inline reference payload built from the stored voice sample.
 

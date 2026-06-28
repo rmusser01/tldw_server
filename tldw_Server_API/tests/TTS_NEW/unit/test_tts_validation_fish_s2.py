@@ -6,16 +6,26 @@ from tldw_Server_API.app.core.TTS.tts_validation import validate_tts_request
 
 
 @pytest.mark.unit
-def test_fish_s2_streaming_requires_wav():
+def test_fish_s2_accepts_hosted_api_opus_format():
     request = TTSRequest(
         text="hello",
         provider="fish_s2",
-        format=AudioFormat.MP3,
+        format=AudioFormat.OPUS,
         stream=True,
         extra_params={"reference_id": "voice-123"},
     )
 
-    with pytest.raises(TTSValidationError) as exc:
-        validate_tts_request(request, provider="fish_s2")
+    validate_tts_request(request, provider="fish_s2")
 
-    assert "wav" in str(exc.value).lower()
+
+@pytest.mark.unit
+def test_fish_s2_rejects_unsupported_format():
+    request = TTSRequest(
+        text="hello",
+        provider="fish_s2",
+        format=AudioFormat.FLAC,
+        stream=False,
+    )
+
+    with pytest.raises(TTSValidationError):
+        validate_tts_request(request, provider="fish_s2")

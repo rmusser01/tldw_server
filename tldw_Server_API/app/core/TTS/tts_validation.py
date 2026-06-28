@@ -608,16 +608,6 @@ class TTSInputValidator:
             if request.format:
                 self._validate_format(request.format, provider)
 
-            if provider == "fish_s2" and request.stream and request.format != AudioFormat.WAV:
-                raise TTSUnsupportedFormatError(
-                    "Fish S2 streaming only supports WAV format",
-                    provider=provider,
-                    details={
-                        "requested_format": request.format.value,
-                        "supported_streaming_formats": [AudioFormat.WAV.value],
-                    },
-                )
-
             # Validate language (allow extra_params.language override)
             language = request.language
             extras = request.extra_params or {}

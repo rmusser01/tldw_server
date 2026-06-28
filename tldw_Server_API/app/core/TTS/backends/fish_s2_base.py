@@ -22,7 +22,7 @@ class FishS2Backend(Protocol):
         text: str,
         response_format: str,
         streaming: bool,
-        reference_id: str | None,
+        reference_id: str | list[str] | None,
         extra_params: dict[str, Any] | None,
     ) -> FishS2SynthesisResult:
         """Generate speech or return a byte stream for a request."""
@@ -33,6 +33,8 @@ class FishS2Backend(Protocol):
         reference_id: str,
         audio_b64: str,
         reference_text: str,
+        title: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         """Create or update a managed Fish reference."""
 
