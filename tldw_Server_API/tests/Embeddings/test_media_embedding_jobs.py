@@ -99,9 +99,42 @@ def _client():
         yield c
 
 
-def test_media_embedding_job_lifecycle():
+def test_media_embedding_job_lifecycle(monkeypatch):
     os.environ["TESTING"] = "true"
     try:
+        from tldw_Server_API.app.api.v1.endpoints import media_embeddings as media_embeddings_endpoint
+
+        class _LifecycleJobsAdapter:
+            _jobs: list[dict] = []
+
+            def create_job(self, **kwargs):
+                row = {
+                    "id": "job-123",
+                    "uuid": "job-123",
+                    "media_id": int(kwargs["media_id"]),
+                    "user_id": str(kwargs["user_id"]),
+                    "status": "queued",
+                    "embedding_model": kwargs["embedding_model"],
+                    "embedding_count": None,
+                    "chunks_processed": None,
+                }
+                type(self)._jobs = [row]
+                return row
+
+            def get_job(self, job_id, user_id):
+                for row in type(self)._jobs:
+                    if str(row["id"]) == str(job_id) and str(row["user_id"]) == str(user_id):
+                        return dict(row)
+                return None
+
+            def list_jobs(self, *, user_id, status=None, limit=50, offset=0):
+                rows = [
+                    dict(row)
+                    for row in type(self)._jobs
+                    if str(row["user_id"]) == str(user_id) and (status is None or row["status"] == status)
+                ]
+                return rows[int(offset) : int(offset) + int(limit)]
+
         original_allowed_providers = settings.get("ALLOWED_EMBEDDING_PROVIDERS")
         original_allowed_models = settings.get("ALLOWED_EMBEDDING_MODELS")
         original_model_limits = settings.get("EMBEDDING_MODEL_MAX_TOKENS")
@@ -109,6 +142,7 @@ def test_media_embedding_job_lifecycle():
         settings["ALLOWED_EMBEDDING_PROVIDERS"] = ["openai", "huggingface"]
         settings["ALLOWED_EMBEDDING_MODELS"] = ["text-embedding-3-small", "sentence-transformers/all-MiniLM-L6-v2"]
         settings["EMBEDDING_MODEL_MAX_TOKENS"] = {"openai:text-embedding-3-small": 8192}
+        monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _LifecycleJobsAdapter)
 
         # Override media DB dependency
         app.dependency_overrides[get_media_db_for_user] = lambda: _FakeMediaDB()

@@ -17,6 +17,7 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.admin_webhook_secrets import encrypt_admin_webhook_secret
 from tldw_Server_API.app.core.DB_Management.migrations import Migration, MigrationManager
 from tldw_Server_API.app.core.Infrastructure.distributed_lock import acquire_migration_lock
+from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 
@@ -5332,7 +5333,9 @@ def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:
         lock_name="authnz_migration",
         redis_url=redis_url,
         timeout=60,
-        allow_file_fallback_on_redis_error=_is_test_mode(),
+        allow_file_fallback_on_redis_error=(
+            _is_test_mode() or _is_explicit_pytest_runtime()
+        ),
     ):
         _apply_authnz_migrations_locked(db_path, target_version)
 

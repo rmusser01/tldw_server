@@ -4,7 +4,7 @@ title: Fix PR 1982 current backend CI shard failures
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-27 23:56'
+updated_date: '2026-06-28 05:47'
 labels:
   - ci
   - pr-1982
@@ -60,6 +60,8 @@ Track the current PR #1982 CI failures after the full matrix appeared on head 93
 2026-06-27 chat-new-unit-a-l follow-up: current PR #1982 run 28301705852/jobs 83854084880 and 83854085179 failed on Windows/macOS in test_llm_provider_readiness_marks_unreachable_local_endpoint_unavailable because CI WORKFLOWS_EGRESS_ALLOWLIST blocked 127.0.0.1 before the opt-in endpoint probe ran, returning egress_blocked instead of endpoint_unreachable. Added WORKFLOWS_EGRESS_ALLOWLIST=127.0.0.1,localhost to that readiness test. Verification: exact failing readiness test passed with CI-like allowlist env; test_llm_providers_readiness.py passed (4 tests); full Chat_NEW/unit/test_[a-l]*.py shard passed with -p pytest_asyncio.plugin (135 tests); combined Bandit on touched allowlist tests with B101 excluded passed; git diff --check passed.
 
 2026-06-27 product-workflows-runtime Windows follow-up: pre-push live run check found an additional failure in run 28301705852/job 83854087649, Full Suite shard (windows-latest / Python 3.12 / product-workflows-runtime). The failing test was test_webhook_step_noop, which left an async workflow run in running for 30 seconds. The exact test and full product-workflows-runtime shard both passed locally under CI-like env on macOS, so this is Windows/order-sensitive scheduler timing rather than webhook adapter behavior. Changed this adapter-focused test to run the saved workflow with mode=sync, matching nearby workflow adapter tests and avoiding background scheduler timing for a no-op webhook assertion.
+
+Run 28306969720 added Ubuntu/Python 3.13 llm-adapters-chat-endpoint failure: AuthNZ SQLite migration retry failed because adapter tests delete TEST_MODE while CI exports REDIS_URL to an unavailable Redis service; apply_authnz_migrations only allowed Redis-to-file fallback for TEST_MODE, not explicit pytest runtime. Patched migrations to also allow fallback under PYTEST_CURRENT_TEST, added regression coverage, and locally verified AuthNZ migration unit tests plus LLM adapter shards with REDIS_URL/EMBEDDINGS_REDIS_URL pointed at localhost and TEST_MODE removed by the tests.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -81,3 +83,10 @@ Implemented and locally verified the current PR #1982 CI shard fixes for run 282
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-06-27 run 28306969720 llm-adapters-orchestrator-extra cancellation follow-up: local exact shard reproduced the CI environment with TEST_MODE=true plus REDIS_URL/EMBEDDINGS_REDIS_URL pointed at localhost while endpoint tests delete TEST_MODE. The full orchestrator-extra shard passed locally (21 passed, 8 warnings), confirming the AuthNZ pytest-runtime Redis fallback covers this cancelled shard as well.
+2026-06-27 final run 28306969720 triage: additional Python 3.13 llm-adapters-orchestrator/chat-errors failures and cancellations were the same AuthNZ/Redis migration-lock family already covered by the pytest-runtime file fallback change. Python 3.13 platform-services-core cancelled after completing test_main_router_contract.py and before the next services test emitted a result; no traceback or Redis failure was present. Aligned the Linux Python 3.13 shard timeout with Python 3.12 at 60 minutes to cover the large services shard while keeping the code fix focused on the adapter/AuthNZ root cause.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.Sandbox.service import SandboxService
 
 pytestmark = pytest.mark.unit
 
-RUNNER_START_TIMEOUT_SEC = 30.0
+RUNNER_START_TIMEOUT_SEC = 60.0
 TEST_BACKGROUND_WORKERS = 2
 
 

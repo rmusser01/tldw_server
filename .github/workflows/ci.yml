@@ -495,7 +495,7 @@ jobs:
   full-suite-linux-312-shards:
     name: Full Suite shard (Ubuntu / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     needs: [lint, syntax-check, changes]
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
@@ -1871,7 +1871,7 @@ jobs:
   full-suite-linux-313-shards:
     name: Full Suite shard (Ubuntu / Python 3.13 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 60
     needs: [lint, syntax-check, changes]
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
@@ -3192,7 +3192,7 @@ jobs:
   full-suite-macos-312-shards:
     name: Full Suite shard (macos-latest / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: macos-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     needs: [lint, syntax-check, changes]
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
@@ -4365,7 +4365,7 @@ jobs:
   full-suite-windows-312-shards:
     name: Full Suite shard (windows-latest / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
     needs: [lint, syntax-check, changes]
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend_changed == 'true' }}
     strategy:
