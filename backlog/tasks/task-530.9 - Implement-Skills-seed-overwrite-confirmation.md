@@ -3,16 +3,16 @@ id: TASK-530.9
 title: Implement Skills seed overwrite confirmation
 status: In Progress
 assignee: []
-created_date: '2026-06-28 15:38'
-updated_date: '2026-06-28 15:39'
+created_date: 2026-06-28 15:38
+updated_date: 2026-06-28 15:39
 labels:
-  - skills
-  - webui
-  - safe-operations
+- skills
+- webui
+- safe-operations
 dependencies: []
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-06-28-skills-seed-overwrite-confirmation-design.md
+- Docs/superpowers/specs/2026-06-28-skills-seed-overwrite-confirmation-design.md
+- Docs/superpowers/plans/2026-06-28-skills-seed-overwrite-confirmation.md
 parent_task_id: TASK-530
 priority: high
 ---
@@ -36,6 +36,7 @@ Continue TASK-530 Safe Operations after TASK-530.8 by adding an explicit fronten
 
 <!-- SECTION:PLAN:BEGIN -->
 Spec: Docs/superpowers/specs/2026-06-28-skills-seed-overwrite-confirmation-design.md
+Plan: Docs/superpowers/plans/2026-06-28-skills-seed-overwrite-confirmation.md
 <!-- SECTION:PLAN:END -->
 
 ## Definition of Done
