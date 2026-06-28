@@ -1,3 +1,5 @@
+"""Run-summary data model and redaction helpers for CATS artifacts."""
+
 from __future__ import annotations
 
 import json
@@ -8,6 +10,8 @@ from typing import Any
 
 @dataclass(frozen=True)
 class CatsRunSummary:
+    """Serializable summary for one CATS harness block."""
+
     block: str
     cats_version: str
     openapi_sha256: str
@@ -22,6 +26,7 @@ class CatsRunSummary:
 
 
 def _mask_header_arg(value: str) -> str:
+    """Mask sensitive header arguments embedded in CATS command argv."""
     for header_name in ("X-API-KEY", "Authorization"):
         prefix = f"{header_name}="
         if value.startswith(prefix):
@@ -30,10 +35,12 @@ def _mask_header_arg(value: str) -> str:
 
 
 def mask_command(command: list[str]) -> list[str]:
+    """Return a copy of command argv with supported credential headers redacted."""
     return [_mask_header_arg(value) for value in command]
 
 
 def write_summary(summary: CatsRunSummary, output_path: Path) -> Path:
+    """Write a redacted JSON summary artifact and return its path."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     data = asdict(summary)
     data["command"] = mask_command(summary.command)

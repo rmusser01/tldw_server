@@ -1,3 +1,5 @@
+"""Runner orchestration for contract and runtime CATS fuzzing blocks."""
+
 from __future__ import annotations
 
 import hashlib
@@ -19,6 +21,7 @@ from Helper_Scripts.cats_fuzz.summary import CatsRunSummary, mask_command, write
 
 
 def _sha256(path: Path) -> str:
+    """Return the SHA-256 digest for a file."""
     digest = hashlib.sha256()
     with path.open("rb") as file_obj:
         for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
@@ -27,6 +30,7 @@ def _sha256(path: Path) -> str:
 
 
 def _write_process_artifacts(result: CatsProcessResult, output_dir: Path) -> tuple[Path, Path]:
+    """Write stdout and stderr logs for a CATS process result."""
     output_dir.mkdir(parents=True, exist_ok=True)
     stdout_path = output_dir / "stdout.log"
     stderr_path = output_dir / "stderr.log"
@@ -44,6 +48,7 @@ def _summarize(
     output_dir: Path,
     report_dir: Path,
 ) -> CatsRunSummary:
+    """Write artifacts and return a redacted run summary."""
     stdout_path, stderr_path = _write_process_artifacts(result, output_dir)
     masked_command = mask_command(result.command)
     summary = CatsRunSummary(
@@ -66,6 +71,7 @@ def _merge_contract_results(
     validate_result: CatsProcessResult,
     stats_result: CatsProcessResult,
 ) -> CatsProcessResult:
+    """Combine validate and stats command results into one contract result."""
     exit_code = validate_result.exit_code or stats_result.exit_code
     return CatsProcessResult(
         command=validate_result.command + [";"] + stats_result.command,
@@ -82,6 +88,7 @@ def run_contract_block(
     openapi_sha256: str | None = None,
     cats_bin: str = "cats",
 ) -> CatsRunSummary:
+    """Run contract-only CATS validation and statistics commands."""
     validate_result = run_command(
         build_cats_validate_command(contract_path, cats_bin=cats_bin),
         timeout_seconds=60,
@@ -113,6 +120,7 @@ def run_runtime_block(
     dry_run: bool = False,
     env: Mapping[str, str] | None = None,
 ) -> CatsRunSummary:
+    """Run one runtime CATS block and always emit block artifacts on failure."""
     block_dir = output_dir / block.name
     report_dir = block_dir / "cats-report"
     if block.requires_readiness:
@@ -155,6 +163,7 @@ def run_runtime_block(
 
 
 def get_default_runtime_block() -> CatsBlock:
+    """Return the default runtime block used by the harness CLI."""
     return get_builtin_block("public-read")
 
 

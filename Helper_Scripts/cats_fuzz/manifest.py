@@ -1,3 +1,5 @@
+"""Built-in CATS fuzzing block manifest and validation rules."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -5,6 +7,8 @@ from enum import Enum
 
 
 class BlockRisk(str, Enum):
+    """Risk categories used to group harness blocks by allowed behavior."""
+
     CONTRACT = "contract"
     PUBLIC_READ = "public-read"
     AUTH_READ = "auth-read"
@@ -14,12 +18,16 @@ class BlockRisk(str, Enum):
 
 
 class ExpectedGate(str, Enum):
+    """Expected CI gate semantics for a harness block."""
+
     NO_5XX = "no_5xx"
     CONTRACT_ONLY = "contract_only"
 
 
 @dataclass(frozen=True)
 class CatsBlock:
+    """Declarative configuration for one CATS fuzzing block."""
+
     name: str
     description: str
     risk: BlockRisk
@@ -46,6 +54,7 @@ class CatsBlock:
 
 
 def validate_block(block: CatsBlock) -> None:
+    """Validate that a CATS block obeys the harness safety constraints."""
     if not block.name:
         raise ValueError("block name is required")
     if not block.paths and not block.tags and block.risk is not BlockRisk.CONTRACT:
@@ -57,6 +66,7 @@ def validate_block(block: CatsBlock) -> None:
 
 
 def get_builtin_manifest() -> dict[str, CatsBlock]:
+    """Return the built-in CATS block manifest keyed by block name."""
     blocks = {
         "contract": CatsBlock(
             name="contract",
@@ -116,6 +126,7 @@ def get_builtin_manifest() -> dict[str, CatsBlock]:
 
 
 def get_builtin_block(name: str) -> CatsBlock:
+    """Return one built-in CATS block by name."""
     return get_builtin_manifest()[name]
 
 

@@ -40,6 +40,28 @@ def test_cli_server_url_without_start_flag_uses_existing_server() -> None:
     assert args.start_server is False
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "server_url",
+    [
+        "http://127.0.0.1:8000/prefix",
+        "http://127.0.0.1:8000?debug=1",
+        "http://127.0.0.1:8000#fragment",
+    ],
+)
+def test_cli_rejects_existing_server_url_with_path_query_or_fragment(
+    server_url: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from Helper_Scripts.cats_fuzz.cli import parse_args
+
+    with pytest.raises(SystemExit) as exc_info:
+        parse_args(["--block", "public-read", "--server-url", server_url])
+
+    assert exc_info.value.code == 2
+    assert "must be an origin URL without a path, query, or fragment" in capsys.readouterr().err
+
+
 def _summary(block: str, exit_code: int) -> CatsRunSummary:
     return CatsRunSummary(
         block=block,
@@ -69,9 +91,10 @@ def test_contract_only_run_exports_openapi_and_returns_contract_exit_code(
         check: bool = False,
         capture_output: bool = False,
         text: bool = False,
+        timeout: int | None = None,
         env: dict[str, str] | None = None,
     ) -> object:
-        calls.append(("subprocess", (command, check, capture_output, text, env)))
+        calls.append(("subprocess", (command, check, capture_output, text, timeout, env)))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     def fail_start_server(*args: object, **kwargs: object) -> None:
@@ -99,7 +122,7 @@ def test_contract_only_run_exports_openapi_and_returns_contract_exit_code(
     assert result == 7
     assert calls[0] == (
         "subprocess",
-        (["python", "export", str(tmp_path / "openapi.json")], False, True, True, {"SAFE": "1"}),
+        (["python", "export", str(tmp_path / "openapi.json")], False, True, True, 120, {"SAFE": "1"}),
     )
     assert calls[1] == ("contract", (tmp_path / "openapi.json", tmp_path, "cats 13.8.0", "cats"))
 
@@ -128,9 +151,10 @@ def test_runtime_default_blocks_start_server_use_started_url_and_stop_finally(
         check: bool = False,
         capture_output: bool = False,
         text: bool = False,
+        timeout: int | None = None,
         env: dict[str, str] | None = None,
     ) -> object:
-        events.append(("export", (command, check, env)))
+        events.append(("export", (command, check, timeout, env)))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     def fake_start_server(env: dict[str, str], *, log_dir: Path) -> SimpleNamespace:
@@ -189,7 +213,7 @@ def test_runtime_default_blocks_start_server_use_started_url_and_stop_finally(
     assert result == 5
     assert events[0] == (
         "export",
-        (["python", "export", str(tmp_path / "openapi.json")], False, child_env),
+        (["python", "export", str(tmp_path / "openapi.json")], False, 120, child_env),
     )
     assert events[1] == ("start", (server_env, tmp_path / "server"))
     started_env = events[1][1][0]
@@ -366,9 +390,11 @@ def test_runtime_rejects_non_loopback_existing_server_url_before_env_or_export(
 
 @pytest.mark.unit
 def test_openapi_export_failure_writes_logs_and_stops_before_blocks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from Helper_Scripts.cats_fuzz import cli
+
+    errors: list[str] = []
 
     def fake_run(
         command: list[str],
@@ -376,12 +402,14 @@ def test_openapi_export_failure_writes_logs_and_stops_before_blocks(
         check: bool = False,
         capture_output: bool = False,
         text: bool = False,
+        timeout: int | None = None,
         env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         assert command == ["python", "export", str(tmp_path / "openapi.json")]
         assert check is False
         assert capture_output is True
         assert text is True
+        assert timeout == 120
         assert env == {"SAFE": "1"}
         return subprocess.CompletedProcess(command, 9, stdout="export out", stderr="export err")
 
@@ -391,6 +419,9 @@ def test_openapi_export_failure_writes_logs_and_stops_before_blocks(
     monkeypatch.setattr(cli, "build_child_env", lambda output_dir, allow_external=False: {"SAFE": "1"})
     monkeypatch.setattr(cli, "build_openapi_export_command", lambda path: ["python", "export", str(path)])
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        cli, "logger", SimpleNamespace(error=lambda message, *args: errors.append(message.format(*args)))
+    )
     monkeypatch.setattr(cli, "start_server", fail_start_or_run)
     monkeypatch.setattr(cli, "run_contract_block", fail_start_or_run)
     monkeypatch.setattr(cli, "run_runtime_block", fail_start_or_run)
@@ -400,7 +431,41 @@ def test_openapi_export_failure_writes_logs_and_stops_before_blocks(
     assert result == 9
     assert (tmp_path / "openapi-export.stdout.log").read_text(encoding="utf-8") == "export out"
     assert (tmp_path / "openapi-export.stderr.log").read_text(encoding="utf-8") == "export err"
-    assert f"OpenAPI export failed; see {tmp_path / 'openapi-export.stderr.log'}" in capsys.readouterr().err
+    assert errors == [f"OpenAPI export failed; see {tmp_path / 'openapi-export.stderr.log'}"]
+
+
+@pytest.mark.unit
+def test_openapi_export_timeout_writes_partial_logs_and_returns_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from Helper_Scripts.cats_fuzz import cli
+
+    errors: list[str] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool = False,
+        capture_output: bool = False,
+        text: bool = False,
+        timeout: int | None = None,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(command, timeout or 0, output="partial stdout", stderr=b"partial stderr")
+
+    monkeypatch.setattr(cli, "build_openapi_export_command", lambda path: ["python", "export", str(path)])
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        cli, "logger", SimpleNamespace(error=lambda message, *args: errors.append(message.format(*args)))
+    )
+
+    result = cli._export_openapi_contract(tmp_path / "openapi.json", {"SAFE": "1"}, tmp_path)
+
+    assert result == 124
+    assert (tmp_path / "openapi-export.stdout.log").read_text(encoding="utf-8") == "partial stdout"
+    assert (tmp_path / "openapi-export.stderr.log").read_text(encoding="utf-8") == "partial stderr"
+    assert errors == [f"OpenAPI export timed out after 120 seconds; see {tmp_path / 'openapi-export.stderr.log'}"]
 
 
 @pytest.mark.unit

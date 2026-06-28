@@ -1,3 +1,5 @@
+"""CATS command builders, subprocess execution, and exit classification."""
+
 from __future__ import annotations
 
 import subprocess  # nosec B404
@@ -10,6 +12,8 @@ from Helper_Scripts.cats_fuzz.manifest import CatsBlock
 
 @dataclass(frozen=True)
 class CatsProcessResult:
+    """Captured result for one CATS or harness subprocess invocation."""
+
     command: list[str]
     exit_code: int
     stdout: str
@@ -20,6 +24,7 @@ _TIMEOUT_EXIT_CODE = 124
 
 
 def _normalize_timeout_output(value: str | bytes | None) -> str:
+    """Convert partial timeout output to text for artifact persistence."""
     if value is None:
         return ""
     if isinstance(value, bytes):
@@ -28,6 +33,7 @@ def _normalize_timeout_output(value: str | bytes | None) -> str:
 
 
 def _append_csv_option(command: list[str], option: str, values: Sequence[str]) -> None:
+    """Append a comma-separated CATS option when values are configured."""
     if values:
         command.extend([option, ",".join(values)])
 
@@ -41,6 +47,7 @@ def build_cats_run_command(
     cats_bin: str = "cats",
     dry_run: bool = False,
 ) -> list[str]:
+    """Build a runtime CATS fuzzing command for one manifest block."""
     command = [
         cats_bin,
         "-c",
@@ -82,6 +89,7 @@ def build_cats_validate_command(
     cats_bin: str = "cats",
     json_output: bool = True,
 ) -> list[str]:
+    """Build a CATS OpenAPI validation command."""
     command = [cats_bin, "validate", "-c", str(contract_path)]
     if json_output:
         command.append("-j")
@@ -93,6 +101,7 @@ def build_cats_stats_command(
     cats_bin: str = "cats",
     json_output: bool = True,
 ) -> list[str]:
+    """Build a CATS OpenAPI statistics command."""
     command = [cats_bin, "stats", "-c", str(contract_path)]
     if json_output:
         command.append("-j")
@@ -100,6 +109,7 @@ def build_cats_stats_command(
 
 
 def classify_cats_exit(exit_code: int, stderr: str) -> str:
+    """Classify a CATS exit as ok, usage, tool, or API behavior."""
     if exit_code == 0:
         return "ok"
 
@@ -134,6 +144,7 @@ def run_command(
     timeout_seconds: int,
     env: Mapping[str, str] | None = None,
 ) -> CatsProcessResult:
+    """Run a CATS subprocess with timeout and structured failure capture."""
     # Command arguments are built by the local harness from controlled values.
     try:
         completed = subprocess.run(  # nosec B603

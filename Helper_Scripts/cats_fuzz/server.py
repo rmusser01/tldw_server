@@ -1,3 +1,5 @@
+"""Local uvicorn lifecycle and readiness helpers for CATS runtime blocks."""
+
 from __future__ import annotations
 
 import socket
@@ -17,6 +19,8 @@ from urllib.request import Request, urlopen
 
 @dataclass(frozen=True)
 class UvicornServer:
+    """Handle for a spawned uvicorn process and its optional log streams."""
+
     process: subprocess.Popen[str]
     url: str
     stdout_stream: TextIO | None = None
@@ -24,12 +28,14 @@ class UvicornServer:
 
 
 def find_free_port() -> int:
+    """Reserve and return an available loopback TCP port."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])
 
 
 def _poll_url(url: str, timeout: float = 2.0) -> int:
+    """Return one HTTP status code for a constrained HTTP(S) health URL."""
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError(f"Unsupported health check URL scheme: {parsed.scheme}")
@@ -46,6 +52,7 @@ def _poll_url(url: str, timeout: float = 2.0) -> int:
 
 
 def _startup_exit_message(return_code: int, stderr_path: Path | None) -> str:
+    """Build an actionable startup failure message for an exited uvicorn child."""
     message = f"uvicorn exited during startup with code {return_code}"
     if stderr_path is not None:
         return f"{message}; stderr log: {stderr_path}"
@@ -59,6 +66,7 @@ def wait_for_health(
     process: subprocess.Popen[str] | None = None,
     stderr_path: Path | None = None,
 ) -> None:
+    """Wait for the local server health endpoint and fail fast if uvicorn exits."""
     deadline = time.monotonic() + timeout_seconds
     health_url = f"{base_url.rstrip('/')}/health"
     last_error: Exception | str | None = None
@@ -81,6 +89,7 @@ def wait_for_health(
 
 
 def wait_for_readiness(base_url: str, timeout_seconds: float = 30.0) -> None:
+    """Wait for one of the supported readiness endpoints to return HTTP 2xx."""
     deadline = time.monotonic() + timeout_seconds
     readiness_urls = (
         f"{base_url.rstrip('/')}/ready",
@@ -105,6 +114,7 @@ def wait_for_readiness(base_url: str, timeout_seconds: float = 30.0) -> None:
 
 
 def _close_server_streams(server: UvicornServer) -> None:
+    """Close any log streams attached to a server handle."""
     for stream in (server.stdout_stream, server.stderr_stream):
         if stream is not None and not stream.closed:
             stream.close()
@@ -115,6 +125,7 @@ def start_server(
     port: int | None = None,
     log_dir: Path | None = None,
 ) -> UvicornServer:
+    """Start a loopback uvicorn server and wait until it is healthy."""
     selected_port = port if port is not None else find_free_port()
     url = f"http://127.0.0.1:{selected_port}"
     command = [
@@ -176,6 +187,7 @@ def start_server(
 
 
 def stop_server(server: UvicornServer) -> None:
+    """Terminate a spawned uvicorn server and close any attached streams."""
     try:
         if server.process.poll() is not None:
             return

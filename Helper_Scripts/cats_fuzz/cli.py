@@ -1,14 +1,17 @@
+"""Command-line orchestration for the local CATS OpenAPI fuzzing harness."""
+
 from __future__ import annotations
 
 import argparse
 import ipaddress
-import sys
 
 # This wrapper invokes fixed local CLI argv with shell=False.
 import subprocess  # nosec B404
-from pathlib import Path
 from collections.abc import Mapping
+from pathlib import Path
 from urllib.parse import urlparse
+
+from loguru import logger
 
 from Helper_Scripts.cats_fuzz.env import build_child_env, build_server_env
 from Helper_Scripts.cats_fuzz.manifest import get_builtin_block
@@ -16,8 +19,12 @@ from Helper_Scripts.cats_fuzz.openapi_export import build_openapi_export_command
 from Helper_Scripts.cats_fuzz.runner import run_contract_block, run_runtime_block
 from Helper_Scripts.cats_fuzz.server import start_server, stop_server
 
+OPENAPI_EXPORT_TIMEOUT_SECONDS = 120
+_TIMEOUT_EXIT_CODE = 124
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse and validate harness CLI arguments."""
     parser = argparse.ArgumentParser(description="Run local CATS OpenAPI fuzzing blocks.")
     parser.add_argument(
         "--block",
@@ -57,6 +64,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _first_output_line(value: str) -> str | None:
+    """Return the first non-empty line from command output."""
     for line in value.splitlines():
         stripped = line.strip()
         if stripped:
@@ -65,6 +73,7 @@ def _first_output_line(value: str) -> str | None:
 
 
 def _cats_version_line(value: str) -> str | None:
+    """Return the first CATS version banner line from command output."""
     for line in value.splitlines():
         stripped = line.strip()
         if stripped.startswith("CATS version "):
@@ -73,6 +82,7 @@ def _cats_version_line(value: str) -> str | None:
 
 
 def _cats_version(cats_bin: str) -> str:
+    """Read the installed CATS version without failing the harness on lookup errors."""
     try:
         # Fixed argv, shell=False; cats_bin selects the local CATS executable.
         result = subprocess.run(  # nosec B603
@@ -96,6 +106,7 @@ def _cats_version(cats_bin: str) -> str:
 
 
 def _first_runtime_block(selected_blocks: list[str]) -> str | None:
+    """Return the first selected block that requires a running API server."""
     for block_name in selected_blocks:
         if block_name != "contract":
             return block_name
@@ -103,6 +114,7 @@ def _first_runtime_block(selected_blocks: list[str]) -> str | None:
 
 
 def _is_loopback_server_url(server_url: str) -> bool:
+    """Return True when a server URL points at localhost or a loopback IP."""
     parsed = urlparse(server_url)
     if parsed.scheme not in {"http", "https"}:
         return False
@@ -118,6 +130,11 @@ def _is_loopback_server_url(server_url: str) -> bool:
 
 
 def _validate_server_url(parser: argparse.ArgumentParser, server_url: str, selected_blocks: list[str]) -> None:
+    """Reject runtime server URLs that could send fuzzing traffic outside loopback or path roots."""
+    parsed = urlparse(server_url)
+    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+        parser.error("--server-url must be an origin URL without a path, query, or fragment")
+
     for block_name in selected_blocks:
         if block_name == "contract":
             continue
@@ -126,25 +143,44 @@ def _validate_server_url(parser: argparse.ArgumentParser, server_url: str, selec
             parser.error(f"{block_name} only allows loopback --server-url values")
 
 
+def _normalize_subprocess_output(value: str | bytes | None) -> str:
+    """Convert partial subprocess output to text for artifact logs."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
 def _export_openapi_contract(contract_path: Path, child_env: Mapping[str, str], output_dir: Path) -> int:
-    # Local helper argv, shell=False, executed with an isolated child env.
-    result = subprocess.run(  # nosec B603
-        build_openapi_export_command(contract_path),
-        check=False,
-        capture_output=True,
-        text=True,
-        env=dict(child_env),
-    )
+    """Run OpenAPI export in an isolated subprocess and persist diagnostic logs."""
     stdout_path = output_dir / "openapi-export.stdout.log"
     stderr_path = output_dir / "openapi-export.stderr.log"
+    # Local helper argv, shell=False, executed with an isolated child env.
+    try:
+        result = subprocess.run(  # nosec B603
+            build_openapi_export_command(contract_path),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=OPENAPI_EXPORT_TIMEOUT_SECONDS,
+            env=dict(child_env),
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout_path.write_text(_normalize_subprocess_output(exc.output), encoding="utf-8")
+        stderr_path.write_text(_normalize_subprocess_output(exc.stderr), encoding="utf-8")
+        logger.error("OpenAPI export timed out after {} seconds; see {}", OPENAPI_EXPORT_TIMEOUT_SECONDS, stderr_path)
+        return _TIMEOUT_EXIT_CODE
+
     stdout_path.write_text(result.stdout, encoding="utf-8")
     stderr_path.write_text(result.stderr, encoding="utf-8")
     if result.returncode != 0:
-        print(f"OpenAPI export failed; see {stderr_path}", file=sys.stderr)
+        logger.error("OpenAPI export failed; see {}", stderr_path)
     return result.returncode
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run selected harness blocks and return the first non-zero block exit code."""
     args = parse_args(argv)
     selected_blocks = list(args.block)
     first_runtime_block = _first_runtime_block(selected_blocks)

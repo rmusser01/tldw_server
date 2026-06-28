@@ -115,6 +115,27 @@ def test_build_child_env_writes_inert_runtime_config_and_env_files(tmp_path: Pat
 
 
 @pytest.mark.unit
+def test_build_child_env_blanks_route_policy_overrides_for_deterministic_export(tmp_path: Path) -> None:
+    env = build_child_env(
+        tmp_path,
+        parent_env={
+            "ROUTES_STABLE_ONLY": "1",
+            "ROUTES_DISABLE": "chat,rag",
+            "ROUTES_ENABLE": "setup",
+            "ROUTES_EXPERIMENTAL": "labs",
+        },
+    )
+
+    for name in ("ROUTES_STABLE_ONLY", "ROUTES_DISABLE", "ROUTES_ENABLE", "ROUTES_EXPERIMENTAL"):
+        assert env[name] == ""
+
+    config_text = Path(env["TLDW_CONFIG_FILE"]).read_text(encoding="utf-8")
+    assert "disable = setup" in config_text
+    assert "chat,rag" not in config_text
+    assert "labs" not in config_text
+
+
+@pytest.mark.unit
 def test_build_server_env_removes_guarded_test_flags_and_writes_safe_env_file(tmp_path: Path) -> None:
     child_env = build_child_env(
         tmp_path,

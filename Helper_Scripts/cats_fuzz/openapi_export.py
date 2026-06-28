@@ -1,3 +1,5 @@
+"""Deterministic OpenAPI export helper for the CATS fuzzing harness."""
+
 from __future__ import annotations
 
 import argparse
@@ -8,6 +10,7 @@ from pathlib import Path
 
 
 def build_openapi_export_command(output_path: Path) -> list[str]:
+    """Build the Python module command used to export OpenAPI in a subprocess."""
     return [
         sys.executable,
         "-m",
@@ -18,6 +21,7 @@ def build_openapi_export_command(output_path: Path) -> list[str]:
 
 
 def export_openapi(output_path: Path) -> str:
+    """Export the FastAPI OpenAPI schema to JSON and return its SHA-256 digest."""
     from tldw_Server_API.app.main import app
 
     app.openapi_schema = None
@@ -34,6 +38,7 @@ def export_openapi(output_path: Path) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entrypoint for deterministic OpenAPI export."""
     parser = argparse.ArgumentParser(description="Export deterministic OpenAPI JSON.")
     parser.add_argument("--output", required=True, type=Path, help="Output OpenAPI JSON path.")
     args = parser.parse_args(argv)

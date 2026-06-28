@@ -1,3 +1,5 @@
+"""Environment isolation helpers for deterministic local CATS fuzzing runs."""
+
 from __future__ import annotations
 
 import os
@@ -121,19 +123,30 @@ SANITIZE_ONLY_ENV_NAMES = frozenset(
 
 SERVER_GUARDED_TEST_FLAGS = ("TEST_MODE", "TESTING", "TLDW_TEST_MODE")
 CONFIG_ENV_NAMES = ("TLDW_CONFIG_FILE", "TLDW_CONFIG_PATH", "TLDW_CONFIG_DIR")
+ROUTE_POLICY_ENV_NAMES = frozenset(
+    {
+        "ROUTES_STABLE_ONLY",
+        "ROUTES_DISABLE",
+        "ROUTES_ENABLE",
+        "ROUTES_EXPERIMENTAL",
+    }
+)
 
 
 def _is_sensitive_name(name: str) -> bool:
+    """Return True when an environment name is known or shaped like a secret."""
     upper_name = name.upper()
     return upper_name in SENSITIVE_ENV_NAMES or any(substring in upper_name for substring in SENSITIVE_NAME_SUBSTRINGS)
 
 
 def _should_blank_name(name: str) -> bool:
+    """Return True when a name should be scrubbed from the child process environment."""
     upper_name = name.upper()
     return _is_sensitive_name(upper_name) or _is_provider_runtime_name(upper_name)
 
 
 def _is_provider_runtime_name(name: str) -> bool:
+    """Return True when a name can route requests to an external provider endpoint."""
     upper_name = name.upper()
     if upper_name in PROVIDER_RUNTIME_ENV_NAMES:
         return True
@@ -145,10 +158,12 @@ def _is_provider_runtime_name(name: str) -> bool:
 
 
 def find_sensitive_values(env: Mapping[str, str]) -> dict[str, str]:
+    """Return a redacted map of populated sensitive environment names."""
     return {name: "set" for name, value in env.items() if value and _is_sensitive_name(name)}
 
 
 def _find_blocking_sensitive_values(env: Mapping[str, str]) -> dict[str, str]:
+    """Return populated sensitive names that should block harness startup."""
     return {
         name: "set"
         for name, value in env.items()
@@ -157,6 +172,7 @@ def _find_blocking_sensitive_values(env: Mapping[str, str]) -> dict[str, str]:
 
 
 def _write_minimal_env_file(env_file: Path, runtime_dir: Path, user_db_dir: Path) -> None:
+    """Write the minimal .env consumed by the OpenAPI export subprocess."""
     config_file = runtime_dir / "config.txt"
     lines = [
         "AUTH_MODE=single_user",
@@ -178,6 +194,7 @@ def _write_minimal_env_file(env_file: Path, runtime_dir: Path, user_db_dir: Path
 
 
 def _write_minimal_config_file(config_file: Path, runtime_dir: Path, user_db_dir: Path) -> None:
+    """Write an inert config.txt that keeps the harness route surface stable."""
     lines = [
         "[Authentication]",
         "auth_mode = single_user",
@@ -218,6 +235,7 @@ def _write_minimal_config_file(config_file: Path, runtime_dir: Path, user_db_dir
 
 
 def _write_server_env_file(env_file: Path, server_env: Mapping[str, str]) -> None:
+    """Write the server-side environment file used by the spawned uvicorn process."""
     names = (
         "AUTH_MODE",
         "SINGLE_USER_API_KEY",
@@ -242,6 +260,7 @@ def build_child_env(
     parent_env: Mapping[str, str] | None = None,
     allow_external: bool = False,
 ) -> dict[str, str]:
+    """Build a scrubbed environment for OpenAPI export and CATS child processes."""
     source_env = dict(os.environ if parent_env is None else parent_env)
     detected = _find_blocking_sensitive_values(source_env)
     if detected and not allow_external:
@@ -257,7 +276,7 @@ def build_child_env(
 
     child_env = dict(source_env)
     for name in set(child_env).union(SENSITIVE_ENV_NAMES, SANITIZE_ONLY_ENV_NAMES, PROVIDER_RUNTIME_ENV_NAMES):
-        if _should_blank_name(name):
+        if _should_blank_name(name) or name.upper() in ROUTE_POLICY_ENV_NAMES:
             child_env[name] = ""
 
     child_env.update(
@@ -285,6 +304,7 @@ def build_child_env(
 
 
 def build_server_env(work_dir: Path, child_env: Mapping[str, str]) -> dict[str, str]:
+    """Build the uvicorn server environment from the already-scrubbed child environment."""
     runtime_dir = work_dir / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     user_db_dir = runtime_dir / "user_databases"
