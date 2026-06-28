@@ -104,6 +104,12 @@ const renderMcpHubPage = (initialEntry = "/mcp-hub") =>
   )
 
 describe("McpHubPage", () => {
+  it("exposes one route-level semantic heading", () => {
+    renderMcpHubPage()
+
+    expect(screen.getByRole("heading", { level: 1, name: "MCP Hub" })).toBeTruthy()
+  })
+
   it("renders workflow shortcuts without implying live readiness", () => {
     renderMcpHubPage()
 
