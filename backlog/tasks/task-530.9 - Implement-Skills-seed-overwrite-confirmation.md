@@ -15,6 +15,8 @@ documentation:
 - Docs/superpowers/plans/2026-06-28-skills-seed-overwrite-confirmation.md
 parent_task_id: TASK-530
 priority: high
+references:
+- https://github.com/rmusser01/tldw_server/pull/2543
 ---
 
 ## Description
@@ -37,6 +39,7 @@ Continue TASK-530 Safe Operations after TASK-530.8 by adding an explicit fronten
 <!-- SECTION:PLAN:BEGIN -->
 Spec: Docs/superpowers/specs/2026-06-28-skills-seed-overwrite-confirmation-design.md
 Plan: Docs/superpowers/plans/2026-06-28-skills-seed-overwrite-confirmation.md
+PR: https://github.com/rmusser01/tldw_server/pull/2543
 
 Implementation completed:
 - Added a `Modal.confirm` guard for the Skills manager `Seed and Overwrite Existing` dropdown action.
@@ -50,6 +53,7 @@ Verification:
 
 Notes:
 - Local `apps/packages/ui/node_modules/antd` symlink target in the tracked worktree points to a missing Bun package hash, so Vitest requires a temporary local symlink to an installed `antd@6.2.1` Bun package hash for execution. The symlink was restored to the tracked target after verification and is not part of this change.
+- PR body includes a placeholder noting that a human-written change summary is required before merge per repo policy.
 <!-- SECTION:PLAN:END -->
 
 ## Definition of Done
