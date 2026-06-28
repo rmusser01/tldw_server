@@ -1146,19 +1146,100 @@ describe("SkillsManager imports", () => {
     })
   })
 
-  it("seeds built-in skills with overwrite via seedSkills action", async () => {
-    renderManager()
+  it("opens a destructive confirmation before seeding built-in skills with overwrite", async () => {
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce(
+      () =>
+        ({
+          destroy: vi.fn(),
+          update: vi.fn()
+        }) as any
+    )
 
-    await waitFor(() => {
-      expect(tldwClientMock.listSkills).toHaveBeenCalled()
-    })
+    try {
+      renderManager()
 
-    fireEvent.click(screen.getByRole("button", { name: "Seed Built-ins" }))
-    fireEvent.click(await screen.findByText("Seed and Overwrite Existing"))
+      await waitFor(() => {
+        expect(tldwClientMock.listSkills).toHaveBeenCalled()
+      })
 
-    await waitFor(() => {
-      expect(tldwClientMock.seedSkills).toHaveBeenCalledWith({ overwrite: true })
-    })
+      fireEvent.click(screen.getByRole("button", { name: "Seed Built-ins" }))
+      fireEvent.click(await screen.findByText("Seed and Overwrite Existing"))
+
+      expect(tldwClientMock.seedSkills).not.toHaveBeenCalled()
+      expect(confirmSpy).toHaveBeenCalledTimes(1)
+      expect(confirmSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Overwrite existing built-in skills?",
+          content:
+            "This replaces existing skill copies that match built-in skill names. Custom skills with other names are not changed.",
+          okText: "Overwrite built-ins",
+          cancelText: "Cancel",
+          okButtonProps: expect.objectContaining({ danger: true })
+        })
+      )
+    } finally {
+      confirmSpy.mockRestore()
+    }
+  })
+
+  it("does not seed built-in skills with overwrite unless confirmation is accepted", async () => {
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce(
+      () =>
+        ({
+          destroy: vi.fn(),
+          update: vi.fn()
+        }) as any
+    )
+
+    try {
+      renderManager()
+
+      await waitFor(() => {
+        expect(tldwClientMock.listSkills).toHaveBeenCalled()
+      })
+
+      fireEvent.click(screen.getByRole("button", { name: "Seed Built-ins" }))
+      fireEvent.click(await screen.findByText("Seed and Overwrite Existing"))
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1)
+      expect(tldwClientMock.seedSkills).not.toHaveBeenCalled()
+    } finally {
+      confirmSpy.mockRestore()
+    }
+  })
+
+  it("seeds built-in skills with overwrite after confirmation", async () => {
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce(
+      () =>
+        ({
+          destroy: vi.fn(),
+          update: vi.fn()
+        }) as any
+    )
+
+    try {
+      renderManager()
+
+      await waitFor(() => {
+        expect(tldwClientMock.listSkills).toHaveBeenCalled()
+      })
+
+      fireEvent.click(screen.getByRole("button", { name: "Seed Built-ins" }))
+      fireEvent.click(await screen.findByText("Seed and Overwrite Existing"))
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1)
+      const [confirmConfig] = confirmSpy.mock.calls[0] as [
+        { onOk?: () => void | Promise<void> }
+      ]
+      await confirmConfig.onOk?.()
+
+      await waitFor(() => {
+        expect(tldwClientMock.seedSkills).toHaveBeenCalledTimes(1)
+        expect(tldwClientMock.seedSkills).toHaveBeenCalledWith({ overwrite: true })
+      })
+    } finally {
+      confirmSpy.mockRestore()
+    }
   })
 
   it("sanitizes skill action failure notifications", async () => {
