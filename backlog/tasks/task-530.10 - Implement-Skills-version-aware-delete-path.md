@@ -1,7 +1,7 @@
 ---
 id: TASK-530.10
 title: Implement Skills version-aware delete path
-status: In Progress
+status: Done
 labels:
 - skills
 - webui
@@ -54,7 +54,7 @@ Implementation plan written at `Docs/superpowers/plans/2026-06-28-skills-version
 
 Plan review loop completed: reviewer approved with no blocking issues or recommendations.
 
-Implementation completed in staged commits. Task 1 added backend summary/context version exposure and delete API coverage. Task 2 added the frontend API client `If-Match` header guard. Task 3 wired row versions through the Skills manager delete confirmation, added stale-conflict recovery copy, and tightened conflict detection after review to avoid treating arbitrary messages containing `409` as conflicts.
+Implementation completed in staged commits. Task 1 added backend summary/context version exposure and delete API coverage. Task 2 added the frontend API client `If-Match` header guard. Task 3 wired row versions through the Skills manager delete confirmation, added stale-conflict recovery copy, and tightened conflict detection after review to avoid treating arbitrary messages containing `409` as conflicts. Final branch review follow-up made handled stale conflicts resolve the confirmation flow so users are not left in a stale delete modal after recovery feedback, while generic delete failures still reject.
 
 Verification completed:
 - Backend focused pytest: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Skills/integration/test_skills_api.py tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py -k "list_skills or delete_skill or get_context_payload or async_variant_uses_async_context_payload" -v` -> 21 passed, 55 deselected.

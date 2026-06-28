@@ -741,7 +741,7 @@ describe("SkillsManager imports", () => {
       await waitFor(() => {
         expect(confirmConfig?.onOk).toBeTypeOf("function")
       })
-      await expect(confirmConfig?.onOk?.()).rejects.toMatchObject({ status: 409 })
+      await expect(confirmConfig?.onOk?.()).resolves.toBeUndefined()
 
       await waitFor(() => {
         expect(notificationMock.error).toHaveBeenCalledWith(
