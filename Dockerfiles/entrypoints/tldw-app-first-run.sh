@@ -95,13 +95,18 @@ try:
                     file=sys.stderr,
                 )
                 sys.exit(1)
-            if not line.strip() or line.lstrip().startswith("#"):
+            line = line.strip()
+            if not line or line.startswith("#"):
                 continue
+            if line.startswith("export "):
+                line = line[7:].lstrip()
             if "=" not in line:
                 print(f"[entrypoint] Invalid env line in {path}:{line_number}", file=sys.stderr)
                 sys.exit(1)
 
             key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
             if not key_re.match(key):
                 print(f"[entrypoint] Invalid env key in {path}:{line_number}: {key!r}", file=sys.stderr)
                 sys.exit(1)

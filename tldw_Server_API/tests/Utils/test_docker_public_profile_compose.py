@@ -28,6 +28,10 @@ def _literal(*parts: str) -> str:
     return "".join(parts)
 
 
+def _write_text_lf(path: Path, text: str) -> None:
+    path.write_bytes(text.encode("utf-8"))
+
+
 def _entrypoint_command(*args: str) -> list[str]:
     shell = "/bin/sh"
     if os.name == "nt":
@@ -396,7 +400,8 @@ def test_entrypoint_loads_env_file_with_literal_dollar_signs(tmp_path: Path) -> 
     env_file = tmp_path / ".env"
     marker_dir = tmp_path / "markers"
     marker_dir.mkdir()
-    env_file.write_text(
+    _write_text_lf(
+        env_file,
         "\n".join(
             (
                 "AUTH_MODE=multi_user",
@@ -411,8 +416,6 @@ def test_entrypoint_loads_env_file_with_literal_dollar_signs(tmp_path: Path) -> 
             )
         )
         + "\n",
-        encoding="utf-8",
-        newline="\n",
     )
 
     result = subprocess.run(  # nosec B603
@@ -433,7 +436,8 @@ def test_entrypoint_loads_raw_env_file_values_without_dotenv_rewriting(tmp_path:
     marker_dir.mkdir()
     postgres_secret = _literal("abc ", "#def", "$ghi")
     admin_secret = _literal("Admin ", "#", "$Dollar", "1!")
-    env_file.write_text(
+    _write_text_lf(
+        env_file,
         "\n".join(
             (
                 "AUTH_MODE=multi_user",
@@ -448,8 +452,6 @@ def test_entrypoint_loads_raw_env_file_values_without_dotenv_rewriting(tmp_path:
             )
         )
         + "\n",
-        encoding="utf-8",
-        newline="\n",
     )
 
     result = subprocess.run(  # nosec B603
@@ -464,6 +466,48 @@ def test_entrypoint_loads_raw_env_file_values_without_dotenv_rewriting(tmp_path:
     assert f"POSTGRES_PASSWORD={postgres_secret}\n" in result.stdout
     assert f"ADMIN_PASSWORD={admin_secret}\n" in result.stdout
     assert "unbound variable" not in result.stderr
+
+
+def test_entrypoint_loads_exported_quoted_env_values_with_equals(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    marker_dir = tmp_path / "markers"
+    marker_dir.mkdir()
+    database_url = "postgresql://override_user:pa==ss@postgres:5432/override_db?sslmode=require"
+    jobs_url = "postgresql://jobs_user:pa==ss@postgres:5432/jobs_db?application_name=tldw=jobs"
+    _write_text_lf(
+        env_file,
+        "\n".join(
+            (
+                ' export AUTH_MODE = "multi_user" ',
+                "POSTGRES_USER=tldw_user",
+                "POSTGRES_DB=tldw_users",
+                "POSTGRES_PASSWORD=abc$def:ghi/with#chars%",
+                "ADMIN_USERNAME=tldw-admin",
+                "ADMIN_PASSWORD=Admin$Dollar1!",
+                "MCP_JWT_SECRET=mcp_jwt_secret_for_entrypoint_test_32_chars",
+                "MCP_API_KEY_SALT=mcp_api_salt_for_entrypoint_test_32_chars",
+                "BYOK_ENCRYPTION_KEY=byok_secret_for_entrypoint_test_32_chars",
+                f'export TLDW_DATABASE_URL_OVERRIDE="{database_url}"',
+                f"TLDW_JOBS_DB_URL_OVERRIDE='{jobs_url}'",
+            )
+        )
+        + "\n",
+    )
+
+    result = subprocess.run(  # nosec B603
+        _entrypoint_command("/usr/bin/env"),
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_entrypoint_process_env(env_file, marker_dir),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "AUTH_MODE=multi_user\n" in result.stdout
+    assert f"DATABASE_URL={database_url}\n" in result.stdout
+    assert f"JOBS_DB_URL={jobs_url}\n" in result.stdout
+    assert f'TLDW_DATABASE_URL_OVERRIDE="{database_url}"' not in result.stdout
+    assert f"TLDW_JOBS_DB_URL_OVERRIDE='{jobs_url}'" not in result.stdout
 
 
 def _entrypoint_process_env(env_file: Path, marker_dir: Path) -> dict[str, str]:
@@ -526,7 +570,8 @@ def _compose_process_env(env_file: Path, marker_dir: Path, extra: dict[str, str]
 
 
 def _write_entrypoint_env(path: Path, extra_lines: tuple[str, ...] = ()) -> None:
-    path.write_text(
+    _write_text_lf(
+        path,
         "\n".join(
             (
                 "AUTH_MODE=multi_user",
@@ -542,8 +587,6 @@ def _write_entrypoint_env(path: Path, extra_lines: tuple[str, ...] = ()) -> None
             )
         )
         + "\n",
-        encoding="utf-8",
-        newline="\n",
     )
 
 
@@ -753,7 +796,8 @@ def test_multi_user_entrypoint_fails_when_admin_bootstrap_fails(tmp_path: Path) 
     wrapper_dir.mkdir()
     _write_entrypoint_env(env_file)
     python_wrapper = wrapper_dir / "python"
-    python_wrapper.write_text(
+    _write_text_lf(
+        python_wrapper,
         "\n".join(
             (
                 "#!/bin/sh",
@@ -774,8 +818,6 @@ def test_multi_user_entrypoint_fails_when_admin_bootstrap_fails(tmp_path: Path) 
             )
         )
         + "\n",
-        encoding="utf-8",
-        newline="\n",
     )
     python_wrapper.chmod(0o700)
     # Keep this test focused on admin bootstrap failure; env-file parsing has
