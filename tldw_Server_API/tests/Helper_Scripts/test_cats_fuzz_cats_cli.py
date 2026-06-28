@@ -32,10 +32,26 @@ def test_public_read_command_uses_blackbox_and_junit_reports(tmp_path: Path) -> 
     assert "--skipReportingForIgnored" in command
     assert "--reportFormat" in command
     assert command[command.index("--reportFormat") + 1] == "HTML_ONLY,JUNIT"
-    assert "-H" in command
-    assert f"X-API-KEY={DEFAULT_TEST_API_KEY}" in command
+    assert "-H" not in command
+    assert f"X-API-KEY={DEFAULT_TEST_API_KEY}" not in command
     assert "--path" in command
     assert "/" in command[command.index("--path") + 1].split(",")
+
+
+@pytest.mark.unit
+def test_auth_read_command_includes_api_key_header(tmp_path: Path) -> None:
+    block = get_builtin_block("auth-read")
+    command = build_cats_run_command(
+        block,
+        contract_path=tmp_path / "openapi.json",
+        server_url="http://127.0.0.1:8000",
+        output_dir=tmp_path / "reports",
+        api_key=DEFAULT_TEST_API_KEY,
+    )
+
+    assert "-H" in command
+    assert f"X-API-KEY={DEFAULT_TEST_API_KEY}" in command
+    assert command.index("-H") < command.index("--maskHeaders")
 
 
 @pytest.mark.unit
@@ -149,4 +165,23 @@ def test_run_command_returns_structured_result_on_timeout(monkeypatch: pytest.Mo
     assert result.stdout == "partial stdout"
     assert "Command timed out after 10 seconds" in result.stderr
     assert "partial stderr" in result.stderr
+    assert classify_cats_exit(result.exit_code, result.stderr) == "tool"
+
+
+@pytest.mark.unit
+def test_run_command_returns_structured_result_when_binary_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    command = ["missing-cats", "-c", "openapi.json"]
+
+    def raise_missing_binary(*_args: object, **_kwargs: object) -> None:
+        raise FileNotFoundError("missing-cats")
+
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.cats_cli.subprocess.run", raise_missing_binary)
+
+    result = run_command(command, timeout_seconds=10)
+
+    assert result.command == command
+    assert result.exit_code == 127
+    assert result.stdout == ""
+    assert "Failed to execute command" in result.stderr
+    assert "missing-cats" in result.stderr
     assert classify_cats_exit(result.exit_code, result.stderr) == "tool"

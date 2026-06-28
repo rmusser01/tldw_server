@@ -32,6 +32,7 @@ class CatsBlock:
     allows_mutation: bool = False
     allows_network: bool = False
     calls_api_service: bool = True
+    include_api_key: bool = True
     blackbox: bool = True
     requires_readiness: bool = False
     timeout_seconds: int = 120
@@ -84,6 +85,7 @@ def get_builtin_manifest() -> dict[str, CatsBlock]:
             skip_methods=("POST", "PUT", "PATCH", "DELETE", "TRACE"),
             allows_mutation=False,
             allows_network=False,
+            include_api_key=False,
             blackbox=True,
             requires_readiness=True,
             expected_gate=ExpectedGate.NO_5XX,

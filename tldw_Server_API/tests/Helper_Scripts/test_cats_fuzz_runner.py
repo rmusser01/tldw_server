@@ -113,7 +113,7 @@ def test_runtime_block_writes_artifacts_passes_env_and_uses_top_level_command(
 def test_runtime_summary_masks_api_key_in_memory_and_on_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     openapi = tmp_path / "openapi.json"
     openapi.write_text("{}", encoding="utf-8")
-    block = replace(get_builtin_block("public-read"), requires_readiness=False)
+    block = replace(get_builtin_block("auth-read"), requires_readiness=False)
 
     def fake_run(
         command: list[str],
@@ -134,7 +134,7 @@ def test_runtime_summary_masks_api_key_in_memory_and_on_disk(tmp_path: Path, mon
         api_key=DEFAULT_TEST_API_KEY,
     )
 
-    summary_json = (tmp_path / "out" / "public-read" / "summary.json").read_text(encoding="utf-8")
+    summary_json = (tmp_path / "out" / "auth-read" / "summary.json").read_text(encoding="utf-8")
     assert DEFAULT_TEST_API_KEY not in " ".join(summary.command)
     assert DEFAULT_TEST_API_KEY not in " ".join(summary.masked_command)
     assert DEFAULT_TEST_API_KEY not in summary_json
@@ -170,6 +170,38 @@ def test_runtime_block_waits_for_readiness_when_required(tmp_path: Path, monkeyp
     )
 
     assert ready_urls == ["http://127.0.0.1:8000"]
+
+
+@pytest.mark.unit
+def test_runtime_block_writes_summary_when_readiness_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    openapi = tmp_path / "openapi.json"
+    openapi.write_text("{}", encoding="utf-8")
+    block = get_builtin_block("public-read")
+
+    def fail_wait_for_readiness(server_url: str) -> None:
+        raise TimeoutError(f"{server_url} never became ready")
+
+    def fail_run(*args: object, **kwargs: object) -> CatsProcessResult:
+        raise AssertionError("CATS should not run when readiness preflight fails")
+
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.runner.wait_for_readiness", fail_wait_for_readiness)
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.runner.run_command", fail_run)
+
+    summary = run_runtime_block(
+        block=block,
+        contract_path=openapi,
+        server_url="http://127.0.0.1:8000",
+        output_dir=tmp_path / "out",
+        cats_version="13.8.0",
+    )
+
+    block_dir = tmp_path / "out" / "public-read"
+    summary_json = json.loads((block_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary.exit_code == 124
+    assert summary.failure_class == "tool"
+    assert summary_json["failure_class"] == "tool"
+    assert "readiness preflight failed" in (block_dir / "stderr.log").read_text(encoding="utf-8")
+    assert (block_dir / "stdout.log").read_text(encoding="utf-8") == ""
 
 
 @pytest.mark.unit
@@ -333,7 +365,7 @@ def test_start_server_discards_output_by_default(monkeypatch: pytest.MonkeyPatch
         return fake_process
 
     monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.subprocess.Popen", fake_popen)
-    monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.wait_for_health", lambda url: None)
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.wait_for_health", lambda url, **kwargs: None)
 
     server = start_server(env={"AUTH_MODE": "single_user"}, port=1234)
 
@@ -354,7 +386,7 @@ def test_start_server_with_log_dir_redirects_output_and_stop_closes_streams(
         return fake_process
 
     monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.subprocess.Popen", fake_popen)
-    monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.wait_for_health", lambda url: None)
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.wait_for_health", lambda url, **kwargs: None)
 
     server = start_server(env={"AUTH_MODE": "single_user"}, port=1234, log_dir=tmp_path)
 
@@ -370,6 +402,27 @@ def test_start_server_with_log_dir_redirects_output_and_stop_closes_streams(
     assert fake_process.terminated is True
     assert server.stdout_stream.closed is True
     assert server.stderr_stream.closed is True
+
+
+@pytest.mark.unit
+def test_start_server_fails_fast_when_child_exits_during_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_process = _FakeProcess(exited=True)
+
+    def fake_popen(command: list[str], **kwargs: Any) -> _FakeProcess:
+        return fake_process
+
+    def fail_poll_url(*args: object, **kwargs: object) -> int:
+        raise AssertionError("health polling should stop once the child has exited")
+
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.server.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("Helper_Scripts.cats_fuzz.server._poll_url", fail_poll_url)
+
+    with pytest.raises(RuntimeError, match="uvicorn exited during startup") as exc_info:
+        start_server(env={"AUTH_MODE": "single_user"}, port=1234, log_dir=tmp_path)
+
+    assert str(tmp_path / "uvicorn.stderr.log") in str(exc_info.value)
 
 
 @pytest.mark.unit

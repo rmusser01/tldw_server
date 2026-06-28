@@ -31,7 +31,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--start-server",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=None,
         help="Start a local loopback uvicorn server for runtime blocks.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Pass dry-run mode to runtime CATS blocks.")
@@ -46,6 +46,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.block is None:
         args.block = ["contract", "public-read"]
+    if args.start_server is None:
+        args.start_server = args.server_url is None
     first_runtime_block = _first_runtime_block(args.block)
     if first_runtime_block is not None and not args.start_server and not args.server_url:
         parser.error(f"{first_runtime_block} requires --server-url or --start-server")

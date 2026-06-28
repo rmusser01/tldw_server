@@ -113,11 +113,27 @@ def run_runtime_block(
     dry_run: bool = False,
     env: Mapping[str, str] | None = None,
 ) -> CatsRunSummary:
-    if block.requires_readiness:
-        wait_for_readiness(server_url)
-
     block_dir = output_dir / block.name
     report_dir = block_dir / "cats-report"
+    if block.requires_readiness:
+        try:
+            wait_for_readiness(server_url)
+        except Exception as exc:  # noqa: BLE001 - preserve artifact output for preflight failures.
+            result = CatsProcessResult(
+                command=["readiness", server_url],
+                exit_code=124,
+                stdout="",
+                stderr=f"readiness preflight failed: {exc}",
+            )
+            return _summarize(
+                block_name=block.name,
+                cats_version=cats_version,
+                openapi_sha256=_sha256(contract_path),
+                result=result,
+                output_dir=block_dir,
+                report_dir=report_dir,
+            )
+
     command = build_cats_run_command(
         block=block,
         contract_path=contract_path,

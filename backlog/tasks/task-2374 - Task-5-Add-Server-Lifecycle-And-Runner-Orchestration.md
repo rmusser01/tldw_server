@@ -14,9 +14,6 @@ dependencies: []
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-<!-- SECTION:DESCRIPTION:BEGIN -->
-<!-- SECTION:DESCRIPTION:END -->
-
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -26,10 +23,6 @@ dependencies: []
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented Task 5 server lifecycle and CATS runner orchestration with TDD. Initial red run failed on missing Helper_Scripts.cats_fuzz.runner import before implementation. Verification: pytest test_cats_fuzz_runner.py passed 13 tests; black --check passed; bandit JSON report passed at /tmp/bandit_cats_fuzz_runner.json.
 
 Code-quality review fix: tightened health/readiness success to 2xx-only, added readiness fallback coverage for 404/503, and changed uvicorn output handling to DEVNULL by default or explicit log files closed by stop_server. Verification: pytest test_cats_fuzz_runner.py passed 19 tests; black --check passed; bandit server report passed at /tmp/bandit_cats_fuzz_server_fix.json.
@@ -39,8 +32,6 @@ Code-quality review fix: tightened health/readiness success to 2xx-only, added r
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added CATS server lifecycle helpers, runner orchestration, artifact/summary writing, readiness gating, and focused unit coverage for Task 5.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

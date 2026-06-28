@@ -45,12 +45,29 @@ def _poll_url(url: str, timeout: float = 2.0) -> int:
         raise RuntimeError(str(exc)) from exc
 
 
-def wait_for_health(base_url: str, timeout_seconds: float = 30.0) -> None:
+def _startup_exit_message(return_code: int, stderr_path: Path | None) -> str:
+    message = f"uvicorn exited during startup with code {return_code}"
+    if stderr_path is not None:
+        return f"{message}; stderr log: {stderr_path}"
+    return f"{message}; stderr was not captured"
+
+
+def wait_for_health(
+    base_url: str,
+    timeout_seconds: float = 30.0,
+    *,
+    process: subprocess.Popen[str] | None = None,
+    stderr_path: Path | None = None,
+) -> None:
     deadline = time.monotonic() + timeout_seconds
     health_url = f"{base_url.rstrip('/')}/health"
     last_error: Exception | str | None = None
 
     while time.monotonic() <= deadline:
+        if process is not None:
+            return_code = process.poll()
+            if return_code is not None:
+                raise RuntimeError(_startup_exit_message(return_code, stderr_path))
         try:
             status = _poll_url(health_url)
             if 200 <= status < 300:
@@ -114,14 +131,16 @@ def start_server(
     stderr_target: int | TextIO
     stdout_stream: TextIO | None = None
     stderr_stream: TextIO | None = None
+    stderr_path: Path | None = None
     if log_dir is None:
         stdout_target = subprocess.DEVNULL
         stderr_target = subprocess.DEVNULL
     else:
         log_dir.mkdir(parents=True, exist_ok=True)
         stdout_stream = (log_dir / "uvicorn.stdout.log").open("w", encoding="utf-8")
+        stderr_path = log_dir / "uvicorn.stderr.log"
         try:
-            stderr_stream = (log_dir / "uvicorn.stderr.log").open("w", encoding="utf-8")
+            stderr_stream = stderr_path.open("w", encoding="utf-8")
         except Exception:
             stdout_stream.close()
             raise
@@ -149,7 +168,7 @@ def start_server(
         stderr_stream=stderr_stream,
     )
     try:
-        wait_for_health(url)
+        wait_for_health(url, process=process, stderr_path=stderr_path)
     except Exception:
         stop_server(server)
         raise

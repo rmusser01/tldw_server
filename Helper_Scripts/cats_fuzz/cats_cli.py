@@ -47,8 +47,6 @@ def build_cats_run_command(
         str(contract_path),
         "-s",
         server_url,
-        "-H",
-        f"X-API-KEY={api_key}",
         "--maskHeaders",
         "X-API-KEY,Authorization",
         "--skipReportingForIgnored",
@@ -65,6 +63,8 @@ def build_cats_run_command(
         "--output",
         str(output_dir),
     ]
+    if block.include_api_key:
+        command[5:5] = ["-H", f"X-API-KEY={api_key}"]
     if block.blackbox:
         command.append("--blackbox")
     _append_csv_option(command, "--path", block.paths)
@@ -115,6 +115,7 @@ def classify_cats_exit(exit_code: int, stderr: str) -> str:
         return "usage"
 
     tool_markers = (
+        "failed to execute command",
         "internal execution error",
         "exception",
         "stacktrace",
@@ -153,6 +154,13 @@ def run_command(
             exit_code=_TIMEOUT_EXIT_CODE,
             stdout=stdout,
             stderr=stderr,
+        )
+    except OSError as exc:
+        return CatsProcessResult(
+            command=list(command),
+            exit_code=127,
+            stdout="",
+            stderr=f"Failed to execute command: {exc}",
         )
     return CatsProcessResult(
         command=list(command),

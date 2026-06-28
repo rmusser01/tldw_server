@@ -30,14 +30,15 @@ def test_vector_list_query_examples_are_cats_validate_compatible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spec = _openapi_spec(monkeypatch)
-    params = {
-        param["name"]: param
-        for param in spec["paths"][VECTOR_LIST_PATH]["get"]["parameters"]
-    }
+    params = {param["name"]: param for param in spec["paths"][VECTOR_LIST_PATH]["get"]["parameters"]}
 
     for name in ("filter", "order_by", "order_dir"):
         schema = params[name].get("schema", {})
-        if isinstance(schema.get("examples"), dict):
-            pytest.fail(f"{name} has schema-level dict examples")
-        if "examples" not in params[name] and not isinstance(schema.get("examples"), list):
-            pytest.fail(f"{name} is missing CATS-compatible examples")
+        assert "examples" not in schema, f"{name} must use parameter-level examples"
+        examples = params[name].get("examples")
+        assert isinstance(examples, dict), f"{name} must expose parameter-level examples"
+        assert examples, f"{name} must expose non-empty parameter-level examples"
+        for example_name, example in examples.items():
+            assert isinstance(example_name, str)
+            assert isinstance(example, dict)
+            assert "value" in example

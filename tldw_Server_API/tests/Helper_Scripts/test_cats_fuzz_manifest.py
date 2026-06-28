@@ -26,9 +26,11 @@ def test_builtin_manifest_contains_initial_blocks() -> None:
     assert manifest["public-read"].timeout_seconds >= 300
     assert manifest["public-read"].allows_mutation is False
     assert manifest["public-read"].allows_network is False
+    assert manifest["public-read"].include_api_key is False
     assert "/" in manifest["public-read"].paths
     assert manifest["auth-read"].allows_mutation is False
     assert manifest["auth-read"].allows_network is False
+    assert manifest["auth-read"].include_api_key is True
 
 
 @pytest.mark.unit

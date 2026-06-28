@@ -30,6 +30,16 @@ def test_cli_accepts_existing_server_url() -> None:
     assert args.start_server is False
 
 
+@pytest.mark.unit
+def test_cli_server_url_without_start_flag_uses_existing_server() -> None:
+    from Helper_Scripts.cats_fuzz.cli import parse_args
+
+    args = parse_args(["--server-url", "http://127.0.0.1:8000"])
+
+    assert args.server_url == "http://127.0.0.1:8000"
+    assert args.start_server is False
+
+
 def _summary(block: str, exit_code: int) -> CatsRunSummary:
     return CatsRunSummary(
         block=block,
@@ -244,6 +254,55 @@ def test_runtime_run_with_existing_server_url_does_not_start_server(
             "--server-url",
             "http://127.0.0.1:8000",
             "--no-start-server",
+            "--output",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    assert runtime_calls == [("public-read", "http://127.0.0.1:8000")]
+
+
+@pytest.mark.unit
+def test_runtime_run_with_server_url_only_does_not_start_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from Helper_Scripts.cats_fuzz import cli
+
+    runtime_calls: list[tuple[str, str]] = []
+
+    def fail_start_server(*args: object, **kwargs: object) -> None:
+        raise AssertionError("server URL should skip server startup unless --start-server is explicit")
+
+    def fake_run_runtime_block(
+        block: object,
+        contract_path: Path,
+        server_url: str,
+        output_dir: Path,
+        cats_version: str,
+        *,
+        cats_bin: str,
+        dry_run: bool,
+        env: dict[str, str],
+    ) -> CatsRunSummary:
+        runtime_calls.append((getattr(block, "name"), server_url))
+        return _summary(getattr(block, "name"), 0)
+
+    monkeypatch.setattr(cli, "build_child_env", lambda output_dir, allow_external=False: {"SAFE": "1"})
+    monkeypatch.setattr(cli, "build_openapi_export_command", lambda path: ["python", "export", str(path)])
+    monkeypatch.setattr(
+        cli.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="", stderr="")
+    )
+    monkeypatch.setattr(cli, "_cats_version", lambda cats_bin: "cats 13.8.0")
+    monkeypatch.setattr(cli, "start_server", fail_start_server)
+    monkeypatch.setattr(cli, "run_runtime_block", fake_run_runtime_block)
+
+    result = cli.main(
+        [
+            "--block",
+            "public-read",
+            "--server-url",
+            "http://127.0.0.1:8000",
             "--output",
             str(tmp_path),
         ]
