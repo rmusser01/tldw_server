@@ -41,36 +41,36 @@ Out of scope:
 
 ## Task 1: Backend Bulk Delete Contract
 
-- [ ] Add Pydantic models `SkillBulkDeleteItem`, `SkillBulkDeleteRequest`, and `SkillBulkDeleteResponse`.
-- [ ] Add failing integration tests for successful bulk delete, unknown-version compatibility, stale conflict, and no partial delete on stale conflict.
-- [ ] Add `SkillsService.bulk_delete_skills(items)` that normalizes names, syncs once, validates every selected row/version, then deletes the validated rows.
-- [ ] Add `POST /api/v1/skills/bulk-delete` endpoint that returns deleted names/count and maps `SkillConflictError` to 409, `SkillNotFoundError` to 404, and generic `SkillsError` to sanitized 500.
-- [ ] Run: `python -m pytest tldw_Server_API/tests/Skills/integration/test_skills_api.py -k "bulk_delete or delete_skill" -v`
+- [x] Add Pydantic models `SkillBulkDeleteItem`, `SkillBulkDeleteRequest`, and `SkillBulkDeleteResponse`.
+- [x] Add failing integration tests for successful bulk delete, unknown-version compatibility, stale conflict, and no partial delete on stale conflict.
+- [x] Add `SkillsService.bulk_delete_skills(items)` that normalizes names, syncs once, validates every selected row/version, then deletes the validated rows.
+- [x] Add `POST /api/v1/skills/bulk-delete` endpoint that returns deleted names/count and maps `SkillConflictError` to 409, `SkillNotFoundError` to 404, and generic `SkillsError` to sanitized 500.
+- [x] Run: `python -m pytest tldw_Server_API/tests/Skills/integration/test_skills_api.py -k "bulk_delete or delete_skill" -v`
 
 ## Task 2: Frontend API Client
 
-- [ ] Add TypeScript request/response types for bulk delete.
-- [ ] Add `workspaceApiMethods.bulkDeleteSkills(items)` using `POST /api/v1/skills/bulk-delete`.
-- [ ] Send only positive safe integer versions in request items.
-- [ ] Add focused API-client tests for valid versions and unknown/invalid versions.
-- [ ] Run: `bunx vitest run src/services/tldw/domains/__tests__/workspace-api.skills.test.ts --reporter=dot`
+- [x] Add TypeScript request/response types for bulk delete.
+- [x] Add `workspaceApiMethods.bulkDeleteSkills(items)` using `POST /api/v1/skills/bulk-delete`.
+- [x] Send only positive safe integer versions in request items.
+- [x] Add focused API-client tests for valid versions and unknown/invalid versions.
+- [x] Run: `bunx vitest run src/services/tldw/domains/__tests__/workspace-api.skills.test.ts --reporter=dot`
 
 ## Task 3: Skills Manager Bulk UX
 
-- [ ] Add selected row state keyed by skill name.
-- [ ] Add AntD `rowSelection` to the Skills table.
-- [ ] Add an unframed action bar above the table when rows are selected: `<count> selected`, clear selection, and destructive `Delete selected`.
-- [ ] Confirm bulk deletion with selected count and a short irreversible warning.
-- [ ] On success, clear selection, invalidate `["skills"]`, and show a bulk-delete success notification.
-- [ ] On stale 409 conflict, keep the selection recoverable, invalidate `["skills"]`, and show reload-before-delete guidance.
-- [ ] Add focused manager tests for selected-row bulk delete, unknown-version compatibility, stale conflict recovery, and clearing selection on success.
-- [ ] Run: `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx --reporter=dot`
+- [x] Add selected row state keyed by skill name.
+- [x] Add AntD `rowSelection` to the Skills table.
+- [x] Add an unframed action bar above the table when rows are selected: `<count> selected`, clear selection, and destructive `Delete selected`.
+- [x] Confirm bulk deletion with selected count and a short irreversible warning.
+- [x] On success, clear selection, invalidate `["skills"]`, and show a bulk-delete success notification.
+- [x] On stale 409 conflict, keep the selection recoverable, invalidate `["skills"]`, and show reload-before-delete guidance.
+- [x] Add focused manager tests for selected-row bulk delete, unknown-version compatibility, stale conflict recovery, and clearing selection on success.
+- [x] Run: `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx --reporter=dot`
 
 ## Task 4: Verification And Closeout
 
-- [ ] Run backend focused pytest from Task 1.
-- [ ] Run frontend focused Vitest from Tasks 2 and 3.
-- [ ] Run Bandit touched backend scope: `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/api/v1/schemas/skills_schemas.py tldw_Server_API/app/core/Skills/skills_service.py -f json -o /tmp/bandit_task_530_11.json`
-- [ ] Run `git diff --check`.
-- [ ] Update TASK-530.11 acceptance criteria, implementation notes, final summary, modified files, verification, and known skips.
+- [x] Run backend focused pytest from Task 1.
+- [x] Run frontend focused Vitest from Tasks 2 and 3.
+- [x] Run Bandit touched backend scope: `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/api/v1/schemas/skills_schemas.py tldw_Server_API/app/core/Skills/skills_service.py -f json -o /tmp/bandit_task_530_11.json`
+- [x] Run `git diff --check`.
+- [x] Update TASK-530.11 acceptance criteria, implementation notes, final summary, modified files, verification, and known skips.
 - [ ] Commit and open PR against `dev`.
