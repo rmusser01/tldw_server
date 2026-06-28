@@ -58,6 +58,16 @@ export interface SkillsListResponse {
   offset: number
 }
 
+export interface SkillBulkDeleteItem {
+  name: string
+  version?: number
+}
+
+export interface SkillBulkDeleteResponse {
+  deleted: string[]
+  count: number
+}
+
 export interface SkillCreate {
   name: string
   content: string

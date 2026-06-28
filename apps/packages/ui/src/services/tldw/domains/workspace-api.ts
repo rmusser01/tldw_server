@@ -4,6 +4,8 @@ import { appendPathQuery } from "../path-utils"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import type { OffsetPaginationMeta } from "@/services/response-envelope"
 import type {
+  SkillBulkDeleteItem,
+  SkillBulkDeleteResponse,
   SkillExecutionResult,
   SkillImportPreviewResponse,
   SkillsListParams,
@@ -720,6 +722,9 @@ const trimmedOptionalString = (value: string | undefined): string | undefined =>
   return trimmed.length > 0 ? trimmed : undefined
 }
 
+const isValidSkillVersion = (version: number | undefined): version is number =>
+  Number.isSafeInteger(version) && Number(version) > 0
+
 export const workspaceApiMethods = {
   // ── Skills API ──
 
@@ -819,14 +824,34 @@ export const workspaceApiMethods = {
       "/api/v1/skills/{name}/"
     ])
     const path = this.fillPathParams(base, name)
-    const headers =
-      Number.isSafeInteger(version) && Number(version) > 0
-        ? { "If-Match": String(version) }
-        : undefined
+    const headers = isValidSkillVersion(version)
+      ? { "If-Match": String(version) }
+      : undefined
     await bgRequest<any>({
       path,
       method: "DELETE",
       ...(headers ? { headers } : {})
+    })
+  },
+
+  async bulkDeleteSkills(
+    this: TldwApiClientCore,
+    skills: SkillBulkDeleteItem[]
+  ): Promise<SkillBulkDeleteResponse> {
+    const base = await this.resolveApiPath("skills.bulkDelete", [
+      "/api/v1/skills/bulk-delete",
+      "/api/v1/skills/bulk-delete/"
+    ])
+    return await bgRequest<SkillBulkDeleteResponse>({
+      path: base,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        skills: skills.map(({ name, version }) => ({
+          name,
+          ...(isValidSkillVersion(version) ? { version } : {})
+        }))
+      }
     })
   },
 
