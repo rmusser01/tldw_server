@@ -811,14 +811,23 @@ export const workspaceApiMethods = {
 
   async deleteSkill(
     this: TldwApiClientCore,
-    name: string
+    name: string,
+    version?: number
   ): Promise<void> {
     const base = await this.resolveApiPath("skills.delete", [
       "/api/v1/skills/{name}",
       "/api/v1/skills/{name}/"
     ])
     const path = this.fillPathParams(base, name)
-    await bgRequest<any>({ path, method: "DELETE" })
+    const headers =
+      Number.isSafeInteger(version) && Number(version) > 0
+        ? { "If-Match": String(version) }
+        : undefined
+    await bgRequest<any>({
+      path,
+      method: "DELETE",
+      ...(headers ? { headers } : {})
+    })
   },
 
   async importSkill(

@@ -142,6 +142,7 @@ def _metadata_to_summary(metadata) -> SkillSummary:
         user_invocable=metadata.user_invocable,
         disable_model_invocation=metadata.disable_model_invocation,
         context=metadata.context,
+        version=metadata.version or 1,
     )
 
 

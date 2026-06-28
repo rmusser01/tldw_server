@@ -28,6 +28,7 @@ export interface SkillSummary {
   user_invocable: boolean
   disable_model_invocation: boolean
   context: SkillContext
+  version: number
 }
 
 export interface SkillResponse {

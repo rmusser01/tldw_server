@@ -27,7 +27,10 @@ os.environ["ROUTES_DISABLE"] = ",".join(sorted(_routes_disable))
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
-from tldw_Server_API.app.api.v1.endpoints.skills import MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES
+from tldw_Server_API.app.api.v1.endpoints.skills import (
+    MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES,
+    _metadata_to_summary,
+)
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.Context_Integrity.resolver import clear_global_context_integrity_resolver
@@ -342,6 +345,35 @@ class TestListSkills:
         assert data["has_more"] is False
         assert data["next_offset"] is None
 
+    def test_list_skills_includes_version(self, client: TestClient) -> None:
+        """List summaries expose the registry version for optimistic deletes."""
+        create_resp = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "listed-version", "content": "content"},
+        )
+        assert create_resp.status_code == 201, create_resp.text
+
+        r = client.get(f"{SKILLS_PREFIX}/?limit=50&offset=0")
+        assert r.status_code == 200, r.text
+        listed = {skill["name"]: skill for skill in r.json()["skills"]}
+        assert listed["listed-version"]["version"] == create_resp.json()["version"]
+
+    def test_metadata_summary_defaults_missing_version(self) -> None:
+        """Legacy metadata without a version still produces a valid summary."""
+        metadata = SimpleNamespace(
+            name="legacy-version",
+            description=None,
+            argument_hint=None,
+            user_invocable=True,
+            disable_model_invocation=False,
+            context="inline",
+            version=None,
+        )
+
+        summary = _metadata_to_summary(metadata)
+
+        assert summary.version == 1
+
     def test_list_skills_search_filters_before_pagination(self, client):
         for i in range(12):
             r = client.post(
@@ -601,6 +633,52 @@ class TestDeleteSkill:
 
         r = client.get(f"{SKILLS_PREFIX}/del-skill")
         assert r.status_code == 404
+
+    def test_delete_skill_accepts_matching_if_match(self, client: TestClient) -> None:
+        """Deletes with a matching If-Match version remove the skill."""
+        create_resp = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "del-versioned", "content": "content"},
+        )
+        assert create_resp.status_code == 201, create_resp.text
+        version = create_resp.json()["version"]
+
+        r = client.delete(
+            f"{SKILLS_PREFIX}/del-versioned",
+            headers={"If-Match": str(version)},
+        )
+        assert r.status_code == 204, r.text
+
+        missing = client.get(f"{SKILLS_PREFIX}/del-versioned")
+        assert missing.status_code == 404
+
+    def test_delete_skill_stale_if_match_returns_409_and_keeps_skill(
+        self,
+        client: TestClient,
+    ) -> None:
+        """Stale If-Match deletes return 409 without deleting the current skill."""
+        create_resp = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "del-stale", "content": "v1"},
+        )
+        assert create_resp.status_code == 201, create_resp.text
+
+        update_resp = client.put(
+            f"{SKILLS_PREFIX}/del-stale",
+            json={"content": "v2"},
+        )
+        assert update_resp.status_code == 200, update_resp.text
+        assert update_resp.json()["version"] == create_resp.json()["version"] + 1
+
+        r = client.delete(
+            f"{SKILLS_PREFIX}/del-stale",
+            headers={"If-Match": str(create_resp.json()["version"])},
+        )
+        assert r.status_code == 409
+
+        still_there = client.get(f"{SKILLS_PREFIX}/del-stale")
+        assert still_there.status_code == 200, still_there.text
+        assert still_there.json()["version"] == update_resp.json()["version"]
 
     def test_delete_skill_not_found_404(self, client):
         r = client.delete(f"{SKILLS_PREFIX}/nonexistent")
@@ -1217,6 +1295,10 @@ class TestContextPayload:
         data = r.json()
         assert len(data["available_skills"]) >= 1
         assert "ctx-skill" in data["context_text"]
+        listed = {skill["name"]: skill for skill in data["available_skills"]}
+        assert listed["ctx-skill"]["version"] == 1
+        ctx_line = next(line for line in data["context_text"].splitlines() if "ctx-skill" in line)
+        assert "version" not in ctx_line.lower()
 
     def test_get_context_payload_uses_async_service_method(self, client, monkeypatch):
         calls = {"async": 0}

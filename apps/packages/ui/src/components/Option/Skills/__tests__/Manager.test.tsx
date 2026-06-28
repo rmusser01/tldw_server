@@ -76,7 +76,8 @@ const makeSkill = (index: number) => ({
   argument_hint: null,
   user_invocable: true,
   disable_model_invocation: false,
-  context: "inline" as const
+  context: "inline" as const,
+  version: index + 1
 })
 
 describe("SkillsManager imports", () => {
@@ -651,6 +652,161 @@ describe("SkillsManager imports", () => {
 
     fireEvent.click(testRunButton)
     expect(screen.getByTestId("skill-preview-open")).toHaveTextContent("skill-1")
+  })
+
+  it("passes the row version when deleting a skill", async () => {
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce(
+      (config) => {
+        void config.onOk?.()
+        return { destroy: vi.fn(), update: vi.fn() } as any
+      }
+    )
+    tldwClientMock.listSkills.mockResolvedValueOnce({
+      skills: [makeSkill(2)],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+    tldwClientMock.deleteSkill.mockResolvedValueOnce(undefined)
+
+    try {
+      renderManager()
+      await screen.findByText("skill-2")
+      fireEvent.click(screen.getByRole("button", { name: "Delete skill-2" }))
+
+      await waitFor(() => {
+        expect(tldwClientMock.deleteSkill).toHaveBeenCalledWith("skill-2", 3)
+      })
+    } finally {
+      confirmSpy.mockRestore()
+    }
+  })
+
+  it("keeps delete compatible when a row has no known version", async () => {
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce(
+      (config) => {
+        void config.onOk?.()
+        return { destroy: vi.fn(), update: vi.fn() } as any
+      }
+    )
+    const legacySkill = { ...makeSkill(4) } as Partial<ReturnType<typeof makeSkill>>
+    delete legacySkill.version
+    tldwClientMock.listSkills.mockResolvedValueOnce({
+      skills: [legacySkill] as any,
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+    tldwClientMock.deleteSkill.mockResolvedValueOnce(undefined)
+
+    try {
+      renderManager()
+      await screen.findByText("skill-4")
+      fireEvent.click(screen.getByRole("button", { name: "Delete skill-4" }))
+
+      await waitFor(() => {
+        expect(tldwClientMock.deleteSkill).toHaveBeenCalledWith("skill-4", undefined)
+      })
+    } finally {
+      confirmSpy.mockRestore()
+    }
+  })
+
+  it("shows reload-before-delete guidance on stale delete conflict", async () => {
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries")
+    let confirmConfig: { onOk?: () => void | Promise<void> } | undefined
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce(
+      (config) => {
+        confirmConfig = config as { onOk?: () => void | Promise<void> }
+        return { destroy: vi.fn(), update: vi.fn() } as any
+      }
+    )
+    const conflict = Object.assign(new Error("409 version conflict"), { status: 409 })
+    tldwClientMock.listSkills.mockResolvedValueOnce({
+      skills: [makeSkill(1)],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+    tldwClientMock.deleteSkill.mockRejectedValueOnce(conflict)
+
+    try {
+      renderManager()
+      await screen.findByText("skill-1")
+      fireEvent.click(screen.getByRole("button", { name: "Delete skill-1" }))
+
+      await waitFor(() => {
+        expect(confirmConfig?.onOk).toBeTypeOf("function")
+      })
+      await expect(confirmConfig?.onOk?.()).resolves.toBeUndefined()
+
+      await waitFor(() => {
+        expect(notificationMock.error).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: "Skill changed elsewhere",
+            description: "Reload skills before deleting this version."
+          })
+        )
+      })
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ["skills"] })
+      )
+    } finally {
+      confirmSpy.mockRestore()
+      invalidateSpy.mockRestore()
+    }
+  })
+
+  it("uses generic delete errors when a non-conflict message mentions 409", async () => {
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries")
+    let confirmConfig: { onOk?: () => void | Promise<void> } | undefined
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce(
+      (config) => {
+        confirmConfig = config as { onOk?: () => void | Promise<void> }
+        return { destroy: vi.fn(), update: vi.fn() } as any
+      }
+    )
+    const failure = new Error("Failed after processing 409 skills")
+    tldwClientMock.listSkills.mockResolvedValueOnce({
+      skills: [makeSkill(1)],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+    tldwClientMock.deleteSkill.mockRejectedValueOnce(failure)
+
+    try {
+      renderManager()
+      await screen.findByText("skill-1")
+      fireEvent.click(screen.getByRole("button", { name: "Delete skill-1" }))
+
+      await waitFor(() => {
+        expect(confirmConfig?.onOk).toBeTypeOf("function")
+      })
+      await expect(confirmConfig?.onOk?.()).rejects.toThrow(
+        "Failed after processing 409 skills"
+      )
+
+      await waitFor(() => {
+        expect(notificationMock.error).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: "Failed to delete skill",
+            description: expect.stringContaining("Failed after processing 409 skills")
+          })
+        )
+      })
+      expect(notificationMock.error).not.toHaveBeenCalledWith(
+        expect.objectContaining({ message: "Skill changed elsewhere" })
+      )
+      expect(invalidateSpy).not.toHaveBeenCalled()
+    } finally {
+      confirmSpy.mockRestore()
+      invalidateSpy.mockRestore()
+    }
   })
 
   it("clears server-backed mode sorting when the mode column is hidden", async () => {

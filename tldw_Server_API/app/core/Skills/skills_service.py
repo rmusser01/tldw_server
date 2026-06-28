@@ -1596,6 +1596,7 @@ class SkillsService:
                     "user_invocable": bool(s.get("user_invocable")),
                     "disable_model_invocation": bool(s.get("disable_model_invocation")),
                     "context": s.get("context", "inline"),
+                    "version": int(s.get("version") or 1),
                 }
                 for s in skills
             ],

@@ -194,6 +194,7 @@ class SkillSummary(BaseModel):
     user_invocable: bool = Field(..., description="If false, hidden from user UI")
     disable_model_invocation: bool = Field(..., description="If true, only user can invoke")
     context: SkillContext = Field(..., description="Execution context mode")
+    version: int = Field(..., description="Version for optimistic locking")
 
     model_config = ConfigDict(from_attributes=True)
 
