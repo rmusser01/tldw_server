@@ -1625,8 +1625,7 @@ async def validate_external_server(
     svc: McpHubService = Depends(get_mcp_hub_service),
     registry: McpHubToolRegistryService = Depends(get_mcp_hub_tool_registry_dep),
 ) -> McpServerReadinessResponse:
-    """Return the current server readiness snapshot after mutation-permission and visibility checks."""
-    _require_mutation_permission(principal)
+    """Return the current server readiness snapshot after visibility checks."""
     row = await _get_visible_external_server_row_or_404(
         server_id=server_id,
         principal=principal,

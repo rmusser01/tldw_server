@@ -1,4 +1,4 @@
-"""MCP Hub readiness policy helpers with sanitized response payload builders."""
+"""MCP Hub readiness policy helpers that sanitize external server status payloads."""
 
 from __future__ import annotations
 
@@ -244,7 +244,7 @@ def build_server_readiness_payload(
         reasons.append("preflight_failed")
 
     last_error_category = row.get("last_error_category")
-    last_error_message = row.get("last_error_message")
+    last_error_message = None
     refresh_errors = refresh_result.get("errors") if isinstance(refresh_result, dict) else {}
     if refresh_result is not None:
         if isinstance(refresh_errors, dict) and server_id in refresh_errors:
@@ -259,7 +259,10 @@ def build_server_readiness_payload(
         last_error_message = "Discovery refresh failed."
 
     if tool_count == 0 and "runtime_unavailable" not in reasons and "discovery_failed" not in reasons:
-        reasons.append("discovery_not_run")
+        if row.get("last_successful_discovery_at"):
+            reasons.append("no_tools_returned")
+        else:
+            reasons.append("discovery_not_run")
     if tool_count > 0 and any(entry.get("metadata_warnings") for entry in matching_entries):
         reasons.append("partial_capability")
 

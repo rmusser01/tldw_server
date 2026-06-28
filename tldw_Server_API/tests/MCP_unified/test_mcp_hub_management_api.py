@@ -1634,7 +1634,55 @@ async def test_mcp_hub_readiness_counts_authoritative_external_tool_as_ready() -
 
 
 @pytest.mark.unit
-async def test_mcp_hub_validate_requires_mutation_permission_and_does_not_refresh() -> None:
+async def test_mcp_hub_readiness_reports_successful_zero_tool_discovery() -> None:
+    row = _external_server_row(server_id="docs")
+    row["last_successful_discovery_at"] = "2026-06-27T07:00:00Z"
+    service = _ConfigurableExternalServerService([row])
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    server = payload["servers"][0]
+    assert server["tool_count"] == 0
+    assert server["display_state"] == "no_tools"
+    assert server["primary_reason_code"] == "no_tools_returned"
+    assert payload["no_tool_server_count"] == 1
+
+
+@pytest.mark.unit
+async def test_mcp_hub_readiness_omits_persisted_internal_error_text() -> None:
+    row = _external_server_row(server_id="docs")
+    row["last_error_category"] = "unreachable"
+    row["last_error_message"] = "Failed with secret token sk-live-review"
+    service = _ConfigurableExternalServerService([row])
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    body = json.dumps(resp.json())
+    assert "sk-live-review" not in body
+    server = resp.json()["servers"][0]
+    assert server["last_error_category"] == "unreachable"
+    assert server["last_error_message"] is None
+
+
+@pytest.mark.unit
+async def test_mcp_hub_validate_allows_visible_readiness_without_mutation_permission() -> None:
     class _RefreshExecutor:
         calls = 0
 
@@ -1644,25 +1692,14 @@ async def test_mcp_hub_validate_requires_mutation_permission_and_does_not_refres
 
     service = _ConfigurableExternalServerService([_external_server_row(server_id="docs")])
     refresh_executor = _RefreshExecutor()
-    forbidden_app = _build_app(
+    read_only_app = _build_app(
         principal=_make_principal(),
         fail_with_401=False,
         service=service,
         registry=_FakeToolRegistry(),
         refresh_executor=refresh_executor,
     )
-    with TestClient(forbidden_app) as client:
-        forbidden = client.post("/api/v1/mcp/hub/external-servers/docs/validate")
-    assert forbidden.status_code == 403
-
-    allowed_app = _build_app(
-        principal=_make_principal(roles=["admin"], permissions=[]),
-        fail_with_401=False,
-        service=service,
-        registry=_FakeToolRegistry(),
-        refresh_executor=refresh_executor,
-    )
-    with TestClient(allowed_app) as client:
+    with TestClient(read_only_app) as client:
         allowed = client.post("/api/v1/mcp/hub/external-servers/docs/validate")
 
     assert allowed.status_code == 200
