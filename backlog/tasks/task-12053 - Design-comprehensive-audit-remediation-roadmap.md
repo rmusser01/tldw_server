@@ -15,7 +15,7 @@ documentation:
 - Docs/superpowers/reviews/2026-06-27-repo-audit/repeatable-audit-process.md
 modified_files:
 - Docs/superpowers/specs/2026-06-27-comprehensive-audit-remediation-roadmap-design.md
-updated_date: 2026-06-28 03:22
+updated_date: 2026-06-28 04:21
 ---
 
 ## Description
@@ -37,6 +37,7 @@ Write and commit the approved design spec for an umbrella remediation roadmap th
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design spec drafted at Docs/superpowers/specs/2026-06-27-comprehensive-audit-remediation-roadmap-design.md. Self-review verification passed: placeholder/stale-scaffold scan returned no matches, all 31 accepted audit finding IDs appear in the spec, Backlog final-summary markers remain exactly one begin and one end marker, and git diff --check passed for the spec and task file. The task remains In Progress until the spec commit is made and the user has reviewed it before implementation planning.
 Spec commit completed in c0e0fdd6bb (docs: design audit remediation roadmap). The remaining open gate is user review before implementation planning.
+Post-spec review fixes applied: remediation task headings now match the 7A/7B track labels, Gate 2 and Gate 3 are modeled as concrete no-finding Backlog decision tasks so dependencies can use task IDs, and closure rules now distinguish local task completion from finding closure when decisive track-specific checks are skipped. Verification after the patch passed: placeholder/stale-scaffold scan returned no matches, all 31 audit finding IDs remain covered, expected remediation headings are present, final-summary markers remain one begin and one end marker, and git diff --check passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

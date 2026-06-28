@@ -181,7 +181,7 @@ A finding is closed only when all of the following are true:
 - Regression coverage or an executable check covers the original failure mode.
 - Required focused verification passes.
 - Bandit has run over touched Python production paths when Python code changed, or the task records why Bandit is not applicable.
-- Track-specific verification has run or an environment skip is recorded.
+- Track-specific verification has run. If a decisive track-specific check cannot run locally, the task may be marked locally complete with a recorded skip, but the finding remains pending external verification and must not be marked closed.
 - Residual risk is documented.
 
 For `needs_reproduction` findings, closure requires either:
@@ -207,7 +207,7 @@ Every documentation-only task should run:
 
 ## Track-Specific Verification
 
-Track-specific checks are required only for relevant tracks. If the local environment cannot run one, the task must record the skip and residual risk.
+Track-specific checks are required only for relevant tracks. If the local environment cannot run a non-decisive check, the task must record the skip and residual risk. Decisive checks, such as Docker image inspection for image-hardening findings, SBOM generation for SBOM coverage findings, live WebSocket checks for deployed client/server contract findings, and networked dependency/CVE audits for dependency findings, must complete before the affected finding is marked closed.
 
 - AuthNZ: SQLite and PostgreSQL impersonation tests, token claim decode tests, audit attribution tests.
 - Media: permission-denial HTTP tests, multi-user MediaWiki DB/vector isolation tests, storage cleanup failure tests.
@@ -224,6 +224,38 @@ Track-specific checks are required only for relevant tracks. If the local enviro
 ## Proposed Backlog Task Map
 
 The entries below are proposed child tasks. They should be created only after user approval.
+
+### Decision-Gate Backlog Tasks
+
+Gate 1 stays inside Track 1 because only the AuthNZ impersonation task depends on it. Gate 2 and Gate 3 should become concrete no-finding Backlog decision tasks so implementation tasks can depend on task IDs rather than abstract gate names.
+
+#### Decide WebSocket Auth Contract
+
+- Findings covered: none directly
+- Priority: Medium
+- Primary ownership: backend/API contract with frontend and MCP input
+- Dependencies: none
+- Acceptance criteria:
+  - The repository documents one WebSocket auth contract for browser clients, ACP streams, and sandbox streams.
+  - The contract defines default query-token behavior, first-frame auth semantics, scoped JWT enforcement expectations, and test expectations.
+  - Tracks 4 and 9 reference the decision task before implementation.
+- Verification:
+  - Contract note is linked from Tracks 4 and 9.
+  - No implementation branch starts with conflicting WebSocket auth semantics.
+
+#### Decide Durable Workflow Ownership Contract
+
+- Findings covered: none directly
+- Priority: Medium
+- Primary ownership: backend/workflows, Jobs, Scheduler
+- Dependencies: none
+- Acceptance criteria:
+  - The repository records whether accepted workflow execution is owned by Jobs or Scheduler.
+  - The decision defines idempotency, startup repair, duplicate-fire collapse, shutdown, cancellation, and process-loss expectations.
+  - Track 6 references the decision task before implementation.
+- Verification:
+  - Contract note is linked from Track 6.
+  - Track 6 acceptance criteria align with the chosen owner.
 
 ### 1. Harden AuthNZ Impersonation Boundary
 
@@ -339,7 +371,7 @@ The entries below are proposed child tasks. They should be created only after us
 - Parallelism notes: Can run in Wave 2 after Gate 3. Avoid overlapping with unrelated Scheduler refactors.
 - Stop conditions: Pause if Jobs versus Scheduler ownership cannot be decided from local code inspection.
 
-### 7. Establish Supply-Chain Foundations And Worker Image Hardening
+### 7A. Establish Supply-Chain Foundations And Worker Image Hardening
 
 - Findings covered: `AUDIT-2026-06-27-OPS-002`, `AUDIT-2026-06-27-DEPS-001`, `AUDIT-2026-06-27-DEPS-002`
 - Priority: Medium
@@ -358,7 +390,7 @@ The entries below are proposed child tasks. They should be created only after us
 - Parallelism notes: Track 7B can inspect release gates in parallel but should wait for final tool setup decisions.
 - Stop conditions: Pause if lock strategy affects packaging policy beyond this remediation program.
 
-### 8. Close Release Verification Gates
+### 7B. Close Release Verification Gates
 
 - Findings covered: `AUDIT-2026-06-27-OPS-001`, `AUDIT-2026-06-27-OPS-003`, `AUDIT-2026-06-27-OPS-004`, `AUDIT-2026-06-27-OPS-006`
 - Priority: Medium
@@ -378,7 +410,7 @@ The entries below are proposed child tasks. They should be created only after us
 - Parallelism notes: Can start after or alongside Track 7A inspection, but implementation should not duplicate tool setup.
 - Stop conditions: Pause if local environment cannot validate Docker or SBOM behavior and CI is required.
 
-### 9. Route Integrations Through Central Outbound HTTP Policy
+### 8. Route Integrations Through Central Outbound HTTP Policy
 
 - Findings covered: `AUDIT-2026-06-27-INTEGRATIONS-001`, `AUDIT-2026-06-27-INTEGRATIONS-002`, `AUDIT-2026-06-27-INTEGRATIONS-003`
 - Priority: Medium
@@ -397,7 +429,7 @@ The entries below are proposed child tasks. They should be created only after us
 - Parallelism notes: Can run in Wave 2. Coordinate with Track 2 if MediaWiki ingestion touches outbound fetch policy.
 - Stop conditions: Pause if local providers require network exceptions that are not represented in central policy.
 
-### 10. Enforce MCP Scoped WebSocket Auth And Cleanup Lifecycle
+### 9. Enforce MCP Scoped WebSocket Auth And Cleanup Lifecycle
 
 - Findings covered: `AUDIT-2026-06-27-MCP-001`, `AUDIT-2026-06-27-MCP-002`
 - Priority: Medium
@@ -415,7 +447,7 @@ The entries below are proposed child tasks. They should be created only after us
 - Parallelism notes: Can run with Track 4 after Gate 2. Coordinate on shared WebSocket auth semantics.
 - Stop conditions: Pause if current scoped-token helper cannot evaluate WebSocket route claims without API changes.
 
-### 11. Clean Up Dependency Automation, Bandit Profiles, And Small Test Gaps
+### 10. Clean Up Dependency Automation, Bandit Profiles, And Small Test Gaps
 
 - Findings covered: `AUDIT-2026-06-27-OPS-005`, `AUDIT-2026-06-27-DEPS-003`, `AUDIT-2026-06-27-MEDIA-004`
 - Priority: Low
@@ -439,10 +471,12 @@ The entries below are proposed child tasks. They should be created only after us
 After this spec is approved:
 
 1. Create one umbrella Backlog remediation task that references this spec and the audit final report.
-2. Create child Backlog tasks from the 11 proposed task map entries.
-3. Add dependencies for Gate 2, Gate 3, Track 7A before Track 7B, and any user-selected sequencing constraints.
-4. Assign one implementation worktree per active child task.
-5. Keep each child task current with reproduction results, implementation notes, verification, residual risk, and final summary.
+2. Create the two shared decision-gate tasks for Gate 2 and Gate 3.
+3. Create child Backlog tasks from the 11 proposed remediation task map entries.
+4. Add dependencies using concrete task IDs: Tracks 4 and 9 depend on the WebSocket auth contract task, Track 6 depends on the durable workflow ownership task, and Track 7B depends on Track 7A.
+5. Add any user-selected sequencing constraints.
+6. Assign one implementation worktree per active child task.
+7. Keep each child task current with reproduction results, implementation notes, verification, residual risk, and final summary.
 
 Backlog tasks should be created through the MCP workflow when available. If Backlog tooling cannot preserve task markers, pause for user approval before direct task-file edits.
 
@@ -462,6 +496,7 @@ This spec is accepted when:
 
 - All 31 accepted audit findings map to one proposed remediation task.
 - The three decision gates are explicit.
+- Shared gates that affect multiple remediation tasks have concrete Backlog decision-task modeling.
 - The four execution waves and wave integration gates are explicit.
 - Universal, documentation-only, and track-specific verification rules are explicit.
 - Closure rules prevent overclaiming on `needs_reproduction` findings.
