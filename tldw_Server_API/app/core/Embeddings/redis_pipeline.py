@@ -105,6 +105,10 @@ class RedisEmbeddingsQueues:
     dlq_prefix: str
 
 
+class RedisEnqueueError(RuntimeError):
+    """Raised when an embeddings Redis enqueue operation cannot be completed."""
+
+
 def load_queues() -> RedisEmbeddingsQueues:
     return RedisEmbeddingsQueues(
         streams={stage: stream_name(stage) for stage in _STAGE_STREAM_DEFAULTS},
@@ -179,7 +183,9 @@ def enqueue_chunking_job(
                     return None
             except Exception as exc:
                 logger.warning(f"Failed to set idempotency key for embeddings root {root_job_uuid}: {exc}")
-                return None
+                raise RedisEnqueueError(
+                    f"Failed to set Redis idempotency key for embeddings root {root_job_uuid}"
+                ) from exc
         return client.xadd(stream, _sanitize_stream_payload(payload))
     finally:
         if created_client:
@@ -226,7 +232,9 @@ def enqueue_content_job(
                     return None
             except Exception as exc:
                 logger.warning(f"Failed to set content idempotency key for embeddings root {root_job_uuid}: {exc}")
-                return None
+                raise RedisEnqueueError(
+                    f"Failed to set Redis idempotency key for embeddings root {root_job_uuid}"
+                ) from exc
         return client.xadd(stream, _sanitize_stream_payload(payload))
     finally:
         if created_client:

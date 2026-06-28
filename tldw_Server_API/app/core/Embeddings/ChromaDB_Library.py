@@ -74,7 +74,7 @@ from tldw_Server_API.app.core.Embeddings.audit_adapter import (
     log_security_violation,
 )
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze  # Assuming this is correct
-from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_truthy
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Utils.Utils import logger  # Assuming this is 'logging' aliased or a custom logger
 
@@ -331,12 +331,14 @@ class ChromaDBManager:
             backend = str(chroma_client_settings_config.get("backend", "persistent")).lower()
             # Honor explicit config, and also support CHROMADB_FORCE_STUB for tests/CI
             _env_force_stub = env_flag_enabled("CHROMADB_FORCE_STUB")
-            use_stub = bool(
-                chroma_client_settings_config.get("use_in_memory_stub", False)
+            use_stub = (
+                is_truthy(str(chroma_client_settings_config.get("use_in_memory_stub", "")).strip())
                 or backend == "stub"
                 or _env_force_stub
             )
-            allow_stub_fallback = bool(chroma_client_settings_config.get("allow_stub_fallback", True))
+            allow_stub_fallback = is_truthy(
+                str(chroma_client_settings_config.get("allow_stub_fallback", "")).strip()
+            )
 
             if use_stub:
                 # Scope the stub client key by user and base dir to avoid cross-config leakage
@@ -1295,25 +1297,21 @@ class ChromaDBManager:
             try:
                 cleaned_metadatas = [self._clean_metadata(metadata) for metadata in metadatas]
 
-                # Dimension Check and Collection Recreation (if needed)
-                # This check is more robust if the collection stores its expected dimension in metadata
+                # Dimension checks are non-destructive. A mismatch means callers are mixing
+                # embedding models/dimensions in one collection and must choose a new collection.
                 collection_meta = target_collection.metadata
                 existing_dim_from_meta = None
                 if collection_meta and "embedding_dimension" in collection_meta:
                     existing_dim_from_meta = int(collection_meta["embedding_dimension"])
 
                 if existing_dim_from_meta and existing_dim_from_meta != new_embedding_dim:
-                    logger.warning(
+                    message = (
                         f"User '{self.user_id}': Embedding dimension mismatch for collection '{target_collection.name}'. "
                         f"Collection expected dim (from metadata): {existing_dim_from_meta}, New: {new_embedding_dim} "
-                        f"(from model_id '{embedding_model_id_for_dim_check or 'Unknown'}'). Recreating collection."
+                        f"(from model_id '{embedding_model_id_for_dim_check or 'Unknown'}')."
                     )
-                    self.client.delete_collection(name=target_collection.name)
-                    new_coll_meta = {"embedding_dimension": new_embedding_dim}
-                    if embedding_model_id_for_dim_check:
-                        new_coll_meta["source_model_id"] = embedding_model_id_for_dim_check
-                    target_collection = self.client.create_collection(name=target_collection.name,
-                                                                      metadata=new_coll_meta)
+                    logger.warning(message)
+                    raise ValueError(message)
                 elif not existing_dim_from_meta and target_collection.count() > 0:  # Has items but no dim in meta
                     # Fallback: get an existing embedding to check dimension
                     existing_item = target_collection.get(limit=1, include=['embeddings'])
@@ -1321,16 +1319,13 @@ class ChromaDBManager:
                     if embeddings_exist and len(existing_item['embeddings']) > 0:
                         existing_dim_from_sample = len(existing_item['embeddings'][0])
                         if existing_dim_from_sample != new_embedding_dim:
-                            logger.warning(
-                                f"User '{self.user_id}': Dim mismatch (sampled). Existing: {existing_dim_from_sample}, New: {new_embedding_dim}. Recreating '{target_collection.name}'."
+                            message = (
+                                f"User '{self.user_id}': Embedding dimension mismatch for collection "
+                                f"'{target_collection.name}'. Existing: {existing_dim_from_sample}, "
+                                f"New: {new_embedding_dim}."
                             )
-                            self.client.delete_collection(name=target_collection.name)
-                            new_coll_meta = {"embedding_dimension": new_embedding_dim}
-                            if embedding_model_id_for_dim_check:
-                                new_coll_meta[
-                                "source_model_id"] = embedding_model_id_for_dim_check
-                            target_collection = self.client.create_collection(name=target_collection.name,
-                                                                              metadata=new_coll_meta)
+                            logger.warning(message)
+                            raise ValueError(message)
 
                 # Batch upsert for potentially large number of embeddings
                 # ChromaDB's upsert handles batching internally, but if we had extremely large lists,
@@ -1383,6 +1378,8 @@ class ChromaDBManager:
                     f"User '{self.user_id}': ChromaDB error in store_in_chroma for collection '{target_collection.name}': {ce}",
                     exc_info=True)
                 raise RuntimeError(f"ChromaDB operation failed: {ce}") from ce
+            except ValueError:
+                raise
             except _CHROMA_NONCRITICAL_EXCEPTIONS as e:
                 import traceback
                 tb = traceback.format_exc()
@@ -1416,7 +1413,7 @@ class ChromaDBManager:
         with self._lock:
             try:
                 logger.info(
-                    f"User '{self.user_id}': Vector search in '{target_collection.name}' for query: '{query[:50]}...' "
+                    f"User '{self.user_id}': Vector search in '{target_collection.name}' "
                     f"using model_id '{query_embedding_model_id}'. k={k}, Filter: {where_filter is not None}."
                 )
 
