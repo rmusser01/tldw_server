@@ -63,6 +63,7 @@ type ManagedServerDraft = McpHubExternalServerCreateInput & {
 }
 
 const AUTH_TEMPLATE_TARGET_BY_TRANSPORT: Record<string, "header" | "env"> = {
+  sse: "header",
   websocket: "header",
   stdio: "env"
 }
@@ -881,10 +882,10 @@ export const ExternalServersTab = ({
     try {
       await validateExternalServer(server.id)
       await loadServers()
-      setSuccessMessage("Server validated")
+      setSuccessMessage("Readiness checked")
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error"
-      setErrorMessage(`Failed to validate external server: ${msg}`)
+      setErrorMessage(`Failed to check server readiness: ${msg}`)
     } finally {
       setRowActionLoadingKey(null)
     }
@@ -948,7 +949,7 @@ export const ExternalServersTab = ({
             loading={rowActionLoadingKey === `${server.id}:validate`}
             onClick={() => void handleValidateServer(server)}
           >
-            Validate
+            Check readiness
           </Button>
         )
       case "refresh_discovery":
@@ -1990,7 +1991,7 @@ export const ExternalServersTab = ({
             <Typography.Text>{`Reason codes: ${detailsReadiness.reasonCodes.join(", ") || "none"}`}</Typography.Text>
             <Typography.Text>{`Transport: ${detailsServer.transport}`}</Typography.Text>
             <Typography.Text>{`Tools: ${detailsReadiness.toolCount}`}</Typography.Text>
-            <Typography.Text>{`Last validation: ${formatDiagnosticTimestamp(
+            <Typography.Text>{`Last stored validation: ${formatDiagnosticTimestamp(
               detailsBackendReadiness?.last_validation_at
             )}`}</Typography.Text>
             <Typography.Text>{`Last discovery: ${formatDiagnosticTimestamp(

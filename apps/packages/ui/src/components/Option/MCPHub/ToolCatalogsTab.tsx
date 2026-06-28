@@ -40,17 +40,18 @@ export const ToolCatalogsTab = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [metadataWarningMessage, setMetadataWarningMessage] = useState<string | null>(null)
   const groupedModules = useMemo(() => getToolEntriesByModule(entries, modules), [entries, modules])
-  const hasNoExternalServers =
-    !metadataWarningMessage && (readiness?.total_servers ?? servers.length) === 0
+  const readinessServers = Array.isArray(readiness?.servers) ? readiness.servers : []
+  const visibleServerCount = Math.max(readinessServers.length, servers.length)
+  const hasNoExternalServers = !metadataWarningMessage && visibleServerCount === 0
   const recoveryReadiness =
-    readiness?.servers.find((server) => server.display_state !== "ready") ??
-    readiness?.servers?.[0] ??
+    readinessServers.find((server) => server.display_state !== "ready") ??
+    readinessServers[0] ??
     null
   const recoveryServer = recoveryReadiness
     ? servers.find((server) => server.id === recoveryReadiness.server_id) ?? null
     : null
   const catalogWarningMessage =
-    groupedModules.length > 0 && readiness?.reason_codes.includes("partial_capability")
+    groupedModules.length > 0 && readiness?.reason_codes?.includes("partial_capability")
       ? readiness.message
       : null
 

@@ -144,6 +144,62 @@ describe("ToolCatalogsTab", () => {
     expect(onOpenServerSetup).toHaveBeenCalledTimes(1)
   })
 
+  it("uses visible readiness rows instead of active total for the no-server empty state", async () => {
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [],
+      modules: []
+    })
+    mocks.listExternalServers.mockResolvedValueOnce([
+      externalServer({
+        enabled: false,
+        runtime_executable: false
+      })
+    ])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse({
+        display_state: "needs_setup",
+        reason_codes: ["not_configured"],
+        primary_reason_code: "not_configured",
+        allowed_actions: ["add_server"],
+        message: "Add an external server to start MCP Hub setup.",
+        servers: [
+          readinessServer({
+            display_state: "needs_attention",
+            reason_codes: ["runtime_unavailable"],
+            primary_reason_code: "runtime_unavailable",
+            allowed_actions: ["edit_config", "view_details"],
+            message: "Runtime is not available for this server."
+          })
+        ],
+        total_servers: 0
+      })
+    )
+
+    render(<ToolCatalogsTab />)
+
+    expect(await screen.findByText(/docs managed runtime is unavailable/i)).toBeTruthy()
+    expect(screen.queryByText(/no mcp servers connected/i)).toBeNull()
+  })
+
+  it("falls back to server inventory when readiness metadata omits servers", async () => {
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [],
+      modules: []
+    })
+    mocks.listExternalServers.mockResolvedValueOnce([externalServer()])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse({
+        servers: undefined,
+        total_servers: 0
+      })
+    )
+
+    render(<ToolCatalogsTab />)
+
+    expect(await screen.findByText(/no tools registered yet/i)).toBeTruthy()
+    expect(screen.queryByText(/no mcp servers connected/i)).toBeNull()
+  })
+
   it("shows refresh discovery recovery when a saved server has no catalog yet", async () => {
     const user = userEvent.setup()
     mocks.getToolRegistrySummary.mockResolvedValueOnce({

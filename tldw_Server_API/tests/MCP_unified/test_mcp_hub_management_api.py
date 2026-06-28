@@ -648,7 +648,7 @@ def _registry_entry(
 
 
 class _ConfigurableExternalServerService(_FakeService):
-    def __init__(self, rows: list[dict[str, Any]]):
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
         self.rows = rows
 
     async def list_external_servers(self, **kwargs: Any) -> list[dict[str, Any]]:
@@ -665,7 +665,7 @@ class _ConfigurableExternalServerService(_FakeService):
 
 
 class _FakeToolRegistry:
-    def __init__(self, entries: list[dict[str, Any]] | None = None):
+    def __init__(self, entries: list[dict[str, Any]] | None = None) -> None:
         self.entries = entries or []
 
     async def list_entries(self) -> list[dict[str, Any]]:
@@ -725,7 +725,7 @@ def _build_app(
     return app
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_refresh_external_server_discovery_requires_mutation_permission(monkeypatch) -> None:
     monkeypatch.setattr(
         mcp_hub_management,
@@ -745,7 +745,7 @@ async def test_refresh_external_server_discovery_requires_mutation_permission(mo
     assert "system.configure" in resp.json()["detail"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_refresh_external_server_discovery_reconciles_live_runtime(monkeypatch) -> None:
     manager = _FakeExternalFederationManager(
         {
@@ -785,7 +785,7 @@ async def test_refresh_external_server_discovery_reconciles_live_runtime(monkeyp
     assert server.module_registry.refresh_calls == ["external_federation"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_refresh_external_server_discovery_accepts_query_server_id(monkeypatch) -> None:
     manager = _FakeExternalFederationManager(
         {
@@ -811,7 +811,7 @@ async def test_refresh_external_server_discovery_accepts_query_server_id(monkeyp
     assert manager.calls == ["docs"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_refresh_external_server_discovery_normalizes_body_server_id_before_conflict_check(monkeypatch) -> None:
     manager = _FakeExternalFederationManager(
         {
@@ -841,7 +841,7 @@ async def test_refresh_external_server_discovery_normalizes_body_server_id_befor
     assert manager.calls == ["docs"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_refresh_external_server_discovery_rejects_unknown_body_fields(monkeypatch) -> None:
     manager = _FakeExternalFederationManager(
         {
@@ -870,7 +870,7 @@ async def test_refresh_external_server_discovery_rejects_unknown_body_fields(mon
     assert manager.calls == []
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_refresh_external_server_discovery_rejects_conflicting_query_and_body_server_id(monkeypatch) -> None:
     manager = _FakeExternalFederationManager(
         {
@@ -899,7 +899,7 @@ async def test_refresh_external_server_discovery_rejects_conflicting_query_and_b
     assert manager.calls == []
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_refresh_external_server_discovery_rejects_blank_body_server_id(monkeypatch) -> None:
     manager = _FakeExternalFederationManager(
         {
@@ -928,7 +928,7 @@ async def test_refresh_external_server_discovery_rejects_blank_body_server_id(mo
     assert manager.calls == []
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_refresh_external_server_discovery_returns_503_when_runtime_module_unavailable(monkeypatch) -> None:
     server = _FakeMcpServer(module=None, initialized=True)
     monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server, raising=False)
@@ -946,7 +946,7 @@ async def test_refresh_external_server_discovery_returns_503_when_runtime_module
     assert "external federation" in payload["detail"]["message"].lower()
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_refresh_external_server_discovery_returns_503_when_module_registry_lookup_fails(monkeypatch) -> None:
     manager = _FakeExternalFederationManager(
         {
@@ -976,7 +976,7 @@ async def test_refresh_external_server_discovery_returns_503_when_module_registr
     assert "external federation" in payload["detail"]["message"].lower()
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_refresh_external_server_discovery_surfaces_module_registry_refresh_failure(monkeypatch) -> None:
     manager = _FakeExternalFederationManager(
         {
@@ -1010,7 +1010,7 @@ async def test_refresh_external_server_discovery_surfaces_module_registry_refres
     assert registry.refresh_calls == ["external_federation"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_events_stream_replays_governance_audit_events(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AUDIT_STORAGE_MODE", "shared")
     monkeypatch.setenv("AUDIT_SHARED_DB_PATH", str(tmp_path / "audit_shared.db"))
@@ -1056,7 +1056,7 @@ async def test_mcp_hub_events_stream_replays_governance_audit_events(tmp_path, m
     assert '"resource_id": "docs"' in resp.text
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_event_stream_permission_replay_is_tenant_scoped(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
@@ -1099,7 +1099,7 @@ async def test_mcp_hub_event_stream_permission_replay_is_tenant_scoped(monkeypat
     assert captured["allow_cross_tenant"] is False
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_event_stream_subscribes_before_replay(monkeypatch) -> None:
     live_event = {
         "event_id": "evt_live_race",
@@ -1144,6 +1144,7 @@ async def test_mcp_hub_event_stream_subscribes_before_replay(monkeypatch) -> Non
     assert "docs-race" in text
 
 
+@pytest.mark.unit
 def test_mcp_hub_audit_row_normalizes_prefixed_actions() -> None:
     event = mcp_hub_service._audit_row_to_mcp_hub_event(
         {
@@ -1164,7 +1165,7 @@ def test_mcp_hub_audit_row_normalizes_prefixed_actions() -> None:
     assert event["event_type"] == "mcp_hub.permission_profile.create"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_scoped_audit_metadata_includes_scope_id(monkeypatch) -> None:
     captured: list[dict[str, Any] | None] = []
 
@@ -1191,7 +1192,7 @@ async def test_mcp_hub_scoped_audit_metadata_includes_scope_id(monkeypatch) -> N
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_durable_audit_replay_survives_event_ring_eviction(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AUDIT_STORAGE_MODE", "shared")
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
@@ -1242,7 +1243,7 @@ async def test_mcp_hub_durable_audit_replay_survives_event_ring_eviction(tmp_pat
     assert replayed[0]["source"] == "mcp_hub.audit"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_durable_replay_scopes_non_admin_queries(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
@@ -1283,7 +1284,7 @@ async def test_mcp_hub_durable_replay_scopes_non_admin_queries(monkeypatch) -> N
     assert replayed[0]["resource_id"] == "docs"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_durable_replay_allows_admin_cross_tenant_queries(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
@@ -1313,7 +1314,7 @@ async def test_mcp_hub_durable_replay_allows_admin_cross_tenant_queries(monkeypa
     assert captured["allow_cross_tenant"] is True
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_get_mcp_hub_profiles_requires_auth() -> None:
     app = _build_app(principal=None, fail_with_401=True)
     with TestClient(app) as client:
@@ -1321,7 +1322,7 @@ async def test_get_mcp_hub_profiles_requires_auth() -> None:
     assert resp.status_code == 401
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_set_external_secret_returns_masked_only() -> None:
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
@@ -1339,7 +1340,7 @@ async def test_set_external_secret_returns_masked_only() -> None:
     assert "abc123secret" not in json.dumps(payload)
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_set_external_secret_not_found_maps_to_404() -> None:
     class _MissingService(_FakeService):
         async def set_external_server_secret(self, *, server_id: str, secret_value: str, actor_id: int | None):
@@ -1358,7 +1359,7 @@ async def test_set_external_secret_not_found_maps_to_404() -> None:
     assert resp.status_code == 404
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_set_external_secret_bad_request_maps_to_400() -> None:
     class _BadPayloadService(_FakeService):
         async def set_external_server_secret(self, *, server_id: str, secret_value: str, actor_id: int | None):
@@ -1377,7 +1378,7 @@ async def test_set_external_secret_bad_request_maps_to_400() -> None:
     assert resp.status_code == 400
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_list_external_servers_includes_source_state_fields() -> None:
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
@@ -1396,7 +1397,7 @@ async def test_list_external_servers_includes_source_state_fields() -> None:
     assert payload[0]["auth_template_blocked_reason"] is None
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_readiness_redacts_config_and_maps_no_auth_stdio() -> None:
     service = _ConfigurableExternalServerService(
         [
@@ -1434,7 +1435,7 @@ async def test_mcp_hub_readiness_redacts_config_and_maps_no_auth_stdio() -> None
     assert "refresh_discovery" in server["allowed_actions"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_readiness_maps_missing_required_slot_and_zero_tools() -> None:
     service = _ConfigurableExternalServerService(
         [
@@ -1464,7 +1465,7 @@ async def test_mcp_hub_readiness_maps_missing_required_slot_and_zero_tools() -> 
     assert "open_credentials" in server["allowed_actions"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_readiness_maps_invalid_auth_template_to_preflight_failed() -> None:
     service = _ConfigurableExternalServerService(
         [
@@ -1494,7 +1495,7 @@ async def test_mcp_hub_readiness_maps_invalid_auth_template_to_preflight_failed(
     assert "validate" in server["allowed_actions"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_readiness_maps_non_stdio_without_auth_state_as_unknown() -> None:
     service = _ConfigurableExternalServerService(
         [
@@ -1525,7 +1526,7 @@ async def test_mcp_hub_readiness_maps_non_stdio_without_auth_state_as_unknown() 
     assert server["primary_reason_code"] == "discovery_not_run"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_readiness_maps_configured_optional_slot_as_configured() -> None:
     service = _ConfigurableExternalServerService(
         [
@@ -1559,7 +1560,7 @@ async def test_mcp_hub_readiness_maps_configured_optional_slot_as_configured() -
     assert server["primary_reason_code"] == "discovery_not_run"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_readiness_maps_disabled_or_nonexecutable_runtime_unavailable() -> None:
     service = _ConfigurableExternalServerService(
         [
@@ -1589,7 +1590,7 @@ async def test_mcp_hub_readiness_maps_disabled_or_nonexecutable_runtime_unavaila
     assert servers["missing-runtime"]["primary_reason_code"] == "runtime_unavailable"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_readiness_ignores_builtin_module_collision() -> None:
     service = _ConfigurableExternalServerService([_external_server_row(server_id="docs")])
     registry = _FakeToolRegistry([_registry_entry(tool_name="docs.search", module="docs")])
@@ -1609,7 +1610,7 @@ async def test_mcp_hub_readiness_ignores_builtin_module_collision() -> None:
     assert server["primary_reason_code"] == "discovery_not_run"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_readiness_counts_authoritative_external_tool_as_ready() -> None:
     service = _ConfigurableExternalServerService([_external_server_row(server_id="docs")])
     registry = _FakeToolRegistry([_registry_entry(tool_name="ext.docs.search", module="docs")])
@@ -1632,8 +1633,56 @@ async def test_mcp_hub_readiness_counts_authoritative_external_tool_as_ready() -
     assert payload["ready_server_count"] == 1
 
 
-@pytest.mark.asyncio
-async def test_mcp_hub_validate_requires_mutation_permission_and_does_not_refresh() -> None:
+@pytest.mark.unit
+async def test_mcp_hub_readiness_reports_successful_zero_tool_discovery() -> None:
+    row = _external_server_row(server_id="docs")
+    row["last_successful_discovery_at"] = "2026-06-27T07:00:00Z"
+    service = _ConfigurableExternalServerService([row])
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    server = payload["servers"][0]
+    assert server["tool_count"] == 0
+    assert server["display_state"] == "no_tools"
+    assert server["primary_reason_code"] == "no_tools_returned"
+    assert payload["no_tool_server_count"] == 1
+
+
+@pytest.mark.unit
+async def test_mcp_hub_readiness_omits_persisted_internal_error_text() -> None:
+    row = _external_server_row(server_id="docs")
+    row["last_error_category"] = "unreachable"
+    row["last_error_message"] = "Failed with secret token sk-live-review"
+    service = _ConfigurableExternalServerService([row])
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    body = json.dumps(resp.json())
+    assert "sk-live-review" not in body
+    server = resp.json()["servers"][0]
+    assert server["last_error_category"] == "unreachable"
+    assert server["last_error_message"] is None
+
+
+@pytest.mark.unit
+async def test_mcp_hub_validate_allows_visible_readiness_without_mutation_permission() -> None:
     class _RefreshExecutor:
         calls = 0
 
@@ -1643,25 +1692,14 @@ async def test_mcp_hub_validate_requires_mutation_permission_and_does_not_refres
 
     service = _ConfigurableExternalServerService([_external_server_row(server_id="docs")])
     refresh_executor = _RefreshExecutor()
-    forbidden_app = _build_app(
+    read_only_app = _build_app(
         principal=_make_principal(),
         fail_with_401=False,
         service=service,
         registry=_FakeToolRegistry(),
         refresh_executor=refresh_executor,
     )
-    with TestClient(forbidden_app) as client:
-        forbidden = client.post("/api/v1/mcp/hub/external-servers/docs/validate")
-    assert forbidden.status_code == 403
-
-    allowed_app = _build_app(
-        principal=_make_principal(roles=["admin"], permissions=[]),
-        fail_with_401=False,
-        service=service,
-        registry=_FakeToolRegistry(),
-        refresh_executor=refresh_executor,
-    )
-    with TestClient(allowed_app) as client:
+    with TestClient(read_only_app) as client:
         allowed = client.post("/api/v1/mcp/hub/external-servers/docs/validate")
 
     assert allowed.status_code == 200
@@ -1670,7 +1708,7 @@ async def test_mcp_hub_validate_requires_mutation_permission_and_does_not_refres
     assert refresh_executor.calls == 0
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_refresh_checks_visibility_executes_refresh_and_sanitizes_errors() -> None:
     class _RefreshExecutor:
         def __init__(self) -> None:
@@ -1714,7 +1752,41 @@ async def test_mcp_hub_refresh_checks_visibility_executes_refresh_and_sanitizes_
     assert payload["refresh_result"]["errors"] == {"docs": "Discovery refresh failed."}
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_mcp_hub_refresh_success_clears_stale_discovery_error_state() -> None:
+    class _RefreshExecutor:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def __call__(self, server_id: str) -> dict[str, Any]:
+            self.calls.append(server_id)
+            return {"refreshed_servers": 1, "total_servers": 1, "virtual_tools": 0, "errors": {}}
+
+    row = _external_server_row(server_id="docs")
+    row["last_error_category"] = "discovery_failed"
+    row["last_error_message"] = "Previous discovery failure with secret detail"
+    service = _ConfigurableExternalServerService([row])
+    refresh_executor = _RefreshExecutor()
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+        refresh_executor=refresh_executor,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post("/api/v1/mcp/hub/external-servers/docs/refresh-discovery")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert refresh_executor.calls == ["docs"]
+    assert "discovery_failed" not in payload["reason_codes"]
+    assert payload["last_error_category"] is None
+    assert payload["last_error_message"] is None
+
+
+@pytest.mark.unit
 async def test_mcp_hub_refresh_rejects_non_operational_visible_servers_without_execution() -> None:
     class _RefreshExecutor:
         def __init__(self) -> None:
@@ -1752,7 +1824,7 @@ async def test_mcp_hub_refresh_rejects_non_operational_visible_servers_without_e
     assert refresh_executor.calls == []
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_refresh_executor_initializes_server_before_module_lookup(monkeypatch) -> None:
     class _RefreshModule:
         async def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1791,7 +1863,7 @@ async def test_mcp_hub_refresh_executor_initializes_server_before_module_lookup(
     assert result["arguments"] == {"server_id": "docs"}
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_mcp_hub_refresh_serializes_same_server_concurrent_requests() -> None:
     class _RefreshExecutor:
         def __init__(self) -> None:
@@ -1824,7 +1896,7 @@ async def test_mcp_hub_refresh_serializes_same_server_concurrent_requests() -> N
     assert refresh_executor.max_active == 1
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_import_legacy_external_server_endpoint_returns_managed_row() -> None:
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
@@ -1840,7 +1912,7 @@ async def test_import_legacy_external_server_endpoint_returns_managed_row() -> N
     assert payload["legacy_source_ref"] == "yaml:legacy-docs"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_profile_credential_binding_endpoints_round_trip() -> None:
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
@@ -1859,7 +1931,7 @@ async def test_profile_credential_binding_endpoints_round_trip() -> None:
     assert delete_resp.json()["ok"] is True
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_profile_slot_write_binding_requires_credential_grant_authority() -> None:
     class _WriteSlotService(_FakeService):
         async def list_external_server_credential_slots(self, *, server_id: str) -> list[dict[str, Any]]:
@@ -1915,7 +1987,7 @@ async def test_profile_slot_write_binding_requires_credential_grant_authority() 
     assert "grant.credentials.write" in resp.json()["detail"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_profile_server_binding_uses_default_slot_grant_authority() -> None:
     class _DefaultWriteSlotService(_FakeService):
         async def list_external_server_credential_slots(self, *, server_id: str) -> list[dict[str, Any]]:
@@ -1971,7 +2043,7 @@ async def test_profile_server_binding_uses_default_slot_grant_authority() -> Non
     assert "grant.credentials.write" in resp.json()["detail"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_assignment_credential_binding_and_external_access_endpoints_round_trip() -> None:
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
@@ -1993,7 +2065,7 @@ async def test_assignment_credential_binding_and_external_access_endpoints_round
     assert preview_resp.json()["servers"][0]["blocked_reason"] == "disabled_by_assignment"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_assignment_disable_does_not_require_credential_grant_authority() -> None:
     app = _build_app(
         principal=_make_principal(permissions=["system.configure"]),
@@ -2009,7 +2081,7 @@ async def test_assignment_disable_does_not_require_credential_grant_authority() 
     assert put_resp.json()["binding_mode"] == "disable"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_external_server_credential_slot_endpoints_round_trip() -> None:
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
@@ -2056,7 +2128,7 @@ async def test_external_server_credential_slot_endpoints_round_trip() -> None:
     assert delete_resp.json()["ok"] is True
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_create_external_server_credential_slot_admin_requires_grant_authority() -> None:
     class _AdminSlotService(_FakeService):
         async def create_external_server_credential_slot(
@@ -2105,7 +2177,7 @@ async def test_create_external_server_credential_slot_admin_requires_grant_autho
     assert "grant.credentials.admin" in resp.json()["detail"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_update_external_server_credential_slot_privilege_escalation_requires_grant_authority() -> None:
     class _EscalatingSlotService(_FakeService):
         async def list_external_server_credential_slots(self, *, server_id: str) -> list[dict[str, Any]]:
@@ -2162,7 +2234,7 @@ async def test_update_external_server_credential_slot_privilege_escalation_requi
     assert "grant.credentials.write" in resp.json()["detail"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_external_server_auth_template_endpoints_round_trip() -> None:
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
@@ -2193,7 +2265,7 @@ async def test_external_server_auth_template_endpoints_round_trip() -> None:
     assert put_resp.json()["mappings"][0]["slot_name"] == "token_readonly"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_slot_binding_endpoints_round_trip() -> None:
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
@@ -2227,7 +2299,7 @@ async def test_slot_binding_endpoints_round_trip() -> None:
     assert preview_resp.json()["servers"][0]["slots"][1]["blocked_reason"] == "disabled_by_assignment"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_slot_status_endpoints_support_action_style_routes() -> None:
     app = _build_app(
         principal=_make_principal(roles=["admin"], permissions=[]),
@@ -2249,7 +2321,7 @@ async def test_slot_status_endpoints_support_action_style_routes() -> None:
     assert assignment_status_resp.json()["slot_name"] == "token_write"
 
 
-@pytest.mark.asyncio
+@pytest.mark.unit
 async def test_set_external_secret_alias_bad_request_maps_to_400_for_multislot_server() -> None:
     class _AmbiguousSecretService(_FakeService):
         async def set_external_server_secret(self, *, server_id: str, secret_value: str, actor_id: int | None):
