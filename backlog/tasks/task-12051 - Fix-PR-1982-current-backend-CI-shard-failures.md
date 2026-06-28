@@ -4,7 +4,7 @@ title: Fix PR 1982 current backend CI shard failures
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-28 17:43'
+updated_date: '2026-06-28 18:50'
 labels:
   - ci
   - pr-1982
@@ -64,6 +64,8 @@ Track the current PR #1982 CI failures after the full matrix appeared on head 93
 Run 28306969720 added Ubuntu/Python 3.13 llm-adapters-chat-endpoint failure: AuthNZ SQLite migration retry failed because adapter tests delete TEST_MODE while CI exports REDIS_URL to an unavailable Redis service; apply_authnz_migrations only allowed Redis-to-file fallback for TEST_MODE, not explicit pytest runtime. Patched migrations to also allow fallback under PYTEST_CURRENT_TEST, added regression coverage, and locally verified AuthNZ migration unit tests plus LLM adapter shards with REDIS_URL/EMBEDDINGS_REDIS_URL pointed at localhost and TEST_MODE removed by the tests.
 
 2026-06-28 current-head CI-contract follow-up: PR #1982 run 28328796097/job 83927186551 failed gap-verified-12 on tldw_Server_API/tests/CI/test_required_workflow_contracts.py. Root cause: the previous platform-services shard split added platform-services-main-routing in .github/workflows/ci.yml, but the contract test still expected FFmpeg gating and uncovered Services test membership for platform-services-core only. Updated the contract expectations to include platform-services-main-routing. Verification: the two failed contract tests passed locally; the full workflow contract file passed (38 tests); the failed shard path set passed under CI-like pytest settings (313 tests); git diff --check passed; Bandit with B101 excluded wrote /tmp/bandit_pr1982_ci_contracts.json with no findings.
+
+2026-06-28 current-head Windows core-utils-tooling follow-up: PR #1982 run 28330769212/job 83929147521 failed tldw_Server_API/tests/Utils/test_docker_public_profile_compose.py::test_entrypoint_loads_exported_quoted_env_values_with_equals. The Windows Git Bash execution left DATABASE_URL at the entrypoint default sqlite URL instead of honoring the exported quoted override with query-string characters. Hardened the entrypoint to capture incoming auth/database overrides and then unset the mutable auth/database URL variables before loading env-file values and reapplying process-env overrides, preventing stale inherited values from surviving into the final exec environment. Verification: focused entrypoint tests passed (4 tests); full docker public profile compose test file passed (42 tests); sh -n on the entrypoint passed; git diff --check passed; Bandit with B101 excluded wrote /tmp/bandit_pr1982_entrypoint_env.json with no findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

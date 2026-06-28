@@ -379,6 +379,8 @@ def test_multi_user_entrypoint_derives_postgres_urls_with_runtime_quoting() -> N
         "load_env_file()",
         "TLDW_DATABASE_URL_OVERRIDE",
         "TLDW_JOBS_DB_URL_OVERRIDE",
+        "unset AUTH_MODE SINGLE_USER_API_KEY DATABASE_URL JOBS_DB_URL",
+        "unset TLDW_DATABASE_URL_OVERRIDE TLDW_JOBS_DB_URL_OVERRIDE",
         "from urllib.parse import quote",
         "POSTGRES_PASSWORD",
         "POSTGRES_HOST",

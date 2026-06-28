@@ -15,6 +15,9 @@ incoming_jobs_db_url="${JOBS_DB_URL:-}"
 incoming_database_url_override="${TLDW_DATABASE_URL_OVERRIDE:-}"
 incoming_jobs_db_url_override="${TLDW_JOBS_DB_URL_OVERRIDE:-}"
 
+unset AUTH_MODE SINGLE_USER_API_KEY DATABASE_URL JOBS_DB_URL
+unset TLDW_DATABASE_URL_OVERRIDE TLDW_JOBS_DB_URL_OVERRIDE
+
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [ -z "$PYTHON_BIN" ]; then
   if command -v python3 >/dev/null 2>&1; then
