@@ -1811,7 +1811,7 @@ async def test_mcp_hub_refresh_serializes_same_server_concurrent_requests() -> N
     registry = _FakeToolRegistry([_registry_entry(tool_name="ext.docs.search", module="external.docs")])
 
     async def _call_refresh() -> Any:
-        return await mcp_hub_management.refresh_external_server_discovery(
+        return await mcp_hub_management.refresh_single_external_server_discovery(
             server_id="docs",
             principal=_make_principal(roles=["admin"], permissions=[]),
             svc=service,

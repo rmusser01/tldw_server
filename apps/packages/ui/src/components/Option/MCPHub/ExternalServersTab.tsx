@@ -15,7 +15,7 @@ import {
   getToolRegistrySummary,
   importExternalServer,
   listExternalServers,
-  refreshExternalServerDiscovery,
+  refreshExternalServerReadinessDiscovery,
   setExternalServerSecret,
   setExternalServerSlotSecret,
   type McpHubDrillTarget,
@@ -826,7 +826,7 @@ export const ExternalServersTab = ({
       }
       let readinessResult: McpHubServerReadiness | null = null
       if (discover) {
-        readinessResult = await refreshExternalServerDiscovery(savedServer.id)
+        readinessResult = await refreshExternalServerReadinessDiscovery(savedServer.id)
       }
       const result = editingServerId
         ? null
@@ -896,7 +896,7 @@ export const ExternalServersTab = ({
     setErrorMessage(null)
     setSuccessMessage(null)
     try {
-      await refreshExternalServerDiscovery(server.id)
+      await refreshExternalServerReadinessDiscovery(server.id)
       await loadServers()
       setSuccessMessage("Tool discovery refreshed")
     } catch (err) {
@@ -915,7 +915,7 @@ export const ExternalServersTab = ({
     setRowActionLoadingKey(loadingKey)
     setErrorMessage(null)
     try {
-      const readinessResult = await refreshExternalServerDiscovery(setupResult.serverId)
+      const readinessResult = await refreshExternalServerReadinessDiscovery(setupResult.serverId)
       await loadServers()
       setSetupResult({
         ...setupResult,

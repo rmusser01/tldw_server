@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Card, Empty, Modal, Space, Tag, Typography } from "antd"
+import { useQueryClient } from "@tanstack/react-query"
 import { StatePanel } from "@/components/ui/state"
 
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/services/tldw/mcp-hub"
 
 import { getPathScopeLabel, getToolEntriesByModule } from "./policyHelpers"
+import { invalidateMcpRuntimeQueries } from "./runtimeRefresh"
 
 type ToolCatalogsTabProps = {
   onOpenServerSetup?: () => void
@@ -27,6 +29,7 @@ export const ToolCatalogsTab = ({
   onOpenServerCredentials,
   onOpenServerConfig
 }: ToolCatalogsTabProps) => {
+  const queryClient = useQueryClient()
   const [entries, setEntries] = useState<McpHubToolRegistryEntry[]>([])
   const [modules, setModules] = useState<McpHubToolRegistryModule[]>([])
   const [servers, setServers] = useState<McpHubExternalServer[]>([])
@@ -133,6 +136,7 @@ export const ToolCatalogsTab = ({
     setErrorMessage(null)
     try {
       await refreshExternalServerDiscovery(serverId)
+      await invalidateMcpRuntimeQueries(queryClient)
       await loadCatalog({ suppressLoading: true })
     } catch {
       setErrorMessage("Failed to refresh tool discovery.")

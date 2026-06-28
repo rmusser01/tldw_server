@@ -6,8 +6,15 @@ import userEvent from "@testing-library/user-event"
 const mocks = vi.hoisted(() => ({
   getToolRegistrySummary: vi.fn(),
   getMcpHubReadiness: vi.fn(),
+  invalidateQueries: vi.fn(),
   listExternalServers: vi.fn(),
   refreshExternalServerDiscovery: vi.fn()
+}))
+
+vi.mock("@tanstack/react-query", () => ({
+  useQueryClient: () => ({
+    invalidateQueries: mocks.invalidateQueries
+  })
 }))
 
 vi.mock("@/services/tldw/mcp-hub", () => ({

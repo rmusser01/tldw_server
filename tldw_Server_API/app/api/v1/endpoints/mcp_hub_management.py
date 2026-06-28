@@ -1988,7 +1988,7 @@ async def validate_external_server(
     "/external-servers/{server_id}/refresh-discovery",
     response_model=McpServerReadinessResponse,
 )
-async def refresh_external_server_discovery(
+async def refresh_single_external_server_discovery(
     server_id: str,
     principal: AuthPrincipal = Depends(get_auth_principal),
     svc: McpHubService = Depends(get_mcp_hub_service),
@@ -4157,7 +4157,7 @@ async def create_external_server(
     "/external-servers/refresh-discovery",
     response_model=ExternalServerDiscoveryRefreshResponse,
 )
-async def refresh_external_server_discovery(
+async def refresh_external_servers_discovery(
     payload: ExternalServerDiscoveryRefreshRequest | None = Body(default=None),
     server_id: str | None = Query(default=None),
     principal: AuthPrincipal = Depends(get_auth_principal),

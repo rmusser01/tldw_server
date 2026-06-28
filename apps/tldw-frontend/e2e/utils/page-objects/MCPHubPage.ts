@@ -213,13 +213,13 @@ export class MCPHubPage extends BasePage {
   async chooseLocalStdio(): Promise<void> {
     await this.setupChoice("Local stdio").click()
     await expect(this.page.getByLabel("Server ID")).toBeVisible()
-    await expect(this.page.getByLabel("Command")).toBeVisible()
+    await expect(this.page.getByRole("textbox", { name: "Command" })).toBeVisible()
   }
 
   async fillLocalStdioServer(input: MCPHubLocalStdioServerInput): Promise<void> {
     await this.page.getByLabel("Server ID").fill(input.serverId)
     await this.page.getByLabel("Name").fill(input.name)
-    await this.page.getByLabel("Command").fill(input.command)
+    await this.page.getByRole("textbox", { name: "Command" }).fill(input.command)
     if (input.args) {
       await this.page.getByLabel("Args").fill(input.args)
     }

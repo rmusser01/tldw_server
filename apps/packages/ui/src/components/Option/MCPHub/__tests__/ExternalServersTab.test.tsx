@@ -32,6 +32,7 @@ vi.mock("@/services/tldw/mcp-hub", () => ({
   getMcpHubReadiness: (...args: unknown[]) => mocks.getMcpHubReadiness(...args),
   getToolRegistrySummary: (...args: unknown[]) => mocks.getToolRegistrySummary(...args),
   refreshExternalServerDiscovery: (...args: unknown[]) => mocks.refreshExternalServerDiscovery(...args),
+  refreshExternalServerReadinessDiscovery: (...args: unknown[]) => mocks.refreshExternalServerDiscovery(...args),
   validateExternalServer: (...args: unknown[]) => mocks.validateExternalServer(...args),
   updateExternalServerAuthTemplate: (...args: unknown[]) => mocks.updateExternalServerAuthTemplate(...args),
   importExternalServer: (...args: unknown[]) => mocks.importExternalServer(...args),
