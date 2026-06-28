@@ -1229,6 +1229,68 @@ class SkillsService:
 
         logger.info(f"Deleted skill '{name}' for user {self.user_id}")
 
+    async def bulk_delete_skills(self, items: list[dict[str, Any]]) -> list[str]:
+        """
+        Delete multiple skills after validating all selected versions.
+
+        Args:
+            items: Skill name/version mappings. Version may be omitted for legacy rows.
+
+        Returns:
+            Deleted skill names in request order.
+
+        Raises:
+            SkillValidationError: If the selection is invalid
+            SkillNotFoundError: If any selected skill doesn't exist
+            SkillConflictError: If any selected version is stale
+        """
+        if not items:
+            raise SkillValidationError("At least one skill is required for bulk delete")
+
+        normalized_items: list[tuple[str, int | None]] = []
+        seen_names: set[str] = set()
+        for item in items:
+            name = self._normalize_and_validate_skill_name(str(item.get("name") or ""))
+            if name in seen_names:
+                raise SkillValidationError(f"Duplicate skill selected for bulk delete: {name}")
+            seen_names.add(name)
+
+            expected_version = item.get("version")
+            if expected_version is not None:
+                if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 1:
+                    raise SkillValidationError(
+                        f"Invalid version for skill '{name}'",
+                        field="version",
+                    )
+            normalized_items.append((name, expected_version))
+
+        await self._sync_registry_async(force=True)
+        db = self._get_db()
+
+        validated_items: list[tuple[str, int]] = []
+        for name, expected_version in normalized_items:
+            row = db.get_skill_registry(name, include_deleted=True)
+            if not row:
+                raise SkillNotFoundError(name)
+
+            current_version = int(row.get("version") or 1)
+            if expected_version is not None and current_version != expected_version:
+                raise SkillConflictError(
+                    f"Skill '{name}' was modified (expected version {expected_version}, got {current_version})",
+                    skill_name=name,
+                    expected_version=expected_version,
+                    actual_version=current_version,
+                )
+            validated_items.append((name, current_version))
+
+        deleted: list[str] = []
+        for name, current_version in validated_items:
+            await self.delete_skill(name, expected_version=current_version)
+            deleted.append(name)
+
+        logger.info(f"Bulk deleted {len(deleted)} skills for user {self.user_id}")
+        return deleted
+
     async def import_skill(
         self,
         content: str,
