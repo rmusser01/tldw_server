@@ -8,11 +8,23 @@ and this project adheres to Some kind of Versioning
 
 ## [Unreleased]
 
-> Rollup coverage: this entry covers the 921 PR-numbered merge/squash
+### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+
+## [0.1.32] - 2026-06-28
+
+> Rollup coverage: this entry covers the 1,175 PR-numbered merge/squash
 > commits present on `dev` after the `0.1.31` changelog push
-> (`42d9c31b0b`, 2026-04-19) through PR #2255. That includes older
-> backfilled branch merges (#861, #961, #971, #1072) plus the main
-> post-release branch sequence from PR #1101 onward.
+> (`42d9c31b0b`, 2026-04-19) through PR #2544. That includes older
+> backfilled branch merges (#861, #961, #971, #1072), the main
+> post-release branch sequence from PR #1101 onward, and the 254 merged
+> `dev` PRs from #2256 through #2544 added during this release-prep pass.
 
 ### Added
 
@@ -35,6 +47,23 @@ and this project adheres to Some kind of Versioning
   setup-readiness closeouts, `llama.cpp` admin configuration and model
   inventory diagnostics, provider-key settings, persona/character-card
   documentation, companion-home shortcuts, and ACP/Codex workspace diagnostics.
+- **MCP, Workspace, And Skills Operations Expansion** — Added MCP filesystem
+  edit/diff/glob/grep parity slices, permission-rule parsing and simulation,
+  approval leases, session path grants, web fetch/search/research tools with
+  caching/rate limits/citation metadata, tool-call hooks/reporting, prompt
+  catalog support, notebook-safe tools, workspace container/runtime/membership
+  contracts, server-backed Skills search/filter/dry-render/import review
+  flows, seed overwrite confirmation, and version-aware Skills deletion.
+- **Research, Scheduled Tasks, And Study Workflow Follow-Through** — Added
+  scheduled-task API and frontend shells, results inbox/home surfacing,
+  Research Workspace UAT certification and remediation, Deep Research
+  literature/import/return handoffs, Notes task-backed to-do lists, Mermaid
+  chat and artifact rendering, Chatterbox upstream parity, Audio Studio media
+  ticket transport, and Writing Playground manuscript annotations.
+- **Release, Packaging, And Local CI Tooling** — Added full-suite PR shard
+  fanout, local CI runner targets and pre-push wiring, MCP Unified RC artifact
+  and publish-readiness flows, MCP Unified trusted-publishing setup, backend
+  PyPI artifact guards, and release package-content checks.
 
 ### Changed
 
@@ -63,6 +92,20 @@ and this project adheres to Some kind of Versioning
   drill-through surfaces rather than redacted transcript views; diagnostics and
   audit metadata are sanitized, but automatic transcript/artifact hard-delete
   retention is not yet a release-certified claim.
+- **Design-System, Admin, And Product-State Migration** — Continued moving
+  onboarding, Knowledge QA, Skills Manager, Scheduled Tasks, quiz, prompt
+  studio, monitoring/admin, data-ops, billing, org/team, and study-suggestion
+  surfaces onto shared design-system alert/status patterns with refreshed
+  visual QA and state-label coverage.
+- **Sandbox, ACP, And MCP Policy Evidence** — Expanded VZ Linux host evidence,
+  disposable image-store clone flows, prepared-host/recovery/failure drill
+  packets, operator-status ingestion, ACP support-safe summaries, custom-profile
+  evidence contracts, live-agent caveat documentation, and conservative
+  downstream-agent support guardrails.
+- **Release Process And Documentation Posture** — Backfilled architecture,
+  ADR, README diagram, resource-governance/security/database, MCP/ACP, and
+  product-state tracker documentation so the release train has auditable
+  implementation and operational context.
 
 ### Fixed
 
@@ -82,6 +125,24 @@ and this project adheres to Some kind of Versioning
   persistent error banners, notes remediation follow-ups, Deep Research bundle
   import hardening, and duplicate workspace route registrations after the
   dev/main integration correction for PR #1982.
+- **Backend Module Review Hardening** — Addressed review findings across ACP,
+  agent orchestration, audit, AuthNZ, audio/audiobook, billing, chat,
+  Chatbooks, Collections, Data Tables, Evaluations, External Sources,
+  Flashcards, Governance, Ingestion, Infrastructure, LLM calls, Local LLM,
+  Logging, Meetings, Metrics, Monitoring, Notes, Persona, PrivilegeMaps, RAG,
+  Research, Reminders, Resource Governance, Sandbox, Scheduler, Security,
+  Setup, Sharing, Slides, Storage, Streaming, StudyPacks, Sync, Telegram, TTS,
+  Usage, Utils, Watchlists, WebClipper, and legacy WebSearch paths.
+- **Frontend And UAT Reliability** — Stabilized chat, media, character modal,
+  Knowledge QA, Mermaid artifact, Notes first-time UX, flashcard setup/review,
+  Quick Ingest file-type handling, Docker WebUI auth bootstrap, WebUI auth
+  persistence/recovery, MCP Hub setup recovery, and Research Workspace UAT
+  follow-up flows.
+- **Packaging, CI, And Runtime Compatibility** — Fixed PR shard coverage and
+  stability issues, MCP standalone/TestPyPI artifact contents, MCP snapshot
+  schema warnings, Search_and_Research package marker casing, Parakeet ONNX
+  graph bundle loading, invalid PGVector metadata order handling, trailing slash
+  media redirects, and package/runtime dependency readiness for release.
 
 ### Removed
 

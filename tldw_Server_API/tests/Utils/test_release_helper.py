@@ -585,8 +585,9 @@ def test_orchestrate_release_resumes_from_remote_tag_without_github_release() ->
     assert runner.pushed_main is False
     assert runner.pushed_tag is False
     assert "prepare_metadata" not in " ".join(runner.operations)
-    assert runner.operations.index("prepare_release_notes_from_tag:0.1.32") < runner.operations.index(
-        "create_github_release:0.1.32"
+    expected_version = bump_version(read_current_version(REPO_ROOT / "pyproject.toml"), "patch")
+    assert runner.operations.index(f"prepare_release_notes_from_tag:{expected_version}") < runner.operations.index(
+        f"create_github_release:{expected_version}"
     )
 
 
