@@ -37,6 +37,8 @@ Self-review completed before implementation planning. Found and patched a spec g
 Spec review loop completed: reviewer approved with no blocking issues. Advisory for planning: confirm the actual React Query skills query key/invalidation behavior or use an existing shared key helper if one exists.
 
 Final pre-plan review completed. Confirmed React Query invalidation uses the existing `['skills']` prefix. Patched two planning issues: `If-Match` should only be sent for positive safe integer versions, and backend verification must include context/MCP paths affected by the shared `SkillSummary` schema.
+
+Implementation plan written at `Docs/superpowers/plans/2026-06-28-skills-version-aware-delete.md`. Plan splits work into backend contract/API coverage, frontend API-client header handling, Skills manager UX recovery, and final verification/bookkeeping.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
