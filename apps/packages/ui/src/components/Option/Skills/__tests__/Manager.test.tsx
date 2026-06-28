@@ -1233,8 +1233,10 @@ describe("SkillsManager imports", () => {
       ]
       await confirmConfig.onOk?.()
 
-      expect(tldwClientMock.seedSkills).toHaveBeenCalledTimes(1)
-      expect(tldwClientMock.seedSkills).toHaveBeenCalledWith({ overwrite: true })
+      await waitFor(() => {
+        expect(tldwClientMock.seedSkills).toHaveBeenCalledTimes(1)
+        expect(tldwClientMock.seedSkills).toHaveBeenCalledWith({ overwrite: true })
+      })
     } finally {
       confirmSpy.mockRestore()
     }
