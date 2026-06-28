@@ -145,10 +145,13 @@ const isConflictError = (error: unknown): boolean => {
     message?: unknown
   } | null
   if (!candidate) return false
+  const message = typeof candidate.message === "string" ? candidate.message : ""
+  const hasConflictMessage = /\b(?:http|status(?:\s+code)?)\s*[:=]?\s*409\b/i.test(message)
+    || /\b409\b\s*(?:[:=-]\s*)?(?:version\s+)?conflict\b/i.test(message)
   return candidate.status === 409
     || candidate.statusCode === 409
     || candidate.response?.status === 409
-    || (typeof candidate.message === "string" && candidate.message.includes("409"))
+    || hasConflictMessage
 }
 
 const buildSkillInvocation = (skillName: string) => `/skill ${skillName}`
