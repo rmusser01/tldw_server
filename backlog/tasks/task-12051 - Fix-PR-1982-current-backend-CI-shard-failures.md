@@ -4,7 +4,7 @@ title: Fix PR 1982 current backend CI shard failures
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-28 05:47'
+updated_date: '2026-06-28 17:43'
 labels:
   - ci
   - pr-1982
@@ -62,6 +62,8 @@ Track the current PR #1982 CI failures after the full matrix appeared on head 93
 2026-06-27 product-workflows-runtime Windows follow-up: pre-push live run check found an additional failure in run 28301705852/job 83854087649, Full Suite shard (windows-latest / Python 3.12 / product-workflows-runtime). The failing test was test_webhook_step_noop, which left an async workflow run in running for 30 seconds. The exact test and full product-workflows-runtime shard both passed locally under CI-like env on macOS, so this is Windows/order-sensitive scheduler timing rather than webhook adapter behavior. Changed this adapter-focused test to run the saved workflow with mode=sync, matching nearby workflow adapter tests and avoiding background scheduler timing for a no-op webhook assertion.
 
 Run 28306969720 added Ubuntu/Python 3.13 llm-adapters-chat-endpoint failure: AuthNZ SQLite migration retry failed because adapter tests delete TEST_MODE while CI exports REDIS_URL to an unavailable Redis service; apply_authnz_migrations only allowed Redis-to-file fallback for TEST_MODE, not explicit pytest runtime. Patched migrations to also allow fallback under PYTEST_CURRENT_TEST, added regression coverage, and locally verified AuthNZ migration unit tests plus LLM adapter shards with REDIS_URL/EMBEDDINGS_REDIS_URL pointed at localhost and TEST_MODE removed by the tests.
+
+2026-06-28 current-head CI-contract follow-up: PR #1982 run 28328796097/job 83927186551 failed gap-verified-12 on tldw_Server_API/tests/CI/test_required_workflow_contracts.py. Root cause: the previous platform-services shard split added platform-services-main-routing in .github/workflows/ci.yml, but the contract test still expected FFmpeg gating and uncovered Services test membership for platform-services-core only. Updated the contract expectations to include platform-services-main-routing. Verification: the two failed contract tests passed locally; the full workflow contract file passed (38 tests); the failed shard path set passed under CI-like pytest settings (313 tests); git diff --check passed; Bandit with B101 excluded wrote /tmp/bandit_pr1982_ci_contracts.json with no findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
