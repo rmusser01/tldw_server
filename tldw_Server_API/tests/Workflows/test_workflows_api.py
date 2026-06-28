@@ -167,6 +167,25 @@ def _wait_for_webhook_delivery_status(
     )
 
 
+def _wait_for_event_type(
+    client: TestClient,
+    run_id: str,
+    event_type: str,
+    timeout: float = 5.0,
+) -> list[str]:
+    deadline = time.time() + timeout
+    event_types: list[str] = []
+    while time.time() < deadline:
+        response = client.get(f"/api/v1/workflows/runs/{run_id}/events")
+        assert response.status_code == 200, response.text
+        events = response.json()
+        event_types = [e["event_type"] for e in events]
+        if event_type in event_types:
+            return event_types
+        time.sleep(0.02)
+    pytest.fail(f"workflow run {run_id} did not record event {event_type!r}; events={event_types}")
+
+
 def test_create_and_run_saved_workflow(client_with_workflows_db: TestClient):
     client = client_with_workflows_db
 
@@ -193,9 +212,7 @@ def test_create_and_run_saved_workflow(client_with_workflows_db: TestClient):
     assert (data.get("outputs") or {}).get("text") == "Hello Alice"
 
     # Events include run_completed
-    ev = client.get(f"/api/v1/workflows/runs/{run_id}/events")
-    assert ev.status_code == 200
-    types = [e["event_type"] for e in ev.json()]
+    types = _wait_for_event_type(client, run_id, "run_completed")
     assert "run_completed" in types
 
 

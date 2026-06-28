@@ -123,6 +123,83 @@ def test_sqlite_append_event_releases_connection_on_serialization_error(monkeypa
     assert db._conn.in_transaction is False
 
 
+def test_get_run_retries_with_independent_read_after_sqlite_interface_error(monkeypatch, tmp_path):
+    db_path = tmp_path / "workflows.db"
+    db = WorkflowsDatabase(str(db_path))
+
+    run_id = "run-interface-retry"
+    db.create_run(
+        run_id=run_id,
+        tenant_id="t1",
+        user_id="1",
+        inputs={"name": "retry"},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "interface-retry", "version": 1, "steps": []},
+    )
+
+    class BadCursor:
+        def execute(self, *_args, **_kwargs):
+            raise sqlite3.InterfaceError("bad parameter or other API misuse")
+
+    class BadConnection:
+        def cursor(self):
+            return BadCursor()
+
+    bad_conn = BadConnection()
+    released = []
+
+    monkeypatch.setattr(db, "_acquire_sqlite", lambda: bad_conn)
+    monkeypatch.setattr(db, "_release_sqlite", released.append)
+
+    run = db.get_run(run_id)
+
+    assert run is not None
+    assert run.run_id == run_id
+    assert json.loads(run.inputs_json) == {"name": "retry"}
+    assert released == [bad_conn]
+
+
+def test_get_run_retries_with_independent_read_after_primary_miss(monkeypatch, tmp_path):
+    db_path = tmp_path / "workflows.db"
+    db = WorkflowsDatabase(str(db_path))
+
+    run_id = "run-primary-miss"
+    db.create_run(
+        run_id=run_id,
+        tenant_id="t1",
+        user_id="1",
+        inputs={"name": "visible"},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "primary-miss", "version": 1, "steps": []},
+    )
+
+    class EmptyCursor:
+        def execute(self, *_args, **_kwargs):
+            return self
+
+        def fetchone(self):
+            return None
+
+    class EmptyConnection:
+        def cursor(self):
+            return EmptyCursor()
+
+    empty_conn = EmptyConnection()
+    released = []
+
+    monkeypatch.setattr(db, "_acquire_sqlite", lambda: empty_conn)
+    monkeypatch.setattr(db, "_release_sqlite", released.append)
+
+    run = db.get_run(run_id)
+
+    assert run is not None
+    assert run.run_id == run_id
+    assert json.loads(run.inputs_json) == {"name": "visible"}
+    assert released == [empty_conn]
+
+
 def test_workflow_research_wait_db_tracks_links(tmp_path):
     db_path = tmp_path / "workflows.db"
     db = WorkflowsDatabase(str(db_path))

@@ -4,16 +4,22 @@ title: Fix PR 1982 current backend CI shard failures
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-28 18:50'
+updated_date: 2026-06-28 18:50
 labels:
-  - ci
-  - pr-1982
-  - tests
+- ci
+- pr-1982
+- tests
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/pull/1982'
-  - 'https://github.com/rmusser01/tldw_server/actions/runs/28282225659'
+- https://github.com/rmusser01/tldw_server/pull/1982
+- https://github.com/rmusser01/tldw_server/actions/runs/28282225659
 priority: high
+modified_files:
+- Dockerfiles/entrypoints/tldw-app-first-run.sh
+- tldw_Server_API/tests/Utils/test_docker_public_profile_compose.py
+- tldw_Server_API/app/core/DB_Management/Workflows_DB.py
+- tldw_Server_API/tests/Workflows/test_workflows_db.py
+- tldw_Server_API/tests/Workflows/test_workflows_api.py
 ---
 
 ## Description
@@ -96,4 +102,6 @@ Implemented and locally verified the current PR #1982 CI shard fixes for run 282
 Current PR #1982 run 28314994849 completed with two real workflow failures plus timeout/cancelled shards. The workflow failures share a root pattern: tests and async workflow engine activity share the same SQLite connection object (`check_same_thread=False`) across threads. On Windows this surfaced as `sqlite3.OperationalError: cannot commit - no transaction is active` in `WorkflowsDatabase.add_artifact`; on Ubuntu/Python 3.13 it surfaced as `sqlite3.InterfaceError: bad parameter or other API misuse` while polling `WorkflowsDatabase.get_run`. Focused tests pass locally on macOS/Python 3.11, so the fix needs to remove cross-thread shared-connection races rather than only chase assertions.
 Applied PR #1982 follow-up fixes for run 28314994849: refactored media embedding job endpoint tests to call endpoint functions directly instead of starting the full FastAPI app with TestClient; changed workflow scheduler status polling to use a short-lived independent SQLite read connection; waited for the workflow run to reach terminal state before inserting the synthetic artifact in the manifest mismatch API test; split the oversized platform-services-core CI shard into platform-services-core and platform-services-main-routing across the full-suite matrices. Verification: exact workflow failures passed (2 tests); full test_engine_scheduler.py passed (8 tests); embeddings media/message shard passed (40 tests); test_main_shutdown_job_pollers.py plus test_media_files_cleanup_service.py passed (31 tests); ci.yml YAML parse passed; shard coverage passed with no new unshared files; git diff --check passed; py_compile on touched Python passed; Bandit with B101 excluded on touched Python wrote /tmp/bandit_pr1982_ci_followup_12051.json with exit 0.
 2026-06-28 PR #1982 head fcb05017 UX gate follow-up: after PR #2536 merged into dev, current Frontend UX Gates run 28327254434/job 83919271487 failed Stage 4 responsive landmarks because /mcp-hub exposed zero semantic h1 elements at 390px. Root cause found in McpHubPage: the route title is rendered with AntD Typography.Title level={3}, which creates an h3 while the smoke gate requires exactly one route-level h1. Changed the title to Typography.Title level={1} while preserving the compact visual size and added a unit regression assertion. Verification: focused McpHubPage Vitest passed (12 tests); exact /mcp-hub Playwright Stage 4 responsive landmarks case passed locally against the dev server; git diff --check passed. Bandit not applicable because this fix touched only frontend TypeScript/TSX and task notes.
+2026-06-28 current-head Windows product-workflows-api follow-up: PR #1982 run 28330769212/job 83929151202 failed tldw_Server_API/tests/Workflows/test_runs_cursor_pagination.py::test_runs_cursor_pagination_flow with sqlite3.InterfaceError in WorkflowsDatabase.get_run immediately after the async workflow scheduler started a background engine thread. Root cause is shared SQLite connection contention on Windows between the request thread's get_run read and workflow-engine thread activity. Added a narrow get_run fallback that retries InterfaceError reads through a short-lived independent SQLite connection, plus regression coverage that forces the primary read to fail. Verification: forced InterfaceError regression plus exact failed pagination test passed (2 tests); full product-workflows-api shard path set passed locally (77 passed, 2 skipped); full test_workflows_db.py passed (13 tests); py_compile on touched Python passed; git diff --check passed; Bandit with B101 excluded wrote /tmp/bandit_pr1982_workflows_get_run.json with no findings.
+2026-06-28 current-head Ubuntu product-workflows-api follow-up: PR #1982 run 28330769212/jobs 83929152525 and 83929153494 failed the workflow API shard after the Windows get_run contention fix scope was identified. Ubuntu/Python 3.12 returned 404 while polling a run that engine logs showed had already transitioned to succeeded; Ubuntu/Python 3.13 observed terminal run status before the asynchronous run_completed event was visible. Extended the get_run fallback to retry with an independent SQLite read when the primary shared-connection read misses, and updated the workflow API test to wait briefly for the run_completed event after terminal status. Verification: focused regressions plus the two failed workflow API tests passed (4 tests); widened product-workflows-api/workflow DB path set passed (91 passed, 2 skipped); py_compile on touched workflow Python passed; git diff --check passed; Bandit with B101 excluded wrote /tmp/bandit_pr1982_workflows_get_run_events.json with no findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -1887,9 +1887,34 @@ class WorkflowsDatabase:
         conn = self._acquire_sqlite()
         try:
             row = conn.cursor().execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id_param,)).fetchone()
-            return WorkflowRun(**dict(row)) if row else None
+            row_data = dict(row) if row else None
+            if row_data is None:
+                row_data = self._get_run_via_independent_sqlite(run_id_param)
+        except sqlite3.InterfaceError as exc:
+            logger.debug(
+                "Workflows DB get_run SQLite read failed for run_id={}: {}; retrying with independent read connection",
+                run_id_param,
+                exc,
+            )
+            row_data = self._get_run_via_independent_sqlite(run_id_param)
         finally:
             self._release_sqlite(conn)
+        return WorkflowRun(**row_data) if row_data else None
+
+    def _get_run_via_independent_sqlite(self, run_id_param: str) -> dict[str, Any] | None:
+        """Read one workflow run through a short-lived connection after shared-connection contention."""
+        with sqlite3.connect(self.db_path, check_same_thread=False) as read_conn:
+            read_conn.row_factory = sqlite3.Row
+            configure_sqlite_connection(
+                read_conn,
+                use_wal=False,
+                synchronous=None,
+                foreign_keys=True,
+                busy_timeout_ms=5000,
+                temp_store=None,
+            )
+            row = read_conn.execute("SELECT * FROM workflow_runs WHERE run_id = ?", (run_id_param,)).fetchone()
+            return dict(row) if row else None
 
     def list_runs(
         self,
