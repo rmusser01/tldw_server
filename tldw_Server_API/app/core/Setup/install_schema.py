@@ -66,7 +66,6 @@ class EmbeddingsInstall(BaseModel):
     onnx: list[str] = Field(default_factory=list)
     trusted_custom_model_acknowledged: bool = Field(
         default=False,
-        exclude_if=lambda value: value is False,
     )
 
     @model_validator(mode='before')

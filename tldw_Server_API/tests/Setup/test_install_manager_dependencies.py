@@ -263,6 +263,15 @@ def test_install_plan_accepts_custom_embeddings_with_trust_acknowledgement():
     assert plan.embeddings.trusted_custom_model_acknowledged is True
 
 
+def test_install_plan_json_schema_does_not_embed_serializer_callables():
+    schema = InstallPlan.model_json_schema()
+
+    trusted_ack_schema = schema["$defs"]["EmbeddingsInstall"]["properties"][
+        "trusted_custom_model_acknowledged"
+    ]
+    assert "exclude_if" not in trusted_ack_schema
+
+
 def test_unpinned_vcs_requirement_is_blocked_by_default(monkeypatch):
     monkeypatch.delenv("TLDW_SETUP_ALLOW_UNPINNED_VCS", raising=False)
     monkeypatch.setattr(install_manager, "_pip_allowed", lambda: True)

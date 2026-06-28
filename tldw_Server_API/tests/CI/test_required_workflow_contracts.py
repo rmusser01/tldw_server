@@ -511,7 +511,8 @@ def test_full_suite_ffmpeg_setup_scopes_heavy_install_to_media_runtime_shards() 
         "matrix.shard.name == 'rag-new-unit-media-ingest' || "
         "matrix.shard.name == 'product-claims-service' || "
         "(matrix.shard.name == 'platform-services-core' || "
-        "matrix.shard.name == 'platform-services-main-routing') }}"
+        "matrix.shard.name == 'platform-services-main-routing' || "
+        "matrix.shard.name == 'platform-services-main-pollers') }}"
     )
 
     wizard_step = _get_step(workflow["jobs"]["wizard-tests"]["steps"], "Install FFmpeg and PortAudio (Linux)")
@@ -829,6 +830,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "platform-sandbox-state-store",
             "platform-sandbox-ws-streams",
             "platform-services-core",
+            "platform-services-main-pollers",
             "platform-services-main-routing",
             "platform-services-shutdown-lifespan",
             "platform-services-startup",
