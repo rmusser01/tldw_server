@@ -31,6 +31,8 @@ Continue TASK-530 Safe Operations after TASK-530.9 by adding version-aware singl
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec approved by user and written at `Docs/superpowers/specs/2026-06-28-skills-version-aware-delete-design.md`. Design scope: expose row versions in Skills list summaries, send `If-Match` from frontend deletes when known, preserve unversioned delete compatibility, and show reload-before-delete recovery copy on stale conflicts.
+
+Self-review completed before implementation planning. Found and patched a spec gap: `SkillSummary` is reused by `/skills/context` and async context integration paths, so requiring `version` must also update `_build_context_payload()` and context/MCP fixtures while keeping `context_text` unchanged. Also tightened delete conflict detection guidance to use a helper covering common wrapped error shapes.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
