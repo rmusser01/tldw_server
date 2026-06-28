@@ -1,5 +1,7 @@
 # audio_voices.py
 # Description: Custom voice management endpoints.
+import base64
+import binascii
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Request, UploadFile
@@ -22,6 +24,10 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
 )
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
+from tldw_Server_API.app.core.TTS.fish_s2_reference_imports import (
+    FishS2ReferenceImportError,
+    parse_fish_s2_reference_import,
+)
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 
 router = APIRouter(
@@ -466,6 +472,96 @@ async def list_fish_s2_references(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list Fish S2 references",
         ) from e
+
+
+@router.post(
+    "/providers/fish_s2/references/import",
+    summary="Import managed Fish S2 references from JSON or Markdown",
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(
+            require_token_scope(
+                "any",
+                require_if_present=True,
+                endpoint_id=VOICE_SCOPE_UPLOAD,
+                count_as=VOICE_COUNTER_TYPE,
+            )
+        ),
+    ],
+)
+async def import_fish_s2_references(
+    request: Request,
+    file: UploadFile = File(..., description="Fish S2 reference import file (.json, .md, .markdown)"),
+    force: bool = Form(default=False, description="Recreate remote Fish references unless an item overrides force"),
+    current_user: User = Depends(get_request_user),
+    tts_service: TTSServiceV2 = Depends(get_tts_service),
+):
+    """Import one or more Fish S2 managed references from JSON or Markdown."""
+    request_id = ensure_request_id(request)
+    try:
+        content = await file.read()
+        items = parse_fish_s2_reference_import(filename=file.filename or "", content=content)
+    except FishS2ReferenceImportError as e:
+        logger.warning(f"Fish S2 reference import parse failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_http_error_detail("Fish S2 reference import file is invalid", request_id, exc=e),
+        ) from e
+
+    results = []
+    errors = []
+    for item in items:
+        file_content = None
+        filename = None
+        if item.audio_base64:
+            try:
+                file_content = base64.b64decode(item.audio_base64, validate=True)
+            except (binascii.Error, ValueError) as e:
+                errors.append(
+                    {
+                        "index": item.source_index,
+                        "message": "audio_base64 must be valid base64",
+                    }
+                )
+                logger.warning(f"Fish S2 reference import item {item.source_index} has invalid audio_base64: {e}")
+                continue
+            filename = item.filename
+
+        try:
+            results.append(
+                await tts_service.create_fish_s2_reference(
+                    user_id=current_user.id,
+                    voice_id=item.voice_id,
+                    file_content=file_content,
+                    filename=filename,
+                    name=item.name,
+                    description=item.description,
+                    reference_text=item.reference_text,
+                    force=item.force if item.force is not None else force,
+                )
+            )
+        except Exception as e:
+            if e.__class__.__name__ == "VoiceProcessingError":
+                logger.warning(f"Fish S2 reference import item {item.source_index} failed: {e}", exc_info=True)
+                errors.append({"index": item.source_index, "message": str(e)})
+                continue
+            logger.error(f"Fish S2 reference import error: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to import Fish S2 references",
+            ) from e
+
+    response = {
+        "results": results,
+        "errors": errors,
+        "imported": len(results),
+        "failed": len(errors),
+    }
+    if not results and errors:
+        detail = _http_error_detail("Fish S2 reference import failed", request_id)
+        detail["errors"] = errors
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+    return response
 
 
 @router.delete(

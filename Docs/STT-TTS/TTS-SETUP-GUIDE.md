@@ -100,12 +100,54 @@ providers:
   `max_new_tokens`, `repetition_penalty`, and chunk-control options.
 - Managed references are user-scoped through:
   - `POST /api/v1/audio/providers/fish_s2/references`
+  - `POST /api/v1/audio/providers/fish_s2/references/import`
   - `GET /api/v1/audio/providers/fish_s2/references`
   - `DELETE /api/v1/audio/providers/fish_s2/references/{reference_id}`
 - `extra_params.reference_id` uses the local stored `voice_id`, not the backend
   Fish reference/model ID; tldw resolves it to the stored remote ID when present.
 - `voice=custom:<voice_id>` reuses existing Fish metadata when present and falls
   back to an inline reference payload built from the stored voice sample.
+
+#### Reference Imports
+
+`POST /api/v1/audio/providers/fish_s2/references/import` accepts `.json`,
+`.md`, and `.markdown` files. Each imported item must either reference an
+existing stored voice with `voice_id` or include embedded base64 audio with
+`audio_base64`, `filename`, `name`, and `reference_text`.
+
+JSON imports may be a single object, an array, or an object with a `references`
+array:
+
+```json
+{
+  "references": [
+    {
+      "voice_id": "local-voice-id",
+      "reference_text": "Transcript for the stored voice.",
+      "force": false
+    },
+    {
+      "audio_base64": "UklGR...",
+      "filename": "speaker.wav",
+      "name": "Speaker One",
+      "description": "Private Fish S2 voice",
+      "reference_text": "Transcript for the embedded audio."
+    }
+  ]
+}
+```
+
+Markdown imports use YAML frontmatter for metadata and the Markdown body as the
+reference transcript when `reference_text` is omitted:
+
+```markdown
+---
+voice_id: local-voice-id
+name: Speaker One
+description: Private Fish S2 voice
+---
+Transcript for the stored voice.
+```
 
 ## Local Model Providers
 
