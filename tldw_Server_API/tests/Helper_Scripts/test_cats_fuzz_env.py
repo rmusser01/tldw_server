@@ -66,6 +66,9 @@ def test_build_child_env_sets_test_paths_and_sentinels(tmp_path: Path) -> None:
     assert env["SINGLE_USER_TEST_API_KEY"] == DEFAULT_TEST_API_KEY
     assert env["DATABASE_URL"].startswith("sqlite:///")
     assert Path(env["TLDW_ENV_FILE"]).exists()
+    assert Path(env["TLDW_CONFIG_FILE"]).exists()
+    assert env["TLDW_CONFIG_PATH"] == env["TLDW_CONFIG_FILE"]
+    assert Path(env["TLDW_CONFIG_DIR"]).exists()
     assert env["OPENAI_API_KEY"] == ""
 
 
@@ -79,6 +82,36 @@ def test_build_child_env_blanks_sensitive_parent_values_when_external_allowed(tm
 
     assert env["SAFE"] == "value"
     assert env["OPENAI_API_KEY"] == ""
+
+
+@pytest.mark.unit
+def test_build_child_env_writes_inert_runtime_config_and_env_files(tmp_path: Path) -> None:
+    external_values = {
+        "OPENAI_API_KEY": "sk-real",
+        "CUSTOM_OPENAI_API_URL": "https://prod-llm.example/v1",
+        "CUSTOM_OPENAI_API_BASE_URL": "https://prod-base.example/v1",
+        "CUSTOM_OPENAI_API_2_BASE": "https://prod-second.example/v1",
+        "CUSTOM_OPENAI37_API_URL": "https://prod-dynamic.example/v1",
+        "OPENAI_API_BASE_URL": "https://prod-openai-proxy.example/v1",
+        "BEDROCK_API_BASE_URL": "https://bedrock.example",
+        "BEDROCK_OPENAI_BASE_URL": "https://bedrock-openai.example/v1",
+        "BEDROCK_RUNTIME_ENDPOINT": "https://bedrock-runtime.example",
+    }
+    env = build_child_env(
+        tmp_path,
+        parent_env=external_values,
+        allow_external=True,
+    )
+
+    for name in external_values:
+        assert env[name] == ""
+
+    config_text = Path(env["TLDW_CONFIG_FILE"]).read_text(encoding="utf-8")
+    env_text = Path(env["TLDW_ENV_FILE"]).read_text(encoding="utf-8")
+    combined_text = config_text + env_text
+    for value in external_values.values():
+        assert value not in combined_text
+    assert "disable = setup" in config_text
 
 
 @pytest.mark.unit
@@ -106,6 +139,9 @@ def test_build_server_env_removes_guarded_test_flags_and_writes_safe_env_file(tm
     assert server_env["USER_DB_BASE_DIR"] == child_env["USER_DB_BASE_DIR"]
     assert server_env["MINIMAL_TEST_APP"] == "1"
     assert server_env["MINIMAL_TEST_INCLUDE_AUDIO"] == "1"
+    assert server_env["TLDW_CONFIG_FILE"] == child_env["TLDW_CONFIG_FILE"]
+    assert server_env["TLDW_CONFIG_PATH"] == child_env["TLDW_CONFIG_PATH"]
+    assert server_env["TLDW_CONFIG_DIR"] == child_env["TLDW_CONFIG_DIR"]
     assert server_env["TLDW_ENV_FILE"] != child_env["TLDW_ENV_FILE"]
 
     server_env_file = Path(server_env["TLDW_ENV_FILE"])
@@ -121,7 +157,7 @@ def test_openapi_export_command_uses_module_and_output_path(tmp_path: Path) -> N
     output = tmp_path / "openapi.json"
     command = build_openapi_export_command(output)
 
-    assert command[:3] == ["python", "-m", "Helper_Scripts.cats_fuzz.openapi_export"]
+    assert command[:3] == [sys.executable, "-m", "Helper_Scripts.cats_fuzz.openapi_export"]
     assert str(output) in command
 
 

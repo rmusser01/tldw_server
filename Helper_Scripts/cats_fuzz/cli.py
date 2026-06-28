@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import sys
 
 # This wrapper invokes fixed local CLI argv with shell=False.
 import subprocess  # nosec B404
 from pathlib import Path
 from collections.abc import Mapping
+from urllib.parse import urlparse
 
 from Helper_Scripts.cats_fuzz.env import build_child_env, build_server_env
 from Helper_Scripts.cats_fuzz.manifest import get_builtin_block
@@ -44,6 +46,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.block is None:
         args.block = ["contract", "public-read"]
+    first_runtime_block = _first_runtime_block(args.block)
+    if first_runtime_block is not None and not args.start_server and not args.server_url:
+        parser.error(f"{first_runtime_block} requires --server-url or --start-server")
+    if args.server_url:
+        _validate_server_url(parser, args.server_url, args.block)
     return args
 
 
@@ -93,6 +100,30 @@ def _first_runtime_block(selected_blocks: list[str]) -> str | None:
     return None
 
 
+def _is_loopback_server_url(server_url: str) -> bool:
+    parsed = urlparse(server_url)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if not parsed.hostname:
+        return False
+    hostname = parsed.hostname.lower()
+    if hostname == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
+def _validate_server_url(parser: argparse.ArgumentParser, server_url: str, selected_blocks: list[str]) -> None:
+    for block_name in selected_blocks:
+        if block_name == "contract":
+            continue
+        block = get_builtin_block(block_name)
+        if not block.allows_network and not _is_loopback_server_url(server_url):
+            parser.error(f"{block_name} only allows loopback --server-url values")
+
+
 def _export_openapi_contract(contract_path: Path, child_env: Mapping[str, str], output_dir: Path) -> int:
     # Local helper argv, shell=False, executed with an isolated child env.
     result = subprocess.run(  # nosec B603
@@ -116,8 +147,6 @@ def main(argv: list[str] | None = None) -> int:
     selected_blocks = list(args.block)
     first_runtime_block = _first_runtime_block(selected_blocks)
     needs_runtime = first_runtime_block is not None
-    if needs_runtime and not args.start_server and not args.server_url:
-        raise ValueError(f"{first_runtime_block} requires --server-url or --start-server")
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)

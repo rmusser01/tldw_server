@@ -3,12 +3,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 
 def build_openapi_export_command(output_path: Path) -> list[str]:
     return [
-        "python",
+        sys.executable,
         "-m",
         "Helper_Scripts.cats_fuzz.openapi_export",
         "--output",

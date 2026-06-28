@@ -255,7 +255,7 @@ def test_runtime_run_with_existing_server_url_does_not_start_server(
 
 @pytest.mark.unit
 def test_runtime_without_server_url_and_no_start_server_raises_before_env_or_export(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from Helper_Scripts.cats_fuzz import cli
 
@@ -268,8 +268,41 @@ def test_runtime_without_server_url_and_no_start_server_raises_before_env_or_exp
     monkeypatch.setattr(cli, "build_child_env", fail_build_child_env)
     monkeypatch.setattr(cli.subprocess, "run", fail_run)
 
-    with pytest.raises(ValueError, match="public-read requires --server-url or --start-server"):
+    with pytest.raises(SystemExit) as exc_info:
         cli.main(["--block", "public-read", "--no-start-server", "--output", str(tmp_path)])
+    assert exc_info.value.code == 2
+    assert "public-read requires --server-url or --start-server" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_runtime_rejects_non_loopback_existing_server_url_before_env_or_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from Helper_Scripts.cats_fuzz import cli
+
+    def fail_build_child_env(*args: object, **kwargs: object) -> None:
+        raise AssertionError("child env should not be built for remote runtime invocation")
+
+    def fail_run(*args: object, **kwargs: object) -> None:
+        raise AssertionError("OpenAPI export should not run for remote runtime invocation")
+
+    monkeypatch.setattr(cli, "build_child_env", fail_build_child_env)
+    monkeypatch.setattr(cli.subprocess, "run", fail_run)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(
+            [
+                "--block",
+                "public-read",
+                "--server-url",
+                "https://prod.example",
+                "--no-start-server",
+                "--output",
+                str(tmp_path),
+            ]
+        )
+    assert exc_info.value.code == 2
+    assert "public-read only allows loopback --server-url values" in capsys.readouterr().err
 
 
 @pytest.mark.unit

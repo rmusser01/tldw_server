@@ -42,18 +42,27 @@ The default harness is local-only by design.
 - Uses a deterministic long test API key for single-user auth.
 - Writes AuthNZ and user SQLite databases under the artifact runtime directory.
 - Generates `runtime/.env` for OpenAPI export and CATS subprocesses.
+- Generates `runtime/config.txt` and forces `TLDW_CONFIG_FILE`,
+  `TLDW_CONFIG_PATH`, and `TLDW_CONFIG_DIR` to that file/directory so the
+  harness does not read a contributor's normal `Config_Files/config.txt`.
 - Generates `runtime/cats-server.env` for uvicorn without guarded test-mode
   flags that would make server startup unsafe.
-- Scrubs known sensitive values from the child environment.
+- Scrubs known sensitive values and provider endpoint overrides from the child
+  environment.
+- Sets `PYTHON_DOTENV_DISABLED=true` in child processes; the generated env file
+  remains as an audit artifact, while the subprocess environment carries the
+  actual test settings.
 - Refuses to run when real provider or webhook credentials are detected unless
   `--allow-external` is passed.
+- Rejects non-loopback `--server-url` values for built-in local-only blocks.
 - Passes `--maskHeaders X-API-KEY,Authorization` to CATS and masks those header
   values again in `summary.json`.
 - Uses CATS blackbox mode for runtime blocks, so the harness gate focuses on 5xx
   responses rather than normal validation mismatches.
 
-Do not point `--server-url` at production or a server with real user data. CATS
-intentionally sends malformed, oversized, and adversarial inputs.
+Do not point CATS at production or a server with real user data. CATS
+intentionally sends malformed, oversized, and adversarial inputs. The built-in
+blocks accept existing servers only on `localhost`, `127.0.0.0/8`, or `::1`.
 
 ## Prerequisites
 
@@ -190,7 +199,7 @@ Options:
   run multiple blocks. Defaults to `contract` and `public-read`.
 - `--output PATH`: Artifact directory. Defaults to `artifacts/cats-fuzz`.
 - `--cats-bin PATH_OR_NAME`: CATS executable. Defaults to `cats`.
-- `--server-url URL`: Use an already running server for runtime blocks.
+- `--server-url URL`: Use an already running loopback server for runtime blocks.
 - `--no-start-server`: Do not start uvicorn. Requires `--server-url` for runtime
   blocks.
 - `--start-server`: Explicitly start the isolated loopback uvicorn server.
@@ -241,6 +250,7 @@ For `--output /tmp/tldw-cats-run`, expect:
 +-- runtime/
 |   +-- .env
 |   +-- cats-server.env
+|   +-- config.txt
 |   +-- users.db
 |   +-- user_databases/
 +-- server/
@@ -352,7 +362,8 @@ python -m Helper_Scripts.cats_fuzz \
 ```
 
 The harness cannot isolate databases, env files, or credentials for a server you
-started yourself. Do not use this mode with production-like data.
+started yourself. Existing-server mode is still restricted to loopback hosts for
+built-in local-only blocks. Do not use this mode with production-like data.
 
 ## Cleanup
 

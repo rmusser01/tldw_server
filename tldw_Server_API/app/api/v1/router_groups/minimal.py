@@ -880,6 +880,7 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             log_name="setup",
             prefix=f"{API_V1_PREFIX}",
             tags=("setup",),
+            route_key="setup",
             skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
