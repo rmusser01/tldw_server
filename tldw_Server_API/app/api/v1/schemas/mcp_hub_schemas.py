@@ -607,6 +607,87 @@ class ToolRegistrySummaryResponse(BaseModel):
     modules: list[ToolRegistryModuleResponse] = Field(default_factory=list)
 
 
+McpHubDisplayState = Literal["needs_setup", "checking", "ready", "needs_attention", "no_tools", "stale"]
+McpHubReasonCode = Literal[
+    "not_configured",
+    "preflight_failed",
+    "discovery_not_run",
+    "auth_missing",
+    "runtime_unavailable",
+    "unreachable",
+    "discovery_failed",
+    "no_tools_returned",
+    "config_changed",
+    "catalog_expired",
+    "partial_capability",
+]
+McpHubReadinessAction = Literal[
+    "add_server",
+    "edit_config",
+    "open_credentials",
+    "refresh_discovery",
+    "validate",
+    "view_details",
+    "open_tool_catalog",
+    "open_audit",
+]
+McpHubCredentialState = Literal[
+    "not_required",
+    "required_missing",
+    "configured",
+    "legacy_fallback",
+    "unknown",
+]
+McpHubOperationType = Literal["validation", "discovery"]
+
+
+class McpHubCurrentOperationResponse(BaseModel):
+    operation_type: McpHubOperationType
+    started_at: datetime | str | None = None
+    message: str | None = None
+
+
+class McpHubDiscoveryRefreshResultResponse(BaseModel):
+    refreshed_servers: int = 0
+    total_servers: int = 0
+    virtual_tools: int = 0
+    errors: dict[str, str] = Field(default_factory=dict)
+
+
+class McpServerReadinessResponse(BaseModel):
+    server_id: str
+    server_name: str
+    display_state: McpHubDisplayState
+    credential_state: McpHubCredentialState
+    tool_count: int
+    reason_codes: list[McpHubReasonCode] = Field(default_factory=list)
+    primary_reason_code: McpHubReasonCode | None = None
+    allowed_actions: list[McpHubReadinessAction] = Field(default_factory=list)
+    message: str
+    current_operation: McpHubCurrentOperationResponse | None = None
+    last_validation_at: datetime | str | None = None
+    last_discovery_at: datetime | str | None = None
+    last_successful_discovery_at: datetime | str | None = None
+    last_error_category: str | None = None
+    last_error_message: str | None = None
+    refresh_result: McpHubDiscoveryRefreshResultResponse | None = None
+
+
+class McpHubReadinessResponse(BaseModel):
+    display_state: McpHubDisplayState
+    reason_codes: list[McpHubReasonCode] = Field(default_factory=list)
+    primary_reason_code: McpHubReasonCode | None = None
+    allowed_actions: list[McpHubReadinessAction] = Field(default_factory=list)
+    message: str
+    servers: list[McpServerReadinessResponse] = Field(default_factory=list)
+    total_servers: int = 0
+    ready_server_count: int = 0
+    checking_server_count: int = 0
+    attention_server_count: int = 0
+    no_tool_server_count: int = 0
+    stale_server_count: int = 0
+
+
 class ExternalServerCreateRequest(BaseModel):
     server_id: str = Field(..., min_length=1, max_length=128)
     name: str = Field(..., min_length=1, max_length=200)

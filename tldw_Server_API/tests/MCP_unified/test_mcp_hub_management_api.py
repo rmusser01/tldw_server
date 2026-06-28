@@ -557,10 +557,148 @@ class _FakeMcpServer:
         self.initialized = True
 
 
+def _external_server_row(
+    *,
+    server_id: str = "docs",
+    name: str = "Docs",
+    enabled: bool = True,
+    owner_scope_type: str = "global",
+    owner_scope_id: int | None = None,
+    transport: str = "stdio",
+    config: dict[str, Any] | None = None,
+    secret_configured: bool = False,
+    server_source: str = "managed",
+    superseded_by_server_id: str | None = None,
+    runtime_executable: bool = True,
+    auth_template_present: bool = False,
+    auth_template_valid: bool = False,
+    auth_template_blocked_reason: str | None = "no_auth_template",
+    credential_slots: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": server_id,
+        "name": name,
+        "enabled": enabled,
+        "owner_scope_type": owner_scope_type,
+        "owner_scope_id": owner_scope_id,
+        "transport": transport,
+        "config": config or {},
+        "secret_configured": secret_configured,
+        "key_hint": "hint",
+        "server_source": server_source,
+        "legacy_source_ref": None,
+        "superseded_by_server_id": superseded_by_server_id,
+        "binding_count": 0,
+        "runtime_executable": runtime_executable,
+        "auth_template_present": auth_template_present,
+        "auth_template_valid": auth_template_valid,
+        "auth_template_blocked_reason": auth_template_blocked_reason,
+        "credential_slots": credential_slots or [],
+        "created_by": 1,
+        "updated_by": 1,
+        "created_at": None,
+        "updated_at": None,
+    }
+
+
+def _required_slot(
+    *,
+    server_id: str = "docs",
+    slot_name: str = "api_key",
+    secret_configured: bool = False,
+    is_required: bool = True,
+) -> dict[str, Any]:
+    return {
+        "server_id": server_id,
+        "slot_name": slot_name,
+        "display_name": "API key",
+        "secret_kind": "api_key",
+        "privilege_class": "read",
+        "is_required": is_required,
+        "secret_configured": secret_configured,
+    }
+
+
+def _registry_entry(
+    *,
+    tool_name: str,
+    module: str,
+    metadata_warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "tool_name": tool_name,
+        "display_name": tool_name,
+        "description": None,
+        "module": module,
+        "module_display_name": module,
+        "category": "external",
+        "risk_class": "low",
+        "capabilities": [],
+        "mutates_state": False,
+        "uses_filesystem": False,
+        "uses_processes": False,
+        "uses_network": False,
+        "uses_credentials": False,
+        "supports_arguments_preview": False,
+        "path_boundable": False,
+        "path_argument_hints": [],
+        "metadata_source": "explicit",
+        "metadata_warnings": metadata_warnings or [],
+    }
+
+
+class _ConfigurableExternalServerService(_FakeService):
+    def __init__(self, rows: list[dict[str, Any]]):
+        self.rows = rows
+
+    async def list_external_servers(self, **kwargs: Any) -> list[dict[str, Any]]:
+        owner_scope_type = kwargs.get("owner_scope_type")
+        owner_scope_id = kwargs.get("owner_scope_id")
+        if owner_scope_type is None:
+            return list(self.rows)
+        return [
+            row
+            for row in self.rows
+            if row.get("owner_scope_type") == owner_scope_type
+            and row.get("owner_scope_id") == owner_scope_id
+        ]
+
+
+class _FakeToolRegistry:
+    def __init__(self, entries: list[dict[str, Any]] | None = None):
+        self.entries = entries or []
+
+    async def list_entries(self) -> list[dict[str, Any]]:
+        return list(self.entries)
+
+    async def list_modules(self) -> list[dict[str, Any]]:
+        modules: dict[str, dict[str, Any]] = {}
+        for entry in self.entries:
+            module = str(entry["module"])
+            modules.setdefault(
+                module,
+                {
+                    "module": module,
+                    "display_name": str(entry.get("module_display_name") or module),
+                    "tool_count": 0,
+                    "risk_summary": {},
+                    "metadata_warnings": [],
+                },
+            )
+            modules[module]["tool_count"] += 1
+        return list(modules.values())
+
+    async def get_summary(self) -> dict[str, list[dict[str, Any]]]:
+        return {"entries": await self.list_entries(), "modules": await self.list_modules()}
+
+
 def _build_app(
     *,
     principal: AuthPrincipal | None,
     fail_with_401: bool,
+    service: Any | None = None,
+    registry: Any | None = None,
+    refresh_executor: Any | None = None,
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(mcp_hub_management.router, prefix="/api/v1")
@@ -576,8 +714,14 @@ def _build_app(
         return principal
 
     app.dependency_overrides[auth_deps.get_auth_principal] = _fake_get_auth_principal
-    app.dependency_overrides[mcp_hub_management.get_mcp_hub_service] = lambda: _FakeService()
+    app.dependency_overrides[mcp_hub_management.get_mcp_hub_service] = lambda: service or _FakeService()
+    app.dependency_overrides[mcp_hub_management.get_mcp_hub_tool_registry_dep] = (
+        lambda: registry or _FakeToolRegistry()
+    )
     app.dependency_overrides[mcp_hub_management.get_mcp_credential_broker_service] = lambda: _FakeBrokerService()
+    refresh_dependency = getattr(mcp_hub_management, "get_mcp_hub_external_refresh_executor", None)
+    if refresh_dependency is not None and refresh_executor is not None:
+        app.dependency_overrides[refresh_dependency] = lambda: refresh_executor
     return app
 
 
@@ -1250,6 +1394,434 @@ async def test_list_external_servers_includes_source_state_fields() -> None:
     assert payload[0]["auth_template_present"] is True
     assert payload[0]["auth_template_valid"] is True
     assert payload[0]["auth_template_blocked_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_readiness_redacts_config_and_maps_no_auth_stdio() -> None:
+    service = _ConfigurableExternalServerService(
+        [
+            _external_server_row(
+                server_id="local-docs",
+                name="Local Docs",
+                transport="stdio",
+                config={"command": "docs-server", "env": {"TOKEN": "super-secret-token"}},
+                secret_configured=False,
+                auth_template_present=False,
+                auth_template_valid=False,
+                auth_template_blocked_reason="no_auth_template",
+            )
+        ]
+    )
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    body = json.dumps(payload)
+    assert "super-secret-token" not in body
+    assert "command" not in body
+    server = payload["servers"][0]
+    assert server["server_id"] == "local-docs"
+    assert server["credential_state"] == "not_required"
+    assert server["primary_reason_code"] == "discovery_not_run"
+    assert "refresh_discovery" in server["allowed_actions"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_readiness_maps_missing_required_slot_and_zero_tools() -> None:
+    service = _ConfigurableExternalServerService(
+        [
+            _external_server_row(
+                auth_template_present=True,
+                auth_template_valid=True,
+                auth_template_blocked_reason=None,
+                credential_slots=[_required_slot(secret_configured=False)],
+            )
+        ]
+    )
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    server = resp.json()["servers"][0]
+    assert server["credential_state"] == "required_missing"
+    assert server["primary_reason_code"] == "auth_missing"
+    assert server["reason_codes"] == ["auth_missing", "discovery_not_run"]
+    assert "open_credentials" in server["allowed_actions"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_readiness_maps_invalid_auth_template_to_preflight_failed() -> None:
+    service = _ConfigurableExternalServerService(
+        [
+            _external_server_row(
+                auth_template_present=True,
+                auth_template_valid=False,
+                auth_template_blocked_reason="missing_slot_mapping",
+                credential_slots=[],
+            )
+        ]
+    )
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    server = resp.json()["servers"][0]
+    assert server["credential_state"] == "unknown"
+    assert server["primary_reason_code"] == "preflight_failed"
+    assert "preflight_failed" in server["reason_codes"]
+    assert "validate" in server["allowed_actions"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_readiness_maps_non_stdio_without_auth_state_as_unknown() -> None:
+    service = _ConfigurableExternalServerService(
+        [
+            _external_server_row(
+                server_id="remote-docs",
+                transport="websocket",
+                secret_configured=False,
+                auth_template_present=False,
+                auth_template_valid=False,
+                auth_template_blocked_reason=None,
+                credential_slots=[],
+            )
+        ]
+    )
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    server = resp.json()["servers"][0]
+    assert server["credential_state"] == "unknown"
+    assert server["primary_reason_code"] == "discovery_not_run"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_readiness_maps_configured_optional_slot_as_configured() -> None:
+    service = _ConfigurableExternalServerService(
+        [
+            _external_server_row(
+                auth_template_present=False,
+                auth_template_valid=False,
+                auth_template_blocked_reason=None,
+                credential_slots=[
+                    _required_slot(
+                        slot_name="optional_token",
+                        secret_configured=True,
+                        is_required=False,
+                    )
+                ],
+            )
+        ]
+    )
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    server = resp.json()["servers"][0]
+    assert server["credential_state"] == "configured"
+    assert server["primary_reason_code"] == "discovery_not_run"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_readiness_maps_disabled_or_nonexecutable_runtime_unavailable() -> None:
+    service = _ConfigurableExternalServerService(
+        [
+            _external_server_row(server_id="disabled", enabled=False),
+            _external_server_row(server_id="missing-runtime", runtime_executable=False),
+        ]
+    )
+    registry = _FakeToolRegistry(
+        [
+            _registry_entry(tool_name="ext.disabled.search", module="external.disabled"),
+            _registry_entry(tool_name="ext.missing-runtime.search", module="external.missing-runtime"),
+        ]
+    )
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=registry,
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    servers = {server["server_id"]: server for server in resp.json()["servers"]}
+    assert servers["disabled"]["primary_reason_code"] == "runtime_unavailable"
+    assert servers["missing-runtime"]["primary_reason_code"] == "runtime_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_readiness_ignores_builtin_module_collision() -> None:
+    service = _ConfigurableExternalServerService([_external_server_row(server_id="docs")])
+    registry = _FakeToolRegistry([_registry_entry(tool_name="docs.search", module="docs")])
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=registry,
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    server = resp.json()["servers"][0]
+    assert server["tool_count"] == 0
+    assert server["primary_reason_code"] == "discovery_not_run"
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_readiness_counts_authoritative_external_tool_as_ready() -> None:
+    service = _ConfigurableExternalServerService([_external_server_row(server_id="docs")])
+    registry = _FakeToolRegistry([_registry_entry(tool_name="ext.docs.search", module="docs")])
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=registry,
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/mcp/hub/readiness")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    server = payload["servers"][0]
+    assert server["tool_count"] == 1
+    assert server["display_state"] == "ready"
+    assert server["primary_reason_code"] is None
+    assert payload["ready_server_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_validate_requires_mutation_permission_and_does_not_refresh() -> None:
+    class _RefreshExecutor:
+        calls = 0
+
+        async def __call__(self, server_id: str) -> dict[str, Any]:
+            self.calls += 1
+            return {"refreshed_servers": 1, "total_servers": 1, "virtual_tools": 1, "errors": {}}
+
+    service = _ConfigurableExternalServerService([_external_server_row(server_id="docs")])
+    refresh_executor = _RefreshExecutor()
+    forbidden_app = _build_app(
+        principal=_make_principal(),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+        refresh_executor=refresh_executor,
+    )
+    with TestClient(forbidden_app) as client:
+        forbidden = client.post("/api/v1/mcp/hub/external-servers/docs/validate")
+    assert forbidden.status_code == 403
+
+    allowed_app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+        refresh_executor=refresh_executor,
+    )
+    with TestClient(allowed_app) as client:
+        allowed = client.post("/api/v1/mcp/hub/external-servers/docs/validate")
+
+    assert allowed.status_code == 200
+    assert allowed.json()["server_id"] == "docs"
+    assert allowed.json()["current_operation"] is None
+    assert refresh_executor.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_refresh_checks_visibility_executes_refresh_and_sanitizes_errors() -> None:
+    class _RefreshExecutor:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def __call__(self, server_id: str) -> dict[str, Any]:
+            self.calls.append(server_id)
+            return {
+                "refreshed_servers": 0,
+                "total_servers": 1,
+                "virtual_tools": 0,
+                "errors": {server_id: "failed with super-secret-token"},
+            }
+
+    service = _ConfigurableExternalServerService(
+        [_external_server_row(server_id="docs", owner_scope_type="team", owner_scope_id=7)]
+    )
+    refresh_executor = _RefreshExecutor()
+    scoped_app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[], team_ids=[7]),
+        fail_with_401=False,
+        service=service,
+        registry=_FakeToolRegistry(),
+        refresh_executor=refresh_executor,
+    )
+
+    with TestClient(scoped_app) as client:
+        hidden = client.post("/api/v1/mcp/hub/external-servers/private/refresh-discovery")
+        visible = client.post("/api/v1/mcp/hub/external-servers/docs/refresh-discovery")
+
+    assert hidden.status_code == 404
+    assert visible.status_code == 200
+    payload = visible.json()
+    assert refresh_executor.calls == ["docs"]
+    assert payload["server_id"] == "docs"
+    assert payload["primary_reason_code"] == "discovery_failed"
+    assert payload["last_error_category"] == "discovery_failed"
+    assert payload["last_error_message"] == "Discovery refresh failed."
+    body = json.dumps(payload)
+    assert "super-secret-token" not in body
+    assert payload["refresh_result"]["errors"] == {"docs": "Discovery refresh failed."}
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_refresh_rejects_non_operational_visible_servers_without_execution() -> None:
+    class _RefreshExecutor:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def __call__(self, server_id: str) -> dict[str, Any]:
+            self.calls.append(server_id)
+            return {"refreshed_servers": 1, "total_servers": 1, "virtual_tools": 1, "errors": {}}
+
+    blocked_rows = [
+        _external_server_row(server_id="disabled", enabled=False),
+        _external_server_row(server_id="superseded", superseded_by_server_id="replacement"),
+        _external_server_row(server_id="legacy", server_source="legacy"),
+        _external_server_row(server_id="missing-runtime", runtime_executable=False),
+    ]
+    refresh_executor = _RefreshExecutor()
+    app = _build_app(
+        principal=_make_principal(roles=["admin"], permissions=[]),
+        fail_with_401=False,
+        service=_ConfigurableExternalServerService(blocked_rows),
+        registry=_FakeToolRegistry(),
+        refresh_executor=refresh_executor,
+    )
+
+    with TestClient(app) as client:
+        responses = [
+            client.post(f"/api/v1/mcp/hub/external-servers/{row['id']}/refresh-discovery")
+            for row in blocked_rows
+        ]
+
+    assert [response.status_code for response in responses] == [409, 409, 409, 409]
+    assert [
+        response.json()["detail"] for response in responses
+    ] == ["External server is not available for discovery refresh"] * 4
+    assert refresh_executor.calls == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_refresh_executor_initializes_server_before_module_lookup(monkeypatch) -> None:
+    class _RefreshModule:
+        async def execute_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+            return {"tool_name": tool_name, "arguments": arguments}
+
+        async def execute_with_circuit_breaker(self, operation: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            return await operation(*args, **kwargs)
+
+    class _ModuleRegistry:
+        def __init__(self, server: "_McpServer") -> None:
+            self.server = server
+            self.lookup_before_initialize = False
+
+        async def find_module_for_tool(self, tool_name: str) -> _RefreshModule:
+            assert tool_name == "external.tools.refresh"
+            self.lookup_before_initialize = not self.server.initialized
+            return _RefreshModule()
+
+    class _McpServer:
+        def __init__(self) -> None:
+            self.initialized = False
+            self.initialize_calls = 0
+            self.module_registry = _ModuleRegistry(self)
+
+        async def initialize(self) -> None:
+            self.initialize_calls += 1
+            self.initialized = True
+
+    server = _McpServer()
+    monkeypatch.setattr(mcp_hub_management, "get_mcp_server", lambda: server)
+
+    result = await mcp_hub_management._execute_external_refresh_tool("docs")
+
+    assert server.initialize_calls == 1
+    assert server.module_registry.lookup_before_initialize is False
+    assert result["arguments"] == {"server_id": "docs"}
+
+
+@pytest.mark.asyncio
+async def test_mcp_hub_refresh_serializes_same_server_concurrent_requests() -> None:
+    class _RefreshExecutor:
+        def __init__(self) -> None:
+            self.active = 0
+            self.max_active = 0
+
+        async def __call__(self, server_id: str) -> dict[str, Any]:
+            assert server_id == "docs"
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0.02)
+            self.active -= 1
+            return {"refreshed_servers": 1, "total_servers": 1, "virtual_tools": 1, "errors": {}}
+
+    refresh_executor = _RefreshExecutor()
+    service = _ConfigurableExternalServerService([_external_server_row(server_id="docs")])
+    registry = _FakeToolRegistry([_registry_entry(tool_name="ext.docs.search", module="external.docs")])
+
+    async def _call_refresh() -> Any:
+        return await mcp_hub_management.refresh_single_external_server_discovery(
+            server_id="docs",
+            principal=_make_principal(roles=["admin"], permissions=[]),
+            svc=service,
+            registry=registry,
+            refresh_executor=refresh_executor,
+        )
+
+    await asyncio.gather(_call_refresh(), _call_refresh())
+
+    assert refresh_executor.max_active == 1
 
 
 @pytest.mark.asyncio

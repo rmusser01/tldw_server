@@ -496,6 +496,91 @@ export type McpHubToolRegistrySummary = {
   modules: McpHubToolRegistryModule[]
 }
 
+export type McpHubReadinessDisplayState =
+  | "needs_setup"
+  | "checking"
+  | "ready"
+  | "needs_attention"
+  | "no_tools"
+  | "stale"
+
+export type McpHubReadinessReasonCode =
+  | "not_configured"
+  | "preflight_failed"
+  | "discovery_not_run"
+  | "auth_missing"
+  | "runtime_unavailable"
+  | "unreachable"
+  | "discovery_failed"
+  | "no_tools_returned"
+  | "config_changed"
+  | "catalog_expired"
+  | "partial_capability"
+
+export type McpHubReadinessAction =
+  | "add_server"
+  | "edit_config"
+  | "open_credentials"
+  | "refresh_discovery"
+  | "validate"
+  | "view_details"
+  | "open_tool_catalog"
+  | "open_audit"
+
+export type McpHubCredentialState =
+  | "not_required"
+  | "required_missing"
+  | "configured"
+  | "legacy_fallback"
+  | "unknown"
+
+export type McpHubCurrentOperation = {
+  operation_type: "validation" | "discovery"
+  started_at?: string | null
+  message?: string | null
+}
+
+export type McpHubDiscoveryRefreshResult = {
+  refreshed_servers: number
+  total_servers: number
+  virtual_tools: number
+  errors: Record<string, string>
+}
+
+export type McpHubServerReadiness = {
+  server_id: string
+  server_name: string
+  display_state: McpHubReadinessDisplayState
+  credential_state: McpHubCredentialState
+  tool_count: number
+  reason_codes: McpHubReadinessReasonCode[]
+  primary_reason_code?: McpHubReadinessReasonCode | null
+  allowed_actions: McpHubReadinessAction[]
+  message: string
+  current_operation?: McpHubCurrentOperation | null
+  last_validation_at?: string | null
+  last_discovery_at?: string | null
+  last_successful_discovery_at?: string | null
+  last_error_category?: string | null
+  last_error_message?: string | null
+  refresh_result?: McpHubDiscoveryRefreshResult | null
+}
+
+export type McpHubReadiness = {
+  display_state: McpHubReadinessDisplayState
+  reason_codes: McpHubReadinessReasonCode[]
+  primary_reason_code?: McpHubReadinessReasonCode | null
+  allowed_actions: McpHubReadinessAction[]
+  message: string
+  servers: McpHubServerReadiness[]
+  total_servers: number
+  ready_server_count: number
+  checking_server_count: number
+  attention_server_count: number
+  no_tool_server_count: number
+  stale_server_count: number
+}
+
 export type McpHubExternalServer = {
   id: string
   name: string
@@ -1080,6 +1165,13 @@ export const listExternalServers = async (params: {
   })
 }
 
+export const getMcpHubReadiness = async (): Promise<McpHubReadiness> => {
+  return await bgRequestClient<McpHubReadiness>({
+    path: "/api/v1/mcp/hub/readiness",
+    method: "GET"
+  })
+}
+
 export const createExternalServer = async (
   payload: McpHubExternalServerCreateInput
 ): Promise<McpHubExternalServer> => {
@@ -1095,6 +1187,24 @@ export const importExternalServer = async (
 ): Promise<McpHubExternalServer> => {
   return await bgRequestClient<McpHubExternalServer>({
     path: `/api/v1/mcp/hub/external-servers/${encodeURIComponent(serverId)}/import`,
+    method: "POST"
+  })
+}
+
+export const validateExternalServer = async (
+  serverId: string
+): Promise<McpHubServerReadiness> => {
+  return await bgRequestClient<McpHubServerReadiness>({
+    path: `/api/v1/mcp/hub/external-servers/${encodeURIComponent(serverId)}/validate`,
+    method: "POST"
+  })
+}
+
+export const refreshExternalServerReadinessDiscovery = async (
+  serverId: string
+): Promise<McpHubServerReadiness> => {
+  return await bgRequestClient<McpHubServerReadiness>({
+    path: `/api/v1/mcp/hub/external-servers/${encodeURIComponent(serverId)}/refresh-discovery`,
     method: "POST"
   })
 }

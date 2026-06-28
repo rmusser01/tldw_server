@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 const mocks = vi.hoisted(() => ({
   getToolRegistrySummary: vi.fn(),
+  getMcpHubReadiness: vi.fn(),
   invalidateQueries: vi.fn(),
   listExternalServers: vi.fn(),
-  useMcpTools: vi.fn(),
   refreshExternalServerDiscovery: vi.fn()
 }))
 
@@ -17,76 +17,72 @@ vi.mock("@tanstack/react-query", () => ({
   })
 }))
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (_key: string, defaultValue?: string) => defaultValue ?? _key
-  })
-}))
-
 vi.mock("@/services/tldw/mcp-hub", () => ({
-  describeExternalServerDiscoveryRefreshFailure: (result: { message?: string | null; errors?: Record<string, string> }) => {
-    const errorText = Object.entries(result.errors ?? {})
-      .map(([serverId, reason]) => `${serverId}: ${reason}`)
-      .join("; ")
-    return [result.message, errorText].filter(Boolean).join(" - ") || "Discovery refresh failed"
-  },
   getToolRegistrySummary: (...args: unknown[]) => mocks.getToolRegistrySummary(...args),
+  getMcpHubReadiness: (...args: unknown[]) => mocks.getMcpHubReadiness(...args),
   listExternalServers: (...args: unknown[]) => mocks.listExternalServers(...args),
   refreshExternalServerDiscovery: (...args: unknown[]) => mocks.refreshExternalServerDiscovery(...args)
 }))
 
-vi.mock("@/hooks/useMcpTools", () => ({
-  useMcpTools: (...args: unknown[]) => mocks.useMcpTools(...args)
-}))
-
 import { ToolCatalogsTab } from "../ToolCatalogsTab"
 
-const deferred = <T,>() => {
-  let resolve!: (value: T) => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<T>((promiseResolve, promiseReject) => {
-    resolve = promiseResolve
-    reject = promiseReject
-  })
-  return { promise, resolve, reject }
-}
+const readinessResponse = (overrides: Record<string, unknown> = {}) => ({
+  display_state: "needs_setup",
+  reason_codes: ["not_configured"],
+  primary_reason_code: "not_configured",
+  allowed_actions: ["add_server"],
+  message: "Add an MCP server to begin setup.",
+  servers: [],
+  total_servers: 0,
+  ready_server_count: 0,
+  checking_server_count: 0,
+  attention_server_count: 0,
+  no_tool_server_count: 0,
+  stale_server_count: 0,
+  ...overrides
+})
 
-const registrySummary = (toolName: string, moduleName: string) => ({
-  entries: [
-    {
-      tool_name: toolName,
-      display_name: toolName,
-      module: moduleName,
-      category: "search",
-      risk_class: "low",
-      capabilities: ["network.read"],
-      mutates_state: false,
-      uses_filesystem: false,
-      uses_processes: false,
-      uses_network: true,
-      uses_credentials: false,
-      supports_arguments_preview: true,
-      path_boundable: false,
-      path_argument_hints: [],
-      metadata_source: "explicit",
-      metadata_warnings: []
-    }
-  ],
-  modules: [
-    {
-      module: moduleName,
-      display_name: moduleName,
-      tool_count: 1,
-      risk_summary: { low: 1, medium: 0, high: 0, unclassified: 0 },
-      metadata_warnings: []
-    }
-  ]
+const readinessServer = (overrides: Record<string, unknown> = {}) => ({
+  server_id: "docs-managed",
+  server_name: "Docs Managed",
+  display_state: "needs_attention",
+  credential_state: "not_required",
+  tool_count: 0,
+  reason_codes: ["discovery_not_run"],
+  primary_reason_code: "discovery_not_run",
+  allowed_actions: ["refresh_discovery", "edit_config"],
+  message: "Run discovery to populate this server's tool catalog. No credentials required.",
+  current_operation: null,
+  last_validation_at: null,
+  last_discovery_at: null,
+  last_successful_discovery_at: null,
+  last_error_category: null,
+  last_error_message: null,
+  refresh_result: null,
+  ...overrides
+})
+
+const externalServer = (overrides: Record<string, unknown> = {}) => ({
+  id: "docs-managed",
+  name: "Docs Managed",
+  enabled: true,
+  owner_scope_type: "global",
+  transport: "stdio",
+  config: {},
+  secret_configured: false,
+  server_source: "managed",
+  binding_count: 0,
+  runtime_executable: true,
+  auth_template_present: false,
+  auth_template_valid: false,
+  auth_template_blocked_reason: "no_auth_template",
+  credential_slots: [],
+  ...overrides
 })
 
 describe("ToolCatalogsTab", () => {
   beforeEach(() => {
-    vi.resetAllMocks()
-    mocks.invalidateQueries.mockResolvedValue(undefined)
+    vi.clearAllMocks()
     mocks.getToolRegistrySummary.mockResolvedValue({
       entries: [
         {
@@ -118,41 +114,9 @@ describe("ToolCatalogsTab", () => {
         }
       ]
     })
-    mocks.refreshExternalServerDiscovery.mockResolvedValue({
-      ok: true,
-      status: "refreshed"
-    })
-    mocks.listExternalServers.mockResolvedValue([
-      {
-        id: "docs-managed",
-        name: "Docs Managed",
-        enabled: true,
-        owner_scope_type: "global",
-        transport: "stdio",
-        config: {},
-        secret_configured: false,
-        server_source: "managed",
-        binding_count: 1,
-        runtime_executable: true,
-        auth_template_present: false,
-        auth_template_valid: false,
-        auth_template_blocked_reason: null,
-        credential_slots: []
-      }
-    ])
-    mocks.useMcpTools.mockReturnValue({
-      healthState: "healthy",
-      toolsAvailable: true,
-      availableTools: [{ rawName: "notes.search" }],
-      chatTools: [{ rawName: "notes.search" }],
-      toolCounts: {
-        discovered: 1,
-        executable: 1,
-        disabled: 0,
-        colliding: 0,
-        chatEnabled: 1
-      }
-    })
+    mocks.listExternalServers.mockResolvedValue([])
+    mocks.getMcpHubReadiness.mockResolvedValue(readinessResponse())
+    mocks.refreshExternalServerDiscovery.mockResolvedValue({})
   })
 
   it("renders registry-backed module and tool metadata", async () => {
@@ -165,223 +129,369 @@ describe("ToolCatalogsTab", () => {
     expect(screen.getByText("hints:path")).toBeTruthy()
   })
 
-  it("explicitly refreshes external discovery and reloads registry metadata", async () => {
+  it("shows add-server recovery when no MCP servers are connected", async () => {
     const user = userEvent.setup()
-    mocks.getToolRegistrySummary
-      .mockResolvedValueOnce({
-        entries: [],
-        modules: []
-      })
-      .mockResolvedValueOnce({
-        entries: [
-          {
-            tool_name: "web.search",
-            display_name: "web.search",
-            module: "external:web",
-            category: "search",
-            risk_class: "medium",
-            capabilities: ["network.read"],
-            mutates_state: false,
-            uses_filesystem: false,
-            uses_processes: false,
-            uses_network: true,
-            uses_credentials: true,
-            supports_arguments_preview: true,
-            path_boundable: false,
-            path_argument_hints: [],
-            metadata_source: "explicit",
-            metadata_warnings: []
-          }
-        ],
-        modules: [
-          {
-            module: "external:web",
-            display_name: "External Web",
-            tool_count: 1,
-            risk_summary: { low: 0, medium: 1, high: 0, unclassified: 0 },
-            metadata_warnings: []
-          }
-        ]
-      })
-
-    render(<ToolCatalogsTab />)
-
-    expect(await screen.findByText(/no tools discovered yet/i)).toBeTruthy()
-    await user.click(screen.getByRole("button", { name: /refresh tools/i }))
-
-    expect(mocks.refreshExternalServerDiscovery).toHaveBeenCalledWith()
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tools"] })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-catalogs"] })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-modules"] })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-health"] })
-    expect(await screen.findByText("External Web")).toBeTruthy()
-    expect(screen.getByText("web.search")).toBeTruthy()
-    expect(mocks.getToolRegistrySummary).toHaveBeenCalledTimes(2)
-  })
-
-  it("offers Add Server when no managed servers or tools exist", async () => {
-    const user = userEvent.setup()
-    const onAddServer = vi.fn()
+    const onOpenServerSetup = vi.fn()
     mocks.getToolRegistrySummary.mockResolvedValueOnce({
       entries: [],
       modules: []
     })
-    mocks.listExternalServers.mockResolvedValueOnce([])
-    mocks.useMcpTools.mockReturnValue({
-      healthState: "healthy",
-      toolsAvailable: false,
-      availableTools: [],
-      chatTools: [],
-      toolCounts: {
-        discovered: 0,
-        executable: 0,
-        disabled: 0,
-        colliding: 0,
-        chatEnabled: 0
-      }
-    })
 
-    render(<ToolCatalogsTab onAddServer={onAddServer} />)
+    render(<ToolCatalogsTab onOpenServerSetup={onOpenServerSetup} />)
 
-    expect(await screen.findByText(/no managed mcp servers yet/i)).toBeTruthy()
-    expect(screen.getByText(/add a managed server before looking for tool catalog entries/i)).toBeTruthy()
+    expect(await screen.findByText(/no mcp servers connected/i)).toBeTruthy()
     await user.click(screen.getByRole("button", { name: /add server/i }))
-    expect(onAddServer).toHaveBeenCalledTimes(1)
+    expect(onOpenServerSetup).toHaveBeenCalledTimes(1)
   })
 
-  it("surfaces server inventory load errors instead of showing an empty server state", async () => {
+  it("shows refresh discovery recovery when a saved server has no catalog yet", async () => {
     const user = userEvent.setup()
-    mocks.getToolRegistrySummary
-      .mockResolvedValueOnce({
-        entries: [],
-        modules: []
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [],
+      modules: []
+    })
+    mocks.listExternalServers.mockResolvedValueOnce([externalServer()])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse({
+        display_state: "needs_attention",
+        reason_codes: ["discovery_not_run"],
+        primary_reason_code: "discovery_not_run",
+        allowed_actions: ["refresh_discovery"],
+        message: "Run discovery to populate MCP tool catalogs.",
+        servers: [readinessServer()],
+        total_servers: 1,
+        attention_server_count: 1
       })
-      .mockResolvedValueOnce({
-        entries: [],
-        modules: []
-      })
-    mocks.listExternalServers
-      .mockRejectedValueOnce(new Error("inventory timeout"))
-      .mockResolvedValueOnce([])
+    )
 
     render(<ToolCatalogsTab />)
 
-    expect(await screen.findByText(/could not load server inventory/i)).toBeTruthy()
-    expect(screen.getByText(/inventory timeout/i)).toBeTruthy()
-    expect(screen.getByText(/server inventory unavailable/i)).toBeTruthy()
-    expect(screen.queryByText(/no managed mcp servers yet/i)).toBeNull()
-
-    await user.click(screen.getByRole("button", { name: /retry server inventory/i }))
-
-    expect(await screen.findByText(/no managed mcp servers yet/i)).toBeTruthy()
-    expect(screen.queryByText(/server inventory unavailable/i)).toBeNull()
-  })
-
-  it("offers discovery refresh when managed servers exist but no tools are registered", async () => {
-    const user = userEvent.setup()
-    mocks.getToolRegistrySummary
-      .mockResolvedValueOnce({
-        entries: [],
-        modules: []
-      })
-      .mockResolvedValueOnce(registrySummary("docs.lookup", "External Docs"))
-
-    render(<ToolCatalogsTab />)
-
-    expect(await screen.findByText(/no tools discovered yet/i)).toBeTruthy()
-    expect(screen.getByText(/managed servers are configured/i)).toBeTruthy()
+    expect(await screen.findByText(/docs managed is saved/i)).toBeTruthy()
     await user.click(screen.getByRole("button", { name: /refresh discovery/i }))
-
-    expect(mocks.refreshExternalServerDiscovery).toHaveBeenCalledWith()
-    expect(await screen.findByText("docs.lookup")).toBeTruthy()
+    expect(mocks.refreshExternalServerDiscovery).toHaveBeenCalledWith("docs-managed")
   })
 
-  it("shows access guidance when registry tools are present but none are executable in chat", async () => {
-    mocks.useMcpTools.mockReturnValue({
-      healthState: "healthy",
-      toolsAvailable: true,
-      availableTools: [{ rawName: "notes.search" }],
-      chatTools: [],
-      toolCounts: {
-        discovered: 1,
-        executable: 1,
-        disabled: 0,
-        colliding: 0,
-        chatEnabled: 0
-      }
+  it("shows credential recovery when a saved server is missing required credentials", async () => {
+    const user = userEvent.setup()
+    const onOpenServerCredentials = vi.fn()
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [],
+      modules: []
     })
+    mocks.listExternalServers.mockResolvedValueOnce([
+      externalServer({
+        credential_slots: [
+          {
+            server_id: "docs-managed",
+            slot_name: "token_readonly",
+            display_name: "Read-only token",
+            secret_kind: "bearer_token",
+            privilege_class: "read",
+            is_required: true,
+            secret_configured: false
+          }
+        ]
+      })
+    ])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse({
+        display_state: "needs_attention",
+        reason_codes: ["auth_missing"],
+        primary_reason_code: "auth_missing",
+        allowed_actions: ["open_credentials", "view_details"],
+        message: "One or more MCP servers are missing required credentials.",
+        servers: [
+          readinessServer({
+            credential_state: "required_missing",
+            reason_codes: ["auth_missing"],
+            primary_reason_code: "auth_missing",
+            allowed_actions: ["open_credentials", "view_details"],
+            message: "Credentials are required before this server can be used."
+          })
+        ],
+        total_servers: 1,
+        attention_server_count: 1
+      })
+    )
+
+    render(<ToolCatalogsTab onOpenServerCredentials={onOpenServerCredentials} />)
+
+    expect(await screen.findByText(/docs managed needs credentials/i)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /fix credentials/i }))
+    expect(onOpenServerCredentials).toHaveBeenCalledWith("docs-managed")
+  })
+
+  it("shows server-config recovery when a saved server runtime is unavailable", async () => {
+    const user = userEvent.setup()
+    const onOpenServerConfig = vi.fn()
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [],
+      modules: []
+    })
+    mocks.listExternalServers.mockResolvedValueOnce([
+      externalServer({
+        runtime_executable: false
+      })
+    ])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse({
+        display_state: "needs_attention",
+        reason_codes: ["runtime_unavailable"],
+        primary_reason_code: "runtime_unavailable",
+        allowed_actions: ["edit_config", "view_details"],
+        message: "One or more MCP server runtimes are unavailable.",
+        servers: [
+          readinessServer({
+            reason_codes: ["runtime_unavailable"],
+            primary_reason_code: "runtime_unavailable",
+            allowed_actions: ["edit_config", "view_details"],
+            message: "The configured runtime is not available."
+          })
+        ],
+        total_servers: 1,
+        attention_server_count: 1
+      })
+    )
+
+    render(<ToolCatalogsTab onOpenServerConfig={onOpenServerConfig} />)
+
+    expect(await screen.findByText(/docs managed runtime is unavailable/i)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /open server config/i }))
+    expect(onOpenServerConfig).toHaveBeenCalledWith("docs-managed")
+  })
+
+  it("shows preflight failure recovery with details", async () => {
+    const user = userEvent.setup()
+    const onOpenServerConfig = vi.fn()
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [],
+      modules: []
+    })
+    mocks.listExternalServers.mockResolvedValueOnce([externalServer()])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse({
+        display_state: "needs_attention",
+        reason_codes: ["preflight_failed"],
+        primary_reason_code: "preflight_failed",
+        allowed_actions: ["edit_config", "validate", "view_details"],
+        message: "One or more MCP servers failed preflight validation.",
+        servers: [
+          readinessServer({
+            reason_codes: ["preflight_failed"],
+            primary_reason_code: "preflight_failed",
+            allowed_actions: ["edit_config", "validate", "view_details"],
+            message: "Preflight validation failed."
+          })
+        ],
+        total_servers: 1,
+        attention_server_count: 1
+      })
+    )
+
+    render(<ToolCatalogsTab onOpenServerConfig={onOpenServerConfig} />)
+
+    expect(await screen.findByText(/docs managed failed preflight validation/i)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /open server config/i }))
+    expect(onOpenServerConfig).toHaveBeenCalledWith("docs-managed")
+
+    await user.click(screen.getByRole("button", { name: /view details/i }))
+    expect(await screen.findByText(/reason codes: preflight_failed/i)).toBeTruthy()
+  })
+
+  it("shows unreachable recovery with config refresh and details actions", async () => {
+    const user = userEvent.setup()
+    const onOpenServerConfig = vi.fn()
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [],
+      modules: []
+    })
+    mocks.listExternalServers.mockResolvedValueOnce([externalServer()])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse({
+        display_state: "needs_attention",
+        reason_codes: ["unreachable"],
+        primary_reason_code: "unreachable",
+        allowed_actions: ["edit_config", "refresh_discovery", "view_details"],
+        message: "One or more MCP servers are unreachable.",
+        servers: [
+          readinessServer({
+            reason_codes: ["unreachable"],
+            primary_reason_code: "unreachable",
+            allowed_actions: ["edit_config", "refresh_discovery", "view_details"],
+            message: "The server is unreachable."
+          })
+        ],
+        total_servers: 1,
+        attention_server_count: 1
+      })
+    )
+
+    render(<ToolCatalogsTab onOpenServerConfig={onOpenServerConfig} />)
+
+    expect(await screen.findByText(/docs managed is unreachable/i)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /open server config/i }))
+    expect(onOpenServerConfig).toHaveBeenCalledWith("docs-managed")
+
+    await user.click(screen.getByRole("button", { name: /view details/i }))
+    expect(await screen.findByText(/reason codes: unreachable/i)).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: /refresh discovery/i }))
+    expect(mocks.refreshExternalServerDiscovery).toHaveBeenCalledWith("docs-managed")
+  })
+
+  it("shows discovery failure recovery with refresh and details actions", async () => {
+    const user = userEvent.setup()
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [],
+      modules: []
+    })
+    mocks.listExternalServers.mockResolvedValueOnce([externalServer()])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse({
+        display_state: "needs_attention",
+        reason_codes: ["discovery_failed"],
+        primary_reason_code: "discovery_failed",
+        allowed_actions: ["refresh_discovery", "view_details"],
+        message: "One or more MCP servers failed tool discovery.",
+        servers: [
+          readinessServer({
+            reason_codes: ["discovery_failed"],
+            primary_reason_code: "discovery_failed",
+            allowed_actions: ["refresh_discovery", "view_details"],
+            message: "Tool discovery failed.",
+            last_error_message: "Process exited with code 1"
+          })
+        ],
+        total_servers: 1,
+        attention_server_count: 1
+      })
+    )
+
+    render(<ToolCatalogsTab />)
+
+    expect(await screen.findByText(/docs managed discovery failed/i)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /view details/i }))
+    expect(await screen.findByText(/process exited with code 1/i)).toBeTruthy()
+
+    await user.click(screen.getByRole("button", { name: /refresh discovery/i }))
+    expect(mocks.refreshExternalServerDiscovery).toHaveBeenCalledWith("docs-managed")
+    expect(screen.queryByRole("button", { name: /open server config/i })).toBeNull()
+  })
+
+  it("shows in-progress discovery without a duplicate refresh action", async () => {
+    const user = userEvent.setup()
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [],
+      modules: []
+    })
+    mocks.listExternalServers.mockResolvedValueOnce([externalServer()])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse({
+        display_state: "checking",
+        reason_codes: ["discovery_not_run"],
+        primary_reason_code: "discovery_not_run",
+        allowed_actions: ["view_details"],
+        message: "Discovery is running.",
+        servers: [
+          readinessServer({
+            display_state: "checking",
+            reason_codes: ["discovery_not_run"],
+            primary_reason_code: "discovery_not_run",
+            allowed_actions: ["view_details"],
+            message: "Discovery is running.",
+            current_operation: {
+              operation_type: "discovery",
+              started_at: "2026-06-27T08:00:00Z",
+              message: "Discovery is running."
+            }
+          })
+        ],
+        total_servers: 1,
+        checking_server_count: 1
+      })
+    )
+
+    render(<ToolCatalogsTab />)
+
+    expect(await screen.findByText(/docs managed discovery is running/i)).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /refresh discovery/i })).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: /view details/i }))
+    expect(await screen.findByText(/reason codes: discovery_not_run/i)).toBeTruthy()
+  })
+
+  it("keeps the catalog visible while surfacing partial capability warnings", async () => {
+    mocks.listExternalServers.mockResolvedValueOnce([externalServer()])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse({
+        display_state: "ready",
+        reason_codes: ["partial_capability"],
+        primary_reason_code: "partial_capability",
+        allowed_actions: ["open_tool_catalog", "view_details"],
+        message: "Server is ready, but some capabilities need review.",
+        servers: [
+          readinessServer({
+            display_state: "ready",
+            tool_count: 1,
+            reason_codes: ["partial_capability"],
+            primary_reason_code: "partial_capability",
+            allowed_actions: ["open_tool_catalog", "view_details"],
+            message: "Server is ready, but some capabilities need review."
+          })
+        ],
+        total_servers: 1,
+        ready_server_count: 1
+      })
+    )
 
     render(<ToolCatalogsTab />)
 
     expect(await screen.findByText("notes.search")).toBeTruthy()
-    expect(screen.getByText(/tools are registered but not executable in chat/i)).toBeTruthy()
-    expect(screen.getByText(/review profile assignments and disabled tool settings/i)).toBeTruthy()
+    expect(screen.getByText(/some capabilities need review/i)).toBeTruthy()
   })
 
-  it("surfaces explicit refresh failures without clearing the current registry", async () => {
-    const user = userEvent.setup()
-    mocks.refreshExternalServerDiscovery.mockRejectedValueOnce(new Error("runtime unavailable"))
+  it("keeps the catalog visible when readiness metadata cannot be loaded", async () => {
+    mocks.listExternalServers.mockResolvedValueOnce([externalServer()])
+    mocks.getMcpHubReadiness.mockRejectedValueOnce(new Error("readiness offline"))
 
     render(<ToolCatalogsTab />)
 
     expect(await screen.findByText("notes.search")).toBeTruthy()
-    await user.click(screen.getByRole("button", { name: /refresh tools/i }))
-
-    expect(await screen.findByText(/failed to refresh tool discovery/i)).toBeTruthy()
-    expect(screen.getByText(/runtime unavailable/i)).toBeTruthy()
-    expect(screen.getByText("notes.search")).toBeTruthy()
-    expect(mocks.getToolRegistrySummary).toHaveBeenCalledTimes(1)
+    expect(screen.getAllByText(/catalog recovery details are limited/i).length).toBeGreaterThan(0)
   })
 
-  it("surfaces resolved refresh errors without clearing the current registry", async () => {
+  it("shows stale catalog recovery when server config changed", async () => {
     const user = userEvent.setup()
-    mocks.refreshExternalServerDiscovery.mockResolvedValueOnce({
-      ok: false,
-      message: "Discovery refreshed with errors",
-      errors: { docs: "external_server_discovery_failed" }
+    mocks.getToolRegistrySummary.mockResolvedValueOnce({
+      entries: [],
+      modules: []
     })
+    mocks.listExternalServers.mockResolvedValueOnce([externalServer()])
+    mocks.getMcpHubReadiness.mockResolvedValueOnce(
+      readinessResponse({
+        display_state: "stale",
+        reason_codes: ["config_changed"],
+        primary_reason_code: "config_changed",
+        allowed_actions: ["refresh_discovery", "edit_config"],
+        message: "One or more MCP server configurations changed after discovery.",
+        servers: [
+          readinessServer({
+            display_state: "stale",
+            reason_codes: ["config_changed"],
+            primary_reason_code: "config_changed",
+            allowed_actions: ["refresh_discovery", "edit_config"],
+            message: "Configuration changed after the last discovery run."
+          })
+        ],
+        total_servers: 1,
+        stale_server_count: 1
+      })
+    )
 
     render(<ToolCatalogsTab />)
 
-    expect(await screen.findByText("notes.search")).toBeTruthy()
-    await user.click(screen.getByRole("button", { name: /refresh tools/i }))
-
-    expect(await screen.findByText(/failed to refresh tool discovery/i)).toBeTruthy()
-    expect(screen.getByText(/external_server_discovery_failed/i)).toBeTruthy()
-    expect(screen.getByText("notes.search")).toBeTruthy()
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tools"] })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-catalogs"] })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-tool-modules"] })
-    expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["mcp-health"] })
-    expect(mocks.getToolRegistrySummary).toHaveBeenCalledTimes(2)
-  })
-
-  it("ignores stale registry loads that resolve after a newer refresh", async () => {
-    const user = userEvent.setup()
-    const stale = deferred<ReturnType<typeof registrySummary>>()
-    const fresh = deferred<ReturnType<typeof registrySummary>>()
-    mocks.getToolRegistrySummary
-      .mockReturnValueOnce(stale.promise)
-      .mockReturnValueOnce(fresh.promise)
-
-    render(<ToolCatalogsTab />)
-
-    await user.click(screen.getByRole("button", { name: /refresh tools/i }))
-    await waitFor(() => {
-      expect(mocks.getToolRegistrySummary).toHaveBeenCalledTimes(2)
-    })
-
-    await act(async () => {
-      fresh.resolve(registrySummary("web.search", "External Web"))
-    })
-    expect(await screen.findByText("web.search")).toBeTruthy()
-
-    await act(async () => {
-      stale.resolve(registrySummary("stale.search", "Stale Module"))
-    })
-    await waitFor(() => {
-      expect(screen.getByText("web.search")).toBeTruthy()
-    })
-    expect(screen.queryByText("stale.search")).toBeNull()
+    expect(await screen.findByText(/docs managed catalog is stale/i)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /refresh discovery/i }))
+    expect(mocks.refreshExternalServerDiscovery).toHaveBeenCalledWith("docs-managed")
   })
 })
