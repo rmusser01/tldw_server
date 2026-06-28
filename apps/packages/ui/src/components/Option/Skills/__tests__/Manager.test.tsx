@@ -716,9 +716,10 @@ describe("SkillsManager imports", () => {
 
   it("shows reload-before-delete guidance on stale delete conflict", async () => {
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries")
+    let confirmConfig: { onOk?: () => void | Promise<void> } | undefined
     const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce(
       (config) => {
-        void config.onOk?.()
+        confirmConfig = config as { onOk?: () => void | Promise<void> }
         return { destroy: vi.fn(), update: vi.fn() } as any
       }
     )
@@ -736,6 +737,11 @@ describe("SkillsManager imports", () => {
       renderManager()
       await screen.findByText("skill-1")
       fireEvent.click(screen.getByRole("button", { name: "Delete skill-1" }))
+
+      await waitFor(() => {
+        expect(confirmConfig?.onOk).toBeTypeOf("function")
+      })
+      await expect(confirmConfig?.onOk?.()).rejects.toMatchObject({ status: 409 })
 
       await waitFor(() => {
         expect(notificationMock.error).toHaveBeenCalledWith(

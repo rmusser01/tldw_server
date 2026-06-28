@@ -657,7 +657,7 @@ export const SkillsManager: React.FC = () => {
         version: Number.isSafeInteger(skill.version) && Number(skill.version) > 0
           ? skill.version
           : undefined
-      }).catch(() => undefined)
+      })
     })
   }
 
