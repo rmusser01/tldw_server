@@ -79,6 +79,11 @@ interface FileImportReview {
   overwrite: boolean
 }
 
+interface DeleteSkillPayload {
+  name: string
+  version?: number
+}
+
 type SkillContextFilter = "all" | SkillContext
 type SkillVisibilityFilter = "visible" | "hidden" | "all"
 type SkillToolsFilter = "any" | "with-tools" | "without-tools"
@@ -130,6 +135,20 @@ const getSeededSkillNames = (result: SeedSkillsResult | undefined): string[] => 
 const getErrorDescription = (error: unknown): string | undefined => {
   if (!error) return undefined
   return sanitizeServerErrorMessage(error, "") || undefined
+}
+
+const isConflictError = (error: unknown): boolean => {
+  const candidate = error as {
+    status?: unknown
+    statusCode?: unknown
+    response?: { status?: unknown }
+    message?: unknown
+  } | null
+  if (!candidate) return false
+  return candidate.status === 409
+    || candidate.statusCode === 409
+    || candidate.response?.status === 409
+    || (typeof candidate.message === "string" && candidate.message.includes("409"))
 }
 
 const buildSkillInvocation = (skillName: string) => `/skill ${skillName}`
@@ -423,7 +442,8 @@ export const SkillsManager: React.FC = () => {
   }
 
   const deleteMutation = useMutation({
-    mutationFn: (name: string) => tldwClient.deleteSkill(name),
+    mutationFn: ({ name, version }: DeleteSkillPayload) =>
+      tldwClient.deleteSkill(name, version),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["skills"] })
       setSuccessAction(null)
@@ -432,6 +452,18 @@ export const SkillsManager: React.FC = () => {
       })
     },
     onError: (err: unknown) => {
+      if (isConflictError(err)) {
+        queryClient.invalidateQueries({ queryKey: ["skills"] })
+        notification.error({
+          message: t("option:skills.deleteConflict", {
+            defaultValue: "Skill changed elsewhere"
+          }),
+          description: t("option:skills.deleteConflictDesc", {
+            defaultValue: "Reload skills before deleting this version."
+          })
+        })
+        return
+      }
       notification.error({
         message: t("option:skills.deleteError", { defaultValue: "Failed to delete skill" }),
         description: getErrorDescription(err)
@@ -606,19 +638,26 @@ export const SkillsManager: React.FC = () => {
     }
   }
 
-  const handleDelete = (name: string) => {
+  const handleDelete = (
+    skill: Pick<SkillSummary, "name"> & Partial<Pick<SkillSummary, "version">>
+  ) => {
     Modal.confirm({
       title: t("option:skills.deleteConfirmTitle", {
         defaultValue: "Delete skill?"
       }),
       content: t("option:skills.deleteConfirmContent", {
-        defaultValue: `Are you sure you want to delete "${name}"? This cannot be undone.`,
-        name
+        defaultValue: `Are you sure you want to delete "${skill.name}"? This cannot be undone.`,
+        name: skill.name
       }),
       okText: t("common:delete", { defaultValue: "Delete" }),
       okButtonProps: { danger: true },
       cancelText: t("common:cancel", { defaultValue: "Cancel" }),
-      onOk: () => deleteMutation.mutateAsync(name)
+      onOk: () => deleteMutation.mutateAsync({
+        name: skill.name,
+        version: Number.isSafeInteger(skill.version) && Number(skill.version) > 0
+          ? skill.version
+          : undefined
+      }).catch(() => undefined)
     })
   }
 
@@ -881,7 +920,7 @@ export const SkillsManager: React.FC = () => {
               size="small"
               danger
               icon={<Trash2 size={14} />}
-              onClick={() => handleDelete(record.name)}
+              onClick={() => handleDelete(record)}
             />
           </Tooltip>
         </div>
