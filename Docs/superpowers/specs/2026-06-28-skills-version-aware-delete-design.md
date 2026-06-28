@@ -85,7 +85,7 @@ Update `tldwClient.deleteSkill` in `workspace-api.ts`:
 async deleteSkill(name: string, version?: number): Promise<void>
 ```
 
-When `version` is a finite number, send:
+When `version` is a positive safe integer, send:
 
 ```ts
 headers: { "If-Match": String(version) }
@@ -137,7 +137,8 @@ Backend focused tests:
 ```bash
 source .venv/bin/activate && python -m pytest \
   tldw_Server_API/tests/Skills/integration/test_skills_api.py \
-  -k "list_skills or delete_skill" -v
+  tldw_Server_API/tests/Skills/integration/test_skill_mcp_integration.py \
+  -k "list_skills or delete_skill or get_context_payload or async_variant_uses_async_context_payload" -v
 ```
 
 Frontend focused tests:
@@ -153,6 +154,7 @@ bunx vitest run \
 Add or update tests for:
 
 - `workspaceApiMethods.deleteSkill` sends `If-Match` when version is provided.
+- `workspaceApiMethods.deleteSkill` treats invalid versions such as `NaN`, decimal values, zero, or negative values as unknown and omits `If-Match`.
 - `workspaceApiMethods.deleteSkill` omits headers when version is not provided.
 - `SkillsManager` calls `deleteSkill(name, version)` from a versioned row.
 - `SkillsManager` still calls `deleteSkill(name, undefined)` or equivalent for an unknown-version row.

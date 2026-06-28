@@ -35,6 +35,8 @@ Spec approved by user and written at `Docs/superpowers/specs/2026-06-28-skills-v
 Self-review completed before implementation planning. Found and patched a spec gap: `SkillSummary` is reused by `/skills/context` and async context integration paths, so requiring `version` must also update `_build_context_payload()` and context/MCP fixtures while keeping `context_text` unchanged. Also tightened delete conflict detection guidance to use a helper covering common wrapped error shapes.
 
 Spec review loop completed: reviewer approved with no blocking issues. Advisory for planning: confirm the actual React Query skills query key/invalidation behavior or use an existing shared key helper if one exists.
+
+Final pre-plan review completed. Confirmed React Query invalidation uses the existing `['skills']` prefix. Patched two planning issues: `If-Match` should only be sent for positive safe integer versions, and backend verification must include context/MCP paths affected by the shared `SkillSummary` schema.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
