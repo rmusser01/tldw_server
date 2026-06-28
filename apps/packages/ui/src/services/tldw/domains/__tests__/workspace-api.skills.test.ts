@@ -41,4 +41,53 @@ describe("workspace API skill methods", () => {
       body: { args: "chapter 1", dry_run: true }
     })
   })
+
+  it("sends If-Match when deleting a skill with a valid version", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce(undefined)
+    const clientCore = {
+      resolveApiPath: vi.fn().mockResolvedValue("/api/v1/skills/{name}"),
+      fillPathParams: vi.fn().mockReturnValue("/api/v1/skills/summarize")
+    }
+
+    await workspaceApiMethods.deleteSkill.call(clientCore as any, "summarize", 3)
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/skills/summarize",
+      method: "DELETE",
+      headers: { "If-Match": "3" }
+    })
+  })
+
+  it("omits If-Match when deleting a skill without a known version", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce(undefined)
+    const clientCore = {
+      resolveApiPath: vi.fn().mockResolvedValue("/api/v1/skills/{name}"),
+      fillPathParams: vi.fn().mockReturnValue("/api/v1/skills/summarize")
+    }
+
+    await workspaceApiMethods.deleteSkill.call(clientCore as any, "summarize")
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/skills/summarize",
+      method: "DELETE"
+    })
+  })
+
+  it.each([Number.NaN, 0, -1, 1.5, Number.POSITIVE_INFINITY])(
+    "omits If-Match for invalid delete version %s",
+    async (version) => {
+      vi.mocked(bgRequest).mockResolvedValueOnce(undefined)
+      const clientCore = {
+        resolveApiPath: vi.fn().mockResolvedValue("/api/v1/skills/{name}"),
+        fillPathParams: vi.fn().mockReturnValue("/api/v1/skills/summarize")
+      }
+
+      await workspaceApiMethods.deleteSkill.call(clientCore as any, "summarize", version)
+
+      expect(bgRequest).toHaveBeenCalledWith({
+        path: "/api/v1/skills/summarize",
+        method: "DELETE"
+      })
+    }
+  )
 })
