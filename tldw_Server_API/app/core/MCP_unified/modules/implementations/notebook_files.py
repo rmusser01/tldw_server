@@ -69,6 +69,7 @@ def parse_notebook_payload(payload: bytes, *, max_bytes: int | None = None) -> P
     for cell in cells:
         if not isinstance(cell, dict):
             raise ValueError("notebook_cell_object_required")
+        cell["cell_type"] = _normalized_cell_type(cell.get("cell_type"))
         cell_id = cell.get("id")
         if not isinstance(cell_id, str) or not cell_id.strip():
             raise ValueError("notebook_cell_id_required")
@@ -188,6 +189,9 @@ def apply_cell_edit(
         if editable_target.get("cell_type") == "code":
             editable_target["outputs"] = []
             editable_target["execution_count"] = None
+        else:
+            editable_target.pop("outputs", None)
+            editable_target.pop("execution_count", None)
         source_after = _cell_source_text(editable_target)
         summary.update(
             {

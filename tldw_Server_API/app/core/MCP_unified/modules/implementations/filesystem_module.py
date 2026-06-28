@@ -2690,7 +2690,12 @@ class FilesystemModule(BaseModule):
 
         if target.suffix.lower() != ".ipynb":
             raise ValueError("notebook_path_required")
-        payload, _file_stat = self._read_existing_regular_file_no_follow(target, max_bytes=max_bytes)
+        try:
+            payload, _file_stat = self._read_existing_regular_file_no_follow(target, max_bytes=max_bytes)
+        except ValueError as exc:
+            if str(exc) == "edit_preimage_too_large":
+                raise ValueError("notebook_too_large") from exc
+            raise
         parsed = parse_notebook_payload(payload, max_bytes=max_bytes)
         rel_path = self._to_workspace_relative_path(workspace_root, target)
         result = {
@@ -2749,7 +2754,12 @@ class FilesystemModule(BaseModule):
             raise ValueError("notebook_path_required")
         rel_path = self._to_workspace_relative_path(workspace_root, target)
         self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
-        payload, file_stat = self._read_existing_regular_file_no_follow(target, max_bytes=preimage_max_bytes)
+        try:
+            payload, file_stat = self._read_existing_regular_file_no_follow(target, max_bytes=preimage_max_bytes)
+        except ValueError as exc:
+            if str(exc) == "edit_preimage_too_large":
+                raise ValueError("notebook_too_large") from exc
+            raise
         parsed = parse_notebook_payload(payload, max_bytes=preimage_max_bytes)
         self._authorize_edit_preimage(
             rel_path,

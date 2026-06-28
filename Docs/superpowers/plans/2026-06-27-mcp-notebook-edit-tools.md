@@ -491,3 +491,42 @@ Expected: no whitespace errors, only intended files changed or clean after commi
 git add 'backlog/tasks/task-2282 - Add-NotebookEdit-style-notebook-file-tools.md'
 git commit -m "chore: finalize task 2282 notebook tools"
 ```
+
+## Task 7: PR Review Remediation
+
+**Files:**
+- Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/filesystem_module.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/modules/implementations/notebook_files.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_notebook_tools.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/tests/test_notebook_files.py`
+- Modify: `backlog/tasks/task-2282 - Add-NotebookEdit-style-notebook-file-tools.md`
+
+- [x] **Step 1: Rebase on latest dev**
+
+Run `git fetch origin dev` and `git rebase origin/dev`. Expected: branch is based on current `origin/dev`.
+
+- [x] **Step 2: Verify review comments against code**
+
+Inspect unresolved PR review threads. Valid review items:
+
+- add docstrings to the new notebook test modules and new symbols;
+- map oversized notebook reads/edits to notebook-specific reason codes;
+- validate existing notebook cell types during parsing;
+- strip code-only metadata when a replace changes a cell to markdown/raw;
+- add receipt-authorized notebook edit coverage.
+
+- [x] **Step 3: Write failing tests for behavior changes**
+
+Add tests for oversized notebook reads/edits, invalid existing `cell_type`, non-code replace metadata stripping, and read-receipt-based edits.
+
+- [x] **Step 4: Implement fixes**
+
+Keep changes minimal: normalize notebook-specific oversize errors at notebook call sites, validate canonical existing cell types in parsing, and strip `outputs` / `execution_count` from final non-code cells.
+
+- [x] **Step 5: Verify focused tests and Bandit**
+
+Run the notebook helper/tool tests, preset tests, existing filesystem baseline, and Bandit on touched Python files.
+
+- [x] **Step 6: Update Backlog and push**
+
+Record remediation summary and verification in `TASK-2282`, commit the fixes, force-with-lease push the rebased branch, and resolve or reply to addressed PR threads.

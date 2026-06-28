@@ -1,3 +1,5 @@
+"""Tests for notebook parsing, summaries, and cell edit helpers."""
+
 from __future__ import annotations
 
 import json
@@ -12,6 +14,8 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.notebook_files
 
 
 def _notebook_bytes(cells: list[dict[str, object]], *, trailing_newline: bool = True) -> bytes:
+    """Build a minimal notebook payload for helper tests."""
+
     payload = {
         "cells": cells,
         "metadata": {"language_info": {"name": "python"}},
@@ -25,6 +29,8 @@ def _notebook_bytes(cells: list[dict[str, object]], *, trailing_newline: bool = 
 
 
 def test_summarize_notebook_defaults_to_structure_only() -> None:
+    """Summaries omit source by default while preserving cell metadata."""
+
     parsed = parse_notebook_payload(
         _notebook_bytes(
             [
@@ -67,6 +73,8 @@ def test_summarize_notebook_defaults_to_structure_only() -> None:
 
 
 def test_summarize_notebook_source_previews_are_cell_and_total_bounded() -> None:
+    """Source previews are bounded by both per-cell and total budgets."""
+
     parsed = parse_notebook_payload(
         _notebook_bytes(
             [
@@ -101,6 +109,8 @@ def test_summarize_notebook_source_previews_are_cell_and_total_bounded() -> None
 
 
 def test_summarize_notebook_source_previews_can_filter_to_cell_ids() -> None:
+    """Source previews can be restricted to selected cell ids."""
+
     parsed = parse_notebook_payload(
         _notebook_bytes(
             [
@@ -157,14 +167,34 @@ def test_summarize_notebook_source_previews_can_filter_to_cell_ids() -> None:
             ),
             "notebook_duplicate_cell_id",
         ),
+        (
+            _notebook_bytes(
+                [
+                    {"id": "missing-type", "metadata": {}, "source": "text"},
+                ]
+            ),
+            "notebook_invalid_cell_type",
+        ),
+        (
+            _notebook_bytes(
+                [
+                    {"cell_type": "widget", "id": "widget-1", "metadata": {}, "source": "text"},
+                ]
+            ),
+            "notebook_invalid_cell_type",
+        ),
     ],
 )
 def test_parse_notebook_payload_rejects_invalid_notebooks(payload: bytes, reason: str) -> None:
+    """Malformed or unsupported notebooks fail with stable reason codes."""
+
     with pytest.raises(ValueError, match=reason):
         parse_notebook_payload(payload)
 
 
 def test_apply_cell_edit_replaces_source_and_clears_code_outputs() -> None:
+    """Replacing a code cell resets stale execution artifacts."""
+
     parsed = parse_notebook_payload(
         _notebook_bytes(
             [
@@ -202,6 +232,8 @@ def test_apply_cell_edit_replaces_source_and_clears_code_outputs() -> None:
 
 
 def test_apply_cell_edit_preserves_list_source_shape_on_replace() -> None:
+    """Replacing a list-source cell preserves the source container shape."""
+
     parsed = parse_notebook_payload(
         _notebook_bytes(
             [
@@ -222,7 +254,44 @@ def test_apply_cell_edit_preserves_list_source_shape_on_replace() -> None:
     assert not result.data.endswith(b"\n")  # nosec B101
 
 
+def test_apply_cell_edit_strips_code_only_fields_when_replacing_with_non_code_type() -> None:
+    """Changing a code cell to markdown removes code-only notebook fields."""
+
+    parsed = parse_notebook_payload(
+        _notebook_bytes(
+            [
+                {
+                    "cell_type": "code",
+                    "execution_count": 4,
+                    "id": "code-1",
+                    "metadata": {},
+                    "outputs": [{"output_type": "stream", "text": "old\n"}],
+                    "source": "print('old')\n",
+                },
+            ]
+        )
+    )
+
+    result = apply_cell_edit(
+        parsed,
+        mode="replace",
+        cell_id="code-1",
+        cell_type="markdown",
+        source="converted markdown",
+    )
+    edited_cell = result.document["cells"][0]
+
+    assert edited_cell["cell_type"] == "markdown"  # nosec B101
+    assert edited_cell["source"] == "converted markdown"  # nosec B101
+    assert "outputs" not in edited_cell  # nosec B101
+    assert "execution_count" not in edited_cell  # nosec B101
+    assert result.summary["output_count_before"] == 1  # nosec B101
+    assert result.summary["output_count_after"] == 0  # nosec B101
+
+
 def test_apply_cell_edit_inserts_before_and_after_anchor_cell() -> None:
+    """Insertion supports before and after positions around an anchor cell."""
+
     parsed = parse_notebook_payload(
         _notebook_bytes(
             [
@@ -264,6 +333,8 @@ def test_apply_cell_edit_inserts_before_and_after_anchor_cell() -> None:
 
 
 def test_apply_cell_edit_deletes_target_cell() -> None:
+    """Deleting a cell removes only the requested target cell."""
+
     parsed = parse_notebook_payload(
         _notebook_bytes(
             [
@@ -315,6 +386,8 @@ def test_apply_cell_edit_deletes_target_cell() -> None:
     ],
 )
 def test_apply_cell_edit_rejects_invalid_mutations(kwargs: dict[str, str], reason: str) -> None:
+    """Invalid edit arguments fail before producing a mutated notebook."""
+
     parsed = parse_notebook_payload(
         _notebook_bytes(
             [
