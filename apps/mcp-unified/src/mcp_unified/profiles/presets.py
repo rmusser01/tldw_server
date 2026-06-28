@@ -186,8 +186,8 @@ _TOOL_DISCOVERY_TOOLS = [
     "tool_describe",
     "profile.tools.list",
 ]
-_FILES_READ_TOOLS = ["fs.list", "fs.read", "fs.stat", "fs.glob", "fs.grep"]
-_FILES_EDIT_TOOLS = [*_FILES_READ_TOOLS, "fs.patch"]
+_FILES_READ_TOOLS = ["fs.list", "fs.read", "fs.stat", "fs.glob", "fs.grep", "notebook.read"]
+_FILES_EDIT_TOOLS = [*_FILES_READ_TOOLS, "fs.patch", "notebook.edit_cell"]
 _FILES_WRITE_TOOLS = [*_FILES_EDIT_TOOLS, "fs.write"]
 _LEGACY_FILES_READ_TOOLS = ["fs.read_text"]
 _LEGACY_FILES_WRITE_TOOLS = ["fs.write_text"]
@@ -765,8 +765,8 @@ _BUILTIN_PRESETS: tuple[ProfilePreset, ...] = (
                 "screenshots.capture",
                 "app_state.read",
             ],
-            direct_categories=["files", "code", "tests", "browser", "tool_discovery"],
-            deferred_categories=["git", "safe_test_runner", "issue_tracker"],
+            direct_categories=["files", "tests", "browser", "tool_discovery"],
+            deferred_categories=["code", "git", "safe_test_runner", "issue_tracker"],
             recommended_tools=[
                 recommended_tool(
                     "tests.plan.generate",
