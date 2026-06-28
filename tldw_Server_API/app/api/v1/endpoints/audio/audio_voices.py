@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from starlette import status
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, TokenScopeGuard, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    TokenScopeGuard,
+    User,
+    check_rate_limit,
+    get_request_user,
+    require_token_scope,
+)
 
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import get_tts_service
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
