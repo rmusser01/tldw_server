@@ -22,6 +22,8 @@ modified_files:
 - apps/packages/ui/src/services/tldw/domains/__tests__/workspace-api.skills.test.ts
 - apps/packages/ui/src/components/Option/Skills/Manager.tsx
 - apps/packages/ui/src/components/Option/Skills/__tests__/Manager.test.tsx
+references:
+- https://github.com/rmusser01/tldw_server/pull/2544
 ---
 
 ## Description
