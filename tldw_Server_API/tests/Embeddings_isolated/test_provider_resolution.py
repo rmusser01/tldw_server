@@ -212,5 +212,5 @@ def test_require_model_true_with_missing_or_blank_model_raises_stable_policy_err
             guess_provider=_fallback_guess,
         )
 
-    assert exc_info.value.code == "model_denied"
+    assert exc_info.value.code == "model_required"
     assert exc_info.value.message == "Model is required"

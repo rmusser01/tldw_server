@@ -1297,6 +1297,14 @@ class ChromaDBManager:
             try:
                 cleaned_metadatas = [self._clean_metadata(metadata) for metadata in metadatas]
 
+                def raise_dimension_mismatch(reason: str) -> None:
+                    message = (
+                        f"User '{self.user_id}': Embedding dimension mismatch for collection "
+                        f"'{target_collection.name}'. {reason}"
+                    )
+                    logger.warning(message)
+                    raise ValueError(message)
+
                 def recreate_target_collection(reason: str) -> None:
                     nonlocal target_collection
                     recreate_metadata: dict[str, Any] = {"embedding_dimension": new_embedding_dim}
@@ -1313,18 +1321,24 @@ class ChromaDBManager:
                         metadata=self._clean_metadata(recreate_metadata),
                     )
 
-                # Dimension mismatches indicate callers changed embedding model dimensions for a
-                # collection; recreate so future writes have coherent collection metadata.
+                # Only empty collections can be recreated safely; populated or unknown-size
+                # collections fail closed so callers do not accidentally discard embeddings.
                 collection_meta = target_collection.metadata
                 existing_dim_from_meta = None
                 if collection_meta and "embedding_dimension" in collection_meta:
                     existing_dim_from_meta = int(collection_meta["embedding_dimension"])
 
                 if existing_dim_from_meta and existing_dim_from_meta != new_embedding_dim:
-                    recreate_target_collection(
-                        f"metadata expected {existing_dim_from_meta}, new {new_embedding_dim} "
+                    mismatch_reason = (
+                        f"Collection expected dim (from metadata): {existing_dim_from_meta}, "
+                        f"New: {new_embedding_dim} "
                         f"(model_id '{embedding_model_id_for_dim_check or 'Unknown'}')"
                     )
+                    collection_count = target_collection.count()
+                    if type(collection_count) is int and collection_count == 0:
+                        recreate_target_collection(mismatch_reason)
+                    else:
+                        raise_dimension_mismatch(mismatch_reason)
                 elif not existing_dim_from_meta and target_collection.count() > 0:  # Has items but no dim in meta
                     # Fallback: get an existing embedding to check dimension
                     existing_item = target_collection.get(limit=1, include=['embeddings'])
@@ -1332,8 +1346,8 @@ class ChromaDBManager:
                     if embeddings_exist and len(existing_item['embeddings']) > 0:
                         existing_dim_from_sample = len(existing_item['embeddings'][0])
                         if existing_dim_from_sample != new_embedding_dim:
-                            recreate_target_collection(
-                                f"sample expected {existing_dim_from_sample}, new {new_embedding_dim}"
+                            raise_dimension_mismatch(
+                                f"Existing: {existing_dim_from_sample}, New: {new_embedding_dim}."
                             )
 
                 # Batch upsert for potentially large number of embeddings

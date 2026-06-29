@@ -65,7 +65,7 @@ def resolve_provider_model(
 
     if model is None or (isinstance(model, str) and not model.strip()):
         if require_model:
-            raise EmbeddingPolicyError("model_denied", "Model is required")
+            raise EmbeddingPolicyError("model_required", "Model is required")
         model = _default_model(settings_config)
 
     prefix_provider, stripped_model = split_provider_model(model)
