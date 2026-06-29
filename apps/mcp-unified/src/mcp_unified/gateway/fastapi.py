@@ -485,6 +485,81 @@ class ExternalRuntimeOperationResponse(BaseModel):
     errors: dict[str, Any] | None = None
 
 
+class GatewayStatusWarning(BaseModel):
+    """Non-secret readiness warning for the package-local gateway status."""
+
+    reason_code: str
+    message: str
+
+
+class GatewayPackageStatus(BaseModel):
+    """Package-boundary metadata for the package-local gateway status."""
+
+    package_name: str | None = None
+    package_import_name: str | None = None
+    package_status: str | None = None
+    publishing_status: str | None = None
+    source_distribution: str | None = None
+    dependency_version_policy: str | None = None
+
+
+class GatewayTransportStatus(BaseModel):
+    """Transport metadata for the package-local gateway status."""
+
+    base_path: str
+    mount_path: str
+
+
+class GatewayStoreReadinessStatus(BaseModel):
+    """Non-secret store readiness metadata for the package-local gateway status."""
+
+    model_config = ConfigDict(extra="allow")
+
+    kind: str
+    persistent: bool | None = None
+
+
+class GatewayDefaultProfileStatus(BaseModel):
+    """Default profile readiness metadata for the package-local gateway status."""
+
+    configured: bool
+    profile_id: str | None = None
+    source: str
+
+
+class GatewayAdminAuthStatus(BaseModel):
+    """Admin authentication readiness metadata without secret values."""
+
+    enabled: bool
+    configured: bool
+    header_name: str | None = None
+
+
+class GatewayExternalServersStatus(BaseModel):
+    """External MCP server count summary for the package-local gateway status."""
+
+    total: int
+    enabled: int
+    unavailable: int
+
+
+class GatewayReadinessStatusResponse(BaseModel):
+    """Response body for package-local gateway readiness status."""
+
+    status: str
+    name: str
+    version: str
+    transport: GatewayTransportStatus
+    package: GatewayPackageStatus
+    profile_store: GatewayStoreReadinessStatus
+    default_profile: GatewayDefaultProfileStatus
+    admin_auth: GatewayAdminAuthStatus
+    external_registry_store: GatewayStoreReadinessStatus
+    external_servers: GatewayExternalServersStatus
+    warnings: list[GatewayStatusWarning]
+    next_actions: list[str]
+
+
 class _GatewayAdminAuthHandlingRoute(APIRoute):
     """Route wrapper that keeps router-only admin auth failures JSON-stable."""
 
@@ -1732,7 +1807,7 @@ async def _gateway_readiness_status(
     *,
     profile_manager: GatewayProfileManager | None,
     external_registry_manager: GatewayExternalRegistryManager | None,
-    admin_auth: GatewayAdminAuthConfig,
+    admin_auth: GatewayAdminAuthConfig | None,
 ) -> dict[str, Any]:
     """Return best-effort package-local gateway readiness metadata."""
 
@@ -1860,12 +1935,18 @@ async def _gateway_readiness_status(
             )
         )
 
+    admin_auth_enabled = bool(admin_auth.enabled) if admin_auth is not None else False
+    admin_auth_configured = (
+        bool(admin_auth.api_key is not None or admin_auth.verifier is not None)
+        if admin_auth is not None
+        else False
+    )
     admin_auth_payload = {
-        "enabled": bool(admin_auth.enabled),
-        "configured": bool(admin_auth.api_key is not None or admin_auth.verifier is not None),
-        "header_name": admin_auth.header_name if admin_auth.enabled else None,
+        "enabled": admin_auth_enabled,
+        "configured": admin_auth_configured,
+        "header_name": admin_auth.header_name if admin_auth_enabled and admin_auth is not None else None,
     }
-    if admin_auth.enabled and not admin_auth_payload["configured"]:
+    if admin_auth_enabled and not admin_auth_payload["configured"]:
         warnings.append(
             _status_warning(
                 "admin_auth_not_configured",
@@ -1973,7 +2054,7 @@ def create_gateway_router(
             policy_explain_permission_checker=policy_explain_permission_checker,
         )
 
-    @router.get("/status", response_model=GatewayStatusResponse)
+    @router.get("/status", response_model=GatewayReadinessStatusResponse)
     async def gateway_status() -> dict[str, Any]:
         """Return best-effort package-local gateway readiness metadata."""
 

@@ -4,25 +4,46 @@ title: Implement MCP Unified residual UX hardening
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-29 04:56'
+updated_date: 2026-06-29 04:56
 labels:
-  - mcp
-  - ux
-  - security
-  - docs
+- mcp
+- ux
+- security
+- docs
 dependencies: []
 references:
-  - TASK-12054
-  - TASK-2372
-  - >-
-    Docs/superpowers/plans/2026-06-28-mcp-unified-residual-ux-hardening-implementation-plan.md
-  - >-
-    Docs/superpowers/specs/2026-06-28-mcp-unified-residual-ux-hardening-design.md
+- TASK-12054
+- TASK-2372
+- Docs/superpowers/plans/2026-06-28-mcp-unified-residual-ux-hardening-implementation-plan.md
+- Docs/superpowers/specs/2026-06-28-mcp-unified-residual-ux-hardening-design.md
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-06-28-mcp-unified-residual-ux-hardening-design.md
-  - >-
-    Docs/superpowers/plans/2026-06-28-mcp-unified-residual-ux-hardening-implementation-plan.md
+- Docs/superpowers/specs/2026-06-28-mcp-unified-residual-ux-hardening-design.md
+- Docs/superpowers/plans/2026-06-28-mcp-unified-residual-ux-hardening-implementation-plan.md
+modified_files:
+- Docs/MCP/Unified/Client_Snippets.md
+- Docs/MCP/Unified/Developer_Guide.md
+- Docs/MCP/Unified/Modules.md
+- Docs/MCP/Unified/README.md
+- Docs/MCP/Unified/Smoke_Client.md
+- Docs/MCP/Unified/System_Admin_Guide.md
+- Docs/MCP/Unified/User_Guide.md
+- Docs/MCP/Unified/Using_Modules_YAML.md
+- apps/mcp-unified/README.md
+- apps/mcp-unified/USER_GUIDE.md
+- apps/mcp-unified/src/mcp_unified/README.md
+- apps/mcp-unified/src/mcp_unified/gateway/fastapi.py
+- tldw_Server_API/Config_Files/mcp_modules.local_opt_in.example.yaml
+- tldw_Server_API/Config_Files/mcp_modules.yaml
+- tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py
+- tldw_Server_API/app/core/MCP_unified/docker/Dockerfile
+- tldw_Server_API/app/core/MCP_unified/module_surface.py
+- tldw_Server_API/app/core/MCP_unified/protocol.py
+- tldw_Server_API/app/core/MCP_unified/server.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_docker_packaging_contract.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
+- tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py
+- tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py
 ---
 
 ## Description
@@ -60,32 +81,6 @@ Docs/superpowers/plans/2026-06-28-mcp-unified-residual-ux-hardening-implementati
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented the approved residual MCP Unified UX hardening work and addressed PR review feedback after rebasing onto latest dev.
 
-Changed files:
-- Docs/MCP/Unified/Client_Snippets.md
-- Docs/MCP/Unified/Developer_Guide.md
-- Docs/MCP/Unified/Modules.md
-- Docs/MCP/Unified/README.md
-- Docs/MCP/Unified/Smoke_Client.md
-- Docs/MCP/Unified/System_Admin_Guide.md
-- Docs/MCP/Unified/User_Guide.md
-- Docs/MCP/Unified/Using_Modules_YAML.md
-- apps/mcp-unified/README.md
-- apps/mcp-unified/USER_GUIDE.md
-- apps/mcp-unified/src/mcp_unified/README.md
-- apps/mcp-unified/src/mcp_unified/gateway/fastapi.py
-- tldw_Server_API/Config_Files/mcp_modules.local_opt_in.example.yaml
-- tldw_Server_API/Config_Files/mcp_modules.yaml
-- tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py
-- tldw_Server_API/app/core/MCP_unified/docker/Dockerfile
-- tldw_Server_API/app/core/MCP_unified/module_surface.py
-- tldw_Server_API/app/core/MCP_unified/protocol.py
-- tldw_Server_API/app/core/MCP_unified/server.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_docker_packaging_contract.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
-- tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py
-- tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py
-
 Summary:
 - Made high-risk MCP modules fail closed by default: filesystem, run_command, and codegraph remain available only through explicit opt-in configuration; status reports disabled-but-available high-risk modules with next actions.
 - Expanded package-local /mcp/status to include non-secret readiness metadata for package publication status, profile store/default profile, admin auth configuration, external registry store, and external server counts.
@@ -105,10 +100,22 @@ Verification:
 
 Clean PR branch follow-up:
 - Moved the MCP residual UX work to clean branch codex/mcp-residual-ux-clean based on latest origin/dev.
-- Final diff review found and removed unrelated README/TASK-12061 drift from the cherry-pick; remaining diff is scoped to MCP docs, package-local gateway status, MCP server/protocol/endpoint behavior, focused tests, and Backlog/spec records.
-- Re-ran clean-branch verification after rebasing on origin/dev: 63 passed for docs/basic/http tests, 5 passed for gateway status/basic JSON-RPC subset, 4 passed for Docker packaging contract, Bandit 0 findings.
+- Final diff review removed unrelated README/TASK-12061 drift from the cherry-pick; remaining diff is scoped to MCP docs, package-local gateway status, MCP server/protocol/endpoint behavior, focused tests, and Backlog/spec records.
+- PR: https://github.com/rmusser01/tldw_server/pull/2548
 
-PR: https://github.com/rmusser01/tldw_server/pull/2548
+PR review follow-up after rebasing on latest origin/dev:
+- Defended package-local /mcp/status against missing package metadata keys and missing admin auth configuration.
+- Added an explicit GatewayReadinessStatusResponse response_model and nested Pydantic response models for /mcp/status OpenAPI truthfulness.
+- Changed configured enabled MCP modules that did not register/load to report status=not_loaded and reason=module_not_loaded instead of appearing enabled or as normal disabled opt-ins.
+- Made gateway import-boundary tests use the real apps/mcp-unified/src package path so clean worktrees without editable package installs can run the full suite.
+
+Verification:
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q --tb=short tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py -> 32 passed, 6 warnings
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q --tb=short tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py -> 205 passed, 5 warnings
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q --tb=short tldw_Server_API/tests/Docs/test_mcp_unified_docs_contract.py tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py -> 33 passed, 4 warnings
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q --tb=short tldw_Server_API/app/core/MCP_unified/tests/test_docker_packaging_contract.py -> 4 passed, 4 warnings
+- source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit tldw_Server_API/app/core/MCP_unified/module_surface.py tldw_Server_API/app/core/MCP_unified/server.py apps/mcp-unified/src/mcp_unified/gateway/fastapi.py -f json -o /tmp/bandit_mcp_pr2548_review_fixes.json -> 0 findings
+- git diff --check -> clean
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

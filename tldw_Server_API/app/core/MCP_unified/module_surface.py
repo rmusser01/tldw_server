@@ -88,7 +88,8 @@ def describe_module_surface(modules: dict[str, Any]) -> dict[str, Any]:
             ("unknown", "No risk tier is registered yet."),
         )
         if not _is_enabled(payload):
-            if tier in EXPLICIT_OPT_IN_TIERS:
+            explicitly_disabled = isinstance(payload, dict) and payload.get("enabled") is False
+            if explicitly_disabled and tier in EXPLICIT_OPT_IN_TIERS:
                 disabled_available.append(
                     {
                         "id": module_name,

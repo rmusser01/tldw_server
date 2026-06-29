@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -22,7 +23,8 @@ from mcp_unified.gateway.external_runtime import GatewayExternalRuntimeError
 from mcp_unified.storage.models import ExternalServerDefinition
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
-GATEWAY_ROOT = REPO_ROOT / "mcp_unified" / "gateway"
+GATEWAY_PACKAGE_ROOT = REPO_ROOT / "apps" / "mcp-unified" / "src"
+GATEWAY_ROOT = GATEWAY_PACKAGE_ROOT / "mcp_unified" / "gateway"
 PROFILE_DISCOVERY_READ_TOOL_NAMES = {
     "tool_categories.list",
     "profile.tools.list",
@@ -956,6 +958,14 @@ def test_gateway_package_does_not_import_tldw_server_api() -> None:
 
 
 def test_gateway_stdio_submodule_import_does_not_eagerly_import_fastapi_transport() -> None:
+    env = {
+        **os.environ,
+        "PYTHONPATH": (
+            f"{GATEWAY_PACKAGE_ROOT}{os.pathsep}{os.environ['PYTHONPATH']}"
+            if os.environ.get("PYTHONPATH")
+            else str(GATEWAY_PACKAGE_ROOT)
+        ),
+    }
     result = subprocess.run(
         [
             sys.executable,
@@ -965,6 +975,7 @@ def test_gateway_stdio_submodule_import_does_not_eagerly_import_fastapi_transpor
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
+        env=env,
         text=True,
     )
 
@@ -2392,7 +2403,7 @@ def test_gateway_status_includes_package_boundary_metadata() -> None:
         for route in app.routes
         if getattr(route, "path", None) == "/mcp/status"
     )
-    assert getattr(status_route, "response_model", None) is gateway_fastapi.GatewayStatusResponse
+    assert getattr(status_route, "response_model", None) is gateway_fastapi.GatewayReadinessStatusResponse
 
     with TestClient(app) as client:
         response = client.get("/mcp/status")
@@ -2408,20 +2419,46 @@ def test_gateway_status_includes_package_boundary_metadata() -> None:
     assert "next_actions" in payload
 
 
-def test_gateway_status_tolerates_partial_package_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gateway_status_route_has_pydantic_response_model() -> None:
+    app = create_gateway_app(_FakeGatewayRuntime())
+
+    schema = app.openapi()["paths"]["/mcp/status"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+
+    assert schema == {"$ref": "#/components/schemas/GatewayReadinessStatusResponse"}
+
+
+def test_gateway_status_tolerates_missing_package_metadata(monkeypatch) -> None:
     monkeypatch.setattr(
         gateway_fastapi,
         "package_metadata_summary",
-        lambda: {"publishing_status": "not-published"},
+        lambda: {"package_name": "mcp-unified"},
     )
     app = create_gateway_app(_FakeGatewayRuntime())
+
     with TestClient(app) as client:
         response = client.get("/mcp/status")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["package"]["package_name"] is None
-    assert payload["package"]["publishing_status"] == "not-published"
+    assert payload["package"]["package_name"] == "mcp-unified"
+    assert payload["package"]["publishing_status"] is None
+    assert not any(warning["reason_code"] == "package_not_published" for warning in payload["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_gateway_readiness_status_handles_missing_admin_auth() -> None:
+    payload = await gateway_fastapi._gateway_readiness_status(
+        _FakeGatewayRuntime(),
+        profile_manager=None,
+        external_registry_manager=None,
+        admin_auth=None,
+    )
+
+    assert payload["admin_auth"] == {
+        "enabled": False,
+        "configured": False,
+        "header_name": None,
+    }
 
 
 def test_gateway_status_reports_profile_store_admin_auth_and_default_profile() -> None:
