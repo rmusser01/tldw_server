@@ -94,6 +94,8 @@ providers:
 
 - Model aliases include `fish_s2`, `fish-s2-pro`, `s2-pro`, and `fishaudio/s2-pro`.
 - Supported response formats include `wav`, `mp3`, `opus`, and `pcm`.
+- Self-hosted `native_http` streaming currently requires `wav`; hosted
+  `commercial_api` streaming can use broader Fish formats such as `opus`.
 - Hosted commercial requests may pass Fish-specific fields through `extra_params`,
   including `reference_id`, `references`, `sample_rate`, `mp3_bitrate`,
   `opus_bitrate`, `latency`, `prosody`, `chunk_length`, `normalize`,
@@ -114,6 +116,12 @@ providers:
 `.md`, and `.markdown` files. Each imported item must either reference an
 existing stored voice with `voice_id` or include embedded base64 audio with
 `audio_base64`, `filename`, `name`, and `reference_text`.
+
+Imports are bounded to protect local storage and hosted Fish model-creation
+costs: files are limited to 75 MB, each file may contain up to 25 references,
+and embedded base64 audio may decode to at most 50 MB per item. Bulk JSON
+imports return indexed `results` and `errors`; valid items can succeed even when
+other items fail validation or provider-side creation.
 
 JSON imports may be a single object, an array, or an object with a `references`
 array:

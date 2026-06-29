@@ -25,9 +25,13 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
 from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.TTS.fish_s2_reference_imports import (
+    FISH_S2_REFERENCE_IMPORT_MAX_BYTES,
+    FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES,
+    FISH_S2_REFERENCE_IMPORT_MAX_ITEMS,
     FishS2ReferenceImportError,
-    parse_fish_s2_reference_import,
+    parse_fish_s2_reference_import_result,
 )
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 
 router = APIRouter(
@@ -46,6 +50,19 @@ VOICE_SCOPE_GET = "audio.voices.get"
 VOICE_SCOPE_DELETE = "audio.voices.delete"
 VOICE_SCOPE_PREVIEW = "audio.voices.preview"
 VOICE_COUNTER_TYPE = "voice_call"
+
+
+def _fish_s2_import_error(index: int, message: str, code: Optional[str] = None) -> dict[str, object]:
+    payload: dict[str, object] = {"index": index, "message": message}
+    if code:
+        payload["code"] = code
+    return payload
+
+
+def _estimated_base64_decoded_size(value: str) -> int:
+    encoded = value.strip()
+    padding = len(encoded) - len(encoded.rstrip("="))
+    return max(0, (len(encoded) * 3 // 4) - padding)
 
 
 @router.post(
@@ -499,51 +516,78 @@ async def import_fish_s2_references(
     """Import one or more Fish S2 managed references from JSON or Markdown."""
     request_id = ensure_request_id(request)
     try:
-        content = await file.read()
-        items = parse_fish_s2_reference_import(filename=file.filename or "", content=content)
+        content = await file.read(FISH_S2_REFERENCE_IMPORT_MAX_BYTES + 1)
+        if len(content) > FISH_S2_REFERENCE_IMPORT_MAX_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_http_error_detail("Fish S2 reference import file is too large", request_id),
+            )
+        parsed = parse_fish_s2_reference_import_result(
+            filename=file.filename or "",
+            content=content,
+            max_items=FISH_S2_REFERENCE_IMPORT_MAX_ITEMS,
+            max_bytes=FISH_S2_REFERENCE_IMPORT_MAX_BYTES,
+        )
     except FishS2ReferenceImportError as e:
         logger.warning(f"Fish S2 reference import parse failed: {e}")
+        detail = _http_error_detail("Fish S2 reference import file is invalid", request_id, exc=e)
+        detail["details"] = str(e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=_http_error_detail("Fish S2 reference import file is invalid", request_id, exc=e),
+            detail=detail,
         ) from e
 
     results = []
-    errors = []
-    for item in items:
+    errors = [_fish_s2_import_error(error.index, error.message) for error in parsed.errors]
+    for item in parsed.items:
         file_content = None
         filename = None
         if item.audio_base64:
+            if _estimated_base64_decoded_size(item.audio_base64) > FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES:
+                errors.append(
+                    _fish_s2_import_error(
+                        item.source_index,
+                        "audio_base64 decoded audio exceeds the maximum size",
+                    )
+                )
+                continue
             try:
                 file_content = base64.b64decode(item.audio_base64, validate=True)
             except (binascii.Error, ValueError) as e:
-                errors.append(
-                    {
-                        "index": item.source_index,
-                        "message": "audio_base64 must be valid base64",
-                    }
-                )
+                errors.append(_fish_s2_import_error(item.source_index, "audio_base64 must be valid base64"))
                 logger.warning(f"Fish S2 reference import item {item.source_index} has invalid audio_base64: {e}")
+                continue
+            if len(file_content) > FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES:
+                errors.append(
+                    _fish_s2_import_error(
+                        item.source_index,
+                        "audio_base64 decoded audio exceeds the maximum size",
+                    )
+                )
                 continue
             filename = item.filename
 
         try:
-            results.append(
-                await tts_service.create_fish_s2_reference(
-                    user_id=current_user.id,
-                    voice_id=item.voice_id,
-                    file_content=file_content,
-                    filename=filename,
-                    name=item.name,
-                    description=item.description,
-                    reference_text=item.reference_text,
-                    force=item.force if item.force is not None else force,
-                )
+            item_result = await tts_service.create_fish_s2_reference(
+                user_id=current_user.id,
+                voice_id=item.voice_id,
+                file_content=file_content,
+                filename=filename,
+                name=item.name,
+                description=item.description,
+                reference_text=item.reference_text,
+                force=item.force if item.force is not None else force,
             )
+            result_payload = dict(item_result) if isinstance(item_result, dict) else {"result": item_result}
+            results.append({"index": item.source_index, **result_payload})
+        except TTSError as e:
+            logger.warning(f"Fish S2 reference import item {item.source_index} failed: {e}", exc_info=True)
+            errors.append(_fish_s2_import_error(item.source_index, str(e), getattr(e, "error_code", None)))
+            continue
         except Exception as e:
             if e.__class__.__name__ == "VoiceProcessingError":
                 logger.warning(f"Fish S2 reference import item {item.source_index} failed: {e}", exc_info=True)
-                errors.append({"index": item.source_index, "message": str(e)})
+                errors.append(_fish_s2_import_error(item.source_index, str(e), getattr(e, "error_code", None)))
                 continue
             logger.error(f"Fish S2 reference import error: {e}")
             raise HTTPException(

@@ -26,7 +26,26 @@ class FishS2ReferenceImportItem:
     source_index: int = 0
 
 
+@dataclass(frozen=True)
+class FishS2ReferenceImportIssue:
+    """Indexed validation issue for an import item."""
+
+    index: int
+    message: str
+
+
+@dataclass(frozen=True)
+class FishS2ReferenceImportParseResult:
+    """Detailed Fish S2 reference import parse result."""
+
+    items: list[FishS2ReferenceImportItem]
+    errors: list[FishS2ReferenceImportIssue]
+
+
 SUPPORTED_FISH_S2_IMPORT_EXTENSIONS = {".json", ".md", ".markdown"}
+FISH_S2_REFERENCE_IMPORT_MAX_BYTES = 75 * 1024 * 1024
+FISH_S2_REFERENCE_IMPORT_MAX_ITEMS = 25
+FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES = 50 * 1024 * 1024
 
 
 def parse_fish_s2_reference_import(
@@ -35,6 +54,26 @@ def parse_fish_s2_reference_import(
     content: bytes,
 ) -> list[FishS2ReferenceImportItem]:
     """Parse JSON or Markdown Fish S2 reference imports into normalized items."""
+    result = parse_fish_s2_reference_import_result(filename=filename, content=content)
+    if result.errors:
+        first_error = result.errors[0]
+        raise FishS2ReferenceImportError(first_error.message)
+    return result.items
+
+
+def parse_fish_s2_reference_import_result(
+    *,
+    filename: str,
+    content: bytes,
+    max_items: int = FISH_S2_REFERENCE_IMPORT_MAX_ITEMS,
+    max_bytes: int = FISH_S2_REFERENCE_IMPORT_MAX_BYTES,
+) -> FishS2ReferenceImportParseResult:
+    """Parse a Fish S2 reference import and collect indexed item errors."""
+    if len(content) > max_bytes:
+        raise FishS2ReferenceImportError(
+            f"Fish S2 import file exceeds the maximum size of {max_bytes} bytes"
+        )
+
     suffix = Path(filename or "").suffix.lower()
     if suffix not in SUPPORTED_FISH_S2_IMPORT_EXTENSIONS:
         raise FishS2ReferenceImportError(
@@ -53,8 +92,22 @@ def parse_fish_s2_reference_import(
 
     if not records:
         raise FishS2ReferenceImportError("Fish S2 import file contains no references")
+    if len(records) > max_items:
+        raise FishS2ReferenceImportError(
+            f"Fish S2 import file contains {len(records)} references; at most {max_items} are allowed"
+        )
 
-    return [_normalize_record(record, index) for index, record in enumerate(records)]
+    items: list[FishS2ReferenceImportItem] = []
+    errors: list[FishS2ReferenceImportIssue] = []
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            errors.append(FishS2ReferenceImportIssue(index=index, message="Each Fish S2 JSON import item must be an object"))
+            continue
+        try:
+            items.append(_normalize_record(record, index))
+        except FishS2ReferenceImportError as exc:
+            errors.append(FishS2ReferenceImportIssue(index=index, message=str(exc)))
+    return FishS2ReferenceImportParseResult(items=items, errors=errors)
 
 
 def _load_json_records(text: str) -> list[dict[str, Any]]:
@@ -71,9 +124,6 @@ def _load_json_records(text: str) -> list[dict[str, Any]]:
     else:
         raise FishS2ReferenceImportError("Fish S2 JSON import must be an object or array")
 
-    for record in records:
-        if not isinstance(record, dict):
-            raise FishS2ReferenceImportError("Each Fish S2 JSON import item must be an object")
     return records
 
 

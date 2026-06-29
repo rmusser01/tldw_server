@@ -23,3 +23,9 @@
 **Success Criteria**: TTS setup docs mention JSON and Markdown import examples; focused pytest and Bandit checks pass.
 **Tests**: Focused TTS endpoint/parser tests plus Bandit on touched production Python files.
 **Status**: Complete
+
+## Stage 4: Code Review Fixes
+**Goal**: Address code-review findings before merge.
+**Success Criteria**: Native Fish streaming rejects non-WAV formats while hosted commercial streaming keeps broader formats; imports return indexed partial errors/results; file/item/audio limits are enforced.
+**Tests**: Adapter regression tests plus parser/endpoint tests for partial parse errors, provider errors, oversized files, too many items, and oversized embedded audio.
+**Status**: Complete

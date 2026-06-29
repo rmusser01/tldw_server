@@ -3,6 +3,7 @@ import pytest
 from tldw_Server_API.app.core.TTS.fish_s2_reference_imports import (
     FishS2ReferenceImportError,
     parse_fish_s2_reference_import,
+    parse_fish_s2_reference_import_result,
 )
 
 
@@ -32,6 +33,34 @@ def test_parse_json_references_array_import():
 
     assert [item.voice_id for item in items] == ["voice-1", "voice-2"]
     assert [item.reference_text for item in items] == ["one", "two"]
+
+
+def test_parse_json_result_collects_item_errors_without_dropping_valid_items():
+    result = parse_fish_s2_reference_import_result(
+        filename="voices.json",
+        content=(
+            b'{"references": ['
+            b'{"voice_id": "voice-1", "reference_text": "one"},'
+            b'{"reference_text": "missing voice"},'
+            b'{"voice_id": "voice-2", "audio_base64": "QUJD", "reference_text": "bad"}'
+            b"]}"
+        ),
+    )
+
+    assert [item.voice_id for item in result.items] == ["voice-1"]
+    assert [(error.index, error.message) for error in result.errors] == [
+        (1, "voice_id or audio_base64 is required for Fish S2 imports"),
+        (2, "Provide either voice_id or audio_base64, not both"),
+    ]
+
+
+def test_parse_json_result_rejects_too_many_items():
+    with pytest.raises(FishS2ReferenceImportError, match="at most 1"):
+        parse_fish_s2_reference_import_result(
+            filename="voices.json",
+            content=b'[{"voice_id": "voice-1"}, {"voice_id": "voice-2"}]',
+            max_items=1,
+        )
 
 
 def test_parse_json_embedded_audio_import():

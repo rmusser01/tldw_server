@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 import pytest
 
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
-from tldw_Server_API.app.core.TTS.tts_exceptions import TTSProviderInitializationError
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSProviderInitializationError, TTSValidationError
 
 
 class _FakeBackend:
@@ -239,6 +239,59 @@ async def test_adapter_returns_streaming_response(monkeypatch):
     assert response.audio_stream is not None
     chunks = [chunk async for chunk in response.audio_stream]
     assert chunks == [b"a", b"b", b"c"]
+
+
+@pytest.mark.asyncio
+async def test_adapter_rejects_native_http_streaming_non_wav(monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter import FishS2Adapter
+
+    backend = _FakeBackend()
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter._build_backend",
+        lambda config: backend,
+    )
+
+    adapter = FishS2Adapter({"backend": "native_http", "base_url": "http://fish.local"})
+    await adapter.ensure_initialized()
+
+    with pytest.raises(TTSValidationError, match="native_http.*streaming.*wav"):
+        await adapter.generate(
+            TTSRequest(
+                text="hello",
+                format=AudioFormat.OPUS,
+                stream=True,
+                extra_params={"reference_id": "voice-123"},
+            )
+        )
+
+    assert backend.calls == []
+
+
+@pytest.mark.asyncio
+async def test_adapter_allows_commercial_api_streaming_opus(monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter import FishS2Adapter
+
+    backend = _FakeBackend(stream_chunks=[b"opus"])
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter._build_backend",
+        lambda config: backend,
+    )
+
+    adapter = FishS2Adapter({"backend": "commercial_api", "api_key": "secret"})
+    await adapter.ensure_initialized()
+
+    response = await adapter.generate(
+        TTSRequest(
+            text="hello",
+            format=AudioFormat.OPUS,
+            stream=True,
+            extra_params={"reference_id": "voice-123"},
+        )
+    )
+
+    assert response.audio_stream is not None
+    assert [chunk async for chunk in response.audio_stream] == [b"opus"]
+    assert backend.calls[-1]["response_format"] == "opus"
 
 
 @pytest.mark.asyncio

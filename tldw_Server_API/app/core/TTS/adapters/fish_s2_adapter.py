@@ -14,6 +14,7 @@ from ..backends.fish_s2_native_http import FishS2NativeHttpBackend
 from ..tts_exceptions import (
     TTSProviderInitializationError,
     TTSProviderNotConfiguredError,
+    TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
 from .base import (
@@ -165,6 +166,7 @@ class FishS2Adapter(TTSAdapter):
 
         normalized_request = self._normalize_request(request)
         validate_tts_request(normalized_request, provider=self.provider_key)
+        self._validate_backend_request(normalized_request)
 
         reference_id = self._resolve_reference_id(normalized_request)
         backend_extra_params = self._build_backend_extra_params(normalized_request.extra_params)
@@ -196,6 +198,20 @@ class FishS2Adapter(TTSAdapter):
             provider=self.PROVIDER_KEY,
             model=normalized_request.model,
         )
+
+    def _validate_backend_request(self, request: TTSRequest) -> None:
+        """Apply backend-specific constraints that global provider validation cannot know."""
+        if (
+            self.backend_name == "native_http"
+            and request.stream
+            and request.format != AudioFormat.WAV
+        ):
+            raise TTSValidationError(
+                "Fish S2 native_http streaming currently supports wav format only",
+                provider=self.PROVIDER_KEY,
+                error_code="unsupported_streaming_format",
+                details={"backend": self.backend_name, "format": request.format.value},
+            )
 
     async def add_reference(
         self,

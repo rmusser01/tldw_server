@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_voices
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSProviderError
 
 
 @pytest.fixture
@@ -251,6 +252,176 @@ def test_import_fish_s2_reference_from_json_embedded_audio(client):
     assert called["name"] == "Voice One"
     assert called["description"] == "Embedded audio import"
     assert called["reference_text"] == "embedded transcript"
+
+
+def test_import_fish_s2_references_returns_partial_parse_errors(client):
+    client_obj, app = client
+    calls = []
+
+    class _FakeTTSService:
+        async def create_fish_s2_reference(self, **kwargs):
+            calls.append(kwargs)
+            return {
+                "reference_id": kwargs["voice_id"],
+                "voice_id": kwargs["voice_id"],
+                "remote_reference_id": f"remote-{kwargs['voice_id']}",
+                "reference_text": kwargs["reference_text"],
+                "cached": False,
+            }
+
+    payload = {
+        "references": [
+            {"voice_id": "voice-1", "reference_text": "one"},
+            {"reference_text": "missing voice"},
+        ]
+    }
+
+    app.dependency_overrides[audio_voices.get_tts_service] = lambda: _FakeTTSService()
+    try:
+        response = client_obj.post(
+            "/api/v1/audio/providers/fish_s2/references/import",
+            files={"file": ("refs.json", json.dumps(payload), "application/json")},
+            headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]},
+        )
+    finally:
+        app.dependency_overrides.pop(audio_voices.get_tts_service, None)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["imported"] == 1
+    assert body["failed"] == 1
+    assert body["results"][0]["index"] == 0
+    assert body["errors"] == [
+        {
+            "index": 1,
+            "message": "voice_id or audio_base64 is required for Fish S2 imports",
+        }
+    ]
+    assert [call["voice_id"] for call in calls] == ["voice-1"]
+
+
+def test_import_fish_s2_references_returns_partial_provider_errors(client):
+    client_obj, app = client
+
+    class _FakeTTSService:
+        async def create_fish_s2_reference(self, **kwargs):
+            if kwargs["voice_id"] == "voice-2":
+                raise TTSProviderError("Fish upstream unavailable", provider="fish_s2", error_code="provider_error")
+            return {
+                "reference_id": kwargs["voice_id"],
+                "voice_id": kwargs["voice_id"],
+                "remote_reference_id": f"remote-{kwargs['voice_id']}",
+                "reference_text": kwargs["reference_text"],
+                "cached": False,
+            }
+
+    payload = {
+        "references": [
+            {"voice_id": "voice-1", "reference_text": "one"},
+            {"voice_id": "voice-2", "reference_text": "two"},
+        ]
+    }
+
+    app.dependency_overrides[audio_voices.get_tts_service] = lambda: _FakeTTSService()
+    try:
+        response = client_obj.post(
+            "/api/v1/audio/providers/fish_s2/references/import",
+            files={"file": ("refs.json", json.dumps(payload), "application/json")},
+            headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]},
+        )
+    finally:
+        app.dependency_overrides.pop(audio_voices.get_tts_service, None)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["imported"] == 1
+    assert body["failed"] == 1
+    assert body["results"][0]["index"] == 0
+    assert body["errors"] == [
+        {
+            "index": 1,
+            "message": "Fish upstream unavailable",
+            "code": "provider_error",
+        }
+    ]
+
+
+def test_import_fish_s2_references_rejects_oversized_file(client, monkeypatch):
+    client_obj, app = client
+    monkeypatch.setattr(audio_voices, "FISH_S2_REFERENCE_IMPORT_MAX_BYTES", 5)
+    app.dependency_overrides[audio_voices.get_tts_service] = lambda: object()
+    try:
+        response = client_obj.post(
+            "/api/v1/audio/providers/fish_s2/references/import",
+            files={"file": ("refs.json", '{"voice_id":"voice-1"}', "application/json")},
+            headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]},
+        )
+    finally:
+        app.dependency_overrides.pop(audio_voices.get_tts_service, None)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["message"] == "Fish S2 reference import file is too large"
+
+
+def test_import_fish_s2_references_rejects_too_many_items(client, monkeypatch):
+    client_obj, app = client
+    monkeypatch.setattr(audio_voices, "FISH_S2_REFERENCE_IMPORT_MAX_ITEMS", 1)
+    app.dependency_overrides[audio_voices.get_tts_service] = lambda: object()
+    try:
+        response = client_obj.post(
+            "/api/v1/audio/providers/fish_s2/references/import",
+            files={
+                "file": (
+                    "refs.json",
+                    '[{"voice_id":"voice-1"}, {"voice_id":"voice-2"}]',
+                    "application/json",
+                )
+            },
+            headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]},
+        )
+    finally:
+        app.dependency_overrides.pop(audio_voices.get_tts_service, None)
+
+    assert response.status_code == 400
+    assert "at most 1" in response.json()["detail"]["details"]
+
+
+def test_import_fish_s2_references_rejects_oversized_embedded_audio(client, monkeypatch):
+    client_obj, app = client
+    monkeypatch.setattr(audio_voices, "FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES", 2)
+    called = False
+
+    class _FakeTTSService:
+        async def create_fish_s2_reference(self, **kwargs):
+            nonlocal called
+            called = True
+            return {}
+
+    payload = {
+        "audio_base64": "QUJD",
+        "filename": "voice.wav",
+        "name": "Voice One",
+        "reference_text": "embedded transcript",
+    }
+
+    app.dependency_overrides[audio_voices.get_tts_service] = lambda: _FakeTTSService()
+    try:
+        response = client_obj.post(
+            "/api/v1/audio/providers/fish_s2/references/import",
+            files={"file": ("voice.json", json.dumps(payload), "application/json")},
+            headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]},
+        )
+    finally:
+        app.dependency_overrides.pop(audio_voices.get_tts_service, None)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["errors"] == [
+        {
+            "index": 0,
+            "message": "audio_base64 decoded audio exceeds the maximum size",
+        }
+    ]
+    assert called is False
 
 
 def test_import_fish_s2_references_rejects_unsupported_file_type(client):
