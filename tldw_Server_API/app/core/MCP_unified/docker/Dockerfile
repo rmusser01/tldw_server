@@ -1,5 +1,5 @@
-# Multi-stage Dockerfile for MCP Unified Module
-# Optimized for production deployment with security best practices
+# Experimental multi-stage Dockerfile for MCP Unified package-boundary smoke tests.
+# Unified MCP is embedded in TLDW Server today; this is not a supported standalone gateway image.
 
 # Stage 1: Builder
 FROM python:3.11-slim as builder
