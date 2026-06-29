@@ -36,6 +36,8 @@ from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_
 from tldw_Server_API.app.api.v1.schemas.skills_schemas import (
     SkillContext,
     SkillContextPayload,
+    SkillBulkDeleteRequest,
+    SkillBulkDeleteResponse,
     SkillCreate,
     SkillExecuteRequest,
     SkillExecutionResult,
@@ -258,6 +260,49 @@ async def get_skills_context(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get skills context",
+        ) from e
+
+
+@router.post("/bulk-delete", response_model=SkillBulkDeleteResponse)
+async def bulk_delete_skills(
+    request: SkillBulkDeleteRequest,
+    service: SkillsService = Depends(get_skills_service),
+) -> SkillBulkDeleteResponse:
+    """
+    Delete multiple selected skills.
+
+    Validates every supplied version before deleting any selected skill.
+    """
+    try:
+        deleted = await service.bulk_delete_skills(
+            [item.model_dump() for item in request.skills]
+        )
+        return SkillBulkDeleteResponse(deleted=deleted, count=len(deleted))
+    except SkillNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+    except SkillConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from e
+    except SkillValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except SkillsError as e:
+        logger.error(
+            "Error bulk deleting skills user_id={} selected_count={} error_type={}",
+            service.user_id,
+            len(request.skills),
+            type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to bulk delete skills",
         ) from e
 
 

@@ -154,6 +154,11 @@ const isConflictError = (error: unknown): boolean => {
     || hasConflictMessage
 }
 
+const getKnownSkillVersion = (version: unknown): number | undefined =>
+  typeof version === "number" && Number.isSafeInteger(version) && version > 0
+    ? version
+    : undefined
+
 const buildSkillInvocation = (skillName: string) => `/skill ${skillName}`
 
 const isSkillTableSortField = (value: React.Key | undefined): value is SkillListSort =>
@@ -252,6 +257,7 @@ export const SkillsManager: React.FC = () => {
     React.useState<FileImportReview | null>(null)
   const [editingSkill, setEditingSkill] = React.useState<SkillResponse | null>(null)
   const [previewSkill, setPreviewSkill] = React.useState<string | null>(null)
+  const [selectedSkillNames, setSelectedSkillNames] = React.useState<string[]>([])
   const [successAction, setSuccessAction] =
     React.useState<SkillsSuccessAction | null>(null)
   const [importTextForm] = Form.useForm<ImportTextFormValues>()
@@ -341,6 +347,12 @@ export const SkillsManager: React.FC = () => {
   })
 
   const hasLoadedSkills = data != null && !isError
+  const currentSkills = React.useMemo(() => data?.skills ?? [], [data?.skills])
+  const selectedSkills = React.useMemo(() => {
+    const selectedNames = new Set(selectedSkillNames)
+    return currentSkills.filter((skill) => selectedNames.has(skill.name))
+  }, [currentSkills, selectedSkillNames])
+  const selectedSkillCount = selectedSkillNames.length
   const totalSkills = data?.total ?? 0
   const hasSearch = searchQuery.length > 0
   const isLibraryEmpty =
@@ -378,6 +390,16 @@ export const SkillsManager: React.FC = () => {
       setPage(lastPage)
     }
   }, [hasLoadedSkills, page, pageSize, totalSkills])
+
+  React.useEffect(() => {
+    if (!hasLoadedSkills) return
+
+    const currentSkillNames = new Set(currentSkills.map((skill) => skill.name))
+    setSelectedSkillNames((current) => {
+      const next = current.filter((name) => currentSkillNames.has(name))
+      return next.length === current.length ? current : next
+    })
+  }, [currentSkills, hasLoadedSkills])
 
   const handleContextFilterChange = (nextFilter: SkillContextFilter) => {
     setContextFilter(nextFilter)
@@ -469,6 +491,54 @@ export const SkillsManager: React.FC = () => {
       }
       notification.error({
         message: t("option:skills.deleteError", { defaultValue: "Failed to delete skill" }),
+        description: getErrorDescription(err)
+      })
+    }
+  })
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (skills: SkillSummary[]) =>
+      tldwClient.bulkDeleteSkills(
+        skills.map((skill) => {
+          const version = getKnownSkillVersion(skill.version)
+          return {
+            name: skill.name,
+            ...(version ? { version } : {})
+          }
+        })
+      ),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["skills"] })
+      setSelectedSkillNames([])
+      setSuccessAction(null)
+      const count = Number(result?.count ?? 0)
+      notification.success({
+        message: t("option:skills.bulkDeleteSuccess", {
+          defaultValue: "Skills deleted"
+        }),
+        description: t("option:skills.bulkDeleteSuccessDesc", {
+          defaultValue: `${count} skill(s) deleted.`,
+          count
+        })
+      })
+    },
+    onError: (err: unknown) => {
+      if (isConflictError(err)) {
+        queryClient.invalidateQueries({ queryKey: ["skills"] })
+        notification.error({
+          message: t("option:skills.bulkDeleteConflict", {
+            defaultValue: "Selected skills changed elsewhere"
+          }),
+          description: t("option:skills.bulkDeleteConflictDesc", {
+            defaultValue: "Reload skills before deleting these versions."
+          })
+        })
+        return
+      }
+      notification.error({
+        message: t("option:skills.bulkDeleteError", {
+          defaultValue: "Failed to delete selected skills"
+        }),
         description: getErrorDescription(err)
       })
     }
@@ -657,10 +727,35 @@ export const SkillsManager: React.FC = () => {
       cancelText: t("common:cancel", { defaultValue: "Cancel" }),
       onOk: () => deleteMutation.mutateAsync({
         name: skill.name,
-        version: Number.isSafeInteger(skill.version) && Number(skill.version) > 0
-          ? skill.version
-          : undefined
+        version: getKnownSkillVersion(skill.version)
       }).catch((err: unknown) => {
+        if (isConflictError(err)) return
+        throw err
+      })
+    })
+  }
+
+  const handleBulkDelete = () => {
+    if (!selectedSkills.length) return
+
+    const count = selectedSkills.length
+    Modal.confirm({
+      title: t("option:skills.bulkDeleteConfirmTitle", {
+        defaultValue: "Delete selected skills?"
+      }),
+      content: t("option:skills.bulkDeleteConfirmContent", {
+        defaultValue: `Delete ${count} selected skill(s)? This cannot be undone.`,
+        count
+      }),
+      okText: t("option:skills.bulkDeleteConfirmOk", {
+        defaultValue: "Delete selected"
+      }),
+      okButtonProps: {
+        danger: true,
+        loading: bulkDeleteMutation.isPending
+      },
+      cancelText: t("common:cancel", { defaultValue: "Cancel" }),
+      onOk: () => bulkDeleteMutation.mutateAsync(selectedSkills).catch((err: unknown) => {
         if (isConflictError(err)) return
         throw err
       })
@@ -1466,12 +1561,58 @@ export const SkillsManager: React.FC = () => {
         </DesignSystemAlert>
       )}
 
+      {selectedSkillCount > 0 && (
+        <div
+          data-testid="skills-selection-actions"
+          className="flex flex-wrap items-center justify-between gap-2 border-y border-border py-2"
+        >
+          <span className="text-sm font-medium text-text" aria-live="polite">
+            {t("option:skills.selectedCount", {
+              defaultValue: `${selectedSkillCount} selected`,
+              count: selectedSkillCount
+            })}
+          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="small"
+              onClick={() => setSelectedSkillNames([])}
+            >
+              {t("option:skills.clearSelection", {
+                defaultValue: "Clear selection"
+              })}
+            </Button>
+            <Button
+              size="small"
+              danger
+              icon={<Trash2 size={14} />}
+              loading={bulkDeleteMutation.isPending}
+              onClick={handleBulkDelete}
+            >
+              {t("option:skills.bulkDeleteAction", {
+                defaultValue: "Delete selected"
+              })}
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Table
         data-testid="skills-table"
         data-density={tableDensity}
-        dataSource={data?.skills ?? []}
+        dataSource={currentSkills}
         columns={columns}
         rowKey="name"
+        rowSelection={{
+          selectedRowKeys: selectedSkillNames,
+          onChange: (selectedRowKeys) =>
+            setSelectedSkillNames(selectedRowKeys.map((key) => String(key))),
+          getCheckboxProps: (record) => ({
+            "aria-label": t("option:skills.selectSkillRow", {
+              defaultValue: `Select ${record.name}`,
+              name: record.name
+            })
+          })
+        }}
         loading={isLoading}
         onChange={handleTableChange}
         pagination={false}

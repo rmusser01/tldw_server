@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+    InputError,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -113,3 +117,47 @@ def test_restore_skill_registry_reactivates_soft_deleted_row(skills_db: Characte
     assert restored["description"] == "After"
     assert not restored["deleted"]
     assert restored["version"] == 3
+
+
+def test_bulk_mark_skill_registry_deleted_rolls_back_on_version_conflict(
+    skills_db: CharactersRAGDB,
+) -> None:
+    """A stale item in a bulk delete must not soft-delete earlier rows."""
+    _insert_skill(skills_db, "bulk-atomic-a")
+    _insert_skill(skills_db, "bulk-atomic-b")
+    skills_db.update_skill_registry(
+        "bulk-atomic-b",
+        {"description": "newer"},
+        expected_version=1,
+    )
+
+    with pytest.raises(ConflictError):
+        skills_db.bulk_mark_skill_registry_deleted(
+            [
+                ("bulk-atomic-a", 1),
+                ("bulk-atomic-b", 1),
+            ]
+        )
+
+    assert skills_db.get_skill_registry("bulk-atomic-a", include_deleted=False) is not None
+    assert skills_db.get_skill_registry("bulk-atomic-b", include_deleted=False) is not None
+
+
+def test_bulk_mark_skill_registry_deleted_allows_unknown_versions(
+    skills_db: CharactersRAGDB,
+) -> None:
+    """Rows with omitted versions remain compatible with unversioned deletes."""
+    _insert_skill(skills_db, "bulk-unversioned")
+    skills_db.update_skill_registry(
+        "bulk-unversioned",
+        {"description": "changed after list"},
+        expected_version=1,
+    )
+
+    deleted = skills_db.bulk_mark_skill_registry_deleted([("bulk-unversioned", None)])
+
+    assert [item["name"] for item in deleted] == ["bulk-unversioned"]
+    assert skills_db.get_skill_registry("bulk-unversioned", include_deleted=False) is None
+    deleted_row = skills_db.get_skill_registry("bulk-unversioned", include_deleted=True)
+    assert deleted_row is not None
+    assert deleted_row["version"] == 3

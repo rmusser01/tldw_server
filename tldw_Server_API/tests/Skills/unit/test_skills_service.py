@@ -521,6 +521,30 @@ New content here.
         assert (skill_dir / "SKILL.md").read_text(encoding="utf-8") == "Content"
 
     @pytest.mark.asyncio
+    async def test_bulk_delete_syncs_registry_once(self, service, monkeypatch):
+        """Bulk delete should reuse one forced registry sync for the whole request."""
+        first = await service.create_skill("bulk-sync-a", "Content A")
+        second = await service.create_skill("bulk-sync-b", "Content B")
+        sync_calls = 0
+        original_sync = service._sync_registry_async
+
+        async def _counted_sync(*args, **kwargs):
+            nonlocal sync_calls
+            sync_calls += 1
+            return await original_sync(*args, **kwargs)
+
+        monkeypatch.setattr(service, "_sync_registry_async", _counted_sync)
+
+        await service.bulk_delete_skills(
+            [
+                {"name": "bulk-sync-a", "version": first["version"]},
+                {"name": "bulk-sync-b", "version": second["version"]},
+            ]
+        )
+
+        assert sync_calls == 1
+
+    @pytest.mark.asyncio
     async def test_update_skill_supporting_files_only_bumps_version(self, service):
         """Supporting-file-only changes are skill bundle mutations and must be versioned."""
         created = await service.create_skill(

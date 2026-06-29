@@ -199,6 +199,37 @@ class SkillSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SkillBulkDeleteItem(BaseModel):
+    """One skill selected for bulk deletion."""
+    name: str = Field(..., min_length=1, max_length=64, description="Skill identifier")
+    version: int | None = Field(
+        None,
+        ge=1,
+        description="Optional optimistic-lock version from the selected row",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return _normalize_and_validate_skill_name(value)
+
+
+class SkillBulkDeleteRequest(BaseModel):
+    """Request to delete multiple selected skills."""
+    skills: list[SkillBulkDeleteItem] = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Selected skills to delete",
+    )
+
+
+class SkillBulkDeleteResponse(BaseModel):
+    """Response for a successful bulk delete."""
+    deleted: list[str] = Field(..., description="Names deleted in request order")
+    count: int = Field(..., ge=0, description="Number of deleted skills")
+
+
 class SkillsListResponse(BaseModel):
     """Response for listing skills."""
     skills: list[SkillSummary] = Field(..., description="List of skill summaries")

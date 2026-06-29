@@ -1229,6 +1229,82 @@ class SkillsService:
 
         logger.info(f"Deleted skill '{name}' for user {self.user_id}")
 
+    async def bulk_delete_skills(self, items: list[dict[str, Any]]) -> list[str]:
+        """
+        Delete multiple skills after validating all selected versions.
+
+        Args:
+            items: Skill name/version mappings. Version may be omitted for legacy rows.
+
+        Returns:
+            Deleted skill names in request order.
+
+        Raises:
+            SkillValidationError: If the selection is invalid
+            SkillNotFoundError: If any selected skill doesn't exist
+            SkillConflictError: If any selected version is stale
+        """
+        if not items:
+            raise SkillValidationError("At least one skill is required for bulk delete")
+
+        normalized_items: list[tuple[str, int | None]] = []
+        seen_names: set[str] = set()
+        for item in items:
+            name = self._normalize_and_validate_skill_name(str(item.get("name") or ""))
+            if name in seen_names:
+                raise SkillValidationError(f"Duplicate skill selected for bulk delete: {name}")
+            seen_names.add(name)
+
+            expected_version = item.get("version")
+            if expected_version is not None:
+                if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 1:
+                    raise SkillValidationError(
+                        f"Invalid version for skill '{name}'",
+                        field="version",
+                    )
+            normalized_items.append((name, expected_version))
+
+        await self._sync_registry_async(force=True)
+        db = self._get_db()
+
+        try:
+            deleted_rows = await asyncio.to_thread(db.bulk_mark_skill_registry_deleted, normalized_items)
+        except InputError as e:
+            message = str(e)
+            missing_name = (
+                message.removeprefix("Skill not found: ").strip()
+                if message.startswith("Skill not found: ")
+                else message
+            )
+            raise SkillNotFoundError(missing_name) from e
+        except ConflictError as e:
+            raise SkillConflictError(str(e)) from e
+        except CharactersRAGDBError as e:
+            raise SkillsError(f"Failed to bulk delete skills in registry: {e}") from e
+
+        deleted: list[str] = []
+        for row in deleted_rows:
+            name = str(row["name"])
+            skill_dir = self._get_skill_dir(name)
+            if await asyncio.to_thread(skill_dir.exists):
+                try:
+                    await asyncio.to_thread(shutil.rmtree, skill_dir)
+                except OSError as e:
+                    if not row.get("was_deleted"):
+                        try:
+                            db.restore_skill_registry(
+                                name,
+                                {"directory_path": str(skill_dir)},
+                                expected_version=int(row["version"]),
+                            )
+                        except Exception as restore_error:
+                            logger.error(f"Failed to restore skill registry after bulk delete failure: {restore_error}")
+                    raise SkillStorageError(f"Failed to delete skill directory: {e}", path=str(skill_dir)) from e
+            deleted.append(name)
+
+        logger.info(f"Bulk deleted {len(deleted)} skills for user {self.user_id}")
+        return deleted
+
     async def import_skill(
         self,
         content: str,

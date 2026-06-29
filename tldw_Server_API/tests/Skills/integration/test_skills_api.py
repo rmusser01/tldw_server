@@ -701,6 +701,122 @@ class TestDeleteSkill:
         assert "/private/" not in joined
 
 
+class TestBulkDeleteSkills:
+    def test_bulk_delete_accepts_matching_versions(self, client: TestClient) -> None:
+        """Bulk delete removes all selected skills when versions match."""
+        first = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "bulk-delete-a", "content": "content a"},
+        )
+        second = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "bulk-delete-b", "content": "content b"},
+        )
+        assert first.status_code == 201, first.text
+        assert second.status_code == 201, second.text
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/bulk-delete",
+            json={
+                "skills": [
+                    {"name": "bulk-delete-a", "version": first.json()["version"]},
+                    {"name": "bulk-delete-b", "version": second.json()["version"]},
+                ],
+            },
+        )
+
+        assert r.status_code == 200, r.text
+        assert r.json() == {
+            "deleted": ["bulk-delete-a", "bulk-delete-b"],
+            "count": 2,
+        }
+        assert client.get(f"{SKILLS_PREFIX}/bulk-delete-a").status_code == 404
+        assert client.get(f"{SKILLS_PREFIX}/bulk-delete-b").status_code == 404
+
+    def test_bulk_delete_keeps_unknown_version_compatible(
+        self,
+        client: TestClient,
+    ) -> None:
+        """Bulk delete remains compatible for legacy rows without known versions."""
+        created = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "bulk-delete-legacy", "content": "content"},
+        )
+        assert created.status_code == 201, created.text
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/bulk-delete",
+            json={"skills": [{"name": "bulk-delete-legacy"}]},
+        )
+
+        assert r.status_code == 200, r.text
+        assert r.json()["deleted"] == ["bulk-delete-legacy"]
+        assert client.get(f"{SKILLS_PREFIX}/bulk-delete-legacy").status_code == 404
+
+    def test_bulk_delete_stale_version_returns_409_without_partial_delete(
+        self,
+        client: TestClient,
+    ) -> None:
+        """A stale bulk delete conflicts before deleting any selected skill."""
+        stale = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "bulk-stale", "content": "v1"},
+        )
+        fresh = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={"name": "bulk-fresh", "content": "content"},
+        )
+        assert stale.status_code == 201, stale.text
+        assert fresh.status_code == 201, fresh.text
+
+        updated = client.put(
+            f"{SKILLS_PREFIX}/bulk-stale",
+            json={"content": "v2"},
+        )
+        assert updated.status_code == 200, updated.text
+
+        r = client.post(
+            f"{SKILLS_PREFIX}/bulk-delete",
+            json={
+                "skills": [
+                    {"name": "bulk-stale", "version": stale.json()["version"]},
+                    {"name": "bulk-fresh", "version": fresh.json()["version"]},
+                ],
+            },
+        )
+
+        assert r.status_code == 409
+        assert client.get(f"{SKILLS_PREFIX}/bulk-stale").status_code == 200
+        assert client.get(f"{SKILLS_PREFIX}/bulk-fresh").status_code == 200
+
+    def test_bulk_delete_sanitized_error_log_has_request_context(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Bulk delete 500 logs should include request context without leaking details."""
+
+        async def _boom(self, items):  # noqa: ANN001, ANN202
+            raise SkillsError("bulk backend exploded at /private/bulk-delete")
+
+        monkeypatch.setattr(SkillsService, "bulk_delete_skills", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.post(
+                f"{SKILLS_PREFIX}/bulk-delete",
+                json={"skills": [{"name": "bulk-log", "version": 1}]},
+            )
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to bulk delete skills"
+        assert "Error bulk deleting skills" in joined
+        assert "selected_count=1" in joined
+        assert f"user_id={TEST_USER_ID}" in joined
+        assert "bulk backend exploded" not in joined
+        assert "/private/" not in joined
+
+
 class TestImportExport:
     def test_import_skill_preview_json_returns_metadata_and_conflict(self, client):
         client.post(

@@ -8,6 +8,7 @@ const tldwClientMock = vi.hoisted(() => ({
   listSkills: vi.fn(),
   getSkill: vi.fn(),
   deleteSkill: vi.fn(),
+  bulkDeleteSkills: vi.fn(),
   exportSkill: vi.fn(),
   previewSkillImport: vi.fn(),
   previewSkillImportFile: vi.fn(),
@@ -202,6 +203,12 @@ describe("SkillsManager imports", () => {
 
   const getColumnVisibilityOption = async (name: string) =>
     within(await openColumnVisibilityMenu()).findByRole("menuitem", { name })
+
+  const selectSkillRow = (name: string) => {
+    const row = screen.getByText(name).closest("tr")
+    expect(row).not.toBeNull()
+    fireEvent.click(within(row as HTMLTableRowElement).getByRole("checkbox"))
+  }
 
   it("orients users with a page summary and library count", async () => {
     tldwClientMock.listSkills.mockResolvedValueOnce({
@@ -741,7 +748,7 @@ describe("SkillsManager imports", () => {
       await waitFor(() => {
         expect(confirmConfig?.onOk).toBeTypeOf("function")
       })
-      await expect(confirmConfig?.onOk?.()).resolves.toBeUndefined()
+      await confirmConfig?.onOk?.()
 
       await waitFor(() => {
         expect(notificationMock.error).toHaveBeenCalledWith(
@@ -754,6 +761,152 @@ describe("SkillsManager imports", () => {
       expect(invalidateSpy).toHaveBeenCalledWith(
         expect.objectContaining({ queryKey: ["skills"] })
       )
+    } finally {
+      confirmSpy.mockRestore()
+      invalidateSpy.mockRestore()
+    }
+  })
+
+  it("bulk deletes selected rows with their current versions", async () => {
+    let confirmConfig: { onOk?: () => void | Promise<void> } | undefined
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce(
+      (config) => {
+        confirmConfig = config as { onOk?: () => void | Promise<void> }
+        return { destroy: vi.fn(), update: vi.fn() } as any
+      }
+    )
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [makeSkill(1), makeSkill(2)],
+      count: 2,
+      total: 2,
+      limit: 10,
+      offset: 0
+    })
+    tldwClientMock.bulkDeleteSkills.mockResolvedValueOnce({
+      deleted: ["skill-1", "skill-2"],
+      count: 2
+    })
+
+    try {
+      renderManager()
+      await screen.findByText("skill-1")
+      selectSkillRow("skill-1")
+      selectSkillRow("skill-2")
+
+      expect(screen.getByTestId("skills-selection-actions")).toHaveTextContent("2 selected")
+      fireEvent.click(screen.getByRole("button", { name: "Delete selected" }))
+
+      await waitFor(() => {
+        expect(confirmConfig?.onOk).toBeTypeOf("function")
+      })
+      await confirmConfig?.onOk?.()
+
+      await waitFor(() => {
+        expect(tldwClientMock.bulkDeleteSkills).toHaveBeenCalledWith([
+          { name: "skill-1", version: 2 },
+          { name: "skill-2", version: 3 }
+        ])
+      })
+      expect(notificationMock.success).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Skills deleted",
+          description: "2 skill(s) deleted."
+        })
+      )
+      await waitFor(() => {
+        expect(screen.queryByTestId("skills-selection-actions")).not.toBeInTheDocument()
+      })
+    } finally {
+      confirmSpy.mockRestore()
+    }
+  })
+
+  it("bulk delete stays compatible when selected rows have no known version", async () => {
+    let confirmConfig: { onOk?: () => void | Promise<void> } | undefined
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce(
+      (config) => {
+        confirmConfig = config as { onOk?: () => void | Promise<void> }
+        return { destroy: vi.fn(), update: vi.fn() } as any
+      }
+    )
+    const legacySkill = { ...makeSkill(4) } as Partial<ReturnType<typeof makeSkill>>
+    delete legacySkill.version
+    tldwClientMock.listSkills.mockResolvedValueOnce({
+      skills: [legacySkill] as any,
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+    tldwClientMock.bulkDeleteSkills.mockResolvedValueOnce({
+      deleted: ["skill-4"],
+      count: 1
+    })
+
+    try {
+      renderManager()
+      await screen.findByText("skill-4")
+      selectSkillRow("skill-4")
+      fireEvent.click(screen.getByRole("button", { name: "Delete selected" }))
+
+      await waitFor(() => {
+        expect(confirmConfig?.onOk).toBeTypeOf("function")
+      })
+      await confirmConfig?.onOk?.()
+
+      await waitFor(() => {
+        expect(tldwClientMock.bulkDeleteSkills).toHaveBeenCalledWith([
+          { name: "skill-4" }
+        ])
+      })
+    } finally {
+      confirmSpy.mockRestore()
+    }
+  })
+
+  it("keeps selected rows recoverable on stale bulk delete conflict", async () => {
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries")
+    let confirmConfig: { onOk?: () => void | Promise<void> } | undefined
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockImplementationOnce(
+      (config) => {
+        confirmConfig = config as { onOk?: () => void | Promise<void> }
+        return { destroy: vi.fn(), update: vi.fn() } as any
+      }
+    )
+    const conflict = Object.assign(new Error("409 version conflict"), { status: 409 })
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [makeSkill(1), makeSkill(2)],
+      count: 2,
+      total: 2,
+      limit: 10,
+      offset: 0
+    })
+    tldwClientMock.bulkDeleteSkills.mockRejectedValueOnce(conflict)
+
+    try {
+      renderManager()
+      await screen.findByText("skill-1")
+      selectSkillRow("skill-1")
+      selectSkillRow("skill-2")
+      fireEvent.click(screen.getByRole("button", { name: "Delete selected" }))
+
+      await waitFor(() => {
+        expect(confirmConfig?.onOk).toBeTypeOf("function")
+      })
+      await expect(confirmConfig?.onOk?.()).resolves.toBeUndefined()
+
+      await waitFor(() => {
+        expect(notificationMock.error).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: "Selected skills changed elsewhere",
+            description: "Reload skills before deleting these versions."
+          })
+        )
+      })
+      expect(invalidateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: ["skills"] })
+      )
+      expect(screen.getByTestId("skills-selection-actions")).toHaveTextContent("2 selected")
     } finally {
       confirmSpy.mockRestore()
       invalidateSpy.mockRestore()

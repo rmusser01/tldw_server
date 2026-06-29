@@ -90,4 +90,58 @@ describe("workspace API skill methods", () => {
       })
     }
   )
+
+  it("posts selected skills and valid row versions for bulk delete", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      deleted: ["skill-a", "skill-b"],
+      count: 2
+    })
+    const clientCore = {
+      resolveApiPath: vi.fn().mockResolvedValue("/api/v1/skills/bulk-delete")
+    }
+
+    await workspaceApiMethods.bulkDeleteSkills.call(clientCore as any, [
+      { name: "skill-a", version: 2 },
+      { name: "skill-b", version: 3 }
+    ])
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/skills/bulk-delete",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        skills: [
+          { name: "skill-a", version: 2 },
+          { name: "skill-b", version: 3 }
+        ]
+      }
+    })
+  })
+
+  it("omits invalid bulk delete versions while preserving selected names", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      deleted: ["legacy-skill", "invalid-version"],
+      count: 2
+    })
+    const clientCore = {
+      resolveApiPath: vi.fn().mockResolvedValue("/api/v1/skills/bulk-delete")
+    }
+
+    await workspaceApiMethods.bulkDeleteSkills.call(clientCore as any, [
+      { name: "legacy-skill" },
+      { name: "invalid-version", version: Number.NaN }
+    ])
+
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/skills/bulk-delete",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        skills: [
+          { name: "legacy-skill" },
+          { name: "invalid-version" }
+        ]
+      }
+    })
+  })
 })
