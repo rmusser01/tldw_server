@@ -322,6 +322,20 @@ modules:
 
 Replace `<content-db>.db` with your configured per-user content DB filename.
 
+### Safer local module defaults
+
+Default installs no longer expose local filesystem or local command execution
+tools. They appear in `/api/v1/mcp/status` under
+`surface.disabled_available` with `requires_explicit_opt_in: true` until an
+operator enables them.
+
+To restore a previous local workflow intentionally:
+
+1. Copy the relevant entries from `tldw_Server_API/Config_Files/mcp_modules.local_opt_in.example.yaml`.
+2. Set only the needed modules to `enabled: true` in the selected `mcp_modules.yaml`.
+3. Restart TLDW Server.
+4. Recheck `/api/v1/mcp/status`; the module should move from `surface.disabled_available` to `surface.tiers`.
+
 ### Environment variable registration (quick dev path)
 
 ```bash
@@ -533,6 +547,7 @@ There is no built-in autonomous multi-stage agent loop. The safe pattern is expl
 | Module degraded or unhealthy | `/api/v1/mcp/status` `problem_modules` | Follow `next_action`, check module config/dependencies, then restart or disable the module. |
 | Invalid safe config | HTTP 400 with `detail.code=invalid_safe_config` | Remove `config` or send base64url-encoded JSON object data only. |
 | Empty tool list | `/status` `modules`, `problem_modules`, `config_warnings`, and `/tool_catalogs` | Confirm modules are enabled, the catalog filter resolves, and the caller has discovery/execute permissions. |
+| Local file or command tool missing | `/api/v1/mcp/status` `surface.disabled_available` | Enable the module explicitly in YAML only if this deployment should expose local file/process access, then restart. |
 
 ### `503 Server not initialized` on `/health`
 

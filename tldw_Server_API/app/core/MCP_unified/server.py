@@ -306,6 +306,7 @@ class MCPServer:
         self._initialize_lock = asyncio.Lock()
         self.startup_time = datetime.now(timezone.utc)
         self.shutdown_event = asyncio.Event()
+        self._configured_modules_for_status: dict[str, dict[str, Any]] = {}
 
         # Background tasks
         self.background_tasks: set[asyncio.Task] = set()
@@ -464,6 +465,33 @@ class MCPServer:
     def _env_flag_explicitly_disabled(name: str) -> bool:
         """Return True when an env flag is set to a common disabled value."""
         return os.getenv(name, "").strip().lower() in {"0", "false", "off", "no", "n"}
+
+    @staticmethod
+    def _module_status_entry(module_config: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+        """Return a sanitized status entry for a configured module."""
+        module_id = str(module_config.get("id") or "").strip()
+        if not module_id:
+            return None
+        enabled = bool(module_config.get("enabled", True))
+        return module_id, {
+            "enabled": enabled,
+            "status": "configured" if enabled else "disabled",
+            "name": str(module_config.get("name") or module_id),
+            "department": str(module_config.get("department") or "general"),
+        }
+
+    def _remember_configured_modules_for_status(self, modules: list[Any]) -> None:
+        """Store sanitized configured-module metadata for status reporting."""
+        remembered: dict[str, dict[str, Any]] = {}
+        for module_config in modules:
+            if not isinstance(module_config, dict):
+                continue
+            entry = self._module_status_entry(module_config)
+            if entry is None:
+                continue
+            module_id, payload = entry
+            remembered[module_id] = payload
+        self._configured_modules_for_status = remembered
 
     def _default_media_db_path(self) -> str:
         """Return the host-provided default media DB path for module config."""
@@ -768,9 +796,9 @@ class MCPServer:
                     })
                     logger.info("TEST_MODE auto-enabled MediaModule for deterministic tool catalogs")
 
-            # 5) Filesystem module is enabled by default for workspace-bounded fs primitives.
-            if os.getenv("MCP_ENABLE_FILESYSTEM_MODULE", "true").strip().lower() not in {"0", "false", "off", "no", "n"}:
-                if not any(m.get("id") == "filesystem" for m in modules_to_load if isinstance(m, dict)):
+            # 5) Filesystem module requires explicit opt-in for workspace-bounded fs primitives.
+            if not any(m.get("id") == "filesystem" for m in modules_to_load if isinstance(m, dict)):
+                if self._env_flag_enabled("MCP_ENABLE_FILESYSTEM_MODULE"):
                     modules_to_load.append({
                         "id": "filesystem",
                         "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule",
@@ -780,7 +808,18 @@ class MCPServer:
                         "department": "management",
                         "settings": {},
                     })
-                    logger.info("MCP filesystem module enabled by default; queuing FilesystemModule for registration")
+                    logger.info("MCP_ENABLE_FILESYSTEM_MODULE=true; queuing FilesystemModule for registration")
+                else:
+                    modules_to_load.append({
+                        "id": "filesystem",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule",
+                        "enabled": False,
+                        "name": "Filesystem",
+                        "version": "1.0.0",
+                        "department": "management",
+                        "settings": {},
+                    })
+                    logger.info("MCP filesystem module available but disabled; set MCP_ENABLE_FILESYSTEM_MODULE=true or enable it in YAML to opt in")
 
             # 6) Optional: Git module - disabled by default
             if self._env_flag_enabled("MCP_ENABLE_GIT_MODULE"):
@@ -876,6 +915,8 @@ class MCPServer:
                         },
                     })
                     logger.info("MCP browser CDP module enabled/configured; queuing BrowserCDPModule for registration")
+
+            self._remember_configured_modules_for_status(modules_to_load)
 
             # Register all specified modules
             from .modules.base import ModuleConfig  # Local import to avoid cycles
@@ -1867,12 +1908,16 @@ class MCPServer:
 
         # Get module health
         health_results = await self.module_registry.check_all_health()
-        module_surface = describe_module_surface(
-            {
-                module_id: {"status": health.status.value}
-                for module_id, health in health_results.items()
-            }
-        )
+        surface_modules = {
+            module_id: dict(payload)
+            for module_id, payload in self._configured_modules_for_status.items()
+        }
+        for module_id, health in health_results.items():
+            entry = dict(surface_modules.get(module_id, {}))
+            entry["enabled"] = True
+            entry["status"] = health.status.value
+            surface_modules[module_id] = entry
+        module_surface = describe_module_surface(surface_modules)
         problem_modules = await self._problem_modules_from_health(health_results)
         config_warnings = get_config_warnings()
 

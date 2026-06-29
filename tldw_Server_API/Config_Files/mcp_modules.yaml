@@ -110,7 +110,9 @@ modules:
 
   - id: filesystem
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule
-    enabled: true
+    # Disabled by default because it exposes local file/workspace access.
+    # Set enabled: true only for deployments that intentionally grant this capability.
+    enabled: false
     name: Filesystem
     version: "1.0.0"
     department: system
@@ -144,7 +146,9 @@ modules:
 
   - id: run_command
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module:RunCommandModule
-    enabled: true
+    # Disabled by default because it can run configured local command families.
+    # Set enabled: true only for deployments that intentionally grant this capability.
+    enabled: false
     name: Run Command
     version: "0.1.0"
     department: system

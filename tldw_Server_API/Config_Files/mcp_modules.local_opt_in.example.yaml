@@ -1,0 +1,26 @@
+modules:
+  # Local file/workspace access. Enable only for deployments where MCP clients
+  # should inspect or mutate configured local filesystem scopes.
+  - id: filesystem
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule
+    enabled: true
+    name: Filesystem
+    version: "1.0.0"
+    department: system
+    max_concurrent: 16
+    settings: {}
+
+  # Local command execution. Enable only after reviewing allowed command
+  # families, RBAC, logging, and host sandboxing posture.
+  - id: run_command
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module:RunCommandModule
+    enabled: true
+    name: Run Command
+    version: "0.1.0"
+    department: system
+    max_concurrent: 16
+    settings:
+      spill_dir: ${MCP_RUN_COMMAND_SPILL_DIR:-.mcp/spills}
+      spill_threshold_bytes: 65536
+      preview_line_limit: 200
+      preview_byte_limit: 51200
