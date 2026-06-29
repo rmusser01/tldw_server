@@ -4,13 +4,14 @@ title: Fix README and getting-started P1/P2 onboarding docs
 status: In Progress
 assignee: []
 created_date: 2026-06-21 23:46
-updated_date: 2026-06-22 00:01
+updated_date: 2026-06-29 00:00
 labels:
 - docs
 - onboarding
 dependencies: []
 references:
 - README.md
+- apps/tldw-frontend/.env.local.example
 - Docs/Getting_Started/QUICKSTART.md
 - Docs/Getting_Started/Profile_Local_Single_User.md
 - Docs/Getting_Started/TROUBLESHOOTING.md
@@ -47,6 +48,11 @@ PR: https://github.com/rmusser01/tldw_server/pull/2427
 Review-rebase follow-up started 2026-06-29:
 - Reopened this task to track rebasing PR #2427 onto latest `origin/dev` and addressing any still-open PR review comments.
 - Plan: `Docs/superpowers/plans/2026-06-29-pr2427-review-rebase.md`
+- Rebased onto `origin/dev` and resolved README/TROUBLESHOOTING conflicts while preserving current dev docs map/runtime-auth guidance plus the PR onboarding fixes.
+- Addressed open Gemini/Qodo/CodeRabbit feedback by splitting the new contract test into marked, docstringed pytest tests with direct assertions, adding ordering checks for wizard auth init before uvicorn and WebUI setup before `bun run dev`, and aligning `apps/tldw-frontend/.env.local.example` with the local single-user WebUI docs.
+- Verification follow-up: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py tldw_Server_API/tests/Docs/test_onboarding_entrypoints.py tldw_Server_API/tests/Docs/test_onboarding_default_contract.py tldw_Server_API/tests/Docs/test_quickstart_same_origin_docs.py tldw_Server_API/tests/Docs/test_public_onboarding_profile_parity.py tldw_Server_API/tests/Docs/test_published_onboarding_parity.py tldw_Server_API/tests/Docs/test_onboarding_dev_docs.py` => 52 passed, 3 warnings.
+- Quality follow-up: `black --check` and `ruff check` passed for `tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py`; `compileall` passed; `git diff --check` passed; README/top-guide docs path hygiene, onboarding command boundary, and onboarding endpoint drift checks passed.
+- Security follow-up: raw Bandit on the touched pytest file only reported B101 pytest `assert` false positives, which were intentionally introduced to satisfy review feedback for standard pytest assertions. Rerun with `-s B101` on the touched test file wrote `/tmp/bandit_pr2427_skip_b101.json` with 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
