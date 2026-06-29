@@ -1,3 +1,5 @@
+"""Dispatch resolved ``process_text`` calls to chunking strategies."""
+
 from __future__ import annotations
 
 import json
@@ -20,6 +22,7 @@ def dispatch_chunks(
     processed_text: str,
     resolved: ResolvedProcessOptions,
 ) -> list[NormalizedChunk]:
+    """Chunk prepared text using the resolved process-text mode."""
     if resolved.hierarchical or resolved.hier_template:
         return _dispatch_hierarchical(context, processed_text, resolved)
     if resolved.multi_level:
@@ -32,6 +35,7 @@ def _dispatch_hierarchical(
     processed_text: str,
     resolved: ResolvedProcessOptions,
 ) -> list[NormalizedChunk]:
+    """Dispatch a hierarchical or template-based chunking request."""
     raw_chunks = context.chunk_text_hierarchical_flat(
         text=processed_text,
         method=resolved.method,
@@ -55,6 +59,7 @@ def _dispatch_multi_level(
     processed_text: str,
     resolved: ResolvedProcessOptions,
 ) -> list[NormalizedChunk]:
+    """Dispatch paragraph-level chunking with metadata fallback support."""
     method_options_for_chunk = dict(resolved.method_options_for_chunk)
     norm_chunks: list[NormalizedChunk] = []
     spans = context._compute_paragraph_spans(processed_text, template=None)
@@ -120,6 +125,7 @@ def _append_metadata_results(
     paragraph_index: int,
     resolved: ResolvedProcessOptions,
 ) -> None:
+    """Append metadata-aware strategy results using document-relative offsets."""
     for res in base_results or []:
         chunk_text = getattr(res, "text", "")
         metadata_obj = getattr(res, "metadata", None)
@@ -157,6 +163,7 @@ def _append_fallback_results(
     paragraph_index: int,
     resolved: ResolvedProcessOptions,
 ) -> None:
+    """Append fallback string/dict results while clamping offsets to a paragraph."""
     cursor = start
     for chunk in base_results or []:
         txt = chunk if isinstance(chunk, str) else (chunk.get("text") if isinstance(chunk, dict) else str(chunk))
@@ -195,6 +202,7 @@ def _dispatch_normal(
     processed_text: str,
     resolved: ResolvedProcessOptions,
 ) -> list[NormalizedChunk]:
+    """Dispatch the standard non-hierarchical process-text path."""
     base_chunks = context.chunk_text(
         processed_text,
         method=resolved.method,
@@ -226,6 +234,9 @@ def _dispatch_normal(
 
 
 def _metadata_to_dict(metadata_obj: Any) -> dict[str, Any]:
+    """Convert supported strategy metadata values into a plain dictionary."""
+    if metadata_obj is None:
+        return {}
     if isinstance(metadata_obj, ChunkMetadata):
         return asdict(metadata_obj)
     if isinstance(metadata_obj, Mapping):

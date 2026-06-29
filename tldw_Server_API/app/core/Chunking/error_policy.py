@@ -1,3 +1,5 @@
+"""Shared exception policy for noncritical chunking fallback paths."""
+
 from __future__ import annotations
 
 import json

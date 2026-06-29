@@ -22,26 +22,17 @@ from tldw_Server_API.app.core.Chunking.exceptions import (
 )
 from tldw_Server_API.app.core.Chunking.llm_context import _LLM_UNSET, llm_override_scope
 from tldw_Server_API.app.core.Chunking.option_utils import _coerce_bool_option
-from tldw_Server_API.app.core.Chunking.process_text import options as process_options
-from tldw_Server_API.app.core.Chunking.process_text.options import (
-    METHOD_OPTION_EXCLUDES,
-    resolve_process_options,
-)
-from tldw_Server_API.app.core.Chunking.process_text import preparation
-from tldw_Server_API.app.core.Chunking.process_text.preparation import (
-    extract_header,
-    prepare_frontmatter,
-)
 from tldw_Server_API.app.core.Chunking.process_text import dispatch as process_dispatch
-from tldw_Server_API.app.core.Chunking.process_text.dispatch import dispatch_chunks
 from tldw_Server_API.app.core.Chunking.process_text import metadata as process_metadata
+from tldw_Server_API.app.core.Chunking.process_text import models, preparation
+from tldw_Server_API.app.core.Chunking.process_text import options as process_options
+from tldw_Server_API.app.core.Chunking.process_text import pipeline as process_pipeline
+from tldw_Server_API.app.core.Chunking.process_text.dispatch import dispatch_chunks
 from tldw_Server_API.app.core.Chunking.process_text.metadata import (
     copy_chunks_for_finalization,
     finalize_chunks,
     restore_prefix_offsets_for_finalization,
 )
-from tldw_Server_API.app.core.Chunking.process_text import pipeline as process_pipeline
-from tldw_Server_API.app.core.Chunking.process_text import models
 from tldw_Server_API.app.core.Chunking.process_text.models import (
     NormalizedChunk,
     PreparedText,
@@ -49,6 +40,16 @@ from tldw_Server_API.app.core.Chunking.process_text.models import (
     ResolvedProcessOptions,
     TelemetryHooks,
 )
+from tldw_Server_API.app.core.Chunking.process_text.options import (
+    METHOD_OPTION_EXCLUDES,
+    resolve_process_options,
+)
+from tldw_Server_API.app.core.Chunking.process_text.preparation import (
+    extract_header,
+    prepare_frontmatter,
+)
+
+pytestmark = pytest.mark.unit
 
 
 def _assert_no_chunker_imports(module: Any) -> None:
@@ -336,7 +337,7 @@ def test_resolve_process_options_excludes_process_only_options_and_keeps_tokeniz
 
     resolved = resolve_process_options(Chunker(), "Body text", opts)
 
-    assert METHOD_OPTION_EXCLUDES == {
+    assert {
         "method",
         "max_size",
         "overlap",
@@ -356,7 +357,7 @@ def test_resolve_process_options_excludes_process_only_options_and_keeps_tokeniz
         "max_adaptive_overlap",
         "code_mode",
         "align_text_to_source",
-    }
+    } == METHOD_OPTION_EXCLUDES
     assert resolved.method_options_for_chunk == {
         "custom_option": "kept",
         "tokenizer_name": "explicit-tokenizer",
@@ -414,6 +415,23 @@ def test_resolve_process_options_adaptive_size_and_overlap() -> None:
     assert resolved.overlap == 25
 
 
+def test_resolve_process_options_uses_normalized_method_for_adaptive_membership() -> None:
+    resolved = resolve_process_options(
+        Chunker(),
+        "x" * 20_000,
+        {
+            "method": "WORDS",
+            "adaptive": True,
+            "base_adaptive_chunk_size": 100,
+            "min_adaptive_chunk_size": 50,
+            "max_adaptive_chunk_size": 200,
+        },
+    )
+
+    assert resolved.method_lower == "words"
+    assert resolved.max_size == 140
+
+
 def test_resolve_process_options_hierarchical_false_and_multi_level_exclusion() -> None:
     template = {"levels": [{"name": "heading"}]}
 
@@ -438,6 +456,17 @@ def test_resolve_process_options_hierarchical_false_and_multi_level_exclusion() 
     assert resolved_with_template.hierarchical is False
     assert resolved_with_template.hier_template == template
     assert resolved_with_template.multi_level is False
+
+
+def test_resolve_process_options_uses_normalized_method_for_multi_level_membership() -> None:
+    resolved = resolve_process_options(
+        Chunker(),
+        "Paragraph one.\n\nParagraph two.",
+        {"method": "WORDS", "multi_level": True},
+    )
+
+    assert resolved.method_lower == "words"
+    assert resolved.multi_level is True
 
 
 def test_prepare_frontmatter_extracts_default_sentinel_metadata() -> None:
@@ -628,6 +657,21 @@ def test_dispatch_chunks_normal_path_converts_text_metadata_dict(
     metadata["end_offset"] = 99
 
     assert chunks == [NormalizedChunk(text="beta", metadata={"start_offset": 2, "end_offset": 6})]
+
+
+def test_dispatch_chunks_normal_path_treats_none_metadata_as_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+
+    def fake_chunk_text(*args: Any, **kwargs: Any) -> list[Any]:
+        return [{"text": "beta", "metadata": None}]
+
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    chunks = dispatch_chunks(chunker, "alpha beta", _resolved_for_dispatch())
+
+    assert chunks == [NormalizedChunk(text="beta", metadata={})]
 
 
 def test_dispatch_chunks_normal_path_preserves_mapping_like_metadata(

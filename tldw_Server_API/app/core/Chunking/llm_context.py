@@ -1,3 +1,5 @@
+"""Scoped LLM override helpers used by the chunking pipeline."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -11,6 +13,7 @@ _LLM_UNSET = object()
 
 @contextmanager
 def llm_override_scope(context: Any, llm_call_func: Any = None, llm_config: Any = None) -> Iterator[None]:
+    """Temporarily install per-call LLM overrides on a chunker context."""
     previous = getattr(context._thread_local, "llm_overrides", _LLM_UNSET)
     apply_overrides = (llm_call_func is not None) or (llm_config is not None)
     if apply_overrides:

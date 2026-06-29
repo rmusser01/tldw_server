@@ -1,3 +1,5 @@
+"""Option normalization helpers shared by chunking entrypoints."""
+
 from __future__ import annotations
 
 from typing import Any

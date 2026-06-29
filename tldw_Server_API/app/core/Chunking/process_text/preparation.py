@@ -1,3 +1,5 @@
+"""Text preparation helpers for ``Chunker.process_text``."""
+
 from __future__ import annotations
 
 import json
@@ -16,6 +18,7 @@ def prepare_frontmatter(
     *,
     tokenizer_name_or_path: str | None,
 ) -> PreparedText:
+    """Prepare process-text input and parse frontmatter in one public helper."""
     prepared, frontmatter_enabled, sentinel_key = _prepare_frontmatter_options(
         text,
         options,
@@ -34,6 +37,7 @@ def _prepare_frontmatter_options(
     *,
     tokenizer_name_or_path: str | None,
 ) -> tuple[PreparedText, bool, str]:
+    """Copy options, inject tokenizer overrides, and extract frontmatter controls."""
     opts = dict(options or {})
     if tokenizer_name_or_path and "tokenizer_name_or_path" not in opts and "tokenizer_name" not in opts:
         opts["tokenizer_name_or_path"] = tokenizer_name_or_path
@@ -63,6 +67,7 @@ def _parse_frontmatter(
     frontmatter_enabled: bool,
     sentinel_key: str,
 ) -> PreparedText:
+    """Parse sentinel JSON frontmatter and update processed-text offsets."""
     json_meta: dict[str, Any] = {}
     processed_text = prepared.processed_text
     prefix_offset = prepared.prefix_offset
@@ -100,6 +105,7 @@ def _parse_frontmatter(
 
 
 def extract_header(prepared: PreparedText) -> PreparedText:
+    """Remove legacy transcription headers while preserving original offsets."""
     processed_text = prepared.processed_text
     prefix_offset = prepared.prefix_offset
     header_text = prepared.header_text

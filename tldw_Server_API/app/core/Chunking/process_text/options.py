@@ -1,3 +1,5 @@
+"""Option resolution for the internal ``Chunker.process_text`` pipeline."""
+
 from __future__ import annotations
 
 import re
@@ -12,7 +14,6 @@ from tldw_Server_API.app.core.Chunking.process_text.models import (
     ProcessTextContext,
     ResolvedProcessOptions,
 )
-
 
 METHOD_OPTION_EXCLUDES = {
     "method",
@@ -42,6 +43,7 @@ def resolve_process_options(
     processed_text: str,
     options: dict[str, Any],
 ) -> ResolvedProcessOptions:
+    """Resolve public ``process_text`` options into pipeline-ready values."""
     requested_method = context._normalize_method_argument(options.get("method"))
     method = requested_method or context.config.default_method.value
 
@@ -114,7 +116,7 @@ def resolve_process_options(
         method_options_for_chunk["code_mode"] = code_mode_for_method
 
     adaptive = _coerce_bool_option(options.get("adaptive"), False)
-    if adaptive and method not in ("semantic", "json", "xml", "ebook_chapters", "rolling_summarize"):
+    if adaptive and method_lower not in ("semantic", "json", "xml", "ebook_chapters", "rolling_summarize"):
         try:
             base_adaptive = int(options.get("base_adaptive_chunk_size") or max_size)
             min_adaptive = int(options.get("min_adaptive_chunk_size") or max_size)
@@ -138,7 +140,11 @@ def resolve_process_options(
 
     hierarchical = _coerce_bool_option(options.get("hierarchical"), False)
     hier_template = options.get("hierarchical_template") if isinstance(options.get("hierarchical_template"), dict) else None
-    multi_level = _coerce_bool_option(options.get("multi_level"), False) and method in ("words", "sentences") and not (hierarchical or hier_template)
+    multi_level = (
+        _coerce_bool_option(options.get("multi_level"), False)
+        and method_lower in ("words", "sentences")
+        and not (hierarchical or hier_template)
+    )
     align_text_to_source = _coerce_bool_option(options.get("align_text_to_source"), True)
 
     return ResolvedProcessOptions(

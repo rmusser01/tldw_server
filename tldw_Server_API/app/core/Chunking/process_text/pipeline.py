@@ -1,3 +1,5 @@
+"""Orchestration for the internal ``Chunker.process_text`` pipeline."""
+
 from __future__ import annotations
 
 import time
@@ -27,7 +29,10 @@ from tldw_Server_API.app.core.Chunking.process_text.preparation import (
 
 
 class ProcessTextPipeline:
+    """Run text preparation, option resolution, dispatch, and metadata finalization."""
+
     def __init__(self, context: ProcessTextContext, telemetry: TelemetryHooks) -> None:
+        """Store the chunker context and telemetry adapter used by this pipeline."""
         self._context = context
         self._telemetry = telemetry
 

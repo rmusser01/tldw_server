@@ -1,3 +1,5 @@
+"""Metadata finalization helpers for the internal process-text pipeline."""
+
 from __future__ import annotations
 
 import hashlib
@@ -19,6 +21,7 @@ def finalize_chunks(
     prepared: PreparedText,
     resolved: ResolvedProcessOptions,
 ) -> list[dict[str, Any]]:
+    """Apply final metadata defaults, timing data, hashes, and provenance."""
     out: list[dict[str, Any]] = []
     total = len(chunks)
     time_segments = _parse_time_segments(prepared.options.get("timecode_map"))
@@ -70,6 +73,7 @@ def finalize_chunks(
 
 
 def copy_chunks_for_finalization(chunks: list[NormalizedChunk]) -> list[NormalizedChunk]:
+    """Copy normalized chunks so finalization can adjust metadata safely."""
     return [
         NormalizedChunk(text=chunk.text, metadata=dict(chunk.metadata))
         for chunk in chunks
@@ -80,6 +84,7 @@ def restore_prefix_offsets_for_finalization(
     chunks: list[NormalizedChunk],
     prefix_offset: int,
 ) -> list[NormalizedChunk]:
+    """Return chunks whose offset metadata has been restored to source coordinates."""
     if not prefix_offset:
         return chunks
 
@@ -92,6 +97,7 @@ def restore_prefix_offsets_for_finalization(
 
 
 def _restore_prefix_offsets(metadata: dict[str, Any], prefix_offset: int) -> None:
+    """Add a prefix offset to every supported character-offset metadata key."""
     if not prefix_offset:
         return
     for key in ("start_offset", "end_offset", "start_char", "end_char"):
@@ -101,6 +107,7 @@ def _restore_prefix_offsets(metadata: dict[str, Any], prefix_offset: int) -> Non
 
 
 def _parse_time_segments(segs: Any) -> list[tuple[int, int, float, float]] | None:
+    """Normalize timecode-map entries into sorted offset/time segments."""
     try:
         if not isinstance(segs, list):
             return None
@@ -136,6 +143,7 @@ def _relative_position(
     original_text: str,
     time_segments: list[tuple[int, int, float, float]] | None,
 ) -> float:
+    """Compute a chunk's relative position and apply missing time metadata."""
     try:
         start = metadata.get("start_offset")
         end = metadata.get("end_offset")
@@ -154,6 +162,7 @@ def _relative_position(
 
 
 def _fallback_relative_position(index: int, total: int) -> float:
+    """Return a stable ordinal-based relative position fallback."""
     return (index + 1) / total if total > 0 else 0.0
 
 
@@ -163,6 +172,7 @@ def _apply_time_segments(
     chunk_end: int,
     time_segments: list[tuple[int, int, float, float]],
 ) -> None:
+    """Map overlapping source-offset segments onto chunk start/end times."""
     try:
         chunk_start_time = None
         chunk_end_time = None

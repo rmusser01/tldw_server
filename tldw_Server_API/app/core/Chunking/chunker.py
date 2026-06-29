@@ -19,6 +19,7 @@ from typing import Any, Optional, Union
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_test_mode
+
 from .base import ChunkerConfig, ChunkingMethod, ChunkResult
 from .error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS as _CHUNKER_NONCRITICAL_EXCEPTIONS
 from .exceptions import ChunkingError, InvalidChunkingMethodError, InvalidInputError
@@ -175,6 +176,7 @@ _ensure_chunker_metrics_registered()
 
 
 def _process_text_telemetry_hooks() -> TelemetryHooks:
+    """Build telemetry hook adapters for the process-text pipeline."""
     return TelemetryHooks(
         increment_counter=increment_counter,
         observe_histogram=observe_histogram,
@@ -1837,8 +1839,7 @@ class Chunker:
                 logger.debug(f"{strategy.__class__.__name__} lacks chunk_generator; falling back to chunk()")
                 chunk_iter = iter(strategy.chunk(text, max_size, overlap, **strategy_options))
 
-        for chunk in chunk_iter:
-            yield chunk
+        yield from chunk_iter
 
     def get_available_methods(self) -> list[str]:
         """
