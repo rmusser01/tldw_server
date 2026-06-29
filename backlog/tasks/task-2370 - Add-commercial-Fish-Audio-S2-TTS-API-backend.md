@@ -62,5 +62,5 @@ Fish Audio S2 now supports a hosted commercial API backend via `backend: commerc
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR #2540 rebase/review pass: rebased Fish S2 branch onto latest origin/dev and addressed review comments for native retry-after parsing, response JSON logging, aggregate audio route mounting, BYOK fallback logging, and Fish S2 endpoint response models. Verification so far: Fish S2 focused pytest selection passed (69 selected), aggregate/route tests passed (22), audio OAuth retry tests passed (18), presets/voice-conversion selection passed (13), Bandit touched production scope reported zero findings.
+Review follow-up complete after latest CodeRabbit pass. Addressed blank BYOK API key fail-closed behavior for Fish S2/OpenAI/ElevenLabs TTS paths, Fish S2 direct-dict/env API key initialization, adapter ERROR status on initialization exceptions, sanitized native HTTP upstream error logging, and forced managed-reference metadata cleanup after deleting stale Fish remote IDs. Verification: 7 red-step regressions now pass; 75 Fish/reference/audio selected tests passed; 54 route/OAuth selected tests passed; git diff --check clean; Bandit on touched production files reported zero findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

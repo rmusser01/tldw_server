@@ -200,10 +200,9 @@ class FishS2NativeHttpBackend(FishS2Backend):
         headers = getattr(response, "headers", {}) or {}
 
         logger.error(
-            "%s upstream returned %s: %s",
+            "{} upstream returned status={}",
             self.PROVIDER_KEY,
             status_code,
-            body,
         )
         self._raise_status_error(status_code=status_code, body=body, headers=headers)
 

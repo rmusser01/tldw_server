@@ -32,7 +32,7 @@ Extend the existing Fish Audio S2 TTS PR with an import endpoint for managed Fis
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR #2540 rebase/review pass: Fish S2 import endpoint now has explicit response models and preserves absent optional fields via response_model_exclude_none. Import regression coverage updated alongside retry-after/logging/router fixes. Verification so far: Fish S2 focused pytest selection passed (69 selected), aggregate/route tests passed (22), audio OAuth retry tests passed (18), presets/voice-conversion selection passed (13), Bandit touched production scope reported zero findings.
+Review follow-up complete after latest CodeRabbit pass. Added bounded direct Fish S2 reference upload reads using the existing 50MB decoded-audio cap, fixture teardown reset for cached auth settings, native HTTP streaming/delete request contract assertions, and forced recreation coverage for stale managed-reference metadata. Verification: 7 red-step regressions now pass; 75 Fish/reference/audio selected tests passed; 54 route/OAuth selected tests passed; git diff --check clean; Bandit on touched production files reported zero findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

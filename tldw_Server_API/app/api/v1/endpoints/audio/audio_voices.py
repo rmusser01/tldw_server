@@ -436,7 +436,12 @@ async def create_fish_s2_reference(
                     request_id,
                 ),
             )
-        file_content = await file.read()
+        file_content = await file.read(FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES + 1)
+        if len(file_content) > FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_http_error_detail("Fish S2 reference audio is too large", request_id),
+            )
         filename = file.filename
 
     try:

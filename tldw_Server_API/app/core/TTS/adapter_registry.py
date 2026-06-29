@@ -54,6 +54,14 @@ def _safe_exception_label(exc: BaseException) -> str:
     return type(exc).__name__
 
 
+def _non_empty_str(value: object) -> Optional[str]:
+    """Return stripped text for non-empty strings."""
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 class TTSProvider(Enum):
     """
     Enumeration of TTS providers known to the service.
@@ -645,16 +653,32 @@ class TTSAdapterRegistry:
                     logger.info(f"Provider {provider.value} is disabled in configuration")
                     return False
                 if explicit_enabled is None:
-                    remote_providers = {TTSProvider.OPENAI, TTSProvider.ELEVENLABS}
+                    remote_providers = {
+                        TTSProvider.OPENAI,
+                        TTSProvider.ELEVENLABS,
+                        TTSProvider.FISH_S2,
+                    }
                     if provider in remote_providers:
                         # Consider provider enabled if API key is supplied via config or env
                         api_key: Optional[str] = None
                         if provider == TTSProvider.OPENAI:
-                            api_key = (self.config.get("openai_api_key")
-                                       or os.getenv("OPENAI_API_KEY"))
+                            api_key = (
+                                _non_empty_str(provider_config.get("api_key"))
+                                or _non_empty_str(provider_config.get("openai_api_key"))
+                                or _non_empty_str(os.getenv("OPENAI_API_KEY"))
+                            )
                         elif provider == TTSProvider.ELEVENLABS:
-                            api_key = (self.config.get("elevenlabs_api_key")
-                                       or os.getenv("ELEVENLABS_API_KEY"))
+                            api_key = (
+                                _non_empty_str(provider_config.get("api_key"))
+                                or _non_empty_str(provider_config.get("elevenlabs_api_key"))
+                                or _non_empty_str(os.getenv("ELEVENLABS_API_KEY"))
+                            )
+                        elif provider == TTSProvider.FISH_S2:
+                            api_key = (
+                                _non_empty_str(provider_config.get("api_key"))
+                                or _non_empty_str(os.getenv("FISH_AUDIO_API_KEY"))
+                                or _non_empty_str(os.getenv("FISH_API_KEY"))
+                            )
                         if not api_key:
                             logger.info(
                                 f"Provider {provider.value} is disabled (no credentials found)"
@@ -728,13 +752,34 @@ class TTSAdapterRegistry:
                 cfg = model_dump_compat(provider_cfg)
                 return _apply_provider_aliases(provider.value, cfg)
 
-        # Fallback to legacy config
+        # Fallback to legacy/direct dict config
         provider_config = self.config.copy()
+
+        providers_cfg = self.config.get("providers")
+        if isinstance(providers_cfg, dict):
+            nested_provider_config = providers_cfg.get(provider.value)
+            if nested_provider_config is not None and not isinstance(nested_provider_config, dict):
+                nested_provider_config = model_dump_compat(nested_provider_config)
+            if isinstance(nested_provider_config, dict):
+                provider_config.update(nested_provider_config)
 
         # Add provider-specific overrides
         provider_key = f"{provider.value}_config"
         if provider_key in self.config:
             provider_config.update(self.config[provider_key])
+
+        if provider == TTSProvider.OPENAI:
+            env_api_key = _non_empty_str(os.getenv("OPENAI_API_KEY"))
+        elif provider == TTSProvider.ELEVENLABS:
+            env_api_key = _non_empty_str(os.getenv("ELEVENLABS_API_KEY"))
+        elif provider == TTSProvider.FISH_S2:
+            env_api_key = _non_empty_str(os.getenv("FISH_AUDIO_API_KEY")) or _non_empty_str(
+                os.getenv("FISH_API_KEY")
+            )
+        else:
+            env_api_key = None
+        if env_api_key and not _non_empty_str(provider_config.get("api_key")):
+            provider_config["api_key"] = env_api_key
 
         return _apply_provider_aliases(provider.value, provider_config)
 

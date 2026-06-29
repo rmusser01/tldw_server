@@ -194,12 +194,12 @@ class ProviderLimits:
             "max_text_length": 5000,
             "languages": ["en"],
             "valid_formats": {"mp3", "opus", "aac", "flac", "wav", "pcm"},
+            "min_speed": 0.25,
+            "max_speed": 4.0,
         },
         "fish_s2": {
             "max_text_length": 5000,
             "valid_formats": {"wav", "mp3", "opus", "pcm"},
-            "min_speed": 0.25,
-            "max_speed": 4.0,
         }
     }
 

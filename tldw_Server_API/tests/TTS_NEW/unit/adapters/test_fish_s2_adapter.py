@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, TTSRequest
+from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, ProviderStatus, TTSRequest
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSProviderInitializationError, TTSValidationError
 
 
@@ -109,6 +109,26 @@ async def test_adapter_rejects_unimplemented_local_runtime():
 
     with pytest.raises(TTSProviderInitializationError):
         await adapter.ensure_initialized()
+
+
+@pytest.mark.asyncio
+async def test_adapter_sets_error_status_when_initialization_raises(monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter import FishS2Adapter
+
+    def _raise_backend(_config):
+        raise TTSProviderInitializationError("backend unavailable", provider="fish_s2")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter._build_backend",
+        _raise_backend,
+    )
+
+    adapter = FishS2Adapter({"backend": "native_http"})
+
+    with pytest.raises(TTSProviderInitializationError):
+        await adapter.ensure_initialized()
+
+    assert adapter.status == ProviderStatus.ERROR
 
 
 @pytest.mark.asyncio

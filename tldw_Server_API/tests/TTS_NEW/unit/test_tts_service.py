@@ -1064,6 +1064,62 @@ async def test_create_fish_s2_reference_returns_cached_mapping(tts_service, monk
 
 
 @pytest.mark.unit
+async def test_create_fish_s2_reference_force_clears_stale_mapping_when_recreate_fails(tts_service, monkeypatch):
+    saved = []
+    metadata = VoiceReferenceMetadata(
+        voice_id="voice-1",
+        reference_text="stored text",
+        provider_artifacts={
+            "fish_s2": {
+                "remote_reference_id": "old-fish-model",
+                "reference_text": "stored text",
+            }
+        },
+    )
+
+    class _FakeVoiceManager:
+        async def load_reference_metadata(self, user_id, voice_id):
+            return metadata
+
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            return b"audio-bytes"
+
+        async def save_reference_metadata(self, user_id, metadata_arg):
+            saved.append(dict(metadata_arg.provider_artifacts))
+
+    class _FakeAdapter:
+        def __init__(self):
+            self.deleted = []
+
+        async def delete_reference(self, *, reference_id):
+            self.deleted.append(reference_id)
+            return True
+
+        async def add_reference(self, **_kwargs):
+            raise TTSProviderError("Fish upstream unavailable", provider="fish_s2")
+
+    adapter = _FakeAdapter()
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+    monkeypatch.setattr(tts_service, "_get_adapter", AsyncMock(return_value=adapter))
+
+    with pytest.raises(TTSProviderError):
+        await tts_service.create_fish_s2_reference(
+            user_id=1,
+            voice_id="voice-1",
+            force=True,
+        )
+
+    assert adapter.deleted == ["old-fish-model"]
+    assert saved
+    assert "fish_s2" not in saved[-1]
+    assert "fish_s2" not in metadata.provider_artifacts
+
+
+@pytest.mark.unit
 async def test_delete_fish_s2_reference_clears_remote_mapping(tts_service, monkeypatch):
     saved = {}
 

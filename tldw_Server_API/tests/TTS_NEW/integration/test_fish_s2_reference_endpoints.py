@@ -26,8 +26,11 @@ def client(monkeypatch):
     reset_settings()
     app = FastAPI()
     app.include_router(audio_voices.router, prefix="/api/v1/audio")
-    with TestClient(app) as c:
-        yield c, app
+    try:
+        with TestClient(app) as c:
+            yield c, app
+    finally:
+        reset_settings()
 
 
 def _find_route(app: FastAPI, method: str, path: str) -> APIRoute:
@@ -97,6 +100,39 @@ def test_create_fish_s2_reference_requires_upload_fields_when_voice_missing(clie
         app.dependency_overrides.pop(audio_voices.get_tts_service, None)
 
     assert response.status_code == 400
+
+
+def test_create_fish_s2_reference_rejects_oversized_upload_before_service(client, monkeypatch):
+    client_obj, app = client
+    monkeypatch.setattr(audio_voices, "FISH_S2_REFERENCE_IMPORT_MAX_DECODED_AUDIO_BYTES", 2)
+    called = False
+
+    class _FakeTTSService:
+        async def create_fish_s2_reference(self, **kwargs):
+            nonlocal called
+            called = True
+            return {
+                "reference_id": "voice-1",
+                "voice_id": "voice-1",
+                "remote_reference_id": "fish-remote",
+                "reference_text": kwargs["reference_text"],
+                "cached": False,
+            }
+
+    app.dependency_overrides[audio_voices.get_tts_service] = lambda: _FakeTTSService()
+    try:
+        response = client_obj.post(
+            "/api/v1/audio/providers/fish_s2/references",
+            data={"name": "Voice One", "reference_text": "uploaded text"},
+            files={"file": ("voice.wav", b"ABC", "audio/wav")},
+            headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]},
+        )
+    finally:
+        app.dependency_overrides.pop(audio_voices.get_tts_service, None)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["message"] == "Fish S2 reference audio is too large"
+    assert called is False
 
 
 def test_list_fish_s2_references(client):

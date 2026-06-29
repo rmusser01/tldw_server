@@ -119,6 +119,32 @@ from tldw_Server_API.app.core.config import load_comprehensive_config as _load_c
 # Re-export config loader for tests to monkeypatch
 load_comprehensive_config = _load_comprehensive_config
 
+_TTS_API_KEY_REQUIRED_PROVIDERS = {"openai", "elevenlabs", "fish_s2"}
+
+
+def _normalize_tts_provider_hint(provider_hint: Optional[str]) -> str:
+    """Normalize TTS provider hints for credential requirement checks."""
+    return str(provider_hint or "").strip().lower().replace("-", "_")
+
+
+def _resolved_api_key(value: object) -> Optional[str]:
+    """Return a non-empty API key string, or None for blank/missing values."""
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _raise_missing_tts_credentials(provider_hint: str) -> None:
+    record_byok_missing_credentials(provider_hint, operation="audio_tts")
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "error_code": "missing_provider_credentials",
+            "message": f"TTS provider '{provider_hint}' requires an API key.",
+        },
+    )
+
 
 async def _resolve_tts_byok(
     *,
@@ -167,21 +193,19 @@ async def _resolve_tts_byok(
             fallback_resolver=_tts_fallback_resolver,
             force_oauth_refresh=force_oauth_refresh,
         )
+        provider_key = _normalize_tts_provider_hint(provider_hint)
+        resolved_api_key = _resolved_api_key(byok_tts_resolution.api_key)
+        requires_api_key = provider_key in _TTS_API_KEY_REQUIRED_PROVIDERS
         if byok_tts_resolution.uses_byok:
-            tts_overrides = {"api_key": byok_tts_resolution.api_key}
+            if not resolved_api_key and requires_api_key:
+                _raise_missing_tts_credentials(provider_hint)
+            if resolved_api_key:
+                tts_overrides = {"api_key": resolved_api_key}
             base_url = byok_tts_resolution.credential_fields.get("base_url")
-            if isinstance(base_url, str) and base_url.strip():
+            if tts_overrides is not None and isinstance(base_url, str) and base_url.strip():
                 tts_overrides["base_url"] = base_url.strip()
-        elif not byok_tts_resolution.api_key:
-            if provider_hint in {"openai", "elevenlabs"}:
-                record_byok_missing_credentials(provider_hint, operation="audio_tts")
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "error_code": "missing_provider_credentials",
-                        "message": f"TTS provider '{provider_hint}' requires an API key.",
-                    },
-                )
+        elif not resolved_api_key and requires_api_key:
+            _raise_missing_tts_credentials(provider_hint)
 
     return user_id_int, tts_overrides, byok_tts_resolution
 

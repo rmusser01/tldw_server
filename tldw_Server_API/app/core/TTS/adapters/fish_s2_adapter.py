@@ -108,14 +108,18 @@ class FishS2Adapter(TTSAdapter):
                 return True
 
             self._status = ProviderStatus.INITIALIZING
-            success = await self.initialize()
-            if success:
-                self._capabilities = await self.get_capabilities()
-                self._status = ProviderStatus.AVAILABLE
-                self._initialized = True
-            else:
+            try:
+                success = await self.initialize()
+                if success:
+                    self._capabilities = await self.get_capabilities()
+                    self._status = ProviderStatus.AVAILABLE
+                    self._initialized = True
+                else:
+                    self._status = ProviderStatus.ERROR
+                return success
+            except Exception:
                 self._status = ProviderStatus.ERROR
-            return success
+                raise
 
     async def initialize(self) -> bool:
         self._backend = _build_backend(self.config)

@@ -2837,8 +2837,14 @@ class TTSServiceV2:
 
         local_reference_id = self._build_fish_s2_remote_reference_id(user_id, resolved_voice_id)
         if force and existing_remote_reference_id and hasattr(adapter, "delete_reference"):
-            with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
-                await adapter.delete_reference(reference_id=str(existing_remote_reference_id))
+            try:
+                delete_result = await adapter.delete_reference(reference_id=str(existing_remote_reference_id))
+            except _TTS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Fish S2 remote reference delete failed before recreation")
+            else:
+                if delete_result is not False:
+                    metadata.provider_artifacts.pop("fish_s2", None)
+                    await voice_manager.save_reference_metadata(user_id, metadata)
 
         adapter_result = await adapter.add_reference(
             reference_id=local_reference_id,
