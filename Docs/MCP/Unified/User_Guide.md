@@ -19,6 +19,14 @@ MCP Unified is the TLDW server's production Model Context Protocol surface. It s
 
 Main base path: `http://127.0.0.1:8000/api/v1/mcp`
 
+## Which Path Should I Use?
+
+| Use case | Current path | Status |
+| --- | --- | --- |
+| Connect MCP clients to TLDW Server | `/api/v1/mcp/status`, `/api/v1/mcp/request`, `/api/v1/mcp/ws` | Supported embedded TLDW surface. Start TLDW Server with `uvicorn` and use these paths. |
+| Test a package-local mounted gateway | `/mcp/status`, `/mcp/request`, `/mcp/ws` | Package-local or host-mounted examples only. Another app must mount `apps/mcp-unified`; the package CLI does not launch a server. |
+| Run a separate standalone gateway process | None | Standalone gateway is planned but not shipped. Do not look for a `serve` command in this release. |
+
 ## 2. Golden Path Quickstart
 
 ### Prerequisites

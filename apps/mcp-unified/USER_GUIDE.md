@@ -6,6 +6,9 @@ credential grants, configuration snapshots, and remote runtime commands.
 
 The package is currently internal/experimental and distributed with the
 `tldw-server` source tree. It is not a separately published standalone package.
+The package CLI does not launch a supported end-user gateway server; remote
+runtime commands require an already running package-local gateway mounted by a
+host application.
 
 ## Publishing Readiness
 

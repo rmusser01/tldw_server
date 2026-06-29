@@ -8,6 +8,10 @@ the `tldw-server` repository, but it is not published as an independent PyPI
 package yet. Treat this directory as the supported package-local integration
 surface for early standalone gateway work.
 
+This package does not currently ship an end-user standalone gateway server
+launcher. `mcp-unified-gateway` commands manage local configuration or talk to
+an already mounted remote gateway supplied by a host application.
+
 ## What Is Included
 
 - JSON-RPC gateway runtime primitives for HTTP, WebSocket, and stdio entrypoints.

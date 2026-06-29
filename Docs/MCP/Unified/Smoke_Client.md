@@ -1,9 +1,9 @@
 # MCP Unified Smoke Client
 
 The MCP Unified smoke client runs a small JSON-RPC scenario against the
-standalone MCP gateway or a compatible MCP server. It is meant for PR checks,
-operator validation, and quick manual testing before adding more specialized
-tool scenarios.
+embedded TLDW MCP endpoint, a package-local host-mounted gateway, or another
+compatible MCP server. It is meant for PR checks, operator validation, and
+quick manual testing before adding more specialized tool scenarios.
 
 ## Scope
 
@@ -27,10 +27,10 @@ absolute paths, bearer tokens, API keys, or long payloads.
 
 ## Commands
 
-Install the package-local gateway extra first:
+Install the package-local gateway extra first from the repository root:
 
 ```bash
-python -m pip install -e "mcp_unified[gateway]"
+python -m pip install -e "apps/mcp-unified[gateway]"
 ```
 
 Run the deterministic in-process fixture:
@@ -39,24 +39,35 @@ Run the deterministic in-process fixture:
 mcp-unified-smoke inprocess --json-report -
 ```
 
-Run a live HTTP endpoint:
+Run a live embedded TLDW HTTP endpoint:
 
 ```bash
 mcp-unified-smoke http \
-  --url http://127.0.0.1:8000/mcp/request \
+  --url http://127.0.0.1:8000/api/v1/mcp/request \
   --profile-id backend-engineer \
   --api-key-env TLDW_API_KEY \
   --json-report /tmp/mcp-smoke-http.json
 ```
 
-Run a live WebSocket endpoint:
+Run a live embedded TLDW WebSocket endpoint:
 
 ```bash
 mcp-unified-smoke websocket \
-  --url ws://127.0.0.1:8000/mcp/ws \
+  --url ws://127.0.0.1:8000/api/v1/mcp/ws \
   --profile-id backend-engineer \
   --bearer-token-env TLDW_JWT \
   --json-report /tmp/mcp-smoke-ws.json
+```
+
+Run a package-local host-mounted HTTP endpoint only when another application
+has mounted the package gateway at `/mcp`:
+
+```bash
+mcp-unified-smoke http \
+  --url http://127.0.0.1:8000/mcp/request \
+  --profile-id backend-engineer \
+  --api-key-env MCP_GATEWAY_ADMIN_KEY \
+  --json-report /tmp/mcp-smoke-package-local-http.json
 ```
 
 Run a stdio subprocess:
@@ -105,7 +116,7 @@ Use safe target overrides when the server does not expose the fixture defaults:
 
 ```bash
 mcp-unified-smoke http \
-  --url http://127.0.0.1:8000/mcp/request \
+  --url http://127.0.0.1:8000/api/v1/mcp/request \
   --safe-tool-name search.docs \
   --safe-tool-arguments-json '{"query":"smoke"}' \
   --safe-resource-uri resource://docs/index \
@@ -149,7 +160,7 @@ Recommended CI pattern:
 
 ```bash
 mcp-unified-smoke http \
-  --url "$MCP_SMOKE_URL" \
+  --url "${MCP_SMOKE_URL:-http://127.0.0.1:8000/api/v1/mcp/request}" \
   --profile-id "$MCP_SMOKE_PROFILE" \
   --api-key-env MCP_SMOKE_API_KEY \
   --mode strict \
