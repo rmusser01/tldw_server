@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.endpoints.audio import audio
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_voices
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -72,3 +73,11 @@ def test_voice_routes_use_granular_endpoint_ids_and_voice_counter():
         scope_dep = _extract_token_scope_dependency(route)
         assert getattr(scope_dep, "_tldw_endpoint_id", None) == endpoint_id
         assert getattr(scope_dep, "_tldw_count_as", None) == "voice_call"
+
+
+def test_audio_aggregate_mounts_presets_and_voice_conversion_routes():
+    app = FastAPI()
+    app.include_router(audio.router, prefix="/api/v1/audio")
+
+    assert _find_route(app, "GET", "/api/v1/audio/presets")
+    assert _find_route(app, "POST", "/api/v1/audio/voice-conversion")

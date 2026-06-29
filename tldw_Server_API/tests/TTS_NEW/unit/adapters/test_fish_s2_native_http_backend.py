@@ -2,15 +2,23 @@ from __future__ import annotations
 
 import pytest
 
-from tldw_Server_API.app.core.TTS.tts_exceptions import TTSAuthenticationError
+from tldw_Server_API.app.core.TTS.tts_exceptions import TTSAuthenticationError, TTSRateLimitError
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int = 200, content: bytes = b"audio", text: str = "ok", json_data=None):
+    def __init__(
+        self,
+        status_code: int = 200,
+        content: bytes = b"audio",
+        text: str = "ok",
+        json_data=None,
+        headers=None,
+    ):
         self.status_code = status_code
         self.content = content
         self.text = text
         self._json_data = json_data
+        self.headers = headers or {}
 
     def json(self):
         return self._json_data
@@ -111,6 +119,58 @@ async def test_backend_maps_401_to_authentication_error(monkeypatch):
             reference_id=None,
             extra_params=None,
         )
+
+
+@pytest.mark.asyncio
+async def test_backend_maps_non_integer_retry_after_to_rate_limit_error(monkeypatch):
+    from tldw_Server_API.app.core.TTS.backends.fish_s2_native_http import FishS2NativeHttpBackend
+
+    backend = FishS2NativeHttpBackend({"base_url": "http://fish.local", "api_key": "secret"})
+
+    async def fake_fetch(**_kwargs):
+        return _FakeResponse(
+            status_code=429,
+            text="rate limited",
+            headers={"retry-after": "Wed, 21 Oct 2015 07:28:00 GMT"},
+        )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.backends.fish_s2_native_http.afetch",
+        fake_fetch,
+    )
+
+    with pytest.raises(TTSRateLimitError) as exc_info:
+        await backend.synthesize(
+            text="hello",
+            response_format="wav",
+            streaming=False,
+            reference_id=None,
+            extra_params=None,
+        )
+
+    assert exc_info.value.retry_after is None
+
+
+def test_backend_response_json_logs_parse_failures(monkeypatch):
+    from tldw_Server_API.app.core.TTS.backends import fish_s2_native_http
+    from tldw_Server_API.app.core.TTS.backends.fish_s2_native_http import FishS2NativeHttpBackend
+
+    class _LoggerStub:
+        def __init__(self):
+            self.debug_calls = []
+
+        def debug(self, *args, **kwargs):
+            self.debug_calls.append((args, kwargs))
+
+    class _InvalidJsonResponse:
+        def json(self):
+            raise ValueError("not json")
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(fish_s2_native_http, "logger", logger_stub)
+
+    assert FishS2NativeHttpBackend._response_json(_InvalidJsonResponse()) is None
+    assert logger_stub.debug_calls
 
 
 @pytest.mark.asyncio

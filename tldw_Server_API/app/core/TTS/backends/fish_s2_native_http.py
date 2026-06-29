@@ -220,7 +220,7 @@ class FishS2NativeHttpBackend(FishS2Backend):
             retry_after = headers.get("retry-after") if isinstance(headers, dict) else None
             raise rate_limit_error(
                 self.PROVIDER_KEY,
-                retry_after=int(retry_after) if retry_after else None,
+                retry_after=self._parse_retry_after(retry_after),
             )
         if status_code in (400, 404):
             raise TTSValidationError(
@@ -256,9 +256,23 @@ class FishS2NativeHttpBackend(FishS2Backend):
             json_fn = getattr(response, "json", None)
             if callable(json_fn):
                 return json_fn()
-        except Exception:
+        except (TypeError, ValueError) as exc:
+            logger.debug("Fish S2 response JSON parse failed: {}", type(exc).__name__)
             return None
         return None
+
+    @staticmethod
+    def _parse_retry_after(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+        try:
+            return int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _normalize_api_key(value: Any) -> str | None:

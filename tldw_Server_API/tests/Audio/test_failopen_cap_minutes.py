@@ -1,4 +1,5 @@
 import importlib
+import builtins
 import os
 import types
 
@@ -331,6 +332,40 @@ async def test_aggregate_resolve_tts_byok_delegates_to_core(monkeypatch):
             "force_oauth_refresh": True,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_aggregate_resolve_tts_byok_logs_resolver_lookup_fallback(monkeypatch):
+    mod = _import_audio_aggregate_module(monkeypatch, cfg=_fake_cfg({}))
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(mod, "logger", logger_stub, raising=True)
+    original_import = builtins.__import__
+
+    class _ByokResolution:
+        uses_byok = False
+        api_key = "configured"
+        credential_fields = {}
+
+    async def _fallback_resolver(*_args, **_kwargs):
+        return _ByokResolution()
+
+    def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tldw_Server_API.app.api.v1.endpoints" and "audio" in fromlist:
+            raise ImportError("audio package resolver unavailable")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(mod, "resolve_byok_credentials", _fallback_resolver, raising=True)
+    monkeypatch.setattr(builtins, "__import__", _guarded_import)
+
+    result = await mod._resolve_tts_byok(
+        provider_hint="fish_s2",
+        current_user=types.SimpleNamespace(id=1),
+        request=object(),
+    )
+
+    assert result[0] == 1
+    assert result[1] is None
+    _assert_sanitized_debug_log(logger_stub, "Falling back to default BYOK resolver after audio package resolver lookup failed")
 
 
 def test_aggregate_quota_helper_import_logs_are_sanitized(monkeypatch):

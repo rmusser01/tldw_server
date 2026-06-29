@@ -172,6 +172,63 @@ class VoiceEncodeResponse(BaseModel):
     reference_text: Optional[str] = None
 
 
+class FishS2ReferenceResponse(BaseModel):
+    """Response schema for one managed Fish S2 reference."""
+    model_config = ConfigDict(extra="allow")
+
+    reference_id: str = Field(..., description="Local managed reference identifier")
+    voice_id: Optional[str] = Field(default=None, description="Stored voice ID backing the reference")
+    remote_reference_id: Optional[str] = Field(default=None, description="Fish-hosted reference/model ID")
+    reference_text: Optional[str] = Field(default=None, description="Transcript associated with the reference")
+    name: Optional[str] = Field(default=None, description="Display name for the reference")
+    description: Optional[str] = Field(default=None, description="Optional reference description")
+    cached: Optional[bool] = Field(default=None, description="Whether an existing remote reference was reused")
+
+
+class FishS2ReferenceDeleteResponse(BaseModel):
+    """Response schema for deleting one managed Fish S2 reference."""
+    model_config = ConfigDict(extra="allow")
+
+    reference_id: str = Field(..., description="Deleted local managed reference identifier")
+    deleted: bool = Field(..., description="Whether the managed reference was deleted")
+
+
+class FishS2ReferenceListResponse(BaseModel):
+    """Response schema for listing managed Fish S2 references."""
+    references: list[FishS2ReferenceResponse] = Field(default_factory=list)
+    count: int = Field(..., ge=0)
+
+
+class FishS2ReferenceImportErrorItem(BaseModel):
+    """Per-item import failure for Fish S2 reference imports."""
+    index: int = Field(..., ge=0)
+    message: str = Field(..., min_length=1)
+    code: Optional[str] = None
+
+
+class FishS2ReferenceImportResult(BaseModel):
+    """Per-item success payload for Fish S2 reference imports."""
+    model_config = ConfigDict(extra="allow")
+
+    index: int = Field(..., ge=0)
+    reference_id: Optional[str] = Field(default=None, description="Local managed reference identifier")
+    voice_id: Optional[str] = Field(default=None, description="Stored voice ID backing the reference")
+    remote_reference_id: Optional[str] = Field(default=None, description="Fish-hosted reference/model ID")
+    reference_text: Optional[str] = Field(default=None, description="Transcript associated with the reference")
+    name: Optional[str] = Field(default=None, description="Display name for the reference")
+    description: Optional[str] = Field(default=None, description="Optional reference description")
+    cached: Optional[bool] = Field(default=None, description="Whether an existing remote reference was reused")
+    result: Optional[Any] = Field(default=None, description="Fallback result payload for non-dict service responses")
+
+
+class FishS2ReferenceImportResponse(BaseModel):
+    """Response schema for Fish S2 reference imports."""
+    results: list[FishS2ReferenceImportResult] = Field(default_factory=list)
+    errors: list[FishS2ReferenceImportErrorItem] = Field(default_factory=list)
+    imported: int = Field(..., ge=0)
+    failed: int = Field(..., ge=0)
+
+
 class AudioTokenizerEncodeRequest(BaseModel):
     """Request schema for audio tokenizer encode endpoint (JSON body)."""
     audio_base64: str = Field(

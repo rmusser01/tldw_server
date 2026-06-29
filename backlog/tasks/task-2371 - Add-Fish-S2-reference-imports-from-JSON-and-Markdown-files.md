@@ -3,16 +3,16 @@ id: TASK-2371
 title: Add Fish S2 reference imports from JSON and Markdown files
 status: Done
 labels:
-  - tts
-  - fish-s2
-  - api
+- tts
+- fish-s2
+- api
 modified_files:
-  - tldw_Server_API/app/core/TTS/fish_s2_reference_imports.py
-  - tldw_Server_API/app/api/v1/endpoints/audio/audio_voices.py
-  - tldw_Server_API/tests/TTS_NEW/unit/test_fish_s2_reference_imports.py
-  - tldw_Server_API/tests/TTS_NEW/integration/test_fish_s2_reference_endpoints.py
-  - Docs/STT-TTS/TTS-SETUP-GUIDE.md
-  - Docs/superpowers/plans/2026-06-27-fish-s2-reference-imports-plan.md
+- tldw_Server_API/app/core/TTS/fish_s2_reference_imports.py
+- tldw_Server_API/app/api/v1/endpoints/audio/audio_voices.py
+- tldw_Server_API/tests/TTS_NEW/unit/test_fish_s2_reference_imports.py
+- tldw_Server_API/tests/TTS_NEW/integration/test_fish_s2_reference_endpoints.py
+- Docs/STT-TTS/TTS-SETUP-GUIDE.md
+- Docs/superpowers/plans/2026-06-27-fish-s2-reference-imports-plan.md
 ---
 
 ## Description
@@ -32,9 +32,7 @@ Extend the existing Fish Audio S2 TTS PR with an import endpoint for managed Fis
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented a core parser for `.json`, `.md`, and `.markdown` Fish S2 reference import files. Added `POST /api/v1/audio/providers/fish_s2/references/import`, with coverage for existing-voice JSON, bulk JSON, embedded base64 audio JSON, Markdown frontmatter, and invalid imports. The endpoint returns per-item results/errors and preserves the existing voice upload scope/rate-limit path.
-
-Reopened for code-review fixes: restore native Fish streaming format constraints, harden import partial-error behavior, and add import size/item/audio limits.
+PR #2540 rebase/review pass: Fish S2 import endpoint now has explicit response models and preserves absent optional fields via response_model_exclude_none. Import regression coverage updated alongside retry-after/logging/router fixes. Verification so far: Fish S2 focused pytest selection passed (69 selected), aggregate/route tests passed (22), audio OAuth retry tests passed (18), presets/voice-conversion selection passed (13), Bandit touched production scope reported zero findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

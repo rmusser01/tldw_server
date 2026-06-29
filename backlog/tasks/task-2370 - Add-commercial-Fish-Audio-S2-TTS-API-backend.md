@@ -4,12 +4,12 @@ title: Add commercial Fish Audio S2 TTS API backend
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-28 01:07'
+updated_date: 2026-06-28 01:07
 labels:
-  - tts
-  - audio
-  - provider
-  - fish-audio
+- tts
+- audio
+- provider
+- fish-audio
 dependencies: []
 priority: high
 ---
@@ -58,3 +58,9 @@ Fish Audio S2 now supports a hosted commercial API backend via `backend: commerc
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+PR #2540 rebase/review pass: rebased Fish S2 branch onto latest origin/dev and addressed review comments for native retry-after parsing, response JSON logging, aggregate audio route mounting, BYOK fallback logging, and Fish S2 endpoint response models. Verification so far: Fish S2 focused pytest selection passed (69 selected), aggregate/route tests passed (22), audio OAuth retry tests passed (18), presets/voice-conversion selection passed (13), Bandit touched production scope reported zero findings.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

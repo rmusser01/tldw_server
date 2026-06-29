@@ -3,9 +3,16 @@ import json
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_voices
+from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
+    FishS2ReferenceDeleteResponse,
+    FishS2ReferenceImportResponse,
+    FishS2ReferenceListResponse,
+    FishS2ReferenceResponse,
+)
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSProviderError
 
@@ -21,6 +28,27 @@ def client(monkeypatch):
     app.include_router(audio_voices.router, prefix="/api/v1/audio")
     with TestClient(app) as c:
         yield c, app
+
+
+def _find_route(app: FastAPI, method: str, path: str) -> APIRoute:
+    for route in app.routes:
+        if isinstance(route, APIRoute) and route.path == path and method.upper() in route.methods:
+            return route
+    raise AssertionError(f"Route not found: {method} {path}")
+
+
+def test_fish_s2_reference_routes_declare_response_models(client):
+    _client_obj, app = client
+
+    expectations = [
+        ("POST", "/api/v1/audio/providers/fish_s2/references", FishS2ReferenceResponse),
+        ("GET", "/api/v1/audio/providers/fish_s2/references", FishS2ReferenceListResponse),
+        ("POST", "/api/v1/audio/providers/fish_s2/references/import", FishS2ReferenceImportResponse),
+        ("DELETE", "/api/v1/audio/providers/fish_s2/references/{reference_id}", FishS2ReferenceDeleteResponse),
+    ]
+
+    for method, path, response_model in expectations:
+        assert _find_route(app, method, path).response_model is response_model
 
 
 def test_create_fish_s2_reference_from_existing_voice(client):

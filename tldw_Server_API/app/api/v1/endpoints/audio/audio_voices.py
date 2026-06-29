@@ -18,6 +18,10 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import get_tts_service
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
+    FishS2ReferenceDeleteResponse,
+    FishS2ReferenceImportResponse,
+    FishS2ReferenceListResponse,
+    FishS2ReferenceResponse,
     OpenAISpeechRequest,
     VoiceEncodeRequest,
     VoiceEncodeResponse,
@@ -387,6 +391,8 @@ async def preview_voice(
 
 @router.post(
     "/providers/fish_s2/references",
+    response_model=FishS2ReferenceResponse,
+    response_model_exclude_none=True,
     summary="Create or sync a managed Fish S2 reference",
     dependencies=[
         Depends(check_rate_limit),
@@ -462,6 +468,8 @@ async def create_fish_s2_reference(
 
 @router.get(
     "/providers/fish_s2/references",
+    response_model=FishS2ReferenceListResponse,
+    response_model_exclude_none=True,
     summary="List managed Fish S2 references for the current user",
     dependencies=[
         Depends(check_rate_limit),
@@ -493,6 +501,8 @@ async def list_fish_s2_references(
 
 @router.post(
     "/providers/fish_s2/references/import",
+    response_model=FishS2ReferenceImportResponse,
+    response_model_exclude_none=True,
     summary="Import managed Fish S2 references from JSON or Markdown",
     dependencies=[
         Depends(check_rate_limit),
@@ -610,6 +620,8 @@ async def import_fish_s2_references(
 
 @router.delete(
     "/providers/fish_s2/references/{reference_id}",
+    response_model=FishS2ReferenceDeleteResponse,
+    response_model_exclude_none=True,
     summary="Delete a managed Fish S2 reference",
     dependencies=[
         Depends(check_rate_limit),

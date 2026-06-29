@@ -27,9 +27,11 @@ from tldw_Server_API.app.core.Metrics.metrics_manager import (
 from . import (
     audio_health,
     audio_history,
+    audio_presets,
     audio_tokenizer,
     audio_transcriptions,
     audio_tts,
+    audio_voice_conversion,
     audio_voices,
 )
 
@@ -49,6 +51,8 @@ router.include_router(audio_tokenizer.router)
 router.include_router(audio_transcriptions.router)
 router.include_router(audio_health.router)
 router.include_router(audio_voices.router)
+router.include_router(audio_presets.router)
+router.include_router(audio_voice_conversion.router)
 
 _AUDIO_STREAMING_MODULE = f"{__package__}.audio_streaming"
 
@@ -66,8 +70,8 @@ def _mount_streaming_routes() -> APIRouter:
         streaming_module = _load_audio_streaming()
         router.include_router(streaming_module.router)
         return streaming_module.ws_router
-    except Exception as exc:
-        logger.warning(f"Audio streaming routes unavailable; skipping import: {exc}")
+    except Exception:
+        logger.warning("Audio streaming routes unavailable; skipping import")
         return APIRouter()
 
 
@@ -124,6 +128,16 @@ async def _resolve_tts_byok(
     force_oauth_refresh: bool = False,
 ):
     """Wrapper to preserve audio.py patch points for BYOK resolution."""
+    if not provider_hint:
+        from tldw_Server_API.app.core.Audio import tts_service as core_tts_service
+
+        return await core_tts_service._resolve_tts_byok(
+            provider_hint=provider_hint,
+            current_user=current_user,
+            request=request,
+            force_oauth_refresh=force_oauth_refresh,
+        )
+
     user_id_int = None
     try:
         user_id_int = getattr(current_user, "id_int", None)
@@ -131,8 +145,8 @@ async def _resolve_tts_byok(
             raw_id = getattr(current_user, "id", None)
             if raw_id is not None:
                 user_id_int = int(raw_id)
-    except (AttributeError, TypeError, ValueError) as exc:
-        logger.debug(f"Failed to extract user_id from current_user: {exc}")
+    except (AttributeError, TypeError, ValueError):
+        logger.debug("Failed to extract user_id from current_user")
         user_id_int = None
 
     tts_overrides = None
@@ -143,7 +157,8 @@ async def _resolve_tts_byok(
             from tldw_Server_API.app.api.v1.endpoints import audio as _audio_pkg
 
             resolver = getattr(_audio_pkg, "resolve_byok_credentials", resolve_byok_credentials)
-        except Exception:
+        except (AttributeError, ImportError):
+            logger.debug("Falling back to default BYOK resolver after audio package resolver lookup failed")
             resolver = resolve_byok_credentials
         byok_tts_resolution = await resolver(
             provider_hint,
@@ -186,8 +201,8 @@ def _get_failopen_cap_minutes() -> float:
             f = float(v)
             if f > 0:
                 return f
-        except (ValueError, TypeError) as exc:
-            logger.debug(f"AUDIO_FAILOPEN_CAP_MINUTES parse failed: {exc}")
+        except (ValueError, TypeError):
+            logger.debug("AUDIO_FAILOPEN_CAP_MINUTES parse failed")
     try:
         try:
             from tldw_Server_API.app.api.v1.endpoints import audio as _audio_pkg
@@ -202,17 +217,17 @@ def _get_failopen_cap_minutes() -> float:
                     f = float(cfg.get("Audio-Quota", "failopen_cap_minutes", fallback=""))
                     if f > 0:
                         return f
-                except (ValueError, TypeError) as exc:
-                    logger.debug(f"[Audio-Quota].failopen_cap_minutes parse failed: {exc}")
+                except (ValueError, TypeError):
+                    logger.debug("[Audio-Quota].failopen_cap_minutes parse failed")
             if cfg.has_section("Audio"):
                 try:
                     f = float(cfg.get("Audio", "failopen_cap_minutes", fallback=""))
                     if f > 0:
                         return f
-                except (ValueError, TypeError) as exc:
-                    logger.debug(f"[Audio].failopen_cap_minutes parse failed: {exc}")
-    except Exception as exc:
-        logger.debug(f"Config read for failopen cap failed: {exc}")
+                except (ValueError, TypeError):
+                    logger.debug("[Audio].failopen_cap_minutes parse failed")
+    except Exception:
+        logger.debug("Config read for failopen cap failed")
     return 5.0
 
 
