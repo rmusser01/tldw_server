@@ -108,9 +108,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.32` Beta status. Expect rough edges and please report issues.
+- `0.1.32` Beta release-prep line. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
-- The `dev` branch currently contains additional unreleased work beyond `0.1.32`; see [CHANGELOG.md](CHANGELOG.md) for branch-level detail and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
+- The `dev` branch is being prepared for the `0.1.32` release merge to `main`; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -144,25 +145,18 @@ Current release line:
 
 ## What's New (in the last few releases)
 
-Recently shipped:
-- Evaluations Recipe Framework for guided retrieval tuning, answer-quality runs, and recipe-first eval workflows.
-- MCP Virtual CLI plus follow-on hardening for governed, workspace-bounded command execution.
-- Writing Suite Phase 1 with manuscript CRUD, TipTap editor surfaces, tree/focus mode, and reorder support.
-- Study Packs Phase 1 for jobs-backed study-material generation and remediation handoffs.
-- Container snapshot publishing to GHCR with a unified `container-build-check` rollup job.
-- FTUE / FTUX expansion across onboarding, LLM setup, chat, watchlists, MCP Hub, moderation, quiz, and flashcards.
-- Deep Research with jobs-backed runs, SSE progress, checkpoint review, and chat handoffs.
-- Shared workspace cloning plus "Shared With Me" flows and privilege-aware sharing rules.
-- Companion Home dashboard, notifications surfaces, and integrations / scheduled-task management.
-- MCP Hub governance pack management and broader ACP workspace discovery/health support.
-- Audio installer and bundle follow-through, including curated `kitten_tts` and `pocket_tts_cpp` paths.
+Included in the `0.1.32` release-prep rollup:
+- Sandbox, MCP Gateway, and ACP expansion, including governed execution, workspace/runtime contracts, profile presets, permission evidence, and release-readiness gates.
+- Research, knowledge, and study workflow growth across Chat Workspace, Research Workspace, Deep Research, quick ingest, flashcards, Study Packs, notes tasks, and study suggestions.
+- Writing Suite follow-through with manuscript authoring, character/world/plot tooling, AI analysis, annotations, agent chat, and live writing feedback.
+- Onboarding, provider, and admin surfaces for public setup profiles, local model recovery, provider keys, companion home shortcuts, scheduled tasks, and workspace diagnostics.
+- Skills, MCP Hub, and workspace operations for server-backed Skills flows, governance packs, tool cataloging, workspace sharing, and permission simulation.
+- Release, packaging, and CI tooling for full-suite PR shard fanout, local CI runner targets, package-content checks, trusted-publishing prep, and PyPI artifact guards.
+- Security, auth, and runtime hardening for provider URL validation, secret redaction, SSRF/network policy handling, dependency floors, and test-only CodeQL suppressions.
 
-Currently landing on `dev` (post-`0.1.32` branch work):
-- Writing Suite Phases 2-4 with characters, world info, plot/research tools, AI analysis, agent chat, and live writing feedback.
-- Persona-routed onboarding, Mission Control home flows, and storage quota warnings.
-- Browser web clipper support for capturing pages into the research workflow.
-- Study suggestions for quiz and flashcard workflows.
-- Additional sandbox / ACP ergonomics and `llama.cpp` / `chatllm` OCR backend expansion.
+Still active on `dev`:
+- Follow-up polish and fixes may continue to land before the `0.1.32` release is published from `main`.
+- Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
 
@@ -210,7 +204,7 @@ See the full [Feature Status Matrix at `Docs/Published/Overview/Feature_Status.m
 
 ## Quickstart
 
-`pip install tldw_server` is not generally available yet (PyPI publishing is in progress).
+`pip install tldw-server` is not generally available yet; the package metadata and artifact checks are prepared, but PyPI publishing is still in progress.
 For now, use this repository checkout and the setup paths below (`make` and no-`make`).
 
 ### Preflight Check (Recommended)
