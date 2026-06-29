@@ -55,6 +55,12 @@ Confirm the CLI is available:
 mcp-unified-gateway package-info
 ```
 
+When a host application mounts the package gateway, use `GET /mcp/status` for
+package-local readiness. The response reports static package boundary metadata,
+profile/external registry store persistence, default profile state, admin-auth
+configured state, external server counts, warnings, and next actions. For the
+embedded TLDW Server product, use `/api/v1/mcp/status` instead.
+
 For a quick standalone JSON-RPC smoke check, confirm the smoke client is also
 available and run the deterministic in-process fixture:
 

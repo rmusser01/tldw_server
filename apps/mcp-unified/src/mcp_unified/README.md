@@ -124,6 +124,15 @@ Validate a gateway config file:
 mcp-unified-gateway validate-config ./gateway.json
 ```
 
+## Package-Local Status
+
+When a host application mounts the package gateway, `GET /mcp/status` returns
+best-effort readiness metadata for that package-local mount. It includes package
+status (`internal-experimental`, `not-published`), runtime name/version,
+profile store persistence, default profile state, admin-auth configured state,
+external server counts, warnings, and next actions. It is not the embedded TLDW
+Server status endpoint; embedded users should call `/api/v1/mcp/status`.
+
 Build an aggregate tool-use report when reporting is enabled:
 
 ```bash
