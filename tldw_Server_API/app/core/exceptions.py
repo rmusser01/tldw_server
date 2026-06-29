@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -62,6 +62,200 @@ class BadRequestError(ValueError):
 
 class InvalidMetadataOrderKeyError(ValueError):
     """Raised when a metadata order key cannot be safely used."""
+
+
+SafeJsonScalar = str | int | float | bool | None
+SafeDetail = dict[str, SafeJsonScalar]
+
+EmbeddingErrorCode = Literal[
+    "empty_input",
+    "invalid_input_type",
+    "too_many_inputs",
+    "input_too_long",
+    "invalid_token_array",
+    "unknown_provider",
+    "provider_model_mismatch",
+    "invalid_dimensions",
+    "provider_denied",
+    "model_denied",
+    "model_required",
+    "provider_unsupported",
+    "missing_provider_credentials",
+    "provider_malformed_response",
+    "provider_rate_limited",
+    "provider_unavailable",
+    "fallback_exhausted",
+    "circuit_breaker_open",
+    "internal_execution_failure",
+]
+
+_EMBEDDING_REDACTED = "[redacted]"
+_EMBEDDING_SENSITIVE_KEY_PARTS = (
+    "api_key",
+    "apikey",
+    "access_token",
+    "authorization",
+    "body",
+    "credential",
+    "header",
+    "input",
+    "password",
+    "raw",
+    "secret",
+    "text",
+)
+_EMBEDDING_SAFE_NUMERIC_TOKEN_KEYS = {"tokens", "token_count", "prompt_tokens", "total_tokens"}
+_EMBEDDING_SENSITIVE_VALUE_PARTS = (
+    "api_key",
+    "authorization",
+    "bearer ",
+    "password",
+    "secret",
+    "sk-",
+    "token",
+)
+
+
+def _is_embedding_sensitive_key(key: str) -> bool:
+    normalized = key.lower().replace("-", "_")
+    return any(part in normalized for part in _EMBEDDING_SENSITIVE_KEY_PARTS)
+
+
+def _is_embedding_sensitive_string(value: str) -> bool:
+    normalized = value.lower()
+    return any(part in normalized for part in _EMBEDDING_SENSITIVE_VALUE_PARTS)
+
+
+def _is_embedding_safe_numeric_token_count(key: str, value: object) -> bool:
+    normalized = key.lower().replace("-", "_")
+    return (
+        normalized in _EMBEDDING_SAFE_NUMERIC_TOKEN_KEYS
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    )
+
+
+def sanitize_embedding_public_details(details: list[SafeDetail] | None) -> list[SafeDetail]:
+    """Return public embedding error details with sensitive values redacted."""
+    if not isinstance(details, list):
+        return []
+
+    sanitized: list[SafeDetail] = []
+    for item in details:
+        if not isinstance(item, Mapping):
+            continue
+
+        safe_item: SafeDetail = {}
+        for raw_key, raw_value in item.items():
+            if not isinstance(raw_key, str):
+                continue
+
+            if _is_embedding_safe_numeric_token_count(raw_key, raw_value):
+                safe_item[raw_key] = raw_value
+                continue
+
+            if _is_embedding_sensitive_key(raw_key):
+                safe_item[raw_key] = _EMBEDDING_REDACTED
+                continue
+
+            if isinstance(raw_value, str):
+                safe_item[raw_key] = (
+                    _EMBEDDING_REDACTED if _is_embedding_sensitive_string(raw_value) else raw_value
+                )
+            elif isinstance(raw_value, (int, float, bool)) or raw_value is None:
+                safe_item[raw_key] = raw_value
+
+        if safe_item:
+            sanitized.append(safe_item)
+
+    return sanitized
+
+
+def sanitize_embedding_scalar_mapping(values: Mapping[str, object] | None) -> dict[str, SafeJsonScalar]:
+    """Return safe scalar observability values for embedding request metadata."""
+    if not isinstance(values, Mapping):
+        return {}
+
+    sanitized: dict[str, SafeJsonScalar] = {}
+    for raw_key, raw_value in values.items():
+        if not isinstance(raw_key, str):
+            continue
+
+        if _is_embedding_safe_numeric_token_count(raw_key, raw_value):
+            sanitized[raw_key] = raw_value
+            continue
+
+        if _is_embedding_sensitive_key(raw_key):
+            sanitized[raw_key] = _EMBEDDING_REDACTED
+            continue
+
+        if isinstance(raw_value, str):
+            sanitized[raw_key] = (
+                _EMBEDDING_REDACTED if _is_embedding_sensitive_string(raw_value) else raw_value
+            )
+        elif isinstance(raw_value, (int, float, bool)) or raw_value is None:
+            sanitized[raw_key] = raw_value
+
+    return sanitized
+
+
+class EmbeddingDomainError(Exception):
+    """Base domain error for embedding request planning and execution."""
+
+    def __init__(
+        self,
+        code: EmbeddingErrorCode,
+        message: str,
+        *,
+        retryable: bool = False,
+        provider: str | None = None,
+        model: str | None = None,
+        retry_after: int | float | None = None,
+        cause_class: str | None = None,
+        details: list[SafeDetail] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.provider = provider
+        self.model = model
+        self.retry_after = retry_after
+        self.cause_class = cause_class
+        self.details = sanitize_embedding_public_details(details)
+
+    def to_http_payload(self) -> dict[str, SafeJsonScalar | list[SafeDetail]]:
+        """Return a stable, sanitized payload safe for HTTP responses."""
+        return {
+            "error_code": self.code,
+            "message": self.message,
+            "provider": self.provider,
+            "model": self.model,
+            "retryable": self.retryable,
+            "retry_after": self.retry_after,
+            "details": sanitize_embedding_public_details(self.details),
+            "cause_class": self.cause_class,
+        }
+
+
+class EmbeddingInputError(EmbeddingDomainError):
+    """Input validation failed before provider execution."""
+
+
+class EmbeddingPolicyError(EmbeddingDomainError):
+    """Provider or model policy rejected the request."""
+
+
+class EmbeddingProviderError(EmbeddingDomainError):
+    """Provider returned an error response or malformed result."""
+
+
+class EmbeddingRateLimitError(EmbeddingProviderError):
+    """Provider rate limit or quota throttled the request."""
+
+
+class EmbeddingExecutionError(EmbeddingDomainError):
+    """Embedding execution failed after request planning."""
 
 
 class RecipeEnqueueError(RuntimeError):
