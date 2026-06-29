@@ -82,8 +82,7 @@ Good fit for:
 
 ## Start Here
 
-1. **Check prerequisites:** `make quickstart-prereqs` (or verify Python 3.10+, ffmpeg, and Docker manually for your chosen profile)
-2. **Pick one peer setup profile:**
+1. **Clone this repository and pick one peer setup profile.**
 
 | Profile | Best for | Prepare | Start | Verify |
 |---------|----------|---------|-------|--------|
@@ -95,7 +94,9 @@ Good fit for:
 
 For a user-facing map of key workflows across the server API, WebUI, and browser extension, start with the [User Guides documentation map](Docs/User_Guides/index.md).
 
-1. **Follow your profile guide** end-to-end. It covers prepare, start, verify, first value, audio path, troubleshoot, and optional add-ons.
+After cloning, you can run the optional Makefile helper checks with `make quickstart-prereqs`, or verify Python 3.10+, ffmpeg, and Docker manually for your chosen profile. On a fresh checkout, the setup targets are still the source of truth because they create the lightweight setup environment they need.
+
+2. **Follow your profile guide** end-to-end. It covers prepare, start, verify, first value, audio path, troubleshoot, and optional add-ons.
 
 Developers working on the WebUI, extension, or shared app packages should also start with [apps/DEVELOPMENT.md](apps/DEVELOPMENT.md).
 
@@ -214,12 +215,14 @@ For now, use this repository checkout and the setup paths below (`make` and no-`
 
 ### Preflight Check (Recommended)
 
-If you plan to use Makefile quickstart targets:
+After cloning the repository, you can run the optional Makefile helper checks:
 ```bash
 make quickstart-prereqs
 ```
 
-If `make` is unavailable (common on Windows), run the equivalent checks manually:
+This helper checks your host Python and optional media tooling. If it reports missing project Python packages on a fresh checkout, continue with the selected setup profile; `make setup-docker-single`, `make setup-docker-multi`, and `make install-local` create the setup environments they need.
+
+If `make` is unavailable (common on Windows), run equivalent host checks manually:
 ```powershell
 py -3.12 --version  # or py -3.13 / -3.11 / -3.10
 ffmpeg -version

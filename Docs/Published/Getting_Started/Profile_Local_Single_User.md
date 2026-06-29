@@ -64,8 +64,21 @@ Start the WebUI in a second terminal when you are ready for the cohesive first-t
 
 ```bash
 cd apps/tldw-frontend
+cp .env.local.example .env.local
+bun install
 bun run dev -- -p 8080
 ```
+
+Confirm `.env.local` contains:
+
+```bash
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+NEXT_PUBLIC_API_VERSION=v1
+# Optional local single-user bootstrap auth:
+# NEXT_PUBLIC_X_API_KEY=your_single_user_api_key
+```
+
+If Bun is not installed, use the Bun install steps or npm fallback in [Local Profile: Add the WebUI](../../../README.md#local-profile-add-the-webui).
 
 Then open http://127.0.0.1:8080 to open the WebUI.
 
@@ -122,6 +135,6 @@ Local audio setup can use host-side config and model files directly. After this 
 
 ## Optional Add-ons
 
-- Add the WebUI after the API is healthy: see [Local Profile: Add the WebUI](../../README.md#local-profile-add-the-webui).
+- Add the WebUI after the API is healthy: see [Local Profile: Add the WebUI](../../../README.md#local-profile-add-the-webui).
 - Keep provider setup in the WebUI first-run wizard for the normal path; use file-based configuration only for recovery, automation, or advanced deployments.
 - Install development extras with `source .venv/bin/activate && pip install -e ".[dev]"`.
