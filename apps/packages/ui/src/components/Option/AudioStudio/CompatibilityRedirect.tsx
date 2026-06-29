@@ -1,6 +1,7 @@
 import React from "react"
-import { Alert, Spin } from "antd"
+import { Spin } from "antd"
 import { useNavigate } from "react-router-dom"
+import { Alert } from "@/components/ui/primitives/Alert"
 import {
   listLegacyAudiobookProjectsForMigration,
   markLegacyAudiobookProjectMigrated,
@@ -227,7 +228,7 @@ export const CompatibilityRedirect: React.FC = () => {
   if (errorMessage && projects.length === 0) {
     return (
       <div className="mx-auto max-w-3xl p-4">
-        <Alert type="error" showIcon title={errorMessage} />
+        <Alert variant="error" title={errorMessage} />
       </div>
     )
   }
