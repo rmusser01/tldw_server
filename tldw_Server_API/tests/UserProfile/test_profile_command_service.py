@@ -407,6 +407,7 @@ async def test_command_service_successful_write_returns_executor_result_and_vers
     assert result.profile_version == profile_service.after_write
     assert result.applied == ("preferences.ui.theme",)
     assert result.skipped == ()
+    assert profile_service.calls == [(write_conn, False), (write_conn, False)]
     assert executor.calls == [
         {
             "user_id": 9,

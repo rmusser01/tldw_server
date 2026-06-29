@@ -47,6 +47,7 @@ class ProfileCommandService:
         if command.expected_profile_version is not None:
             current_version = await self._profile_service.get_profile_version(
                 user_id=command.target_user_id,
+                db_conn=db_conn,
             )
             if not self._profile_service.versions_match(
                 current_version,
@@ -78,6 +79,7 @@ class ProfileCommandService:
         if current_version is None:
             current_version = await self._profile_service.get_profile_version(
                 user_id=command.target_user_id,
+                db_conn=db_conn,
             )
         if command.dry_run:
             return LegacyProfileCommandResult(
@@ -115,6 +117,7 @@ class ProfileCommandService:
         )
         current_version = await self._profile_service.get_profile_version(
             user_id=command.target_user_id,
+            db_conn=db_conn,
         )
         return LegacyProfileCommandResult(
             profile_version=current_version,
