@@ -175,6 +175,7 @@ jobs:
         with:
           name: research-workspace-extension-parity-artifacts
           if-no-files-found: ignore
+          include-hidden-files: true
           path: |
             apps/extension/.workspace-parity-e2e-report.json
             apps/extension/test-results/**
