@@ -212,6 +212,10 @@ export function getDesignSystemStateLabel(
 }
 
 export const READY_STATE_LABEL = getDesignSystemStateLabel("ready", "Ready")
+export const SETUP_REQUIRED_STATE_LABEL = getDesignSystemStateLabel(
+  "setup_required",
+  "Setup required"
+)
 export const UNAVAILABLE_STATE_LABEL = getDesignSystemStateLabel(
   "unavailable",
   "Unavailable"

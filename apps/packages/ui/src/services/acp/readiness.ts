@@ -1,3 +1,4 @@
+import { SETUP_REQUIRED_STATE_LABEL } from "@/design-system"
 import type {
   ACPAgentInfo,
   ACPExecutionHealthAgentSummary,
@@ -156,7 +157,7 @@ export const buildACPAgentSetupSummary = (agent: ACPAgentInfo): ACPAgentSetupSum
 
     return {
       disabled: true,
-      title: "Setup required",
+      title: SETUP_REQUIRED_STATE_LABEL,
       description: `Configure ${agent.name} before starting an ACP session.`
     }
   }
@@ -260,7 +261,7 @@ export const buildACPAgentSetupSummary = (agent: ACPAgentInfo): ACPAgentSetupSum
 
   return {
     disabled: true,
-    title: "Setup required",
+    title: SETUP_REQUIRED_STATE_LABEL,
     description: statusMessageOr(agent, `${agent.name} is not ready to start.`)
   }
 }
