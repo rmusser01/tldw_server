@@ -12,7 +12,7 @@
 
 ## Stage 1: Rebase And Inventory
 **Goal**: Rebase PR #2528 onto latest `origin/dev` and identify all active review threads/comments.
-**Success Criteria**: Branch rebases cleanly or conflicts are resolved, review comments are mapped to touched files, and Backlog task `TASK-12015` tracks the work.
+**Success Criteria**: Branch rebases cleanly or conflicts are resolved, review comments are mapped to touched files, and Backlog task `TASK-12022` tracks the work.
 **Tests**: Git rebase status and GitHub review-thread query.
 **Status**: Complete
 
@@ -32,4 +32,4 @@
 **Goal**: Commit, push the rebased branch, reply to/resolved addressed review threads, and report remaining CI status.
 **Success Criteria**: PR branch is updated on GitHub, review threads are resolved or documented as non-actionable, and final status is reported.
 **Tests**: `gh pr view`, `gh pr checks`, and review-thread query.
-**Status**: In Progress
+**Status**: Complete
