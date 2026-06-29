@@ -104,19 +104,18 @@ const pushTipTapMappingPoint = (
   points.push({ position, offset })
 }
 
-const isEmptyTipTapTextBlock = (node: TipTapNode): boolean =>
-  (node.type.name === "paragraph" || node.type.name === "heading") &&
-  node.content.size === 0
+const TIPTAP_BLOCK_CONTAINER_TYPES = new Set([
+  "bulletList",
+  "orderedList",
+  "listItem",
+  "blockquote"
+])
 
-const getTipTapBlockSeparatorLength = (
-  previousNode: TipTapNode | null,
-  nextNode: TipTapNode,
-): number => {
-  if (!previousNode) return 0
-  return isEmptyTipTapTextBlock(previousNode) || isEmptyTipTapTextBlock(nextNode)
-    ? 1
-    : 2
-}
+const usesTipTapBlockChildSeparators = (node: TipTapNode): boolean =>
+  TIPTAP_BLOCK_CONTAINER_TYPES.has(node.type.name)
+
+const getTipTapBlockSeparatorLength = (previousNode: TipTapNode | null): number =>
+  previousNode ? 2 : 0
 
 const appendTipTapNodeMappings = (
   node: TipTapNode,
@@ -152,13 +151,24 @@ const appendTipTapNodeMappings = (
   }
 
   let nextOffset = offset
+  let previousChildNode: TipTapNode | null = null
+  const shouldSeparateChildren = usesTipTapBlockChildSeparators(node)
   node.forEach((childNode, childOffset) => {
+    if (shouldSeparateChildren) {
+      const separatorLength = getTipTapBlockSeparatorLength(previousChildNode)
+      const childPosition = position + 1 + childOffset
+      for (let index = 1; index <= separatorLength; index += 1) {
+        pushTipTapMappingPoint(points, childPosition, nextOffset + index)
+      }
+      nextOffset += separatorLength
+    }
     nextOffset = appendTipTapNodeMappings(
       childNode,
       position + 1 + childOffset,
       nextOffset,
       points,
     )
+    previousChildNode = childNode
   })
 
   pushTipTapMappingPoint(points, position + node.nodeSize - 1, nextOffset)
@@ -174,7 +184,7 @@ const getTipTapPositionOffsetPoints = (
   let previousNode: TipTapNode | null = null
 
   editor.state.doc.forEach((childNode, childOffset) => {
-    const separatorLength = getTipTapBlockSeparatorLength(previousNode, childNode)
+    const separatorLength = getTipTapBlockSeparatorLength(previousNode)
     for (let index = 1; index <= separatorLength; index += 1) {
       pushTipTapMappingPoint(points, childOffset, offset + index)
     }

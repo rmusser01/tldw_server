@@ -23,7 +23,7 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Run a post-merge UAT and polish pass for the Writing Playground manuscript annotations workflow across WebUI and extension surfaces. Capture browser/rendered evidence for saved-scene binding, manual annotations, margin rail behavior, dirty-scene gating, selected-text/scene review affordances, and suggested-fix revision handoff; fix narrow defects found during the pass.
+Run a post-merge UAT and polish pass for the Writing Playground manuscript annotations workflow, using rendered WebUI evidence and explicitly recording the blocked extension harness status. Capture browser/rendered evidence for saved-scene binding, manual annotations, margin rail behavior, dirty-scene gating, selected-text/scene review affordances, and suggested-fix revision handoff; fix narrow defects found during the pass.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -48,7 +48,7 @@ Run a post-merge UAT and polish pass for the Writing Playground manuscript annot
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed Writing Playground manuscript annotations UAT/polish. Fixed Rich mode TipTap SSR crash, aligned TipTap paragraph serialization/selection offsets with manuscript blank-line delimiters, and made scene dirty checks respect Plain vs Rich editor authority. Added focused frontend coverage and captured rendered WebUI UAT screenshots for Rich margin rail and Plain inspector fallback. Residual unrelated issues documented: local /openapi.json 500, Ant Design Drawer width deprecation warning, and extension E2E harness service-worker/blank-launch blocker.
+Completed Writing Playground manuscript annotations WebUI UAT/polish and recorded the extension E2E harness as blocked in this environment. Fixed Rich mode TipTap SSR crash, aligned TipTap paragraph serialization/selection offsets with manuscript blank-line delimiters, and made scene dirty checks respect Plain vs Rich editor authority. Added focused frontend coverage and captured rendered WebUI UAT screenshots for Rich margin rail and Plain inspector fallback. Residual unrelated issues documented: local /openapi.json 500, Ant Design Drawer width deprecation warning, and extension E2E harness service-worker/blank-launch blocker.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
