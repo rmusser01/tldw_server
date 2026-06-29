@@ -105,11 +105,27 @@ class SkillFrontmatter(BaseModel):
     argument_hint: str | None = Field(None, max_length=100, description="Hint shown in UI (e.g., '[issue-number]')")
     disable_model_invocation: bool = Field(False, description="If true, only user can invoke (not auto-invoked by LLM)")
     user_invocable: bool = Field(True, description="If false, hidden from user UI (background knowledge only)")
-    allowed_tools: list[str] | None = Field(None, description="Tools allowed without permission when skill is active")
+    allowed_tools: list[str] | None = Field(None, description="Declared tool strings")
     model: str | None = Field(None, description="Override model for this skill")
     context: SkillContext = Field("inline", description="'inline' or 'fork' (fork runs in isolated subagent)")
 
     model_config = ConfigDict(extra='ignore')
+
+
+class SkillRuntimeMetadata(BaseModel):
+    """Read-only runtime declarations derived from skill metadata."""
+    execution_mode: SkillContext = Field("inline", description="Declared execution context mode")
+    test_run_may_call_model: bool = Field(
+        False,
+        description="Whether a non-dry user-triggered test run may call the configured model",
+    )
+    declares_tools: bool = Field(False, description="Whether the skill declares tool strings")
+    declared_tool_count: int = Field(0, ge=0, description="Count of declared tool strings")
+    model_override: str | None = Field(None, description="Declared model override")
+    auto_invocation_enabled: bool = Field(
+        True,
+        description="Whether the skill can be advertised for model auto-invocation context",
+    )
 
 
 class SkillBase(BaseModel):
@@ -119,9 +135,13 @@ class SkillBase(BaseModel):
     argument_hint: str | None = Field(None, max_length=100, description="Hint shown in UI")
     disable_model_invocation: bool = Field(False, description="If true, only user can invoke")
     user_invocable: bool = Field(True, description="If false, hidden from user UI")
-    allowed_tools: list[str] | None = Field(None, description="Tools allowed during skill execution")
+    allowed_tools: list[str] | None = Field(None, description="Declared tool strings")
     model: str | None = Field(None, description="Override model for this skill")
     context: SkillContext = Field("inline", description="Execution context mode")
+    runtime: SkillRuntimeMetadata = Field(
+        default_factory=SkillRuntimeMetadata,
+        description="Read-only runtime declarations derived from skill metadata",
+    )
 
     @field_validator("name")
     @classmethod
@@ -193,7 +213,13 @@ class SkillSummary(BaseModel):
     argument_hint: str | None = Field(None, description="Hint shown in UI")
     user_invocable: bool = Field(..., description="If false, hidden from user UI")
     disable_model_invocation: bool = Field(..., description="If true, only user can invoke")
+    allowed_tools: list[str] | None = Field(None, description="Declared tool strings")
+    model: str | None = Field(None, description="Declared model override")
     context: SkillContext = Field(..., description="Execution context mode")
+    runtime: SkillRuntimeMetadata = Field(
+        default_factory=SkillRuntimeMetadata,
+        description="Read-only runtime declarations derived from skill metadata",
+    )
     version: int = Field(..., description="Version for optimistic locking")
 
     model_config = ConfigDict(from_attributes=True)
@@ -261,7 +287,7 @@ class SkillExecutionResult(BaseModel):
     """Result of skill execution."""
     skill_name: str = Field(..., description="Name of the executed skill")
     rendered_prompt: str = Field(..., description="Prompt with arguments substituted")
-    allowed_tools: list[str] | None = Field(None, description="Tools allowed for this skill")
+    allowed_tools: list[str] | None = Field(None, description="Declared tool strings")
     model_override: str | None = Field(None, description="Model override if specified")
     execution_mode: SkillContext = Field(..., description="How the skill was executed")
     fork_output: str | None = Field(None, description="Output from fork execution (if applicable)")
@@ -320,7 +346,7 @@ class SkillImportPreviewResponse(BaseModel):
     argument_hint: str | None = Field(None, description="Parsed argument hint")
     disable_model_invocation: bool | None = Field(None, description="Whether model invocation is disabled")
     user_invocable: bool | None = Field(None, description="Whether users can invoke the skill directly")
-    allowed_tools: list[str] | None = Field(None, description="Parsed allowed tools")
+    allowed_tools: list[str] | None = Field(None, description="Parsed declared tool strings")
     model: str | None = Field(None, description="Parsed model override")
     context: SkillContext | None = Field(None, description="Parsed execution context")
     supporting_file_count: int = Field(0, description="Number of supporting files included in the import")

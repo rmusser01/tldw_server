@@ -7,6 +7,7 @@ import os
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,6 +30,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints.skills import (
     MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES,
+    _skill_data_to_response,
     _metadata_to_summary,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
@@ -37,6 +39,7 @@ from tldw_Server_API.app.core.Context_Integrity.resolver import clear_global_con
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Skills.exceptions import SkillsError
+from tldw_Server_API.app.core.Skills.runtime_metadata import build_skill_runtime_metadata
 from tldw_Server_API.app.core.Skills.skills_service import SkillsService
 
 pytestmark = pytest.mark.integration
@@ -374,6 +377,67 @@ class TestListSkills:
 
         assert summary.version == 1
 
+    def test_metadata_summary_defaults_explicit_none_runtime_fields(self) -> None:
+        """Legacy metadata with explicit null runtime fields still produces a valid summary."""
+        metadata = SimpleNamespace(
+            name="legacy-runtime",
+            description=None,
+            argument_hint=None,
+            user_invocable=True,
+            disable_model_invocation=None,
+            allowed_tools=["Read"],
+            model=None,
+            context=None,
+            version=1,
+        )
+
+        summary = _metadata_to_summary(metadata)
+
+        assert summary.context == "inline"
+        assert summary.disable_model_invocation is False
+        assert summary.runtime.execution_mode == "inline"
+        assert summary.runtime.declared_tool_count == 1
+
+    def test_skill_response_defaults_explicit_none_runtime_fields(self) -> None:
+        """Detail responses preserve schema defaults when legacy rows contain nulls."""
+        now = datetime.now(timezone.utc)
+        response = _skill_data_to_response(
+            {
+                "id": "legacy-runtime-id",
+                "name": "legacy-runtime",
+                "description": None,
+                "argument_hint": None,
+                "disable_model_invocation": None,
+                "user_invocable": True,
+                "allowed_tools": ["Read"],
+                "model": None,
+                "context": None,
+                "content": "Body",
+                "supporting_files": None,
+                "directory_path": "/tmp/legacy-runtime",
+                "created_at": now,
+                "last_modified": now,
+                "version": 1,
+            }
+        )
+
+        assert response.context == "inline"
+        assert response.disable_model_invocation is False
+        assert response.runtime.execution_mode == "inline"
+        assert response.runtime.declared_tool_count == 1
+
+    def test_runtime_metadata_counts_single_tool_string_as_one(self) -> None:
+        """Defensive runtime metadata treats one tool string as one declaration."""
+        metadata = build_skill_runtime_metadata(
+            context="fork",
+            allowed_tools="Read",
+            model=None,
+            disable_model_invocation=False,
+        )
+
+        assert metadata["declares_tools"] is True
+        assert metadata["declared_tool_count"] == 1
+
     def test_list_skills_search_filters_before_pagination(self, client):
         for i in range(12):
             r = client.post(
@@ -463,6 +527,50 @@ class TestListSkills:
             "has_more": True,
             "next_offset": 1,
         }
+
+    def test_list_and_detail_responses_include_runtime_metadata(self, client):
+        r = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={
+                "name": "runtime-review",
+                "content": (
+                    "---\n"
+                    "description: Runtime metadata review\n"
+                    "context: fork\n"
+                    "allowed-tools:\n"
+                    "  - Read\n"
+                    "  - \"Bash(git *)\"\n"
+                    "model: gpt-4o\n"
+                    "disable-model-invocation: true\n"
+                    "---\n\n"
+                    "Use this with runtime metadata."
+                ),
+            },
+        )
+        assert r.status_code == 201, r.text
+
+        r = client.get(f"{SKILLS_PREFIX}/?q=runtime-review")
+        assert r.status_code == 200, r.text
+        list_body = r.json()
+        assert list_body["count"] == 1
+        summary = list_body["skills"][0]
+        assert summary["allowed_tools"] == ["Read", "Bash(git *)"]
+        assert summary["model"] == "gpt-4o"
+        assert summary["runtime"] == {
+            "execution_mode": "fork",
+            "test_run_may_call_model": True,
+            "declares_tools": True,
+            "declared_tool_count": 2,
+            "model_override": "gpt-4o",
+            "auto_invocation_enabled": False,
+        }
+
+        r = client.get(f"{SKILLS_PREFIX}/runtime-review")
+        assert r.status_code == 200, r.text
+        detail = r.json()
+        assert detail["allowed_tools"] == ["Read", "Bash(git *)"]
+        assert detail["model"] == "gpt-4o"
+        assert detail["runtime"] == summary["runtime"]
 
     def test_list_skills_explicit_hidden_filter(self, client):
         for name, user_invocable in (("visible", "true"), ("hidden", "false")):
@@ -1415,6 +1523,69 @@ class TestContextPayload:
         assert listed["ctx-skill"]["version"] == 1
         ctx_line = next(line for line in data["context_text"].splitlines() if "ctx-skill" in line)
         assert "version" not in ctx_line.lower()
+
+    def test_get_context_payload_includes_runtime_metadata(self, client):
+        r = client.post(
+            f"{SKILLS_PREFIX}/",
+            json={
+                "name": "ctx-runtime",
+                "content": (
+                    "---\n"
+                    "description: Context runtime test\n"
+                    "argument-hint: \"[topic]\"\n"
+                    "context: fork\n"
+                    "allowed-tools:\n"
+                    "  - Read\n"
+                    "model: gpt-4o-mini\n"
+                    "---\n\n"
+                    "Context runtime body"
+                ),
+            },
+        )
+        assert r.status_code == 201, r.text
+
+        r = client.get(f"{SKILLS_PREFIX}/context")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        listed = {skill["name"]: skill for skill in data["available_skills"]}
+        assert listed["ctx-runtime"]["allowed_tools"] == ["Read"]
+        assert listed["ctx-runtime"]["model"] == "gpt-4o-mini"
+        assert listed["ctx-runtime"]["runtime"] == {
+            "execution_mode": "fork",
+            "test_run_may_call_model": True,
+            "declares_tools": True,
+            "declared_tool_count": 1,
+            "model_override": "gpt-4o-mini",
+            "auto_invocation_enabled": True,
+        }
+        ctx_line = next(line for line in data["context_text"].splitlines() if "ctx-runtime" in line)
+        assert "gpt-4o-mini" not in ctx_line
+        assert "Read" not in ctx_line
+
+    def test_context_payload_defaults_explicit_none_context(self):
+        service = SkillsService.__new__(SkillsService)
+        service._is_skill_allowed = lambda _name, purpose: True
+
+        payload = service._build_context_payload(
+            [
+                {
+                    "name": "legacy-context",
+                    "description": "Legacy context row",
+                    "argument_hint": None,
+                    "user_invocable": True,
+                    "disable_model_invocation": False,
+                    "allowed_tools": ["Read"],
+                    "model": None,
+                    "context": None,
+                    "version": 1,
+                }
+            ]
+        )
+
+        skill = payload["available_skills"][0]
+        assert skill["context"] == "inline"
+        assert skill["runtime"]["execution_mode"] == "inline"
+        assert skill["runtime"]["declared_tool_count"] == 1
 
     def test_get_context_payload_uses_async_service_method(self, client, monkeypatch):
         calls = {"async": 0}
