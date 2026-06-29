@@ -219,6 +219,35 @@ describe("workspace API skill methods", () => {
     expect(result.blob).toBeInstanceOf(Blob)
   })
 
+  it("preserves safe fallback filename characters from user-provided skill names", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: new Uint8Array([4, 5, 6]).buffer
+    })
+    const clientCore = {
+      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
+    }
+
+    const result = await workspaceApiMethods.exportSkill.call(
+      clientCore as any,
+      "  2_Custom Skill!  "
+    )
+
+    expect(result.filename).toBe("2_Custom-Skill.zip")
+  })
+
+  it("rejects export responses without contextual response metadata", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce(undefined)
+    const clientCore = {
+      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
+    }
+
+    await expect(
+      workspaceApiMethods.exportSkill.call(clientCore as any, "client-skill")
+    ).rejects.toThrow("Export failed for skill client-skill: missing response")
+  })
+
   it("rejects successful export responses without binary data", async () => {
     vi.mocked(bgRequest).mockResolvedValueOnce({
       ok: true,
@@ -233,6 +262,21 @@ describe("workspace API skill methods", () => {
 
     await expect(
       workspaceApiMethods.exportSkill.call(clientCore as any, "client-skill")
-    ).rejects.toThrow("Export failed: missing export payload")
+    ).rejects.toThrow("Export failed for skill client-skill: missing export payload")
+  })
+
+  it("rejects serialized export responses with invalid binary payloads", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: { lost: "array-buffer" }
+    })
+    const clientCore = {
+      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
+    }
+
+    await expect(
+      workspaceApiMethods.exportSkill.call(clientCore as any, "client-skill")
+    ).rejects.toThrow("Export failed for skill client-skill: invalid export payload")
   })
 })

@@ -41,7 +41,10 @@ vi.mock("react-i18next", () => ({
     ) => {
       if (typeof fallbackOrOptions === "string") return fallbackOrOptions
       if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        return fallbackOrOptions.defaultValue || key
+        const defaultValue = fallbackOrOptions.defaultValue || key
+        return defaultValue.replace(/\{\{(\w+)\}\}/g, (_match, token: string) =>
+          String(fallbackOrOptions[token] ?? "")
+        )
       }
       return key
     }

@@ -776,7 +776,7 @@ export const SkillsManager: React.FC = () => {
       notification.success({
         message: t("option:skills.exportStarted", { defaultValue: "Export started" }),
         description: t("option:skills.exportStartedDescription", {
-          defaultValue: `${filename} download has started.`,
+          defaultValue: "{{filename}} download has started.",
           filename
         })
       })

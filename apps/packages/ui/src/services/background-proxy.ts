@@ -570,6 +570,51 @@ async function bgRequestImpl<
     if (typeof Blob !== "undefined" && value instanceof Blob) return true
     return false
   }
+  type RuntimeResponsePayload = {
+    ok: boolean
+    error?: string
+    status?: number
+    data?: unknown
+    headers?: Record<string, string>
+  }
+  const requestDirectArrayBufferFallback = async () => {
+    const storage = createSafeStorage()
+    return await tldwRequest(
+      {
+        path,
+        method,
+        headers: resolvedHeaders,
+        body,
+        noAuth: resolvedNoAuth,
+        timeoutMs,
+        abortSignal,
+        responseType
+      },
+      { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+    )
+  }
+  const resolveArrayBufferResponse = async (
+    resp: RuntimeResponsePayload
+  ): Promise<T> => {
+    if (!resp?.ok || responseType !== "arrayBuffer" || isArrayBufferLike(resp.data)) {
+      return (returnResponse ? resp : resp.data) as T
+    }
+
+    const fallback = await requestDirectArrayBufferFallback()
+    if (!fallback) {
+      const error = buildRequestError("Request failed: missing fallback response")
+      throw error
+    }
+    if (!fallback.ok && !returnResponse) {
+      const msg = formatErrorMessage(
+        fallback.error,
+        `Request failed: ${fallback.status}`
+      )
+      const error = buildRequestError(msg, fallback.status, fallback.data)
+      throw error
+    }
+    return (returnResponse ? fallback : fallback.data) as T
+  }
   const hasRuntimeMessage =
     !preferDirect &&
     Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
@@ -693,35 +738,7 @@ async function bgRequestImpl<
             throw markNoFallbackError(error)
           }
         }
-        if (!returnResponse && responseType === "arrayBuffer") {
-          const raw = (resp as any)?.data
-          if (!isArrayBufferLike(raw)) {
-            const storage = createSafeStorage()
-            const fallback = await tldwRequest(
-              {
-                path,
-                method,
-                headers: resolvedHeaders,
-                body,
-                noAuth: resolvedNoAuth,
-                timeoutMs,
-                abortSignal,
-                responseType
-              },
-              { getConfig: () => storage.get("tldwConfig").catch(() => null) }
-            )
-            if (!fallback?.ok) {
-              const msg = formatErrorMessage(
-                fallback?.error,
-                `Request failed: ${fallback?.status}`
-              )
-              const error = buildRequestError(msg, fallback?.status, fallback?.data)
-              throw error
-            }
-            return fallback.data as T
-          }
-        }
-        return (returnResponse ? resp : resp.data) as T
+        return await resolveArrayBufferResponse(resp as RuntimeResponsePayload)
       }
 
       if (abortSignal.aborted) {
@@ -795,35 +812,7 @@ async function bgRequestImpl<
           throw markNoFallbackError(error)
         }
       }
-      if (!returnResponse && responseType === "arrayBuffer") {
-        const raw = (resp as any)?.data
-        if (!isArrayBufferLike(raw)) {
-          const storage = createSafeStorage()
-          const fallback = await tldwRequest(
-            {
-              path,
-              method,
-              headers: resolvedHeaders,
-              body,
-              noAuth: resolvedNoAuth,
-              timeoutMs,
-              abortSignal,
-              responseType
-            },
-            { getConfig: () => storage.get("tldwConfig").catch(() => null) }
-          )
-          if (!fallback?.ok) {
-            const msg = formatErrorMessage(
-              fallback?.error,
-              `Request failed: ${fallback?.status}`
-            )
-            const error = buildRequestError(msg, fallback?.status, fallback?.data)
-            throw error
-          }
-          return fallback.data as T
-        }
-      }
-      return (returnResponse ? resp : resp.data) as T
+      return await resolveArrayBufferResponse(resp as RuntimeResponsePayload)
     }
   } catch (e) {
     if (isNoFallbackError(e)) {

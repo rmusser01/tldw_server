@@ -730,20 +730,34 @@ export interface SkillExportDownload {
   filename: string
 }
 
+type SkillExportPayload = ArrayBuffer | ArrayBufferView<ArrayBuffer> | Blob
+
 type BinaryResponsePayload = {
   ok: boolean
   status: number
-  data?: ArrayBuffer
+  data?: SkillExportPayload
   error?: string
   headers?: Record<string, string>
 }
 
 const getSkillExportFallbackFilename = (skillName: string): string => {
   const trimmedName = skillName.trim()
-  const safeName = /^[a-z][a-z0-9-]{0,63}$/.test(trimmedName)
-    ? trimmedName
-    : "skill"
-  return `${safeName}.zip`
+  const safeName = trimmedName
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64)
+  return `${safeName || "skill"}.zip`
+}
+
+const isSkillExportPayload = (value: unknown): value is SkillExportPayload => {
+  if (!value) return false
+  if (value instanceof ArrayBuffer) return true
+  if (ArrayBuffer.isView?.(value)) {
+    return value.buffer instanceof ArrayBuffer
+  }
+  if (typeof Blob !== "undefined" && value instanceof Blob) return true
+  return false
 }
 
 const isSafeDownloadFilename = (filename: string | undefined): filename is string => {
@@ -766,6 +780,8 @@ const getContentDispositionFilename = (disposition: string | null): string | und
   try {
     return decodeURIComponent(rawFilename.trim())
   } catch {
+    // Export filenames are optional, untrusted metadata; keep the raw token so
+    // safety validation can either accept it or fall back to the skill name.
     return rawFilename.trim()
   }
 }
@@ -1018,14 +1034,20 @@ export const workspaceApiMethods = {
       responseType: "arrayBuffer",
       returnResponse: true
     })
+    const exportErrorContext = `Export failed for skill ${name}`
     if (!response) {
-      throw new Error("Export failed")
+      throw new Error(`${exportErrorContext}: missing response`)
     }
     if (!response.ok) {
-      throw new Error(response.error || `Export failed: ${response.status}`)
+      throw new Error(
+        response.error || `${exportErrorContext}: request failed with status ${response.status}`
+      )
     }
     if (!response.data) {
-      throw new Error("Export failed: missing export payload")
+      throw new Error(`${exportErrorContext}: missing export payload`)
+    }
+    if (!isSkillExportPayload(response.data)) {
+      throw new Error(`${exportErrorContext}: invalid export payload`)
     }
 
     const headers = new Headers(response.headers || {})
