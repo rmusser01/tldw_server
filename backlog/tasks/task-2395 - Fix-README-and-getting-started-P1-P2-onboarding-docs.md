@@ -1,7 +1,7 @@
 ---
 id: TASK-2395
 title: Fix README and getting-started P1/P2 onboarding docs
-status: In Progress
+status: Done
 assignee: []
 created_date: 2026-06-21 23:46
 updated_date: 2026-06-29 00:00
@@ -53,12 +53,15 @@ Review-rebase follow-up started 2026-06-29:
 - Verification follow-up: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py tldw_Server_API/tests/Docs/test_onboarding_entrypoints.py tldw_Server_API/tests/Docs/test_onboarding_default_contract.py tldw_Server_API/tests/Docs/test_quickstart_same_origin_docs.py tldw_Server_API/tests/Docs/test_public_onboarding_profile_parity.py tldw_Server_API/tests/Docs/test_published_onboarding_parity.py tldw_Server_API/tests/Docs/test_onboarding_dev_docs.py` => 52 passed, 3 warnings.
 - Quality follow-up: `black --check` and `ruff check` passed for `tldw_Server_API/tests/Docs/test_onboarding_guides_structure.py`; `compileall` passed; `git diff --check` passed; README/top-guide docs path hygiene, onboarding command boundary, and onboarding endpoint drift checks passed.
 - Security follow-up: raw Bandit on the touched pytest file only reported B101 pytest `assert` false positives, which were intentionally introduced to satisfy review feedback for standard pytest assertions. Rerun with `-s B101` on the touched test file wrote `/tmp/bandit_pr2427_skip_b101.json` with 0 findings.
+- Push/review follow-up: pushed rebased branch `codex/fix-onboarding-docs-p1-p2` at `6452b23097`, resolved all previously open review threads, and posted PR summary comment https://github.com/rmusser01/tldw_server/pull/2427#issuecomment-4828456659.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed the P1/P2 onboarding documentation issues from the README/Getting Started review. Updated README preflight positioning, QUICKSTART manual local auth setup and /setup recovery language, local WebUI setup steps plus published mirror, troubleshooting for Windows/no-make compose commands, and NEXT_PUBLIC_X_API_KEY guidance. Added a focused docs regression test for these contracts.
+
+Follow-up rebased PR #2427 onto latest `origin/dev`, resolved README/TROUBLESHOOTING conflicts, addressed all active Gemini/Qodo/CodeRabbit review threads, aligned `apps/tldw-frontend/.env.local.example` with the local single-user docs, split/marked/docstringed the onboarding docs contract tests, verified the focused docs scope, pushed the updated branch, and posted a PR summary comment.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
