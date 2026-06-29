@@ -14,6 +14,27 @@ def _has_psycopg() -> bool:
         return False
 
 
+def test_store_env_overrides_stale_settings_attrs(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.config import clear_config_cache, settings as app_settings
+
+    db_path = str(tmp_path / "sandbox_store.db")
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "sqlite")
+    monkeypatch.setenv("SANDBOX_STORE_DB_PATH", db_path)
+    if hasattr(app_settings, "SANDBOX_STORE_BACKEND"):
+        monkeypatch.setattr(app_settings, "SANDBOX_STORE_BACKEND", "memory")
+    if hasattr(app_settings, "SANDBOX_STORE_DB_PATH"):
+        monkeypatch.setattr(app_settings, "SANDBOX_STORE_DB_PATH", str(tmp_path / "stale.db"))
+    clear_config_cache()
+
+    from tldw_Server_API.app.core.Sandbox import store as sbx_store
+    importlib.reload(sbx_store)
+
+    assert sbx_store.get_store_mode() == "sqlite"
+    st = sbx_store.get_store()
+    assert isinstance(st, sbx_store.SQLiteStore)
+    assert st.db_path == db_path
+
+
 def test_cluster_mode_without_postgres_is_fail_fast(monkeypatch):
 
 

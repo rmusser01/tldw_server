@@ -13,7 +13,6 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     User,
     check_rate_limit,
     get_request_user,
-    require_token_scope,
 )
 
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import get_tts_service
@@ -397,7 +396,7 @@ async def preview_voice(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_UPLOAD,
@@ -479,7 +478,7 @@ async def create_fish_s2_reference(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_LIST,
@@ -512,7 +511,7 @@ async def list_fish_s2_references(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_UPLOAD,
@@ -631,7 +630,7 @@ async def import_fish_s2_references(
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id=VOICE_SCOPE_DELETE,

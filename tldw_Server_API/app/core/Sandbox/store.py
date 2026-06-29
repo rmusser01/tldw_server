@@ -4319,7 +4319,7 @@ def _require_cluster_ready() -> str:
 def get_store() -> SandboxStore:
     backend = None
     try:
-        backend = str(getattr(app_settings, "SANDBOX_STORE_BACKEND", "memory")).strip().lower()
+        backend = str(os.getenv("SANDBOX_STORE_BACKEND") or getattr(app_settings, "SANDBOX_STORE_BACKEND", "memory")).strip().lower()
     except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
         backend = "memory"
     if backend == "memory":
@@ -4332,7 +4332,7 @@ def get_store() -> SandboxStore:
     # Default sqlite
     ttl = int(getattr(app_settings, "SANDBOX_IDEMPOTENCY_TTL_SEC", 600))
     try:
-        db_path = getattr(app_settings, "SANDBOX_STORE_DB_PATH", None)
+        db_path = os.getenv("SANDBOX_STORE_DB_PATH") or getattr(app_settings, "SANDBOX_STORE_DB_PATH", None)
     except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
         db_path = None
     return SQLiteStore(db_path=db_path, idem_ttl_sec=ttl)
@@ -4344,7 +4344,7 @@ def get_store_mode() -> str:
     Values: memory | sqlite | cluster | unknown
     """
     try:
-        backend = str(getattr(app_settings, "SANDBOX_STORE_BACKEND", "memory")).strip().lower()
+        backend = str(os.getenv("SANDBOX_STORE_BACKEND") or getattr(app_settings, "SANDBOX_STORE_BACKEND", "memory")).strip().lower()
     except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
         backend = "memory"
     if backend == "cluster":

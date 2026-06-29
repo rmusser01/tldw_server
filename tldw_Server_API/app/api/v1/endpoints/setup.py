@@ -866,6 +866,18 @@ def _safe_ingest_defaults_payload(payload: IngestDefaultsRequest) -> dict[str, A
     return _validated_public_first_run_step_data("ingest_defaults", _step_payload(payload))
 
 
+def _install_plan_background_payload(install_plan: InstallPlan) -> dict[str, Any]:
+    payload = model_dump_compat(install_plan)
+    embeddings = payload.get("embeddings")
+    if (
+        isinstance(embeddings, dict)
+        and not embeddings.get("custom")
+        and embeddings.get("trusted_custom_model_acknowledged") is False
+    ):
+        embeddings.pop("trusted_custom_model_acknowledged", None)
+    return payload
+
+
 def _reject_setup_lifecycle_config_updates(updates: dict[str, dict[str, Any]]) -> None:
     for section, section_updates in updates.items():
         if section.lower() != setup_manager.SETUP_SECTION.lower():
@@ -887,7 +899,7 @@ async def _complete_setup_flow(
         plan_requested = False
         if payload.install_plan and not payload.install_plan.is_empty():
             plan_requested = True
-            plan_dict = model_dump_compat(payload.install_plan)
+            plan_dict = _install_plan_background_payload(payload.install_plan)
             background_tasks.add_task(execute_install_plan, plan_dict)
 
         if payload.disable_first_time_setup:
@@ -1897,7 +1909,7 @@ async def _provision_setup_readiness(
     install_plan_submitted = not install_plan.is_empty()
     install_plan_payload = model_dump_compat(install_plan)
     if install_plan_submitted:
-        background_tasks.add_task(execute_install_plan, install_plan_payload)
+        background_tasks.add_task(execute_install_plan, _install_plan_background_payload(install_plan))
 
     operation_id = _new_setup_readiness_operation_id()
     operation_status = "queued" if install_plan_submitted else "completed"

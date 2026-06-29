@@ -77,6 +77,7 @@ load_env_file() {
   parsed_env_file="$(mktemp "${TMPDIR:-/tmp}/tldw-env.XXXXXX")"
   if "$PYTHON_BIN" - "$ENV_FILE" > "$parsed_env_file" <<'PY'
 import re
+import shlex
 import sys
 
 path = sys.argv[1]
@@ -120,16 +121,13 @@ try:
             if "\n" in value:
                 print(f"[entrypoint] Refusing env value with newline for key {key}", file=sys.stderr)
                 sys.exit(1)
-            print(f"{key}={value}")
+            print(f"export {key}={shlex.quote(value)}")
 except Exception as exc:
     print(f"[entrypoint] Failed to parse env file {path}: {exc}", file=sys.stderr)
     sys.exit(1)
 PY
   then
-    while IFS= read -r assignment || [ -n "$assignment" ]; do
-      [ -n "$assignment" ] || continue
-      export "$assignment"
-    done < "$parsed_env_file"
+    . "$parsed_env_file"
     rm -f "$parsed_env_file"
   else
     rm -f "$parsed_env_file"

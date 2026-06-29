@@ -3198,6 +3198,158 @@
     {
       "dependencies": [
         {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "List Fish S2 managed references from local user-scoped metadata.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.list_fish_s2_references",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_fish_s2_references",
+      "path": "/api/v1/audio/providers/fish_s2/references",
+      "rate_limit_resources": [],
+      "summary": "List managed Fish S2 references for the current user",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Create a managed Fish S2 reference from an existing stored voice or a new upload.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.create_fish_s2_reference",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_fish_s2_reference",
+      "path": "/api/v1/audio/providers/fish_s2/references",
+      "rate_limit_resources": [],
+      "summary": "Create or sync a managed Fish S2 reference",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Import one or more Fish S2 managed references from JSON or Markdown.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.import_fish_s2_references",
+      "methods": [
+        "POST"
+      ],
+      "name": "import_fish_s2_references",
+      "path": "/api/v1/audio/providers/fish_s2/references/import",
+      "rate_limit_resources": [],
+      "summary": "Import managed Fish S2 references from JSON or Markdown",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Delete the remote Fish S2 reference while preserving the local voice asset.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.delete_fish_s2_reference",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_fish_s2_reference",
+      "path": "/api/v1/audio/providers/fish_s2/references/{reference_id}",
+      "rate_limit_resources": [],
+      "summary": "Delete a managed Fish S2 reference",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
           "id": "DB_Deps.try_get_media_db_for_user",
           "module": "tldw_Server_API.app.api.v1.API_Deps.DB_Deps",
           "type": "dependency"
@@ -5819,6 +5971,44 @@
           "type": "dependency"
         },
         {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Delete the remote Fish S2 reference while preserving the local voice asset.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.delete_fish_s2_reference",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_fish_s2_reference",
+      "path": "/api/v1/audio/providers/fish_s2/references/{reference_id}",
+      "rate_limit_resources": [],
+      "summary": "Delete a managed Fish S2 reference",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
           "id": "auth_deps._checker",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
@@ -5924,6 +6114,44 @@
           "type": "dependency"
         },
         {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "List Fish S2 managed references from local user-scoped metadata.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.list_fish_s2_references",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_fish_s2_references",
+      "path": "/api/v1/audio/providers/fish_s2/references",
+      "rate_limit_resources": [],
+      "summary": "List managed Fish S2 references for the current user",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
           "id": "auth_deps._checker",
           "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
           "type": "dependency"
@@ -5991,6 +6219,82 @@
     }
   ],
   "audio.voices.upload": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Create a managed Fish S2 reference from an existing stored voice or a new upload.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.create_fish_s2_reference",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_fish_s2_reference",
+      "path": "/api/v1/audio/providers/fish_s2/references",
+      "rate_limit_resources": [],
+      "summary": "Create or sync a managed Fish S2 reference",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "audio_tts.get_tts_service",
+          "module": "tldw_Server_API.app.api.v1.endpoints.audio.audio_tts",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.check_rate_limit",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Import one or more Fish S2 managed references from JSON or Markdown.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.audio.audio_voices.import_fish_s2_references",
+      "methods": [
+        "POST"
+      ],
+      "name": "import_fish_s2_references",
+      "path": "/api/v1/audio/providers/fish_s2/references/import",
+      "rate_limit_resources": [],
+      "summary": "Import managed Fish S2 references from JSON or Markdown",
+      "tags": [
+        "audio",
+        "Audio",
+        "Audio"
+      ]
+    },
     {
       "dependencies": [
         {

@@ -412,7 +412,6 @@ class TTSConfigManager:
         api_key_env_vars = (
             ('OPENAI_API_KEY', ('openai', 'api_key')),
             ('ELEVENLABS_API_KEY', ('elevenlabs', 'api_key')),
-            ('ANTHROPIC_API_KEY', ('anthropic', 'api_key')),
             ('FISH_API_KEY', ('fish_s2', 'api_key')),
             ('FISH_AUDIO_API_KEY', ('fish_s2', 'api_key')),
         )

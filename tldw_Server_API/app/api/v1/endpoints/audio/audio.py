@@ -112,12 +112,13 @@ from tldw_Server_API.app.core.Audio.tts_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
-    resolve_byok_credentials,
+    resolve_byok_credentials as _default_resolve_byok_credentials,
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config as _load_comprehensive_config
 
 # Re-export config loader for tests to monkeypatch
 load_comprehensive_config = _load_comprehensive_config
+resolve_byok_credentials = _default_resolve_byok_credentials
 
 _TTS_API_KEY_REQUIRED_PROVIDERS = {"openai", "elevenlabs", "fish_s2"}
 
@@ -144,6 +145,30 @@ def _raise_missing_tts_credentials(provider_hint: str) -> None:
             "message": f"TTS provider '{provider_hint}' requires an API key.",
         },
     )
+
+
+def _resolve_tts_byok_resolver():
+    local_resolver = resolve_byok_credentials
+    package_resolver = _default_resolve_byok_credentials
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import audio as _audio_pkg
+
+        package_resolver = getattr(_audio_pkg, "resolve_byok_credentials", _default_resolve_byok_credentials)
+    except (AttributeError, ImportError):
+        logger.debug("Falling back to default BYOK resolver after audio package resolver lookup failed")
+    if local_resolver is not _default_resolve_byok_credentials:
+        return local_resolver
+    if package_resolver is not _default_resolve_byok_credentials:
+        return package_resolver
+    try:
+        from tldw_Server_API.app.core.Audio import tts_service as core_tts_service
+
+        core_resolver = getattr(core_tts_service, "resolve_byok_credentials", _default_resolve_byok_credentials)
+        if core_resolver is not _default_resolve_byok_credentials:
+            return core_resolver
+    except (AttributeError, ImportError):
+        logger.debug("Falling back to default BYOK resolver after core resolver lookup failed")
+    return _default_resolve_byok_credentials
 
 
 async def _resolve_tts_byok(
@@ -178,14 +203,7 @@ async def _resolve_tts_byok(
     tts_overrides = None
     byok_tts_resolution = None
     if provider_hint:
-        resolver = resolve_byok_credentials
-        try:
-            from tldw_Server_API.app.api.v1.endpoints import audio as _audio_pkg
-
-            resolver = getattr(_audio_pkg, "resolve_byok_credentials", resolve_byok_credentials)
-        except (AttributeError, ImportError):
-            logger.debug("Falling back to default BYOK resolver after audio package resolver lookup failed")
-            resolver = resolve_byok_credentials
+        resolver = _resolve_tts_byok_resolver()
         byok_tts_resolution = await resolver(
             provider_hint,
             user_id=user_id_int,
