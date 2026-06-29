@@ -16,8 +16,8 @@ from typing import Any, ClassVar, Protocol
 
 from .models import (
     CommandChain,
-    CommandExecutionStep,
     CommandExecutionResult,
+    CommandExecutionStep,
     CommandSpillReference,
     CommandStepResult,
 )
@@ -94,12 +94,9 @@ class CommandRuntimeExecutor:
                     continue
 
             pipeline_stdin = ""
-            segment_stdout = ""
-            segment_stderr = ""
             segment_stdout_spill: CommandSpillReference | None = None
             segment_stderr_spill: CommandSpillReference | None = None
             segment_stdout_binary = False
-            segment_stderr_binary = False
             segment_exit_code = 0
             segment_terminal_stdout: Any = ""
 
@@ -135,10 +132,9 @@ class CommandRuntimeExecutor:
                         stderr=step_stderr,
                         exit_code=1,
                         metadata=step_result.metadata,
-                    )
+                )
                 segment_exit_code = int(step_result.exit_code)
                 segment_stdout_binary = step_stdout_binary
-                segment_stderr_binary = step_stderr_binary
                 segment_terminal_stdout = step_stdout
                 segment_stdout_spill = await self._spill_payload_async(
                     step_stdout,
