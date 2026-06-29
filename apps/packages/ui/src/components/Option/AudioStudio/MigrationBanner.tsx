@@ -1,5 +1,6 @@
 import React from "react"
-import { Alert, Button, Checkbox, List, Space, Tag, Typography } from "antd"
+import { Button, Checkbox, List, Space, Tag, Typography } from "antd"
+import { Alert } from "@/components/ui/primitives/Alert"
 import type { AudiobookProject } from "@/db/dexie/types"
 import type { AudiobookMigrationCounts } from "@/services/audio-studio"
 
@@ -57,12 +58,12 @@ export const MigrationBanner: React.FC<MigrationBannerProps> = ({
   if (!projects || !selectedProjectIds || !onSelectionChange || !onPreview || !onCommit) {
     return (
       <Alert
-        type="info"
-        showIcon
-        className="rounded-md"
+        variant="info"
         title="Audiobook projects can move into Audio Studio Narration"
-        description="Open the legacy Audiobook Studio route to check local projects and migrate them without deleting Dexie data."
-      />
+      >
+        Open the legacy Audiobook Studio route to check local projects and
+        migrate them without deleting Dexie data.
+      </Alert>
     )
   }
 
@@ -108,17 +109,12 @@ export const MigrationBanner: React.FC<MigrationBannerProps> = ({
           </Typography.Paragraph>
         </div>
 
-        {errorMessage ? (
-          <Alert type="error" showIcon title={errorMessage} />
-        ) : null}
+        {errorMessage ? <Alert variant="error" title={errorMessage} /> : null}
 
         {previewSummary ? (
-          <Alert
-            type="success"
-            showIcon
-            title="Migration preview"
-            description={previewSummary}
-          />
+          <Alert variant="success" title="Migration preview">
+            {previewSummary}
+          </Alert>
         ) : null}
 
         <div className="flex items-center justify-between gap-3">

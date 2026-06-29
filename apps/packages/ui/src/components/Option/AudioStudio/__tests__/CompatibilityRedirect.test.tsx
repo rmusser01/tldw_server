@@ -1,6 +1,10 @@
 import React from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  expectInsideDesignSystemAlert,
+  expectInsideDesignSystemAlertAsync
+} from "@/test-utils/designSystemAlert"
 
 const dexieMocks = vi.hoisted(() => ({
   listProjects: vi.fn(),
@@ -47,6 +51,7 @@ import {
   AUDIOBOOK_COMPATIBILITY_TARGET,
   CompatibilityRedirect
 } from "../CompatibilityRedirect"
+import { MigrationBanner } from "../MigrationBanner"
 
 const legacyProject = {
   id: "legacy-1",
@@ -108,6 +113,22 @@ describe("CompatibilityRedirect", () => {
     )
   })
 
+  it("renders static migration guidance through the design-system Alert primitive", () => {
+    render(<MigrationBanner />)
+
+    expectInsideDesignSystemAlert(
+      "Audiobook projects can move into Audio Studio Narration"
+    )
+  })
+
+  it("renders legacy project load errors through the design-system Alert primitive", async () => {
+    dexieMocks.listProjects.mockRejectedValueOnce(new Error("Dexie unavailable"))
+
+    render(<CompatibilityRedirect />)
+
+    await expectInsideDesignSystemAlertAsync("Dexie unavailable")
+  })
+
   it("shows a migration banner with local project preview when Dexie projects exist", async () => {
     render(<CompatibilityRedirect />)
 
@@ -136,6 +157,7 @@ describe("CompatibilityRedirect", () => {
     expect(
       await screen.findByText("1 project, 2 chapters, 0 audio assets")
     ).toBeInTheDocument()
+    expectInsideDesignSystemAlert("Migration preview")
   })
 
   it("marks local projects only after commit succeeds and redirects to the migrated project", async () => {
@@ -174,6 +196,7 @@ describe("CompatibilityRedirect", () => {
     expect(
       await screen.findByText("commit failed")
     ).toBeInTheDocument()
+    expectInsideDesignSystemAlert("commit failed")
     expect(dexieMocks.markMigrated).not.toHaveBeenCalled()
     expect(routerMocks.navigate).not.toHaveBeenCalled()
   })
