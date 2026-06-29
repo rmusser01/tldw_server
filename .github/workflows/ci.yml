@@ -808,6 +808,8 @@ jobs:
               tldw_Server_API/tests/Chunking/test_async_*.py
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_process_text_components.py
+              tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
               tldw_Server_API/tests/Chunking/test_chunking_offsets_property.py
               tldw_Server_API/tests/Chunking/test_chunking_overlap_properties.py
@@ -2193,6 +2195,8 @@ jobs:
               tldw_Server_API/tests/Chunking/test_async_*.py
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_process_text_components.py
+              tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
               tldw_Server_API/tests/Chunking/test_chunking_offsets_property.py
               tldw_Server_API/tests/Chunking/test_chunking_overlap_properties.py
@@ -3451,6 +3455,8 @@ jobs:
               tldw_Server_API/tests/Chunking/test_async_*.py
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_process_text_components.py
+              tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
               tldw_Server_API/tests/Chunking/test_chunking_offsets_property.py
               tldw_Server_API/tests/Chunking/test_chunking_overlap_properties.py
@@ -4633,6 +4639,8 @@ jobs:
               tldw_Server_API/tests/Chunking/test_async_*.py
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_process_text_components.py
+              tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
               tldw_Server_API/tests/Chunking/test_chunking_offsets_property.py
               tldw_Server_API/tests/Chunking/test_chunking_overlap_properties.py
@@ -5816,6 +5824,8 @@ jobs:
               tldw_Server_API/tests/Chunking/test_async_*.py
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
+              tldw_Server_API/tests/Chunking/test_process_text_components.py
+              tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
               tldw_Server_API/tests/Chunking/test_chunking_offsets_property.py
               tldw_Server_API/tests/Chunking/test_chunking_overlap_properties.py

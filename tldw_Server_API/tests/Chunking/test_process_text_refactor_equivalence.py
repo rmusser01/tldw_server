@@ -1,0 +1,308 @@
+from __future__ import annotations
+
+import pytest
+
+from tldw_Server_API.app.core.Chunking import Chunker
+from tldw_Server_API.app.core.Chunking.base import ChunkMetadata, ChunkResult
+from tldw_Server_API.app.core.Chunking.exceptions import ChunkingError, InvalidInputError
+
+pytestmark = pytest.mark.unit
+
+
+def test_process_text_normal_path_preserves_text_dict_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    chunker = Chunker()
+
+    def fake_chunk_text(*args, **kwargs):
+        return [{"text": "alpha", "metadata": {"start_offset": 0, "end_offset": 5}}]
+
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    rows = chunker.process_text("alpha beta", options={"method": "words", "max_size": 10, "overlap": 0})
+
+    assert rows[0]["text"] == "alpha"
+    assert rows[0]["metadata"]["start_offset"] == 0
+    assert rows[0]["metadata"]["end_offset"] == 5
+    assert rows[0]["metadata"]["chunk_method"] == "words"
+
+
+def test_process_text_normal_path_stringifies_custom_chunk_objects(monkeypatch: pytest.MonkeyPatch) -> None:
+    chunker = Chunker()
+
+    class CustomChunk:
+        text = "attribute text"
+        metadata = {"start_offset": 99, "copied_from_attribute": True}
+
+        def __str__(self) -> str:
+            return "custom object text"
+
+    def fake_chunk_text(*args, **kwargs):
+        return [CustomChunk()]
+
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    rows = chunker.process_text("alpha beta", options={"method": "words", "max_size": 10, "overlap": 0})
+
+    assert rows[0]["text"] == "custom object text"
+    assert "copied_from_attribute" not in rows[0]["metadata"]
+    assert rows[0]["metadata"]["chunk_index"] == 1
+    assert rows[0]["metadata"]["chunk_method"] == "words"
+
+
+def test_process_text_multi_level_fallback_clamps_offsets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+    text = "First paragraph.\n\nSecond paragraph."
+    first_segment = "First paragraph."
+    second_segment = "Second paragraph."
+
+    def fake_chunk_text_with_metadata(segment, *args, **kwargs):
+        raise ChunkingError("force fallback")
+
+    def fake_chunk_text(segment, *args, **kwargs):
+        return [f"{segment} beyond the paragraph span"]
+
+    monkeypatch.setattr(chunker, "chunk_text_with_metadata", fake_chunk_text_with_metadata)
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    rows = chunker.process_text(
+        text,
+        options={"method": "words", "max_size": 10, "overlap": 0, "multi_level": True},
+    )
+
+    assert [row["metadata"]["paragraph_index"] for row in rows] == [0, 1]
+    assert rows[0]["metadata"]["start_offset"] == 0
+    assert rows[0]["metadata"]["end_offset"] >= len(first_segment)
+    assert rows[0]["metadata"]["end_offset"] <= text.index("Second")
+    assert rows[1]["metadata"]["start_offset"] == text.index(second_segment)
+    assert rows[1]["metadata"]["end_offset"] == rows[1]["metadata"]["start_offset"] + len(second_segment)
+    assert rows[1]["metadata"]["end_offset"] <= len(text)
+
+
+def test_process_text_hierarchical_template_preserves_section_metadata() -> None:
+    chunker = Chunker()
+
+    template = {"levels": [{"name": "heading", "pattern": r"^# .+"}]}
+    rows = chunker.process_text(
+        "# Title\n\nBody text.",
+        options={"method": "words", "max_size": 20, "overlap": 0, "hierarchical_template": template},
+    )
+
+    assert [row["text"] for row in rows] == ["# Title", "Body text."]
+    assert rows[0]["metadata"]["paragraph_kind"] == "header_atx"
+    assert rows[0]["metadata"]["section_path"] == "Title"
+    assert rows[1]["metadata"]["paragraph_kind"] == "paragraph"
+    assert rows[1]["metadata"]["section_path"] == "Title"
+
+
+def test_process_text_frontmatter_offsets_and_timecode_map_are_original_coordinates() -> None:
+    chunker = Chunker()
+    frontmatter = '{"meta": "x", "__tldw_frontmatter__": true}\n\n'
+    body = "Body text."
+    payload = frontmatter + body
+    timecode_map = [
+        {
+            "start_offset": len(frontmatter),
+            "end_offset": len(payload),
+            "start_time": 12.0,
+            "end_time": 18.0,
+        }
+    ]
+
+    rows = chunker.process_text(
+        payload,
+        options={
+            "method": "words",
+            "max_size": 10,
+            "overlap": 0,
+            "hierarchical": True,
+            "timecode_map": timecode_map,
+        },
+    )
+
+    assert rows
+    expected_metadata = {
+        "start_offset": len(frontmatter),
+        "end_offset": len(payload),
+        "start_time": 12.0,
+        "end_time": 18.0,
+        "initial_document_json_metadata": {"meta": "x"},
+    }
+    metadata = rows[0]["metadata"]
+    for key, value in expected_metadata.items():
+        assert metadata[key] == value
+    assert rows[0]["text"] == body
+
+
+def test_process_text_string_false_frontmatter_option_remains_truthy() -> None:
+    chunker = Chunker()
+    payload = '{"meta": "x", "__tldw_frontmatter__": true}\nBody text.'
+
+    rows = chunker.process_text(payload, options={"enable_frontmatter_parsing": "false"})
+
+    assert rows
+    assert rows[0]["metadata"]["initial_document_json_metadata"] == {"meta": "x"}
+    assert rows[0]["text"].startswith("Body")
+
+
+def test_process_text_string_false_hierarchical_option_remains_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+
+    def forbidden_hierarchical_path(*args, **kwargs):
+        raise AssertionError("string 'false' hierarchical option must not enable hierarchical mode")
+
+    monkeypatch.setattr(chunker, "chunk_text_hierarchical_flat", forbidden_hierarchical_path)
+
+    rows = chunker.process_text(
+        "# Title\n\nBody text.",
+        options={"method": "words", "max_size": 50, "overlap": 0, "hierarchical": "false"},
+    )
+
+    assert rows
+    assert all("paragraph_kind" not in row["metadata"] for row in rows)
+    assert all("ancestry_titles" not in row["metadata"] for row in rows)
+
+
+def test_process_text_tokenizer_override_reaches_chunk_text_without_mutating_cached_strategy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunker = Chunker()
+    calls: list[dict] = []
+
+    def spy_chunk_text(*args, **kwargs):
+        calls.append(dict(kwargs))
+        return ["one two three"]
+
+    monkeypatch.setattr(chunker, "chunk_text", spy_chunk_text)
+
+    rows = chunker.process_text(
+        "one two three four five six seven eight nine ten",
+        options={"method": "tokens", "max_size": 5},
+        tokenizer_name_or_path="test-tokenizer",
+    )
+
+    token_strategy = chunker.get_strategy("tokens")
+    assert rows
+    assert calls[0]["tokenizer_name_or_path"] == "test-tokenizer"
+    assert getattr(token_strategy, "tokenizer_name", None) != "test-tokenizer"
+
+
+def test_process_text_preserves_explicit_zero_overlap(monkeypatch: pytest.MonkeyPatch) -> None:
+    chunker = Chunker()
+    calls: list[dict] = []
+
+    def fake_chunk_text(*args, **kwargs):
+        calls.append(dict(kwargs))
+        return ["alpha beta"]
+
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    rows = chunker.process_text("alpha beta", options={"method": "words", "max_size": 10, "overlap": 0})
+
+    assert calls[0]["overlap"] == 0
+    assert rows[0]["metadata"]["overlap"] == 0
+    assert rows[0]["metadata"]["overlap_setting"] == 0
+
+
+def test_process_text_clamps_negative_overlap_to_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    chunker = Chunker()
+    calls: list[dict] = []
+
+    def fake_chunk_text(*args, **kwargs):
+        calls.append(dict(kwargs))
+        return ["alpha beta"]
+
+    monkeypatch.setattr(chunker, "chunk_text", fake_chunk_text)
+
+    rows = chunker.process_text("alpha beta", options={"method": "words", "max_size": 10, "overlap": -5})
+
+    assert calls[0]["overlap"] == 0
+    assert rows[0]["metadata"]["overlap"] == 0
+    assert rows[0]["metadata"]["overlap_setting"] == 0
+
+
+def test_process_text_invalid_max_size_raises_invalid_input_error() -> None:
+    with pytest.raises(InvalidInputError):
+        Chunker().process_text("alpha beta", options={"method": "words", "max_size": "not-an-int"})
+
+
+def test_process_text_invalid_non_string_input_raises_invalid_input_error() -> None:
+    with pytest.raises(InvalidInputError):
+        Chunker().process_text(
+            ChunkResult(
+                text="alpha",
+                metadata=ChunkMetadata(index=0, start_char=0, end_char=5, word_count=1),
+            )
+        )  # type: ignore[arg-type]
+
+
+def test_process_text_invalid_input_increments_process_counter(monkeypatch: pytest.MonkeyPatch) -> None:
+    import tldw_Server_API.app.core.Chunking.chunker as chunker_module
+
+    calls: list[tuple[str, dict | None]] = []
+
+    def fake_increment_counter(name, labels=None):
+        calls.append((name, labels))
+
+    monkeypatch.setattr(chunker_module, "increment_counter", fake_increment_counter)
+
+    with pytest.raises(InvalidInputError):
+        Chunker().process_text(None)
+
+    assert ("chunker_process_total", {"component": "chunker", "op": "process_text"}) in calls
+
+
+def test_process_text_wrapper_delegates_to_pipeline_with_chunker_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tldw_Server_API.app.core.Chunking.chunker as chunker_module
+
+    chunker = Chunker()
+    telemetry = object()
+    options = {"method": "words"}
+    llm_config = {"model": "test"}
+    calls: list[tuple] = []
+
+    class FakePipeline:
+        def __init__(self, context, telemetry_hooks):
+            calls.append(("init", context, telemetry_hooks))
+
+        def run(
+            self,
+            text,
+            options_arg=None,
+            *,
+            tokenizer_name_or_path=None,
+            llm_call_func=None,
+            llm_config=None,
+        ):
+            calls.append(
+                (
+                    "run",
+                    text,
+                    options_arg,
+                    tokenizer_name_or_path,
+                    llm_call_func,
+                    llm_config,
+                )
+            )
+            return [{"text": "delegated", "metadata": {"source": "fake"}}]
+
+    monkeypatch.setattr(chunker_module, "_process_text_telemetry_hooks", lambda: telemetry)
+    monkeypatch.setattr(chunker_module, "ProcessTextPipeline", FakePipeline)
+
+    rows = chunker.process_text(
+        "alpha beta",
+        options=options,
+        tokenizer_name_or_path="tokenizer",
+        llm_call_func="llm-call",
+        llm_config=llm_config,
+    )
+
+    assert rows == [{"text": "delegated", "metadata": {"source": "fake"}}]
+    assert calls == [
+        ("init", chunker, telemetry),
+        ("run", "alpha beta", options, "tokenizer", "llm-call", llm_config),
+    ]
