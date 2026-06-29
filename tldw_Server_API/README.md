@@ -133,7 +133,7 @@ Using dots.ocr
   - Create env (Python 3.12), install a compatible PyTorch build (CUDA/CPU), then `pip install -e .` from the dots.ocr repo.
   - Download model weights: `python3 tools/download_model.py` (save directory name should not contain periods; e.g., `DotsOCR`).
   - Recommended: run a vLLM server with the downloaded weights for best performance and consistency.
-- Optional extras: `pip install .[ocr_dots]` to pull dots.ocr automatically.
+- Manual install: `dots.ocr` is not bundled in `tldw-server` package metadata because PyPI rejects direct Git dependencies. Install it from the upstream repo before selecting `ocr_backend=dots`.
 - Backend behavior:
   - The `dots` backend shells out to `python -m dots_ocr.parser` per page image.
   - If dots.ocr is not installed/available, auto-detect falls back to `tesseract` unless `ocr_backend=dots` is explicitly forced.
@@ -150,7 +150,7 @@ Integration tests
 
 Two integration modes
 - Transformers (local model):
-  - Install WePOINTS and use the HF model `tencent/POINTS-Reader` locally.
+  - Install WePOINTS manually from source and use the HF model `tencent/POINTS-Reader` locally.
   - Env (optional): `POINTS_MODEL_PATH` to override model id/path.
   - Requirements: `transformers`, `torch` (CUDA recommended for performance).
 - SGLang server (recommended for production):
@@ -165,8 +165,8 @@ Prompt and generation
 - Set `POINTS_PROMPT` to override the default extraction prompt (tables in HTML, others in Markdown).
 - Optional generation envs: `POINTS_MAX_NEW_TOKENS`, `POINTS_TEMPERATURE`, `POINTS_REPETITION_PENALTY`, `POINTS_TOP_P`, `POINTS_TOP_K`, `POINTS_DO_SAMPLE`.
 
-Install via extras (optional)
-- Local transformers path: `pip install .[ocr_points_transformers]`
+Install via extras/manual source setup (optional)
+- Local transformers path: `pip install .[ocr_points_transformers]`, then install WePOINTS manually from the upstream repo.
 - SGLang client only: `pip install .[ocr_points_sglang]`
 
 Notes

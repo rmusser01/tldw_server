@@ -31,6 +31,13 @@ pip install -e .[TTS_chatterbox_lang]
 pip install chatterbox-tts
 ```
 
+If you need the optional Perth watermark runtime, install it manually from source. It is not bundled in `tldw-server` package metadata because PyPI rejects direct Git dependencies.
+```bash
+git clone https://github.com/resemble-ai/Perth.git
+cd Perth
+pip install -e .
+```
+
 Option B - Install upstream Chatterbox from source:
 ```bash
 git clone https://github.com/resemble-ai/chatterbox
@@ -304,7 +311,7 @@ The WebUI uses the same `/api/v1/audio/speech` endpoint under the hood and will 
 
 ## Troubleshooting
 1) Import error: `chatterbox` not found
-- Install upstream package: `pip install chatterbox-tts`, or use repo’s vendored module with `pip install -e .[TTS_chatterbox]`.
+- Install upstream package: `pip install chatterbox-tts`, or install upstream Chatterbox from source. The `TTS_chatterbox` extra installs repo-side support dependencies only.
 
 2) Model download blocked/offline
 - Pre-download via `hf download ResembleAI/chatterbox --local-dir ./models/chatterbox` and set offline env vars.

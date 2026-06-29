@@ -266,16 +266,16 @@ chunking_multilingual = [
 
 # OCR providers (optional)
 ocr_dots = [
-  # Dots OCR from source
-  "dots-ocr @ git+https://github.com/rednote-hilab/dots.ocr.git"
+  # dots.ocr is installed manually from source; direct VCS dependencies are not
+  # accepted in PyPI package metadata.
 ]
 
 ocr_points_transformers = [
   # Local inference requirements for POINTS-Reader via HF Transformers
   "transformers>=5.5.3",
   "torch>=2.11.0",
-  # WePOINTS toolkit (installed from source)
-  "wepoints @ git+https://github.com/WePOINTS/WePOINTS.git"
+  # WePOINTS is installed manually from source; direct VCS dependencies are not
+  # accepted in PyPI package metadata.
 ]
 
 ocr_points_sglang = [
@@ -433,7 +433,8 @@ TTS_chatterbox = [
   # Audio / DSP
   "librosa>=0.10.0",
   "pyloudnorm>=0.1.1",
-  "resemble-perth @ git+https://github.com/resemble-ai/Perth.git@ce86c49d029f42272c1902eccb675556b9ed2330",
+  # resemble-perth is installed manually from source when watermark support is
+  # needed; direct VCS dependencies are not accepted in PyPI package metadata.
   # Diffusion / attention utils used in matcha blocks
   "diffusers>=0.29.0",
   "einops>=0.7.0",

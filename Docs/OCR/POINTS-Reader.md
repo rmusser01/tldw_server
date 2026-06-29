@@ -62,10 +62,11 @@ pip install -e .
 2) Ensure `transformers` and `torch` match your CUDA setup.
 3) Optional: set `POINTS_MODEL_PATH` to a local cache or custom path.
 
-Extras install (optional):
-- You can install project + deps in one step for the local path:
+Extras/manual source setup (optional):
+- Install the project dependencies for the local path:
   - `pip install .[ocr_points_transformers]`
-  - Brings in `transformers`, `torch`, and WePOINTS via VCS.
+  - This installs the PyPI-publishable `transformers` and `torch` dependencies.
+- Install WePOINTS manually from source with the steps above. It is not bundled in `tldw-server` package metadata because PyPI rejects direct Git dependencies.
 
 ### SGLang Server
 
