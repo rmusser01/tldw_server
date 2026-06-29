@@ -215,6 +215,12 @@ curl -X POST http://127.0.0.1:8000/api/v1/mcp/request \
 - `GET /api/v1/mcp/prompts`
 
 The convenience endpoints map to MCP operations and keep the same RBAC behavior.
+When a failure has a known recovery path, JSON-RPC responses include
+`error.data.reason_code` and `error.data.next_action`. Convenience HTTP
+endpoints preserve their existing response body shape: object-shaped `detail`
+may include `reason_code` and `next_action`, while string-shaped `detail`
+exposes the same metadata in `X-MCP-Reason-Code` and `X-MCP-Next-Action`
+headers.
 
 ### Sessions and safe config
 

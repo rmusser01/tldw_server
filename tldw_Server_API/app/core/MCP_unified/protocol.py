@@ -1911,7 +1911,13 @@ class MCPProtocol:
         data: Optional[Any]
     ) -> Optional[Any]:
         """Attach a structured hint for common error scenarios."""
+        metadata = self._error_recovery_metadata(code, message)
         if data is not None:
+            if isinstance(data, dict) and metadata and not any(key in data for key in ("governance", "approval")):
+                merged = dict(data)
+                for key, value in metadata.items():
+                    merged.setdefault(key, value)
+                return merged
             return data
 
         hint: Optional[str] = None
@@ -1932,8 +1938,41 @@ class MCPProtocol:
         elif code == ErrorCode.AUTHORIZATION_ERROR and "write tools are disabled" in lowered:
             hint = "Enable write tools (set MCP_DISABLE_WRITE_TOOLS=0) or switch to a read-only operation."
 
+        recovery: dict[str, Any] = dict(metadata or {})
         if hint:
-            return {"hint": hint}
+            recovery["hint"] = hint
+        return recovery or None
+
+    @staticmethod
+    def _error_recovery_metadata(code: ErrorCode, message: str) -> dict[str, str] | None:
+        """Return additive recovery metadata for known JSON-RPC errors."""
+        lowered = message.lower()
+        if code == ErrorCode.INVALID_PARAMS:
+            return {
+                "reason_code": "invalid_params",
+                "next_action": "Check the method parameters or tool input schema from tools/list before retrying.",
+            }
+        if code == ErrorCode.AUTHENTICATION_ERROR:
+            return {
+                "reason_code": "authentication_required",
+                "next_action": "Send Authorization: Bearer <token> or X-API-KEY with the request.",
+            }
+        if code == ErrorCode.AUTHORIZATION_ERROR:
+            reason_code = "write_tools_disabled" if "write tools are disabled" in lowered else "permission_denied"
+            return {
+                "reason_code": reason_code,
+                "next_action": "Use a token or API key with the required MCP permission.",
+            }
+        if code == ErrorCode.MODULE_ERROR:
+            return {
+                "reason_code": "module_unavailable",
+                "next_action": "Check /api/v1/mcp/status for problem_modules.",
+            }
+        if code == ErrorCode.TIMEOUT_ERROR:
+            return {
+                "reason_code": "upstream_unavailable",
+                "next_action": "Retry after checking the upstream module or external service.",
+            }
         return None
 
     async def _check_authorization(

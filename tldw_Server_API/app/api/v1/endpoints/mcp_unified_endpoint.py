@@ -117,6 +117,7 @@ def _parse_safe_config_query(config: str | None) -> dict[str, Any]:
             status_code=400,
             detail={
                 "code": "invalid_safe_config",
+                "reason_code": "invalid_params",
                 "message": "The config query parameter must be base64url-encoded JSON.",
                 "next_action": "Remove the config parameter or send a valid encoded JSON object.",
             },
@@ -789,13 +790,29 @@ def _jsonrpc_error_response(response: MCPResponse) -> JSONResponse:
     return JSONResponse(mcp_response_to_json(response))
 
 
-def _mcp_permission_detail(response: MCPResponse, *, hint: str) -> dict[str, str] | None:
+def _mcp_recovery_headers(reason_code: str, next_action: str) -> dict[str, str]:
+    """Return additive recovery headers for string-body HTTP errors."""
+    return {
+        "X-MCP-Reason-Code": reason_code,
+        "X-MCP-Next-Action": next_action,
+    }
+
+
+def _mcp_permission_detail(
+    response: MCPResponse,
+    *,
+    hint: str,
+    reason_code: str = "permission_denied",
+    next_action: str = "Use a token or API key with the required MCP permission.",
+) -> dict[str, str] | None:
     """Return an HTTP-friendly permission detail for MCP authorization errors."""
     if response.error is None or response.error.code != -32001:
         return None
     return {
         "message": response.error.message or "Insufficient permissions",
         "hint": hint,
+        "reason_code": reason_code,
+        "next_action": next_action,
     }
 
 
@@ -817,8 +834,8 @@ def _is_anonymous_mcp_request(http_request: Request, auth: McpAuthContext) -> bo
 async def websocket_endpoint(
     websocket: WebSocket,
     client_id: Optional[str] = Query(None, description="Client identifier"),
-    token: Optional[str] = Query(None, description="Authentication token"),
-    api_key: Optional[str] = Query(None, description="API key for authentication"),
+    token: Optional[str] = Query(None, description="Legacy query authentication token; disabled by default unless MCP_WS_ALLOW_QUERY_AUTH=true. Prefer headers or WebSocket subprotocol auth."),
+    api_key: Optional[str] = Query(None, description="Legacy query API key; disabled by default unless MCP_WS_ALLOW_QUERY_AUTH=true. Prefer headers or WebSocket subprotocol auth."),
     mcp_session_id: Optional[str] = Query(None, description="Stable MCP session identifier"),
     workspace_id: Optional[str] = Query(None, description="Trusted workspace identifier"),
     cwd: Optional[str] = Query(None, description="Current working directory within the workspace"),
@@ -828,13 +845,17 @@ async def websocket_endpoint(
 
     Supports:
     - Full MCP protocol over WebSocket
-    - Optional authentication via token parameter
+    - Header or WebSocket subprotocol authentication
+    - Legacy query auth only when explicitly enabled
     - Real-time bidirectional communication
     - Automatic reconnection support
 
     Example:
     ```javascript
-    const ws = new WebSocket('ws://localhost:8000/api/v1/mcp/ws?client_id=my-client&token=jwt-token');
+    const ws = new WebSocket(
+        'ws://localhost:8000/api/v1/mcp/ws?client_id=my-client',
+        ['bearer', jwtToken]
+    );
 
     ws.onopen = () => {
         ws.send(JSON.stringify({
@@ -962,6 +983,7 @@ async def mcp_request(
         permission_detail = _mcp_permission_detail(
             resp_obj,
             hint="Permission denied for listing tools. Contact an admin.",
+            next_action="Use a token or API key with tools discovery permission.",
         )
         if permission_detail is not None:
             raise HTTPException(status_code=403, detail=permission_detail)
@@ -1232,12 +1254,20 @@ async def list_tools(
         if response.error.code == -32001:
             raise HTTPException(
                 status_code=403,
-                detail={
-                    "message": response.error.message or "Insufficient permissions",
-                    "hint": "Permission denied for listing tools. Contact an admin.",
-                },
+                detail=_mcp_permission_detail(
+                    response,
+                    hint="Permission denied for listing tools. Contact an admin.",
+                    next_action="Use a token or API key with tools discovery permission.",
+                ),
             )
-        raise HTTPException(status_code=500, detail="Failed to list MCP tools")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to list MCP tools",
+            headers=_mcp_recovery_headers(
+                "mcp_tool_list_failed",
+                "Check /api/v1/mcp/status for problem_modules and config_warnings.",
+            ),
+        )
 
     return response.result
 
@@ -1369,7 +1399,13 @@ async def execute_tool(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
-            headers={"WWW-Authenticate": "Bearer"},
+            headers={
+                "WWW-Authenticate": "Bearer",
+                **_mcp_recovery_headers(
+                    "authentication_required",
+                    "Send Authorization: Bearer <token> or X-API-KEY with the request.",
+                ),
+            },
         )
 
     user = auth.user
@@ -1385,24 +1421,46 @@ async def execute_tool(
 
     if response is None:
         logger.error("MCP server returned no response for tools/call", tool=request.tool_name)
-        raise HTTPException(status_code=502, detail="MCP tool execution returned no response")
+        raise HTTPException(
+            status_code=502,
+            detail="MCP tool execution returned no response",
+            headers=_mcp_recovery_headers(
+                "upstream_no_response",
+                "Check /api/v1/mcp/status for problem_modules, then retry the tool call.",
+            ),
+        )
 
     if response.error:
         # Map authorization failures to 403 with a helpful hint
         if response.error.code == -32001:  # AUTHORIZATION_ERROR
-            hint = {
-                "message": response.error.message or "Insufficient permissions",
-                "hint": (
+            detail = _mcp_permission_detail(
+                response,
+                hint=(
                     f"Permission denied. Ask an admin to grant tools.execute:{request.tool_name} "
                     f"or tools.execute:* to your role (Admin → Access Control)."
                 ),
-            }
-            raise HTTPException(status_code=403, detail=hint)
+                next_action=f"Ask an admin to grant tools.execute:{request.tool_name} or tools.execute:*.",
+            )
+            raise HTTPException(status_code=403, detail=detail)
         # Invalid params
         if response.error.code == -32602:
-            raise HTTPException(status_code=400, detail=response.error.message)
+            raise HTTPException(
+                status_code=400,
+                detail=response.error.message,
+                headers=_mcp_recovery_headers(
+                    "invalid_params",
+                    "Check the tool input schema from /api/v1/mcp/tools and retry.",
+                ),
+            )
         # Other errors
-        raise HTTPException(status_code=500, detail="MCP tool execution failed")
+        raise HTTPException(
+            status_code=500,
+            detail="MCP tool execution failed",
+            headers=_mcp_recovery_headers(
+                "mcp_tool_execution_failed",
+                "Check /api/v1/mcp/status for problem_modules and retry with valid tool arguments.",
+            ),
+        )
 
     execution_time = (time.time() - start_time) * 1000
 
@@ -1463,12 +1521,20 @@ async def list_modules(
         if response.error.code == -32001:
             raise HTTPException(
                 status_code=403,
-                detail={
-                    "message": response.error.message or "Insufficient permissions",
-                    "hint": "Permission denied for listing tools. Contact an admin.",
-                },
+                detail=_mcp_permission_detail(
+                    response,
+                    hint="Permission denied for listing modules. Contact an admin.",
+                    next_action="Use a token or API key with permission to list MCP modules.",
+                ),
             )
-        raise HTTPException(status_code=500, detail="Failed to list MCP modules")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to list MCP modules",
+            headers=_mcp_recovery_headers(
+                "module_unavailable",
+                "Check /api/v1/mcp/status for problem_modules.",
+            ),
+        )
 
     return response.result
 
@@ -1503,12 +1569,20 @@ async def get_modules_health(
         if response.error.code == -32001:
             raise HTTPException(
                 status_code=403,
-                detail={
-                    "message": response.error.message or "Insufficient permissions",
-                    "hint": "Permission denied for listing modules. Contact an admin.",
-                },
+                detail=_mcp_permission_detail(
+                    response,
+                    hint="Permission denied for listing modules. Contact an admin.",
+                    next_action="Use an admin token or a principal with system.logs permission.",
+                ),
             )
-        raise HTTPException(status_code=500, detail="Failed to get MCP module health")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to get MCP module health",
+            headers=_mcp_recovery_headers(
+                "module_unavailable",
+                "Check /api/v1/mcp/status for problem_modules.",
+            ),
+        )
 
     return response.result
 
