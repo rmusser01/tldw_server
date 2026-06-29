@@ -43,6 +43,7 @@ Continue TASK-530 Safe Operations after TASK-530.11 by preserving Skills export 
 - Preserved sanitized export failure feedback and added regression coverage for the sanitized failure path.
 
 ## Modified Files
+
 - `apps/packages/ui/src/services/tldw/domains/workspace-api.ts`
 - `apps/packages/ui/src/services/tldw/domains/__tests__/workspace-api.skills.test.ts`
 - `apps/packages/ui/src/components/Option/Skills/Manager.tsx`
@@ -50,12 +51,14 @@ Continue TASK-530 Safe Operations after TASK-530.11 by preserving Skills export 
 - `Docs/superpowers/plans/2026-06-29-skills-export-metadata-feedback.md`
 
 ## Verification
+
 - `bunx vitest run src/services/tldw/domains/__tests__/workspace-api.skills.test.ts --reporter=dot` - RED for missing-payload regression before guard: 1 failed, 13 passed.
 - `bunx vitest run src/services/tldw/domains/__tests__/workspace-api.skills.test.ts --reporter=dot` - GREEN after guard: 1 file passed, 14 tests passed.
 - `bunx vitest run src/services/tldw/domains/__tests__/workspace-api.skills.test.ts src/components/Option/Skills/__tests__/Manager.test.tsx --reporter=dot` - 2 files passed, 50 tests passed.
 - `git diff --check` - passed.
 
 ## Known Skips Or Blockers
+
 - Bandit skipped: touched code is frontend TypeScript/TSX and Markdown only.
 - Full package typecheck/build skipped: focused Vitest coverage targets the changed Skills export contract and manager workflow.
 
@@ -71,6 +74,15 @@ Review follow-up verification:
 - `bunx vitest run src/services/tldw/domains/__tests__/workspace-api.skills.test.ts src/components/Option/Skills/__tests__/Manager.test.tsx src/services/__tests__/background-proxy.test.ts --reporter=dot` - 3 files passed, 98 tests passed.
 - `git diff --check` - passed.
 - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --project tsconfig.json --pretty false` - still fails on existing baseline diagnostics outside the review fixes; the changed-code `workspace-api.ts` BlobPart diagnostic was fixed and did not recur.
+
+Additional PR #2546 CodeRabbit follow-up:
+- Hardened export failure sanitizer coverage with negative assertions for the raw API path, query token, local path, and bearer token value.
+- Extended RFC 5987 parsing to accept non-empty language tags in `filename*` values and added coverage for language-tagged encoded filenames.
+- Fixed Backlog task Markdown heading spacing flagged by markdownlint.
+
+Additional review verification:
+- `bunx vitest run src/services/tldw/domains/__tests__/workspace-api.skills.test.ts src/components/Option/Skills/__tests__/Manager.test.tsx src/services/__tests__/background-proxy.test.ts --reporter=dot` - 3 files passed, 99 tests passed.
+- `git diff --check` - passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

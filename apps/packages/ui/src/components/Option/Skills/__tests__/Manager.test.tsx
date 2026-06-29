@@ -867,6 +867,10 @@ describe("SkillsManager imports", () => {
     }
     expect(payload.description).toContain("[redacted-path]")
     expect(payload.description).toContain("Bearer [redacted-secret]")
+    expect(payload.description).not.toContain("/api/v1/skills/skill-1/export")
+    expect(payload.description).not.toContain("token=sk_live_secret")
+    expect(payload.description).not.toContain("/Users/alice/.tldw")
+    expect(payload.description).not.toContain("token_secret_123")
   })
 
   it("bulk deletes selected rows with their current versions", async () => {

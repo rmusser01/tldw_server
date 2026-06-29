@@ -772,7 +772,7 @@ const isSafeDownloadFilename = (filename: string | undefined): filename is strin
 const getContentDispositionFilename = (disposition: string | null): string | undefined => {
   if (!disposition) return undefined
 
-  const encodedMatch = disposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+  const encodedMatch = disposition.match(/filename\*\s*=\s*UTF-8'[^']*'([^;]+)/i)
   const plainMatch = disposition.match(/filename\s*=\s*"?([^\";]+)"?/i)
   const rawFilename = encodedMatch?.[1] || plainMatch?.[1]
   if (!rawFilename) return undefined

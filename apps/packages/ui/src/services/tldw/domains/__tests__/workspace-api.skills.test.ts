@@ -197,6 +197,27 @@ describe("workspace API skill methods", () => {
     expect(result.filename).toBe("encoded-skill.zip")
   })
 
+  it("accepts encoded export filenames with RFC 5987 language tags", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: new Uint8Array([1, 2, 3]).buffer,
+      headers: {
+        "content-disposition": "attachment; filename*=UTF-8'en'encoded-lang-skill.zip"
+      }
+    })
+    const clientCore = {
+      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
+    }
+
+    const result = await workspaceApiMethods.exportSkill.call(
+      clientCore as any,
+      "client-skill"
+    )
+
+    expect(result.filename).toBe("encoded-lang-skill.zip")
+  })
+
   it("falls back to a safe export filename when response metadata is unsafe", async () => {
     vi.mocked(bgRequest).mockResolvedValueOnce({
       ok: true,
