@@ -22,14 +22,17 @@ def _input_error(
     *,
     details: list[dict[str, int]] | None = None,
 ) -> EmbeddingInputError:
+    """Build a sanitized input-domain error for invalid embedding input."""
     return EmbeddingInputError(code, message, details=details)
 
 
 def _is_token_id(value: object) -> bool:
+    """Return True when a value is an integer token id, excluding bools."""
     return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _raise_if_too_long(token_counts: list[int], *, max_tokens: int, model: str) -> None:
+    """Raise when any normalized input exceeds the model token limit."""
     too_long = [
         {"index": index, "tokens": tokens}
         for index, tokens in enumerate(token_counts)
@@ -51,6 +54,7 @@ def _normalize_texts(
     count_tokens: Callable[[str, str], int],
     empty_message: str = "Input cannot be empty",
 ) -> NormalizedEmbeddingInput:
+    """Normalize text inputs and compute their token counts."""
     for text in texts:
         if not text.strip():
             raise _input_error("empty_input", empty_message)
@@ -61,6 +65,7 @@ def _normalize_texts(
 
 
 def _raw_token_lengths(raw_input: list[int] | list[list[int]], mode: TokenInputMode) -> list[int]:
+    """Validate token-array shape and return fallback token lengths."""
     if mode == "single":
         if not all(_is_token_id(token) for token in raw_input):
             raise _input_error("invalid_token_array", "Invalid token array input")
@@ -73,6 +78,7 @@ def _raw_token_lengths(raw_input: list[int] | list[list[int]], mode: TokenInputM
 
 
 def _validate_provided_token_lengths(value: object, expected_lengths: list[int]) -> list[int]:
+    """Validate decoder-supplied token lengths against raw token-array lengths."""
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise _input_error("invalid_token_array", "Invalid token array input")
 
@@ -87,6 +93,7 @@ def _validate_provided_token_lengths(value: object, expected_lengths: list[int])
 
 
 def _validate_decoded_texts(value: object) -> list[str]:
+    """Validate decoder output text payloads for token-array inputs."""
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise _input_error("invalid_token_array", "Invalid token array input")
 
@@ -99,6 +106,7 @@ def _validate_decoded_texts(value: object) -> list[str]:
 
 
 def _raise_if_token_array_shape_mismatch(texts: list[str], token_lengths: list[int], expected_count: int) -> None:
+    """Raise when decoded token arrays do not match the original batch shape."""
     if len(texts) != expected_count or len(token_lengths) != expected_count:
         raise _input_error("invalid_token_array", "Invalid token array input")
 
@@ -111,6 +119,7 @@ def _normalize_token_arrays(
     mode: Literal["single", "batch"],
     tokens_to_texts: Callable[[list[int] | list[list[int]], str], object],
 ) -> NormalizedEmbeddingInput:
+    """Decode token arrays into text payloads and validated token counts."""
     fallback_lengths = _raw_token_lengths(raw_input, mode)
     expected_count = 1 if mode == "single" else len(raw_input)
     try:

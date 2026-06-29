@@ -235,8 +235,9 @@ class EmbeddingRequestOrchestrator:
         miss_texts: list[str] = []
 
         await self._provider_preflight(plan.provider, plan.model)
+        primary_backend_identity = self._backend_identity_resolver(plan.provider, plan.model)
         for index, text in enumerate(prepared.normalized_input.texts):
-            key = self._cache_key(text, plan.provider, plan.model, plan.dimensions, plan.backend_identity)
+            key = self._cache_key(text, plan.provider, plan.model, plan.dimensions, primary_backend_identity)
             cached = await self._cache.get(key)
             if cached is not None:
                 results.append(
@@ -386,9 +387,9 @@ class EmbeddingRequestOrchestrator:
         results: list[list[float] | None] = []
         miss_indices: list[int] = []
         miss_texts: list[str] = []
-        backend_identity = self._backend_identity_resolver(provider, model)
 
         await self._provider_preflight(provider, model)
+        backend_identity = self._backend_identity_resolver(provider, model)
         for index, text in enumerate(prepared.normalized_input.texts):
             key = self._cache_key(text, provider, model, plan.dimensions, backend_identity)
             cached = await self._cache.get(key)
@@ -614,8 +615,28 @@ async def _no_provider_preflight(provider: str, model: str) -> None:
     del provider, model
 
 
+_NON_FALLBACKABLE_ERROR_CODES = frozenset(
+    {
+        "empty_input",
+        "invalid_input_type",
+        "too_many_inputs",
+        "input_too_long",
+        "invalid_token_array",
+        "unknown_provider",
+        "provider_model_mismatch",
+        "invalid_dimensions",
+        "provider_denied",
+        "model_denied",
+        "model_required",
+        "provider_unsupported",
+        "missing_provider_credentials",
+        "provider_malformed_response",
+    }
+)
+
+
 def _is_fallback_eligible(error: EmbeddingDomainError) -> bool:
-    return error.retryable and error.code in {"provider_rate_limited", "provider_unavailable"}
+    return bool(error.retryable) and error.code not in _NON_FALLBACKABLE_ERROR_CODES
 
 
 def _select_exhausted_error(errors: list[EmbeddingDomainError]) -> EmbeddingDomainError | None:

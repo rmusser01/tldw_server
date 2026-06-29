@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from tldw_Server_API.app.core.Embeddings.request_types import (
+    EmbeddingExecutionError,
     EmbeddingProviderError,
     EmbeddingRateLimitError,
     EmbeddingRequestContext,
@@ -424,6 +425,41 @@ async def test_fallback_execution_maps_model_and_returns_fallback_headers():
     assert result.fallback_from == "openai"
     assert result.response_headers["X-Embeddings-Provider"] == "huggingface"
     assert result.response_headers["X-Embeddings-Fallback-From"] == "openai"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fallback_execution_uses_retryable_execution_failures():
+    openai_failure = EmbeddingExecutionError(
+        "circuit_breaker_open",
+        "openai circuit open",
+        provider="openai",
+        model="text-embedding-3-small",
+        retryable=True,
+    )
+    executor = RecordingExecutor(
+        failures={"openai": openai_failure},
+        provider_vectors={"huggingface": [[0.5, 0.25]]},
+    )
+    orchestrator = _orchestrator(
+        executor=executor,
+        settings_fallback_chain={"openai": ["huggingface"]},
+        settings_fallback_model_map={
+            "openai:text-embedding-3-small": {
+                "huggingface": "sentence-transformers/all-MiniLM-L6-v2"
+            }
+        },
+    )
+    prepared = orchestrator.prepare(
+        "fallback after circuit breaker",
+        _context(model="text-embedding-3-small", provider="openai"),
+    )
+
+    result = await orchestrator.execute(prepared)
+
+    assert result.provider == "huggingface"
+    assert result.fallback_from == "openai"
+    assert [call["provider"] for call in executor.calls] == ["openai", "huggingface"]
 
 
 @pytest.mark.unit

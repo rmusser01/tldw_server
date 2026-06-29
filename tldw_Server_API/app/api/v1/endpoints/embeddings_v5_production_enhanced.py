@@ -22,6 +22,7 @@ import threading
 import time
 import uuid
 from asyncio import Lock
+from collections.abc import Mapping
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from enum import Enum
@@ -63,6 +64,7 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
     resolve_byok_credentials,
 )
+from tldw_Server_API.app.core.AuthNZ.byok_config import PROVIDER_APP_CONFIG_KEYS
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
 from tldw_Server_API.app.core.AuthNZ.permissions import EMBEDDINGS_ADMIN, SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
@@ -1316,9 +1318,7 @@ def _sanitize_query(query: str) -> str:
 
 def _normalize_cache_backend_identity(config: dict[str, Any], provider: str) -> str | None:
     """Derive stable backend identity for cache partitioning."""
-    if provider != "local_api":
-        return None
-
+    _ = provider
     api_url = str(config.get("api_url") or "").strip()
     if not api_url:
         return None
@@ -1331,6 +1331,70 @@ def _normalize_cache_backend_identity(config: dict[str, Any], provider: str) -> 
         sanitized_query = _sanitize_query(parsed.query)
         return urlunsplit((parsed.scheme, host, parsed.path.rstrip("/"), sanitized_query, ""))
     return api_url.rstrip("/")
+
+
+_BYOK_API_URL_FIELD_CANDIDATES = (
+    "base_url",
+    "api_base_url",
+    "api_url",
+    "embedding_api_url",
+    "endpoint_url",
+    "endpoint",
+)
+
+
+def _first_config_url_value(values: Mapping[str, object] | None) -> str | None:
+    """Return the first supported endpoint URL value from a config mapping."""
+    if not isinstance(values, Mapping):
+        return None
+    for key in _BYOK_API_URL_FIELD_CANDIDATES:
+        value = values.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _provider_app_config_sections(provider: str) -> tuple[str, ...]:
+    """Return likely app-config sections for a provider's endpoint overrides."""
+    provider_key = (provider or "").strip().lower()
+    candidates = [
+        PROVIDER_APP_CONFIG_KEYS.get(provider_key),
+        f"{provider_key}_api" if provider_key else None,
+        provider_key,
+        provider_key.replace("_", "-") if provider_key else None,
+    ]
+    seen: set[str] = set()
+    sections: list[str] = []
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        sections.append(candidate)
+    return tuple(sections)
+
+
+def _resolve_credentials_api_url(
+    provider: str,
+    credentials: ResolvedByokCredentials | None,
+) -> str | None:
+    """Resolve a BYOK endpoint override from credential fields or merged app config."""
+    if credentials is None:
+        return None
+
+    credential_fields = getattr(credentials, "credential_fields", None)
+    api_url = _first_config_url_value(credential_fields if isinstance(credential_fields, Mapping) else None)
+    if api_url:
+        return api_url
+
+    app_config = getattr(credentials, "app_config", None)
+    if not isinstance(app_config, Mapping):
+        return None
+    for section_name in _provider_app_config_sections(provider):
+        section = app_config.get(section_name)
+        api_url = _first_config_url_value(section if isinstance(section, Mapping) else None)
+        if api_url:
+            return api_url
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1807,40 +1871,58 @@ def build_provider_config(
             "model_name_or_path": model,
             "api_key": api_key or settings.get("OPENAI_API_KEY"),
         }
+        if api_url:
+            config["api_url"] = api_url
+            config["api_base_url"] = api_url
         if dimensions is not None:
             config["dimensions"] = dimensions
         return config
     elif provider == EmbeddingProvider.HUGGINGFACE:
-        return {
+        config = {
             "provider": "huggingface",
             "model_name_or_path": model,
             "trust_remote_code": _hf_trusts_remote_code(model),
             "hf_cache_dir_subpath": "huggingface_cache",
         }
+        if api_url:
+            config["api_url"] = api_url
+        return config
     elif provider == EmbeddingProvider.COHERE:
-        return {
+        config = {
             "provider": "cohere",
             "model_name_or_path": model,
             "api_key": api_key or settings.get("COHERE_API_KEY"),
         }
+        if api_url:
+            config["api_url"] = api_url
+        return config
     elif provider == EmbeddingProvider.VOYAGE:
-        return {
+        config = {
             "provider": "voyage",
             "model_name_or_path": model,
             "api_key": api_key or settings.get("VOYAGE_API_KEY"),
         }
+        if api_url:
+            config["api_url"] = api_url
+        return config
     elif provider == EmbeddingProvider.GOOGLE:
-        return {
+        config = {
             "provider": "google",
             "model_name_or_path": model,
             "api_key": api_key or settings.get("GOOGLE_API_KEY"),
         }
+        if api_url:
+            config["api_url"] = api_url
+        return config
     elif provider == EmbeddingProvider.MISTRAL:
-        return {
+        config = {
             "provider": "mistral",
             "model_name_or_path": model,
             "api_key": api_key or settings.get("MISTRAL_API_KEY"),
         }
+        if api_url:
+            config["api_url"] = api_url
+        return config
     elif provider == EmbeddingProvider.ONNX:
         return {
             "provider": "onnx",
@@ -1891,6 +1973,7 @@ async def create_embeddings_with_circuit_breaker(
                 model_cfg = OpenAIModelCfg(
                     provider="openai",
                     model_name_or_path=config.get("model_name_or_path", model_id),
+                    api_key=config.get("api_key"),
                     dimensions=dim_override,
                 )
             elif provider == "onnx":
@@ -2032,6 +2115,14 @@ async def create_embeddings_with_circuit_breaker(
                     "models": {provider_qualified_id: model_cfg},
                 }
             }
+            if provider == "openai" and (config.get("api_key") or config.get("api_base_url") or config.get("api_url")):
+                openai_section: dict[str, Any] = {}
+                if config.get("api_key"):
+                    openai_section["api_key"] = config.get("api_key")
+                api_base_url = config.get("api_base_url") or config.get("api_url")
+                if api_base_url:
+                    openai_section["api_base_url"] = str(api_base_url)
+                app_config["openai_api"] = openai_section
 
             # Pass provider-qualified override to avoid implicit defaults inside the batcher
             return await batching_create_embeddings_batch_async(
@@ -2422,6 +2513,15 @@ class _EndpointEmbeddingExecutor:
         if credentials is not None:
             await self._touch_credentials(credentials, provider_key)
 
+    def backend_identity(self, provider: str, model: str) -> str | None:
+        """Return a cache backend identity using any resolved BYOK endpoint config."""
+        provider_key = (provider or "").strip().lower()
+        credentials = self._credential_cache.get(provider_key)
+        try:
+            return _orchestrator_backend_identity(provider_key, model, credentials)
+        except TypeError:
+            return _orchestrator_backend_identity(provider_key, model)
+
     @staticmethod
     def _ensure_provider_key(
         provider: str,
@@ -2469,7 +2569,7 @@ class _EndpointEmbeddingExecutor:
                 and _supports_openai_dimensions(model)
             ):
                 adapter_request["dimensions"] = dimensions
-            result = adapter.embed(adapter_request)
+            result = await asyncio.to_thread(adapter.embed, adapter_request)
             vectors = self._extract_adapter_vectors(result, expected=len(texts))
             if vectors is not None:
                 return vectors
@@ -2482,9 +2582,15 @@ class _EndpointEmbeddingExecutor:
                 and exc.detail.get("error_code") == "missing_provider_credentials"
             ):
                 raise _http_exception_to_embedding_domain_error(exc, provider, model) from exc
-            logger.debug(f"Embeddings adapter path failed; falling back to legacy: {exc}")
+            logger.debug(
+                "Embeddings adapter path failed; falling back to legacy",
+                extra=_safe_adapter_error_metadata(exc),
+            )
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Embeddings adapter path failed; falling back to legacy: {exc}")
+            logger.debug(
+                "Embeddings adapter path failed; falling back to legacy",
+                extra=_safe_adapter_error_metadata(exc),
+            )
         return None
 
     @staticmethod
@@ -2521,7 +2627,7 @@ class _EndpointEmbeddingExecutor:
             provider_enum,
             model,
             credentials.api_key,
-            None,
+            _resolve_credentials_api_url(provider, credentials),
             dimensions,
         )
         all_vectors: list[list[float]] = []
@@ -2653,6 +2759,18 @@ def _http_exception_to_embedding_domain_error(
     )
 
 
+def _safe_adapter_error_metadata(exc: BaseException) -> dict[str, Any]:
+    """Return non-sensitive adapter failure metadata for debug logging."""
+    metadata: dict[str, Any] = {"error_type": type(exc).__name__}
+    status_code = getattr(exc, "status_code", None)
+    if status_code is not None:
+        try:
+            metadata["status_code"] = int(status_code)
+        except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+            metadata["status_code"] = str(status_code)
+    return metadata
+
+
 def _is_nonretryable_provider_http_error(exc: HTTPException) -> bool:
     try:
         code = int(getattr(exc, "status_code", 0) or 0)
@@ -2667,6 +2785,23 @@ def _record_orchestrator_dimension_adjustment(provider: str, model: str, method:
         model=model,
         method=method,
     ).inc()
+
+
+def _record_orchestrator_cache_hits(result: EmbeddingExecutionResult) -> None:
+    """Record cache hits from the orchestrator path on the legacy metric."""
+    try:
+        cache_hits = int(result.cache_hits or 0)
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+        cache_hits = 0
+    if cache_hits <= 0:
+        return
+    try:
+        embedding_cache_hits.labels(
+            provider=result.provider,
+            model=result.model,
+        ).inc(cache_hits)
+    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
+        pass
 
 
 def _build_embedding_request_orchestrator(
@@ -2719,17 +2854,27 @@ def _build_embedding_request_orchestrator(
         settings_fallback_model_map=_embedding_policy_setting("EMBEDDINGS_FALLBACK_MODEL_MAP", None),
         dimension_policy=_dimension_policy(),
         guess_provider=guess_provider_for_model,
-        backend_identity_resolver=_orchestrator_backend_identity,
+        backend_identity_resolver=endpoint_executor.backend_identity,
         record_dimension_adjustment=_record_orchestrator_dimension_adjustment,
         provider_preflight=endpoint_executor.preflight_provider,
         execution_path="adapter" if context.adapters_enabled else "legacy",
     )
 
 
-def _orchestrator_backend_identity(provider: str, model: str) -> str | None:
+def _orchestrator_backend_identity(
+    provider: str,
+    model: str,
+    credentials: ResolvedByokCredentials | None = None,
+) -> str | None:
     try:
         provider_enum = EmbeddingProvider(provider)
-        config = build_provider_config(provider_enum, model, None, None, None)
+        config = build_provider_config(
+            provider_enum,
+            model,
+            getattr(credentials, "api_key", None),
+            _resolve_credentials_api_url(provider, credentials),
+            None,
+        )
         return _normalize_cache_backend_identity(config, provider)
     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
         return None
@@ -2782,6 +2927,7 @@ def _embedding_domain_error_to_http(exc: EmbeddingDomainError) -> HTTPException 
         "unknown_provider",
         "provider_model_mismatch",
         "invalid_dimensions",
+        "model_required",
     } or isinstance(exc, EmbeddingInputError):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message)
 
@@ -3057,6 +3203,7 @@ async def _create_embedding_with_orchestrator(
             raise mapped from domain_exc
 
         await endpoint_executor.touch_resolved_credentials(result.provider)
+        _record_orchestrator_cache_hits(result)
         rg_actual_units = int(result.total_tokens or result.prompt_tokens or 0)
         for header_name, header_value in result.response_headers.items():
             if response is not None:
@@ -3468,7 +3615,7 @@ async def _create_embedding_legacy(
                     and _supports_openai_dimensions(model)
                 ):
                     adapter_request["dimensions"] = embedding_request.dimensions
-                result = adapter.embed(adapter_request) if adapter else None
+                result = await asyncio.to_thread(adapter.embed, adapter_request) if adapter else None
                 if isinstance(result, dict) and isinstance(result.get("data"), list):
                     embs: list[list[float]] = []
                     for item in result["data"]:
@@ -3496,10 +3643,16 @@ async def _create_embedding_legacy(
                     and he.detail.get("error_code") == "missing_provider_credentials"
                 ):
                     raise
-                logger.debug(f"Embeddings adapter path failed; falling back to legacy: {he}")
+                logger.debug(
+                    "Embeddings adapter path failed; falling back to legacy",
+                    extra=_safe_adapter_error_metadata(he),
+                )
             except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as _e:
                 # Log and fall back silently; adapter path is optional
-                logger.debug(f"Embeddings adapter path failed; falling back to legacy: {_e}")
+                logger.debug(
+                    "Embeddings adapter path failed; falling back to legacy",
+                    extra=_safe_adapter_error_metadata(_e),
+                )
 
         if use_synthetic_openai and not embeddings:
             dim = 1536

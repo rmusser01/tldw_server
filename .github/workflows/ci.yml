@@ -914,6 +914,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_metrics*.py
               tldw_Server_API/tests/Embeddings/test_model_eviction_in_use_guard.py
               tldw_Server_API/tests/Embeddings/test_multi_tier_cache_sync_async_loop.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator*.py
               tldw_Server_API/tests/Embeddings/test_orchestrator*.py
               tldw_Server_API/tests/Embeddings/test_pgvector*.py
               tldw_Server_API/tests/Embeddings/test_priority_bump_endpoint.py
@@ -2298,6 +2299,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_metrics*.py
               tldw_Server_API/tests/Embeddings/test_model_eviction_in_use_guard.py
               tldw_Server_API/tests/Embeddings/test_multi_tier_cache_sync_async_loop.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator*.py
               tldw_Server_API/tests/Embeddings/test_orchestrator*.py
               tldw_Server_API/tests/Embeddings/test_pgvector*.py
               tldw_Server_API/tests/Embeddings/test_priority_bump_endpoint.py
@@ -3555,6 +3557,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_metrics*.py
               tldw_Server_API/tests/Embeddings/test_model_eviction_in_use_guard.py
               tldw_Server_API/tests/Embeddings/test_multi_tier_cache_sync_async_loop.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator*.py
               tldw_Server_API/tests/Embeddings/test_orchestrator*.py
               tldw_Server_API/tests/Embeddings/test_pgvector*.py
               tldw_Server_API/tests/Embeddings/test_priority_bump_endpoint.py
@@ -4736,6 +4739,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_metrics*.py
               tldw_Server_API/tests/Embeddings/test_model_eviction_in_use_guard.py
               tldw_Server_API/tests/Embeddings/test_multi_tier_cache_sync_async_loop.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator*.py
               tldw_Server_API/tests/Embeddings/test_orchestrator*.py
               tldw_Server_API/tests/Embeddings/test_pgvector*.py
               tldw_Server_API/tests/Embeddings/test_priority_bump_endpoint.py
@@ -5918,6 +5922,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_metrics*.py
               tldw_Server_API/tests/Embeddings/test_model_eviction_in_use_guard.py
               tldw_Server_API/tests/Embeddings/test_multi_tier_cache_sync_async_loop.py
+              tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator*.py
               tldw_Server_API/tests/Embeddings/test_orchestrator*.py
               tldw_Server_API/tests/Embeddings/test_pgvector*.py
               tldw_Server_API/tests/Embeddings/test_priority_bump_endpoint.py

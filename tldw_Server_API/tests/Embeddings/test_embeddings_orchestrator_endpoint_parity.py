@@ -22,10 +22,13 @@ from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingExecutionError,
     EmbeddingExecutionResult,
     EmbeddingInputError,
+    EmbeddingPolicyError,
     EmbeddingProviderError,
     EmbeddingRateLimitError,
 )
 from tldw_Server_API.app.main import app
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -120,10 +123,14 @@ class FakeCredentials:
         api_key: str | None,
         source: str = "server",
         auth_source: str | None = None,
+        credential_fields: dict[str, object] | None = None,
+        app_config: dict[str, object] | None = None,
     ) -> None:
         self.api_key = api_key
         self.source = source
         self.auth_source = auth_source
+        self.credential_fields = credential_fields or {}
+        self.app_config = app_config
         self.touch_last_used = AsyncMock()
 
 
@@ -138,6 +145,20 @@ class _NoopMetric:
         return None
 
     def observe(self, *_args, **_kwargs):
+        return None
+
+
+class _RecordingCounter:
+    def __init__(self) -> None:
+        self.label_calls: list[dict[str, object]] = []
+        self.inc_calls: list[object] = []
+
+    def labels(self, **kwargs):
+        self.label_calls.append(dict(kwargs))
+        return self
+
+    def inc(self, amount=1):
+        self.inc_calls.append(amount)
         return None
 
 
@@ -331,7 +352,6 @@ def _run_dual_path_embedding_request(
     monkeypatch.setattr(mod, "log_llm_usage", fake_log_usage)
     monkeypatch.setattr(mod, "backfill_legacy_tokens_to_ledger", fake_backfill)
     monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
-    monkeypatch.setattr(mod, "create_embeddings_with_circuit_breaker", fake_provider)
     monkeypatch.setattr(mod, "get_cache_key", _friendly_cache_key)
     monkeypatch.setattr(mod, "_orchestrator_backend_identity", lambda _provider, _model: None)
     monkeypatch.setattr(mod, "build_provider_config", fake_build_provider_config)
@@ -876,6 +896,55 @@ def test_orchestrator_response_headers_are_applied(client, monkeypatch):
     assert response.json()["model"] == "huggingface:sentence-transformers/all-MiniLM-L6-v2"
 
 
+def test_orchestrator_cache_hits_increment_legacy_metric(client, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    monkeypatch.setenv("EMBEDDINGS_ORCHESTRATOR_ENABLED", "true")
+    cache_hits = _RecordingCounter()
+    fake_orchestrator = FakeOrchestrator(
+        result=EmbeddingExecutionResult(
+            vectors=[[0.25, 0.75]],
+            provider="huggingface",
+            model="sentence-transformers/all-MiniLM-L6-v2",
+            prompt_tokens=3,
+            total_tokens=3,
+            cache_hits=2,
+            cache_misses=0,
+        )
+    )
+    monkeypatch.setattr(
+        mod,
+        "_build_embedding_request_orchestrator",
+        lambda *_args, **_kwargs: fake_orchestrator,
+        raising=False,
+    )
+    monkeypatch.setattr(mod, "embedding_cache_hits", cache_hits, raising=False)
+
+    response = client.post(
+        "/api/v1/embeddings",
+        headers={"x-provider": "huggingface"},
+        json={"model": "sentence-transformers/all-MiniLM-L6-v2", "input": "cached"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert cache_hits.label_calls == [
+        {"provider": "huggingface", "model": "sentence-transformers/all-MiniLM-L6-v2"}
+    ]
+    assert cache_hits.inc_calls == [2]
+
+
+def test_orchestrator_missing_model_policy_error_maps_to_400():
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    mapped = mod._embedding_domain_error_to_http(
+        EmbeddingPolicyError("model_required", "Model is required")
+    )
+
+    assert isinstance(mapped, HTTPException)
+    assert mapped.status_code == status.HTTP_400_BAD_REQUEST
+    assert mapped.detail == "Model is required"
+
+
 @pytest.mark.asyncio
 async def test_executor_retries_openai_oauth_401_with_forced_refresh_and_touches_final_credentials(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
@@ -1056,6 +1125,63 @@ async def test_executor_batches_provider_calls_and_concatenates_vectors(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_executor_forwards_byok_endpoint_config_to_provider_and_cache_identity(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    credentials = FakeCredentials(
+        api_key="local-key",
+        source="user",
+        credential_fields={
+            "base_url": "http://127.0.0.1:8081/v1/embeddings?api_key=secret&tenant=alpha"
+        },
+    )
+
+    async def fake_resolve(*_args, **_kwargs):
+        return credentials
+
+    captured_configs: list[dict[str, object]] = []
+
+    def fake_build_provider_config(provider_enum, model_id, api_key=None, api_url=None, dimensions=None):
+        config = {
+            "provider": getattr(provider_enum, "value", str(provider_enum)),
+            "model_name_or_path": model_id,
+            "api_key": api_key,
+            "api_url": api_url,
+            "dimensions": dimensions,
+        }
+        captured_configs.append(config)
+        return config
+
+    async def fake_provider(texts, provider, model, config, metadata=None, dimensions=None):
+        _ = (texts, provider, model, metadata, dimensions)
+        assert config["api_url"] == "http://127.0.0.1:8081/v1/embeddings?api_key=secret&tenant=alpha"
+        return [[0.1, 0.2]]
+
+    monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
+    monkeypatch.setattr(mod, "build_provider_config", fake_build_provider_config)
+    monkeypatch.setattr(mod, "create_embeddings_with_circuit_breaker", fake_provider)
+
+    executor = mod._EndpointEmbeddingExecutor(
+        request=_request(),
+        current_user=_user(),
+        user_metadata=None,
+    )
+
+    vectors = await executor.create(
+        ["one"],
+        provider="local_api",
+        model="test-local-model",
+        dimensions=None,
+    )
+
+    assert vectors == [[0.1, 0.2]]
+    assert captured_configs[0]["api_key"] == "local-key"
+    assert executor.backend_identity("local_api", "test-local-model") == (
+        "http://127.0.0.1:8081/v1/embeddings?tenant=alpha"
+    )
+
+
+@pytest.mark.asyncio
 async def test_executor_uses_adapter_registry_before_provider_execution(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
 
@@ -1105,6 +1231,62 @@ async def test_executor_uses_adapter_registry_before_provider_execution(monkeypa
     assert vectors.embeddings_from_adapter is True
     assert provider_call.await_count == 0
     credentials.touch_last_used.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_executor_adapter_runs_sync_embed_in_thread_and_logs_sanitized_failure(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as mod
+
+    monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "true")
+    credentials = FakeCredentials(api_key="sk-test-secret", source="user")
+
+    async def fake_resolve(*_args, **_kwargs):
+        return credentials
+
+    class FakeAdapter:
+        def embed(self, request):
+            assert request["api_key"] == "sk-test-secret"
+            raise RuntimeError("adapter failed with sk-test-secret")
+
+    class FakeRegistry:
+        def get_adapter(self, provider):
+            assert provider == "openai"
+            return FakeAdapter()
+
+    to_thread_calls = []
+
+    async def fake_to_thread(func, *args, **kwargs):
+        to_thread_calls.append((func, args, kwargs))
+        return func(*args, **kwargs)
+
+    log_messages: list[str] = []
+
+    def fake_debug(message, *args, **kwargs):
+        _ = (args, kwargs)
+        log_messages.append(str(message))
+
+    monkeypatch.setattr(mod, "_resolve_embeddings_byok", fake_resolve)
+    monkeypatch.setattr(mod, "get_embeddings_registry", lambda: FakeRegistry())
+    monkeypatch.setattr(mod.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(mod.logger, "debug", fake_debug)
+
+    executor = mod._EndpointEmbeddingExecutor(
+        request=_request(),
+        current_user=_user(),
+        user_metadata=None,
+    )
+
+    result = await executor.create_adapter(
+        ["one"],
+        provider="openai",
+        model="text-embedding-3-small",
+        dimensions=None,
+    )
+
+    assert result is None
+    assert len(to_thread_calls) == 1
+    assert log_messages
+    assert all("sk-test-secret" not in message for message in log_messages)
 
 
 def test_orchestrator_adapter_path_preserves_adapter_vector_scale(client, monkeypatch):

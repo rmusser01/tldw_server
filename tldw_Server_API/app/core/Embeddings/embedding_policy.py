@@ -204,8 +204,10 @@ def resolve_fallback_chain(
     if isinstance(settings_fallback_chain, Mapping):
         chain = settings_fallback_chain.get(primary_provider)
         if isinstance(chain, list) and chain:
-            return [primary_provider] + [provider for provider in chain if isinstance(provider, str)]
-    return list(DEFAULT_FALLBACK_CHAINS.get(primary_provider, [primary_provider]))
+            return _dedupe_provider_chain(
+                [primary_provider] + [provider for provider in chain if isinstance(provider, str)]
+            )
+    return _dedupe_provider_chain(DEFAULT_FALLBACK_CHAINS.get(primary_provider, [primary_provider]))
 
 
 def fallback_model_map(
@@ -358,6 +360,19 @@ def _normalize_allowlist(values: Sequence[str] | set[str] | None, *, lowercase: 
         return None
     normalized = {str(value).lower() if lowercase else str(value) for value in values}
     return normalized if normalized else None
+
+
+def _dedupe_provider_chain(values: Sequence[str]) -> list[str]:
+    """Deduplicate provider fallback chains while preserving first-seen order."""
+    chain: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        provider = str(value or "").strip().lower()
+        if not provider or provider in seen:
+            continue
+        seen.add(provider)
+        chain.append(provider)
+    return chain
 
 
 _dimension_policy = dimension_policy

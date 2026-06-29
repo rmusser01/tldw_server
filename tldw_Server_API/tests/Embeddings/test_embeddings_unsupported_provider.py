@@ -10,12 +10,14 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 def _testing_env():
     previous_testing = os.environ.get("TESTING")
     os.environ["TESTING"] = "true"
-    yield
-    if previous_testing is None:
-        os.environ.pop("TESTING", None)
-    else:
-        os.environ["TESTING"] = previous_testing
-    app.dependency_overrides.pop(get_request_user, None)
+    try:
+        yield
+    finally:
+        if previous_testing is None:
+            os.environ.pop("TESTING", None)
+        else:
+            os.environ["TESTING"] = previous_testing
+        app.dependency_overrides.pop(get_request_user, None)
 
 
 @pytest.fixture

@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.Embeddings.embedding_policy import (
     supports_openai_dimensions,
     validate_dimensions_request,
 )
+from tldw_Server_API.app.core.Embeddings.provider_resolution import resolve_provider_model
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingPolicyError,
     EmbeddingRequestContext,
@@ -112,6 +113,23 @@ def test_fallback_chain_defaults_and_configured_chain():
         "openai",
         settings_fallback_chain={"openai": ["onnx", "huggingface"]},
     ) == ["openai", "onnx", "huggingface"]
+    assert resolve_fallback_chain(
+        "openai",
+        settings_fallback_chain={"openai": ["openai", "onnx", "huggingface", "onnx"]},
+    ) == ["openai", "onnx", "huggingface"]
+
+
+def test_resolve_provider_model_reports_missing_model_as_validation_error():
+    with pytest.raises(EmbeddingPolicyError) as exc_info:
+        resolve_provider_model(
+            "",
+            None,
+            settings_config={},
+            require_model=True,
+        )
+
+    assert exc_info.value.code == "model_required"
+    assert exc_info.value.message == "Model is required"
 
 
 def test_fallback_model_mapping_defaults_and_configured_map():
