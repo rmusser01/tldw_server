@@ -41,7 +41,10 @@ vi.mock("react-i18next", () => ({
     ) => {
       if (typeof fallbackOrOptions === "string") return fallbackOrOptions
       if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        return fallbackOrOptions.defaultValue || key
+        const defaultValue = fallbackOrOptions.defaultValue || key
+        return defaultValue.replace(/\{\{(\w+)\}\}/g, (_match, token: string) =>
+          String(fallbackOrOptions[token] ?? "")
+        )
       }
       return key
     }
@@ -765,6 +768,109 @@ describe("SkillsManager imports", () => {
       confirmSpy.mockRestore()
       invalidateSpy.mockRestore()
     }
+  })
+
+  it("downloads exported skills with the server filename and success feedback", async () => {
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    let downloadedFilename = ""
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        downloadedFilename = this.download
+      })
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => "blob:skills-export")
+    })
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn()
+    })
+    tldwClientMock.listSkills.mockResolvedValueOnce({
+      skills: [makeSkill(1)],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+    tldwClientMock.exportSkill.mockResolvedValueOnce({
+      blob: new Blob(["zip"], { type: "application/zip" }),
+      filename: "server-skill.zip"
+    })
+
+    try {
+      renderManager()
+      await screen.findByText("skill-1")
+      fireEvent.click(screen.getByRole("button", { name: "Export skill-1" }))
+
+      await waitFor(() => {
+        expect(tldwClientMock.exportSkill).toHaveBeenCalledWith("skill-1")
+      })
+      expect(downloadedFilename).toBe("server-skill.zip")
+      expect(notificationMock.success).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Export started",
+          description: "server-skill.zip download has started."
+        })
+      )
+    } finally {
+      clickSpy.mockRestore()
+      if (originalCreateObjectURL) {
+        Object.defineProperty(URL, "createObjectURL", {
+          configurable: true,
+          value: originalCreateObjectURL
+        })
+      } else {
+        Reflect.deleteProperty(URL, "createObjectURL")
+      }
+      if (originalRevokeObjectURL) {
+        Object.defineProperty(URL, "revokeObjectURL", {
+          configurable: true,
+          value: originalRevokeObjectURL
+        })
+      } else {
+        Reflect.deleteProperty(URL, "revokeObjectURL")
+      }
+    }
+  })
+
+  it("sanitizes export failure notifications", async () => {
+    tldwClientMock.listSkills.mockResolvedValueOnce({
+      skills: [makeSkill(1)],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+    tldwClientMock.exportSkill.mockRejectedValueOnce(
+      new Error(
+        "Request failed: GET /api/v1/skills/skill-1/export?token=sk_live_secret from /Users/alice/.tldw with Bearer token_secret_123"
+      )
+    )
+
+    renderManager()
+    await screen.findByText("skill-1")
+    fireEvent.click(screen.getByRole("button", { name: "Export skill-1" }))
+
+    await waitFor(() => {
+      expect(notificationMock.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Failed to export skill",
+          description: expect.stringContaining("[server-endpoint]")
+        })
+      )
+    })
+
+    const payload = notificationMock.error.mock.calls.at(-1)?.[0] as {
+      description?: string
+    }
+    expect(payload.description).toContain("[redacted-path]")
+    expect(payload.description).toContain("Bearer [redacted-secret]")
+    expect(payload.description).not.toContain("/api/v1/skills/skill-1/export")
+    expect(payload.description).not.toContain("token=sk_live_secret")
+    expect(payload.description).not.toContain("/Users/alice/.tldw")
+    expect(payload.description).not.toContain("token_secret_123")
   })
 
   it("bulk deletes selected rows with their current versions", async () => {

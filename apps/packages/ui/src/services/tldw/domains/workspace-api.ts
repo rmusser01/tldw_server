@@ -725,6 +725,78 @@ const trimmedOptionalString = (value: string | undefined): string | undefined =>
 const isValidSkillVersion = (version: number | undefined): version is number =>
   Number.isSafeInteger(version) && Number(version) > 0
 
+export interface SkillExportDownload {
+  blob: Blob
+  filename: string
+}
+
+type SkillExportPayload = ArrayBuffer | ArrayBufferView<ArrayBuffer> | Blob
+
+type BinaryResponsePayload = {
+  ok: boolean
+  status: number
+  data?: SkillExportPayload
+  error?: string
+  headers?: Record<string, string>
+}
+
+const getSkillExportFallbackFilename = (skillName: string): string => {
+  const trimmedName = skillName.trim()
+  const safeName = trimmedName
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64)
+  return `${safeName || "skill"}.zip`
+}
+
+const isSkillExportPayload = (value: unknown): value is SkillExportPayload => {
+  if (!value) return false
+  if (value instanceof ArrayBuffer) return true
+  if (ArrayBuffer.isView?.(value)) {
+    return value.buffer instanceof ArrayBuffer
+  }
+  if (typeof Blob !== "undefined" && value instanceof Blob) return true
+  return false
+}
+
+const isSafeDownloadFilename = (filename: string | undefined): filename is string => {
+  if (!filename) return false
+  const trimmedFilename = filename.trim()
+  if (!trimmedFilename || trimmedFilename === "." || trimmedFilename === "..") {
+    return false
+  }
+  return !/[\/\\\0-\x1f\x7f]/.test(trimmedFilename)
+}
+
+const getContentDispositionFilename = (disposition: string | null): string | undefined => {
+  if (!disposition) return undefined
+
+  const encodedMatch = disposition.match(/filename\*\s*=\s*UTF-8'[^']*'([^;]+)/i)
+  const plainMatch = disposition.match(/filename\s*=\s*"?([^\";]+)"?/i)
+  const rawFilename = encodedMatch?.[1] || plainMatch?.[1]
+  if (!rawFilename) return undefined
+
+  try {
+    return decodeURIComponent(rawFilename.trim())
+  } catch {
+    // Export filenames are optional, untrusted metadata; keep the raw token so
+    // safety validation can either accept it or fall back to the skill name.
+    return rawFilename.trim()
+  }
+}
+
+const resolveSkillExportFilename = (
+  skillName: string,
+  headers: Headers
+): string => {
+  const fallbackFilename = getSkillExportFallbackFilename(skillName)
+  const headerFilename = getContentDispositionFilename(headers.get("content-disposition"))
+  return isSafeDownloadFilename(headerFilename)
+    ? headerFilename.trim()
+    : fallbackFilename
+}
+
 export const workspaceApiMethods = {
   // ── Skills API ──
 
@@ -954,14 +1026,38 @@ export const workspaceApiMethods = {
   async exportSkill(
     this: TldwApiClientCore,
     name: string
-  ): Promise<Blob> {
+  ): Promise<SkillExportDownload> {
     await this.ensureConfigForRequest(true)
-    const res = await bgRequest<ArrayBuffer, AllowedPath>({
+    const response = await bgRequest<BinaryResponsePayload, AllowedPath>({
       path: `/api/v1/skills/${encodeURIComponent(name)}/export` as AllowedPath,
       method: "GET",
-      responseType: "arrayBuffer"
+      responseType: "arrayBuffer",
+      returnResponse: true
     })
-    return new Blob([res], { type: "application/zip" })
+    const exportErrorContext = `Export failed for skill ${name}`
+    if (!response) {
+      throw new Error(`${exportErrorContext}: missing response`)
+    }
+    if (!response.ok) {
+      throw new Error(
+        response.error || `${exportErrorContext}: request failed with status ${response.status}`
+      )
+    }
+    if (!response.data) {
+      throw new Error(`${exportErrorContext}: missing export payload`)
+    }
+    if (!isSkillExportPayload(response.data)) {
+      throw new Error(`${exportErrorContext}: invalid export payload`)
+    }
+
+    const headers = new Headers(response.headers || {})
+    const blob = new Blob([response.data], {
+      type: headers.get("content-type") || "application/zip"
+    })
+    return {
+      blob,
+      filename: resolveSkillExportFilename(name, headers)
+    }
   },
 
   async executeSkill(

@@ -144,4 +144,160 @@ describe("workspace API skill methods", () => {
       }
     })
   })
+
+  it("returns exported skill blob with filename metadata from response headers", async () => {
+    const payload = new Uint8Array([1, 2, 3]).buffer
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: payload,
+      headers: {
+        "content-type": "application/zip",
+        "content-disposition": 'attachment; filename="server-skill.zip"'
+      }
+    })
+    const clientCore = {
+      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
+    }
+
+    const result = await workspaceApiMethods.exportSkill.call(
+      clientCore as any,
+      "client-skill"
+    )
+
+    expect(result.filename).toBe("server-skill.zip")
+    expect(result.blob).toBeInstanceOf(Blob)
+    expect(result.blob.type).toBe("application/zip")
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/skills/client-skill/export",
+      method: "GET",
+      responseType: "arrayBuffer",
+      returnResponse: true
+    })
+  })
+
+  it("prefers encoded export filenames from content disposition metadata", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: new Uint8Array([1, 2, 3]).buffer,
+      headers: {
+        "content-disposition": "attachment; filename=\"plain.zip\"; filename*=UTF-8''encoded-skill.zip"
+      }
+    })
+    const clientCore = {
+      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
+    }
+
+    const result = await workspaceApiMethods.exportSkill.call(
+      clientCore as any,
+      "client-skill"
+    )
+
+    expect(result.filename).toBe("encoded-skill.zip")
+  })
+
+  it("accepts encoded export filenames with RFC 5987 language tags", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: new Uint8Array([1, 2, 3]).buffer,
+      headers: {
+        "content-disposition": "attachment; filename*=UTF-8'en'encoded-lang-skill.zip"
+      }
+    })
+    const clientCore = {
+      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
+    }
+
+    const result = await workspaceApiMethods.exportSkill.call(
+      clientCore as any,
+      "client-skill"
+    )
+
+    expect(result.filename).toBe("encoded-lang-skill.zip")
+  })
+
+  it("falls back to a safe export filename when response metadata is unsafe", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: new Uint8Array([4, 5, 6]).buffer,
+      headers: {
+        "content-disposition": 'attachment; filename="../secret.zip"'
+      }
+    })
+    const clientCore = {
+      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
+    }
+
+    const result = await workspaceApiMethods.exportSkill.call(
+      clientCore as any,
+      "safe-skill"
+    )
+
+    expect(result.filename).toBe("safe-skill.zip")
+    expect(result.blob).toBeInstanceOf(Blob)
+  })
+
+  it("preserves safe fallback filename characters from user-provided skill names", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: new Uint8Array([4, 5, 6]).buffer
+    })
+    const clientCore = {
+      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
+    }
+
+    const result = await workspaceApiMethods.exportSkill.call(
+      clientCore as any,
+      "  2_Custom Skill!  "
+    )
+
+    expect(result.filename).toBe("2_Custom-Skill.zip")
+  })
+
+  it("rejects export responses without contextual response metadata", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce(undefined)
+    const clientCore = {
+      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
+    }
+
+    await expect(
+      workspaceApiMethods.exportSkill.call(clientCore as any, "client-skill")
+    ).rejects.toThrow("Export failed for skill client-skill: missing response")
+  })
+
+  it("rejects successful export responses without binary data", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: {
+        "content-disposition": 'attachment; filename="server-skill.zip"'
+      }
+    })
+    const clientCore = {
+      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
+    }
+
+    await expect(
+      workspaceApiMethods.exportSkill.call(clientCore as any, "client-skill")
+    ).rejects.toThrow("Export failed for skill client-skill: missing export payload")
+  })
+
+  it("rejects serialized export responses with invalid binary payloads", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: { lost: "array-buffer" }
+    })
+    const clientCore = {
+      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
+    }
+
+    await expect(
+      workspaceApiMethods.exportSkill.call(clientCore as any, "client-skill")
+    ).rejects.toThrow("Export failed for skill client-skill: invalid export payload")
+  })
 })

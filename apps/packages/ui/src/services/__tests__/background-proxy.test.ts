@@ -526,6 +526,59 @@ describe("background proxy fallback safety", () => {
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
+  it("falls back to direct arrayBuffer requests while preserving response metadata", async () => {
+    const buffer = new Uint8Array([7, 8, 9]).buffer
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {},
+      headers: {
+        "content-disposition": 'attachment; filename="runtime.zip"'
+      }
+    })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: buffer,
+      headers: {
+        "content-disposition": 'attachment; filename="direct.zip"'
+      }
+    })
+
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest<{
+        ok: boolean
+        status: number
+        data: ArrayBuffer
+        headers: Record<string, string>
+      }>({
+        path: "/api/v1/skills/client-skill/export",
+        method: "GET",
+        responseType: "arrayBuffer",
+        returnResponse: true
+      })
+    ).resolves.toEqual({
+      ok: true,
+      status: 200,
+      data: buffer,
+      headers: {
+        "content-disposition": 'attachment; filename="direct.zip"'
+      }
+    })
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.tldwRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/skills/client-skill/export",
+        method: "GET",
+        responseType: "arrayBuffer"
+      }),
+      expect.any(Object)
+    )
+  })
+
   it("does not fall back to direct request on POST extension timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))

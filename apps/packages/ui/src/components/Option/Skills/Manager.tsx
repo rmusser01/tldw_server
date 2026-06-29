@@ -764,15 +764,22 @@ export const SkillsManager: React.FC = () => {
 
   const handleExport = async (name: string) => {
     try {
-      const blob = await tldwClient.exportSkill(name)
+      const { blob, filename } = await tldwClient.exportSkill(name)
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
-      a.download = `${name}.zip`
+      a.download = filename
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
+      notification.success({
+        message: t("option:skills.exportStarted", { defaultValue: "Export started" }),
+        description: t("option:skills.exportStartedDescription", {
+          defaultValue: "{{filename}} download has started.",
+          filename
+        })
+      })
     } catch (err: unknown) {
       notification.error({
         message: t("option:skills.exportError", { defaultValue: "Failed to export skill" }),
