@@ -789,6 +789,33 @@ class TestBulkDeleteSkills:
         assert client.get(f"{SKILLS_PREFIX}/bulk-stale").status_code == 200
         assert client.get(f"{SKILLS_PREFIX}/bulk-fresh").status_code == 200
 
+    def test_bulk_delete_sanitized_error_log_has_request_context(
+        self,
+        client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Bulk delete 500 logs should include request context without leaking details."""
+
+        async def _boom(self, items):  # noqa: ANN001, ANN202
+            raise SkillsError("bulk backend exploded at /private/bulk-delete")
+
+        monkeypatch.setattr(SkillsService, "bulk_delete_skills", _boom)
+
+        with _capture_skills_endpoint_errors() as messages:
+            r = client.post(
+                f"{SKILLS_PREFIX}/bulk-delete",
+                json={"skills": [{"name": "bulk-log", "version": 1}]},
+            )
+
+        joined = "\n".join(messages)
+        assert r.status_code == 500
+        assert r.json()["detail"] == "Failed to bulk delete skills"
+        assert "Error bulk deleting skills" in joined
+        assert "selected_count=1" in joined
+        assert f"user_id={TEST_USER_ID}" in joined
+        assert "bulk backend exploded" not in joined
+        assert "/private/" not in joined
+
 
 class TestImportExport:
     def test_import_skill_preview_json_returns_metadata_and_conflict(self, client):

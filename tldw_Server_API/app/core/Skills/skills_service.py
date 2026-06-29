@@ -1267,25 +1267,39 @@ class SkillsService:
         await self._sync_registry_async(force=True)
         db = self._get_db()
 
-        validated_items: list[tuple[str, int]] = []
-        for name, expected_version in normalized_items:
-            row = db.get_skill_registry(name, include_deleted=True)
-            if not row:
-                raise SkillNotFoundError(name)
-
-            current_version = int(row.get("version") or 1)
-            if expected_version is not None and current_version != expected_version:
-                raise SkillConflictError(
-                    f"Skill '{name}' was modified (expected version {expected_version}, got {current_version})",
-                    skill_name=name,
-                    expected_version=expected_version,
-                    actual_version=current_version,
-                )
-            validated_items.append((name, current_version))
+        try:
+            deleted_rows = await asyncio.to_thread(db.bulk_mark_skill_registry_deleted, normalized_items)
+        except InputError as e:
+            message = str(e)
+            missing_name = (
+                message.removeprefix("Skill not found: ").strip()
+                if message.startswith("Skill not found: ")
+                else message
+            )
+            raise SkillNotFoundError(missing_name) from e
+        except ConflictError as e:
+            raise SkillConflictError(str(e)) from e
+        except CharactersRAGDBError as e:
+            raise SkillsError(f"Failed to bulk delete skills in registry: {e}") from e
 
         deleted: list[str] = []
-        for name, current_version in validated_items:
-            await self.delete_skill(name, expected_version=current_version)
+        for row in deleted_rows:
+            name = str(row["name"])
+            skill_dir = self._get_skill_dir(name)
+            if await asyncio.to_thread(skill_dir.exists):
+                try:
+                    await asyncio.to_thread(shutil.rmtree, skill_dir)
+                except OSError as e:
+                    if not row.get("was_deleted"):
+                        try:
+                            db.restore_skill_registry(
+                                name,
+                                {"directory_path": str(skill_dir)},
+                                expected_version=int(row["version"]),
+                            )
+                        except Exception as restore_error:
+                            logger.error(f"Failed to restore skill registry after bulk delete failure: {restore_error}")
+                    raise SkillStorageError(f"Failed to delete skill directory: {e}", path=str(skill_dir)) from e
             deleted.append(name)
 
         logger.info(f"Bulk deleted {len(deleted)} skills for user {self.user_id}")

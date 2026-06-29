@@ -294,7 +294,12 @@ async def bulk_delete_skills(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error("Error bulk deleting skills")
+        logger.error(
+            "Error bulk deleting skills user_id={} selected_count={} error_type={}",
+            service.user_id,
+            len(request.skills),
+            type(e).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to bulk delete skills",

@@ -16638,6 +16638,77 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"Database error deleting skill '{name}': {exc}")
             raise
 
+    def bulk_mark_skill_registry_deleted(
+        self,
+        items: list[tuple[str, int | None]],
+    ) -> list[dict[str, Any]]:
+        """Soft-delete multiple skill registry rows in one atomic transaction."""
+        if not items:
+            return []
+
+        self._ensure_skill_registry_table()
+        now = self._get_current_utc_timestamp_iso()
+        deleted_value = self._skill_bool_value(True)
+        active_value = self._skill_bool_value(False)
+        select_query = "SELECT * FROM skill_registry WHERE name = ?"
+        update_query = (
+            "UPDATE skill_registry SET deleted = ?, last_modified = ?, version = ? "
+            "WHERE name = ? AND version = ? AND deleted = ?"
+        )
+
+        try:
+            with self.transaction() as conn:
+                validated_rows: list[dict[str, Any]] = []
+                for name, expected_version in items:
+                    prepared_query, prepared_params = self._prepare_backend_statement(select_query, (name,))
+                    row = self._skill_row_to_dict(conn.execute(prepared_query, prepared_params).fetchone())
+                    if not row:
+                        raise InputError(f"Skill not found: {name}")  # noqa: TRY003
+
+                    current_version = int(row.get("version") or 1)
+                    if expected_version is not None and current_version != expected_version:
+                        raise ConflictError(
+                            f"Skill '{name}' version mismatch (db has {current_version}, expected {expected_version}).",
+                            entity="skill_registry",
+                            entity_id=name,
+                        )
+
+                    row["previous_version"] = current_version
+                    row["was_deleted"] = bool(row.get("deleted", False))
+                    validated_rows.append(row)
+
+                for row in validated_rows:
+                    if row["was_deleted"]:
+                        continue
+
+                    current_version = int(row["previous_version"])
+                    next_version = current_version + 1
+                    params = (
+                        deleted_value,
+                        now,
+                        next_version,
+                        row["name"],
+                        current_version,
+                        active_value,
+                    )
+                    prepared_query, prepared_params = self._prepare_backend_statement(update_query, params)
+                    cursor = conn.execute(prepared_query, prepared_params)
+                    if cursor.rowcount == 0:
+                        raise ConflictError(
+                            f"Skill '{row['name']}' delete affected 0 rows.",
+                            entity="skill_registry",
+                            entity_id=row["name"],
+                        )
+                    row["version"] = next_version
+                    row["deleted"] = True
+
+                return validated_rows
+        except (ConflictError, InputError):
+            raise
+        except CharactersRAGDBError as exc:
+            logger.error(f"Database error bulk deleting skills: {exc}")
+            raise
+
     def restore_skill_registry(
         self,
         name: str,
