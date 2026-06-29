@@ -13,12 +13,7 @@ type RuntimeConfigResponse = {
   }
 }
 
-const FORWARDED_HEADER_NAMES = [
-  "forwarded",
-  "x-forwarded-for",
-  "x-forwarded-host",
-  "x-real-ip"
-]
+const UNTRUSTED_FORWARDING_HEADER_NAMES = ["x-real-ip"]
 
 const PLACEHOLDER_KEYS = new Set([
   "change-me",
@@ -82,6 +77,55 @@ const isLoopbackHost = (hostHeader?: string | string[]): boolean => {
 const isLoopbackPeerAddress = (remoteAddress?: string): boolean =>
   LOOPBACK_PEER_ADDRESSES.has(normalizeEnvValue(remoteAddress).toLowerCase())
 
+const normalizeForwardedValue = (value?: string): string => {
+  const normalized = normalizeEnvValue(value)
+  if (normalized.length >= 2 && normalized.startsWith("\"") && normalized.endsWith("\"")) {
+    return normalized.slice(1, -1)
+  }
+  return normalized
+}
+
+const isLoopbackForwardedFor = (value?: string): boolean => {
+  const normalized = normalizeForwardedValue(value)
+  if (!normalized || normalized.toLowerCase() === "unknown") return false
+  return isLoopbackHost(normalized) || isLoopbackPeerAddress(normalized)
+}
+
+const parseForwardedEntry = (entry: string): Record<string, string> => {
+  const params: Record<string, string> = {}
+  for (const part of entry.split(";")) {
+    const [rawKey, ...rawValueParts] = part.split("=")
+    const key = normalizeEnvValue(rawKey).toLowerCase()
+    const value = normalizeForwardedValue(rawValueParts.join("="))
+    if (key && value) {
+      params[key] = value
+    }
+  }
+  return params
+}
+
+const isTrustedForwardedHeader = (headerValue?: string | string[]): boolean => {
+  const values = Array.isArray(headerValue) ? headerValue : [headerValue]
+  return values.every((value) => {
+    const normalized = normalizeEnvValue(value)
+    if (!normalized) return false
+
+    return normalized.split(",").every((entry) => {
+      const params = parseForwardedEntry(entry)
+      return isLoopbackForwardedFor(params.for)
+    })
+  })
+}
+
+const isTrustedForwardedForHeader = (headerValue?: string | string[]): boolean => {
+  const values = Array.isArray(headerValue) ? headerValue : [headerValue]
+  return values.every((value) => {
+    const normalized = normalizeEnvValue(value)
+    if (!normalized) return false
+    return normalized.split(",").every((entry) => isLoopbackForwardedFor(entry))
+  })
+}
+
 const extractIPv4Address = (remoteAddress?: string): number[] | null => {
   const normalized = normalizeEnvValue(remoteAddress).toLowerCase()
   const address = normalized.startsWith("::ffff:")
@@ -122,10 +166,25 @@ const isTrustedLocalPeerAddress = (
   return runtimeAuthEnabled && deploymentMode === "quickstart" && isDockerGatewayPeerAddress(remoteAddress)
 }
 
-const hasForwardingHeaders = (req: NextApiRequest): boolean =>
-  FORWARDED_HEADER_NAMES.some((name) =>
-    Object.prototype.hasOwnProperty.call(req.headers, name)
-  )
+const hasUntrustedForwardingHeaders = (req: NextApiRequest): boolean => {
+  if (
+    UNTRUSTED_FORWARDING_HEADER_NAMES.some((name) =>
+      Object.prototype.hasOwnProperty.call(req.headers, name)
+    )
+  ) {
+    return true
+  }
+
+  if (Object.prototype.hasOwnProperty.call(req.headers, "x-forwarded-for")) {
+    return !isTrustedForwardedForHeader(req.headers["x-forwarded-for"])
+  }
+
+  if (Object.prototype.hasOwnProperty.call(req.headers, "forwarded")) {
+    return !isTrustedForwardedHeader(req.headers.forwarded)
+  }
+
+  return false
+}
 
 const unavailable = (reason: string): RuntimeConfigResponse => ({
   runtimeAuth: {
@@ -178,7 +237,7 @@ export default function handler(
     return
   }
 
-  if (hasForwardingHeaders(req)) {
+  if (hasUntrustedForwardingHeaders(req)) {
     res.status(200).json(unavailable("forwarded"))
     return
   }

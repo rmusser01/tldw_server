@@ -259,11 +259,59 @@ describe("WebUI runtime config API", () => {
     expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
   })
 
+  it("ignores x-forwarded-host for local quickstart runtime auth decisions", async () => {
+    const res = await callRuntimeConfig({
+      "x-forwarded-host": "127.0.0.1:8080"
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      runtimeAuth: {
+        available: true,
+        authMode: "single-user",
+        apiKey: "runtime-single-user-key"
+      }
+    })
+  })
+
+  it.each([
+    "127.0.0.1",
+    "\"::1\"",
+    "\"::ffff:127.0.0.1\""
+  ])("allows loopback-only Forwarded metadata for local quickstart runtime auth from %s", async (forwardedFor) => {
+    const res = await callRuntimeConfig({
+      forwarded: `for=${forwardedFor};host=127.0.0.1:8080;proto=http`
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      runtimeAuth: {
+        available: true,
+        authMode: "single-user",
+        apiKey: "runtime-single-user-key"
+      }
+    })
+  })
+
+  it("allows loopback-only x-forwarded-for metadata for local quickstart runtime auth", async () => {
+    const res = await callRuntimeConfig({
+      "x-forwarded-for": "127.0.0.1"
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      runtimeAuth: {
+        available: true,
+        authMode: "single-user",
+        apiKey: "runtime-single-user-key"
+      }
+    })
+  })
+
   it.each([
     ["forwarded", "forwarded", "for=203.0.113.10;host=localhost:8080"],
     ["x-forwarded-for", "x-forwarded-for", "203.0.113.10"],
     ["empty x-forwarded-for", "x-forwarded-for", ""],
-    ["x-forwarded-host", "x-forwarded-host", "localhost:8080"],
     ["x-real-ip", "x-real-ip", "203.0.113.10"]
   ])("returns unavailable when %s is present", async (_name, header, value) => {
     const res = await callRuntimeConfig({ [header]: value })
