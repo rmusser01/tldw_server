@@ -1,19 +1,19 @@
 ---
 id: TASK-2395
 title: Fix README and getting-started P1/P2 onboarding docs
-status: Done
+status: In Progress
 assignee: []
-created_date: '2026-06-21 23:46'
-updated_date: '2026-06-22 00:01'
+created_date: 2026-06-21 23:46
+updated_date: 2026-06-22 00:01
 labels:
-  - docs
-  - onboarding
+- docs
+- onboarding
 dependencies: []
 references:
-  - README.md
-  - Docs/Getting_Started/QUICKSTART.md
-  - Docs/Getting_Started/Profile_Local_Single_User.md
-  - Docs/Getting_Started/TROUBLESHOOTING.md
+- README.md
+- Docs/Getting_Started/QUICKSTART.md
+- Docs/Getting_Started/Profile_Local_Single_User.md
+- Docs/Getting_Started/TROUBLESHOOTING.md
 priority: high
 ---
 
@@ -43,6 +43,10 @@ Verification: source .venv/bin/activate && python -m pytest -q tldw_Server_API/t
 Known skips/blockers: no app/server runtime smoke was started because this change only edits documentation and a docs contract test. No subagent code-reviewer was spawned because the available subagent tool requires the user to explicitly request delegation; local verification was run instead.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2427
+
+Review-rebase follow-up started 2026-06-29:
+- Reopened this task to track rebasing PR #2427 onto latest `origin/dev` and addressing any still-open PR review comments.
+- Plan: `Docs/superpowers/plans/2026-06-29-pr2427-review-rebase.md`
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
