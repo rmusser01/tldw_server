@@ -10,6 +10,9 @@ labels:
   - release
   - pr-1982
 dependencies: []
+modified_files:
+  - Docs/Product/WebUI/evidence/pre_main_uat/pre-main-uat-20260629054510/provider-preflight.md
+  - backlog/tasks/task-12064 - Execute-pre-main-UAT-matrix-for-PR-1982.md
 ---
 
 ## Description
@@ -39,6 +42,17 @@ Task 1 verification:
 - Confirmed unrelated untracked watchlist templates are present and intentionally excluded from Task 1 staging/commit.
 - Ran git diff --check: passed with no output.
 - Bandit not run because Task 1 touched only Markdown evidence/tracking files and disposable /tmp fixtures, with no code changes.
+
+Task 2 provider preflight:
+- Sourced /tmp/tldw-pre-main-uat/pre-main-uat-20260629054510/uat.env before checking provider configuration.
+- OpenAI credential check: OPENAI_API_KEY was absent; no secret value was printed or stored.
+- OpenAI direct chat completion to https://api.openai.com/v1/chat/completions with gpt-4o-mini was not sent because the credential was missing. Expected token would have been ok-pre-main-uat-20260629054510.
+- Raw artifact: /tmp/tldw-pre-main-uat/pre-main-uat-20260629054510/provider/openai_credential_check.txt.
+- llama.cpp direct preflight was not run and LLAMA_CPP_MODEL was not selected because Task 2 requires committing evidence and returning DONE_WITH_CONCERNS when the OpenAI credential is missing.
+- Evidence updated: Docs/Product/WebUI/evidence/pre_main_uat/pre-main-uat-20260629054510/provider-preflight.md.
+- Verification: git diff --check passed with no output.
+- Bandit not run because Task 2 touched only Markdown evidence/tracking files and a disposable /tmp credential-check artifact, with no code changes.
+- Task remains long-running/incomplete; provider/config is blocking the live provider gate.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
