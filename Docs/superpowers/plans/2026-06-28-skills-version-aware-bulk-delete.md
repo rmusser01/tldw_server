@@ -73,4 +73,6 @@ Out of scope:
 - [x] Run Bandit touched backend scope: `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/skills.py tldw_Server_API/app/api/v1/schemas/skills_schemas.py tldw_Server_API/app/core/Skills/skills_service.py -f json -o /tmp/bandit_task_530_11.json`
 - [x] Run `git diff --check`.
 - [x] Update TASK-530.11 acceptance criteria, implementation notes, final summary, modified files, verification, and known skips.
-- [ ] Commit and open PR against `dev`.
+- [x] Commit and open PR against `dev`.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2545

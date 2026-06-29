@@ -1,7 +1,7 @@
 ---
 id: TASK-530.11
 title: Implement Skills version-aware bulk delete
-status: In Progress
+status: Done
 labels:
 - skills
 - webui
@@ -64,6 +64,7 @@ Continue TASK-530 Safe Operations after TASK-530.10 by adding version-aware bulk
 - Implemented version-aware bulk deletion for Skills across backend, frontend API, and manager UI.
 - The backend prevalidates all selected names and optimistic versions before deleting any skill, so a stale selected row returns a recoverable conflict without partial deletion.
 - The UI now supports row selection, a selected-action bar, destructive confirmation, version-aware request payloads, success clearing, and reload-before-delete conflict guidance.
+- PR: https://github.com/rmusser01/tldw_server/pull/2545
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
