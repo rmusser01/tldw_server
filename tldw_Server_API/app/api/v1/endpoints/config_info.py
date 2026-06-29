@@ -147,9 +147,9 @@ def load_safe_config() -> dict:
         caps["hasMediaIngestJobEvents"] = has_media_routes
         caps["hasMediaIngestWorker"] = bool(
             worker_path_enabled(
-                "MEDIA_INGEST_HEAVY_JOBS_WORKER_ENABLED",
-                "media-ingest-heavy-jobs",
-                default_stable=False,
+                "MEDIA_INGEST_JOBS_WORKER_ENABLED",
+                "media",
+                default_stable=True,
                 test_mode=False,
             )
         )

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
 from typing import Any
 
-from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.services.lifecycle_workers import ShutdownPhase
 
 
@@ -111,9 +112,10 @@ def route_enabled_predicate(
     """Return a worker predicate backed by the lifecycle route gate."""
 
     def _enabled(context: WorkerLifecycleContext) -> bool:
-        return env_flag_enabled(flag_key) and bool(
-            context.route_enabled(route_key, **route_kwargs)
-        )
+        raw_flag = os.getenv(flag_key)
+        if raw_flag is not None and str(raw_flag).strip() != "" and not is_truthy(raw_flag):
+            return False
+        return bool(context.route_enabled(route_key, **route_kwargs))
 
     return _enabled
 

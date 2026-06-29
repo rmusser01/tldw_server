@@ -49,7 +49,7 @@ def _worker_spec(name: str, **overrides: Any) -> WorkerSpec:
 
 
 @pytest.mark.unit
-def test_route_enabled_predicate_requires_env_flag_and_route_gate(
+def test_route_enabled_predicate_inherits_route_gate_when_env_unset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     route_calls: list[tuple[str, dict[str, object]]] = []
@@ -77,14 +77,19 @@ def test_route_enabled_predicate_requires_env_flag_and_route_gate(
     monkeypatch.delenv("EXAMPLE_WORKER_ENABLED", raising=False)
 
     assert predicate(context) is False
-    assert route_calls == []
-
-    monkeypatch.setenv("EXAMPLE_WORKER_ENABLED", "1")
-
-    assert predicate(context) is False
     assert route_calls == [("example-route", {"default_stable": False})]
 
     route_allowed = True
+
+    assert predicate(context) is True
+    assert route_calls[-1] == ("example-route", {"default_stable": False})
+
+    monkeypatch.setenv("EXAMPLE_WORKER_ENABLED", "0")
+
+    assert predicate(context) is False
+    assert route_calls[-1] == ("example-route", {"default_stable": False})
+
+    monkeypatch.setenv("EXAMPLE_WORKER_ENABLED", "1")
 
     assert predicate(context) is True
     assert route_calls[-1] == ("example-route", {"default_stable": False})
