@@ -7,23 +7,26 @@ GuardianDB (no mocks). Each test gets a fresh database via tmp_path.
 from __future__ import annotations
 
 import re
-import time
 
 import pytest
 
 import tldw_Server_API.app.core.Moderation.supervised_policy as supervised_module
 from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB, SupervisedPolicy
+from tldw_Server_API.app.core.Moderation.moderation_service import (
+    ModerationPolicy,
+    PatternRule,
+)
+from tldw_Server_API.app.core.Moderation.policy_compiler import (
+    PolicyCompilationInput,
+    PolicyCompiler,
+    ResolvedModerationConfig,
+)
 from tldw_Server_API.app.core.Moderation.supervised_policy import (
     GuardianModerationProxy,
     SupervisedCheckResult,
     SupervisedPolicyEngine,
     dispatch_guardian_notification,
 )
-from tldw_Server_API.app.core.Moderation.moderation_service import (
-    ModerationPolicy,
-    PatternRule,
-)
-
 
 # ── Fixtures ──────────────────────────────────────────────────
 
@@ -823,6 +826,50 @@ class TestBuildModerationPolicyOverlay:
         assert rule.action == "block"
         assert rule.categories == {"test_cat"}
 
+    def test_overlay_accepts_compiler_policy_and_preserves_base_io_settings(self, db, engine):
+        rel = _setup_active_relationship(db)
+        db.create_policy(
+            relationship_id=rel.id,
+            pattern="supervised_word",
+            action="block",
+            category="supervised",
+        )
+        base = PolicyCompiler().compile_global(
+            PolicyCompilationInput(
+                config=ResolvedModerationConfig(
+                    enabled=True,
+                    input_enabled=False,
+                    output_enabled=True,
+                    input_action="warn",
+                    output_action="block",
+                    redact_replacement="[BASE]",
+                    per_user_overrides=False,
+                    categories_enabled={"base", "supervised"},
+                    pii_enabled=False,
+                ),
+                blocklist_lines=["base-secret -> warn #base"],
+            )
+        ).policy
+
+        result = engine.build_moderation_policy_overlay("child1", base)
+
+        assert isinstance(result, ModerationPolicy)
+        assert result.enabled is True
+        assert result.input_enabled is False
+        assert result.output_enabled is True
+        assert result.input_action == "warn"
+        assert result.output_action == "block"
+        assert result.redact_replacement == "[BASE]"
+        assert result.per_user_overrides is False
+        assert result.categories_enabled == {"base", "supervised"}
+        assert len(result.block_patterns) == 2
+        assert result.block_patterns[0].regex.search("base-secret")
+        assert result.block_patterns[0].action == "warn"
+        assert result.block_patterns[0].categories == {"base"}
+        assert result.block_patterns[1].regex.search("supervised_word")
+        assert result.block_patterns[1].action == "block"
+        assert result.block_patterns[1].categories == {"supervised"}
+
     def test_overlay_appends_to_existing_patterns(self, db, engine):
         rel = _setup_active_relationship(db)
         db.create_policy(
@@ -947,7 +994,7 @@ class TestEdgeCases:
             pattern="restricted",
             action="block",
         )
-        rel2 = _setup_active_relationship(db, "guardian1", "child2")
+        _setup_active_relationship(db, "guardian1", "child2")
         # child2 has no policies
 
         result_child1 = engine.check_text("restricted content", "child1")
@@ -1404,6 +1451,7 @@ class TestTransparentMode:
 class TestGuardianNotificationDispatch:
     def test_dispatches_when_notify_guardian_true(self, db, engine):
         from unittest.mock import MagicMock, patch
+
         from tldw_Server_API.app.core.Moderation.supervised_policy import (
             SupervisedCheckResult,
             dispatch_guardian_notification,
