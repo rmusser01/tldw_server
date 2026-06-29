@@ -4,7 +4,8 @@
 - Task id: `TASK-12064`
 - Backlog task: `TASK-12066`
 - Basic UAT task: `TASK-12068`
-- Status: Basic local single-user API pass after fixes; browser/mobile UI pass blocked by Browser policy
+- OpenAPI proxy task: `TASK-12069`
+- Status: Pass after fixes, including CDP desktop/mobile visual UAT
 
 ## Runtime
 
@@ -12,7 +13,7 @@
 - WebUI: `http://127.0.0.1:8080`, detached Next dev process listening on loopback.
 - Runtime config: `GET /api/_tldw-webui/runtime-config` returned HTTP 200 with `runtimeAuth.available=true`, `authMode=single-user`, and an API key present. The key was not logged.
 - Backend proxy: `GET /api/v1/setup/readiness/status` through the WebUI origin returned HTTP 200.
-- Browser: an earlier local browser check rendered the first-time setup screen with setup readiness lanes and setup path choices. Later Browser automation attempts were blocked by the in-app Browser URL policy for local navigation, so the remaining UI/mobile checks were not completed in this pass. This is recorded as an automation limitation, not an application failure.
+- Browser: in-app Browser automation was blocked by local URL policy, so this pass used a CDP-controlled Chromium session against `http://127.0.0.1:8080/`. Desktop and mobile screenshots are recorded under `/tmp/tldw-pre-main-uat/pre-main-uat-20260629054510/local/cdp/`.
 
 ## Runtime Auth Finding Fixed
 
@@ -74,6 +75,40 @@ Raw artifacts are under `/tmp/tldw-pre-main-uat/pre-main-uat-20260629054510/loca
 | OpenAI character turn | `roleplay-chat-openai.json` | HTTP 200, provider `openai`, model `gpt-4o-mini`, saved response contains `pre-main-uat-20260629054510`. |
 | llama.cpp character turn | `roleplay-chat-llamacpp.json` | HTTP 200, provider `llama.cpp`, model `gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf`, saved response contains `pre-main-uat-20260629054510`. |
 
+## CDP Browser And Mobile Visual UAT
+
+Raw artifacts are under `/tmp/tldw-pre-main-uat/pre-main-uat-20260629054510/local/cdp/`.
+
+### Initial CDP Finding
+
+- CDP initially exposed a Next dev build overlay: `Module not found: Can't resolve 'antd'` from `apps/packages/ui/src/components/Common/Beta.tsx`.
+- The package target existed, but the long-running Next dev process held stale module state across dependency repair/rebase. Restarting the WebUI dev server from the rebased worktree cleared the overlay.
+- After restart, CDP verified the app rendered without a framework overlay.
+
+### OpenAPI Discovery Finding Fixed
+
+- CDP then exposed repeated `GET http://127.0.0.1:8080/openapi.json` HTTP 404 responses on both home and chat routes.
+- Root cause: quickstart same-origin WebUI requests `/openapi.json`, but only `/api/*` backend paths were proxied through the WebUI origin.
+- Fix applied: `apps/tldw-frontend/pages/openapi.json.ts` proxies the same-origin OpenAPI document request to the configured backend origin.
+- Regression coverage: `apps/tldw-frontend/__tests__/pages/openapi-json-proxy.test.ts`.
+- Live probe after fix: `GET http://127.0.0.1:8080/openapi.json` returned HTTP 200.
+
+### Final CDP Pass
+
+| Check | Artifact | Result |
+| --- | --- | --- |
+| Desktop home | `desktop-initial.png` | `http://127.0.0.1:8080/`, nonblank, no framework overlay. |
+| Desktop chat | `desktop-after-nav-click.png` | `http://127.0.0.1:8080/chat`, nonblank, no framework overlay. |
+| Mobile home | `mobile-initial.png` | 390px viewport, nonblank, readable first viewport, no framework overlay. |
+| Mobile chat | `mobile-after-first-click.png` | 390px viewport, chat composer visible and usable, no framework overlay. |
+| Console/network | `cdp-results.json` | `relevantConsoleEvents=[]` after the OpenAPI proxy fix. |
+
+Interactions recorded by CDP:
+
+- Desktop home card/link navigation to chat.
+- Desktop chat nav/control click.
+- Mobile home navigation to chat.
+
 ## Backend Fix Verification
 
 - Red tests observed before implementation:
@@ -93,9 +128,23 @@ Raw artifacts are under `/tmp/tldw-pre-main-uat/pre-main-uat-20260629054510/loca
   - `git diff --check`
   - Result: exit `0`.
 
+## Frontend Fix Verification
+
+- Red test observed before implementation:
+  - `bunx vitest run __tests__/pages/openapi-json-proxy.test.ts`
+  - Failed because `@web/pages/openapi.json` did not exist.
+- Green focused verification:
+  - `bunx vitest run __tests__/pages/openapi-json-proxy.test.ts`
+  - Result: `1 passed`.
+- Broader related frontend verification:
+  - `bunx vitest run __tests__/pages/api/runtime-config.test.ts __tests__/pages/openapi-json-proxy.test.ts __tests__/extension/runtime-bootstrap.test.ts`
+  - Result: `3 files passed, 68 tests passed`.
+- Live verification:
+  - `GET http://127.0.0.1:8080/openapi.json` returned HTTP 200.
+  - `node /tmp/run_cdp_visual_uat.mjs` returned `pageIdentityOk=true`, `notBlank=true`, `noFrameworkOverlay=true`, `interactionCount=3`, and `relevantConsoleEvents=[]`.
+
 ## Notes
 
 - The temporary UAT launcher must parse `export NAME=value` lines in the run-scoped `uat.env`; an earlier local restart missed the API key because the parser treated `export UAT_API_KEY` as the variable name.
 - `bun install --frozen-lockfile` in `apps/` repaired a stale local `apps/packages/ui/node_modules/antd` symlink needed for the WebUI dev server to resolve shared UI imports. This dependency-state repair is left unstaged and is not part of the product fix.
 - The OpenAI key was loaded from the local UAT env and was not printed or stored in artifacts.
-- Browser/mobile visual checks remain pending until local Browser navigation is available for this workspace.
