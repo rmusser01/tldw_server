@@ -1,10 +1,10 @@
 ---
 id: TASK-530.12
 title: Implement Skills export metadata feedback
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-29 01:15'
+updated_date: '2026-06-29 01:32'
 labels:
   - skills
   - webui
@@ -64,6 +64,8 @@ Continue TASK-530 Safe Operations after TASK-530.11 by preserving Skills export 
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented Skills export metadata feedback. The frontend API now preserves server filename metadata for export downloads, safely falls back when metadata is absent or unsafe, rejects missing binary payloads, and the Skills manager now reports successful export starts with the actual download filename while keeping sanitized error feedback intact.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2546
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
