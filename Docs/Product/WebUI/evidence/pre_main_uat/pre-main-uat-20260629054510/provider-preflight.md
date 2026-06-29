@@ -1,0 +1,9 @@
+# Provider Preflight
+
+- Run id: `pre-main-uat-20260629054510`
+- Task id: `TASK-12064`
+- Status: Not Started
+
+## Notes
+
+- Provider preflight evidence has not started.
