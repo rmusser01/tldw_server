@@ -27,12 +27,101 @@ describe("writing editor adapter", () => {
       }
     })
     const adapter = createTipTapEditorAdapter(editor)
+    const plainText = tipTapJsonToPlainText(editor.getJSON())
+    const start = plainText.indexOf("Beta")
 
-    adapter?.setSelection({ start: 6, end: 10 })
+    expect(plainText).toBe("Alpha\n\nBeta")
+
+    adapter?.setSelection({ start, end: start + "Beta".length })
 
     const { from, to } = editor.state.selection
     expect(editor.state.doc.textBetween(from, to, "\n", "\n")).toBe("Beta")
-    expect(adapter?.getSelection()).toEqual({ start: 6, end: 10 })
+    expect(adapter?.getSelection()).toEqual({ start, end: start + "Beta".length })
+
+    editor.destroy()
+  })
+
+  it("sets TipTap selections using offsets after empty paragraphs", () => {
+    const editor = new Editor({
+      extensions: [StarterKit],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Alpha" }]
+          },
+          {
+            type: "paragraph"
+          },
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "Beta" }]
+          }
+        ]
+      }
+    })
+    const adapter = createTipTapEditorAdapter(editor)
+    const plainText = tipTapJsonToPlainText(editor.getJSON())
+    const start = plainText.indexOf("Beta")
+
+    expect(plainText).toBe("Alpha\n\n\n\nBeta")
+
+    adapter?.setSelection({ start, end: start + "Beta".length })
+
+    const { from, to } = editor.state.selection
+    expect(editor.state.doc.textBetween(from, to, "\n", "\n")).toBe("Beta")
+    expect(adapter?.getSelection()).toEqual({ start, end: start + "Beta".length })
+
+    editor.destroy()
+  })
+
+  it("sets TipTap selections using offsets inside nested list items", () => {
+    const editor = new Editor({
+      extensions: [StarterKit],
+      content: {
+        type: "doc",
+        content: [
+          {
+            type: "bulletList",
+            content: [
+              {
+                type: "listItem",
+                content: [
+                  {
+                    type: "paragraph",
+                    content: [{ type: "text", text: "First item" }]
+                  }
+                ]
+              },
+              {
+                type: "listItem",
+                content: [
+                  {
+                    type: "paragraph",
+                    content: [{ type: "text", text: "Second item" }]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    })
+    const adapter = createTipTapEditorAdapter(editor)
+    const plainText = tipTapJsonToPlainText(editor.getJSON())
+    const start = plainText.indexOf("Second item")
+
+    expect(plainText).toBe("First item\n\nSecond item")
+
+    adapter?.setSelection({ start, end: start + "Second item".length })
+
+    const { from, to } = editor.state.selection
+    expect(editor.state.doc.textBetween(from, to, "\n", "\n")).toBe("Second item")
+    expect(adapter?.getSelection()).toEqual({
+      start,
+      end: start + "Second item".length
+    })
 
     editor.destroy()
   })
@@ -59,7 +148,7 @@ describe("writing editor adapter", () => {
     const plainText = tipTapJsonToPlainText(editor.getJSON())
     const start = plainText.indexOf("Beta")
 
-    expect(plainText).toBe("Alpha\n\n***\nBeta")
+    expect(plainText).toBe("Alpha\n\n***\n\nBeta")
 
     adapter?.setSelection({ start, end: start + "Beta".length })
 
@@ -88,8 +177,12 @@ describe("writing editor adapter", () => {
       }
     })
     const adapter = createTipTapEditorAdapter(editor)
+    const plainText = tipTapJsonToPlainText(editor.getJSON())
+    const start = plainText.indexOf("Beta")
 
-    adapter?.setSelection({ start: 6, end: 10 })
+    expect(plainText).toBe("Alpha\n\nBeta")
+
+    adapter?.setSelection({ start, end: start + "Beta".length })
     const { from } = editor.state.selection
     const coordsAtPos = vi
       .spyOn(editor.view, "coordsAtPos")
@@ -107,7 +200,7 @@ describe("writing editor adapter", () => {
       }))
 
     expect(adapter?.measureRange).toBeTypeOf("function")
-    expect(adapter?.measureRange?.({ start: 6, end: 10 })).toEqual({
+    expect(adapter?.measureRange?.({ start, end: start + "Beta".length })).toEqual({
       top: 24,
       bottom: 82,
       height: 58

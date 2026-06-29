@@ -46,7 +46,7 @@ const normalizeUnboundedSelection = (
   return start <= end ? { start, end } : { start: end, end: start }
 }
 
-const TIPTAP_SCENE_BREAK_TEXT = "\n***\n"
+const TIPTAP_SCENE_BREAK_TEXT = "***"
 
 type TipTapNode = Editor["state"]["doc"]
 
@@ -104,6 +104,19 @@ const pushTipTapMappingPoint = (
   points.push({ position, offset })
 }
 
+const TIPTAP_BLOCK_CONTAINER_TYPES = new Set([
+  "bulletList",
+  "orderedList",
+  "listItem",
+  "blockquote"
+])
+
+const usesTipTapBlockChildSeparators = (node: TipTapNode): boolean =>
+  TIPTAP_BLOCK_CONTAINER_TYPES.has(node.type.name)
+
+const getTipTapBlockSeparatorLength = (previousNode: TipTapNode | null): number =>
+  previousNode ? 2 : 0
+
 const appendTipTapNodeMappings = (
   node: TipTapNode,
   position: number,
@@ -138,21 +151,27 @@ const appendTipTapNodeMappings = (
   }
 
   let nextOffset = offset
+  let previousChildNode: TipTapNode | null = null
+  const shouldSeparateChildren = usesTipTapBlockChildSeparators(node)
   node.forEach((childNode, childOffset) => {
+    if (shouldSeparateChildren) {
+      const separatorLength = getTipTapBlockSeparatorLength(previousChildNode)
+      const childPosition = position + 1 + childOffset
+      for (let index = 1; index <= separatorLength; index += 1) {
+        pushTipTapMappingPoint(points, childPosition, nextOffset + index)
+      }
+      nextOffset += separatorLength
+    }
     nextOffset = appendTipTapNodeMappings(
       childNode,
       position + 1 + childOffset,
       nextOffset,
       points,
     )
+    previousChildNode = childNode
   })
 
   pushTipTapMappingPoint(points, position + node.nodeSize - 1, nextOffset)
-
-  if (node.type.name === "paragraph" || node.type.name === "heading") {
-    nextOffset += 1
-  }
-
   pushTipTapMappingPoint(points, position + node.nodeSize, nextOffset)
   return nextOffset
 }
@@ -162,9 +181,16 @@ const getTipTapPositionOffsetPoints = (
 ): TipTapPositionOffsetPoint[] => {
   const points: TipTapPositionOffsetPoint[] = [{ position: 0, offset: 0 }]
   let offset = 0
+  let previousNode: TipTapNode | null = null
 
   editor.state.doc.forEach((childNode, childOffset) => {
+    const separatorLength = getTipTapBlockSeparatorLength(previousNode)
+    for (let index = 1; index <= separatorLength; index += 1) {
+      pushTipTapMappingPoint(points, childOffset, offset + index)
+    }
+    offset += separatorLength
     offset = appendTipTapNodeMappings(childNode, childOffset, offset, points)
+    previousNode = childNode
   })
 
   return points.sort((a, b) => a.position - b.position || a.offset - b.offset)

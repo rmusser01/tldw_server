@@ -481,6 +481,7 @@ export const WritingPlayground = () => {
     setEditorText,
     tipTapContent,
     setTipTapContent,
+    editorMode,
     isOnline
   })
   const {
