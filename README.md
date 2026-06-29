@@ -145,6 +145,9 @@ Current release line:
 
 ## What's New (in the last few releases)
 
+<details>
+<summary>0.1.32 release-prep rollup</summary>
+
 Included in the `0.1.32` release-prep rollup:
 - Sandbox, MCP Gateway, and ACP expansion, including governed execution, workspace/runtime contracts, profile presets, permission evidence, and release-readiness gates.
 - Research, knowledge, and study workflow growth across Chat Workspace, Research Workspace, Deep Research, quick ingest, flashcards, Study Packs, notes tasks, and study suggestions.
@@ -159,6 +162,8 @@ Still active on `dev`:
 - Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
+
+</details>
 
 ## Privacy & Security
 
@@ -209,6 +214,9 @@ For now, use this repository checkout and the setup paths below (`make` and no-`
 
 ### Preflight Check (Recommended)
 
+<details>
+<summary>Host prerequisite checks</summary>
+
 After cloning the repository, you can run the optional Makefile helper checks:
 ```bash
 make quickstart-prereqs
@@ -223,7 +231,12 @@ ffmpeg -version
 docker --version    # only if using Docker paths
 ```
 
+</details>
+
 ### At-a-Glance Commands
+
+<details>
+<summary>Public setup profiles and command shortcuts</summary>
 
 Choose one public setup profile:
 
@@ -270,7 +283,12 @@ make verify-local-single
 
 If `make` is unavailable, use [No-Make Path (Windows-Friendly)](#no-make-path-windows-friendly).
 
+</details>
+
 ### Default Docker Path (Makefile)
+
+<details>
+<summary>Docker single-user + WebUI quickstart details</summary>
 
 ```bash
 # from repo root
@@ -288,7 +306,12 @@ Want a more advanced deployment?
 - API-only Docker deployment: `make quickstart-docker`
 - Use the advanced/custom-host path for LAN, reverse-proxy, or custom-domain browser access only when you need browsers to call a non-default host.
 
+</details>
+
 ### No-Docker Path (Makefile, Development)
+
+<details>
+<summary>Local single-user setup with Makefile targets</summary>
 
 ```bash
 # from repo root
@@ -312,7 +335,12 @@ make verify-local-single
 
 `make quickstart-install` remains a compatibility alias for local installation only. It does not start the server.
 
+</details>
+
 ### No-Make Path (Windows-Friendly)
+
+<details>
+<summary>Shortcut scripts and manual compose commands</summary>
 
 Use these paths when `make` is not available.
 
@@ -347,7 +375,12 @@ $env:TLDW_ENV_FILE=(Resolve-Path "tldw_Server_API/Config_Files/.env").Path
 docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --build
 ```
 
+</details>
+
 ### Manual Setup
+
+<details>
+<summary>Manual virtualenv, environment, auth, and startup steps</summary>
 
 Supported Python versions:
 - Minimum: Python 3.10+
@@ -456,7 +489,12 @@ openssl rand -base64 32   # paste the output as the value for MCP_API_KEY_SALT
 See [MCP System Admin Guide](Docs/MCP/Unified/System_Admin_Guide.md) for details.
 </details>
 
+</details>
+
 ### Next Steps by Goal
+
+<details>
+<summary>Goal-oriented guide links</summary>
 
 | I want to... | Guide |
 |--------------|-------|
@@ -468,7 +506,12 @@ See [MCP System Admin Guide](Docs/MCP/Unified/System_Admin_Guide.md) for details
 | Deploy for a team with proper security | [Docker Multi-User + Postgres Profile](Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md) |
 | Develop the WebUI or browser extension | [Extension & Web UI Development Guide](apps/DEVELOPMENT.md) |
 
+</details>
+
 ### Local Profile: Add the WebUI
+
+<details>
+<summary>Launch the WebUI alongside a local API</summary>
 
 The repo-root quick-launch scripts start the local API and WebUI together by default:
 
@@ -540,7 +583,12 @@ Notes:
 - Container names are whatever Docker reports via `docker ps --format '{{.Names}}'`.
 </details>
 
+</details>
+
 ### Run the Web UI (WIP)
+
+<details>
+<summary>WebUI quickstart, development server, and LAN notes</summary>
 
 The current Next.js UI is a work in progress and may be unstable, buggy, or rough around the edges.
 Use Bun (recommended) or Node.js with npm/yarn/pnpm.
@@ -626,7 +674,12 @@ Tip: http://127.0.0.1:8000/api/v1/config/quickstart redirects to your configured
 
 Security note: avoid exposing this quickstart setup directly to the public internet. For internet-facing access, use HTTPS with a reverse proxy and follow `Docs/Deployment/First_Time_Production_Setup.md`.
 
+</details>
+
 ### Docker Compose
+
+<details>
+<summary>Manual Docker Compose reference</summary>
 
 For the fastest Docker path, use the quickstart targets in [At-a-Glance Commands](#at-a-glance-commands).
 This section is the canonical manual/no-`make` compose reference.
@@ -687,6 +740,8 @@ Notes
 - The primary UI is the Next.js WebUI in `apps/tldw-frontend/`.
   - Run it separately for development, or use `Dockerfiles/docker-compose.webui.yml` for a containerized WebUI.
   - For unified streaming validation in non-prod, prefer the dev overlay above. You can also export `STREAMS_UNIFIED=1` directly in your environment.
+
+</details>
 
 ### Supporting Services via Docker
 
@@ -946,6 +1001,9 @@ shows every backend datastore as its own node (no single icon stands in for mult
 
 ### High-Level Overview
 
+<details>
+<summary>High-level Mermaid architecture diagram</summary>
+
 ```mermaid
 flowchart TB
   subgraph CLIENTS["Clients"]
@@ -1133,7 +1191,12 @@ flowchart TB
   classDef ext fill:#fff0f0,stroke:#e57373,color:#7b1f1f;
 ```
 
+</details>
+
 ### Core Modules → Databases
+
+<details>
+<summary>Module-to-database Mermaid map</summary>
 
 Each backend datastore is a separate node. Content DBs are **per-user** (under
 `Databases/user_databases/<user_id>/`); platform DBs are **shared/global** (under `Databases/`).
@@ -1296,7 +1359,12 @@ flowchart LR
   classDef ext fill:#fff0f0,stroke:#e57373,color:#7b1f1f;
 ```
 
+</details>
+
 ## Networking & Limits
+
+<details>
+<summary>HTTP client, egress, and rate-limit references</summary>
 
 - HTTP client and TLS/pinning configuration: `tldw_Server_API/Config_Files/README.md` (timeouts, retries, redirects/proxies, JSON limits, TLS min version, cert pinning, SSE/download helpers).
 - Egress/SSRF policy and security middleware: `tldw_Server_API/app/core/Security/README.md`.
@@ -1324,6 +1392,8 @@ flowchart LR
 
 All limits are designed to be conservative by default and can be tuned using the various `*_RATE_LIMIT_*`, `MAX_*`, and RG policy settings in `Config_Files/` and environment variables.
 
+</details>
+
 ## Running Tests
 
 <details>
@@ -1339,6 +1409,9 @@ All limits are designed to be conservative by default and can be tuned using the
 
 ## Frontend Integration Testing
 
+<details>
+<summary>Frontend integration test helper</summary>
+
 Use the helper script to run frontend unit tests plus smoke checks against a live backend:
 
 ```bash
@@ -1351,6 +1424,8 @@ Notes:
 - Set `TLDW_X_API_KEY=...` for single-user mode (a temporary key is generated if missing).
 - Use `--backend-docker` to start the backend via Docker Compose, or `--skip-backend` if you already have it running.
 - Use `--no-backend-tests` to skip backend integration tests.
+
+</details>
 
 ## CI Status & Smoke Tests
 
@@ -1435,6 +1510,7 @@ Some self-hosted OpenAI-compatible servers reject unknown fields (like `top_k`).
 
 <details>
 <summary>Deployment resources</summary>
+
 - Dockerfiles and compose templates live under `Dockerfiles/` (see `Dockerfiles/README.md`).
 - Reverse proxy samples: `Helper_Scripts/Samples/Nginx/`, `Helper_Scripts/Samples/Caddy/`.
 - Monitoring: `Docs/Deployment/Monitoring/` and `Helper_Scripts/Samples/Grafana/`.
@@ -1460,6 +1536,9 @@ Some self-hosted OpenAI-compatible servers reject unknown fields (like `top_k`).
 
 ## Troubleshooting
 
+<details>
+<summary>Common setup and runtime fixes</summary>
+
 | Issue | Solution |
 |-------|----------|
 | `Connection refused` | Server not running - check `uvicorn` or `docker compose ps` |
@@ -1472,6 +1551,8 @@ Some self-hosted OpenAI-compatible servers reject unknown fields (like `top_k`).
 | Docker issues | Check `docker compose ps` and `docker compose logs -f` |
 
 Quick verify: `curl http://localhost:8000/health` (no auth needed)
+
+</details>
 
 ## Contributing & Support
 
@@ -1506,6 +1587,9 @@ Quick verify: `curl http://localhost:8000/health` (no auth needed)
 
 ## About
 
+<details>
+<summary>Project background and support links</summary>
+
 tldw_server started as a tool to transcribe and summarize YouTube videos and has evolved into a comprehensive media analysis and knowledge management platform for researchers, students, and professionals.
 For extended background and vision, see `Docs/About.md`.
 
@@ -1519,6 +1603,8 @@ See `SECURITY.md` for reporting guidelines and disclosures.
 
 ### Project Guidelines
 See [Project_Guidelines.md](Project_Guidelines.md) for development philosophy and contribution guidelines.
+
+</details>
 
 ## Appendix (Optional)
 
