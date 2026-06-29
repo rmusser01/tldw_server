@@ -38,7 +38,7 @@ Rebase PR #2541 onto latest origin/dev, evaluate all PR review comments, address
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Plan: `Docs/superpowers/plans/2026-06-29-pr2541-review-rebase.md`
-- Rebased PR #2541 onto `origin/dev` at `40d5a2f8db01bc31a4e012de546626389a137a10`.
+- Rebased PR #2541 onto `origin/dev` at `ccd07118855e153780011823155cef6cafa59030`.
 - Addressed actionable review threads:
   - Preserved empty TipTap paragraphs by joining serialized blocks with a consistent `\n\n` separator.
   - Simplified top-level block separator mapping now that every previous block contributes two plain-text separator characters.
@@ -47,13 +47,13 @@ Rebase PR #2541 onto latest origin/dev, evaluate all PR review comments, address
   - Narrowed the prior UAT task summary to WebUI evidence and explicit extension-harness blocked status.
 - Verification:
   - `./node_modules/.bin/vitest run src/components/Option/WritingPlayground/__tests__/writing-tiptap-utils.test.ts src/components/Option/WritingPlayground/__tests__/writing-editor-adapter.test.ts --maxWorkers=1 --no-file-parallelism` passed: 17 tests.
-  - `./node_modules/.bin/vitest run src/components/Option/WritingPlayground/__tests__/WritingTipTapEditor.external-sync.test.tsx src/components/Option/WritingPlayground/__tests__/WritingTipTapEditor.ssr-options.test.tsx src/components/Option/WritingPlayground/__tests__/useActiveManuscriptScene.test.tsx src/components/Option/WritingPlayground/__tests__/writing-editor-adapter.test.ts src/components/Option/WritingPlayground/__tests__/writing-tiptap-utils.test.ts --maxWorkers=1 --no-file-parallelism` passed: 30 tests.
+  - `./node_modules/.bin/vitest run src/components/Option/WritingPlayground/__tests__/WritingTipTapEditor.external-sync.test.tsx src/components/Option/WritingPlayground/__tests__/WritingTipTapEditor.ssr-options.test.tsx src/components/Option/WritingPlayground/__tests__/useActiveManuscriptScene.test.tsx src/components/Option/WritingPlayground/__tests__/writing-editor-adapter.test.ts src/components/Option/WritingPlayground/__tests__/writing-tiptap-utils.test.ts --maxWorkers=1 --no-file-parallelism` passed: 30 tests before and after the final rebase onto `ccd07118855e153780011823155cef6cafa59030`.
   - `git diff --check` passed.
   - `./node_modules/.bin/tsc --noEmit --pretty false` hit Node's default heap limit. Retried as `NODE_OPTIONS=--max-old-space-size=8192 ./node_modules/.bin/tsc --noEmit --pretty false`; after temporarily correcting the local `antd` node_modules symlink for the check, it failed only on existing package-wide diagnostics outside the touched Writing Playground files.
   - Bandit skipped: touched implementation scope is TypeScript/Markdown, not Python.
-- Pushed `0d71a6b1d8b97a81836b5e03fec23721f2e68d14` to `codex/writing-annotations-uat-polish`.
-- Resolved all five actionable inline review threads and posted PR summary comment: https://github.com/rmusser01/tldw_server/pull/2541#issuecomment-4828919427
-- `gh pr view` confirmed PR #2541 remains open against `dev` with head `0d71a6b1d8b97a81836b5e03fec23721f2e68d14`.
+- Pushed the rebased branch to `codex/writing-annotations-uat-polish`.
+- Resolved all five actionable inline review threads and posted a PR summary comment: https://github.com/rmusser01/tldw_server/pull/2541#issuecomment-4828919427
+- `gh pr view` confirmed PR #2541 remains open against `dev`.
 - `gh pr checks` showed newly triggered GitHub checks still pending at handoff.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
