@@ -51,9 +51,6 @@ from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
 )
 from tldw_Server_API.app.api.v1.utils.cache import generate_etag, is_not_modified
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
-from tldw_Server_API.app.api.v1.utils.profile_errors import (
-    classify_profile_update_skips,
-)
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import (
@@ -70,8 +67,17 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_si
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
+from tldw_Server_API.app.core.UserProfiles.contracts import (
+    ProfileContractMode,
+    ProfileReadRequest,
+    ProfileUpdateCommand,
+)
+from tldw_Server_API.app.core.UserProfiles.query_service import ProfileQueryService
+from tldw_Server_API.app.core.UserProfiles.response_mappers import (
+    LegacyProfileCommandResult,
+)
 from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
-from tldw_Server_API.app.core.UserProfiles.update_service import UserProfileUpdateService
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import load_user_profile_catalog
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
@@ -125,6 +131,23 @@ def _profile_error_response(
         errors=errors or [],
     )
     return JSONResponse(status_code=status_code, content=payload.model_dump())
+
+
+def _legacy_profile_command_response(
+    result: LegacyProfileCommandResult,
+) -> UserProfileUpdateResponse | JSONResponse:
+    if result.status_code != status.HTTP_200_OK:
+        return _profile_error_response(
+            status_code=result.status_code,
+            error_code=result.error_code or "profile_update_invalid",
+            detail=result.detail or "One or more updates failed validation",
+            errors=[UserProfileErrorDetail(**item) for item in result.skipped],
+        )
+    return UserProfileUpdateResponse(
+        profile_version=result.profile_version,
+        applied=list(result.applied),
+        skipped=[UserProfileUpdateError(**item) for item in result.skipped],
+    )
 
 
 def _principal_user_id(principal: AuthPrincipal) -> int:
@@ -397,6 +420,7 @@ async def get_current_user_profile_view(
         )
     db_pool = await get_db_pool()
     service = UserProfileService(db_pool)
+    query_service = ProfileQueryService(service)
     user_context = await _resolve_user_context(principal)
     _require_active_verified_user(user_context)
     user_dict: dict[str, Any] = dict(user_context)
@@ -407,13 +431,18 @@ async def get_current_user_profile_view(
         session_manager=session_manager,
         api_key_manager=api_mgr,
     )
-    profile = await service.build_profile(
+    profile = await query_service.build(
+        ProfileReadRequest(
+            actor_user_id=int(user_context["id"]),
+            target_user_id=int(user_context["id"]),
+            sections=frozenset(requested) if requested is not None else None,
+            include_sources=include_sources,
+            include_raw=include_raw,
+            mask_secrets=mask_secrets,
+            contract_mode=ProfileContractMode.LEGACY_V1,
+        ),
         user=user_dict,
-        sections=requested,
         security=security,
-        include_sources=include_sources,
-        include_raw=include_raw,
-        mask_secrets=mask_secrets,
         metrics_scope="self",
     )
     return UserProfileResponse(**profile)
@@ -441,70 +470,33 @@ async def update_current_user_profile(
     _require_active_verified_user(user_context)
     user_id = int(user_context["id"])
     db_pool = await get_db_pool()
-    profile_service = UserProfileService(db_pool)
-    current_version = await profile_service.get_profile_version(user_id=user_id)
-    if payload.profile_version is not None:
-        if not profile_service.versions_match(current_version, payload.profile_version):
-            return _profile_error_response(
-                status_code=status.HTTP_409_CONFLICT,
-                error_code="profile_version_mismatch",
-                detail="profile_version_mismatch",
-                errors=[UserProfileErrorDetail(key="profile_version", message="mismatch")],
-            )
-
-    service = UserProfileUpdateService(db_pool)
-    updates = [(entry.key, entry.value) for entry in payload.updates]
-    preflight = await service.apply_updates(
-        user_id=user_id,
-        updates=updates,
-        roles={"user"},
-        dry_run=True,
+    command = ProfileUpdateCommand(
+        actor_user_id=user_id,
+        target_user_id=user_id,
+        updates=tuple((entry.key, entry.value) for entry in payload.updates),
+        roles=frozenset({"user"}),
+        dry_run=payload.dry_run,
+        expected_profile_version=payload.profile_version,
+        contract_mode=ProfileContractMode.LEGACY_V1,
+    )
+    result = await ProfileCommandService(db_pool=db_pool).apply(
+        command,
         db_conn=db,
-        updated_by=user_id,
+        scope=None,
     )
-
-    error_payload = classify_profile_update_skips(preflight.skipped)
-    if error_payload:
-        status_code, error_code, detail, errors = error_payload
-        return _profile_error_response(
-            status_code=status_code,
-            error_code=error_code,
-            detail=detail,
-            errors=errors,
-        )
-
-    if payload.dry_run:
-        return UserProfileUpdateResponse(
-            profile_version=current_version,
-            applied=preflight.applied,
-            skipped=[],
-        )
-
-    result = await service.apply_updates(
-        user_id=user_id,
-        updates=updates,
-        roles={"user"},
-        dry_run=False,
-        db_conn=db,
-        updated_by=user_id,
-    )
-
-    current_version = await profile_service.get_profile_version(user_id=user_id)
-    skipped = [UserProfileUpdateError(**item) for item in result.skipped]
-    response = UserProfileUpdateResponse(
-        profile_version=current_version,
-        applied=result.applied,
-        skipped=skipped,
-    )
+    response = _legacy_profile_command_response(result)
+    if isinstance(response, JSONResponse):
+        return response
     with contextlib.suppress(_USERS_AUDIT_EXCEPTIONS):
-        await _emit_user_profile_audit_event(
-            http_request,
-            user_id=user_id,
-            update_keys=[entry.key for entry in payload.updates],
-            applied_count=len(result.applied),
-            skipped_count=len(result.skipped),
-            dry_run=False,
-        )
+        if not payload.dry_run:
+            await _emit_user_profile_audit_event(
+                http_request,
+                user_id=user_id,
+                update_keys=[entry.key for entry in payload.updates],
+                applied_count=len(response.applied),
+                skipped_count=len(response.skipped),
+                dry_run=False,
+            )
     return response
 
 

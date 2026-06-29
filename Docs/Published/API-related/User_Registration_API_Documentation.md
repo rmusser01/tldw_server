@@ -243,6 +243,11 @@ Authorization: Bearer <access_token>
 }
 ```
 
+**Profile update compatibility**:
+- v1 profile update responses include `applied` and `skipped` for compatibility.
+- v2 profile single-update responses are atomic all-or-reject and omit `skipped`.
+- Bulk profile updates continue to report per-user partial results.
+
 ---
 
 ### POST /users/change-password

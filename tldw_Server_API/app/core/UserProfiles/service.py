@@ -299,6 +299,47 @@ class UserProfileService:
             return ts.replace(tzinfo=timezone.utc)
         return ts.astimezone(timezone.utc)
 
+    @staticmethod
+    def _row_value(row: Any, key: str, index: int = 0) -> Any | None:
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            return row.get(key)
+        try:
+            return row[key]
+        except _PROFILE_NONCRITICAL_EXCEPTIONS:
+            pass
+        try:
+            return row[index]
+        except _PROFILE_NONCRITICAL_EXCEPTIONS:
+            return None
+
+    async def _fetch_user_updated_at_for_version(
+        self,
+        *,
+        user_id: int,
+        db_conn: Any | None,
+        lock_user: bool,
+    ) -> Any | None:
+        is_postgres_backend = bool(getattr(self._db_pool, "pool", None))
+        if is_postgres_backend:
+            query = "SELECT updated_at FROM users WHERE id = $1"
+            if lock_user:
+                query += " FOR UPDATE"
+            if db_conn is not None and hasattr(db_conn, "fetchrow"):
+                row = await db_conn.fetchrow(query, user_id)
+                return self._row_value(row, "updated_at")
+            row = await self._db_pool.fetchone(query, user_id)
+            return self._row_value(row, "updated_at")
+
+        query = "SELECT updated_at FROM users WHERE id = ?"
+        if db_conn is not None:
+            cursor = await db_conn.execute(query, (user_id,))
+            row = await cursor.fetchone()
+            return self._row_value(row, "updated_at")
+        row = await self._db_pool.fetchone(query, (user_id,))
+        return self._row_value(row, "updated_at")
+
     @classmethod
     def versions_match(cls, current: Any, expected: Any) -> bool:
         current_ts = cls._normalize_timestamp(current)
@@ -726,20 +767,23 @@ class UserProfileService:
         *,
         user_id: int,
         user_updated_at: Any | None = None,
+        db_conn: Any | None = None,
+        lock_user: bool = False,
     ) -> datetime:
         user_ts = self._normalize_timestamp(user_updated_at)
         if user_ts is None:
-            row = await self._db_pool.fetchone(
-                "SELECT updated_at FROM users WHERE id = $1",
-                user_id,
+            user_updated_at = await self._fetch_user_updated_at_for_version(
+                user_id=user_id,
+                db_conn=db_conn,
+                lock_user=lock_user,
             )
-            user_ts = self._normalize_timestamp(row.get("updated_at") if row else None)
+            user_ts = self._normalize_timestamp(user_updated_at)
 
         override_ts: datetime | None = None
         try:
             repo = UserProfileOverridesRepo(self._db_pool)
             await repo.ensure_tables()
-            override_raw = await repo.get_latest_update_for_user(user_id)
+            override_raw = await repo.get_latest_update_for_user(user_id, db_conn=db_conn)
             override_ts = self._normalize_timestamp(override_raw)
         except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Overrides timestamp lookup failed for user {}: {}", user_id, exc)
