@@ -5,6 +5,7 @@ Tests the main service logic, adapter selection, and request processing
 with mocked dependencies.
 """
 
+import base64
 import pytest
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 import asyncio
@@ -805,6 +806,404 @@ async def test_custom_voice_stores_qwen3_prompt_metadata(tts_service, monkeypatc
     assert metadata is not None
     assert metadata.voice_clone_prompt_b64 == "PROMPTDATA"
     assert metadata.voice_clone_prompt_format == "qwen3_tts_prompt_v1"
+
+
+@pytest.mark.unit
+async def test_fish_custom_voice_reuses_remote_reference_metadata(tts_service, monkeypatch):
+    class _FakeVoiceManager:
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            return b"audio-bytes"
+
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(
+                voice_id=voice_id,
+                reference_text="stored text",
+                provider_artifacts={
+                    "fish_s2": {
+                        "remote_reference_id": "tldw_u1_voice-1",
+                        "reference_text": "stored text",
+                    }
+                },
+            )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+
+    req = OpenAISpeechRequest(
+        model="fish_s2",
+        input="hello",
+        voice="custom:voice-1",
+        response_format="wav",
+        stream=False,
+    )
+    tts_request = tts_service._convert_request(req)
+
+    await tts_service._apply_custom_voice_reference(tts_request, user_id=1, provider_hint="fish_s2")
+    await tts_service._apply_fish_s2_reference_context(tts_request, user_id=1, provider_hint="fish_s2")
+
+    assert tts_request.extra_params.get("reference_id") == "tldw_u1_voice-1"
+    assert "references" not in tts_request.extra_params
+
+
+@pytest.mark.unit
+async def test_fish_custom_voice_falls_back_to_inline_reference(tts_service, monkeypatch):
+    class _FakeVoiceManager:
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            return b"audio-bytes"
+
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(
+                voice_id=voice_id,
+                reference_text="stored text",
+                provider_artifacts={},
+            )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+
+    req = OpenAISpeechRequest(
+        model="fish_s2",
+        input="hello",
+        voice="custom:voice-1",
+        response_format="wav",
+        stream=False,
+    )
+    tts_request = tts_service._convert_request(req)
+
+    await tts_service._apply_custom_voice_reference(tts_request, user_id=1, provider_hint="fish_s2")
+    await tts_service._apply_fish_s2_reference_context(tts_request, user_id=1, provider_hint="fish_s2")
+
+    assert tts_request.extra_params.get("reference_id") is None
+    assert tts_request.extra_params.get("references") == [
+        {
+            "audio_b64": base64.b64encode(b"audio-bytes").decode("ascii"),
+            "text": "stored text",
+        }
+    ]
+
+
+@pytest.mark.unit
+async def test_fish_reference_id_resolves_local_voice_id(tts_service, monkeypatch):
+    class _FakeVoiceManager:
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            return b"audio-bytes"
+
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(
+                voice_id=voice_id,
+                reference_text="stored text",
+                provider_artifacts={
+                    "fish_s2": {
+                        "remote_reference_id": "tldw_u1_voice-1",
+                    }
+                },
+            )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+
+    req = OpenAISpeechRequest(
+        model="fish_s2",
+        input="hello",
+        voice="alloy",
+        response_format="wav",
+        stream=False,
+        extra_params={"reference_id": "voice-1"},
+    )
+    tts_request = tts_service._convert_request(req)
+
+    await tts_service._apply_fish_s2_reference_context(tts_request, user_id=1, provider_hint="fish_s2")
+
+    assert tts_request.extra_params.get("reference_id") == "tldw_u1_voice-1"
+
+
+@pytest.mark.unit
+async def test_create_fish_s2_reference_persists_remote_mapping(tts_service, monkeypatch):
+    saved = {}
+
+    class _FakeVoiceManager:
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(voice_id=voice_id, reference_text="stored text")
+
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            return b"audio-bytes"
+
+        async def save_reference_metadata(self, user_id, metadata):
+            saved["metadata"] = metadata
+
+    class _FakeAdapter:
+        async def add_reference(self, *, reference_id, audio_b64, reference_text, title=None, description=None):
+            return {"reference_id": reference_id}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+    monkeypatch.setattr(tts_service, "_get_adapter", AsyncMock(return_value=_FakeAdapter()))
+
+    result = await tts_service.create_fish_s2_reference(
+        user_id=1,
+        voice_id="voice-1",
+        reference_text="stored text",
+    )
+
+    assert result["reference_id"] == "voice-1"
+    assert result["remote_reference_id"] == "tldw_u1_voice-1"
+    metadata = saved["metadata"]
+    assert metadata.provider_artifacts["fish_s2"]["remote_reference_id"] == "tldw_u1_voice-1"
+    assert metadata.provider_artifacts["fish_s2"]["reference_text"] == "stored text"
+
+
+@pytest.mark.unit
+async def test_create_fish_s2_reference_uses_hosted_remote_id(tts_service, monkeypatch):
+    saved = {}
+
+    class _FakeVoiceManager:
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(voice_id=voice_id, reference_text="stored text")
+
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            return b"audio-bytes"
+
+        async def save_reference_metadata(self, user_id, metadata):
+            saved["metadata"] = metadata
+
+    class _FakeAdapter:
+        def __init__(self):
+            self.add_calls = []
+
+        async def add_reference(self, *, reference_id, audio_b64, reference_text, title=None, description=None):
+            self.add_calls.append(
+                {
+                    "reference_id": reference_id,
+                    "audio_b64": audio_b64,
+                    "reference_text": reference_text,
+                    "title": title,
+                    "description": description,
+                }
+            )
+            return {
+                "reference_id": "fish-hosted-model-id",
+                "remote_reference_id": "fish-hosted-model-id",
+            }
+
+    adapter = _FakeAdapter()
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+    monkeypatch.setattr(tts_service, "_get_adapter", AsyncMock(return_value=adapter))
+
+    result = await tts_service.create_fish_s2_reference(
+        user_id=1,
+        voice_id="voice-1",
+        name="Voice One",
+        description="private clone",
+        reference_text="stored text",
+    )
+
+    assert result["reference_id"] == "voice-1"
+    assert result["remote_reference_id"] == "fish-hosted-model-id"
+    assert adapter.add_calls == [
+        {
+            "reference_id": "tldw_u1_voice-1",
+            "audio_b64": base64.b64encode(b"audio-bytes").decode("ascii"),
+            "reference_text": "stored text",
+            "title": "Voice One",
+            "description": "private clone",
+        }
+    ]
+    metadata = saved["metadata"]
+    assert metadata.provider_artifacts["fish_s2"]["remote_reference_id"] == "fish-hosted-model-id"
+    assert metadata.provider_artifacts["fish_s2"]["local_reference_id"] == "tldw_u1_voice-1"
+    assert metadata.provider_artifacts["fish_s2"]["reference_text"] == "stored text"
+
+
+@pytest.mark.unit
+async def test_create_fish_s2_reference_returns_cached_mapping(tts_service, monkeypatch):
+    class _FakeVoiceManager:
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(
+                voice_id=voice_id,
+                reference_text="stored text",
+                provider_artifacts={
+                    "fish_s2": {
+                        "remote_reference_id": "tldw_u1_voice-1",
+                        "reference_text": "stored text",
+                    }
+                },
+            )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+    get_adapter = AsyncMock()
+    monkeypatch.setattr(tts_service, "_get_adapter", get_adapter)
+
+    result = await tts_service.create_fish_s2_reference(
+        user_id=1,
+        voice_id="voice-1",
+    )
+
+    assert result["cached"] is True
+    assert result["remote_reference_id"] == "tldw_u1_voice-1"
+    get_adapter.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_create_fish_s2_reference_force_clears_stale_mapping_when_recreate_fails(tts_service, monkeypatch):
+    saved = []
+    metadata = VoiceReferenceMetadata(
+        voice_id="voice-1",
+        reference_text="stored text",
+        provider_artifacts={
+            "fish_s2": {
+                "remote_reference_id": "old-fish-model",
+                "reference_text": "stored text",
+            }
+        },
+    )
+
+    class _FakeVoiceManager:
+        async def load_reference_metadata(self, user_id, voice_id):
+            return metadata
+
+        async def load_voice_reference_audio(self, user_id, voice_id):
+            return b"audio-bytes"
+
+        async def save_reference_metadata(self, user_id, metadata_arg):
+            saved.append(dict(metadata_arg.provider_artifacts))
+
+    class _FakeAdapter:
+        def __init__(self):
+            self.deleted = []
+
+        async def delete_reference(self, *, reference_id):
+            self.deleted.append(reference_id)
+            return True
+
+        async def add_reference(self, **_kwargs):
+            raise TTSProviderError("Fish upstream unavailable", provider="fish_s2")
+
+    adapter = _FakeAdapter()
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+    monkeypatch.setattr(tts_service, "_get_adapter", AsyncMock(return_value=adapter))
+
+    with pytest.raises(TTSProviderError):
+        await tts_service.create_fish_s2_reference(
+            user_id=1,
+            voice_id="voice-1",
+            force=True,
+        )
+
+    assert adapter.deleted == ["old-fish-model"]
+    assert saved
+    assert "fish_s2" not in saved[-1]
+    assert "fish_s2" not in metadata.provider_artifacts
+
+
+@pytest.mark.unit
+async def test_delete_fish_s2_reference_clears_remote_mapping(tts_service, monkeypatch):
+    saved = {}
+
+    class _FakeVoiceManager:
+        async def load_reference_metadata(self, user_id, voice_id):
+            return VoiceReferenceMetadata(
+                voice_id=voice_id,
+                reference_text="stored text",
+                provider_artifacts={
+                    "fish_s2": {
+                        "remote_reference_id": "tldw_u1_voice-1",
+                        "reference_text": "stored text",
+                    }
+                },
+            )
+
+        async def save_reference_metadata(self, user_id, metadata):
+            saved["metadata"] = metadata
+
+    class _FakeAdapter:
+        def __init__(self):
+            self.calls = []
+
+        async def delete_reference(self, *, reference_id):
+            self.calls.append(reference_id)
+            return True
+
+    adapter = _FakeAdapter()
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+    monkeypatch.setattr(tts_service, "_get_adapter", AsyncMock(return_value=adapter))
+
+    result = await tts_service.delete_fish_s2_reference(user_id=1, reference_id="voice-1")
+
+    assert result["deleted"] is True
+    assert adapter.calls == ["tldw_u1_voice-1"]
+    assert saved["metadata"].provider_artifacts == {}
+
+
+@pytest.mark.unit
+async def test_list_fish_s2_references_reads_local_metadata(tts_service, monkeypatch):
+    class _Voice:
+        def __init__(self, voice_id, name):
+            self.voice_id = voice_id
+            self.name = name
+
+    class _FakeVoiceManager:
+        async def list_user_voices(self, user_id, refresh=False):
+            return [_Voice("voice-1", "Voice One"), _Voice("voice-2", "Voice Two")]
+
+        async def load_reference_metadata(self, user_id, voice_id):
+            if voice_id == "voice-1":
+                return VoiceReferenceMetadata(
+                    voice_id=voice_id,
+                    reference_text="stored text",
+                    provider_artifacts={
+                        "fish_s2": {
+                            "remote_reference_id": "tldw_u1_voice-1",
+                            "reference_text": "stored text",
+                        }
+                    },
+                )
+            return VoiceReferenceMetadata(voice_id=voice_id, reference_text="other text")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.voice_manager.get_voice_manager",
+        lambda: _FakeVoiceManager(),
+        raising=True,
+    )
+
+    result = await tts_service.list_fish_s2_references(user_id=1)
+
+    assert result == [
+        {
+            "reference_id": "voice-1",
+            "voice_id": "voice-1",
+            "name": "Voice One",
+            "reference_text": "stored text",
+            "remote_reference_id": "tldw_u1_voice-1",
+        }
+    ]
 
 # ========================================================================
 # Caching Tests

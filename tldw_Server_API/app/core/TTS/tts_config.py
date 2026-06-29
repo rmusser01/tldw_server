@@ -42,6 +42,7 @@ REDACTED_SECRET = "********"  # nosec B105
 class ProviderConfig(BaseModel):
     """Configuration for a single TTS provider"""
     enabled: bool = False
+    backend: Optional[str] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     runtime: Optional[str] = None
@@ -408,12 +409,15 @@ class TTSConfigManager:
         config_dict = {}
 
         # Check for provider API keys
-        api_key_env_vars = {
-            'OPENAI_API_KEY': ('openai', 'api_key'),
-            'ELEVENLABS_API_KEY': ('elevenlabs', 'api_key'),
-        }
+        api_key_env_vars = (
+            ('OPENAI_API_KEY', ('openai', 'api_key')),
+            ('ELEVENLABS_API_KEY', ('elevenlabs', 'api_key')),
+            ('ANTHROPIC_API_KEY', ('anthropic', 'api_key')),
+            ('FISH_API_KEY', ('fish_s2', 'api_key')),
+            ('FISH_AUDIO_API_KEY', ('fish_s2', 'api_key')),
+        )
 
-        for env_var, (provider, field) in api_key_env_vars.items():
+        for env_var, (provider, field) in api_key_env_vars:
             value = os.getenv(env_var)
             if value:
                 if 'providers' not in config_dict:

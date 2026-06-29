@@ -196,6 +196,10 @@ class ProviderLimits:
             "valid_formats": {"mp3", "opus", "aac", "flac", "wav", "pcm"},
             "min_speed": 0.25,
             "max_speed": 4.0,
+        },
+        "fish_s2": {
+            "max_text_length": 5000,
+            "valid_formats": {"wav", "mp3", "opus", "pcm"},
         }
     }
 
@@ -300,6 +304,7 @@ class TTSInputValidator:
         "lux_tts": 5000,
         "qwen3_tts": 5000,
         "omnivoice": 5000,
+        "fish_s2": 5000,
         "default": 5000,
     }
 
@@ -357,6 +362,7 @@ class TTSInputValidator:
         "lux_tts": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.FLAC, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.PCM},
         "qwen3_tts": {AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.WAV, AudioFormat.PCM},
         "omnivoice": {AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.FLAC, AudioFormat.WAV, AudioFormat.PCM},
+        "fish_s2": {AudioFormat.WAV, AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.PCM},
     }
 
     # Voice reference file validation

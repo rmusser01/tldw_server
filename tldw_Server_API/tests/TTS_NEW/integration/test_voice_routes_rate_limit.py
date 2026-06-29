@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
+from tldw_Server_API.app.api.v1.endpoints.audio import audio
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_voices
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
@@ -16,7 +16,7 @@ def client(monkeypatch):
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
     reset_settings()
     app = FastAPI()
-    app.include_router(audio_router, prefix="/api/v1/audio")
+    app.include_router(audio_voices.router, prefix="/api/v1/audio")
 
     async def _deny_rate_limit():
         raise HTTPException(status_code=429, detail="rate limited in test")
@@ -54,7 +54,7 @@ def _extract_token_scope_dependency(route: APIRoute):
 
 def test_voice_routes_use_granular_endpoint_ids_and_voice_counter():
     app = FastAPI()
-    app.include_router(audio_router, prefix="/api/v1/audio")
+    app.include_router(audio_voices.router, prefix="/api/v1/audio")
 
     expectations = [
         ("POST", "/api/v1/audio/voices/upload", "audio.voices.upload"),
@@ -63,6 +63,9 @@ def test_voice_routes_use_granular_endpoint_ids_and_voice_counter():
         ("GET", "/api/v1/audio/voices/{voice_id}", "audio.voices.get"),
         ("DELETE", "/api/v1/audio/voices/{voice_id}", "audio.voices.delete"),
         ("POST", "/api/v1/audio/voices/{voice_id}/preview", "audio.voices.preview"),
+        ("POST", "/api/v1/audio/providers/fish_s2/references", "audio.voices.upload"),
+        ("GET", "/api/v1/audio/providers/fish_s2/references", "audio.voices.list"),
+        ("DELETE", "/api/v1/audio/providers/fish_s2/references/{reference_id}", "audio.voices.delete"),
     ]
 
     for method, path, endpoint_id in expectations:
@@ -70,3 +73,11 @@ def test_voice_routes_use_granular_endpoint_ids_and_voice_counter():
         scope_dep = _extract_token_scope_dependency(route)
         assert getattr(scope_dep, "_tldw_endpoint_id", None) == endpoint_id
         assert getattr(scope_dep, "_tldw_count_as", None) == "voice_call"
+
+
+def test_audio_aggregate_mounts_presets_and_voice_conversion_routes():
+    app = FastAPI()
+    app.include_router(audio.router, prefix="/api/v1/audio")
+
+    assert _find_route(app, "GET", "/api/v1/audio/presets")
+    assert _find_route(app, "POST", "/api/v1/audio/voice-conversion")

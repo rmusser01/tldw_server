@@ -466,6 +466,7 @@ class TTSServiceV2:
                 config=self._get_validation_config(),
             )
             await self._apply_custom_voice_reference(tts_request, user_id, provider_hint)
+            await self._apply_fish_s2_reference_context(tts_request, user_id, provider_hint)
 
             adapter = await self._get_adapter(request.model, provider, overrides=provider_overrides)
             if not adapter and fallback:
@@ -2685,6 +2686,252 @@ class TTSServiceV2:
                 request_id or "unknown",
                 exc,
             )
+
+    async def _apply_fish_s2_reference_context(
+        self,
+        request: TTSRequest,
+        user_id: Optional[int],
+        provider_hint: Optional[str],
+    ) -> None:
+        """Resolve Fish S2 logical references into backend-ready request fields."""
+        if not user_id or (provider_hint or "").lower() != "fish_s2":
+            return
+
+        extras = request.extra_params or {}
+        if not isinstance(extras, dict):
+            extras = {}
+
+        explicit_reference_id = extras.get("reference_id")
+        local_voice_id: Optional[str] = None
+        if isinstance(explicit_reference_id, str) and explicit_reference_id.strip():
+            local_voice_id = explicit_reference_id.strip()
+        elif isinstance(request.voice, str) and request.voice.startswith("custom:"):
+            local_voice_id = request.voice.split("custom:", 1)[-1].strip() or None
+
+        if not local_voice_id:
+            request.extra_params = extras
+            return
+
+        try:
+            from tldw_Server_API.app.core.TTS.voice_manager import VoiceProcessingError, get_voice_manager
+
+            voice_manager = get_voice_manager()
+            metadata = await voice_manager.load_reference_metadata(user_id, local_voice_id)
+
+            fish_artifacts = {}
+            if metadata and isinstance(metadata.provider_artifacts, dict):
+                fish_artifacts = metadata.provider_artifacts.get("fish_s2") or {}
+
+            remote_reference_id = None
+            if isinstance(fish_artifacts, dict):
+                remote_reference_id = fish_artifacts.get("remote_reference_id") or fish_artifacts.get("reference_id")
+
+            if remote_reference_id:
+                extras["reference_id"] = str(remote_reference_id)
+                extras.pop("references", None)
+                request.extra_params = extras
+                return
+
+            reference_text = (
+                extras.get("reference_text")
+                or extras.get("ref_text")
+                or extras.get("voice_reference_text")
+                or (fish_artifacts.get("reference_text") if isinstance(fish_artifacts, dict) else None)
+                or (metadata.reference_text if metadata else None)
+            )
+
+            voice_bytes = request.voice_reference
+            if voice_bytes is None:
+                try:
+                    voice_bytes = await voice_manager.load_voice_reference_audio(user_id, local_voice_id)
+                    request.voice_reference = voice_bytes
+                except VoiceProcessingError:
+                    voice_bytes = None
+
+            if isinstance(voice_bytes, (bytes, bytearray)) and reference_text:
+                extras.pop("reference_id", None)
+                extras["references"] = [
+                    {
+                        "audio_b64": base64.b64encode(bytes(voice_bytes)).decode("ascii"),
+                        "text": str(reference_text),
+                    }
+                ]
+
+            request.extra_params = extras
+        except _TTS_NONCRITICAL_EXCEPTIONS as exc:
+            request_id, _ = self._get_tts_request_observability(request)
+            logger.debug(
+                "Fish S2 reference resolution failed for {} (request_id={}): {}",
+                local_voice_id,
+                request_id or "unknown",
+                exc,
+            )
+
+    async def create_fish_s2_reference(
+        self,
+        *,
+        user_id: int,
+        voice_id: Optional[str] = None,
+        file_content: Optional[bytes] = None,
+        filename: Optional[str] = None,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        reference_text: Optional[str] = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Create or reuse a managed Fish S2 reference backed by local voice metadata."""
+        from tldw_Server_API.app.core.TTS.voice_manager import (
+            VoiceProcessingError,
+            VoiceReferenceMetadata,
+            VoiceUploadRequest,
+            get_voice_manager,
+        )
+
+        voice_manager = get_voice_manager()
+
+        resolved_voice_id = voice_id
+        if not resolved_voice_id:
+            if not file_content or not filename or not name or not reference_text:
+                raise VoiceProcessingError(
+                    "file, filename, name, and reference_text are required when voice_id is not provided"
+                )
+            upload_request = VoiceUploadRequest(
+                name=name,
+                description=description,
+                provider="fish_s2",
+                reference_text=reference_text,
+            )
+            upload_result = await voice_manager.upload_voice(
+                user_id=user_id,
+                file_content=file_content,
+                filename=filename,
+                request=upload_request,
+            )
+            resolved_voice_id = upload_result.voice_id
+
+        metadata = await voice_manager.load_reference_metadata(user_id, resolved_voice_id)
+        if metadata is None:
+            metadata = VoiceReferenceMetadata(voice_id=resolved_voice_id)
+        if reference_text:
+            metadata.reference_text = reference_text.strip() or None
+
+        fish_artifacts = metadata.provider_artifacts.get("fish_s2") or {}
+        existing_remote_reference_id = fish_artifacts.get("remote_reference_id")
+        if existing_remote_reference_id and not force:
+            return {
+                "reference_id": resolved_voice_id,
+                "voice_id": resolved_voice_id,
+                "remote_reference_id": existing_remote_reference_id,
+                "reference_text": fish_artifacts.get("reference_text") or metadata.reference_text,
+                "cached": True,
+            }
+
+        voice_bytes = await voice_manager.load_voice_reference_audio(user_id, resolved_voice_id)
+        resolved_reference_text = metadata.reference_text
+        if not resolved_reference_text:
+            raise VoiceProcessingError("reference_text is required for Fish S2 references")
+
+        adapter = await self._get_adapter("fish_s2", provider="fish_s2")
+        if adapter is None or not hasattr(adapter, "add_reference"):
+            raise TTSProviderNotConfiguredError("Fish S2 adapter is not available", provider="fish_s2")
+
+        local_reference_id = self._build_fish_s2_remote_reference_id(user_id, resolved_voice_id)
+        if force and existing_remote_reference_id and hasattr(adapter, "delete_reference"):
+            try:
+                delete_result = await adapter.delete_reference(reference_id=str(existing_remote_reference_id))
+            except _TTS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Fish S2 remote reference delete failed before recreation")
+            else:
+                if delete_result is not False:
+                    metadata.provider_artifacts.pop("fish_s2", None)
+                    await voice_manager.save_reference_metadata(user_id, metadata)
+
+        adapter_result = await adapter.add_reference(
+            reference_id=local_reference_id,
+            audio_b64=base64.b64encode(voice_bytes).decode("ascii"),
+            reference_text=resolved_reference_text,
+            title=name or resolved_voice_id,
+            description=description,
+        )
+        remote_reference_id = local_reference_id
+        if isinstance(adapter_result, dict):
+            remote_reference_id = str(
+                adapter_result.get("remote_reference_id")
+                or adapter_result.get("reference_id")
+                or local_reference_id
+            )
+
+        metadata.provider_artifacts["fish_s2"] = {
+            "remote_reference_id": remote_reference_id,
+            "local_reference_id": local_reference_id,
+            "reference_text": resolved_reference_text,
+        }
+        await voice_manager.save_reference_metadata(user_id, metadata)
+        return {
+            "reference_id": resolved_voice_id,
+            "voice_id": resolved_voice_id,
+            "remote_reference_id": remote_reference_id,
+            "reference_text": resolved_reference_text,
+            "cached": False,
+        }
+
+    async def list_fish_s2_references(self, *, user_id: int) -> list[dict[str, Any]]:
+        """List Fish S2 managed references from local voice metadata."""
+        from tldw_Server_API.app.core.TTS.voice_manager import get_voice_manager
+
+        voice_manager = get_voice_manager()
+        voices = await voice_manager.list_user_voices(user_id, refresh=True)
+        references: list[dict[str, Any]] = []
+
+        for voice in voices:
+            voice_id = getattr(voice, "voice_id", None)
+            if not voice_id:
+                continue
+            metadata = await voice_manager.load_reference_metadata(user_id, voice_id)
+            if metadata is None:
+                continue
+            fish_artifacts = metadata.provider_artifacts.get("fish_s2") or {}
+            remote_reference_id = fish_artifacts.get("remote_reference_id")
+            if not remote_reference_id:
+                continue
+            references.append(
+                {
+                    "reference_id": voice_id,
+                    "voice_id": voice_id,
+                    "name": getattr(voice, "name", voice_id),
+                    "reference_text": fish_artifacts.get("reference_text") or metadata.reference_text,
+                    "remote_reference_id": remote_reference_id,
+                }
+            )
+
+        return references
+
+    async def delete_fish_s2_reference(self, *, user_id: int, reference_id: str) -> dict[str, Any]:
+        """Delete a Fish S2 managed reference while preserving the local voice record."""
+        from tldw_Server_API.app.core.TTS.voice_manager import VoiceProcessingError, get_voice_manager
+
+        voice_manager = get_voice_manager()
+        metadata = await voice_manager.load_reference_metadata(user_id, reference_id)
+        if metadata is None:
+            raise VoiceProcessingError(f"Fish S2 reference not found: {reference_id}")
+
+        fish_artifacts = metadata.provider_artifacts.get("fish_s2") or {}
+        remote_reference_id = fish_artifacts.get("remote_reference_id")
+        if not remote_reference_id:
+            raise VoiceProcessingError(f"Fish S2 reference not found: {reference_id}")
+
+        adapter = await self._get_adapter("fish_s2", provider="fish_s2")
+        if adapter is None or not hasattr(adapter, "delete_reference"):
+            raise TTSProviderNotConfiguredError("Fish S2 adapter is not available", provider="fish_s2")
+
+        await adapter.delete_reference(reference_id=str(remote_reference_id))
+        metadata.provider_artifacts.pop("fish_s2", None)
+        await voice_manager.save_reference_metadata(user_id, metadata)
+        return {"reference_id": reference_id, "deleted": True}
+
+    @staticmethod
+    def _build_fish_s2_remote_reference_id(user_id: int, voice_id: str) -> str:
+        return f"tldw_u{user_id}_{voice_id}"
 
     async def _get_adapter(
         self,

@@ -54,6 +54,14 @@ def _safe_exception_label(exc: BaseException) -> str:
     return type(exc).__name__
 
 
+def _non_empty_str(value: object) -> Optional[str]:
+    """Return stripped text for non-empty strings."""
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 class TTSProvider(Enum):
     """
     Enumeration of TTS providers known to the service.
@@ -82,6 +90,7 @@ class TTSProvider(Enum):
     OMNIVOICE = "omnivoice"
     LUX_TTS = "lux_tts"
     KITTEN_TTS = "kitten_tts"
+    FISH_S2 = "fish_s2"
     # Additional providers
     ALLTALK = "alltalk"  # TODO: Implement AllTalk adapter
     MOCK = "mock"  # Mock provider for testing
@@ -118,6 +127,9 @@ def _build_tts_provider_aliases() -> dict[str, TTSProvider]:
         "echotts": TTSProvider.ECHO_TTS,
         "kittentts": TTSProvider.KITTEN_TTS,
         "vibevoice-asr": TTSProvider.VIBEVOICE,
+        "fish-s2-pro": TTSProvider.FISH_S2,
+        "s2-pro": TTSProvider.FISH_S2,
+        "fishaudio/s2-pro": TTSProvider.FISH_S2,
     }
     for alias, provider in explicit_aliases.items():
         for token in _provider_alias_tokens(alias):
@@ -294,6 +306,7 @@ class TTSAdapterRegistry:
         TTSProvider.OMNIVOICE: "tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter.OmniVoiceAdapter",
         TTSProvider.LUX_TTS: "tldw_Server_API.app.core.TTS.adapters.luxtts_adapter.LuxTTSAdapter",
         TTSProvider.KITTEN_TTS: "tldw_Server_API.app.core.TTS.adapters.kitten_tts_adapter.KittenTTSAdapter",
+        TTSProvider.FISH_S2: "tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter.FishS2Adapter",
     }
 
     @classmethod
@@ -640,16 +653,32 @@ class TTSAdapterRegistry:
                     logger.info(f"Provider {provider.value} is disabled in configuration")
                     return False
                 if explicit_enabled is None:
-                    remote_providers = {TTSProvider.OPENAI, TTSProvider.ELEVENLABS}
+                    remote_providers = {
+                        TTSProvider.OPENAI,
+                        TTSProvider.ELEVENLABS,
+                        TTSProvider.FISH_S2,
+                    }
                     if provider in remote_providers:
                         # Consider provider enabled if API key is supplied via config or env
                         api_key: Optional[str] = None
                         if provider == TTSProvider.OPENAI:
-                            api_key = (self.config.get("openai_api_key")
-                                       or os.getenv("OPENAI_API_KEY"))
+                            api_key = (
+                                _non_empty_str(provider_config.get("api_key"))
+                                or _non_empty_str(provider_config.get("openai_api_key"))
+                                or _non_empty_str(os.getenv("OPENAI_API_KEY"))
+                            )
                         elif provider == TTSProvider.ELEVENLABS:
-                            api_key = (self.config.get("elevenlabs_api_key")
-                                       or os.getenv("ELEVENLABS_API_KEY"))
+                            api_key = (
+                                _non_empty_str(provider_config.get("api_key"))
+                                or _non_empty_str(provider_config.get("elevenlabs_api_key"))
+                                or _non_empty_str(os.getenv("ELEVENLABS_API_KEY"))
+                            )
+                        elif provider == TTSProvider.FISH_S2:
+                            api_key = (
+                                _non_empty_str(provider_config.get("api_key"))
+                                or _non_empty_str(os.getenv("FISH_AUDIO_API_KEY"))
+                                or _non_empty_str(os.getenv("FISH_API_KEY"))
+                            )
                         if not api_key:
                             logger.info(
                                 f"Provider {provider.value} is disabled (no credentials found)"
@@ -723,13 +752,34 @@ class TTSAdapterRegistry:
                 cfg = model_dump_compat(provider_cfg)
                 return _apply_provider_aliases(provider.value, cfg)
 
-        # Fallback to legacy config
+        # Fallback to legacy/direct dict config
         provider_config = self.config.copy()
+
+        providers_cfg = self.config.get("providers")
+        if isinstance(providers_cfg, dict):
+            nested_provider_config = providers_cfg.get(provider.value)
+            if nested_provider_config is not None and not isinstance(nested_provider_config, dict):
+                nested_provider_config = model_dump_compat(nested_provider_config)
+            if isinstance(nested_provider_config, dict):
+                provider_config.update(nested_provider_config)
 
         # Add provider-specific overrides
         provider_key = f"{provider.value}_config"
         if provider_key in self.config:
             provider_config.update(self.config[provider_key])
+
+        if provider == TTSProvider.OPENAI:
+            env_api_key = _non_empty_str(os.getenv("OPENAI_API_KEY"))
+        elif provider == TTSProvider.ELEVENLABS:
+            env_api_key = _non_empty_str(os.getenv("ELEVENLABS_API_KEY"))
+        elif provider == TTSProvider.FISH_S2:
+            env_api_key = _non_empty_str(os.getenv("FISH_AUDIO_API_KEY")) or _non_empty_str(
+                os.getenv("FISH_API_KEY")
+            )
+        else:
+            env_api_key = None
+        if env_api_key and not _non_empty_str(provider_config.get("api_key")):
+            provider_config["api_key"] = env_api_key
 
         return _apply_provider_aliases(provider.value, provider_config)
 
@@ -1204,6 +1254,13 @@ class TTSAdapterFactory:
         "kittenml/kitten-tts-nano-0.8": TTSProvider.KITTEN_TTS,
         "kittenml/kitten-tts-nano-0.8-fp32": TTSProvider.KITTEN_TTS,
         "kittenml/kitten-tts-nano-0.8-int8": TTSProvider.KITTEN_TTS,
+
+        # Fish Audio S2 models
+        "fish_s2": TTSProvider.FISH_S2,
+        "fish-s2": TTSProvider.FISH_S2,
+        "fish-s2-pro": TTSProvider.FISH_S2,
+        "s2-pro": TTSProvider.FISH_S2,
+        "fishaudio/s2-pro": TTSProvider.FISH_S2,
     }
 
     def __init__(self, config: Optional[dict[str, Any]] = None):
