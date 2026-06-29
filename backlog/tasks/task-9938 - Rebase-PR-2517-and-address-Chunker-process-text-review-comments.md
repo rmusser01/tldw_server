@@ -1,7 +1,7 @@
 ---
 id: TASK-9938
 title: Rebase PR 2517 and address Chunker process_text review comments
-status: In Progress
+status: Done
 labels:
 - pr-review
 - chunking
@@ -18,10 +18,10 @@ Rebase PR #2517 on latest dev, inspect active review comments, implement verifie
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 PR #2517 branch is rebased onto latest origin/dev without unresolved conflicts.
-- [ ] #2 All active review comments are inventoried, technically verified, and either fixed or answered with rationale.
-- [ ] #3 Focused tests, compile checks, shard coverage or relevant CI guard checks, and Bandit on touched production code are run as applicable.
-- [ ] #4 Updated branch is pushed and review threads are replied to/resolved.
+- [x] #1 PR #2517 branch is rebased onto latest origin/dev without unresolved conflicts.
+- [x] #2 All active review comments are inventoried, technically verified, and either fixed or answered with rationale.
+- [x] #3 Focused tests, compile checks, shard coverage or relevant CI guard checks, and Bandit on touched production code are run as applicable.
+- [x] #4 Updated branch is pushed and review threads are replied to/resolved.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -43,18 +43,19 @@ Rebase PR #2517 on latest dev, inspect active review comments, implement verifie
   - `python -m bandit -r ... -f json -o /tmp/bandit_pr2517.json` -> 0 findings.
   - `python Helper_Scripts/ci/check_shard_coverage.py --ci-file .github/workflows/ci.yml` -> passed (`new_uncovered=0`).
   - Full `tldw_Server_API/tests/Chunking` run under sandbox passed 402 tests with 4 skips and failed 6 tokenizer tests due blocked `huggingface.co` DNS; rerunning those 6 failures with network access passed.
+- Pushed the rebased PR branch with `--force-with-lease` and resolved all 6 open GitHub review threads.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+PR #2517 was rebased onto latest `dev`, review feedback was addressed, focused/local verification passed, and all open review threads were resolved. GitHub checks were restarted by the branch push and were pending at handoff.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Backlog task and implementation plan are updated with verification evidence.
-- [ ] #2 Code changes are committed with a clear message.
-- [ ] #3 No unrelated dirty files are staged or modified.
-- [ ] #4 PR branch is pushed to GitHub and remaining check status is reported.
+- [x] #1 Backlog task and implementation plan are updated with verification evidence.
+- [x] #2 Code changes are committed with a clear message.
+- [x] #3 No unrelated dirty files are staged or modified.
+- [x] #4 PR branch is pushed to GitHub and remaining check status is reported.
 <!-- DOD:END -->
