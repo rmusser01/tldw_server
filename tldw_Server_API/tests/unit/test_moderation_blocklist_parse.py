@@ -1,12 +1,11 @@
 import os
 import re
 import tempfile
-from typing import Optional, Set
 
 import pytest
 
 import tldw_Server_API.app.core.Moderation.moderation_service as moderation_service_module
-from tldw_Server_API.app.core.Moderation.moderation_service import ModerationService, ModerationPolicy, PatternRule
+from tldw_Server_API.app.core.Moderation.moderation_service import ModerationPolicy, ModerationService, PatternRule
 
 
 def _tmp_moderation_config(tmp_path, blocklist_path):
@@ -273,7 +272,7 @@ def test_blocklist_invalid_action_warning_sanitizes_line_details(tmp_path):
 
 
 @pytest.mark.unit
-def test_load_block_patterns_missing_file_sanitizes_warning_path(tmp_path):
+def test_load_block_patterns_missing_file_logs_path_context(tmp_path):
     svc = ModerationService()
     blocklist_path = tmp_path / "private_moderation_blocklist.txt"
 
@@ -287,12 +286,11 @@ def test_load_block_patterns_missing_file_sanitizes_warning_path(tmp_path):
     joined = "\n".join(messages)
     assert rules == []
     assert "Moderation blocklist file not found" in joined
-    assert "private_moderation_blocklist.txt" not in joined
-    assert str(tmp_path) not in joined
+    assert f"path={blocklist_path}" in joined
 
 
 @pytest.mark.unit
-def test_load_block_patterns_sanitizes_outer_failure_log(monkeypatch, tmp_path):
+def test_load_block_patterns_failure_log_preserves_exception_context(monkeypatch, tmp_path):
     svc = ModerationService()
     blocklist_path = tmp_path / "moderation_blocklist.txt"
     blocklist_path.write_text("secret\n", encoding="utf-8")
@@ -312,8 +310,42 @@ def test_load_block_patterns_sanitizes_outer_failure_log(monkeypatch, tmp_path):
     joined = "\n".join(messages)
     assert rules == []
     assert "Failed to load moderation blocklist" in joined
-    assert "blocklist load failed" not in joined
-    assert "moderation_blocklist.txt" not in joined
+    assert f"path={blocklist_path}" in joined
+    assert "blocklist load failed" in joined
+    assert "Traceback" in joined
+
+
+@pytest.mark.unit
+def test_load_block_patterns_iterates_blocklist_without_readlines(monkeypatch, tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    blocklist_path.write_text("ignored by monkeypatch\n", encoding="utf-8")
+
+    class IterOnlyBlocklist:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            return iter(["secret -> block #confidential\n"])
+
+        def readlines(self):
+            raise AssertionError("readlines should not be used for compilation")
+
+    monkeypatch.setattr(
+        moderation_service_module,
+        "open",
+        lambda *_args, **_kwargs: IterOnlyBlocklist(),
+        raising=False,
+    )
+
+    rules = svc._load_block_patterns(str(blocklist_path))
+
+    assert len(rules) == 1
+    assert rules[0].regex.search("secret")
+    assert rules[0].categories == {"confidential"}
 
 
 @pytest.mark.unit

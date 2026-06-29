@@ -7,18 +7,11 @@ GuardianDB (no mocks). Each test gets a fresh database via tmp_path.
 from __future__ import annotations
 
 import re
-import time
 
 import pytest
 
 import tldw_Server_API.app.core.Moderation.supervised_policy as supervised_module
 from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB, SupervisedPolicy
-from tldw_Server_API.app.core.Moderation.supervised_policy import (
-    GuardianModerationProxy,
-    SupervisedCheckResult,
-    SupervisedPolicyEngine,
-    dispatch_guardian_notification,
-)
 from tldw_Server_API.app.core.Moderation.moderation_service import (
     ModerationPolicy,
     PatternRule,
@@ -28,7 +21,12 @@ from tldw_Server_API.app.core.Moderation.policy_compiler import (
     PolicyCompiler,
     ResolvedModerationConfig,
 )
-
+from tldw_Server_API.app.core.Moderation.supervised_policy import (
+    GuardianModerationProxy,
+    SupervisedCheckResult,
+    SupervisedPolicyEngine,
+    dispatch_guardian_notification,
+)
 
 # ── Fixtures ──────────────────────────────────────────────────
 
@@ -996,7 +994,7 @@ class TestEdgeCases:
             pattern="restricted",
             action="block",
         )
-        rel2 = _setup_active_relationship(db, "guardian1", "child2")
+        _setup_active_relationship(db, "guardian1", "child2")
         # child2 has no policies
 
         result_child1 = engine.check_text("restricted content", "child1")
@@ -1453,6 +1451,7 @@ class TestTransparentMode:
 class TestGuardianNotificationDispatch:
     def test_dispatches_when_notify_guardian_true(self, db, engine):
         from unittest.mock import MagicMock, patch
+
         from tldw_Server_API.app.core.Moderation.supervised_policy import (
             SupervisedCheckResult,
             dispatch_guardian_notification,

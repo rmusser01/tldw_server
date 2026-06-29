@@ -1,5 +1,7 @@
 import re
 
+import pytest
+
 from tldw_Server_API.app.core.Moderation.moderation_service import (
     ModerationPolicy,
     ModerationService,
@@ -10,6 +12,8 @@ from tldw_Server_API.app.core.Moderation.policy_compiler import (
     PolicyCompiler,
     ResolvedModerationConfig,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _config(**overrides):

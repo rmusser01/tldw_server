@@ -1,6 +1,9 @@
+"""Deterministic moderation policy compilation helpers."""
+
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -13,6 +16,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ResolvedModerationConfig:
+    """Moderation config values after service config/env resolution."""
+
     enabled: bool = False
     input_enabled: bool = True
     output_enabled: bool = True
@@ -26,6 +31,8 @@ class ResolvedModerationConfig:
 
 @dataclass(frozen=True)
 class PolicyCompilationIssue:
+    """Sanitized issue emitted while compiling moderation policy inputs."""
+
     source: str
     reason: str
     index: int | None = None
@@ -34,6 +41,8 @@ class PolicyCompilationIssue:
 
 @dataclass
 class PolicyCompilationReport:
+    """Collects sanitized policy compilation issues for service logging."""
+
     issues: list[PolicyCompilationIssue] = field(default_factory=list)
 
     def add(
@@ -44,6 +53,8 @@ class PolicyCompilationReport:
         index: int | None = None,
         detail: str | None = None,
     ) -> None:
+        """Append a sanitized issue entry to the report."""
+
         self.issues.append(
             PolicyCompilationIssue(
                 source=source,
@@ -56,25 +67,33 @@ class PolicyCompilationReport:
 
 @dataclass
 class PolicyCompilationInput:
+    """Input bundle for compiling a global moderation policy."""
+
     config: ResolvedModerationConfig
     runtime_override: dict[str, object] = field(default_factory=dict)
-    blocklist_lines: list[str] = field(default_factory=list)
+    blocklist_lines: Iterable[str] = field(default_factory=list)
     user_override: dict[str, object] | None = None
     pii_rules: list[PatternRule] = field(default_factory=list)
 
 
 @dataclass
 class PolicyCompilationResult:
+    """Compiled moderation policy and the sanitized report from compilation."""
+
     policy: ModerationPolicy
     report: PolicyCompilationReport
 
 
 class PolicyCompiler:
+    """Compile moderation policies from resolved config and rule inputs."""
+
     _ALLOWED_REGEX_FLAGS = {"i", "m", "s", "x"}
     _ALLOWED_ACTIONS = {"block", "redact", "warn"}
 
     @staticmethod
     def policy_types() -> tuple[type[ModerationPolicy], type[PatternRule]]:
+        """Load policy dataclasses lazily to avoid import cycles."""
+
         from tldw_Server_API.app.core.Moderation.moderation_service import (
             ModerationPolicy,
             PatternRule,
@@ -83,6 +102,8 @@ class PolicyCompiler:
         return ModerationPolicy, PatternRule
 
     def compile_global(self, data: PolicyCompilationInput) -> PolicyCompilationResult:
+        """Compile the global moderation policy from config and blocklist input."""
+
         report = PolicyCompilationReport()
         config = data.config
         ModerationPolicy, _ = self.policy_types()
@@ -113,6 +134,8 @@ class PolicyCompiler:
         base_policy: ModerationPolicy,
         override: dict[str, object] | None,
     ) -> PolicyCompilationResult:
+        """Compile a per-user policy overlay on top of the base policy."""
+
         report = PolicyCompilationReport()
         if not override:
             return PolicyCompilationResult(policy=base_policy, report=report)
@@ -141,9 +164,11 @@ class PolicyCompiler:
 
     def compile_blocklist_lines(
         self,
-        lines: list[str],
+        lines: Iterable[str] | None,
         report: PolicyCompilationReport | None = None,
     ) -> list[PatternRule]:
+        """Compile blocklist lines into pattern rules without materializing input."""
+
         compiled: list[PatternRule] = []
         active_report = report or PolicyCompilationReport()
         for idx, raw in enumerate(lines or []):
@@ -173,6 +198,8 @@ class PolicyCompiler:
 
     @classmethod
     def parse_rule_line(cls, text: str) -> tuple[str | None, str | None, str | None, set[str] | None]:
+        """Parse one blocklist line into expression, action, replacement, and categories."""
+
         if not text:
             return None, None, None, None
         line = text
@@ -204,6 +231,8 @@ class PolicyCompiler:
 
     @staticmethod
     def _find_category_suffix(text: str) -> int:
+        """Return the index of an unescaped category suffix marker."""
+
         if "#" not in text:
             return -1
         for i in range(len(text) - 1, -1, -1):
@@ -222,6 +251,8 @@ class PolicyCompiler:
 
     @staticmethod
     def split_action_directive(text: str) -> tuple[str, str | None]:
+        """Split a blocklist action directive while preserving regex arrows."""
+
         if "->" not in text:
             return text, None
         in_regex = False
@@ -253,6 +284,8 @@ class PolicyCompiler:
 
     @classmethod
     def parse_regex_expr(cls, expr: str) -> tuple[str, str] | None:
+        """Parse a `/pattern/flags` expression or return ``None`` for literals."""
+
         if not expr or not expr.startswith("/"):
             return None
         last_slash = expr.rfind("/")
@@ -270,6 +303,8 @@ class PolicyCompiler:
 
     @classmethod
     def regex_flags(cls, flags: str | None) -> int:
+        """Convert supported regex flag letters into Python ``re`` flags."""
+
         value = re.IGNORECASE
         lowered = (flags or "").lower()
         if "i" in lowered:
@@ -284,10 +319,14 @@ class PolicyCompiler:
 
     @classmethod
     def is_valid_action(cls, action: str) -> bool:
+        """Return whether an action is allowed in blocklist rules."""
+
         return str(action).strip().lower() in cls._ALLOWED_ACTIONS
 
     @staticmethod
     def has_nested_quantifiers(expr: str) -> bool:
+        """Detect nested quantifiers that can trigger catastrophic backtracking."""
+
         try:
             return bool(re.search(r"\((?:[^)(]|\([^)(]*\))*[+*][^)]*\)\s*[+*]", expr))
         except (TypeError, ValueError, re.error):
@@ -295,12 +334,16 @@ class PolicyCompiler:
 
     @staticmethod
     def too_many_groups(expr: str, limit: int = 100) -> bool:
+        """Return whether a regex expression exceeds the group-count limit."""
+
         try:
             return expr.count("(") - expr.count("\\(") > limit
         except (TypeError, ValueError):
             return False
 
     def is_regex_dangerous(self, expr: str) -> bool:
+        """Return whether a regex should be rejected before compilation."""
+
         if not expr:
             return True
         if len(expr) > 2000:
@@ -321,6 +364,8 @@ class PolicyCompiler:
         source: str,
         index: int | None,
     ) -> PatternRule | None:
+        """Compile one literal or regex expression into a pattern rule."""
+
         _, PatternRule = self.policy_types()
         try:
             regex_parts = self.parse_regex_expr(expr)
@@ -346,6 +391,8 @@ class PolicyCompiler:
 
     @staticmethod
     def coalesce_bool(value: object, default: bool) -> bool:
+        """Parse a truthy/falsy override value, falling back to a default."""
+
         if isinstance(value, bool):
             return value
         if value is None:
@@ -354,6 +401,8 @@ class PolicyCompiler:
 
     @staticmethod
     def parse_bool_value(value: object) -> bool | None:
+        """Parse a bool-like value or return ``None`` when invalid."""
+
         if isinstance(value, bool):
             return value
         if value is None:
@@ -373,6 +422,8 @@ class PolicyCompiler:
         override: dict[str, object],
         default_categories: set[str] | None,
     ) -> set[str] | None:
+        """Resolve per-user category overrides against default categories."""
+
         if "categories_enabled" not in override:
             return set(default_categories) if default_categories is not None else None
         parsed = self.parse_categories_override(override.get("categories_enabled"))
@@ -382,6 +433,8 @@ class PolicyCompiler:
 
     @staticmethod
     def parse_categories_override(value: object | None) -> set[str] | None:
+        """Parse a category override value into a normalized category set."""
+
         if value is None:
             return None
         if isinstance(value, list):
@@ -399,6 +452,8 @@ class PolicyCompiler:
         report: PolicyCompilationReport,
         index: int,
     ) -> PatternRule | None:
+        """Compile one per-user quick rule into a pattern rule."""
+
         if not isinstance(raw_rule, dict):
             report.add("user_rule", "invalid_rule", index=index)
             return None
@@ -436,6 +491,8 @@ class PolicyCompiler:
 
     @staticmethod
     def resolve_runtime_pii(runtime_override: dict[str, object], default: bool) -> bool:
+        """Resolve effective PII enablement from runtime overrides."""
+
         if "pii_enabled" in runtime_override:
             return bool(runtime_override.get("pii_enabled"))
         return bool(default)
@@ -445,6 +502,8 @@ class PolicyCompiler:
         runtime_override: dict[str, object],
         default: set[str] | None,
     ) -> set[str] | None:
+        """Resolve effective categories from runtime overrides."""
+
         if "categories_enabled" not in runtime_override:
             return set(default) if default is not None else None
         raw = runtime_override.get("categories_enabled") or []

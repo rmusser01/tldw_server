@@ -289,21 +289,25 @@ class ModerationService:
         )
 
     @staticmethod
-    def _read_blocklist_lines_from_path(path: str) -> list[str]:
-        with open(path, encoding="utf-8") as f:
-            return [ln.rstrip("\r\n") for ln in f.readlines()]
+    def _read_blocklist_lines_from_path(path: str) -> Iterator[str]:
+        """Yield blocklist file lines without trailing newlines."""
 
-    def _read_blocklist_lines_for_compile(self, path: str | None) -> list[str]:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                yield line.rstrip("\r\n")
+
+    def _read_blocklist_lines_for_compile(self, path: str | None) -> Iterator[str]:
+        """Yield blocklist lines for compilation with contextual logging."""
+
         if not path:
-            return []
+            return
         if not os.path.exists(path):
-            logger.warning("Moderation blocklist file not found")
-            return []
+            logger.warning("Moderation blocklist file not found for path={}", path)
+            return
         try:
-            return self._read_blocklist_lines_from_path(path)
+            yield from self._read_blocklist_lines_from_path(path)
         except _MODERATION_NONCRITICAL_EXCEPTIONS:
-            logger.error("Failed to load moderation blocklist")
-            return []
+            logger.exception("Failed to load moderation blocklist from path={}", path)
 
     def _compile_global_policy_from_resolved_config(self, config: ResolvedModerationConfig) -> ModerationPolicy:
         effective_pii_enabled = self._policy_compiler.resolve_runtime_pii(
@@ -394,21 +398,6 @@ class ModerationService:
             except _MODERATION_NONCRITICAL_EXCEPTIONS:
                 return []
         return rules
-
-    @staticmethod
-    def _has_nested_quantifiers(expr: str) -> bool:
-        """Heuristic check for nested quantifiers like (.*)+ or (.+)* that can cause catastrophic backtracking."""
-        try:
-            return bool(re.search(r"\((?:[^)(]|\([^)(]*\))*[+*][^)]*\)\s*[+*]", expr))
-        except _MODERATION_NONCRITICAL_EXCEPTIONS:
-            return False
-
-    @staticmethod
-    def _too_many_groups(expr: str, limit: int = 100) -> bool:
-        try:
-            return expr.count("(") - expr.count("\\(") > limit
-        except _MODERATION_NONCRITICAL_EXCEPTIONS:
-            return False
 
     def _is_regex_dangerous(self, expr: str) -> bool:
         return self._policy_compiler.is_regex_dangerous(expr)
@@ -1163,7 +1152,7 @@ class ModerationService:
                 self._user_overrides = next_overrides
                 logger.info(f"Saved moderation user overrides to {path}")
                 return {"ok": True, "persisted": True}
-            except _MODERATION_NONCRITICAL_EXCEPTIONS as e:
+            except _MODERATION_NONCRITICAL_EXCEPTIONS:
                 logger.error("Failed to save user overrides")
                 return {
                     "ok": False,
@@ -1190,7 +1179,7 @@ class ModerationService:
                         return {"ok": True, "persisted": True}
                     self._user_overrides = next_overrides
                     return {"ok": True, "persisted": False}
-                except _MODERATION_NONCRITICAL_EXCEPTIONS as e:
+                except _MODERATION_NONCRITICAL_EXCEPTIONS:
                     logger.error("Failed to persist user override deletion")
                     return {
                         "ok": False,
@@ -1207,7 +1196,7 @@ class ModerationService:
             return []
         try:
             with self._lock, open(path, encoding="utf-8") as f:
-                return [ln.rstrip("\r\n") for ln in f.readlines()]
+                return [ln.rstrip("\r\n") for ln in f]
         except _MODERATION_NONCRITICAL_EXCEPTIONS:
             logger.error("Failed to read blocklist")
             return []
