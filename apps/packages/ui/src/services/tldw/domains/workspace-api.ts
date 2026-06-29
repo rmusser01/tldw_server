@@ -725,6 +725,62 @@ const trimmedOptionalString = (value: string | undefined): string | undefined =>
 const isValidSkillVersion = (version: number | undefined): version is number =>
   Number.isSafeInteger(version) && Number(version) > 0
 
+export interface SkillExportDownload {
+  blob: Blob
+  filename: string
+}
+
+type BinaryResponsePayload = {
+  ok: boolean
+  status: number
+  data?: ArrayBuffer
+  error?: string
+  headers?: Record<string, string>
+}
+
+const getSkillExportFallbackFilename = (skillName: string): string => {
+  const trimmedName = skillName.trim()
+  const safeName = /^[a-z][a-z0-9-]{0,63}$/.test(trimmedName)
+    ? trimmedName
+    : "skill"
+  return `${safeName}.zip`
+}
+
+const isSafeDownloadFilename = (filename: string | undefined): filename is string => {
+  if (!filename) return false
+  const trimmedFilename = filename.trim()
+  if (!trimmedFilename || trimmedFilename === "." || trimmedFilename === "..") {
+    return false
+  }
+  return !/[\/\\\0-\x1f\x7f]/.test(trimmedFilename)
+}
+
+const getContentDispositionFilename = (disposition: string | null): string | undefined => {
+  if (!disposition) return undefined
+
+  const encodedMatch = disposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+  const plainMatch = disposition.match(/filename\s*=\s*"?([^\";]+)"?/i)
+  const rawFilename = encodedMatch?.[1] || plainMatch?.[1]
+  if (!rawFilename) return undefined
+
+  try {
+    return decodeURIComponent(rawFilename.trim())
+  } catch {
+    return rawFilename.trim()
+  }
+}
+
+const resolveSkillExportFilename = (
+  skillName: string,
+  headers: Headers
+): string => {
+  const fallbackFilename = getSkillExportFallbackFilename(skillName)
+  const headerFilename = getContentDispositionFilename(headers.get("content-disposition"))
+  return isSafeDownloadFilename(headerFilename)
+    ? headerFilename.trim()
+    : fallbackFilename
+}
+
 export const workspaceApiMethods = {
   // ── Skills API ──
 
@@ -954,14 +1010,32 @@ export const workspaceApiMethods = {
   async exportSkill(
     this: TldwApiClientCore,
     name: string
-  ): Promise<Blob> {
+  ): Promise<SkillExportDownload> {
     await this.ensureConfigForRequest(true)
-    const res = await bgRequest<ArrayBuffer, AllowedPath>({
+    const response = await bgRequest<BinaryResponsePayload, AllowedPath>({
       path: `/api/v1/skills/${encodeURIComponent(name)}/export` as AllowedPath,
       method: "GET",
-      responseType: "arrayBuffer"
+      responseType: "arrayBuffer",
+      returnResponse: true
     })
-    return new Blob([res], { type: "application/zip" })
+    if (!response) {
+      throw new Error("Export failed")
+    }
+    if (!response.ok) {
+      throw new Error(response.error || `Export failed: ${response.status}`)
+    }
+    if (!response.data) {
+      throw new Error("Export failed: missing export payload")
+    }
+
+    const headers = new Headers(response.headers || {})
+    const blob = new Blob([response.data], {
+      type: headers.get("content-type") || "application/zip"
+    })
+    return {
+      blob,
+      filename: resolveSkillExportFilename(name, headers)
+    }
   },
 
   async executeSkill(
