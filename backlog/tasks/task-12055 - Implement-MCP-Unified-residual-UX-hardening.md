@@ -4,7 +4,7 @@ title: Implement MCP Unified residual UX hardening
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-29 04:51'
+updated_date: '2026-06-29 04:56'
 labels:
   - mcp
   - ux
@@ -107,6 +107,8 @@ Clean PR branch follow-up:
 - Moved the MCP residual UX work to clean branch codex/mcp-residual-ux-clean based on latest origin/dev.
 - Final diff review found and removed unrelated README/TASK-12061 drift from the cherry-pick; remaining diff is scoped to MCP docs, package-local gateway status, MCP server/protocol/endpoint behavior, focused tests, and Backlog/spec records.
 - Re-ran clean-branch verification after rebasing on origin/dev: 63 passed for docs/basic/http tests, 5 passed for gateway status/basic JSON-RPC subset, 4 passed for Docker packaging contract, Bandit 0 findings.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2548
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
