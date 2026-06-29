@@ -1,7 +1,7 @@
 ---
 id: TASK-12057
 title: Rebase PR 2529 and address UserProfiles contract review comments
-status: In Progress
+status: Done
 labels:
   - pr-review
   - userprofiles
@@ -19,7 +19,7 @@ Rebase PR #2529 on latest dev, inspect all active PR review comments, implement 
 - [x] #1 PR #2529 branch is rebased onto latest origin/dev without unresolved conflicts.
 - [x] #2 All active review comments are inventoried, technically verified, and either fixed or answered with rationale.
 - [x] #3 Focused tests, compile checks, shard coverage or relevant CI guard checks, and Bandit on touched production code are run as applicable.
-- [ ] #4 Updated branch is pushed and review threads are replied to/resolved.
+- [x] #4 Updated branch is pushed and review threads are replied to/resolved.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -42,13 +42,13 @@ Rebase PR #2529 on latest dev, inspect all active PR review comments, implement 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Rebased PR #2529 onto `origin/dev`, addressed all active inline review threads, pushed the updated `codex/userprofiles-contract-refactor` branch, and resolved all review threads. Local verification passed for the UserProfile focused suite, compile checks, Bandit on touched production files, shard coverage, and diff whitespace checks. GitHub Actions were queued/pending after the push; CodeRabbit reported review skipped/pass.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Backlog task and implementation plan are updated with verification evidence.
-- [ ] #2 Code changes are committed with a clear message.
+- [x] #2 Code changes are committed with a clear message.
 - [x] #3 No unrelated dirty files are staged or modified.
-- [ ] #4 PR branch is pushed to GitHub and remaining check status is reported.
+- [x] #4 PR branch is pushed to GitHub and remaining check status is reported.
 <!-- DOD:END -->
