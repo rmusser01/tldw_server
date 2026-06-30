@@ -4,17 +4,17 @@ This guide is for users and operators working with the package-local MCP
 Unified standalone gateway boundary. It focuses on profiles, external servers,
 credential grants, configuration snapshots, and remote runtime commands.
 
-The package is currently internal/experimental and distributed with the
-`tldw-server` source tree. It is not a separately published standalone package.
-The package CLI does not launch a supported end-user gateway server; remote
-runtime commands require an already running package-local gateway mounted by a
-host application.
+The package is currently internal/experimental and published on PyPI as the
+early standalone boundary extracted from the `tldw-server` source tree. The
+package CLI does not launch a supported end-user gateway server; remote runtime
+commands require an already running package-local gateway mounted by a host
+application.
 
 ## Publishing Readiness
 
-The standalone package has publish-ready metadata and package-local artifacts,
-but it remains `not-published`. New users should install it from the repository
-until maintainers complete a deliberate TestPyPI and PyPI promotion.
+The standalone package is published on PyPI, while the package status remains
+`internal-experimental`. New users can install the released package from PyPI;
+developers testing unpublished changes should install from the repository.
 
 Run the full internal release candidate gate from the repository root:
 
@@ -28,25 +28,37 @@ Generate a TestPyPI publish plan without uploading artifacts:
 make mcp-unified-publish-dry-run
 ```
 
-Live upload is intentionally gated. A maintainer-owned TestPyPI or PyPI token
-must be configured in the manual publish workflow, the workflow confirmation
-must be set to `MCP_UNIFIED_PUBLISH`, and the RC helper refuses execution unless
-`MCP_UNIFIED_ALLOW_PUBLISH=1` is present in the environment. Do not use public
-PyPI install guidance while package metadata reports `not-published`.
+Live upload is intentionally gated. The workflow confirmation must be set to
+`MCP_UNIFIED_PUBLISH`, and the RC helper refuses execution unless
+`MCP_UNIFIED_ALLOW_PUBLISH=1` is present in the environment. Production PyPI
+uploads use the repository's configured trusted publishing environment rather
+than a long-lived PyPI token.
 
 ## 1. Install The Package Boundary
 
-From the repository root:
+From PyPI:
+
+```bash
+python -m pip install "mcp-unified[gateway]"
+```
+
+From the repository root, when testing unpublished changes:
 
 ```bash
 python -m pip install -e "apps/mcp-unified[gateway]"
 ```
 
-For development and artifact checks, install both the gateway runtime and
-development tools:
+For development and artifact checks from the repository, install both the
+gateway runtime and development tools:
 
 ```bash
 python -m pip install -e "apps/mcp-unified[gateway,dev]"
+```
+
+For development extras from PyPI:
+
+```bash
+python -m pip install "mcp-unified[gateway,dev]"
 ```
 
 Confirm the CLI is available:

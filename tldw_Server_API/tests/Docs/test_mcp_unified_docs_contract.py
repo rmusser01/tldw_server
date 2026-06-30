@@ -1,7 +1,7 @@
 """Documentation contracts for the Unified MCP user journey."""
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 import pytest
 
@@ -201,25 +201,27 @@ def test_unified_mcp_docs_do_not_normalize_query_token_auth() -> None:
     )
 
 
-def test_unified_mcp_package_docs_do_not_promise_serve_or_publishing() -> None:
-    """Package docs should not promise an unsupported standalone server product."""
+def test_unified_mcp_package_docs_do_not_promise_unsupported_server() -> None:
+    """Package docs should keep published status separate from server support."""
     docs = "\n\n".join(
         [
             _read("apps/mcp-unified/README.md"),
             _read("apps/mcp-unified/USER_GUIDE.md"),
             _read("apps/mcp-unified/src/mcp_unified/README.md"),
+            _read("apps/mcp-unified/src/mcp_unified/USER_GUIDE.md"),
         ]
     ).lower()
 
     forbidden = [
         "mcp-unified-gateway serve",
-        "pip install mcp-unified",
-        "published to pypi",
         "production standalone gateway",
     ]
     found = [phrase for phrase in forbidden if phrase in docs]
-    _require(not found, f"Package docs imply unsupported standalone/published flows: {found}")
-    _require("not published" in docs, "Package docs should state the package is not published.")
+    _require(not found, f"Package docs imply unsupported standalone server flows: {found}")
+    _require(
+        "published on pypi" in docs,
+        "Package docs should state the package is published on PyPI.",
+    )
     _require(
         "internal" in docs and "experimental" in docs,
         "Package docs should state internal/experimental status.",
