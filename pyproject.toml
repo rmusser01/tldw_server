@@ -265,19 +265,8 @@ chunking_multilingual = [
 ]
 
 # OCR providers (optional)
-ocr_dots = [
-  # Dots OCR from source
-  "dots-ocr @ git+https://github.com/rednote-hilab/dots.ocr.git"
-]
-
-ocr_points_transformers = [
-  # Local inference requirements for POINTS-Reader via HF Transformers
-  "transformers>=5.5.3",
-  "torch>=2.11.0",
-  # WePOINTS toolkit (installed from source)
-  "wepoints @ git+https://github.com/WePOINTS/WePOINTS.git"
-]
-
+# Source-only backends such as dots.ocr and POINTS transformers are installed
+# manually; direct VCS dependencies are not accepted in PyPI package metadata.
 ocr_points_sglang = [
   # Client-side only; server runs separately
   "requests>=2.31.0"
@@ -419,31 +408,6 @@ TTS_echo_tts = [
   "einops>=0.8.0"
 ]
 
-TTS_chatterbox = [
-  # Core compute
-  "torch>=2.11.0",
-  "torchaudio>=2.11.0",
-  "numpy>=1.24.0",
-  "scipy>=1.10.0",
-  # HF stack
-  "transformers>=5.5.3",
-  "tokenizers>=0.13.0",
-  "huggingface_hub>=0.21.0",
-  "safetensors>=0.4.2",
-  # Audio / DSP
-  "librosa>=0.10.0",
-  "pyloudnorm>=0.1.1",
-  "resemble-perth @ git+https://github.com/resemble-ai/Perth.git@ce86c49d029f42272c1902eccb675556b9ed2330",
-  # Diffusion / attention utils used in matcha blocks
-  "diffusers>=0.29.0",
-  "einops>=0.7.0",
-  # Conformer block dependency (for matcha decoder)
-  "conformer>=0.3.2",
-  # S3 tokenizer backend
-  "s3tokenizer>=0.1.6",
-  "omegaconf>=2.3.0",
-]
-
 # Optional language preprocessing extras for multilingual text tokenization
 TTS_chatterbox_lang = [
   "pykakasi>=2.2.1",          # Japanese romanization -> hiragana
@@ -501,7 +465,7 @@ gpu_monitoring = [
 
 # All optional dependencies
 all = [
-  "tldw-server[dev,evaluation,data-tools,chunking_multilingual,gradio,ingestion_email,media_wiki,web_research,STT_All,TTS_All,TTS_higgs,TTS_vibevoice,TTS_chatterbox,backend_onnx,db_postgres,ocr_dots,ocr_points_transformers,ocr_points_sglang,gpu_monitoring]"
+  "tldw-server[dev,evaluation,data-tools,chunking_multilingual,gradio,ingestion_email,media_wiki,web_research,STT_All,TTS_All,TTS_higgs,TTS_vibevoice,backend_onnx,db_postgres,ocr_points_sglang,gpu_monitoring]"
 ]
 
 ###########################

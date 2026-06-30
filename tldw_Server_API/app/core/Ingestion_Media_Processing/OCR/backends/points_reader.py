@@ -23,6 +23,13 @@ _POINTS_RUNTIME_EXCEPTIONS = (
     json.JSONDecodeError,
 )
 
+_POINTS_TRANSFORMERS_EXCEPTIONS = _POINTS_RUNTIME_EXCEPTIONS + (
+    ImportError,
+    ModuleNotFoundError,
+)
+
+_WEPOINTS_MODULE = "wepoints"
+
 
 def _resolve_mode() -> str:
     mode = (os.getenv("POINTS_MODE") or "auto").lower()
@@ -63,7 +70,10 @@ class PointsReaderBackend(OCRBackend):
             try:
                 has_tf = importlib.util.find_spec("transformers") is not None
                 has_torch = importlib.util.find_spec("torch") is not None
-                return bool(has_tf and has_torch)
+                has_wepoints = importlib.util.find_spec(_WEPOINTS_MODULE) is not None
+                if has_tf and has_torch and not has_wepoints:
+                    logging.warning("PointsReaderBackend transformers mode unavailable: WePOINTS missing")
+                return bool(has_tf and has_torch and has_wepoints)
             except (AttributeError, ImportError, ValueError):
                 return False
         return False
@@ -90,7 +100,10 @@ class PointsReaderBackend(OCRBackend):
 
     def ocr_image(self, image_bytes: bytes, lang: str | None = None) -> str:
         if not self.available():
-            logging.warning("PointsReaderBackend not available: install 'transformers'+'torch' or set up SGLang (requests)")
+            logging.warning(
+                "PointsReaderBackend not available: install 'transformers'+'torch' plus WePOINTS, "
+                "or configure POINTS_SGLANG_URL for SGLang"
+            )
             return ""
 
         prompt = os.getenv("POINTS_PROMPT") or (
@@ -119,8 +132,11 @@ class PointsReaderBackend(OCRBackend):
 
             try:
                 return _ocr_via_transformers(img_path, prompt)
-            except _POINTS_RUNTIME_EXCEPTIONS as e:
-                logging.error(f"POINTS Transformers path failed: {e}", exc_info=True)
+            except _POINTS_TRANSFORMERS_EXCEPTIONS as e:
+                if isinstance(e, (ImportError, ModuleNotFoundError)) and "wepoints" in str(e).lower():
+                    logging.error(f"POINTS Transformers path failed: WePOINTS missing: {e}", exc_info=True)
+                else:
+                    logging.error(f"POINTS Transformers path failed: {e}", exc_info=True)
                 return ""
 
 

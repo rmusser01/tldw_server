@@ -123,10 +123,11 @@ Quick setup
   - Download model weights: `python3 tools/download_model.py` (use a directory name without periods, e.g., `DotsOCR`).
 - Recommended: serve with vLLM for performance (see upstream docs).
 
-Install via extras (optional)
-- You can install the project with the dots extra:
-  - `pip install .[ocr_dots]`
-  - This pulls the dots.ocr repo via a VCS dependency.
+Manual install
+- `dots.ocr` is not installed by a `tldw-server` package extra because PyPI rejects direct Git dependencies in package metadata.
+- Install it from the upstream repo before using `ocr_backend=dots`:
+  - `git clone https://github.com/rednote-hilab/dots.ocr.git && cd dots.ocr`
+  - `pip install -e .`
 
 Backend specifics
 - CLI mode: shells out to `python -m dots_ocr.parser <image.png>` per page (or use `DOTS_OCR_CMD` to specify an explicit command).
@@ -159,9 +160,10 @@ Environment
 Docs
 - See detailed guide at `Docs/OCR/POINTS-Reader.md`.
 
-Install via extras (optional)
-- Local transformers path: `pip install .[ocr_points_transformers]`
-  - Includes `transformers`, `torch`, and the WePOINTS toolkit via VCS.
+Manual source setup (optional)
+- Local transformers path:
+  - Install `transformers` and a CUDA/CPU-compatible `torch`.
+  - Install the WePOINTS toolkit manually from `https://github.com/WePOINTS/WePOINTS` before using `POINTS_MODE=transformers`.
 - SGLang client only: `pip install .[ocr_points_sglang]`
 
 ## DeepSeek-OCR (backend: `deepseek`)
