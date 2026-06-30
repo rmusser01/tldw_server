@@ -192,6 +192,9 @@ class JWTService:
         Returns:
             Encoded JWT access token
         """
+        if expires_delta is not None and expires_delta.total_seconds() <= 0:
+            raise ValueError("expires_delta must be positive")
+
         issued_at = datetime.now(timezone.utc)
         lifetime = (
             expires_delta
@@ -236,6 +239,26 @@ class JWTService:
         except _JWT_SERVICE_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to create access token: {e}")
             raise InvalidTokenError(f"Failed to create token: {e}") from e
+
+    def create_impersonation_access_token(
+        self,
+        *,
+        user_id: int,
+        username: str,
+        role: str,
+        impersonated_by: int,
+        expires_delta: timedelta,
+    ) -> str:
+        return self.create_access_token(
+            user_id=user_id,
+            username=username,
+            role=role,
+            additional_claims={
+                "impersonated_by": int(impersonated_by),
+                "impersonation": True,
+            },
+            expires_delta=expires_delta,
+        )
 
     def create_refresh_token(
         self,
