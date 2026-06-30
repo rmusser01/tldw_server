@@ -28,6 +28,19 @@ Write a design spec for a standalone-first MCP document corpus that supports doc
 - [ ] #5 Spec is written under Docs/superpowers/specs and committed.
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Reviewed the draft before implementation planning and tightened the spec around:
+- Stage 1 versus full-program acceptance criteria.
+- Local `docs.import_path` belonging to Stage 1, while Stage 2 is URL acquisition only.
+- Store-level owner/profile scope enforcement.
+- Current tldw_server module-loader shim requirements.
+- Config-backed standalone source profiles and future policy storage.
+- Explicit collection/keyword read and write tools.
+- Context7 alias authorization through canonical docs.* operations.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
@@ -37,7 +50,7 @@ Write a design spec for a standalone-first MCP document corpus that supports doc
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec written for the standalone-first document corpus/RAG MCP module. Verification: unfinished-marker scan returned no matches in the spec. Bandit skipped because this task only changes documentation and Backlog.md task metadata.
+Design spec written and revised after review for the standalone-first document corpus/RAG MCP module. The revision separates Stage 1 from full-program acceptance, moves local `docs.import_path` into Stage 1, adds store-level scope enforcement, documents the current tldw_server shim path, clarifies source-policy storage, splits collection/keyword tools by read/write behavior, and maps Context7 aliases to canonical docs.* authorization. Verification: unfinished-marker scan returned no matches in the spec/task. Bandit skipped because this task only changes documentation and Backlog.md task metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

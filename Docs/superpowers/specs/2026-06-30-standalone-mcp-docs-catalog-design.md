@@ -135,10 +135,20 @@ tldw_Server_API/app/core/MCP_unified/adapters/docs/
   source_bridge.py
 ```
 
+The current in-repo MCP module loader is constrained to
+`tldw_Server_API.app.core.MCP_unified.modules.implementations`. Until the
+standalone extraction adds a loader that can import runtime-neutral packages,
+the built-in `tldw_server` MCP server should expose the docs module through a
+thin shim in that allowed namespace. The shim registers tools and delegates to
+`mcp_unified.docs.DocsMCPModule` plus host adapters; it must not move
+`tldw_Server_API` imports into the standalone docs package.
+
 Boundary requirements:
 
 - `mcp_unified.docs` must not import `tldw_Server_API`.
 - Host adapters may import both the standalone package and `tldw_Server_API`.
+- The in-tree `tldw_server` shim may live in the current implementation
+  namespace only as registration glue.
 - Import-boundary tests must enforce this.
 - Standalone examples should use the local SQLite store as the default state
   owner.
@@ -165,6 +175,17 @@ Discovery and execution authority stay separate:
 - write/acquisition tools require explicit write permission, source policy, and
   approval when configured;
 - source catalogs and aliases never grant execution authority by themselves.
+
+Scope enforcement is a store invariant, not only a caller convention:
+
+- every store and retrieval helper that reads or mutates scoped records must
+  accept an explicit access scope object;
+- `owner_scope` and `profile_scope` filters must be applied inside store/query
+  helpers before results leave the storage layer;
+- write helpers must reject attempts to assign records outside the active
+  access scope;
+- MCP tools and host adapters may narrow scopes, but they cannot bypass store
+  enforcement by omitting filters.
 
 ## Data Model
 
@@ -454,16 +475,31 @@ Fetches and ingests one approved URL. It supports:
 The tool must evaluate approval and egress policy before making a network
 request.
 
-`docs.collections`
+`docs.collections.list`
 
-Lists, creates, updates, or modifies collection membership when write tools are
-enabled. Read-only deployments may expose list behavior through `docs.list`
-instead.
+Lists collections and collection members. This is a read tool and may also be
+served through `docs.list` in compact deployments.
 
-`docs.keywords`
+`docs.collections.create`
 
-Lists and applies keywords when write tools are enabled. Read-only deployments
-may expose list behavior through `docs.list`.
+Creates a collection. This is a write tool.
+
+`docs.collections.update`
+
+Updates collection metadata. This is a write tool.
+
+`docs.collections.set_membership`
+
+Adds, removes, or reorders documents in a collection. This is a write tool.
+
+`docs.keywords.list`
+
+Lists keywords and keyword usage counts. This is a read tool and may also be
+served through `docs.list` in compact deployments.
+
+`docs.keywords.apply`
+
+Adds or removes keywords on documents or chunks. This is a write tool.
 
 `docs.sync_source`
 
@@ -490,7 +526,27 @@ library.
 Compatibility aliases are useful for existing clients and prompts, but
 documentation should teach the canonical `docs.*` tools first.
 
+Compatibility aliases must authorize as the canonical operations they invoke:
+
+- `resolve-library-id` authorizes as `docs.resolve`;
+- `get-library-docs` authorizes as `docs.search`, `docs.get`, or
+  `docs.context` according to the resolved execution path;
+- aliases share canonical rate limits, audit categories, source scopes, and
+  store-level access checks;
+- audit records should include both the alias name and canonical operation.
+
 ## Source Policy And URL Safety
+
+Source profile and approval state has deployment-specific storage:
+
+- standalone v1 loads trusted roots, source profiles, preapproved domains, and
+  approval behavior from explicit configuration;
+- config-only policy is acceptable for the first standalone slice because it is
+  easy to reason about in locked-down deployments;
+- later stages may add SQLite-backed policy tables for editable source
+  profiles, approval grants, and source catalogs;
+- `tldw_server` should provide this state through host adapters backed by its
+  MCP Hub/auth/audit policy systems when available.
 
 Source profiles:
 
@@ -603,14 +659,14 @@ policy, approval, egress, or path-scope checks are unavailable.
 - SQLite + FTS5 schema and migrations.
 - Document/collection/keyword/source/audit model.
 - Markdown, MDX, text, and static HTML import.
+- `docs.import_path` for configured local roots with path-scope enforcement.
 - `docs.search`, `docs.get`, `docs.context`, `docs.resolve`, `docs.list`, and
   `docs.status`.
 - Context7-compatible read aliases.
 - Import-boundary test proving no `tldw_Server_API` imports.
 
-### Stage 2: Acquisition
+### Stage 2: URL Acquisition
 
-- `docs.import_path` with path-scope enforcement.
 - `docs.ingest_url` with approval-required flow and egress policy.
 - Static HTTP fetcher.
 - URL canonicalization, redirect handling, content-type allowlists, body limits,
@@ -623,6 +679,9 @@ policy, approval, egress, or path-scope checks are unavailable.
   state.
 - Built-in `tldw_server` MCP server mounts the same module through host
   adapters.
+- In the current tree, mounting uses a thin module under
+  `tldw_Server_API.app.core.MCP_unified.modules.implementations` that delegates
+  to the standalone docs module and host adapters.
 - `tldw_server` host bridge for Media/RAG content remains optional and
   separately planned.
 
@@ -642,7 +701,11 @@ Unit tests:
 - document without collection
 - collection membership
 - keyword assignment and filtering
+- store-level owner/profile scope enforcement
 - alias resolution and ambiguity
+- alias permission mapping to canonical `docs.*` operations
+- source policy config loading
+- collection/keyword write-tool classification
 - section/chunk offset precision
 - context budget enforcement
 - path-scope canonicalization
@@ -661,7 +724,8 @@ Integration tests:
 - approval-required URL flow
 - locked-down URL denial
 - standalone server tool discovery and tool call flow
-- `tldw_server` module mounting without Media DB/RAG dependency
+- `tldw_server` shim registration and module mounting without Media DB/RAG
+  dependency
 
 Boundary tests:
 
@@ -679,26 +743,39 @@ Security tests:
 - no fetch before approval-required result
 - path traversal and symlink escape denial for local import
 
-## Acceptance Criteria
+## Stage 1 Acceptance Criteria
 
 - A fresh standalone MCP server can ingest local Markdown, MDX, text, and static
   HTML into SQLite, search with FTS5, retrieve cited chunks, and return bounded
   `docs.context` packs.
 - Documents can exist outside any collection.
 - Collections and keywords are optional metadata for grouping and filtering.
-- Context7-compatible aliases work for package-like collections without forcing
-  all documents into library/version semantics.
+- `docs.import_path` enforces trusted roots, path canonicalization, and symlink
+  escape denial for local import.
+- `docs.collections.*` and `docs.keywords.*` read/write operations have
+  explicit tool classification.
+- Context7-compatible read aliases work for package-like collections without
+  forcing all documents into library/version semantics.
+- Read tools degrade cleanly to FTS5 when optional embedding/rerank adapters are
+  unavailable.
+- Store/query helpers enforce owner/profile scope internally.
+- Tests prove import-boundary cleanliness, FTS retrieval, local import
+  idempotency, collection/keyword filtering, scope enforcement, and alias
+  routing.
+
+## Full Program Acceptance Criteria
+
 - `docs.ingest_url` never fetches before approval when policy requires
   approval.
 - URL ingest blocks private/link-local/loopback targets, disallowed schemes,
   unsafe redirects, unsupported content types, and oversized bodies.
-- Read tools degrade cleanly to FTS5 when optional embedding/rerank adapters are
-  unavailable.
-- The built-in `tldw_server` MCP server exposes the same docs tools through
-  host adapters without making the standalone package depend on `tldw_server`.
-- Tests prove import-boundary cleanliness, FTS retrieval, idempotent ingestion,
-  policy denials, approval-required flow, collection/keyword filtering, and
-  alias routing.
+- Source profiles and approval behavior support locked-down, local-first, and
+  online-capable deployments.
+- The built-in `tldw_server` MCP server exposes the same docs tools through a
+  shim and host adapters without making the standalone package depend on
+  `tldw_server`.
+- Tests prove policy denials, approval-required flow, no-fetch-before-approval,
+  `tldw_server` shim registration, and host adapter boundary behavior.
 
 ## Implementation Planning Notes
 
@@ -707,3 +784,7 @@ avoid URL networking, browser extraction, embeddings, and `tldw_server` Media/RA
 bridging. That keeps the first slice small enough to prove the data model, MCP
 tool contracts, FTS retrieval, and package boundary before adding acquisition
 risk.
+
+Later implementation plans can pull from the full-program acceptance criteria
+after the standalone corpus, store-level scope enforcement, and canonical tool
+contracts are stable.
