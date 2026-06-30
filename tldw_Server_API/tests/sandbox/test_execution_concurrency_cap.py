@@ -180,6 +180,95 @@ def test_background_execution_respects_max_concurrent_runs(
         executor.shutdown(wait=True, cancel_futures=True)
 
 
+def test_background_admission_renews_queued_claim_while_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_sqlite_store(monkeypatch, tmp_path)
+    monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "true")
+    monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "true")
+    monkeypatch.setenv("SANDBOX_MAX_CONCURRENT_RUNS", "1")
+    monkeypatch.setenv("SANDBOX_RUN_CLAIM_LEASE_SEC", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "0")
+    _force_docker_preflight_available(monkeypatch)
+
+    lock = threading.Lock()
+    allow_first_finish = threading.Event()
+    first_started = threading.Event()
+    second_started = threading.Event()
+    start_order: list[str] = []
+
+    def _fake_start_run(self, run_id: str, spec: RunSpec, workspace_path: str | None) -> RunStatus:
+        with lock:
+            start_order.append(run_id)
+            index = len(start_order)
+        if index == 1:
+            first_started.set()
+            allow_first_finish.wait(timeout=5.0)
+        else:
+            second_started.set()
+        now = datetime.now(timezone.utc)
+        return RunStatus(
+            id=run_id,
+            phase=RunPhase.completed,
+            runtime=RuntimeType.docker,
+            base_image=spec.base_image,
+            exit_code=0,
+            started_at=now,
+            finished_at=now,
+            message="ok",
+        )
+
+    monkeypatch.setattr(DockerRunner, "start_run", _fake_start_run)
+
+    svc = SandboxService()
+    executor = _install_test_background_executor(monkeypatch, svc)
+    run2: RunStatus | None = None
+    try:
+        run1 = svc.start_run_scaffold(
+            user_id="user-queued-renew",
+            spec=RunSpec(
+                session_id=None,
+                runtime=RuntimeType.docker,
+                base_image="python:3.11-slim",
+                command=["echo", "one"],
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={"command": ["echo", "one"]},
+        )
+        assert first_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
+
+        run2 = svc.start_run_scaffold(
+            user_id="user-queued-renew",
+            spec=RunSpec(
+                session_id=None,
+                runtime=RuntimeType.docker,
+                base_image="python:3.11-slim",
+                command=["echo", "two"],
+            ),
+            spec_version="1.0",
+            idem_key=None,
+            raw_body={"command": ["echo", "two"]},
+        )
+
+        time.sleep(1.2)
+        assert second_started.is_set() is False
+
+        allow_first_finish.set()
+        assert second_started.wait(timeout=RUNNER_START_TIMEOUT_SEC) is True
+
+        done1 = _wait_for_phase(svc, run1.id, RunPhase.completed)
+        done2 = _wait_for_phase(svc, run2.id, RunPhase.completed)
+        assert done1 is not None
+        assert done2 is not None
+    finally:
+        allow_first_finish.set()
+        if run2 is not None:
+            svc._orch.release_run_claim(run2.id, worker_id=svc._claim_worker_id)
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
 def test_global_active_cap_enforced_across_service_instances(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -220,6 +220,45 @@ def test_start_admission_respects_active_run_limit(
     )
     assert admitted_b_after is not None
     assert admitted_b_after.phase == RunPhase.starting
+
+
+def test_start_admission_ignores_expired_active_claim(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_sqlite_store(monkeypatch, tmp_path)
+    monkeypatch.setenv("SANDBOX_QUEUE_MAX_LENGTH", "10")
+    monkeypatch.setenv("SANDBOX_QUEUE_TTL_SEC", "120")
+
+    orch_a = SandboxOrchestrator()
+    orch_b = SandboxOrchestrator()
+    run_a = _enqueue(orch_a, user_id="claim-user", command="stale-active-a")
+    run_b = _enqueue(orch_b, user_id="claim-user", command="stale-active-b")
+
+    assert orch_a.try_claim_run(run_a, worker_id="worker-a", lease_seconds=30) is not None
+    assert orch_b.try_claim_run(run_b, worker_id="worker-b", lease_seconds=30) is not None
+
+    admitted_a = orch_a.try_admit_run_start(
+        run_a,
+        worker_id="worker-a",
+        max_active_runs=1,
+        lease_seconds=30,
+    )
+    assert admitted_a is not None
+    assert admitted_a.phase == RunPhase.starting
+
+    admitted_a.claim_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    orch_a.update_run(run_a, admitted_a)
+
+    admitted_b = orch_b.try_admit_run_start(
+        run_b,
+        worker_id="worker-b",
+        max_active_runs=1,
+        lease_seconds=30,
+    )
+
+    assert admitted_b is not None
+    assert admitted_b.phase == RunPhase.starting
 
 
 @pytest.mark.parametrize(

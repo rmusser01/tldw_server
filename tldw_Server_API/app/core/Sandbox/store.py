@@ -716,6 +716,14 @@ class InMemoryStore(SandboxStore):
                     is_active = True
                 if not is_active:
                     continue
+                active_exp = getattr(rs, "claim_expires_at", None)
+                if isinstance(active_exp, str):
+                    active_exp = _parse_optional_iso_datetime(active_exp)
+                if isinstance(active_exp, datetime):
+                    if active_exp.tzinfo is None:
+                        active_exp = active_exp.replace(tzinfo=timezone.utc)
+                    if active_exp <= now:
+                        continue
                 active += 1
                 if target_user and self._owners.get(rs.id) == target_user:
                     active_user += 1
@@ -1826,9 +1834,10 @@ class SQLiteStore(SandboxStore):
                 cur_active = con.execute(
                     (
                         "SELECT COUNT(*) AS c FROM sandbox_runs "
-                        "WHERE phase=? OR (phase=? AND started_at IS NOT NULL)"
+                        "WHERE (phase=? OR (phase=? AND started_at IS NOT NULL)) "
+                        "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
                     ),
-                    (RunPhase.running.value, RunPhase.starting.value),
+                    (RunPhase.running.value, RunPhase.starting.value, now_iso),
                 )
                 row = cur_active.fetchone()
                 active = int(row["c"]) if row and row["c"] is not None else 0
@@ -1843,9 +1852,10 @@ class SQLiteStore(SandboxStore):
                     cur_user = con.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE user_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL))"
+                            "WHERE user_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
                         ),
-                        (target_user, RunPhase.running.value, RunPhase.starting.value),
+                        (target_user, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_user = cur_user.fetchone()
                     active_user = int(row_user["c"]) if row_user and row_user["c"] is not None else 0
@@ -1856,9 +1866,10 @@ class SQLiteStore(SandboxStore):
                     cur_persona = con.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE persona_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL))"
+                            "WHERE persona_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
                         ),
-                        (target_persona, RunPhase.running.value, RunPhase.starting.value),
+                        (target_persona, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_persona = cur_persona.fetchone()
                     active_persona = int(row_persona["c"]) if row_persona and row_persona["c"] is not None else 0
@@ -1869,9 +1880,10 @@ class SQLiteStore(SandboxStore):
                     cur_workspace = con.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE workspace_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL))"
+                            "WHERE workspace_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
                         ),
-                        (target_workspace, RunPhase.running.value, RunPhase.starting.value),
+                        (target_workspace, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_workspace = cur_workspace.fetchone()
                     active_workspace = int(row_workspace["c"]) if row_workspace and row_workspace["c"] is not None else 0
@@ -1882,9 +1894,10 @@ class SQLiteStore(SandboxStore):
                     cur_workspace_group = con.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE workspace_group_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL))"
+                            "WHERE workspace_group_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
                         ),
-                        (target_workspace_group, RunPhase.running.value, RunPhase.starting.value),
+                        (target_workspace_group, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_workspace_group = cur_workspace_group.fetchone()
                     active_workspace_group = int(row_workspace_group["c"]) if row_workspace_group and row_workspace_group["c"] is not None else 0
@@ -3347,9 +3360,10 @@ class PostgresStore(SandboxStore):
                 cur.execute(
                     (
                         "SELECT COUNT(*) AS c FROM sandbox_runs "
-                        "WHERE phase=%s OR (phase=%s AND started_at IS NOT NULL)"
+                        "WHERE (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
+                        "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
                     ),
-                    (RunPhase.running.value, RunPhase.starting.value),
+                    (RunPhase.running.value, RunPhase.starting.value, now_iso),
                 )
                 row = cur.fetchone() or {}
                 active = int(row.get("c") or 0)
@@ -3364,9 +3378,10 @@ class PostgresStore(SandboxStore):
                     cur.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE user_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
+                            "WHERE user_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
                         ),
-                        (target_user, RunPhase.running.value, RunPhase.starting.value),
+                        (target_user, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_user = cur.fetchone() or {}
                     active_user = int(row_user.get("c") or 0)
@@ -3377,9 +3392,10 @@ class PostgresStore(SandboxStore):
                     cur.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE persona_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
+                            "WHERE persona_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
                         ),
-                        (target_persona, RunPhase.running.value, RunPhase.starting.value),
+                        (target_persona, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_persona = cur.fetchone() or {}
                     active_persona = int(row_persona.get("c") or 0)
@@ -3390,9 +3406,10 @@ class PostgresStore(SandboxStore):
                     cur.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE workspace_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
+                            "WHERE workspace_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
                         ),
-                        (target_workspace, RunPhase.running.value, RunPhase.starting.value),
+                        (target_workspace, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_workspace = cur.fetchone() or {}
                     active_workspace = int(row_workspace.get("c") or 0)
@@ -3403,9 +3420,10 @@ class PostgresStore(SandboxStore):
                     cur.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE workspace_group_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
+                            "WHERE workspace_group_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
                         ),
-                        (target_workspace_group, RunPhase.running.value, RunPhase.starting.value),
+                        (target_workspace_group, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_workspace_group = cur.fetchone() or {}
                     active_workspace_group = int(row_workspace_group.get("c") or 0)

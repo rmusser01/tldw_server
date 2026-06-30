@@ -701,6 +701,8 @@ class SandboxService:
             "SANDBOX_ACTIVE_MAX_PER_WORKSPACE_GROUP",
             "SANDBOX_ACTIVE_MAX_PER_WORKSPACE_GROUP",
         )
+        renew_interval = max(0.5, min(5.0, float(lease_seconds) / 3.0))
+        next_renew = time.monotonic() + renew_interval
         while True:
             admitted = self._orch.try_admit_run_start(
                 run_id,
@@ -720,6 +722,15 @@ class SandboxService:
             owner = str(getattr(current, "claim_owner", "") or "").strip()
             if current.phase != RunPhase.queued or owner != self._claim_worker_id:
                 return current
+            now_monotonic = time.monotonic()
+            if now_monotonic >= next_renew:
+                with contextlib.suppress(_SANDBOX_SERVICE_NONCRITICAL_EXCEPTIONS):
+                    self._orch.renew_run_claim(
+                        run_id,
+                        worker_id=self._claim_worker_id,
+                        lease_seconds=lease_seconds,
+                    )
+                next_renew = now_monotonic + renew_interval
             time.sleep(0.05)
 
     def _apply_admitted_status(self, target: RunStatus, admitted: RunStatus) -> None:
