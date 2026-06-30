@@ -366,12 +366,19 @@ body {
 }
 
 /* Ant Design bridge: keep generated component CSS aligned with app theme tokens. */
-.ant-card,
+.ant-card {
+  background-color: rgb(var(--color-surface)) !important;
+  color: rgb(var(--color-text)) !important;
+  border-color: rgb(var(--color-border)) !important;
+}
+
 .ant-popover-inner,
 .ant-dropdown-menu,
 .ant-modal-content,
-.ant-modal-header {
-  background-color: rgb(var(--color-surface)) !important;
+.ant-modal-header,
+.ant-drawer-content,
+.ant-drawer-header {
+  background-color: rgb(var(--color-elevated)) !important;
   color: rgb(var(--color-text)) !important;
   border-color: rgb(var(--color-border)) !important;
 }
@@ -379,7 +386,7 @@ body {
 .ant-card-head,
 .ant-modal-title,
 .ant-drawer-title,
-.ant-typography,
+.ant-typography:not(.ant-typography-danger):not(.ant-typography-success):not(.ant-typography-warning),
 .ant-form-item-label > label,
 .ant-checkbox-wrapper,
 .ant-radio-wrapper,
@@ -389,8 +396,7 @@ body {
   color: rgb(var(--color-text)) !important;
 }
 
-.ant-card-head,
-.ant-modal-header {
+.ant-card-head {
   border-color: rgb(var(--color-border)) !important;
 }
 
@@ -405,6 +411,18 @@ body {
 .ant-tabs .ant-tabs-tab:hover .ant-tabs-tab-btn,
 .ant-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
   color: rgb(var(--color-primary)) !important;
+}
+
+.ant-typography.ant-typography-danger {
+  color: rgb(var(--color-danger)) !important;
+}
+
+.ant-typography.ant-typography-success {
+  color: rgb(var(--color-success)) !important;
+}
+
+.ant-typography.ant-typography-warning {
+  color: rgb(var(--color-warn)) !important;
 }
 
 .ant-input,
@@ -448,6 +466,118 @@ body {
   box-shadow: 0 0 0 2px rgb(var(--color-focus) / 0.4) !important;
 }
 
+.ant-form-item-has-error .ant-form-item-explain,
+.ant-form-item-has-error .ant-form-item-explain-error {
+  color: rgb(var(--color-danger)) !important;
+}
+
+.ant-form-item-has-warning .ant-form-item-explain,
+.ant-form-item-has-warning .ant-form-item-explain-warning {
+  color: rgb(var(--color-warn)) !important;
+}
+
+.ant-form-item-has-success .ant-form-item-explain,
+.ant-form-item-has-success .ant-form-item-explain-success {
+  color: rgb(var(--color-success)) !important;
+}
+
+.ant-input-status-error,
+.ant-input-status-error:hover,
+.ant-input-affix-wrapper-status-error,
+.ant-input-affix-wrapper-status-error:hover,
+.ant-input-number-status-error,
+.ant-input-number-status-error:hover,
+.ant-picker-status-error,
+.ant-picker-status-error:hover,
+.ant-select-status-error .ant-select-selector,
+.ant-select-status-error .ant-select-selector:hover,
+.ant-form-item-has-error .ant-input,
+.ant-form-item-has-error .ant-input:hover,
+.ant-form-item-has-error .ant-input-affix-wrapper,
+.ant-form-item-has-error .ant-input-affix-wrapper:hover,
+.ant-form-item-has-error .ant-input-number,
+.ant-form-item-has-error .ant-input-number:hover,
+.ant-form-item-has-error .ant-select-selector,
+.ant-form-item-has-error .ant-select-selector:hover,
+.ant-form-item-has-error .ant-picker,
+.ant-form-item-has-error .ant-picker:hover {
+  border-color: rgb(var(--color-danger)) !important;
+}
+
+.ant-input-status-error:focus,
+.ant-input-affix-wrapper-status-error.ant-input-affix-wrapper-focused,
+.ant-input-number-status-error.ant-input-number-focused,
+.ant-picker-status-error.ant-picker-focused,
+.ant-select-status-error.ant-select-focused .ant-select-selector,
+.ant-form-item-has-error .ant-input:focus,
+.ant-form-item-has-error .ant-input-affix-wrapper-focused,
+.ant-form-item-has-error .ant-input-number-focused,
+.ant-form-item-has-error .ant-select-focused .ant-select-selector,
+.ant-form-item-has-error .ant-picker-focused {
+  border-color: rgb(var(--color-danger)) !important;
+  box-shadow: 0 0 0 2px rgb(var(--color-danger) / 0.24) !important;
+}
+
+.ant-input-status-warning,
+.ant-input-status-warning:hover,
+.ant-input-affix-wrapper-status-warning,
+.ant-input-affix-wrapper-status-warning:hover,
+.ant-input-number-status-warning,
+.ant-input-number-status-warning:hover,
+.ant-picker-status-warning,
+.ant-picker-status-warning:hover,
+.ant-select-status-warning .ant-select-selector,
+.ant-select-status-warning .ant-select-selector:hover,
+.ant-form-item-has-warning .ant-input,
+.ant-form-item-has-warning .ant-input:hover,
+.ant-form-item-has-warning .ant-input-affix-wrapper,
+.ant-form-item-has-warning .ant-input-affix-wrapper:hover,
+.ant-form-item-has-warning .ant-input-number,
+.ant-form-item-has-warning .ant-input-number:hover,
+.ant-form-item-has-warning .ant-select-selector,
+.ant-form-item-has-warning .ant-select-selector:hover,
+.ant-form-item-has-warning .ant-picker,
+.ant-form-item-has-warning .ant-picker:hover {
+  border-color: rgb(var(--color-warn)) !important;
+}
+
+.ant-input-status-warning:focus,
+.ant-input-affix-wrapper-status-warning.ant-input-affix-wrapper-focused,
+.ant-input-number-status-warning.ant-input-number-focused,
+.ant-picker-status-warning.ant-picker-focused,
+.ant-select-status-warning.ant-select-focused .ant-select-selector,
+.ant-form-item-has-warning .ant-input:focus,
+.ant-form-item-has-warning .ant-input-affix-wrapper-focused,
+.ant-form-item-has-warning .ant-input-number-focused,
+.ant-form-item-has-warning .ant-select-focused .ant-select-selector,
+.ant-form-item-has-warning .ant-picker-focused {
+  border-color: rgb(var(--color-warn)) !important;
+  box-shadow: 0 0 0 2px rgb(var(--color-warn) / 0.24) !important;
+}
+
+.ant-input-status-success,
+.ant-input-status-success:hover,
+.ant-input-affix-wrapper-status-success,
+.ant-input-affix-wrapper-status-success:hover,
+.ant-input-number-status-success,
+.ant-input-number-status-success:hover,
+.ant-picker-status-success,
+.ant-picker-status-success:hover,
+.ant-select-status-success .ant-select-selector,
+.ant-select-status-success .ant-select-selector:hover,
+.ant-form-item-has-success .ant-input,
+.ant-form-item-has-success .ant-input:hover,
+.ant-form-item-has-success .ant-input-affix-wrapper,
+.ant-form-item-has-success .ant-input-affix-wrapper:hover,
+.ant-form-item-has-success .ant-input-number,
+.ant-form-item-has-success .ant-input-number:hover,
+.ant-form-item-has-success .ant-select-selector,
+.ant-form-item-has-success .ant-select-selector:hover,
+.ant-form-item-has-success .ant-picker,
+.ant-form-item-has-success .ant-picker:hover {
+  border-color: rgb(var(--color-success)) !important;
+}
+
 .ant-input::placeholder,
 .ant-input-textarea::placeholder,
 .ant-input-textarea textarea::placeholder,
@@ -477,17 +607,51 @@ body {
   background-color: rgb(var(--color-elevated)) !important;
 }
 
-.ant-btn-default {
+.ant-btn-default:not(.ant-btn-dangerous) {
   background-color: rgb(var(--color-surface)) !important;
   border-color: rgb(var(--color-border)) !important;
   color: rgb(var(--color-text)) !important;
 }
 
-.ant-btn-default:hover,
-.ant-btn-default:focus {
+.ant-btn-default:not(.ant-btn-dangerous):hover,
+.ant-btn-default:not(.ant-btn-dangerous):focus {
   background-color: rgb(var(--color-surface-2)) !important;
   border-color: rgb(var(--color-primary)) !important;
   color: rgb(var(--color-text)) !important;
+}
+
+.ant-btn-default.ant-btn-dangerous {
+  background-color: rgb(var(--color-danger) / 0.12) !important;
+  border-color: rgb(var(--color-danger)) !important;
+  color: rgb(var(--color-danger)) !important;
+}
+
+.ant-btn-default.ant-btn-dangerous:hover,
+.ant-btn-default.ant-btn-dangerous:focus {
+  background-color: rgb(var(--color-danger) / 0.18) !important;
+  border-color: rgb(var(--color-danger)) !important;
+  color: rgb(var(--color-danger)) !important;
+}
+
+.ant-input-disabled,
+.ant-input[disabled],
+.ant-input-affix-wrapper-disabled,
+.ant-input-affix-wrapper-disabled input,
+.ant-input-number-disabled,
+.ant-input-number-disabled input,
+.ant-picker-disabled,
+.ant-picker-disabled input,
+.ant-select-disabled .ant-select-selector,
+.ant-select-disabled .ant-select-selection-item,
+.ant-select-disabled .ant-select-arrow,
+.ant-checkbox-wrapper-disabled,
+.ant-radio-wrapper-disabled,
+.ant-btn-default:disabled,
+.ant-btn-default.ant-btn-disabled {
+  background-color: rgb(var(--color-surface-2) / 0.5) !important;
+  border-color: rgb(var(--color-border) / 0.5) !important;
+  color: rgb(var(--color-text-muted) / 0.72) !important;
+  cursor: not-allowed !important;
 }
 
 .focus-ring:focus-visible {
