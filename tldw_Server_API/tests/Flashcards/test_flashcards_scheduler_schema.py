@@ -31,6 +31,7 @@ def test_scheduler_schema_columns_exist_on_fresh_db(chacha_db: CharactersRAGDB):
 
     assert "scheduler_settings_json" in deck_columns
     assert "scheduler_type" in deck_columns
+    assert "parent_deck_id" in deck_columns
     assert "queue_state" in flashcard_columns
     assert "step_index" in flashcard_columns
     assert "suspended_reason" in flashcard_columns

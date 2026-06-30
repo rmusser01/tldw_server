@@ -2518,8 +2518,8 @@ def extract_article_with_pipeline(
                         extract_schema_fields,
                         validate_selector_rules,
                     )
-                except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS as exc:
-                    trace.append(_trace_entry(strategy, "failed", "schema_import_error", str(exc)))
+                except _ARTICLE_EXTRACTOR_NONCRITICAL_EXCEPTIONS:
+                    trace.append(_trace_entry(strategy, "failed", "schema_import_error"))
                     _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
                     continue
                 cache_key = _schema_cache_key(html, url, schema_rules)
@@ -2553,7 +2553,7 @@ def extract_article_with_pipeline(
                         strategy=strategy,
                     )
                 if exc or result is None:
-                    trace.append(_trace_entry(strategy, "failed", "schema_error", str(exc) if exc else None))
+                    trace.append(_trace_entry(strategy, "failed", "schema_error"))
                     _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
                     continue
                 if warning_detail:
@@ -2586,7 +2586,7 @@ def extract_article_with_pipeline(
             with _strategy_throttle(strategy):
                 result, exc, _attempts = _run_with_retries(lambda: handler(html, url), strategy=strategy)
             if exc or result is None:
-                trace.append(_trace_entry(strategy, "failed", "handler_error", str(exc) if exc else None))
+                trace.append(_trace_entry(strategy, "failed", "handler_error"))
                 _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
                 continue
             if "extraction_trace" in result:
@@ -2644,7 +2644,7 @@ def extract_article_with_pipeline(
                     strategy=strategy,
                 )
             if exc or result is None:
-                trace.append(_trace_entry(strategy, "failed", "extractor_error", str(exc) if exc else None))
+                trace.append(_trace_entry(strategy, "failed", "extractor_error"))
                 _record_strategy_metrics(strategy, "failed", time.perf_counter() - start)
                 continue
             last_result = result

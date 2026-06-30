@@ -1882,7 +1882,18 @@ _CREATE_USAGE_TABLES = [
             remote_ip TEXT,
             user_agent TEXT,
             token_name TEXT,
-            conversation_id TEXT
+            conversation_id TEXT,
+            cached_input_tokens INTEGER,
+            cache_write_input_tokens INTEGER,
+            cache_read_input_tokens INTEGER,
+            billable_input_tokens INTEGER,
+            reasoning_tokens INTEGER,
+            choice_count INTEGER,
+            estimate_source TEXT,
+            prompt_fingerprint TEXT,
+            prompt_fingerprint_version TEXT,
+            world_book_fingerprint TEXT,
+            raw_usage_metadata_json TEXT
         )
         """,
         (),
@@ -1891,6 +1902,17 @@ _CREATE_USAGE_TABLES = [
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS user_agent TEXT", ()),
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS token_name TEXT", ()),
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS conversation_id TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS cached_input_tokens INTEGER", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS cache_write_input_tokens INTEGER", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS cache_read_input_tokens INTEGER", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS billable_input_tokens INTEGER", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS reasoning_tokens INTEGER", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS choice_count INTEGER", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS estimate_source TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS prompt_fingerprint TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS prompt_fingerprint_version TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS world_book_fingerprint TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS raw_usage_metadata_json TEXT", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_ts ON llm_usage_log(ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user ON llm_usage_log(user_id)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_provider_model ON llm_usage_log(provider, model)", ()),
@@ -2550,6 +2572,58 @@ async def ensure_privilege_snapshots_table_pg(pool: DatabasePool | None = None) 
         return False
 
 
+async def ensure_mcp_prompt_read_permission_pg(pool: DatabasePool | None = None) -> bool:
+    """Ensure prompts.read and default admin/user grants exist on PostgreSQL."""
+    try:
+        db_pool = pool or await get_db_pool()
+        if getattr(db_pool, "pool", None) is None:
+            return False
+
+        async with db_pool.transaction() as conn:
+            existing_tables = await conn.fetch(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_name = ANY($1::text[])
+                """,
+                ["roles", "permissions", "role_permissions"],
+            )
+            table_names = {str(row["table_name"]) for row in existing_tables}
+            if {"roles", "permissions", "role_permissions"} - table_names:
+                logger.debug("PG MCP prompts.read seed skipped; RBAC core tables are incomplete")
+                return False
+
+            await conn.execute(
+                """
+                INSERT INTO permissions (name, description, category)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (name) DO NOTHING
+                """,
+                "prompts.read",
+                "Read MCP prompts",
+                "prompts",
+            )
+            await conn.execute(
+                """
+                INSERT INTO role_permissions (role_id, permission_id)
+                SELECT r.id, p.id
+                FROM roles r
+                JOIN permissions p ON p.name = $1
+                WHERE r.name = ANY($2::text[])
+                ON CONFLICT (role_id, permission_id) DO NOTHING
+                """,
+                "prompts.read",
+                ["admin", "user"],
+            )
+
+        logger.info("Ensured PostgreSQL MCP prompts.read permission and default grants")
+        return True
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.warning(f"Failed to ensure PostgreSQL MCP prompts.read permission: {exc}")
+        return False
+
+
 async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure core AuthNZ tables exist for PostgreSQL backends.
 
@@ -2567,6 +2641,7 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
                 await db_pool.execute(sql, *params)
             except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(f"PG ensure authnz core tables DDL failed: {exc}")
+        await ensure_mcp_prompt_read_permission_pg(db_pool)
         logger.info(
             "Ensured PostgreSQL AuthNZ core tables "
             "(audit_logs, sessions, registration_codes, RBAC, orgs/teams)"

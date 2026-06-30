@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
+from tldw_Server_API.app.api.v1.schemas.admin_schemas import OrgBudgetUpdateRequest
 from tldw_Server_API.app.services import admin_budgets_service
 
 
@@ -49,6 +51,32 @@ class _SqliteBudgetAdapter:
 
 class _PostgresBudgetAdapter:
     _is_sqlite = False
+
+
+async def _assert_budget_log_sanitized(
+    call,
+    *,
+    expected_detail: str,
+    expected_log: str,
+    raw_marker: str,
+) -> None:
+    messages: list[str] = []
+    sink_id = admin_budgets_service.logger.add(
+        lambda message: messages.append(str(message)),
+        level="ERROR",
+    )
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await call()
+    finally:
+        admin_budgets_service.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == expected_detail
+    assert expected_log in joined
+    assert raw_marker not in joined
+    assert "/private/" not in joined
 
 
 @pytest.mark.asyncio
@@ -182,3 +210,91 @@ async def test_upsert_org_budget_no_longer_reads_legacy_subscription_context(
     assert changes
     assert all("org_subscriptions" not in call for call in calls)
     assert all("subscription_plans" not in call for call in calls)
+
+
+@pytest.mark.asyncio
+async def test_list_budgets_sanitizes_generic_failure_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_list_org_budgets(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("budget list failed at /private/budgets.db")
+
+    monkeypatch.setattr(admin_budgets_service, "list_org_budgets", fail_list_org_budgets)
+
+    await _assert_budget_log_sanitized(
+        lambda: admin_budgets_service.list_budgets(
+            principal=object(),
+            org_id=None,
+            page=1,
+            limit=10,
+            db=object(),
+        ),
+        expected_detail="Failed to list org budgets",
+        expected_log="Failed to list org budgets",
+        raw_marker="budget list failed",
+    )
+
+
+@pytest.mark.asyncio
+async def test_upsert_budget_sanitizes_generic_failure_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_upsert_org_budget(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("budget upsert failed at /private/budgets.db")
+
+    monkeypatch.setattr(admin_budgets_service, "upsert_org_budget", fail_upsert_org_budget)
+
+    await _assert_budget_log_sanitized(
+        lambda: admin_budgets_service.upsert_budget(
+            payload=OrgBudgetUpdateRequest(org_id=7),
+            request=object(),
+            principal=object(),
+            db=object(),
+        ),
+        expected_detail="Failed to upsert org budget",
+        expected_log="Failed to upsert org budget",
+        raw_marker="budget upsert failed",
+    )
+
+
+@pytest.mark.asyncio
+async def test_upsert_budget_sanitizes_audit_failure_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def pass_upsert_org_budget(*_args: Any, **_kwargs: Any) -> Any:
+        return (
+            {
+                "org_id": 7,
+                "org_name": "Acme",
+                "org_slug": "acme",
+                "plan_name": "free",
+                "plan_display_name": "Free",
+                "budgets": {},
+                "custom_limits": {},
+                "effective_limits": {},
+                "updated_at": None,
+            },
+            [],
+        )
+
+    async def fail_emit_budget_audit_event(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("budget audit failed at /private/budgets.db")
+
+    monkeypatch.setattr(admin_budgets_service, "upsert_org_budget", pass_upsert_org_budget)
+    monkeypatch.setattr(
+        admin_budgets_service,
+        "_emit_budget_audit_event",
+        fail_emit_budget_audit_event,
+    )
+
+    await _assert_budget_log_sanitized(
+        lambda: admin_budgets_service.upsert_budget(
+            payload=OrgBudgetUpdateRequest(org_id=7),
+            request=object(),
+            principal=object(),
+            db=object(),
+        ),
+        expected_detail="audit_failed",
+        expected_log="Budget audit failed",
+        raw_marker="budget audit failed",
+    )

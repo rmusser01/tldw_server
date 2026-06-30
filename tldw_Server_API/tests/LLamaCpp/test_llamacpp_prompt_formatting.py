@@ -4,8 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 from types import SimpleNamespace
 
-from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+from tldw_Server_API.tests.LLamaCpp.llamacpp_test_app import llamacpp_test_client
 
 
 @pytest.fixture(scope="module")
@@ -20,7 +20,7 @@ def client():
         reset_settings()
         settings = get_settings()
         headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
-        with TestClient(app, headers=headers) as c:
+        with llamacpp_test_client(headers=headers) as c:
             yield c
     finally:
         # Restore previous environment and reset settings so other tests see

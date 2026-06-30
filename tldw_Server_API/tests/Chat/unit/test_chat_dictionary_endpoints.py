@@ -15,10 +15,11 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     DictionaryEntryReorderRequest,
     DictionaryEntryUpdate,
     ImportDictionaryJSONRequest,
+    ImportDictionaryRequest,
     ProcessTextRequest,
 )
 from tldw_Server_API.app.core.Character_Chat.chat_dictionary import ChatDictionaryService
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
 
 @pytest.fixture()
@@ -35,6 +36,73 @@ def test_chat_dictionary_router_exposes_markdown_export_alias():
     paths = {route.path for route in chat_dictionary_endpoints.router.routes}
     assert "/dictionaries/{dictionary_id}/export" in paths
     assert "/dictionaries/{dictionary_id}/export/markdown" in paths
+
+
+def test_process_text_dictionary_ids_validation_names_dictionary_ids_field():
+    with pytest.raises(ValueError) as exc_info:
+        ProcessTextRequest.model_validate({"text": "hello", "dictionary_ids": ["nope"]})
+
+    message = str(exc_info.value)
+    assert "dictionary_ids" in message
+    assert "included_dictionary_ids" not in message
+
+
+@pytest.mark.asyncio
+async def test_process_text_dictionary_ids_share_one_token_budget(monkeypatch):
+    calls: list[tuple[int, int | None]] = []
+
+    class FakeChatDictionaryService:
+        def __init__(self, db):
+            self.db = db
+
+        def get_dictionary(self, dictionary_id: int):
+            return {"id": dictionary_id}
+
+        def process_text(
+            self,
+            text: str,
+            *,
+            dictionary_id: int,
+            token_budget: int | None,
+            return_stats: bool,
+            **_kwargs,
+        ):
+            assert return_stats is True
+            calls.append((dictionary_id, token_budget))
+            requested_budget = 3
+            used_budget = (
+                requested_budget
+                if token_budget is None
+                else min(requested_budget, token_budget)
+            )
+            return f"{text}|{dictionary_id}", {
+                "replacements": 1,
+                "iterations": 1,
+                "entries_used": [dictionary_id],
+                "token_budget_used": used_budget,
+                "token_budget_exceeded": token_budget is not None
+                and used_budget < requested_budget,
+            }
+
+    monkeypatch.setattr(
+        chat_dictionary_endpoints,
+        "ChatDictionaryService",
+        FakeChatDictionaryService,
+    )
+
+    response = await chat_dictionary_endpoints.process_text_with_dictionaries(
+        ProcessTextRequest(
+            text="hello",
+            dictionary_ids=[101, 202, 303],
+            token_budget=5,
+        ),
+        db=object(),
+    )
+
+    assert calls == [(101, 5), (202, 2)]
+    assert response.token_budget_used == 5
+    assert response.token_budget_exceeded is True
+    assert response.entries_used == [101, 202]
 
 
 def test_chat_dictionary_service_initializes_legacy_entries_table_without_sort_order(
@@ -144,6 +212,28 @@ async def test_add_dictionary_entry_returns_persisted_fields(chacha_db: Characte
     assert stored_entry["id"] == response.id
     assert stored_entry["pattern"] == "hello"
     assert stored_entry["replacement"] == "world"
+
+
+@pytest.mark.asyncio
+async def test_add_dictionary_entry_maps_prefetch_database_error(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def _raise_db_error(self, dictionary_id: int):
+        _ = (self, dictionary_id)
+        raise CharactersRAGDBError("sqlite backend unavailable")
+
+    monkeypatch.setattr(ChatDictionaryService, "get_dictionary", _raise_db_error)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_endpoints.add_dictionary_entry(
+            123,
+            DictionaryEntryCreate(pattern="alpha", replacement="beta"),
+            db=chacha_db,
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to add dictionary entry"
 
 
 @pytest.mark.asyncio
@@ -384,6 +474,302 @@ async def test_reorder_dictionary_entries_rejects_incomplete_entry_list(
 
 
 @pytest.mark.asyncio
+async def test_bulk_dictionary_entry_operations_sanitizes_unexpected_error(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service = ChatDictionaryService(chacha_db)
+    dictionary_id = service.create_dictionary("Bulk Fallback Dictionary", None)
+    entry_id = service.add_entry(dictionary_id, pattern="fallback", replacement="safe")
+
+    def _raise_unexpected_response_error(*args, **kwargs):
+        _ = (args, kwargs)
+        raise RuntimeError("bulk response backend unavailable")
+
+    monkeypatch.setattr(
+        chat_dictionary_endpoints,
+        "BulkOperationResponse",
+        _raise_unexpected_response_error,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await chat_endpoints.bulk_dictionary_entry_operations(
+            BulkEntryOperation(entry_ids=[entry_id], operation="activate"),
+            db=chacha_db,
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to perform bulk entry operation"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("service_method", "call_factory", "expected_detail"),
+    [
+        (
+            "reorder_entries",
+            lambda dictionary_id, db: chat_endpoints.reorder_dictionary_entries(
+                dictionary_id,
+                DictionaryEntryReorderRequest(entry_ids=[1]),
+                db=db,
+            ),
+            "Failed to reorder dictionary entries",
+        ),
+        (
+            "list_transform_activity",
+            lambda dictionary_id, db: chat_endpoints.list_dictionary_activity(
+                dictionary_id,
+                limit=10,
+                offset=0,
+                db=db,
+            ),
+            "Failed to list dictionary activity",
+        ),
+        (
+            "list_dictionary_versions",
+            lambda dictionary_id, db: chat_endpoints.list_dictionary_versions(
+                dictionary_id,
+                limit=10,
+                offset=0,
+                db=db,
+            ),
+            "Failed to list dictionary versions",
+        ),
+        (
+            "get_dictionary_version",
+            lambda dictionary_id, db: chat_endpoints.get_dictionary_version(
+                dictionary_id,
+                1,
+                db=db,
+            ),
+            "Failed to read dictionary revision",
+        ),
+        (
+            "revert_dictionary_to_revision",
+            lambda dictionary_id, db: chat_endpoints.revert_dictionary_version(
+                dictionary_id,
+                1,
+                db=db,
+            ),
+            "Failed to revert dictionary revision",
+        ),
+        (
+            "get_statistics",
+            lambda dictionary_id, db: chat_endpoints.get_dictionary_statistics(
+                dictionary_id,
+                db=db,
+            ),
+            "Failed to get dictionary statistics",
+        ),
+    ],
+)
+async def test_chat_dictionary_tail_handlers_sanitize_unexpected_errors(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    service_method: str,
+    call_factory,
+    expected_detail: str,
+):
+    service = ChatDictionaryService(chacha_db)
+    dictionary_id = service.create_dictionary("Tail Fallback Dictionary", None)
+
+    def _raise_unexpected_error(self, *args, **kwargs):
+        _ = (self, args, kwargs)
+        raise RuntimeError(f"{service_method} backend unavailable")
+
+    monkeypatch.setattr(ChatDictionaryService, service_method, _raise_unexpected_error)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await call_factory(dictionary_id, chacha_db)
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == expected_detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case_name", "service_method", "call_factory", "expected_detail"),
+    [
+        (
+            "create_dictionary",
+            "create_dictionary",
+            lambda dictionary_id, entry_id, db: chat_endpoints.create_chat_dictionary(
+                ChatDictionaryCreate(name="Create Fallback Dictionary"),
+                db=db,
+            ),
+            "Failed to create dictionary",
+        ),
+        (
+            "list_dictionaries",
+            "list_dictionaries_with_entry_counts",
+            lambda dictionary_id, entry_id, db: chat_endpoints.list_chat_dictionaries(
+                include_inactive=True,
+                include_usage=False,
+                db=db,
+            ),
+            "Failed to list dictionaries",
+        ),
+        (
+            "get_dictionary",
+            "get_dictionary",
+            lambda dictionary_id, entry_id, db: chat_endpoints.get_chat_dictionary(
+                dictionary_id,
+                db=db,
+            ),
+            "Failed to get dictionary",
+        ),
+        (
+            "update_dictionary",
+            "update_dictionary",
+            lambda dictionary_id, entry_id, db: chat_endpoints.update_chat_dictionary(
+                dictionary_id,
+                ChatDictionaryUpdate(description="fallback update"),
+                db=db,
+            ),
+            "Failed to update dictionary",
+        ),
+        (
+            "delete_dictionary",
+            "delete_dictionary",
+            lambda dictionary_id, entry_id, db: chat_endpoints.delete_chat_dictionary(
+                dictionary_id,
+                hard_delete=False,
+                db=db,
+            ),
+            "Failed to delete dictionary",
+        ),
+        (
+            "add_entry_prefetch",
+            "get_dictionary",
+            lambda dictionary_id, entry_id, db: chat_endpoints.add_dictionary_entry(
+                dictionary_id,
+                DictionaryEntryCreate(pattern="prefetch", replacement="safe"),
+                db=db,
+            ),
+            "Failed to add dictionary entry",
+        ),
+        (
+            "add_entry",
+            "add_entry",
+            lambda dictionary_id, entry_id, db: chat_endpoints.add_dictionary_entry(
+                dictionary_id,
+                DictionaryEntryCreate(pattern="add", replacement="safe"),
+                db=db,
+            ),
+            "Failed to add dictionary entry",
+        ),
+        (
+            "list_entries",
+            "get_entries",
+            lambda dictionary_id, entry_id, db: chat_endpoints.list_dictionary_entries(
+                dictionary_id,
+                group=None,
+                db=db,
+            ),
+            "Failed to list dictionary entries",
+        ),
+        (
+            "update_entry",
+            "update_entry",
+            lambda dictionary_id, entry_id, db: chat_endpoints.update_dictionary_entry(
+                entry_id,
+                DictionaryEntryUpdate(replacement="updated fallback"),
+                db=db,
+            ),
+            "Failed to update dictionary entry",
+        ),
+        (
+            "delete_entry",
+            "delete_entry",
+            lambda dictionary_id, entry_id, db: chat_endpoints.delete_dictionary_entry(
+                entry_id,
+                db=db,
+            ),
+            "Failed to delete dictionary entry",
+        ),
+        (
+            "process_text",
+            "process_text",
+            lambda dictionary_id, entry_id, db: chat_endpoints.process_text_with_dictionaries(
+                ProcessTextRequest(text="fallback", dictionary_id=dictionary_id),
+                db=db,
+            ),
+            "Failed to process text",
+        ),
+        (
+            "import_markdown",
+            "import_from_markdown",
+            lambda dictionary_id, entry_id, db: chat_endpoints.import_dictionary(
+                ImportDictionaryRequest(
+                    content="# Dictionary",
+                    name="Import Fallback Dictionary",
+                ),
+                db=db,
+            ),
+            "Failed to import dictionary",
+        ),
+        (
+            "export_markdown",
+            "export_to_markdown",
+            lambda dictionary_id, entry_id, db: chat_endpoints.export_dictionary(
+                dictionary_id,
+                db=db,
+            ),
+            "Failed to export dictionary",
+        ),
+        (
+            "export_json",
+            "export_to_json",
+            lambda dictionary_id, entry_id, db: chat_endpoints.export_dictionary_json(
+                dictionary_id,
+                db=db,
+            ),
+            "Failed to export dictionary JSON",
+        ),
+        (
+            "import_json",
+            "import_from_json",
+            lambda dictionary_id, entry_id, db: chat_endpoints.import_dictionary_json(
+                ImportDictionaryJSONRequest(
+                    data={
+                        "name": "Import JSON Fallback Dictionary",
+                        "entries": [],
+                    },
+                    activate=True,
+                ),
+                db=db,
+            ),
+            "Failed to import dictionary JSON",
+        ),
+    ],
+    ids=lambda value: value if isinstance(value, str) else None,
+)
+async def test_chat_dictionary_core_handlers_sanitize_unexpected_errors(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    case_name: str,
+    service_method: str,
+    call_factory,
+    expected_detail: str,
+):
+    service = ChatDictionaryService(chacha_db)
+    dictionary_id = service.create_dictionary(f"Core Fallback Dictionary {case_name}", None)
+    entry_id = service.add_entry(dictionary_id, pattern="core", replacement="safe")
+
+    def _raise_unexpected_error(self, *args, **kwargs):
+        _ = (self, args, kwargs)
+        raise RuntimeError(f"{case_name} backend unavailable")
+
+    monkeypatch.setattr(ChatDictionaryService, service_method, _raise_unexpected_error)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await call_factory(dictionary_id, entry_id, chacha_db)
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == expected_detail
+
+
+@pytest.mark.asyncio
 async def test_list_chat_dictionaries_counts_inactive_entries(chacha_db: CharactersRAGDB):
     service = ChatDictionaryService(chacha_db)
     dictionary_id = service.create_dictionary("Inactive Dictionary", None)
@@ -616,6 +1002,13 @@ async def test_process_text_uses_dictionary_default_token_budget_and_records_act
     )
     assert activity.dictionary_id == dictionary_id
     assert activity.total >= 1
+    assert activity.pagination.total == activity.total
+    assert activity.pagination.limit == 10
+    assert activity.pagination.offset == 0
+    assert activity.pagination.has_more is False
+    assert activity.pagination.next_offset is None
+    assert activity.has_more is False
+    assert activity.next_offset is None
     assert len(activity.events) >= 1
 
     event = activity.events[0]
@@ -951,6 +1344,13 @@ async def test_dictionary_version_history_endpoints_list_and_read_snapshots(
     )
     assert versions_response.dictionary_id == dictionary_id
     assert versions_response.total >= 3
+    assert versions_response.pagination.total == versions_response.total
+    assert versions_response.pagination.limit == 20
+    assert versions_response.pagination.offset == 0
+    assert versions_response.pagination.has_more is False
+    assert versions_response.pagination.next_offset is None
+    assert versions_response.has_more is False
+    assert versions_response.next_offset is None
     assert len(versions_response.versions) >= 3
     latest_revision = versions_response.versions[0].revision
     assert latest_revision >= 1

@@ -47,12 +47,39 @@ describe("TldwApiClient chat request debug snapshot", () => {
 
     const snapshot = getLastChatRequestDebugSnapshot()
     expect(snapshot).toMatchObject({
-      endpoint: "/api/v1/chats/42/complete-v2",
       method: "POST",
       mode: "stream"
     })
+    expect(snapshot?.endpoint).toMatch(/^\/api\/v1\/chats\/42\/complete-v2(?:\?|$)/)
     expect((snapshot?.body as any)?.model).toBe("kimi-k2")
+    expect((snapshot?.body as any)?.include_character_context).toBe(true)
     expect((snapshot?.body as any)?.stream).toBe(true)
+  })
+
+  it("adds chat scope query params to streamed character completions", async () => {
+    mocks.bgStream.mockImplementation(async function* () {
+      yield JSON.stringify({ delta: "scoped" })
+    })
+
+    const client = new TldwApiClient()
+    const scope = { type: "workspace", workspaceId: "workspace-7" } as const
+
+    for await (const _ of client.streamCharacterChatCompletion(
+      "42",
+      { include_character_context: true },
+      { scope }
+    )) {
+      break
+    }
+
+    expect(mocks.bgStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chats/42/complete-v2?scope_type=workspace&workspace_id=workspace-7"
+      })
+    )
+    expect(getLastChatRequestDebugSnapshot()?.endpoint).toBe(
+      "/api/v1/chats/42/complete-v2?scope_type=workspace&workspace_id=workspace-7"
+    )
   })
 
   it("captures complete endpoint payloads for non-stream character completion", async () => {

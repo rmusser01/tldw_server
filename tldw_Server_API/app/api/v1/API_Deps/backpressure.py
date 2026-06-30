@@ -134,7 +134,7 @@ def _should_enforce_ingest_tenant_rps(request: Request, current_user: User) -> b
         ctx = getattr(request.state, "auth", None)
         principal: AuthPrincipal | None = ctx.principal if isinstance(ctx, AuthContext) else None
     except _BACKPRESSURE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Failed to extract principal from request.state.auth: {}", exc)
+        logger.debug("Failed to extract principal from request.state.auth: {}", type(exc).__name__)
         principal = None
 
     is_admin = _principal_has_admin_claims(principal) if principal is not None else False
@@ -142,7 +142,7 @@ def _should_enforce_ingest_tenant_rps(request: Request, current_user: User) -> b
     try:
         single_profile = is_single_user_profile_mode()
     except _BACKPRESSURE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Failed to determine single-user profile mode: {}", exc)
+        logger.debug("Failed to determine single-user profile mode: {}", type(exc).__name__)
         single_profile = False
 
     # Local single-user-style profiles: never enforce tenant quotas for admin principals.
@@ -200,6 +200,18 @@ async def guard_backpressure_and_quota(
                     response.headers["X-RateLimit-Remaining"] = str(remaining)
                 except _BACKPRESSURE_NONCRITICAL_EXCEPTIONS:
                     pass
+        except _BACKPRESSURE_NONCRITICAL_EXCEPTIONS as exc:
+            tenant_id = getattr(current_user, "id", "anon")
+            logger.bind(
+                tenant_id=str(tenant_id),
+                exception_type=type(exc).__name__,
+                event="ingest_tenant_quota_redis_unavailable",
+            ).opt(exception=exc).warning("Ingest tenant quota Redis unavailable; failing closed")
+            raise HTTPException(
+                status_code=503,
+                detail="Tenant quota temporarily unavailable",
+                headers={"Retry-After": "1"},
+            ) from exc
         finally:
             try:
                 if client2 is not None:

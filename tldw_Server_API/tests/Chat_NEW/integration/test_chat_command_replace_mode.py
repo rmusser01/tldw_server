@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -70,10 +71,17 @@ def test_chat_command_revalidates_after_injection(monkeypatch, test_client, auth
 
     monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fail_call)
 
-    payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
-    resp = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 
-    assert resp.status_code == 413
+    test_client.app.dependency_overrides[get_chacha_db_for_user] = lambda: SimpleNamespace(client_id="test_client")
+    payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
+
+    try:
+        resp = test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+
+        assert resp.status_code == 413
+    finally:
+        test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
 
 
 @pytest.mark.integration

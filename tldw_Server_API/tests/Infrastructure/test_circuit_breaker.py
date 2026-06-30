@@ -177,6 +177,8 @@ class TestStateTransitionsSync:
                 failure_threshold=1,
                 recovery_timeout=0.05,
                 success_threshold=2,
+                backoff_factor=100.0,
+                max_recovery_timeout=10.0,
             ),
         )
         with pytest.raises(TransientError):
@@ -399,6 +401,7 @@ class TestHalfOpenSerialProbes:
                 recovery_timeout=0.05,
                 half_open_max_calls=1,
                 success_threshold=2,
+                max_recovery_timeout=1.0,
             ),
         )
         with pytest.raises(TransientError):
@@ -450,7 +453,7 @@ class TestExponentialBackoff:
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
         assert cb._current_recovery_timeout == 0.05  # no backoff on first trip from CLOSED
-        time.sleep(0.06)
+        cb.force_half_open()
         assert cb.is_half_open
         # Fail again in half-open → re-opens with backoff
         with pytest.raises(TransientError):
@@ -471,7 +474,7 @@ class TestExponentialBackoff:
         )
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
-        time.sleep(0.06)
+        cb.force_half_open()
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
         assert cb._current_recovery_timeout == pytest.approx(0.5)
@@ -488,7 +491,7 @@ class TestExponentialBackoff:
         )
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
-        time.sleep(0.06)
+        cb.force_half_open()
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
         assert cb._current_recovery_timeout == pytest.approx(0.05)
@@ -505,11 +508,11 @@ class TestExponentialBackoff:
         )
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
-        time.sleep(0.06)
+        cb.force_half_open()
         with pytest.raises(TransientError):
             cb.call(_fail_transient)
         assert cb._current_recovery_timeout == pytest.approx(0.10)
-        time.sleep(0.11)
+        cb.force_half_open()
         cb.call(_succeed)
         assert cb.is_closed
         assert cb._current_recovery_timeout == pytest.approx(0.05)
@@ -788,6 +791,18 @@ class TestRegistry:
 
         with pytest.raises(CircuitBreakerOpenError):
             cb_b.call(_succeed)
+
+    def test_persistence_rejects_rolling_window_breakers(self, tmp_path):
+        reg = CircuitBreakerRegistry(
+            persistence_enabled=True,
+            db_path=str(tmp_path / "cb_registry_window.db"),
+        )
+
+        with pytest.raises(ValueError, match="rolling-window circuit breakers"):
+            reg.get_or_create(
+                "shared-window",
+                config=CircuitBreakerConfig(window_size=5),
+            )
 
     def test_registry_persistence_opt_in_enabled(self, tmp_path):
         db_path = tmp_path / "cb_registry_enabled.db"
@@ -1086,7 +1101,7 @@ class TestPersistentStore:
         name = "lease-limit"
         cfg = CircuitBreakerConfig(
             failure_threshold=1,
-            recovery_timeout=0.05,
+            recovery_timeout=5.0,
             half_open_max_calls=1,
             success_threshold=1,
         )
@@ -1104,7 +1119,7 @@ class TestPersistentStore:
 
         cb_a.record_failure(TransientError("trip"))
         assert cb_a.is_open
-        time.sleep(0.06)
+        cb_a.force_half_open()
 
         release_event = threading.Event()
         result: dict[str, object] = {}
@@ -1175,7 +1190,6 @@ class TestPersistentStore:
             name,
             config=CircuitBreakerConfig(
                 failure_threshold=1,
-                recovery_timeout=0.05,
                 half_open_max_calls=1,
                 success_threshold=2,
             ),
@@ -1183,7 +1197,7 @@ class TestPersistentStore:
 
         cb.record_failure(TransientError("trip"))
         assert cb.is_open
-        time.sleep(0.06)
+        cb.force_half_open()
 
         assert cb.call(_succeed) == "ok"
         assert cb.is_half_open

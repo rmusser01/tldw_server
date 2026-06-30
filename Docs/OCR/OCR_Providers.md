@@ -8,7 +8,7 @@ Supported backends
 - dots (dots.ocr project)
 - points (Tencent POINTS-Reader)
 - deepseek (DeepSeek-OCR, Transformers)
-- hunyuan (Tencent HunyuanOCR, native Hunyuan + Hunyuan GGUF via llama.cpp)
+- hunyuan (Tencent HunyuanOCR, vLLM + Transformers)
 - dolphin (ByteDance Dolphin-v2, Transformers + remote server)
 - llamacpp (OCR-capable llama.cpp deployment, remote/managed/cli)
 - chatllm (OCR-capable ChatLLM deployment, remote/managed/cli)
@@ -123,10 +123,11 @@ Quick setup
   - Download model weights: `python3 tools/download_model.py` (use a directory name without periods, e.g., `DotsOCR`).
 - Recommended: serve with vLLM for performance (see upstream docs).
 
-Install via extras (optional)
-- You can install the project with the dots extra:
-  - `pip install .[ocr_dots]`
-  - This pulls the dots.ocr repo via a VCS dependency.
+Manual install
+- `dots.ocr` is not installed by a `tldw-server` package extra because PyPI rejects direct Git dependencies in package metadata.
+- Install it from the upstream repo before using `ocr_backend=dots`:
+  - `git clone https://github.com/rednote-hilab/dots.ocr.git && cd dots.ocr`
+  - `pip install -e .`
 
 Backend specifics
 - CLI mode: shells out to `python -m dots_ocr.parser <image.png>` per page (or use `DOTS_OCR_CMD` to specify an explicit command).
@@ -159,9 +160,10 @@ Environment
 Docs
 - See detailed guide at `Docs/OCR/POINTS-Reader.md`.
 
-Install via extras (optional)
-- Local transformers path: `pip install .[ocr_points_transformers]`
-  - Includes `transformers`, `torch`, and the WePOINTS toolkit via VCS.
+Manual source setup (optional)
+- Local transformers path:
+  - Install `transformers` and a CUDA/CPU-compatible `torch`.
+  - Install the WePOINTS toolkit manually from `https://github.com/WePOINTS/WePOINTS` before using `POINTS_MODE=transformers`.
 - SGLang client only: `pip install .[ocr_points_sglang]`
 
 ## DeepSeek-OCR (backend: `deepseek`)
@@ -193,33 +195,23 @@ Docs
 ## HunyuanOCR (backend: `hunyuan`)
 
 Summary
-- Public Hunyuan selector that can run either the native Hunyuan family or Hunyuan GGUF through llama.cpp.
+- Supports vLLM (OpenAI-compatible) and local Transformers.
 - Good for structured outputs when paired with `ocr_output_format=json` or prompt presets.
-- Keeps the same request contract while exposing family-specific discovery metadata under `/api/v1/ocr/backends`.
 
 Environment
-- `HUNYUAN_RUNTIME_FAMILY`: `auto|native|llamacpp`.
 - `HUNYUAN_MODE`: `auto` (default), `vllm`, `transformers`.
 - `HUNYUAN_PROMPT`: prompt override (free-form).
 - `HUNYUAN_PROMPT_PRESET`: `general|doc|table|spotting|json`.
 
-Native vLLM
+vLLM
 - `HUNYUAN_VLLM_URL`: OpenAI-compatible `/v1/chat/completions` endpoint.
 - `HUNYUAN_VLLM_MODEL`: served model name.
 - `HUNYUAN_VLLM_TIMEOUT`: request timeout seconds.
 - `HUNYUAN_VLLM_USE_DATA_URL`: `true` to send base64 image URLs (recommended).
 
-Native Transformers
+Transformers
 - `HUNYUAN_MODEL_PATH` (default: `tencent/HunyuanOCR`).
 - `HUNYUAN_DEVICE` (optional: `cuda`, `cpu`, etc.).
-
-Hunyuan GGUF via llama.cpp
-- `HUNYUAN_LLAMACPP_MODE`: `auto|remote|managed|cli`.
-- `HUNYUAN_LLAMACPP_AUTO_ELIGIBLE`, `HUNYUAN_LLAMACPP_AUTO_HIGH_QUALITY_ELIGIBLE`.
-- `HUNYUAN_LLAMACPP_MAX_PAGE_CONCURRENCY`.
-- Remote: `HUNYUAN_LLAMACPP_HOST`, `HUNYUAN_LLAMACPP_PORT`, `HUNYUAN_LLAMACPP_MODEL`.
-- Managed: `HUNYUAN_LLAMACPP_ALLOW_MANAGED_START`, `HUNYUAN_LLAMACPP_MODEL_PATH`, `HUNYUAN_LLAMACPP_SERVER_ARGV`, `HUNYUAN_LLAMACPP_STARTUP_TIMEOUT_SEC`.
-- CLI: `HUNYUAN_LLAMACPP_MODEL_PATH`, `HUNYUAN_LLAMACPP_CLI_ARGV`.
 
 Generation / post-processing
 - `HUNYUAN_MAX_NEW_TOKENS`, `HUNYUAN_TEMPERATURE`, `HUNYUAN_DO_SAMPLE`.
@@ -227,10 +219,6 @@ Generation / post-processing
 
 Docs
 - See `Docs/OCR/HunyuanOCR.md` for setup details and usage notes.
-
-Notes
-- `HUNYUAN_RUNTIME_FAMILY=auto` now requires explicit native intent for the Transformers path; importable `transformers` packages alone no longer make Hunyuan participate in generic OCR auto selection.
-- `ocr_backend=llamacpp` remains the generic llama.cpp surface. Use `ocr_backend=hunyuan` when you want Hunyuan-specific prompts, parsing, and discovery metadata on top of GGUF execution.
 
 ## Dolphin (backend: `dolphin`)
 

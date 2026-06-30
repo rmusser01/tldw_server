@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import time
 import hmac
 import hashlib
@@ -13,19 +12,45 @@ from tldw_Server_API.app.core.config import clear_config_cache
 
 pytestmark = pytest.mark.sandbox_ws_signed
 
-def _client_signed(secret: str) -> TestClient:
+
+def _force_docker_preflight_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+    from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+    from tldw_Server_API.app.core.Sandbox.service import SandboxService
+
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
+
+
+def _client_signed(secret: str, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     # Enable test mode and WS signing
-    os.environ.setdefault("TEST_MODE", "1")
-    os.environ["SANDBOX_WS_SIGNED_URLS"] = "true"
-    os.environ["SANDBOX_WS_SIGNING_SECRET"] = secret
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("SANDBOX_WS_SIGNED_URLS", "true")
+    monkeypatch.setenv("SANDBOX_WS_SIGNING_SECRET", secret)
     # speed up loop where relevant
-    os.environ["SANDBOX_WS_POLL_TIMEOUT_SEC"] = "0.1"
+    monkeypatch.setenv("SANDBOX_WS_POLL_TIMEOUT_SEC", "0.1")
     # Avoid real execution
-    os.environ["SANDBOX_ENABLE_EXECUTION"] = "false"
-    os.environ["SANDBOX_BACKGROUND_EXECUTION"] = "true"
-    os.environ["TLDW_SANDBOX_DOCKER_FAKE_EXEC"] = "1"
+    monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "false")
+    monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "true")
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", "1")
     # Ensure synthetic frames so a connect has immediate frames available
-    os.environ["SANDBOX_WS_SYNTHETIC_FRAMES_FOR_TESTS"] = "true"
+    monkeypatch.setenv("SANDBOX_WS_SYNTHETIC_FRAMES_FOR_TESTS", "true")
+    _force_docker_preflight_available(monkeypatch)
     clear_config_cache()
     # Import app after env is set and cache cleared
     from tldw_Server_API.app.main import app as _app
@@ -33,9 +58,9 @@ def _client_signed(secret: str) -> TestClient:
 
 
 @pytest.mark.unit
-def test_ws_signed_valid_token_connects() -> None:
+def test_ws_signed_valid_token_connects(monkeypatch: pytest.MonkeyPatch) -> None:
     secret = "test-secret"
-    with _client_signed(secret) as client:
+    with _client_signed(secret, monkeypatch) as client:
         # Sanity: verify settings reflect env
         import os as _os
         from tldw_Server_API.app.core.config import settings as app_settings
@@ -77,9 +102,9 @@ def test_ws_signed_valid_token_connects() -> None:
 
 
 @pytest.mark.unit
-def test_ws_signed_expired_token_rejected() -> None:
+def test_ws_signed_expired_token_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     secret = "test-secret"
-    with _client_signed(secret) as client:
+    with _client_signed(secret, monkeypatch) as client:
         body = {
             "spec_version": "1.0",
             "runtime": "docker",
@@ -102,9 +127,9 @@ def test_ws_signed_expired_token_rejected() -> None:
 
 
 @pytest.mark.unit
-def test_ws_signed_tampered_token_rejected() -> None:
+def test_ws_signed_tampered_token_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     secret = "test-secret"
-    with _client_signed(secret) as client:
+    with _client_signed(secret, monkeypatch) as client:
         body = {
             "spec_version": "1.0",
             "runtime": "docker",

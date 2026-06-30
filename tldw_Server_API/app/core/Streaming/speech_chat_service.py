@@ -86,6 +86,59 @@ from tldw_Server_API.app.core.TTS.tts_request_resolution import (
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 
 _ALLOWED_AUDIO_FORMATS = {"wav", "mp3", "ogg", "opus", "aac", "flac", "webm", "m4a"}
+_STT_EXTRA_PARAM_KEYS = {"whisper_model"}
+_LLM_EXTRA_PARAM_RESERVED_KEYS = {
+    "action",
+    "api_base_url",
+    "api_endpoint",
+    "api_key",
+    "api_provider",
+    "api_url",
+    "app_config",
+    "auth_user",
+    "base_url",
+    "caller_request",
+    "extra_body",
+    "extra_headers",
+    "frequency_penalty",
+    "function_call",
+    "functions",
+    "http_client_factory",
+    "http_fetcher",
+    "max_tokens",
+    "maxp",
+    "messages",
+    "messages_payload",
+    "model",
+    "presence_penalty",
+    "principal",
+    "provider",
+    "request",
+    "response_format",
+    "stream",
+    "streaming",
+    "system_message",
+    "temp",
+    "temperature",
+    "tool_choice",
+    "tools",
+    "topk",
+    "topp",
+    "trusted_base_url_override",
+    "user",
+    "user_identifier",
+}
+
+
+def _audio_chat_max_bytes() -> int:
+    """Return the configured speech-chat audio byte limit."""
+    raw_max_bytes = os.getenv("AUDIO_CHAT_MAX_BYTES")
+    if raw_max_bytes is not None:
+        try:
+            return int(raw_max_bytes)
+        except (ValueError, TypeError):
+            logger.debug("AUDIO_CHAT_MAX_BYTES parse failed; using default 20MB")
+    return 20 * 1024 * 1024
 
 
 def _normalize_audio_format(input_format: str) -> str:
@@ -107,11 +160,28 @@ def _decode_base64_audio(data: str) -> bytes:
     try:
         return base64.b64decode(data, validate=True)
     except Exception as e:  # noqa: BLE001
-        logger.warning(f"Failed to decode base64 audio: {e}")
+        logger.warning("Failed to decode base64 audio")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid base64 encoding for input_audio",
         ) from e
+
+
+def _estimate_base64_decoded_size(data: str) -> int:
+    """Estimate decoded byte length without allocating the decoded payload."""
+    encoded = str(data or "").strip()
+    padding = min(2, len(encoded) - len(encoded.rstrip("=")))
+    return max(0, (len(encoded) * 3) // 4 - padding)
+
+
+def _validate_encoded_audio_size(input_audio: str) -> None:
+    """Reject base64 payloads that would decode above the speech-chat byte limit."""
+    max_bytes = _audio_chat_max_bytes()
+    if _estimate_base64_decoded_size(input_audio) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="input_audio exceeds size limit for speech chat",
+        )
 
 
 def _load_audio_to_mono_np(audio_bytes: bytes) -> tuple[np.ndarray, int]:
@@ -124,7 +194,7 @@ def _load_audio_to_mono_np(audio_bytes: bytes) -> tuple[np.ndarray, int]:
         with io.BytesIO(audio_bytes) as buf:
             audio, sample_rate = sf.read(buf, dtype="float32", always_2d=False)
     except Exception as e:  # noqa: BLE001
-        logger.warning(f"Failed to read audio bytes for speech chat: {e}")
+        logger.warning("Failed to read audio bytes for speech chat")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported or corrupt audio format in input_audio",
@@ -161,19 +231,8 @@ def _validate_audio_constraints(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported input_audio_format '{input_format}'",
         )
-    # Size limit (bytes): allow env override but fall back safely on parse errors.
-    _raw_max_bytes = os.getenv("AUDIO_CHAT_MAX_BYTES")
-    if _raw_max_bytes is not None:
-        try:
-            max_bytes = int(_raw_max_bytes)
-        except (ValueError, TypeError) as exc:
-            logger.debug(
-                f"AUDIO_CHAT_MAX_BYTES parse failed ({_raw_max_bytes!r}); using default 20MB: {exc}"
-            )
-            max_bytes = 20 * 1024 * 1024
-    else:
-        max_bytes = 20 * 1024 * 1024
 
+    max_bytes = _audio_chat_max_bytes()
     if audio_bytes and len(audio_bytes) > max_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -184,10 +243,8 @@ def _validate_audio_constraints(
     if _raw_max_duration is not None:
         try:
             max_duration = float(_raw_max_duration)
-        except (ValueError, TypeError) as exc:
-            logger.debug(
-                f"AUDIO_CHAT_MAX_DURATION_SEC parse failed ({_raw_max_duration!r}); using default 120s: {exc}"
-            )
+        except (ValueError, TypeError):
+            logger.debug("AUDIO_CHAT_MAX_DURATION_SEC parse failed; using default 120s")
             max_duration = 120.0
     else:
         max_duration = 120.0
@@ -204,20 +261,58 @@ def _actions_enabled() -> bool:
     return is_truthy(os.getenv("AUDIO_CHAT_ENABLE_ACTIONS"))
 
 
+def _allowed_audio_chat_actions() -> set[str]:
+    """Return the explicit audio-chat action allowlist."""
+    allow_env = os.getenv("AUDIO_CHAT_ALLOWED_ACTIONS", "")
+    return {action.strip() for action in allow_env.split(",") if action.strip()}
+
+
+def _provider_llm_extra_params(extra_params: dict[str, Any] | None) -> dict[str, Any]:
+    """Return provider-bound LLM params without internal or security-sensitive fields."""
+    if not isinstance(extra_params, dict):
+        return {}
+
+    safe_params: dict[str, Any] = {}
+    for raw_key, value in extra_params.items():
+        if not isinstance(raw_key, str):
+            continue
+        key = raw_key.strip()
+        key_lower = key.lower()
+        if (
+            not key
+            or key.startswith("_")
+            or key_lower in _LLM_EXTRA_PARAM_RESERVED_KEYS
+            or key_lower.endswith("_api_url")
+        ):
+            continue
+        safe_params[key] = value
+    return safe_params
+
+
+def _stt_extra_params(stt_extra_params: dict[str, Any] | None) -> dict[str, Any]:
+    """Return STT params supported by the shared transcription entrypoint."""
+    if not isinstance(stt_extra_params, dict):
+        return {}
+    return {
+        key: value
+        for key, value in stt_extra_params.items()
+        if isinstance(key, str) and key in _STT_EXTRA_PARAM_KEYS and value is not None
+    }
+
+
 async def _execute_action(action_name: str, transcript: str, current_user: User) -> dict[str, Any]:
     """
     Execute a tool/workflow via MCP modules when available; fail soft with status.
     """
-    allow_env = os.getenv("AUDIO_CHAT_ALLOWED_ACTIONS", "")
-    if allow_env:
-        allowed = {a.strip() for a in allow_env.split(",") if a.strip()}
-        if allowed and action_name not in allowed:
-            return {
-                "action": action_name,
-                "status": "not_allowed",
-                "message": "Action not allowed",
-                "user_id": getattr(current_user, "id", None),
-            }
+    action_name = str(action_name or "").strip()
+    allowed = _allowed_audio_chat_actions()
+    if not action_name or action_name not in allowed:
+        return {
+            "action": action_name,
+            "status": "not_allowed",
+            "message": "Action not allowed",
+            "user_id": getattr(current_user, "id", None),
+        }
     user_id = getattr(current_user, "id", None)
     ctx = RequestContext(
         request_id=str(uuid.uuid4()),
@@ -228,11 +323,8 @@ async def _execute_action(action_name: str, transcript: str, current_user: User)
     registry = get_module_registry()
     try:
         module = await registry.find_module_for_tool(action_name)
-    except Exception as exc:  # noqa: BLE001  # defensive: action failures must not break speech chat
-        logger.warning(
-            f"Action lookup failed: action={action_name}, error={exc}",
-            exc_info=True,
-        )
+    except Exception:  # noqa: BLE001  # defensive: action failures must not break speech chat
+        logger.warning("Action lookup failed during speech chat")
         return {
             "action": action_name,
             "status": "error",
@@ -256,11 +348,8 @@ async def _execute_action(action_name: str, transcript: str, current_user: User)
             "result": result,
             "user_id": user_id,
         }
-    except Exception as exc:  # noqa: BLE001  # defensive: action failures must not break speech chat
-        logger.warning(
-            f"Action execution failed: action={action_name}, error={exc}",
-            exc_info=True,
-        )
+    except Exception:  # noqa: BLE001  # defensive: action failures must not break speech chat
+        logger.warning("Action execution failed during speech chat")
         return {
             "action": action_name,
             "status": "error",
@@ -328,31 +417,34 @@ def _strip_whisper_metadata_header_from_text(text: str) -> str:
 def _map_tts_exception(exc: Exception) -> HTTPException:
     """Map TTS exceptions to HTTPException consistent with /audio/speech."""
     if isinstance(exc, TTSInvalidVoiceReferenceError):
-        logger.warning(f"TTS voice reference error in speech chat: {exc}")
-        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+        logger.warning("TTS voice reference error in speech chat")
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid TTS voice reference",
+        )
     if isinstance(exc, TTSValidationError):
-        logger.warning(f"TTS validation error in speech chat: {exc}")
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        logger.warning("TTS validation error in speech chat")
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid TTS request")
     if isinstance(exc, TTSProviderNotConfiguredError):
-        logger.error(f"TTS provider not configured in speech chat: {exc}")
+        logger.error("TTS provider not configured in speech chat")
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"TTS service unavailable: {str(exc)}",
+            detail="TTS service unavailable",
         )
     if isinstance(exc, TTSAuthenticationError):
-        logger.error(f"TTS authentication error in speech chat: {exc}")
+        logger.error("TTS authentication error in speech chat")
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="TTS provider authentication failed",
         )
     if isinstance(exc, TTSRateLimitError):
-        logger.warning(f"TTS rate limit exceeded in speech chat: {exc}")
+        logger.warning("TTS rate limit exceeded in speech chat")
         return HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="TTS provider rate limit exceeded. Please try again later.",
         )
     if isinstance(exc, TTSQuotaExceededError):
-        logger.warning(f"TTS quota exceeded in speech chat: {exc}")
+        logger.warning("TTS quota exceeded in speech chat")
         return HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="TTS quota exceeded. Please review your plan or quota.",
@@ -360,13 +452,13 @@ def _map_tts_exception(exc: Exception) -> HTTPException:
 
     # Fallback for other TTSError subclasses and unexpected errors
     if isinstance(exc, TTSError):
-        logger.error(f"TTS error in speech chat: {exc}")
+        logger.error("TTS provider error in speech chat")
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="TTS provider error while generating speech",
         )
 
-    logger.error(f"Unexpected TTS error in speech chat: {exc}")
+    logger.error("Unexpected TTS error in speech chat")
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Unexpected error during TTS generation",
@@ -394,7 +486,18 @@ async def run_speech_chat_turn(
     """
     # --- Decode audio ---
     req_start = time.time()
+    _validate_audio_constraints(
+        audio_bytes=b"",
+        duration_sec=0.0,
+        input_format=request_data.input_audio_format,
+    )
+    _validate_encoded_audio_size(request_data.input_audio)
     raw_audio_bytes = _decode_base64_audio(request_data.input_audio)
+    _validate_audio_constraints(
+        audio_bytes=raw_audio_bytes,
+        duration_sec=0.0,
+        input_format=request_data.input_audio_format,
+    )
     audio_np, sample_rate = _load_audio_to_mono_np(raw_audio_bytes)
     duration_sec = float(len(audio_np) / float(sample_rate or 16000))
     _validate_audio_constraints(
@@ -407,9 +510,13 @@ async def run_speech_chat_turn(
     stt_start = time.time()
     stt_provider = None
     stt_language = None
+    stt_kwargs: dict[str, Any] = {}
     if request_data.stt_config is not None:
         stt_provider = request_data.stt_config.provider
         stt_language = request_data.stt_config.language
+        stt_kwargs.update(_stt_extra_params(request_data.stt_config.extra_params))
+        if request_data.stt_config.model:
+            stt_kwargs["whisper_model"] = request_data.stt_config.model
     try:
         transcript = await asyncio.to_thread(
             transcribe_audio,
@@ -417,11 +524,12 @@ async def run_speech_chat_turn(
             transcription_provider=stt_provider,
             sample_rate=sample_rate,
             speaker_lang=stt_language,
+            **stt_kwargs,
         )
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
-        logger.error(f"Speech chat STT failed: {e}", exc_info=True)
+        logger.error("Speech chat STT failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Transcription failed for speech chat",
@@ -435,7 +543,7 @@ async def run_speech_chat_turn(
         )
 
     if _is_transcription_error(transcript):
-        logger.error(f"Speech chat STT returned error sentinel: {transcript}")
+        logger.error("Speech chat STT returned error sentinel")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Transcription failed for speech chat. Please try again or verify STT configuration in config.txt.",
@@ -498,8 +606,8 @@ async def run_speech_chat_turn(
             limit=20,
             loop=loop,
         )
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"Failed to load conversation history for speech chat: {e}", exc_info=True)
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to load conversation history for speech chat")
         history_messages = []
 
     # --- LLM call ---
@@ -514,6 +622,7 @@ async def run_speech_chat_turn(
         or DEFAULT_LLM_PROVIDER
     )
     llm_model = request_data.llm_config.model
+    llm_extra_params = _provider_llm_extra_params(request_data.llm_config.extra_params)
 
     messages_payload = list(history_messages)
     messages_payload.append({"role": "user", "content": transcript})
@@ -577,6 +686,7 @@ async def run_speech_chat_turn(
                 "user": str(getattr(current_user, "id", client_id)),
                 "app_config": app_config,
             }
+            request_payload.update(llm_extra_params)
             try:
                 llm_response = await adapter.achat(request_payload)
             except NotImplementedError:
@@ -597,11 +707,12 @@ async def run_speech_chat_turn(
                 user_identifier=str(getattr(current_user, "id", client_id)),
                 system_message=system_message,
                 app_config=app_config,
+                **llm_extra_params,
             )
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
-        logger.error(f"Speech chat LLM call failed: {e}", exc_info=True)
+        logger.error("Speech chat LLM call failed")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="LLM provider error during speech chat",
@@ -658,8 +769,8 @@ async def run_speech_chat_turn(
         if action_result is not None:
             try:
                 tool_content = json.dumps(action_result)
-            except TypeError as exc:
-                logger.warning(f"Failed to serialize action_result for chat history: {exc}")
+            except TypeError:
+                logger.warning("Failed to serialize action_result for chat history")
             else:
                 chat_db.add_message(
                     {
@@ -669,8 +780,8 @@ async def run_speech_chat_turn(
                         "client_id": client_id,
                     }
                 )
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"Failed to persist speech chat messages: {e}", exc_info=True)
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to persist speech chat messages")
         # Do not fail the user-facing request solely due to DB persistence issues
 
     # --- TTS ---
@@ -746,8 +857,8 @@ async def run_speech_chat_turn(
                 "tts_provider": resolved_tts.provider,
             },
         )
-    except Exception as e:  # noqa: BLE001
-        logger.debug(f"Failed to record audio_chat_latency_seconds metric: {e}")
+    except Exception:  # noqa: BLE001
+        logger.debug("Failed to record audio_chat_latency_seconds metric")
 
     return SpeechChatResponse(
         session_id=conversation_id,

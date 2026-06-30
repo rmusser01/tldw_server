@@ -418,6 +418,7 @@ async def test_generate_with_adapter_closes_stream_before_pocket_tts_cpp_cleanup
         ("custom:voice-1", None, "custom_voice-1.wav"),
         ("alloy", _make_wav_base64(b"\x01\x02" * 8), "ref_"),
     ],
+    ids=("stored-custom-voice", "inline-reference-audio"),
 )
 async def test_pocket_tts_cpp_fallback_materializes_voice_for_fallback_adapter(
     tmp_path,
@@ -488,10 +489,11 @@ async def test_pocket_tts_cpp_fallback_materializes_voice_for_fallback_adapter(
         chunks.append(chunk)
 
     assert b"".join(chunks) == b"fallback"
-    assert "/voices/providers/pocket_tts_cpp/" in seen["voice_path"]
-    assert expected_fragment in seen["voice_path"]
+    voice_path = Path(seen["voice_path"])
+    assert voice_path.parent.parts[-3:] == ("voices", "providers", "pocket_tts_cpp")
+    assert expected_fragment in voice_path.name
     with pytest.raises(ValueError):
-        resolve_provider_managed_voice_path(seen["token"], Path(seen["voice_path"]))
+        resolve_provider_managed_voice_path(seen["token"], voice_path)
 
 
 @pytest.mark.asyncio

@@ -7,20 +7,26 @@ GuardianDB (no mocks). Each test gets a fresh database via tmp_path.
 from __future__ import annotations
 
 import re
-import time
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB
-from tldw_Server_API.app.core.Moderation.supervised_policy import (
-    SupervisedCheckResult,
-    SupervisedPolicyEngine,
-)
+import tldw_Server_API.app.core.Moderation.supervised_policy as supervised_module
+from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB, SupervisedPolicy
 from tldw_Server_API.app.core.Moderation.moderation_service import (
     ModerationPolicy,
     PatternRule,
 )
-
+from tldw_Server_API.app.core.Moderation.policy_compiler import (
+    PolicyCompilationInput,
+    PolicyCompiler,
+    ResolvedModerationConfig,
+)
+from tldw_Server_API.app.core.Moderation.supervised_policy import (
+    GuardianModerationProxy,
+    SupervisedCheckResult,
+    SupervisedPolicyEngine,
+    dispatch_guardian_notification,
+)
 
 # ── Fixtures ──────────────────────────────────────────────────
 
@@ -715,6 +721,64 @@ class TestInvalidRegex:
         result = engine.check_text("this has goodword in it", "child1")
         assert result.action == "warn"
 
+    def test_compile_logs_sanitize_unsafe_pattern_details(self, monkeypatch, db, engine):
+        monkeypatch.setattr(
+            db,
+            "list_active_policies_for_dependent",
+            lambda *_args, **_kwargs: [
+                SupervisedPolicy(
+                    id="policy1",
+                    relationship_id="rel1",
+                    pattern="private-pattern",
+                    pattern_type="regex",
+                )
+            ],
+        )
+        monkeypatch.setattr(
+            supervised_module,
+            "validate_regex_safety",
+            lambda _pattern: (False, "unsafe regex detail at /private/supervised-policy.db"),
+        )
+
+        messages: list[str] = []
+        sink_id = supervised_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+        try:
+            assert engine._get_compiled_policies("child1") == []
+        finally:
+            supervised_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert "Unsafe supervised policy regex skipped" in joined
+        assert "private-pattern" not in joined
+        assert "supervised-policy.db" not in joined
+
+    def test_compile_logs_sanitize_invalid_pattern_details(self, monkeypatch, db, engine):
+        monkeypatch.setattr(
+            db,
+            "list_active_policies_for_dependent",
+            lambda *_args, **_kwargs: [
+                SupervisedPolicy(
+                    id="policy1",
+                    relationship_id="rel1",
+                    pattern="private-pattern(",
+                    pattern_type="regex",
+                )
+            ],
+        )
+        monkeypatch.setattr(supervised_module, "validate_regex_safety", lambda _pattern: (True, ""))
+
+        messages: list[str] = []
+        sink_id = supervised_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+        try:
+            assert engine._get_compiled_policies("child1") == []
+        finally:
+            supervised_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert "Invalid supervised policy pattern skipped" in joined
+        assert "private-pattern" not in joined
+        assert "missing ), unterminated subpattern" not in joined
+
 
 # ── 20. build_moderation_policy_overlay ──────────────────────
 
@@ -761,6 +825,50 @@ class TestBuildModerationPolicyOverlay:
         assert isinstance(rule, PatternRule)
         assert rule.action == "block"
         assert rule.categories == {"test_cat"}
+
+    def test_overlay_accepts_compiler_policy_and_preserves_base_io_settings(self, db, engine):
+        rel = _setup_active_relationship(db)
+        db.create_policy(
+            relationship_id=rel.id,
+            pattern="supervised_word",
+            action="block",
+            category="supervised",
+        )
+        base = PolicyCompiler().compile_global(
+            PolicyCompilationInput(
+                config=ResolvedModerationConfig(
+                    enabled=True,
+                    input_enabled=False,
+                    output_enabled=True,
+                    input_action="warn",
+                    output_action="block",
+                    redact_replacement="[BASE]",
+                    per_user_overrides=False,
+                    categories_enabled={"base", "supervised"},
+                    pii_enabled=False,
+                ),
+                blocklist_lines=["base-secret -> warn #base"],
+            )
+        ).policy
+
+        result = engine.build_moderation_policy_overlay("child1", base)
+
+        assert isinstance(result, ModerationPolicy)
+        assert result.enabled is True
+        assert result.input_enabled is False
+        assert result.output_enabled is True
+        assert result.input_action == "warn"
+        assert result.output_action == "block"
+        assert result.redact_replacement == "[BASE]"
+        assert result.per_user_overrides is False
+        assert result.categories_enabled == {"base", "supervised"}
+        assert len(result.block_patterns) == 2
+        assert result.block_patterns[0].regex.search("base-secret")
+        assert result.block_patterns[0].action == "warn"
+        assert result.block_patterns[0].categories == {"base"}
+        assert result.block_patterns[1].regex.search("supervised_word")
+        assert result.block_patterns[1].action == "block"
+        assert result.block_patterns[1].categories == {"supervised"}
 
     def test_overlay_appends_to_existing_patterns(self, db, engine):
         rel = _setup_active_relationship(db)
@@ -886,7 +994,7 @@ class TestEdgeCases:
             pattern="restricted",
             action="block",
         )
-        rel2 = _setup_active_relationship(db, "guardian1", "child2")
+        _setup_active_relationship(db, "guardian1", "child2")
         # child2 has no policies
 
         result_child1 = engine.check_text("restricted content", "child1")
@@ -1343,6 +1451,7 @@ class TestTransparentMode:
 class TestGuardianNotificationDispatch:
     def test_dispatches_when_notify_guardian_true(self, db, engine):
         from unittest.mock import MagicMock, patch
+
         from tldw_Server_API.app.core.Moderation.supervised_policy import (
             SupervisedCheckResult,
             dispatch_guardian_notification,
@@ -1385,3 +1494,59 @@ class TestGuardianNotificationDispatch:
         result = SupervisedCheckResult(action="block", notify_guardian=False)
         status = dispatch_guardian_notification(result, "child1")
         assert status == "skipped"
+
+    def test_dispatch_failure_log_sanitizes_backend_details(self, monkeypatch):
+        result = SupervisedCheckResult(
+            action="block",
+            notify_guardian=True,
+            severity="critical",
+            matched_category="violence",
+            matched_pattern="fight",
+        )
+
+        def fail_service():
+            raise RuntimeError("notify backend failed at /private/guardian-notify.db")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Monitoring.notification_service.get_notification_service",
+            fail_service,
+        )
+
+        messages: list[str] = []
+        sink_id = supervised_module.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+        try:
+            status = dispatch_guardian_notification(result, "child1", "guardian1")
+        finally:
+            supervised_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert status == "failed"
+        assert "Guardian notification dispatch failed" in joined
+        assert "guardian-notify.db" not in joined
+
+
+class TestGuardianModerationProxySanitizers:
+    def test_overlay_failure_log_sanitizes_backend_details(self):
+        base_policy = ModerationPolicy(enabled=True)
+
+        class Base:
+            def get_effective_policy(self, user_id=None):  # noqa: ANN001, ANN202
+                return base_policy
+
+        class Engine:
+            def build_moderation_policy_overlay(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+                raise RuntimeError("overlay backend failed at /private/guardian-overlay.db")
+
+        proxy = GuardianModerationProxy(Base(), Engine(), "child1")
+
+        messages: list[str] = []
+        sink_id = supervised_module.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+        try:
+            result = proxy.get_effective_policy("child1")
+        finally:
+            supervised_module.logger.remove(sink_id)
+
+        joined = "\n".join(messages)
+        assert result is base_policy
+        assert "Guardian policy overlay skipped in proxy" in joined
+        assert "guardian-overlay.db" not in joined

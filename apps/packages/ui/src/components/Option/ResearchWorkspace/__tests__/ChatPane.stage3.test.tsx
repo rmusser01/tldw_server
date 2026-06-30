@@ -27,6 +27,7 @@ const mockSetChatMode = vi.fn()
 const mockSetFileRetrievalEnabled = vi.fn()
 const mockSetRagTopK = vi.fn()
 const mockSetRagAdvancedOptions = vi.fn()
+const mockSetSelectedModel = vi.fn()
 const mockCaptureToCurrentNote = vi.fn()
 const mockClearChatFocusTarget = vi.fn()
 
@@ -45,6 +46,7 @@ const workspaceStoreState = {
     mediaId: number
     title: string
     type: "pdf" | "video" | "audio" | "website" | "document" | "text"
+    status?: "processing" | "ready" | "error"
     addedAt?: Date
     url?: string
   }>,
@@ -55,6 +57,7 @@ const workspaceStoreState = {
       mediaId: number
       title: string
       type: "pdf" | "video" | "audio" | "website" | "document" | "text"
+      status?: "processing" | "ready" | "error"
     }>,
   getSelectedMediaIds: () => [] as number[],
   setSelectedSourceIds: vi.fn(),
@@ -70,6 +73,8 @@ const workspaceStoreState = {
 }
 
 const optionStoreState = {
+  selectedModel: "test-model",
+  setSelectedModel: mockSetSelectedModel,
   setRagMediaIds: mockSetRagMediaIds,
   setChatMode: mockSetChatMode,
   setFileRetrievalEnabled: mockSetFileRetrievalEnabled,
@@ -199,7 +204,9 @@ vi.mock("@/components/Common/FeatureEmptyState", () => ({
 
 vi.mock("../source-location-copy", () => ({
   getWorkspaceChatNoSourcesHint: () =>
-    "Select sources from the Sources pane, then ask questions."
+    "Select sources from the Sources pane, then ask questions.",
+  getWorkspaceChatSourcesExplainer: () =>
+    "Sources are documents, PDFs, web pages, or other content you add. Add or select sources from the Sources pane to ask grounded questions about them."
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -214,6 +221,16 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
       size: 8
     }))
   }
+}))
+
+vi.mock("@/services/tldw-server", () => ({
+  fetchChatModels: vi.fn(async () => [
+    {
+      id: "test-model",
+      name: "Test Model",
+      provider: "test"
+    }
+  ])
 }))
 
 vi.mock("antd", async () => {
@@ -288,6 +305,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     mockCaptureToCurrentNote.mockReset()
 
     optionStoreState.ragTopK = 8
+    optionStoreState.selectedModel = "test-model"
     optionStoreState.ragAdvancedOptions = {
       min_score: 0.2,
       enable_reranking: false
@@ -318,6 +336,15 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     expect(screen.getByText("Start your research")).toBeInTheDocument()
   })
 
+  it("uses contextual source guidance instead of stale left-panel copy", () => {
+    renderChatPane()
+
+    const explainer = screen.getByTestId("workspace-chat-sources-explainer")
+
+    expect(explainer).toHaveTextContent("Sources pane")
+    expect(explainer.textContent?.toLowerCase()).not.toContain("left panel")
+  })
+
   it("adapts empty-state examples based on selected source types", () => {
     workspaceStoreState.selectedSourceIds = ["source-video-1"]
     workspaceStoreState.getSelectedSources = () => [
@@ -325,7 +352,8 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         id: "source-video-1",
         mediaId: 10,
         title: "Interview Recording",
-        type: "video"
+        type: "video",
+        status: "ready"
       }
     ]
     workspaceStoreState.getSelectedMediaIds = () => [10]
@@ -344,7 +372,8 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         id: "source-video-1",
         mediaId: 10,
         title: "Interview Recording",
-        type: "video"
+        type: "video",
+        status: "ready"
       }
     ]
     workspaceStoreState.getSelectedMediaIds = () => [10]
@@ -379,7 +408,8 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         id: "source-doc-1",
         mediaId: 101,
         title: "Policy Document",
-        type: "pdf"
+        type: "pdf",
+        status: "ready"
       }
     ]
     workspaceStoreState.getSelectedMediaIds = () => [101]
@@ -403,7 +433,8 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         id: "source-doc-1",
         mediaId: 101,
         title: "Policy Document",
-        type: "pdf"
+        type: "pdf",
+        status: "ready"
       }
     ]
     workspaceStoreState.getSelectedMediaIds = () => [101]
@@ -438,7 +469,8 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         id: "source-doc-1",
         mediaId: 101,
         title: "Policy Document",
-        type: "pdf"
+        type: "pdf",
+        status: "ready"
       }
     ]
     workspaceStoreState.getSelectedMediaIds = () => [101]
@@ -476,13 +508,15 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         id: "source-doc-1",
         mediaId: 101,
         title: "Primary Paper",
-        type: "pdf"
+        type: "pdf",
+        status: "ready"
       },
       {
         id: "source-doc-2",
         mediaId: 102,
         title: "Appendix Notes",
-        type: "document"
+        type: "document",
+        status: "ready"
       }
     ]
     workspaceStoreState.getSelectedMediaIds = () => [101, 102]

@@ -22,6 +22,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
@@ -29,6 +30,54 @@ from tldw_Server_API.app.core.config import settings
 
 
 pytestmark = pytest.mark.unit
+
+
+_WEBSUB_SENSITIVE_MARKERS = (
+    "push-invalid-token",
+    "push-inv",
+    "websub processing leaked",
+    "websub upsert leaked",
+    "hub discovery leaked",
+    "subscribe request leaked",
+    "hub result leaked",
+    "unsubscribe request leaked",
+    "/private/websub-feed.xml",
+    "/private/websub-item.db",
+    "/private/websub-hub.xml",
+    "/private/websub-subscribe.db",
+    "/private/websub-unsubscribe.db",
+    "https://private.example/item",
+    "4242",
+    "4243",
+    "4244",
+    "4245",
+)
+
+
+class _LoggerStub:
+    def __init__(self):
+        self.warnings: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+        self.debugs: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        self.warnings.append((message, args, kwargs))
+
+    def debug(self, message: str, *args: object, **kwargs: object) -> None:
+        self.debugs.append((message, args, kwargs))
+
+
+def _assert_sanitized_warning_log(logger_stub: _LoggerStub, expected_message: str) -> None:
+    assert logger_stub.warnings == [(expected_message, (), {})]
+    rendered = repr(logger_stub.warnings)
+    for marker in _WEBSUB_SENSITIVE_MARKERS:
+        assert marker not in rendered
+
+
+def _assert_sanitized_debug_log(logger_stub: _LoggerStub, expected_message: str) -> None:
+    assert logger_stub.debugs == [(expected_message, (), {})]
+    rendered = repr(logger_stub.debugs)
+    for marker in _WEBSUB_SENSITIVE_MARKERS:
+        assert marker not in rendered
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +230,149 @@ def test_discover_hub_url_xml_takes_precedence_over_missing_header():
 
     hub, self_url = discover_hub_url(ATOM_FEED_WITH_HUB, response_headers={})
     assert hub == "https://hub.example.com/"
+
+
+@pytest.mark.asyncio
+async def test_websub_subscribe_sanitizes_hub_discovery_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import collections_websub
+    from tldw_Server_API.app.core import http_client
+
+    logger_stub = _LoggerStub()
+
+    class _Source:
+        url = "https://private.example/feed.xml"
+
+    class _DB:
+        def get_source(self, feed_id):
+            return _Source()
+
+        def get_websub_subscription_for_source(self, feed_id):
+            return None
+
+    async def _raise_fetch_failure(*args, **kwargs):
+        raise OSError("hub discovery leaked /private/websub-hub.xml")
+
+    monkeypatch.setattr(collections_websub, "logger", logger_stub)
+    monkeypatch.setattr(http_client, "afetch", _raise_fetch_failure)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await collections_websub.websub_subscribe(
+            feed_id=4242,
+            payload=collections_websub.WebSubSubscribeRequest(),
+            current_user=User(id=710, username="websub", email=None, is_active=True),
+            db=_DB(),
+        )
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == "hub_discovery_failed"
+    _assert_sanitized_warning_log(logger_stub, "WebSub hub discovery failed")
+
+
+class _SubscribeSource:
+    url = "https://private.example/feed.xml"
+
+
+class _SubscribeRow:
+    id = 11
+    source_id = 4243
+    hub_url = "https://hub.example.com/"
+    topic_url = "https://example.com/feed.atom"
+    state = "pending"
+    lease_seconds = 86400
+    verified_at = None
+    expires_at = None
+    last_push_at = None
+    created_at = "2025-01-01"
+    callback_token = "callback-token"  # nosec B105
+    secret = "secret"  # nosec B105
+    user_id = 710
+
+
+class _SubscribeDB:
+    def __init__(self):
+        self.sub = _SubscribeRow()
+
+    def get_source(self, feed_id):
+        return _SubscribeSource()
+
+    def get_websub_subscription_for_source(self, feed_id):
+        return None
+
+    def create_websub_subscription(self, **kwargs):
+        return self.sub
+
+    def get_websub_subscription(self, sub_id):
+        return self.sub
+
+
+async def _successful_feed_fetch(*args, **kwargs):
+    class _Response:
+        status_code = 200
+        text = ATOM_FEED_WITH_HUB
+        headers = {}
+
+    return _Response()
+
+
+def _patch_subscribe_dependencies(monkeypatch):
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Security import egress
+    from tldw_Server_API.app.core.Watchlists import websub as websub_core
+
+    monkeypatch.setattr(http_client, "afetch", _successful_feed_fetch)
+    monkeypatch.setattr(egress, "is_url_allowed", lambda url: True)
+    monkeypatch.setattr(websub_core, "generate_callback_token", lambda: "callback-token")
+    monkeypatch.setattr(websub_core, "generate_secret", lambda: "secret")
+    monkeypatch.setattr(websub_core, "build_callback_url", lambda token, user_id=None: "https://callback.example")
+    return websub_core
+
+
+@pytest.mark.asyncio
+async def test_websub_subscribe_sanitizes_non_2xx_result_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import collections_websub
+
+    logger_stub = _LoggerStub()
+    websub_core = _patch_subscribe_dependencies(monkeypatch)
+
+    async def _return_failed_result(*args, **kwargs):
+        return {"ok": False, "error": "hub result leaked /private/websub-subscribe.db"}
+
+    monkeypatch.setattr(collections_websub, "logger", logger_stub)
+    monkeypatch.setattr(websub_core, "send_subscribe_request", _return_failed_result)
+
+    response = await collections_websub.websub_subscribe(
+        feed_id=4243,
+        payload=collections_websub.WebSubSubscribeRequest(),
+        current_user=User(id=710, username="websub", email=None, is_active=True),
+        db=_SubscribeDB(),
+    )
+
+    assert response.id == 11
+    _assert_sanitized_warning_log(logger_stub, "WebSub: hub returned non-2xx for subscribe")
+
+
+@pytest.mark.asyncio
+async def test_websub_subscribe_sanitizes_request_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import collections_websub
+
+    logger_stub = _LoggerStub()
+    websub_core = _patch_subscribe_dependencies(monkeypatch)
+
+    async def _raise_subscribe_failure(*args, **kwargs):
+        raise TimeoutError("subscribe request leaked /private/websub-subscribe.db")
+
+    monkeypatch.setattr(collections_websub, "logger", logger_stub)
+    monkeypatch.setattr(websub_core, "send_subscribe_request", _raise_subscribe_failure)
+
+    response = await collections_websub.websub_subscribe(
+        feed_id=4244,
+        payload=collections_websub.WebSubSubscribeRequest(),
+        current_user=User(id=710, username="websub", email=None, is_active=True),
+        db=_SubscribeDB(),
+    )
+
+    assert response.id == 11
+    _assert_sanitized_warning_log(logger_stub, "WebSub: subscribe request failed")
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +639,50 @@ def test_get_nonexistent_subscription(db_for_test):
     assert db.get_websub_subscription_for_source(999999) is None
 
 
+@pytest.mark.asyncio
+async def test_websub_unsubscribe_sanitizes_request_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import collections_websub
+    from tldw_Server_API.app.core.Watchlists import websub as websub_core
+
+    logger_stub = _LoggerStub()
+
+    class _Sub:
+        id = 12
+        callback_token = "callback-token"  # nosec B105
+        user_id = 711
+        hub_url = "https://hub.example.com/"
+        topic_url = "https://example.com/feed.atom"
+        secret = "secret"  # nosec B105
+
+    class _DB:
+        def __init__(self):
+            self.updated: dict[str, object] | None = None
+
+        def get_websub_subscription_for_source(self, feed_id):
+            return _Sub()
+
+        def update_websub_subscription(self, sub_id, patch):
+            self.updated = {"sub_id": sub_id, "patch": patch}
+
+    async def _raise_unsubscribe_failure(*args, **kwargs):
+        raise TimeoutError("unsubscribe request leaked /private/websub-unsubscribe.db")
+
+    db = _DB()
+    monkeypatch.setattr(collections_websub, "logger", logger_stub)
+    monkeypatch.setattr(websub_core, "build_callback_url", lambda token, user_id=None: "https://callback.example")
+    monkeypatch.setattr(websub_core, "send_unsubscribe_request", _raise_unsubscribe_failure)
+
+    response = await collections_websub.websub_unsubscribe(
+        feed_id=4245,
+        current_user=User(id=711, username="websub", email=None, is_active=True),
+        db=db,
+    )
+
+    assert response.state == "unsubscribed"
+    assert db.updated == {"sub_id": 12, "patch": {"state": "unsubscribed"}}
+    _assert_sanitized_warning_log(logger_stub, "WebSub: unsubscribe request failed")
+
+
 # ---------------------------------------------------------------------------
 # Hub challenge verification callback tests
 # ---------------------------------------------------------------------------
@@ -585,6 +821,9 @@ def test_push_notification_valid_signature(websub_app, monkeypatch):
 
 def test_push_notification_invalid_signature(websub_app, monkeypatch):
     from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WebSubRow
+    from tldw_Server_API.app.api.v1.endpoints import collections_websub
+
+    logger_stub = _LoggerStub()
 
     mock_sub = WebSubRow(
         id=1, user_id="703", source_id=1,
@@ -600,7 +839,7 @@ def test_push_notification_invalid_signature(websub_app, monkeypatch):
     with TestClient(websub_app) as client:
         with patch(
             "tldw_Server_API.app.api.v1.endpoints.collections_websub._lookup_subscription_by_token"
-        ) as mock_lookup:
+        ) as mock_lookup, patch.object(collections_websub, "logger", logger_stub):
             mock_lookup.return_value = mock_sub
 
             r = client.post(
@@ -609,6 +848,7 @@ def test_push_notification_invalid_signature(websub_app, monkeypatch):
                 headers={"X-Hub-Signature": "sha256=totally_wrong_digest"},
             )
             assert r.status_code == 403
+            _assert_sanitized_warning_log(logger_stub, "WebSub: invalid signature")
 
 
 def test_push_notification_no_signature(websub_app, monkeypatch):
@@ -636,3 +876,66 @@ def test_push_notification_no_signature(websub_app, monkeypatch):
                 content=b"<feed>data</feed>",
             )
             assert r.status_code == 403
+
+
+def test_process_and_record_push_sanitizes_processing_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import collections_websub
+
+    logger_stub = _LoggerStub()
+
+    class _Sub:
+        user_id = 705
+        source_id = 99
+
+    def _raise_processing_failure(*args, **kwargs):
+        raise RuntimeError("websub processing leaked /private/websub-feed.xml")
+
+    monkeypatch.setattr(collections_websub, "logger", logger_stub)
+    monkeypatch.setattr(collections_websub, "_process_push_items", _raise_processing_failure)
+    monkeypatch.setattr(collections_websub, "_record_push_timestamp", lambda sub: None)
+
+    collections_websub._process_and_record_push(_Sub(), [{"url": "https://private.example/item"}])
+
+    _assert_sanitized_warning_log(logger_stub, "WebSub: error processing push items")
+
+
+def test_process_push_items_sanitizes_upsert_failure_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import collections_websub
+    from tldw_Server_API.app.core.DB_Management import Collections_DB as collections_db_module
+    from tldw_Server_API.app.core.DB_Management import Watchlists_DB as watchlists_db_module
+
+    logger_stub = _LoggerStub()
+
+    class _Sub:
+        user_id = 706
+        source_id = 100
+
+    class _FailingCollectionsDB:
+        def upsert_content_item(self, *args, **kwargs):
+            raise RuntimeError("websub upsert leaked /private/websub-item.db")
+
+    class _WatchlistsDB:
+        def __init__(self, user_id):
+            self.user_id = user_id
+
+        def has_seen_item(self, *args, **kwargs):
+            return False
+
+        def mark_seen_item(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setattr(collections_websub, "logger", logger_stub)
+    monkeypatch.setattr(
+        collections_db_module.CollectionsDatabase,
+        "for_user",
+        staticmethod(lambda user_id: _FailingCollectionsDB()),
+    )
+    monkeypatch.setattr(watchlists_db_module, "WatchlistsDatabase", _WatchlistsDB)
+
+    count = collections_websub._process_push_items(
+        _Sub(),
+        [{"url": "https://private.example/item", "summary": "<p>body</p>", "guid": "guid-1"}],
+    )
+
+    assert count == 0
+    _assert_sanitized_debug_log(logger_stub, "WebSub: upsert failed")

@@ -22,12 +22,46 @@ const {
   const addArtifact = vi.fn()
   const updateArtifactStatus = vi.fn()
   const setIsGeneratingOutput = vi.fn()
+  const defaultSource = {
+    id: "source-1",
+    mediaId: 101,
+    title: "Folder Article",
+    type: "document",
+    status: "ready",
+    addedAt: new Date("2026-02-18T00:00:00.000Z")
+  }
 
   const workspaceState = {
     selectedSourceIds: [] as string[],
     selectedSourceFolderIds: [] as string[],
+    sources: [defaultSource] as Array<any>,
+    sourceFolders: [
+      {
+        id: "folder-1",
+        workspaceId: "workspace-a",
+        name: "Folder",
+        parentFolderId: null,
+        createdAt: new Date("2026-02-18T00:00:00.000Z"),
+        updatedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ] as Array<any>,
+    sourceFolderMemberships: [
+      {
+        folderId: "folder-1",
+        sourceId: "source-1"
+      }
+    ] as Array<any>,
     getSelectedMediaIds: () => [] as number[],
     getEffectiveSelectedMediaIds: () => [] as number[],
+    getEffectiveSelectedSources: () =>
+      workspaceState.sources.filter((source: { id: string }) => {
+        if (workspaceState.selectedSourceIds.includes(source.id)) return true
+        return workspaceState.sourceFolderMemberships.some(
+          (membership: { folderId: string; sourceId: string }) =>
+            workspaceState.selectedSourceFolderIds.includes(membership.folderId) &&
+            membership.sourceId === source.id
+        )
+      }),
     generatedArtifacts: [] as Array<any>,
     isGeneratingOutput: false,
     generatingOutputType: null as any,
@@ -234,6 +268,32 @@ describe("StudioPane Stage 5 folder-derived context", () => {
 
     workspaceStoreState.selectedSourceIds = []
     workspaceStoreState.selectedSourceFolderIds = ["folder-1"]
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "Folder Article",
+        type: "document",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    workspaceStoreState.sourceFolders = [
+      {
+        id: "folder-1",
+        workspaceId: "workspace-a",
+        name: "Folder",
+        parentFolderId: null,
+        createdAt: new Date("2026-02-18T00:00:00.000Z"),
+        updatedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
+    workspaceStoreState.sourceFolderMemberships = [
+      {
+        folderId: "folder-1",
+        sourceId: "source-1"
+      }
+    ]
     workspaceStoreState.getSelectedMediaIds = () => []
     workspaceStoreState.getEffectiveSelectedMediaIds = () => [101]
     workspaceStoreState.generatedArtifacts = []

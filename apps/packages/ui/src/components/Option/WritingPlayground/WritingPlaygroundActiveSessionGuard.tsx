@@ -1,5 +1,6 @@
 import type { FC, ReactNode } from "react"
-import { Alert, Empty, Skeleton } from "antd"
+import { Empty, Skeleton } from "antd"
+import { Alert } from "@/components/ui/primitives"
 import type { TranslateFn } from "./WritingPlaygroundDiagnostics.types"
 
 type WritingPlaygroundActiveSessionGuardProps = {
@@ -31,8 +32,7 @@ export const WritingPlaygroundActiveSessionGuard: FC<
   if (hasError) {
     return (
       <Alert
-        type="error"
-        showIcon
+        variant="error"
         title={t(
           "option:writingPlayground.settingsError",
           "Unable to load session settings."

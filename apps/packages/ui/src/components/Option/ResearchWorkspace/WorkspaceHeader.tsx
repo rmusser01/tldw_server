@@ -33,7 +33,11 @@ import {
   Settings,
   Star,
   Share2,
-  CircleHelp
+  CircleHelp,
+  Bot,
+  History,
+  ShieldAlert,
+  Search
 } from "lucide-react"
 import type {
   SavedWorkspace,
@@ -42,6 +46,7 @@ import type {
 } from "@/types/workspace"
 import { useWorkspaceStore } from "@/store/workspace"
 import { useConnectionStore } from "@/store/connection"
+import { DESIGN_SYSTEM_STATES, getDesignSystemState } from "@/design-system"
 import { deriveConnectionUxState } from "@/types/connection"
 import {
   buildResearchWorkspaceConfusionDashboardSnapshot,
@@ -63,6 +68,7 @@ import {
 import {
   WORKSPACE_TEMPLATE_PRESETS,
   buildWorkspaceBibtex,
+  buildWorkspaceTemplateNoteContent,
   createWorkspaceBibtexFilename,
   filterSavedWorkspaces,
   formatWorkspaceLastAccessed,
@@ -87,12 +93,19 @@ import {
   normalizeRolloutPercentage
 } from "@/utils/feature-rollout"
 import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
+import { WorkspaceAgentTaskHandoffModal } from "./WorkspaceAgentTaskHandoffModal"
+import { WorkspaceACPHistoryModal } from "./WorkspaceACPHistoryModal"
+import { WorkspaceSandboxDiagnosticsPanel } from "./WorkspaceSandboxDiagnosticsPanel"
+import { WORKSPACES_PATH } from "@/routes/route-paths"
+import { useActiveWorkspaceContext } from "@/services/workspace-context"
+import { renderWorkspaceMessageActionContent } from "./workspace-message-content"
 
 interface WorkspaceHeaderProps {
   leftPaneOpen: boolean
   rightPaneOpen: boolean
   onToggleLeftPane: () => void
   onToggleRightPane: () => void
+  onOpenSearch?: () => void
   onOpenSplitWorkspace?: () => void
   /** Hide pane toggle buttons (for mobile layout) */
   hideToggles?: boolean
@@ -112,6 +125,8 @@ interface WorkspaceHeaderProps {
   provenanceEnabled?: boolean
   /** Rollout gate for status/guardrails surfaces (connectivity/quota/conflict state). */
   statusGuardrailsEnabled?: boolean
+  /** Increment when page-level workspace reconciliation has fresh server context. */
+  serverContextRefreshVersion?: number
 }
 
 const TELEMETRY_EVENT_ORDER: ResearchWorkspaceTelemetryEventType[] = [
@@ -134,18 +149,85 @@ const TELEMETRY_EVENT_ORDER: ResearchWorkspaceTelemetryEventType[] = [
 
 type WorkspaceRolloutControlKey =
   keyof typeof FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS
+type WorkspaceHeaderConnectionTelemetryStatus =
+  | "connected"
+  | "degraded"
+  | "disconnected"
 
 const WORKSPACE_ROLLOUT_CONTROL_ORDER: WorkspaceRolloutControlKey[] = [
   "research_workspace_provenance_v1",
   "research_workspace_status_guardrails_v1"
 ]
 const WORKSPACE_ROLLOUT_PRESET_PERCENTAGES = [0, 10, 50, 100] as const
+const WORKSPACE_IMPORT_ACCEPT = ".json,.workspace.json,.zip,.workspace.zip"
+
+const isSupportedWorkspaceImportFile = (file: File): boolean => {
+  const name = file.name.toLowerCase()
+  return (
+    name.endsWith(".json") ||
+    name.endsWith(".workspace.json") ||
+    name.endsWith(".zip") ||
+    name.endsWith(".workspace.zip")
+  )
+}
+
+const getServerWorkspaceContextStatusCopy = (
+  context: ReturnType<typeof useActiveWorkspaceContext>["context"],
+  loading: boolean
+): { key: string; fallback: string } => {
+  if (loading) {
+    return {
+      key: "playground:workspace.serverContextLoading",
+      fallback: "Server context loading"
+    }
+  }
+  if (
+    context.attentionState === "archived" ||
+    context.workspace?.archived ||
+    context.recovery.reasonCode === "workspace_archived"
+  ) {
+    return {
+      key: "playground:workspace.serverContextArchived",
+      fallback: "Server context archived"
+    }
+  }
+  const state = context.state
+  if (state === "partial") {
+    return {
+      key: "playground:workspace.serverContextPartial",
+      fallback: "Server context partial"
+    }
+  }
+  if (state === "error") {
+    return {
+      key: "playground:workspace.serverContextUnavailable",
+      fallback: "Server context unavailable"
+    }
+  }
+  if (state === "missing") {
+    return {
+      key: "playground:workspace.serverContextMissing",
+      fallback: "Server context missing"
+    }
+  }
+  if (state === "none") {
+    return {
+      key: "playground:workspace.noServerContext",
+      fallback: "No server context"
+    }
+  }
+  return {
+    key: "playground:workspace.serverContextReady",
+    fallback: "Server context ready"
+  }
+}
 
 export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   leftPaneOpen,
   rightPaneOpen,
   onToggleLeftPane,
   onToggleRightPane,
+  onOpenSearch,
   onOpenSplitWorkspace,
   hideToggles = false,
   storageUsedBytes,
@@ -155,16 +237,31 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   storageAccountUsedBytes,
   storageAccountQuotaBytes,
   provenanceEnabled = true,
-  statusGuardrailsEnabled = true
+  statusGuardrailsEnabled = true,
+  serverContextRefreshVersion
 }) => {
   const { t } = useTranslation(["playground", "option", "common"])
   const navigate = useNavigate()
   const startTutorial = useTutorialStore((s) => s.startTutorial)
   const [messageApi, messageContextHolder] = message.useMessage()
+  const handleStartWorkspaceTour = React.useCallback(() => {
+    startTutorial("research-workspace-basics")
+    messageApi.info(
+      t(
+        "playground:workspace.tourStarted",
+        "Tour started. Follow the highlighted steps."
+      )
+    )
+  }, [messageApi, startTutorial, t])
   const [isEditing, setIsEditing] = React.useState(false)
   const [editName, setEditName] = React.useState("")
   const [workspaceBrowserOpen, setWorkspaceBrowserOpen] = React.useState(false)
+  const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = React.useState(false)
+  const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = React.useState(false)
   const [shortcutsModalOpen, setShortcutsModalOpen] = React.useState(false)
+  const [agentTaskModalOpen, setAgentTaskModalOpen] = React.useState(false)
+  const [acpHistoryModalOpen, setAcpHistoryModalOpen] = React.useState(false)
+  const [sandboxDiagnosticsOpen, setSandboxDiagnosticsOpen] = React.useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false)
   const [deleteConfirmInput, setDeleteConfirmInput] = React.useState("")
   const [deleteTargetWorkspace, setDeleteTargetWorkspace] = React.useState<{
@@ -209,6 +306,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     })
   }, [])
   const [shareDialogOpen, setShareDialogOpen] = React.useState(false)
+  const [importDialogOpen, setImportDialogOpen] = React.useState(false)
   const [bannerModalOpen, setBannerModalOpen] = React.useState(false)
   const [bannerTitleDraft, setBannerTitleDraft] = React.useState("")
   const [bannerSubtitleDraft, setBannerSubtitleDraft] = React.useState("")
@@ -372,6 +470,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
     if (uxState === "connected_ok") {
       return {
+        telemetryStatus:
+          "connected" satisfies WorkspaceHeaderConnectionTelemetryStatus,
         label: t("playground:workspace.connectionConnected", "Connected"),
         detail: t(
           "playground:workspace.connectionConnectedDetail",
@@ -387,8 +487,13 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       uxState === "connected_degraded" ||
       uxState === "demo_mode"
     ) {
+      const degradedState = getDesignSystemState("degraded") as
+        | ReturnType<typeof getDesignSystemState>
+        | undefined
       return {
-        label: t("playground:workspace.connectionDegraded", "Degraded"),
+        telemetryStatus:
+          "degraded" satisfies WorkspaceHeaderConnectionTelemetryStatus,
+        label: degradedState?.label ?? DESIGN_SYSTEM_STATES.degraded.label,
         detail: t(
           "playground:workspace.connectionDegradedDetail",
           "Connection degraded or still checking"
@@ -399,6 +504,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     }
 
     return {
+      telemetryStatus:
+        "disconnected" satisfies WorkspaceHeaderConnectionTelemetryStatus,
       label: t("playground:workspace.connectionDisconnected", "Disconnected"),
       detail: t(
         "playground:workspace.connectionDisconnectedDetail",
@@ -412,6 +519,13 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   const workspaceName = useWorkspaceStore((s) => s.workspaceName)
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
   const workspaceTag = useWorkspaceStore((s) => s.workspaceTag)
+  const {
+    context: serverWorkspaceContext,
+    loading: serverWorkspaceContextLoading
+  } = useActiveWorkspaceContext({
+    workspaceId,
+    refreshKey: serverContextRefreshVersion
+  })
   const workspaceBanner = useWorkspaceStore((s) => s.workspaceBanner) || {
     title: "",
     subtitle: "",
@@ -458,7 +572,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       lastConnectivityStatusRef.current = null
       return
     }
-    const nextStatus = connectionIndicator.label.toLowerCase()
+    const nextStatus = connectionIndicator.telemetryStatus
     const previousStatus = lastConnectivityStatusRef.current
     if (previousStatus === nextStatus) return
 
@@ -470,7 +584,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     })
 
     lastConnectivityStatusRef.current = nextStatus
-  }, [connectionIndicator.label, statusGuardrailsEnabled, workspaceId])
+  }, [connectionIndicator.telemetryStatus, statusGuardrailsEnabled, workspaceId])
 
   const handleStartEdit = () => {
     setEditName(workspaceName || "New Research")
@@ -503,6 +617,39 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     navigate("/")
   }
 
+  const handleOpenWorkspacesManager = () => {
+    saveCurrentWorkspace()
+    navigate(WORKSPACES_PATH)
+  }
+
+  const handleOpenAgentTaskModal = () => {
+    setAgentTaskModalOpen(true)
+  }
+
+  const handleCloseAgentTaskModal = () => {
+    setAgentTaskModalOpen(false)
+  }
+
+  const handleOpenAcpHistoryModal = () => {
+    setAcpHistoryModalOpen(true)
+  }
+
+  const handleCloseAcpHistoryModal = () => {
+    setAcpHistoryModalOpen(false)
+  }
+
+  const handleOpenAgentTasksPage = () => {
+    setAgentTaskModalOpen(false)
+    setAcpHistoryModalOpen(false)
+    const canonicalWorkspaceId = workspaceId?.trim()
+    if (!canonicalWorkspaceId) {
+      navigate("/agent-tasks")
+      return
+    }
+    const params = new URLSearchParams({ workspace: canonicalWorkspaceId })
+    navigate(`/agent-tasks?${params.toString()}`)
+  }
+
   const handleCreateNewWorkspace = () => {
     createNewWorkspace()
   }
@@ -517,18 +664,42 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     setCurrentNote({
       id: undefined,
       title: template.noteTitle,
-      content: template.noteContent,
-      keywords: [...template.keywords],
+      content: buildWorkspaceTemplateNoteContent(template),
+      keywords: Array.from(new Set([...template.keywords, "template"])),
       version: undefined,
       isDirty: true
     })
 
-    messageApi.success(
-      t("playground:workspace.templateCreated", {
-        defaultValue: "Created workspace from template: {{template}}",
-        template: template.label
-      })
+    const templateMessageKey = `workspace-template-${template.id}`
+    const content = t(
+      "playground:workspace.templateAppliedDetailed",
+      "{{template}} template applied. Added outline, source checklist, suggested prompts, and Studio recommendations.",
+      { template: template.label }
     )
+    const maybeOpen = (messageApi as { open?: (config: unknown) => void }).open
+    const messageConfig = {
+      key: templateMessageKey,
+      type: "success",
+      duration: 8,
+      content: renderWorkspaceMessageActionContent(
+        content,
+        <Button
+          type="link"
+          size="small"
+          onClick={() => {
+            createNewWorkspace()
+            messageApi.destroy(templateMessageKey)
+          }}
+        >
+          {t("playground:workspace.startOver", "Start over")}
+        </Button>
+      )
+    }
+    if (typeof maybeOpen === "function") {
+      maybeOpen(messageConfig)
+    } else {
+      messageApi.success(content)
+    }
   }
 
   const handleSwitchWorkspace = (id: string) => {
@@ -948,15 +1119,16 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     const undoMessageKey = `workspace-delete-undo-${undoHandle.id}`
     const maybeOpen = (messageApi as { open?: (config: unknown) => void })
       .open
+    const deletedContent = t(
+      "playground:workspace.deleted",
+      "Workspace deleted."
+    )
     const messageConfig = {
       key: undoMessageKey,
       type: "warning",
       duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-      content: t(
-        "playground:workspace.deleted",
-        "Workspace deleted."
-      ),
-      btn: (
+      content: renderWorkspaceMessageActionContent(
+        deletedContent,
         <button
           type="button"
           className="rounded border border-border px-2 py-0.5 text-xs font-medium hover:bg-surface2"
@@ -983,14 +1155,58 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         messageApi as { warning?: (content: string) => void }
       ).warning
       if (typeof maybeWarning === "function") {
-        maybeWarning(t("playground:workspace.deleted", "Workspace deleted."))
+        maybeWarning(deletedContent)
       }
     }
   }
 
   const handleDuplicateCurrentWorkspace = () => {
     if (!workspaceId) return
-    duplicateWorkspace(workspaceId)
+    const originalWorkspaceId = workspaceId
+    const originalWorkspaceName =
+      workspaceName?.trim() ||
+      t("playground:workspace.currentWorkspace", "current workspace")
+    const duplicatedWorkspaceId = duplicateWorkspace(originalWorkspaceId)
+    if (!duplicatedWorkspaceId) {
+      messageApi.warning(
+        t(
+          "playground:workspace.duplicateFailed",
+          "Workspace could not be duplicated."
+        )
+      )
+      return
+    }
+
+    const messageKey = `workspace-duplicate-${duplicatedWorkspaceId}`
+    const content = t(
+      "playground:workspace.duplicateSuccessNamed",
+      "Duplicated {{name}}. You are editing the new copy.",
+      { name: originalWorkspaceName }
+    )
+    const maybeOpen = (messageApi as { open?: (config: unknown) => void }).open
+    const messageConfig = {
+      key: messageKey,
+      type: "success",
+      duration: 6,
+      content: renderWorkspaceMessageActionContent(
+        content,
+        <button
+          type="button"
+          className="rounded border border-border px-2 py-0.5 text-xs font-medium hover:bg-surface2"
+          onClick={() => {
+            switchWorkspace(originalWorkspaceId)
+            messageApi.destroy(messageKey)
+          }}
+        >
+          {t("playground:workspace.openOriginal", "Open original")}
+        </button>
+      )
+    }
+    if (typeof maybeOpen === "function") {
+      maybeOpen(messageConfig)
+    } else {
+      messageApi.success(content)
+    }
   }
 
   const handleArchiveCurrentWorkspace = () => {
@@ -1018,15 +1234,16 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         const undoMessageKey = `workspace-archive-undo-${undoHandle.id}`
         const maybeOpen = (messageApi as { open?: (config: unknown) => void })
           .open
+        const archiveContent = t(
+          "playground:workspace.archived",
+          "Workspace archived."
+        )
         const messageConfig = {
           key: undoMessageKey,
           type: "warning",
           duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-          content: t(
-            "playground:workspace.archived",
-            "Workspace archived."
-          ),
-          btn: (
+          content: renderWorkspaceMessageActionContent(
+            archiveContent,
             <Button
               size="small"
               type="link"
@@ -1050,7 +1267,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             messageApi as { warning?: (content: string) => void }
           ).warning
           if (typeof maybeWarning === "function") {
-            maybeWarning(t("playground:workspace.archived", "Workspace archived."))
+            maybeWarning(archiveContent)
           }
         }
       },
@@ -1154,7 +1371,11 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       )
       triggerFileDownload(zipBlob, zipFilename)
       messageApi.success(
-        t("playground:workspace.exportSuccessZip", "Workspace exported (.zip)")
+        t(
+          "playground:workspace.exportSuccessNamed",
+          "Workspace exported: {{filename}}",
+          { filename: zipFilename }
+        )
       )
       return
     } catch {
@@ -1169,13 +1390,17 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         )
       )
       messageApi.success(
-        t("playground:workspace.exportSuccess", "Workspace exported")
+        t(
+          "playground:workspace.exportSuccessNamed",
+          "Workspace exported: {{filename}}",
+          { filename }
+        )
       )
     }
   }
 
   const handleOpenImportWorkspace = () => {
-    importFileInputRef.current?.click()
+    setImportDialogOpen(true)
   }
 
   const handleExportWorkspaceCitations = () => {
@@ -1214,7 +1439,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     messageApi.success(
       t(
         "playground:workspace.exportCitationsSuccess",
-        "Citations exported (BibTeX)"
+        "Citations exported: {{filename}}",
+        { filename }
       )
     )
   }
@@ -1225,6 +1451,15 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     const file = event.target.files?.[0]
     event.target.value = ""
     if (!file) return
+    if (!isSupportedWorkspaceImportFile(file)) {
+      messageApi.error(
+        t(
+          "playground:workspace.importUnsupportedFile",
+          "Choose a .workspace.zip or workspace JSON export."
+        )
+      )
+      return
+    }
 
     try {
       const parsed = await parseWorkspaceImportFile(file)
@@ -1233,9 +1468,21 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         throw new Error("import-failed")
       }
 
+      const importedName =
+        typeof parsed.workspace?.name === "string" && parsed.workspace.name.trim()
+          ? parsed.workspace.name.trim()
+          : t(
+              "playground:workspace.importedWorkspaceFallback",
+              "Imported workspace"
+            )
       messageApi.success(
-        t("playground:workspace.importSuccess", "Workspace imported")
+        t(
+          "playground:workspace.importSuccessNamed",
+          "Workspace imported: {{name}}",
+          { name: importedName }
+        )
       )
+      setImportDialogOpen(false)
     } catch {
       messageApi.error(
         t(
@@ -1335,6 +1582,19 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       })),
     [workspaceCollections]
   )
+  const serverWorkspaceContextStatusCopy = getServerWorkspaceContextStatusCopy(
+    serverWorkspaceContext,
+    serverWorkspaceContextLoading
+  )
+  const serverWorkspaceContextLabel =
+    serverWorkspaceContext.workspace?.label ||
+    workspaceId ||
+    t("playground:workspace.noServerWorkspace", "No server Workspace")
+  const serverWorkspaceRecovery = serverWorkspaceContext.recovery
+  const showServerWorkspaceRecovery =
+    !serverWorkspaceContextLoading &&
+    serverWorkspaceRecovery.reasonCode !== "allowed" &&
+    Boolean(serverWorkspaceRecovery.message)
 
   // ── Workspace Switcher dropdown: recent/pinned workspaces + navigation ──
   const workspaceSwitcherItems: MenuProps["items"] = [
@@ -1412,6 +1672,15 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             ),
             onClick: handleOpenWorkspaceBrowser
           },
+          {
+            key: "manage-server-workspaces",
+            icon: <Settings className="h-4 w-4" />,
+            label: t(
+              "playground:workspace.manageServerWorkspaces",
+              "Manage server Workspaces"
+            ),
+            onClick: handleOpenWorkspacesManager
+          },
           { type: "divider" as const, key: "divider-view-all" }
         ]
       : []),
@@ -1425,8 +1694,45 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
   // ── Settings kebab menu: import/export, templates, tools, navigation ──
   const workspaceSettingsItems: MenuProps["items"] = [
+    {
+      key: "manage-workspaces",
+      icon: <Settings className="h-4 w-4" />,
+      label: t(
+        "playground:workspace.manageInWorkspaces",
+        "Manage in Workspaces"
+      ),
+      onClick: handleOpenWorkspacesManager
+    },
+    { type: "divider" as const, key: "divider-workspaces-manager" },
     ...(workspaceId
       ? [
+          {
+            key: "create-agent-task",
+            icon: <Bot className="h-4 w-4" />,
+            label: t(
+              "playground:workspace.createAgentTask",
+              "Create agent task"
+            ),
+            onClick: handleOpenAgentTaskModal
+          },
+          {
+            key: "acp-run-history",
+            icon: <History className="h-4 w-4" />,
+            label: t(
+              "playground:workspace.acpRunHistory",
+              "ACP run history"
+            ),
+            onClick: handleOpenAcpHistoryModal
+          },
+          {
+            key: "sandbox-diagnostics",
+            icon: <ShieldAlert className="h-4 w-4" />,
+            label: t(
+              "playground:workspace.sandboxDiagnostics",
+              "Sandbox diagnostics"
+            ),
+            onClick: () => setSandboxDiagnosticsOpen(true)
+          },
           {
             key: "duplicate-current",
             icon: <Copy className="h-4 w-4" />,
@@ -1515,7 +1821,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       key: "replay-tour",
       icon: <FlaskConical className="h-4 w-4" />,
       label: t("playground:workspace.replayTour", "Replay tour"),
-      onClick: () => startTutorial("research-workspace-basics")
+      onClick: handleStartWorkspaceTour
     },
     {
       key: "keyboard-shortcuts",
@@ -1545,17 +1851,21 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   return (
     <header
       data-testid="workspace-header"
-      className="flex items-center justify-between border-b border-border/70 bg-[linear-gradient(90deg,var(--surface)_0%,var(--surface-2)_100%)] px-4 py-3.5"
+      className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-[linear-gradient(90deg,var(--surface)_0%,var(--surface-2)_100%)] px-4 py-3.5"
     >
       {messageContextHolder}
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
           <FlaskConical className="h-4 w-4 text-primary" />
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {isEditing ? (
             <div className="flex items-center gap-1">
               <Input
+                aria-label={t(
+                  "playground:workspace.nameInputLabel",
+                  "Workspace name"
+                )}
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -1585,8 +1895,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold text-text">
+            <div className="flex min-w-0 items-center gap-2">
+              <h1 className="truncate text-lg font-semibold text-text">
                 {workspaceName || t("playground:workspace.title", "Research Workspace")}
               </h1>
               <Tooltip title={t("playground:workspace.rename", "Rename workspace")}>
@@ -1602,11 +1912,43 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             </div>
           )}
         </div>
+        <div
+          data-testid="workspace-server-context-indicator"
+          className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 rounded-md border border-border bg-surface/80 px-2 py-1 text-xs text-text-muted"
+        >
+          <span className="font-medium text-text">
+            {t("playground:workspace.serverWorkspace", "Server Workspace")}
+          </span>
+          <span className="max-w-[14rem] truncate">
+            {serverWorkspaceContextLabel}
+          </span>
+          <span className="rounded bg-surface2 px-1.5 py-0.5">
+            {t(
+              serverWorkspaceContextStatusCopy.key,
+              serverWorkspaceContextStatusCopy.fallback
+            )}
+          </span>
+          {showServerWorkspaceRecovery && (
+            <span className="min-w-0">
+              {serverWorkspaceRecovery.message}
+            </span>
+          )}
+          {showServerWorkspaceRecovery &&
+            serverWorkspaceRecovery.nextStepHref &&
+            serverWorkspaceRecovery.nextStepLabel && (
+              <a
+                href={serverWorkspaceRecovery.nextStepHref}
+                className="font-medium text-primary hover:text-primary/80"
+              >
+                {serverWorkspaceRecovery.nextStepLabel}
+              </a>
+            )}
+        </div>
       </div>
 
       <div
         data-testid="workspace-header-actions"
-        className="flex items-center gap-2"
+        className="flex min-w-0 max-w-full flex-1 flex-wrap items-center justify-end gap-2 overflow-hidden"
       >
         {/* Left pane expand button (only shown when collapsed) */}
         {!hideToggles && !leftPaneOpen && (
@@ -1654,18 +1996,55 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           </Tooltip>
         )}
 
+        {onOpenSearch && (
+          <Tooltip
+            title={t(
+              "playground:workspace.openSearchShortcut",
+              `Search workspace (${shortcutModifierLabel}+K)`
+            )}
+          >
+            <button
+              type="button"
+              data-testid="workspace-search-button"
+              onClick={onOpenSearch}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 text-sm font-medium text-text transition hover:bg-surface2"
+              aria-label={t(
+                "playground:workspace.openSearchShortcut",
+                `Search workspace (${shortcutModifierLabel}+K)`
+              )}
+            >
+              <Search className="h-4 w-4 text-text-muted" />
+              <span className="hidden sm:inline">
+                {t("playground:workspace.search", "Search")}
+              </span>
+              <kbd className="rounded bg-surface2 px-1 py-0.5 text-[10px] font-semibold leading-none text-text-muted">
+                {shortcutModifierLabel}+K
+              </kbd>
+            </button>
+          </Tooltip>
+        )}
+
         {/* Workspace Switcher Dropdown */}
         <Dropdown
           menu={{ items: workspaceSwitcherItems }}
           trigger={["click"]}
           placement="bottomRight"
+          destroyOnHidden
+          open={workspaceSwitcherOpen}
+          styles={workspaceSwitcherOpen ? undefined : { root: { display: "none" } }}
+          onOpenChange={(open) => {
+            setWorkspaceSwitcherOpen(open)
+            if (open) setWorkspaceSettingsOpen(false)
+          }}
         >
           <button
             type="button"
             data-testid="workspace-workspaces-button"
-            className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text transition hover:bg-surface2"
+            className="flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text transition hover:bg-surface2"
           >
-            <span>{t("playground:workspace.workspaces", "Workspaces")}</span>
+            <span className="truncate">
+              {t("playground:workspace.workspaces", "Workspaces")}
+            </span>
             <ChevronDown className="h-4 w-4 text-text-muted" />
           </button>
         </Dropdown>
@@ -1675,7 +2054,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           <button
             type="button"
             data-testid="workspace-share-button"
-            className="flex items-center justify-center rounded-lg border border-border bg-surface p-1.5 text-text-muted transition hover:bg-surface2 hover:text-text"
+            className="flex shrink-0 items-center justify-center rounded-lg border border-border bg-surface p-1.5 text-text-muted transition hover:bg-surface2 hover:text-text"
             aria-label={t("playground:workspace.share", "Share workspace")}
             onClick={() => setShareDialogOpen(true)}
           >
@@ -1688,8 +2067,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           <button
             type="button"
             data-testid="workspace-help-tour-button"
-            onClick={() => startTutorial("research-workspace-basics")}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-surface text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+            onClick={handleStartWorkspaceTour}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text"
             aria-label={t("playground:workspace.takeTour", "Take a tour of the workspace")}
           >
             <CircleHelp className="h-4 w-4" />
@@ -1701,12 +2080,19 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           menu={{ items: workspaceSettingsItems }}
           trigger={["click"]}
           placement="bottomRight"
+          destroyOnHidden
+          open={workspaceSettingsOpen}
+          styles={workspaceSettingsOpen ? undefined : { root: { display: "none" } }}
+          onOpenChange={(open) => {
+            setWorkspaceSettingsOpen(open)
+            if (open) setWorkspaceSwitcherOpen(false)
+          }}
         >
           <Tooltip title={t("playground:workspace.workspaceSettings", "Workspace settings")}>
             <button
               type="button"
               data-testid="workspace-settings-button"
-              className="flex items-center justify-center rounded-lg border border-border bg-surface p-1.5 text-text-muted transition hover:bg-surface2 hover:text-text"
+              className="flex shrink-0 items-center justify-center rounded-lg border border-border bg-surface p-1.5 text-text-muted transition hover:bg-surface2 hover:text-text"
               aria-label={t("playground:workspace.workspaceSettings", "Workspace settings")}
             >
               <MoreHorizontal className="h-4 w-4" />
@@ -1715,16 +2101,93 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         </Dropdown>
       </div>
 
+      <WorkspaceAgentTaskHandoffModal
+        open={agentTaskModalOpen}
+        workspaceId={workspaceId}
+        workspaceName={workspaceName}
+        workspaceTag={workspaceTag}
+        onBeforeSubmit={saveCurrentWorkspace}
+        onCancel={handleCloseAgentTaskModal}
+        onOpenAgentTasks={handleOpenAgentTasksPage}
+      />
+
+      <WorkspaceACPHistoryModal
+        open={acpHistoryModalOpen}
+        workspaceId={workspaceId}
+        workspaceName={workspaceName}
+        onCancel={handleCloseAcpHistoryModal}
+        onOpenAgentTasks={handleOpenAgentTasksPage}
+      />
+
+      <Modal
+        title={t("playground:workspace.sandboxDiagnostics", "Sandbox diagnostics")}
+        open={sandboxDiagnosticsOpen}
+        onCancel={() => setSandboxDiagnosticsOpen(false)}
+        footer={null}
+        width={720}
+        destroyOnHidden
+      >
+        {workspaceId ? (
+          <WorkspaceSandboxDiagnosticsPanel workspaceId={workspaceId} />
+        ) : (
+          <p className="text-sm text-text-muted">
+            {t(
+              "playground:workspace.sandboxDiagnosticsNoWorkspace",
+              "Select or save a workspace before loading sandbox diagnostics."
+            )}
+          </p>
+        )}
+      </Modal>
+
       <input
         ref={importFileInputRef}
         type="file"
-        accept=".json,.workspace.json,.zip,.workspace.zip"
+        accept={WORKSPACE_IMPORT_ACCEPT}
         className="hidden"
         data-testid="workspace-import-input"
         onChange={(event) => {
           void handleImportWorkspaceFile(event)
         }}
       />
+
+      <Modal
+        title={t("playground:workspace.importWorkspace", "Import Workspace")}
+        open={importDialogOpen}
+        onCancel={() => setImportDialogOpen(false)}
+        footer={null}
+        destroyOnHidden
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-text-muted">
+            {t(
+              "playground:workspace.importWorkspaceHelp",
+              "Choose a Research Workspace JSON or .workspace.zip export to import."
+            )}
+          </p>
+          <label
+            htmlFor="workspace-import-visible-input"
+            className="block text-sm font-medium text-text"
+          >
+            {t(
+              "playground:workspace.importWorkspaceFileLabel",
+              "Workspace bundle file"
+            )}
+          </label>
+          <input
+            id="workspace-import-visible-input"
+            type="file"
+            accept={WORKSPACE_IMPORT_ACCEPT}
+            className="block w-full rounded border border-border bg-surface px-3 py-2 text-sm text-text"
+            aria-label={t(
+              "playground:workspace.importWorkspaceFileLabel",
+              "Workspace bundle file"
+            )}
+            onChange={(event) => {
+              void handleImportWorkspaceFile(event)
+            }}
+          />
+        </div>
+      </Modal>
 
       <input
         ref={bannerFileInputRef}
@@ -1765,6 +2228,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       >
         <div className="space-y-3">
           <Input
+            aria-label={t(
+              "playground:workspace.bannerTitleLabel",
+              "Banner title"
+            )}
             value={bannerTitleDraft}
             onChange={(event) => setBannerTitleDraft(event.target.value)}
             placeholder={t(
@@ -1775,6 +2242,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             data-testid="workspace-banner-title-input"
           />
           <Input.TextArea
+            aria-label={t(
+              "playground:workspace.bannerSubtitleLabel",
+              "Banner subtitle"
+            )}
             value={bannerSubtitleDraft}
             onChange={(event) => setBannerSubtitleDraft(event.target.value)}
             placeholder={t(
@@ -1846,6 +2317,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       >
         <div className="space-y-3">
           <Input
+            aria-label={t(
+              "playground:workspace.searchWorkspacesLabel",
+              "Search workspaces"
+            )}
             value={workspaceSearchQuery}
             onChange={(event) => setWorkspaceSearchQuery(event.target.value)}
             placeholder={t(
@@ -1888,6 +2363,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
             <div className="flex min-w-[240px] flex-1 items-center gap-2">
               <Input
+                aria-label={t(
+                  "playground:workspace.collectionCreateLabel",
+                  "New collection name"
+                )}
                 value={workspaceCollectionDraft}
                 onChange={(event) =>
                   setWorkspaceCollectionDraft(event.target.value)
@@ -2296,7 +2775,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
                         flag === "research_workspace_provenance_v1"
                           ? t(
                               "playground:workspace.rolloutProvenanceLabel",
-                              "Provenance trust surfaces"
+                              "Provenance indicators"
                             )
                           : t(
                               "playground:workspace.rolloutStatusLabel",
@@ -2468,6 +2947,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
                 )}
               </p>
               <Input
+                aria-label={t(
+                  "playground:workspace.deleteConfirmLabel",
+                  "Confirm workspace deletion"
+                )}
                 value={deleteConfirmInput}
                 onChange={(e) => setDeleteConfirmInput(e.target.value)}
                 placeholder={deleteTargetWorkspace.name}

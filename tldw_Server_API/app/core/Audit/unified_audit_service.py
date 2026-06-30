@@ -71,7 +71,6 @@ _AUDIT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     json.JSONDecodeError,
     csv.Error,
     aiosqlite.Error,
-    asyncio.CancelledError,
 )
 
 
@@ -95,6 +94,16 @@ try:
 except _AUDIT_NONCRITICAL_EXCEPTIONS:
     _app_settings = {}
 
+
+def _current_app_settings() -> Any:
+    """Return the live config settings mapping, falling back to the import-time handle."""
+    try:
+        from tldw_Server_API.app.core.config import settings as current_settings  # type: ignore
+
+        return current_settings
+    except _AUDIT_NONCRITICAL_EXCEPTIONS:
+        return _app_settings
+
 # Consistent risk threshold constants (tunable via env var)
 try:
     HIGH_RISK_SCORE = int(os.getenv("AUDIT_HIGH_RISK_SCORE", "70"))
@@ -111,6 +120,7 @@ _VALID_STORAGE_MODES = {"per_user", "shared"}
 _SYSTEM_TENANT_ID = "system"
 _UNIDENTIFIED_TENANT_ID = "unidentified_user"
 _AUDIT_SHARED_SCHEMA_VERSION = 1
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r", "\n")
 
 try:
     import fcntl  # type: ignore
@@ -208,6 +218,18 @@ def _normalize_storage_mode(raw: Any) -> str:
         return "per_user"
     mode = str(raw).strip().lower()
     return mode if mode in _VALID_STORAGE_MODES else "per_user"
+
+
+def _neutralize_csv_formula(value: Any) -> Any:
+    """Prevent spreadsheet formula execution for exported string cells."""
+    if isinstance(value, str) and value and value[0] in _CSV_FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
+
+def _neutralize_csv_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Return a CSV-safe copy of a row without mutating caller-owned data."""
+    return {key: _neutralize_csv_formula(value) for key, value in row.items()}
 
 
 def _resolve_storage_mode(explicit: Optional[str] = None) -> str:
@@ -657,7 +679,16 @@ class PIIDetector:
         """Recursively redact PII from nested dict/list/tuple/set structures and strings."""
         try:
             if isinstance(data, dict):
-                return {k: self.redact_obj(v, placeholder_format) for k, v in data.items()}
+                redacted: dict[Any, Any] = {}
+                for key, value in data.items():
+                    safe_key = self._redact_value(key, placeholder_format) if isinstance(key, str) else key
+                    unique_key = safe_key
+                    suffix = 2
+                    while unique_key in redacted:
+                        unique_key = f"{safe_key}__{suffix}"
+                        suffix += 1
+                    redacted[unique_key] = self.redact_obj(value, placeholder_format)
+                return redacted
             if isinstance(data, list):
                 return [self.redact_obj(v, placeholder_format) for v in data]
             if isinstance(data, tuple):
@@ -718,10 +749,12 @@ class RiskScorer:
                  *,
                  high_risk_ops_override: Optional[Union[list[str], str]] = None,
                  suspicious_thresholds_override: Optional[dict[str, Union[int, bool]]] = None) -> None:
+        app_settings = _current_app_settings()
+
         # Merge overrides from settings, then supplied overrides
         merged: dict[str, int] = dict(self.DEFAULT_ACTION_RISK_BONUS)
         try:
-            cfg = _app_settings.get("AUDIT_ACTION_RISK_BONUS")
+            cfg = app_settings.get("AUDIT_ACTION_RISK_BONUS")
             if isinstance(cfg, dict):
                 for k, v in cfg.items():
                     try:
@@ -759,7 +792,7 @@ class RiskScorer:
 
         default_ops = set(self.HIGH_RISK_OPERATIONS)
         try:
-            cfg_ops = _app_settings.get("AUDIT_HIGH_RISK_OPERATIONS")
+            cfg_ops = app_settings.get("AUDIT_HIGH_RISK_OPERATIONS")
             ops_from_settings = _parse_ops(cfg_ops)
         except _AUDIT_NONCRITICAL_EXCEPTIONS:
             ops_from_settings = set()
@@ -797,7 +830,7 @@ class RiskScorer:
 
         thresholds = dict(self.DEFAULT_SUSPICIOUS_THRESHOLDS)
         try:
-            cfg_thr = _app_settings.get("AUDIT_SUSPICIOUS_THRESHOLDS")
+            cfg_thr = app_settings.get("AUDIT_SUSPICIOUS_THRESHOLDS")
             thresholds = _merge_thresholds(thresholds, cfg_thr if isinstance(cfg_thr, dict) else None)
         except _AUDIT_NONCRITICAL_EXCEPTIONS:
             pass
@@ -1117,19 +1150,38 @@ class UnifiedAuditService:
         """Resume the tamper-evident chain from the most recently inserted event."""
         try:
             async with self._read_db() as db:
-                async with db.execute(
-                    "SELECT chain_hash FROM audit_events "
-                    "WHERE chain_hash IS NOT NULL AND chain_hash != '' "
-                    "ORDER BY rowid DESC LIMIT 1"
-                ) as cursor:
-                    row = await cursor.fetchone()
+                return await self._load_last_chain_hash_from_db(db)
         except _AUDIT_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"Failed to resume audit hash chain: {exc}")
             return ""
 
+    async def _load_last_chain_hash_from_db(self, db: aiosqlite.Connection) -> str:
+        """Read the persisted hash-chain head from an existing connection."""
+        async with db.execute(
+            "SELECT chain_hash FROM audit_events "
+            "WHERE chain_hash IS NOT NULL AND chain_hash != '' "
+            "ORDER BY rowid DESC LIMIT 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+
         if not row:
             return ""
         return str(row[0] or "")
+
+    @asynccontextmanager
+    async def _immediate_write_transaction(self, db: aiosqlite.Connection) -> AsyncGenerator[None, None]:
+        """Hold SQLite's writer lock from chain-head read through commit."""
+        await db.execute("BEGIN IMMEDIATE")
+        committed = False
+        try:
+            yield
+            await db.commit()
+            committed = True
+        finally:
+            if not committed:
+                with suppress(_AUDIT_NONCRITICAL_EXCEPTIONS):
+                    await db.rollback()
+
 
     def _build_event_columns(self) -> list[str]:
         columns = [
@@ -2467,40 +2519,44 @@ class UnifiedAuditService:
                                 db.row_factory = aiosqlite.Row
                             except _AUDIT_NONCRITICAL_EXCEPTIONS:
                                 pass
-                            new_events = await self._filter_new_events(db, events)
-                            if not new_events:
-                                return True
-                            # Prepare batch data
-                            records = [event.to_dict() for event in new_events]
-                            self._ensure_record_tenant_ids(records)
-                            committed_chain_hash = self._apply_chain_hashes(
-                                records,
-                                previous_hash=self._last_chain_hash,
-                            )
-                            await db.executemany(self._event_insert_sql, records)
-                            await self._update_daily_stats(db, new_events)
-                            await db.commit()
+                            committed_chain_hash = self._last_chain_hash
+                            async with self._immediate_write_transaction(db):
+                                new_events = await self._filter_new_events(db, events)
+                                if not new_events:
+                                    return True
+                                # Prepare batch data
+                                records = [event.to_dict() for event in new_events]
+                                self._ensure_record_tenant_ids(records)
+                                previous_hash = await self._load_last_chain_hash_from_db(db)
+                                committed_chain_hash = self._apply_chain_hashes(
+                                    records,
+                                    previous_hash=previous_hash,
+                                )
+                                await db.executemany(self._event_insert_sql, records)
+                                await self._update_daily_stats(db, new_events)
                             self._last_chain_hash = committed_chain_hash
                     else:
                         db = await self._ensure_db_pool()
                         async with self._db_lock:
-                            new_events = await self._filter_new_events(db, events)
-                            if not new_events:
-                                return True
-                            # Prepare batch data
-                            records = [event.to_dict() for event in new_events]
+                            committed_chain_hash = self._last_chain_hash
+                            async with self._immediate_write_transaction(db):
+                                new_events = await self._filter_new_events(db, events)
+                                if not new_events:
+                                    return True
+                                # Prepare batch data
+                                records = [event.to_dict() for event in new_events]
 
-                            # Batch insert
-                            self._ensure_record_tenant_ids(records)
-                            committed_chain_hash = self._apply_chain_hashes(
-                                records,
-                                previous_hash=self._last_chain_hash,
-                            )
-                            await db.executemany(self._event_insert_sql, records)
+                                # Batch insert
+                                self._ensure_record_tenant_ids(records)
+                                previous_hash = await self._load_last_chain_hash_from_db(db)
+                                committed_chain_hash = self._apply_chain_hashes(
+                                    records,
+                                    previous_hash=previous_hash,
+                                )
+                                await db.executemany(self._event_insert_sql, records)
 
-                            # Update daily statistics
-                            await self._update_daily_stats(db, new_events)
-                            await db.commit()
+                                # Update daily statistics
+                                await self._update_daily_stats(db, new_events)
                             self._last_chain_hash = committed_chain_hash
 
                     # Success
@@ -2917,47 +2973,49 @@ class UnifiedAuditService:
 
                 async def _do_write() -> int:
                     nonlocal replay_chain_hash
-                    record_ids = [str(r.get("event_id")) for r in records_chunk if r.get("event_id")]
-                    existing_ids = await self._fetch_existing_event_ids(db, record_ids)
-                    seen: set[str] = set()
-                    filtered_records: list[dict[str, Any]] = []
-                    for record in records_chunk:
-                        event_id = record.get("event_id")
-                        if not event_id:
-                            continue
-                        event_id = str(event_id)
-                        if event_id in existing_ids or event_id in seen:
-                            continue
-                        seen.add(event_id)
-                        filtered_records.append(record)
-
-                    if not filtered_records:
-                        return 0
-
-                    for record in filtered_records:
-                        record["pii_detected"] = _coerce_bool(record.get("pii_detected"), False)
-
-                    self._ensure_record_tenant_ids(filtered_records)
-                    committed_chain_hash = self._apply_chain_hashes(
-                        filtered_records,
-                        previous_hash=replay_chain_hash,
-                    )
-                    await db.executemany(self._event_insert_sql, filtered_records)
-                    if stats_events:
-                        filtered_stats: list[AuditEvent] = []
-                        stats_seen: set[str] = set()
-                        for ev in stats_events:
-                            if not ev.event_id:
+                    committed_chain_hash = replay_chain_hash
+                    async with self._immediate_write_transaction(db):
+                        record_ids = [str(r.get("event_id")) for r in records_chunk if r.get("event_id")]
+                        existing_ids = await self._fetch_existing_event_ids(db, record_ids)
+                        seen: set[str] = set()
+                        filtered_records: list[dict[str, Any]] = []
+                        for record in records_chunk:
+                            event_id = record.get("event_id")
+                            if not event_id:
                                 continue
-                            if ev.event_id in existing_ids or ev.event_id not in seen:
+                            event_id = str(event_id)
+                            if event_id in existing_ids or event_id in seen:
                                 continue
-                            if ev.event_id in stats_seen:
-                                continue
-                            stats_seen.add(ev.event_id)
-                            filtered_stats.append(ev)
-                        if filtered_stats:
-                            await self._update_daily_stats(db, filtered_stats)
-                    await db.commit()
+                            seen.add(event_id)
+                            filtered_records.append(record)
+
+                        if not filtered_records:
+                            return 0
+
+                        for record in filtered_records:
+                            record["pii_detected"] = _coerce_bool(record.get("pii_detected"), False)
+
+                        self._ensure_record_tenant_ids(filtered_records)
+                        previous_hash = await self._load_last_chain_hash_from_db(db)
+                        committed_chain_hash = self._apply_chain_hashes(
+                            filtered_records,
+                            previous_hash=previous_hash,
+                        )
+                        await db.executemany(self._event_insert_sql, filtered_records)
+                        if stats_events:
+                            filtered_stats: list[AuditEvent] = []
+                            stats_seen: set[str] = set()
+                            for ev in stats_events:
+                                if not ev.event_id:
+                                    continue
+                                if ev.event_id in existing_ids or ev.event_id not in seen:
+                                    continue
+                                if ev.event_id in stats_seen:
+                                    continue
+                                stats_seen.add(ev.event_id)
+                                filtered_stats.append(ev)
+                            if filtered_stats:
+                                await self._update_daily_stats(db, filtered_stats)
                     replay_chain_hash = committed_chain_hash
                     self._last_chain_hash = committed_chain_hash
                     return len(filtered_records)
@@ -3120,6 +3178,14 @@ class UnifiedAuditService:
     ) -> list[dict[str, Any]]:
         """Query audit events with filters"""
         self._touch()
+        try:
+            await self.flush(raise_on_failure=True)
+        except asyncio.CancelledError:
+            raise
+        except _AUDIT_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"Failed to flush before query: {e}")
+            raise AuditReadError("Failed to flush audit buffer before query") from e
+
         base_query, params = self._build_events_query(
             start_time=start_time,
             end_time=end_time,
@@ -3143,6 +3209,8 @@ class UnifiedAuditService:
             async with self._read_db() as db, db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
+        except asyncio.CancelledError:
+            raise
         except _AUDIT_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to query audit events: {e}")
             raise AuditReadError("Failed to query audit events") from e
@@ -3186,6 +3254,8 @@ class UnifiedAuditService:
             async with self._read_db() as db, db.execute(query, params) as cursor:
                 row = await cursor.fetchone()
                 return int(row[0]) if row else 0
+        except asyncio.CancelledError:
+            raise
         except _AUDIT_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to count audit events: {e}")
             raise AuditReadError("Failed to count audit events") from e
@@ -3237,6 +3307,8 @@ class UnifiedAuditService:
         self._touch()
         try:
             await self.flush(raise_on_failure=True)
+        except asyncio.CancelledError:
+            raise
         except _AUDIT_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to flush before export: {e}")
             raise AuditReadError("Failed to flush audit buffer before export") from e
@@ -3326,7 +3398,7 @@ class UnifiedAuditService:
                     for r in chunk:
                         if max_rows is not None and rows_written >= max_rows:
                             break
-                        writer.writerow(r)
+                        writer.writerow(_neutralize_csv_row(r))
                         rows_written += 1
                     cursor_ts, cursor_event_id = self._cursor_from_row(chunk[-1])
                     if (
@@ -3358,7 +3430,7 @@ class UnifiedAuditService:
                     for r in rows:
                         if max_rows is not None and written >= max_rows:
                             break
-                        writer.writerow(r)
+                        writer.writerow(_neutralize_csv_row(r))
                         written += 1
                     chunk_str = buf.getvalue()
                     if chunk_str:
@@ -3544,7 +3616,7 @@ class UnifiedAuditService:
             writer = csv.DictWriter(buf, fieldnames=CSV_HEADERS, extrasaction="ignore")
             writer.writeheader()
             for r in rows:
-                writer.writerow(r)
+                writer.writerow(_neutralize_csv_row(r))
             return buf.getvalue()
 
         if file_path is None:
@@ -3656,6 +3728,15 @@ class UnifiedAuditService:
             Dictionary with summary stats: high_risk_events, failure_events,
             unique_security_users, top_failing_ips
         """
+        self._touch()
+        try:
+            await self.flush(raise_on_failure=True)
+        except asyncio.CancelledError:
+            raise
+        except _AUDIT_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"Failed to flush before security summary: {e}")
+            raise AuditReadError("Failed to flush audit buffer before security summary") from e
+
         start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
         start_iso = start_time.isoformat()
         cat = AuditEventCategory.SECURITY.value
@@ -3749,8 +3830,14 @@ class UnifiedAuditService:
                 "total_events": total_events,
             }
 
-        async with self._read_db() as db:
-            return await _summarize(db)
+        try:
+            async with self._read_db() as db:
+                return await _summarize(db)
+        except asyncio.CancelledError:
+            raise
+        except _AUDIT_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"Failed to summarize security audit events: {e}")
+            raise AuditReadError("Failed to summarize security audit events") from e
 
     def decode_row_fields(self, row: dict[str, Any]) -> dict[str, Any]:
         """Return a copy of a row dict with JSON fields decoded.

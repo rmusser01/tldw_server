@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import base64
-import contextlib
 import os
-import re
 from typing import Callable
 
 from loguru import logger
@@ -13,37 +10,8 @@ from starlette.responses import Response
 
 from tldw_Server_API.app.core.testing import is_truthy
 
-_SCRIPT_TAG_RE = re.compile(rb"<script(\s[^>]*)?>", re.IGNORECASE)
 
-
-def _gen_nonce() -> str:
-    # 128-bit random, URL-safe base64 without padding
-    raw = os.urandom(16)
-    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-
-def _inject_nonce_into_html(html: bytes, nonce: str) -> bytes:
-    # Insert nonce attribute into every <script ...> tag
-    nonce_attr = f' nonce="{nonce}"'.encode()
-
-    def _repl(match: re.Match[bytes]) -> bytes:
-        tag = match.group(0)
-        # If nonce already present, leave as-is
-        if b" nonce=" in tag:
-            return tag
-        # Insert just before closing '>' of the opening tag
-        if tag.endswith(b">"):
-            return tag[:-1] + nonce_attr + b">"
-        return tag + nonce_attr
-
-    try:
-        return _SCRIPT_TAG_RE.sub(_repl, html)
-    except Exception as exc:
-        logger.debug(f"Nonce injection regex failed: {exc}")
-        return html
-
-
-def _build_setup_csp(nonce: str, *, allow_inline_scripts: bool, allow_eval: bool) -> str:
+def _build_setup_csp(*, allow_inline_scripts: bool, allow_eval: bool) -> str:
     """Build CSP for Setup UI.
 
     - /setup keeps inline scripts allowed since the setup flow relies on helpers.
@@ -82,11 +50,6 @@ class SetupCSPMiddleware(BaseHTTPMiddleware):
         if not path.startswith("/setup"):
             return await call_next(request)
 
-        # Generate a nonce to future-proof policy customization; store on state
-        nonce = _gen_nonce()
-        with contextlib.suppress(Exception):
-            request.state.csp_nonce = nonce
-
         response = await call_next(request)
         try:
             allow_inline_scripts = True
@@ -101,11 +64,11 @@ class SetupCSPMiddleware(BaseHTTPMiddleware):
                 allow_eval = True
             response.headers.setdefault(
                 "Content-Security-Policy",
-                _build_setup_csp(nonce, allow_inline_scripts=allow_inline_scripts, allow_eval=allow_eval),
+                _build_setup_csp(allow_inline_scripts=allow_inline_scripts, allow_eval=allow_eval),
             )
-        except Exception as csp_header_error:
+        except Exception:
             # Best-effort header set; return original response
-            logger.debug("Setup CSP middleware failed to attach CSP header", exc_info=csp_header_error)
+            logger.debug("Setup CSP middleware failed to attach CSP header")
         return response
 
 

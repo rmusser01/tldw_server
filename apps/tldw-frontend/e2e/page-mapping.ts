@@ -262,12 +262,12 @@ export const PAGE_MAPPINGS: PageMapping[] = [
   // Session 3: Knowledge & Content
   // ═══════════════════════════════════════════════════════════════════════════
   {
-    name: "Knowledge Workspace",
+    name: "Knowledge QA Workspace",
     category: "knowledge",
     webuiPath: "/knowledge",
     extensionOptionsPath: "/knowledge",
     extensionSidepanelPath: null,
-    sharedComponent: "OptionKnowledge",
+    sharedComponent: "KnowledgeQA",
     session: 3,
     checklistItems: CHECKLIST_TEMPLATES.knowledge
   },
@@ -683,17 +683,34 @@ export const PAGE_MAPPINGS: PageMapping[] = [
     ]
   },
   {
-    name: "Moderation Playground",
+    name: "Moderation Review",
     category: "workspace",
-    webuiPath: "/moderation-playground",
-    extensionOptionsPath: "/moderation-playground",
+    webuiPath: "/moderation",
+    extensionOptionsPath: "/moderation",
     extensionSidepanelPath: null,
-    sharedComponent: "OptionModerationPlayground",
+    sharedComponent: "ModerationReviewShell",
     session: 6,
     checklistItems: [
-      "Input field accepts text",
-      "Moderation button works",
-      "Results display correctly"
+      "Review shell renders",
+      "Queue unavailable status is clear",
+      "Review item detail shows decision history and redaction state",
+      "Bulk selection reports partial failures",
+      "Saved filter presets and scoped shortcuts work",
+      "Content Rules link works"
+    ]
+  },
+  {
+    name: "Content Rules",
+    category: "workspace",
+    webuiPath: "/moderation/rules",
+    extensionOptionsPath: "/moderation/rules",
+    extensionSidepanelPath: null,
+    sharedComponent: "ModerationPlaygroundShell",
+    session: 6,
+    checklistItems: [
+      "Policy tabs render",
+      "Blocklist and override controls are reachable",
+      "Rule test sandbox works"
     ]
   },
   {
@@ -803,18 +820,33 @@ export const EXTENSION_ONLY_PAGES: PageMapping[] = [
     ]
   },
   {
-    name: "Audiobook Studio",
+    name: "Audio Studio",
     category: "audio",
-    webuiPath: null,
-    extensionOptionsPath: "/audiobook-studio",
+    webuiPath: "/audio-studio",
+    extensionOptionsPath: "/audio-studio",
     extensionSidepanelPath: null,
-    sharedComponent: "OptionAudiobookStudio",
+    sharedComponent: "OptionAudioStudio",
     session: 7,
     checklistItems: [
       "Studio interface loads",
-      "Can import content",
-      "Voice options available",
-      "Preview/generate works"
+      "Narration workflow available",
+      "Podcast workflow available",
+      "Briefing workflow available",
+      "Music workflow available"
+    ]
+  },
+  {
+    name: "Audiobook Studio",
+    category: "audio",
+    webuiPath: "/audiobook-studio",
+    extensionOptionsPath: "/audiobook-studio",
+    extensionSidepanelPath: null,
+    sharedComponent: "OptionAudiobookStudioCompatibility",
+    session: 7,
+    checklistItems: [
+      "Compatibility route loads",
+      "Redirects to Audio Studio Narration",
+      "Legacy local migration check runs"
     ]
   },
   {

@@ -34,6 +34,8 @@ type SearchBarProps = {
   className?: string
   autoFocus?: boolean
   showWebToggle?: boolean
+  webFallbackAvailable?: boolean
+  searchBlockedMessage?: string | null
   widthMode?: "compact" | "wide"
 }
 
@@ -77,6 +79,8 @@ export function SearchBar({
   className,
   autoFocus = true,
   showWebToggle = true,
+  webFallbackAvailable = true,
+  searchBlockedMessage = null,
   widthMode = "compact",
 }: SearchBarProps) {
   const {
@@ -103,7 +107,30 @@ export function SearchBar({
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
   const hasResults = results.length > 0 || Boolean(answer)
   const hasSources = settings.sources.length > 0
-  const noSourcesBlocked = !hasSources && !settings.enable_web_fallback
+  const webFallbackUsable = settings.enable_web_fallback && webFallbackAvailable
+  const sourceSelectionBlocked = !hasSources && !webFallbackUsable
+  const explicitSearchBlocked =
+    typeof searchBlockedMessage === "string" &&
+    searchBlockedMessage.trim().length > 0
+  const noSourcesBlocked = sourceSelectionBlocked || explicitSearchBlocked
+  const noSourceBlockMessage = webFallbackAvailable
+    ? "Select source categories or enable web fallback before asking Knowledge QA."
+    : "Web fallback is not available on this server. Select personal-library sources before asking Knowledge QA."
+  const noSourceBlockTooltip = webFallbackAvailable
+    ? "Select source categories or enable web fallback to search"
+    : "Select personal-library sources to search"
+  const searchBlockMessage = explicitSearchBlocked
+    ? searchBlockedMessage
+    : noSourceBlockMessage
+  const searchBlockTooltip = explicitSearchBlocked
+    ? searchBlockedMessage
+    : noSourceBlockTooltip
+  const searchDescriptionIds = [
+    "knowledge-qa-search-description",
+    noSourcesBlocked ? "knowledge-search-no-source-explanation" : null,
+  ]
+    .filter((id): id is string => typeof id === "string")
+    .join(" ")
   const showHintEmphasis = !query && !isSearching && cycleCount === 0
   const showCharacterCount = query.length >= Math.floor(MAX_QUERY_LENGTH * 0.8)
   const historyQueries = useMemo(
@@ -347,7 +374,7 @@ export function SearchBar({
             isSearching && "opacity-75 cursor-not-allowed"
           )}
           aria-label="Search your knowledge base"
-          aria-describedby="knowledge-qa-search-description"
+          aria-describedby={searchDescriptionIds}
           aria-autocomplete="list"
           aria-expanded={shouldShowSuggestions}
           aria-controls={shouldShowSuggestions ? "knowledge-search-suggestions" : undefined}
@@ -399,7 +426,7 @@ export function SearchBar({
         <Tooltip
           title={
             noSourcesBlocked
-              ? "Select source categories or enable web fallback to search"
+              ? searchBlockTooltip
               : null
           }
         >
@@ -407,6 +434,9 @@ export function SearchBar({
             <button
               type="submit"
               disabled={!query.trim() || isSearching || noSourcesBlocked}
+              aria-describedby={
+                noSourcesBlocked ? "knowledge-search-no-source-explanation" : undefined
+              }
               className={cn(
                 "px-4 py-2 rounded-lg",
                 "bg-primary text-white",
@@ -421,6 +451,17 @@ export function SearchBar({
           </span>
         </Tooltip>
       </div>
+
+      {noSourcesBlocked ? (
+        <p
+          id="knowledge-search-no-source-explanation"
+          role="status"
+          aria-live="polite"
+          className="mt-2 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn"
+        >
+          {searchBlockMessage}
+        </p>
+      ) : null}
 
       {isSearching && (
         <div
@@ -488,18 +529,29 @@ export function SearchBar({
           {showWebToggle ? (
             <button
               type="button"
-              onClick={() =>
+              onClick={() => {
+                if (!webFallbackAvailable) return
                 updateSetting("enable_web_fallback", !settings.enable_web_fallback)
-              }
+              }}
+              disabled={!webFallbackAvailable}
               className={cn(
                 "inline-flex items-center gap-1 px-2 py-1 rounded-full border transition-colors whitespace-nowrap",
-                settings.enable_web_fallback
+                webFallbackUsable
                   ? "border-primary/40 bg-primary/10 text-primary"
-                  : "border-border bg-surface text-text-subtle hover:bg-hover hover:text-text"
+                  : "border-border bg-surface text-text-subtle hover:bg-hover hover:text-text",
+                !webFallbackAvailable && "opacity-60 cursor-not-allowed hover:bg-surface hover:text-text-subtle"
               )}
-              aria-pressed={settings.enable_web_fallback}
-              title="Falls back to web search when local source relevance is below threshold (configurable in settings)."
-              aria-label={`Web fallback is currently ${settings.enable_web_fallback ? "enabled" : "disabled"}. Click to toggle.`}
+              aria-pressed={webFallbackUsable}
+              title={
+                webFallbackAvailable
+                  ? "Falls back to web search when local source relevance is below threshold (configurable in settings)."
+                  : "Web fallback is not available on this server."
+              }
+              aria-label={
+                webFallbackAvailable
+                  ? `Web fallback is currently ${settings.enable_web_fallback ? "enabled" : "disabled"}. Click to toggle.`
+                  : "Web fallback is not available on this server."
+              }
             >
               <Globe className="w-3.5 h-3.5" />
               Web

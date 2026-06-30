@@ -190,6 +190,54 @@ async def test_failed_jobs_surface_failed_without_mutating_prior_snapshots(
     assert snapshots[0]["payload_json"]["topics"][0]["display_label"] == "Original topic"  # nosec B101
 
 
+async def test_anchor_status_prefers_newer_ready_snapshot_over_older_failed_job(
+    db: CharactersRAGDB,
+    jobs_db_path: Path,
+):
+    _actions_mod, snapshot_service_mod, jobs_mod, _worker_mod = _load_modules()
+    jm = JobManager(db_path=jobs_db_path)
+    failed_job = jm.create_job(
+        domain=jobs_mod.STUDY_SUGGESTIONS_DOMAIN,
+        queue=jobs_mod.study_suggestions_jobs_queue(),
+        job_type=jobs_mod.STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
+        payload=jobs_mod.build_study_suggestions_job_payload(
+            job_type=jobs_mod.STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
+            anchor_type="quiz_attempt",
+            anchor_id=101,
+        ),
+        owner_user_id="1",
+        priority=5,
+        max_retries=1,
+    )
+    acquired = jm.acquire_next_job(
+        domain=jobs_mod.STUDY_SUGGESTIONS_DOMAIN,
+        queue=jobs_mod.study_suggestions_jobs_queue(),
+        lease_seconds=30,
+        worker_id="study-suggestions-worker-test",
+    )
+    assert acquired is not None  # nosec B101
+    assert int(acquired["id"]) == int(failed_job["id"])  # nosec B101
+    jm.fail_job(
+        int(acquired["id"]),
+        error="refresh failed",
+        retryable=False,
+        worker_id=str(acquired["worker_id"]),
+        lease_id=str(acquired["lease_id"]),
+    )
+    ready_snapshot_id = _create_snapshot(db, anchor_id=101)
+
+    status = snapshot_service_mod.get_anchor_status(
+        note_db=db,
+        job_manager=jm,
+        anchor_type="quiz_attempt",
+        anchor_id=101,
+        owner_user_id="1",
+    )
+
+    assert status["status"] == "ready"  # nosec B101
+    assert status["snapshot_id"] == ready_snapshot_id  # nosec B101
+
+
 async def test_anchor_status_pages_past_first_hundred_failed_jobs_for_matching_anchor(
     db: CharactersRAGDB,
     jobs_db_path: Path,
@@ -334,13 +382,36 @@ async def test_selection_fingerprint_includes_snapshot_target_topics_action_gene
         normalization_version="norm-v2",
     )
 
-    assert "snapshot_id=17" in fingerprint  # nosec B101
-    assert "target_service=quiz" in fingerprint  # nosec B101
-    assert "target_type=quiz" in fingerprint  # nosec B101
-    assert "topics=acid base,renal basics" in fingerprint  # nosec B101
-    assert "action_kind=follow_up_quiz" in fingerprint  # nosec B101
-    assert "generator_version=v2" in fingerprint  # nosec B101
-    assert "normalization_version=norm-v2" in fingerprint  # nosec B101
+    assert fingerprint.startswith("study-suggestions:v2:")  # nosec B101
+    assert "acid base" not in fingerprint  # nosec B101
+    assert "renal basics" not in fingerprint  # nosec B101
+
+
+async def test_selection_fingerprint_distinguishes_topic_delimiter_collisions():
+    actions_mod, _snapshot_service_mod, _jobs_mod, _worker_mod = _load_modules()
+
+    first = actions_mod.build_selection_fingerprint(
+        snapshot_id=17,
+        target_service="quiz",
+        target_type="quiz",
+        selected_topics=["a,b", "c"],
+        action_kind="follow_up_quiz",
+        generator_version="v2",
+        normalization_version="norm-v2",
+    )
+    second = actions_mod.build_selection_fingerprint(
+        snapshot_id=17,
+        target_service="quiz",
+        target_type="quiz",
+        selected_topics=["a", "b,c"],
+        action_kind="follow_up_quiz",
+        generator_version="v2",
+        normalization_version="norm-v2",
+    )
+
+    assert first != second  # nosec B101
+    assert len(first) <= 96  # nosec B101
+    assert len(second) <= 96  # nosec B101
 
 
 async def test_resolve_selected_topic_labels_defaults_to_snapshot_selected_topics():

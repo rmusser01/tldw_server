@@ -58,7 +58,7 @@ class FileAdapterRegistry:
             self._adapters[name] = adapter
             return adapter
         except Exception as exc:
-            logger.error("Failed to initialize adapter for '{}' (spec={}): {}", name, spec, exc)
+            logger.error("Failed to initialize file adapter error_type={}", type(exc).__name__)
             raise AdapterInitializationError(name, spec, exc) from exc
 
     def list_types(self) -> list[str]:

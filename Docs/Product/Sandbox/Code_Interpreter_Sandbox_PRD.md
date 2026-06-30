@@ -8,6 +8,7 @@ Last updated: 2025-11-03
 - [Revision History](#revision-history)
 - [1) Summary](#1-summary)
  - [Implementation Status (v0.3)](#implementation-status-v03)
+ - [Current Runtime Reconciliation](#current-runtime-reconciliation)
  - [1) Summary](#1-summary)
 - [2) Problem Statement](#2-problem-statement)
 - [3) Goals and Non-Goals](#3-goals-and-non-goals)
@@ -81,6 +82,26 @@ Clarifications
 - Artifact downloads: single‑range supported; multi‑range returns 416.
 - `supported_spec_versions`: servers may advertise `["1.0","1.1"]`; 1.1 is backward‑compatible and adds optional fields/capabilities.
 
+## Current Runtime Reconciliation
+
+This PRD started as the Docker/Firecracker code-interpreter plan. The current
+runtime contract is broader and should be read from the active sandbox docs:
+`Docs/Sandbox/sandbox-runtime-capability-inventory.md`,
+`Docs/Sandbox/sandbox-security-policy-matrix.md`,
+`Docs/API-related/Sandbox_API.md`, and
+`tldw_Server_API/app/core/Sandbox/README.md`.
+
+Current runtime identities are `docker`, `firecracker`, `lima`, `vz_linux`,
+`vz_macos`, `seatbelt`, and `worktree`; runtime discovery and runtime preflight
+remain authoritative for the current host. `seatbelt` and `worktree` are
+host-local runtimes, not VM-grade isolation boundaries. `seatbelt` and
+`worktree` are not `untrusted`-eligible.
+`vz_macos` real execution is not implemented; it remains a scaffold/preflight
+identity until the real runner defines execution, workspace, and network
+behavior. Firecracker real execution also remains host-gated by Linux/KVM
+prerequisites and should not be described as broadly available without passing
+preflight.
+
 Primary use cases:
 - Validate LLM-generated code safely, before running it locally.
 - Run tests, scripts, and small apps against a provided workspace snapshot.
@@ -97,7 +118,8 @@ Developers increasingly rely on LLMs to generate code. Executing untrusted snipp
 
 ### Goals
 1. Provide a sandboxed code execution service with clear isolation guarantees.
-2. Offer two runtimes: Docker (broad support) and Firecracker (stronger isolation on Linux).
+2. Preserve the original Docker/Firecracker goal while deferring current
+   runtime status to the active capability inventory and security matrix.
 3. Expose a clean REST + WebSocket API for runs, logs, and artifacts.
 4. Provide an LSP bridge so IDEs can trigger runs and show diagnostics inline.
 5. Support agent/workflow invocation (incl. MCP tool) with policy and approvals.
@@ -145,7 +167,9 @@ vNext
 ## 6) Scope
 
 In Scope (MVP)
-- Docker and Firecracker runtimes (selectable via policy or request).
+- Docker and Firecracker runtimes were the original MVP scope. Current runtime
+  support is broader and host-dependent; see
+  [Current Runtime Reconciliation](#current-runtime-reconciliation).
 - Language base images: Python, Node.js, Go, Java, .NET, plus a generic image.
 - One-shot runs with tar/zip uploads or remote git clone + patch.
 - Resource controls: CPU, memory, disk, wall-clock timeout.
@@ -235,7 +259,9 @@ Auth: Reuse existing AuthNZ (JWT for multi-user or API key for single-user). App
 
 Endpoints
 - POST `/sessions`
-  - Create a session. Body: `spec_version`, runtime (`docker`|`firecracker`), base_image, cpu/mem limits, timeout, network_policy, env (non-secret), labels.
+  - Create a session. Body: `spec_version`, runtime (current enum from
+    runtime discovery), base_image, cpu/mem limits, timeout, network_policy,
+    env (non-secret), labels.
   - Returns: `session_id`, `expires_at`, runtime info, `policy_hash`.
 
 - POST `/sessions/{session_id}/files`
@@ -991,7 +1017,9 @@ Warm Pools & Caching
 
 ## 17) Admin & Policy
 
-- Runtime selection policy: Docker default on macOS/Windows; Firecracker allowed on supported Linux hosts (direct integration).
+- Runtime selection policy: choose defaults from the active capability
+  inventory and runtime discovery; do not assume a host can run VM-grade
+  backends without preflight.
 - Quotas: per-user daily CPU-seconds cap; concurrent run cap; total artifacts size/day.
 - Network policy: deny_all default; allowlist domains (vNext) per policy; domain wildcards controlled via config.
 - Approvals: optional manual approval gates for large runs or network-enabled runs.
@@ -1000,7 +1028,7 @@ Warm Pools & Caching
 See also: [Security Defaults](#security-defaults-quick-reference)
 
   Configuration Keys (examples)
-- `SANDBOX_DEFAULT_RUNTIME` (docker|firecracker)
+- `SANDBOX_DEFAULT_RUNTIME` (current runtime enum; validate with discovery)
 - `SANDBOX_NETWORK_DEFAULT` (deny_all|allowlist)
 - `SANDBOX_MAX_UPLOAD_MB`
 - `SANDBOX_ARTIFACT_TTL_HOURS`

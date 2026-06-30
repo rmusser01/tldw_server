@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
+from tldw_Server_API.app.core.Infrastructure import provider_registry as provider_registry_module
 from tldw_Server_API.app.core.Infrastructure.provider_registry import (
     ProviderRegistryBase,
     ProviderRegistryConfig,
@@ -44,8 +43,12 @@ async def test_get_adapter_async_uses_async_materializer_and_cache() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_adapter_async_respects_retry_window_after_failure() -> None:
+async def test_get_adapter_async_respects_retry_window_after_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls = {"count": 0}
+    now = {"value": 1000.0}
+    monkeypatch.setattr(provider_registry_module.time, "time", lambda: now["value"])
 
     async def _flaky_materialize(provider_name: str, spec: object) -> object:
         calls["count"] += 1
@@ -67,7 +70,7 @@ async def test_get_adapter_async_respects_retry_window_after_failure() -> None:
     assert await registry.get_adapter_async("flaky") is None
     assert calls["count"] == 1
 
-    await asyncio.sleep(0.03)
+    now["value"] += 0.03
 
     adapter = await registry.get_adapter_async("flaky")
     assert isinstance(adapter, _AsyncAdapter)

@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 #
 # Local Imports
 from .adapters.base import AudioFormat, ProviderStatus, TTSAdapter, TTSCapabilities
+from .chatterbox_catalog import CHATTERBOX_MODEL_PROVIDER_ALIASES
 from .tts_config import get_tts_config_manager
 from .tts_exceptions import (
     TTSError,
@@ -47,6 +48,20 @@ _TTS_REGISTRY_ADAPTER_EXCEPTIONS: tuple[type[BaseException], ...] = (
     TTSError,
 ) + _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS
 
+
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
+def _non_empty_str(value: object) -> Optional[str]:
+    """Return stripped text for non-empty strings."""
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 class TTSProvider(Enum):
     """
     Enumeration of TTS providers known to the service.
@@ -72,8 +87,10 @@ class TTSProvider(Enum):
     POCKET_TTS_CPP = "pocket_tts_cpp"
     ECHO_TTS = "echo_tts"
     QWEN3_TTS = "qwen3_tts"
+    OMNIVOICE = "omnivoice"
     LUX_TTS = "lux_tts"
     KITTEN_TTS = "kitten_tts"
+    FISH_S2 = "fish_s2"
     # Additional providers
     ALLTALK = "alltalk"  # TODO: Implement AllTalk adapter
     MOCK = "mock"  # Mock provider for testing
@@ -110,6 +127,9 @@ def _build_tts_provider_aliases() -> dict[str, TTSProvider]:
         "echotts": TTSProvider.ECHO_TTS,
         "kittentts": TTSProvider.KITTEN_TTS,
         "vibevoice-asr": TTSProvider.VIBEVOICE,
+        "fish-s2-pro": TTSProvider.FISH_S2,
+        "s2-pro": TTSProvider.FISH_S2,
+        "fishaudio/s2-pro": TTSProvider.FISH_S2,
     }
     for alias, provider in explicit_aliases.items():
         for token in _provider_alias_tokens(alias):
@@ -158,10 +178,24 @@ def _apply_provider_aliases(provider_key: str, cfg: dict[str, Any]) -> dict[str,
         alias("max_speakers", "dia_max_speakers")
         alias("target_latency_ms", "dia_target_latency_ms")
     elif normalized_provider == "chatterbox":
+        alias("variant", "chatterbox_variant")
+        alias("model_path", "chatterbox_model_path")
+        alias("multilingual_model_path", "chatterbox_multilingual_model_path")
+        alias("turbo_model_path", "chatterbox_turbo_model_path")
+        alias("vc_model_path", "chatterbox_vc_model_path")
         alias("device", "chatterbox_device")
         alias("use_multilingual", "chatterbox_use_multilingual")
+        alias("use_bf16", "chatterbox_use_bf16")
         alias("disable_watermark", "chatterbox_disable_watermark")
         alias("target_latency_ms", "chatterbox_target_latency_ms")
+        alias("auto_download", "chatterbox_auto_download")
+        alias("conditionals_cache_size", "chatterbox_conditionals_cache_size")
+        alias("default_exaggeration", "chatterbox_default_exaggeration")
+        alias("cfg_weight", "chatterbox_cfg_weight")
+        alias("temperature", "chatterbox_temperature")
+        alias("repetition_penalty", "chatterbox_repetition_penalty")
+        alias("min_p", "chatterbox_min_p")
+        alias("top_p", "chatterbox_top_p")
     elif normalized_provider == "elevenlabs":
         alias("api_key", "elevenlabs_api_key")
         alias("base_url", "elevenlabs_base_url")
@@ -269,8 +303,10 @@ class TTSAdapterRegistry:
         TTSProvider.POCKET_TTS_CPP: "tldw_Server_API.app.core.TTS.adapters.pocket_tts_cpp_adapter.PocketTTSCppAdapter",
         TTSProvider.ECHO_TTS: "tldw_Server_API.app.core.TTS.adapters.echo_tts_adapter.EchoTTSAdapter",
         TTSProvider.QWEN3_TTS: "tldw_Server_API.app.core.TTS.adapters.qwen3_tts_adapter.Qwen3TTSAdapter",
+        TTSProvider.OMNIVOICE: "tldw_Server_API.app.core.TTS.adapters.omnivoice_adapter.OmniVoiceAdapter",
         TTSProvider.LUX_TTS: "tldw_Server_API.app.core.TTS.adapters.luxtts_adapter.LuxTTSAdapter",
         TTSProvider.KITTEN_TTS: "tldw_Server_API.app.core.TTS.adapters.kitten_tts_adapter.KittenTTSAdapter",
+        TTSProvider.FISH_S2: "tldw_Server_API.app.core.TTS.adapters.fish_s2_adapter.FishS2Adapter",
     }
 
     @classmethod
@@ -570,7 +606,11 @@ class TTSAdapterRegistry:
         try:
             success = await adapter.ensure_initialized()
         except _TTS_REGISTRY_ADAPTER_EXCEPTIONS as exc:
-            logger.error(f"Error initializing {resolved_provider.value} adapter with overrides: {exc}")
+            logger.error(
+                "Error initializing {} adapter with overrides ({})",
+                resolved_provider.value,
+                _safe_exception_label(exc),
+            )
             return None
         if not success:
             logger.error(f"Failed to initialize {resolved_provider.value} adapter with overrides")
@@ -613,16 +653,32 @@ class TTSAdapterRegistry:
                     logger.info(f"Provider {provider.value} is disabled in configuration")
                     return False
                 if explicit_enabled is None:
-                    remote_providers = {TTSProvider.OPENAI, TTSProvider.ELEVENLABS}
+                    remote_providers = {
+                        TTSProvider.OPENAI,
+                        TTSProvider.ELEVENLABS,
+                        TTSProvider.FISH_S2,
+                    }
                     if provider in remote_providers:
                         # Consider provider enabled if API key is supplied via config or env
                         api_key: Optional[str] = None
                         if provider == TTSProvider.OPENAI:
-                            api_key = (self.config.get("openai_api_key")
-                                       or os.getenv("OPENAI_API_KEY"))
+                            api_key = (
+                                _non_empty_str(provider_config.get("api_key"))
+                                or _non_empty_str(provider_config.get("openai_api_key"))
+                                or _non_empty_str(os.getenv("OPENAI_API_KEY"))
+                            )
                         elif provider == TTSProvider.ELEVENLABS:
-                            api_key = (self.config.get("elevenlabs_api_key")
-                                       or os.getenv("ELEVENLABS_API_KEY"))
+                            api_key = (
+                                _non_empty_str(provider_config.get("api_key"))
+                                or _non_empty_str(provider_config.get("elevenlabs_api_key"))
+                                or _non_empty_str(os.getenv("ELEVENLABS_API_KEY"))
+                            )
+                        elif provider == TTSProvider.FISH_S2:
+                            api_key = (
+                                _non_empty_str(provider_config.get("api_key"))
+                                or _non_empty_str(os.getenv("FISH_AUDIO_API_KEY"))
+                                or _non_empty_str(os.getenv("FISH_API_KEY"))
+                            )
                         if not api_key:
                             logger.info(
                                 f"Provider {provider.value} is disabled (no credentials found)"
@@ -663,9 +719,17 @@ class TTSAdapterRegistry:
 
         except Exception as e:
             if isinstance(e, TTSError):
-                logger.error(f"Error initializing {provider.value} adapter: {e}")
+                logger.error(
+                    "Error initializing {} adapter ({})",
+                    provider.value,
+                    _safe_exception_label(e),
+                )
                 raise
-            logger.error(f"Error initializing {provider.value} adapter: {e}")
+            logger.error(
+                "Error initializing {} adapter ({})",
+                provider.value,
+                _safe_exception_label(e),
+            )
             # Don't store failed adapter - it will be retried next time
             return False
 
@@ -688,13 +752,34 @@ class TTSAdapterRegistry:
                 cfg = model_dump_compat(provider_cfg)
                 return _apply_provider_aliases(provider.value, cfg)
 
-        # Fallback to legacy config
+        # Fallback to legacy/direct dict config
         provider_config = self.config.copy()
+
+        providers_cfg = self.config.get("providers")
+        if isinstance(providers_cfg, dict):
+            nested_provider_config = providers_cfg.get(provider.value)
+            if nested_provider_config is not None and not isinstance(nested_provider_config, dict):
+                nested_provider_config = model_dump_compat(nested_provider_config)
+            if isinstance(nested_provider_config, dict):
+                provider_config.update(nested_provider_config)
 
         # Add provider-specific overrides
         provider_key = f"{provider.value}_config"
         if provider_key in self.config:
             provider_config.update(self.config[provider_key])
+
+        if provider == TTSProvider.OPENAI:
+            env_api_key = _non_empty_str(os.getenv("OPENAI_API_KEY"))
+        elif provider == TTSProvider.ELEVENLABS:
+            env_api_key = _non_empty_str(os.getenv("ELEVENLABS_API_KEY"))
+        elif provider == TTSProvider.FISH_S2:
+            env_api_key = _non_empty_str(os.getenv("FISH_AUDIO_API_KEY")) or _non_empty_str(
+                os.getenv("FISH_API_KEY")
+            )
+        else:
+            env_api_key = None
+        if env_api_key and not _non_empty_str(provider_config.get("api_key")):
+            provider_config["api_key"] = env_api_key
 
         return _apply_provider_aliases(provider.value, provider_config)
 
@@ -762,7 +847,11 @@ class TTSAdapterRegistry:
                 if self._failure_retry_seconds is not None:
                     self._schedule_retry(provider)
             except _TTS_REGISTRY_ADAPTER_EXCEPTIONS as e:
-                logger.debug(f"Error getting capabilities for {provider.value}: {e}")
+                logger.debug(
+                    "Error getting capabilities for {} ({})",
+                    provider.value,
+                    e.__class__.__name__,
+                )
                 if self._failure_retry_seconds is not None:
                     self._schedule_retry(provider)
 
@@ -918,7 +1007,11 @@ class TTSAdapterRegistry:
                 try:
                     await resource_manager.unregister_model(provider.value)
                 except _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS as e:
-                    logger.warning(f"Error unregistering {provider.value} from resource manager: {e}")
+                    logger.warning(
+                        "Error unregistering {} from resource manager ({})",
+                        provider.value,
+                        e.__class__.__name__,
+                    )
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -933,9 +1026,62 @@ class TTSAdapterRegistry:
             try:
                 await resource_manager.cleanup_all()
             except _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(f"Error during resource manager cleanup: {e}")
+                logger.warning(
+                    "Error during resource manager cleanup ({})",
+                    e.__class__.__name__,
+                )
 
         logger.info("All TTS adapters closed")
+
+    async def unload_provider(self, provider: Union[TTSProvider, str]) -> dict[str, Any]:
+        """Close and forget one initialized provider adapter, if currently loaded."""
+        resolved_provider = self.resolve_provider(provider)
+        if resolved_provider is None or resolved_provider not in self._adapter_specs:
+            raise TTSProviderNotConfiguredError(
+                f"Unknown TTS provider '{provider}'",
+                provider=str(provider),
+            )
+
+        provider_key = self._base.resolve_provider_name(resolved_provider.value)
+        cached_by_name = self._base.get_cached_adapters()
+        adapter = self._adapters.pop(resolved_provider, None)
+        if adapter is None:
+            adapter = cached_by_name.get(provider_key) or cached_by_name.get(resolved_provider.value)
+
+        unloaded = adapter is not None
+        try:
+            if adapter is not None:
+                logger.info(f"Unloading {resolved_provider.value} TTS adapter")
+                await adapter.close()
+        except _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS as e:
+            logger.bind(
+                provider=resolved_provider.value,
+                provider_key=provider_key or "<missing>",
+                error_type=type(e).__name__,
+            ).opt(exception=e).warning("Error closing TTS adapter during unload; clearing cached state anyway")
+        finally:
+            with self._base._lock:  # noqa: SLF001 - wrapper needs single-provider cache invalidation.
+                if provider_key:
+                    self._base._invalidate_provider_state_locked(provider_key)  # noqa: SLF001
+                self._base._invalidate_provider_state_locked(resolved_provider.value)  # noqa: SLF001
+
+            self._initialized_providers.discard(resolved_provider)
+
+        resource_manager = get_existing_resource_manager()
+        if resource_manager:
+            for resource_key in {resolved_provider.value, provider_key}:
+                if not resource_key:
+                    continue
+                try:
+                    await resource_manager.unregister_model(resource_key)
+                except _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS as e:
+                    logger.warning(
+                        "Error unregistering {} from resource manager ({})",
+                        resource_key,
+                        e.__class__.__name__,
+                    )
+
+        return {"provider": resolved_provider.value, "unloaded": unloaded}
 
     def get_status_summary(self) -> dict[str, Any]:
         """
@@ -1027,8 +1173,7 @@ class TTSAdapterFactory:
         "dia-1.6b": TTSProvider.DIA,
 
         # Chatterbox models
-        "chatterbox": TTSProvider.CHATTERBOX,
-        "chatterbox-emotion": TTSProvider.CHATTERBOX,
+        **{alias: TTSProvider.CHATTERBOX for alias in CHATTERBOX_MODEL_PROVIDER_ALIASES},
 
         # VibeVoice models
         "vibevoice": TTSProvider.VIBEVOICE,
@@ -1091,6 +1236,9 @@ class TTSAdapterFactory:
         # Qwen3-TTS models
         "qwen3-tts": TTSProvider.QWEN3_TTS,
         "qwen3_tts": TTSProvider.QWEN3_TTS,
+        "omnivoice": TTSProvider.OMNIVOICE,
+        "omni-voice": TTSProvider.OMNIVOICE,
+        "omni_voice": TTSProvider.OMNIVOICE,
         "qwen/qwen3-tts-12hz-1.7b-customvoice": TTSProvider.QWEN3_TTS,
         "qwen/qwen3-tts-12hz-0.6b-customvoice": TTSProvider.QWEN3_TTS,
         "qwen/qwen3-tts-12hz-1.7b-voicedesign": TTSProvider.QWEN3_TTS,
@@ -1106,6 +1254,13 @@ class TTSAdapterFactory:
         "kittenml/kitten-tts-nano-0.8": TTSProvider.KITTEN_TTS,
         "kittenml/kitten-tts-nano-0.8-fp32": TTSProvider.KITTEN_TTS,
         "kittenml/kitten-tts-nano-0.8-int8": TTSProvider.KITTEN_TTS,
+
+        # Fish Audio S2 models
+        "fish_s2": TTSProvider.FISH_S2,
+        "fish-s2": TTSProvider.FISH_S2,
+        "fish-s2-pro": TTSProvider.FISH_S2,
+        "s2-pro": TTSProvider.FISH_S2,
+        "fishaudio/s2-pro": TTSProvider.FISH_S2,
     }
 
     def __init__(self, config: Optional[dict[str, Any]] = None):
@@ -1168,6 +1323,10 @@ class TTSAdapterFactory:
     async def close(self):
         """Close all adapters"""
         await self.registry.close_all()
+
+    async def unload_provider(self, provider: Union[TTSProvider, str]) -> dict[str, Any]:
+        """Close and forget one initialized provider adapter."""
+        return await self.registry.unload_provider(provider)
 
     def get_status(self) -> dict[str, Any]:
         """Get factory status"""

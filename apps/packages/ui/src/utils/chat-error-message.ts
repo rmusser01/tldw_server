@@ -10,6 +10,8 @@ export type ChatErrorPayload = {
   detail: string
   upgradeUrl?: string
   category?: string
+  recoveryAction?: "open-model-selector" | "open-model-settings"
+  recoveryLabel?: string
 }
 
 export const encodeChatErrorPayload = (payload: ChatErrorPayload): string =>
@@ -33,10 +35,24 @@ export const decodeChatErrorPayload = (
       detail: typeof parsed.detail === "string" ? parsed.detail : "",
       upgradeUrl: typeof parsed.upgradeUrl === "string" ? parsed.upgradeUrl : undefined,
       category: typeof parsed.category === "string" ? parsed.category : undefined,
+      recoveryAction:
+        parsed.recoveryAction === "open-model-selector" ||
+        parsed.recoveryAction === "open-model-settings"
+          ? parsed.recoveryAction
+          : undefined,
+      recoveryLabel:
+        typeof parsed.recoveryLabel === "string" ? parsed.recoveryLabel : undefined,
     }
   } catch {
     return null
   }
+}
+
+const translateErrorText = (key: string, fallback: string): string => {
+  const translated = i18n.t(key, fallback)
+  return typeof translated === "string" && translated.trim().length > 0
+    ? translated
+    : fallback
 }
 
 export const buildFriendlyErrorMessage = (rawError: unknown): string => {
@@ -45,6 +61,8 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
 
   let summary: string
   let hint: string
+  let recoveryAction: ChatErrorPayload["recoveryAction"] | undefined
+  let recoveryLabel: string | undefined
 
   if (lower.includes("invalid x-api-key")) {
     summary = i18n.t(
@@ -61,13 +79,18 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
     lower.includes("model_not_found") ||
     lower.includes("no such model")
   ) {
-    summary = i18n.t(
+    summary = translateErrorText(
       "common:error.friendlyModelUnavailableSummary",
       "The selected model is not available."
     )
-    hint = i18n.t(
+    hint = translateErrorText(
       "common:error.friendlyModelUnavailableHint",
       "Choose a different model or refresh the model list, then try again."
+    )
+    recoveryAction = "open-model-selector"
+    recoveryLabel = translateErrorText(
+      "common:error.chooseAnotherModel",
+      "Choose another model"
     )
   } else if (
     lower.includes("/api/v1/files/create") &&
@@ -117,6 +140,23 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
     hint = i18n.t(
       "common:error.friendlyTimeoutHint",
       "The server stopped streaming responses. Try again, or open Health & diagnostics to check server status."
+    )
+  } else if (
+    lower.includes("no response text was returned") ||
+    lower.includes("empty response")
+  ) {
+    summary = translateErrorText(
+      "common:error.friendlyEmptyResponseSummary",
+      "No response was returned."
+    )
+    hint = translateErrorText(
+      "common:error.friendlyEmptyResponseHint",
+      "The model finished without text. Retry, or choose a different model."
+    )
+    recoveryAction = "open-model-selector"
+    recoveryLabel = translateErrorText(
+      "common:error.chooseAnotherModel",
+      "Choose another model"
     )
   } else if (
     lower.includes("chunkererror") ||
@@ -205,7 +245,9 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
   return encodeChatErrorPayload({
     summary,
     hint,
-    detail
+    detail,
+    recoveryAction,
+    recoveryLabel
   })
 }
 

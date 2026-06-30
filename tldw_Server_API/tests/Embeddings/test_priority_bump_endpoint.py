@@ -19,8 +19,16 @@ class FakeRedisKV:
         return True
 
 
+class FailingRedisKV:
+    async def set(self, k, v):
+        raise RuntimeError("redis password leaked")
+
+    async def close(self):
+        return True
+
+
 @pytest.mark.unit
-def test_bump_priority_sets_override(monkeypatch, admin_user):
+def test_bump_priority_sets_override(monkeypatch, admin_user, auth_headers):
     client = TestClient(app)
     fake = FakeRedisKV()
     import redis.asyncio as aioredis
@@ -29,7 +37,30 @@ def test_bump_priority_sets_override(monkeypatch, admin_user):
         return fake
 
     monkeypatch.setattr(aioredis, "from_url", fake_from_url)
-    r = client.post("/api/v1/embeddings/job/priority/bump", json={"job_id": "j1", "priority": "high", "ttl_seconds": 60})
+    r = client.post(
+        "/api/v1/embeddings/job/priority/bump",
+        json={"job_id": "j1", "priority": "high", "ttl_seconds": 60},
+        headers=auth_headers,
+    )
     assert r.status_code == 200
     assert fake.kv.get("embeddings:priority:override:j1") == "high"
     # Cleanup handled by admin_user fixture
+
+
+@pytest.mark.unit
+def test_bump_priority_sanitizes_backend_failure(monkeypatch, admin_user, auth_headers):
+    client = TestClient(app)
+    import redis.asyncio as aioredis
+
+    async def fake_from_url(url, decode_responses=True):  # noqa: ARG001
+        return FailingRedisKV()
+
+    monkeypatch.setattr(aioredis, "from_url", fake_from_url)
+    response = client.post(
+        "/api/v1/embeddings/job/priority/bump",
+        json={"job_id": "j1", "priority": "high", "ttl_seconds": 60},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to set priority override"

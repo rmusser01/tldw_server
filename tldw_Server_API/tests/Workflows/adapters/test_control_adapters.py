@@ -161,6 +161,30 @@ class TestPromptAdapter:
         result = task.result()
         assert result.get("__status__") == "cancelled"
 
+    @pytest.mark.asyncio
+    async def test_merge_fallback_log_sanitizes_backend_error(self):
+        """Test prompt fallback logs hide raw backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.control import flow
+
+        class BrokenVariables:
+            def keys(self):
+                raise RuntimeError("merge exploded at /private/flow.env")
+
+        messages = []
+        sink_id = flow.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+        try:
+            result = await run_prompt_adapter(
+                {"template": "OK", "variables": BrokenVariables()},
+                {"inputs": {}},
+            )
+        finally:
+            flow.logger.remove(sink_id)
+
+        assert result == {"text": "OK"}
+        joined = "\n".join(messages)
+        assert "Prompt adapter: failed to merge variables into context" in joined
+        assert "merge exploded at /private/flow.env" not in joined
+
 
 # =============================================================================
 # Delay Adapter Tests
@@ -654,6 +678,22 @@ class TestParallelAdapter:
 
         assert result.get("__status__") == "cancelled"
 
+    @pytest.mark.asyncio
+    async def test_parallel_sanitizes_substep_errors(self):
+        """Test parallel adapter hides raw substep exception details."""
+        config = {
+            "steps": [
+                {"type": "prompt", "config": {"template": "Test", "force_error": True}},
+            ],
+            "max_concurrency": 1,
+            "fail_fast": True,
+        }
+
+        result = await run_parallel_adapter(config, {"inputs": {}})
+
+        assert result["results"] == [{"error": "parallel_step_error"}]
+        assert result["errors"] == ["parallel_step_error"]
+
 
 # =============================================================================
 # Batch Adapter Tests
@@ -822,6 +862,47 @@ class TestCacheResultAdapter:
         mock_collection.delete.assert_called_once_with(ids=["test_key"])
 
     @pytest.mark.asyncio
+    async def test_cache_store_sanitizes_backend_errors(self, monkeypatch):
+        """Test cache store failures hide raw backend exception details."""
+        mock_collection = MagicMock()
+        mock_collection.upsert.side_effect = RuntimeError(
+            "cache store exploded at /private/cache"
+        )
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.control.state._get_workflow_cache_collection",
+            lambda _name: mock_collection,
+        )
+
+        result = await run_cache_result_adapter(
+            {"key": "test_key", "action": "set", "data": {"value": 42}},
+            {},
+        )
+
+        assert result == {
+            "cached": False,
+            "data": {"value": 42},
+            "error": "cache_store_error",
+        }
+
+    @pytest.mark.asyncio
+    async def test_cache_result_sanitizes_backend_errors(self, monkeypatch):
+        """Test outer cache failures hide raw backend exception details."""
+
+        class BadCollection:
+            def __bool__(self):
+                raise RuntimeError("cache collection exploded at /private/cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.control.state._get_workflow_cache_collection",
+            lambda _name: BadCollection(),
+        )
+
+        result = await run_cache_result_adapter({"key": "test_key"}, {})
+
+        assert result == {"cached": False, "data": {}, "error": "cache_result_error"}
+
+    @pytest.mark.asyncio
     async def test_cache_cancellation(self):
         """Test cache adapter respects cancellation."""
 
@@ -934,10 +1015,10 @@ class TestRetryAdapter:
 
     @pytest.mark.asyncio
     async def test_retry_exhausted(self, monkeypatch):
-        """Test retry adapter fails after exhausting retries."""
+        """Test retry adapter fails after exhausting retries without raw backend details."""
 
         async def always_failing_adapter(config, context):
-            raise Exception("persistent_failure")
+            raise RuntimeError("persistent failure at /private/retry-cache")
 
         from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 
@@ -966,7 +1047,7 @@ class TestRetryAdapter:
 
         assert result["success"] is False
         assert result["attempts"] == 3  # initial + 2 retries
-        assert "persistent_failure" in result["error"]
+        assert result["error"] == "retry_step_error"
 
     @pytest.mark.asyncio
     async def test_retry_cancellation(self):
@@ -1060,6 +1141,24 @@ class TestCheckpointAdapter:
         assert events[0][1]["data"] == {"custom": "payload"}
 
     @pytest.mark.asyncio
+    async def test_checkpoint_sanitizes_backend_errors(self):
+        """Test checkpoint failures hide raw backend exception details."""
+
+        def append_event(_event_type, _data):
+            raise RuntimeError("checkpoint backend exploded at /private/checkpoints")
+
+        config = {"checkpoint_id": "ckpt_error"}
+        context = {"inputs": {}, "append_event": append_event}
+
+        result = await run_checkpoint_adapter(config, context)
+
+        assert result == {
+            "error": "checkpoint_error",
+            "checkpoint_id": "ckpt_error",
+            "saved": False,
+        }
+
+    @pytest.mark.asyncio
     async def test_checkpoint_cancellation(self):
         """Test checkpoint adapter respects cancellation."""
 
@@ -1104,19 +1203,14 @@ class TestWorkflowCallAdapter:
         mock_module.get_workflows_db = lambda: mock_db
 
         import sys
-        sys.modules["tldw_Server_API.app.core.Workflows.workflows_db"] = mock_module
+        monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.Workflows.workflows_db", mock_module)
 
-        try:
-            config = {"workflow_id": "nonexistent_workflow"}
-            context = {}
+        config = {"workflow_id": "nonexistent_workflow"}
+        context = {}
 
-            result = await run_workflow_call_adapter(config, context)
+        result = await run_workflow_call_adapter(config, context)
 
-            assert "workflow_not_found" in result["error"]
-        finally:
-            # Clean up the mock module
-            if "tldw_Server_API.app.core.Workflows.workflows_db" in sys.modules:
-                del sys.modules["tldw_Server_API.app.core.Workflows.workflows_db"]
+        assert "workflow_not_found" in result["error"]
 
     @pytest.mark.asyncio
     async def test_workflow_call_async(self, monkeypatch):
@@ -1141,29 +1235,22 @@ class TestWorkflowCallAdapter:
         mock_engine_module.EngineConfig = MagicMock()
 
         import sys
-        sys.modules["tldw_Server_API.app.core.Workflows.workflows_db"] = mock_db_module
-        sys.modules["tldw_Server_API.app.core.Workflows.engine"] = mock_engine_module
+        monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.Workflows.workflows_db", mock_db_module)
+        monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.Workflows.engine", mock_engine_module)
 
-        try:
-            config = {
-                "workflow_id": "wf_123",
-                "inputs": {"param": "value"},
-                "wait": False,
-            }
-            context = {"tenant_id": "test_tenant", "user_id": "user_1"}
+        config = {
+            "workflow_id": "wf_123",
+            "inputs": {"param": "value"},
+            "wait": False,
+        }
+        context = {"tenant_id": "test_tenant", "user_id": "user_1"}
 
-            result = await run_workflow_call_adapter(config, context)
+        result = await run_workflow_call_adapter(config, context)
 
-            assert result["status"] == "submitted"
-            assert result["async"] is True
-            assert "run_id" in result
-            mock_engine.submit.assert_called_once()
-        finally:
-            # Clean up the mock modules
-            if "tldw_Server_API.app.core.Workflows.workflows_db" in sys.modules:
-                del sys.modules["tldw_Server_API.app.core.Workflows.workflows_db"]
-            if "tldw_Server_API.app.core.Workflows.engine" in sys.modules:
-                del sys.modules["tldw_Server_API.app.core.Workflows.engine"]
+        assert result["status"] == "submitted"
+        assert result["async"] is True
+        assert "run_id" in result
+        mock_engine.submit.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_workflow_call_cancellation(self):
@@ -1207,27 +1294,35 @@ class TestWorkflowCallAdapter:
         mock_engine_module.EngineConfig = MagicMock()
 
         import sys
-        sys.modules["tldw_Server_API.app.core.Workflows.workflows_db"] = mock_db_module
-        sys.modules["tldw_Server_API.app.core.Workflows.engine"] = mock_engine_module
+        monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.Workflows.workflows_db", mock_db_module)
+        monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.Workflows.engine", mock_engine_module)
 
-        try:
-            config = {
-                "workflow_id": "wf_slow",
-                "inputs": {},
-                "wait": True,
-                "timeout_seconds": 1,  # Short timeout for test
-            }
-            context = {"tenant_id": "default"}
+        config = {
+            "workflow_id": "wf_slow",
+            "inputs": {},
+            "wait": True,
+            "timeout_seconds": 1,  # Short timeout for test
+        }
+        context = {"tenant_id": "default"}
 
-            result = await run_workflow_call_adapter(config, context)
+        result = await run_workflow_call_adapter(config, context)
 
-            assert result["error"] == "workflow_timeout"
-        finally:
-            # Clean up the mock modules
-            if "tldw_Server_API.app.core.Workflows.workflows_db" in sys.modules:
-                del sys.modules["tldw_Server_API.app.core.Workflows.workflows_db"]
-            if "tldw_Server_API.app.core.Workflows.engine" in sys.modules:
-                del sys.modules["tldw_Server_API.app.core.Workflows.engine"]
+        assert result["error"] == "workflow_timeout"
+
+    @pytest.mark.asyncio
+    async def test_workflow_call_sanitizes_backend_errors(self, monkeypatch):
+        """Test workflow call failures hide raw backend exception details."""
+        mock_db_module = MagicMock()
+        mock_db_module.get_workflows_db.side_effect = RuntimeError(
+            "workflow DB exploded at /private/workflows.db"
+        )
+
+        import sys
+        monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.Workflows.workflows_db", mock_db_module)
+
+        result = await run_workflow_call_adapter({"workflow_id": "wf_error"}, {})
+
+        assert result == {"error": "workflow_call_error", "result": None}
 
 
 # =============================================================================

@@ -1,10 +1,10 @@
 /**
- * Page Object for the TTS (Text-to-Speech) Playground
+ * Page Object for the Text to Speech route
  *
  * Wraps the /tts route which renders SpeechPlaygroundPage in locked "listen" mode.
  * Key UI elements: title, text input area, Play/Stop/Download buttons, voice provider strip.
  */
-import { type Page, type Locator, expect } from "@playwright/test"
+import { type Page, type Locator } from "@playwright/test"
 import { BasePage, type InteractiveElement } from "./BasePage"
 import { waitForAppShell, waitForConnection } from "../helpers"
 
@@ -22,16 +22,16 @@ export class TTSPage extends BasePage {
 
   async assertPageReady(): Promise<void> {
     await waitForAppShell(this.page, 30_000)
-    // Wait for the TTS Playground heading
-    const heading = this.page.getByText("TTS Playground")
+    // Wait for the canonical Text to Speech route heading.
+    const heading = this.page.getByText("Text to Speech")
     await heading.first().waitFor({ state: "visible", timeout: 20_000 }).catch(() => {})
   }
 
   // -- Locators --------------------------------------------------------------
 
-  /** Page heading ("TTS Playground") */
+  /** Page heading ("Text to Speech") */
   get heading(): Locator {
-    return this.page.getByRole("heading", { name: /tts playground/i })
+    return this.page.getByRole("heading", { name: /text to speech/i })
   }
 
   /** Subtitle text */

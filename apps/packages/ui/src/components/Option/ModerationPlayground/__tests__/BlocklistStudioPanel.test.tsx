@@ -7,11 +7,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 // Mocks
 // ---------------------------------------------------------------------------
 
+const antdMocks = vi.hoisted(() => ({
+  confirm: vi.fn()
+}))
+
 vi.mock("antd", () => ({
   Select: ({ placeholder, ...props }: any) => (
     <div data-testid="categories-select">{placeholder}</div>
   ),
-  Modal: { confirm: vi.fn() },
+  Modal: { confirm: antdMocks.confirm },
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
 
@@ -33,10 +37,23 @@ function makeBlocklist(overrides: Partial<ReturnType<typeof import("../hooks/use
     setRawText: vi.fn(),
     rawLint: null,
     isDirtyRaw: false,
+    pendingRawPreview: null,
+    rawReplaceUndo: null,
     loading: false,
     loadRaw: vi.fn().mockResolvedValue(undefined),
     saveRaw: vi.fn().mockResolvedValue(undefined),
     saveRawText: vi.fn().mockResolvedValue(undefined),
+    previewRawReplace: vi.fn().mockResolvedValue({
+      previousText: "",
+      nextText: "",
+      addedCount: 0,
+      removedCount: 0,
+      changedCount: 0,
+      lint: { items: [], valid_count: 0, invalid_count: 0 }
+    }),
+    confirmRawReplace: vi.fn().mockResolvedValue(undefined),
+    cancelRawReplace: vi.fn(),
+    undoRawReplace: vi.fn().mockResolvedValue(undefined),
     lintRaw: vi.fn().mockResolvedValue(undefined),
     managedItems: [],
     managedVersion: "",
@@ -140,6 +157,122 @@ describe("BlocklistStudioPanel", () => {
 
     expect(screen.getByTestId("rules-table")).toBeInTheDocument()
     expect(screen.getByText("badword")).toBeInTheDocument()
+  })
+
+  it("defaults to active valid rules and excludes comments, blanks, and invalid rows from counts", () => {
+    const blocklist = makeBlocklist({
+      managedItems: [
+        { id: 1, line: "badword -> block #violence", pattern_type: "literal", action: "block", categories: ["violence"], ok: true },
+        { id: 2, line: "# internal note", pattern_type: "comment", ok: true, warning: "comment (ignored)" },
+        { id: 3, line: "", pattern_type: "empty", ok: true, warning: "blank line (ignored)" },
+        { id: 4, line: "/[broken/ -> block", pattern_type: "regex", action: "block", ok: false, error: "invalid regex" }
+      ]
+    })
+    render(<BlocklistStudioPanel blocklist={blocklist as any} messageApi={messageApi} />)
+
+    expect(screen.getByText(/1 active rule/i)).toBeInTheDocument()
+    expect(screen.getByText(/3 non-active rows hidden/i)).toBeInTheDocument()
+    expect(screen.getByText("badword")).toBeInTheDocument()
+    expect(screen.queryByText("# internal note")).not.toBeInTheDocument()
+    expect(screen.queryByText("/[broken/")).not.toBeInTheDocument()
+  })
+
+  it("can reveal comments and blanks, filter by category, and sort rules", async () => {
+    const blocklist = makeBlocklist({
+      managedItems: [
+        { id: 1, line: "zeta -> warn #pii", pattern_type: "literal", action: "warn", categories: ["pii"], sample: "zeta", ok: true },
+        { id: 2, line: "alpha -> block #violence", pattern_type: "literal", action: "block", categories: ["violence"], sample: "alpha", ok: true },
+        { id: 3, line: "# note", pattern_type: "comment", ok: true }
+      ]
+    })
+    render(<BlocklistStudioPanel blocklist={blocklist as any} messageApi={messageApi} />)
+
+    await userEvent.click(screen.getByRole("checkbox", { name: /show comments and blanks/i }))
+    expect(screen.getByText("# note")).toBeInTheDocument()
+
+    await userEvent.type(screen.getByPlaceholderText(/search rules/i), "alpha")
+    expect(screen.getByText("alpha")).toBeInTheDocument()
+    expect(screen.queryByText("zeta")).not.toBeInTheDocument()
+  })
+
+  it("previews raw replace and only confirms through the preview modal", async () => {
+    const blocklist = makeBlocklist({
+      rawText: "draft rule",
+      previewRawReplace: vi.fn().mockResolvedValue({
+        previousText: "old rule",
+        nextText: "draft rule",
+        addedCount: 1,
+        removedCount: 1,
+        changedCount: 1,
+        lint: { items: [{ index: 0, line: "draft rule", ok: true }], valid_count: 1, invalid_count: 0 }
+      })
+    })
+    render(<BlocklistStudioPanel blocklist={blocklist as any} messageApi={messageApi} />)
+
+    await userEvent.click(screen.getByRole("tab", { name: /raw editor/i }))
+    await userEvent.click(screen.getByRole("button", { name: /save \/ replace/i }))
+
+    expect(blocklist.previewRawReplace).toHaveBeenCalledWith("draft rule")
+    expect(blocklist.saveRaw).not.toHaveBeenCalled()
+    expect(blocklist.confirmRawReplace).not.toHaveBeenCalled()
+    expect(antdMocks.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Confirm blocklist replacement",
+        okButtonProps: expect.objectContaining({ danger: true, disabled: false })
+      })
+    )
+
+    const onOk = antdMocks.confirm.mock.calls.at(-1)?.[0]?.onOk
+    await onOk()
+    expect(blocklist.confirmRawReplace).toHaveBeenCalledTimes(1)
+  })
+
+  it("disables raw replace confirmation when preview lint has invalid rows", async () => {
+    const blocklist = makeBlocklist({
+      rawText: "/[bad/",
+      previewRawReplace: vi.fn().mockResolvedValue({
+        previousText: "",
+        nextText: "/[bad/",
+        addedCount: 1,
+        removedCount: 0,
+        changedCount: 1,
+        lint: {
+          items: [{ index: 0, line: "/[bad/", ok: false, pattern_type: "regex", error: "invalid regex" }],
+          valid_count: 0,
+          invalid_count: 1
+        }
+      })
+    })
+    render(<BlocklistStudioPanel blocklist={blocklist as any} messageApi={messageApi} />)
+
+    await userEvent.click(screen.getByRole("tab", { name: /raw editor/i }))
+    await userEvent.click(screen.getByRole("button", { name: /save \/ replace/i }))
+
+    expect(antdMocks.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        okButtonProps: expect.objectContaining({ disabled: true })
+      })
+    )
+    expect(blocklist.confirmRawReplace).not.toHaveBeenCalled()
+  })
+
+  it("offers a session undo after deleting a managed rule", async () => {
+    const blocklist = makeBlocklist({
+      managedItems: [
+        { id: 10, line: "badword -> block", pattern_type: "literal", action: "block", ok: true }
+      ]
+    })
+    render(<BlocklistStudioPanel blocklist={blocklist as any} messageApi={messageApi} />)
+
+    await userEvent.click(screen.getByRole("button", { name: /delete rule 10/i }))
+    const onOk = antdMocks.confirm.mock.calls.at(-1)?.[0]?.onOk
+    await onOk()
+
+    expect(blocklist.deleteManaged).toHaveBeenCalledWith(10)
+    expect(screen.getByRole("button", { name: /undo deleted rule/i })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: /undo deleted rule/i }))
+    expect(blocklist.appendLine).toHaveBeenCalledWith("badword -> block")
   })
 
   it("renders raw editor warning banner when in raw tab", async () => {

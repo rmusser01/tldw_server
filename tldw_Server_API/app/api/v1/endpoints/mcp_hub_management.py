@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 import json
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from types import SimpleNamespace
+from typing import Any, Awaitable, Callable
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal
@@ -25,10 +28,14 @@ from tldw_Server_API.app.api.v1.schemas.mcp_hub_schemas import (
     CapabilityAdapterMappingResponse,
     CapabilityAdapterMappingUpdateRequest,
     CredentialBindingResponse,
-    EffectivePolicyResponse,
     EffectiveExternalAccessResponse,
+    EffectivePermissionPreviewRequest,
+    EffectivePermissionPreviewResponse,
+    EffectivePolicyResponse,
     ExternalSecretSetRequest,
     ExternalSecretSetResponse,
+    ExternalServerDiscoveryRefreshRequest,
+    ExternalServerDiscoveryRefreshResponse,
     ExternalServerAuthTemplateResponse,
     ExternalServerAuthTemplateUpdateRequest,
     ExternalServerCredentialSlotCreateRequest,
@@ -62,6 +69,8 @@ from tldw_Server_API.app.api.v1.schemas.mcp_hub_schemas import (
     GovernanceAuditFindingListResponse,
     MCPHubDeleteResponse,
     McpCredentialSlotStatusResponse,
+    McpHubReadinessResponse,
+    McpServerReadinessResponse,
     PathScopeObjectCreateRequest,
     PathScopeObjectResponse,
     PathScopeObjectUpdateRequest,
@@ -94,6 +103,13 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
 from tldw_Server_API.app.core.config import config
 from tldw_Server_API.app.core.exceptions import BadRequestError, ResourceNotFoundError
+from tldw_Server_API.app.core.MCP_unified.mcp_hub_readiness import (
+    build_hub_readiness_payload,
+    build_server_readiness_payload,
+    is_available_for_discovery_refresh,
+    sanitize_discovery_refresh_result_payload,
+)
+from tldw_Server_API.app.core.MCP_unified.server import get_mcp_server
 from tldw_Server_API.app.services.mcp_hub_external_legacy_inventory import (
     McpHubExternalLegacyInventoryService,
 )
@@ -116,8 +132,17 @@ from tldw_Server_API.app.services.mcp_hub_governance_pack_distribution_service i
 from tldw_Server_API.app.services.mcp_credential_broker_service import (
     McpCredentialBrokerService,
 )
+from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+    McpHubPathEnforcementService,
+    get_mcp_hub_path_enforcement_service,
+)
 from tldw_Server_API.app.services.mcp_hub_policy_resolver import McpHubPolicyResolver, get_mcp_hub_policy_resolver
-from tldw_Server_API.app.services.mcp_hub_service import McpHubConflictError, McpHubService
+from tldw_Server_API.app.services.mcp_hub_service import (
+    McpHubConflictError,
+    McpHubService,
+    get_mcp_hub_event_bus,
+    replay_mcp_hub_audit_events,
+)
 from tldw_Server_API.app.services.mcp_hub_tool_registry import McpHubToolRegistryService
 
 router = APIRouter(prefix="/mcp/hub", tags=["mcp-hub"], dependencies=[Depends(check_rate_limit)])
@@ -149,6 +174,10 @@ _DEFAULT_SCOPED_APPROVAL_TTL_MINUTES = 480
 _PATH_SCOPE_BREADTH_RANK = {"cwd_descendants": 0, "workspace_root": 1, "none": 2}
 _WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 _PATH_SCOPE_DOCUMENT_KEYS = {"path_scope_mode", "path_scope_enforcement", "path_allowlist_prefixes"}
+_MCP_HUB_REFRESH_TOOL_NAME = "external.tools.refresh"
+_MCP_HUB_REFRESH_LOCK_TIMEOUT_SECONDS = 30.0
+_mcp_hub_refresh_locks: dict[str, asyncio.Lock] = {}
+_mcp_hub_refresh_locks_guard = asyncio.Lock()
 
 
 async def get_mcp_hub_service() -> McpHubService:
@@ -207,9 +236,35 @@ async def get_mcp_hub_policy_resolver_dep() -> McpHubPolicyResolver:
     return await get_mcp_hub_policy_resolver()
 
 
+async def get_mcp_hub_path_enforcement_service_dep() -> McpHubPathEnforcementService:
+    """Resolve MCP Hub path enforcement service for effective permission previews."""
+    return await get_mcp_hub_path_enforcement_service()
+
+
 async def get_mcp_hub_tool_registry_dep() -> McpHubToolRegistryService:
     """Resolve the derived MCP Hub tool registry service."""
     return McpHubToolRegistryService()
+
+
+async def _execute_external_refresh_tool(server_id: str) -> dict[str, Any]:
+    """Execute the existing external federation discovery refresh tool."""
+    server = get_mcp_server()
+    if not getattr(server, "initialized", False):
+        await server.initialize()
+    module = await server.module_registry.find_module_for_tool(_MCP_HUB_REFRESH_TOOL_NAME)
+    if module is None:
+        raise HTTPException(status_code=503, detail="External discovery refresh tool is unavailable")
+    result = await module.execute_with_circuit_breaker(
+        module.execute_tool,
+        _MCP_HUB_REFRESH_TOOL_NAME,
+        {"server_id": server_id},
+    )
+    return result if isinstance(result, dict) else {}
+
+
+async def get_mcp_hub_external_refresh_executor() -> Callable[[str], Awaitable[dict[str, Any]]]:
+    """Resolve the external discovery refresh executor for route dependency overrides."""
+    return _execute_external_refresh_tool
 
 
 async def get_mcp_credential_broker_service() -> McpCredentialBrokerService:
@@ -255,11 +310,159 @@ def _is_mutation_allowed(principal: AuthPrincipal) -> bool:
     return bool(permissions & required)
 
 
+def _is_admin_principal(principal: AuthPrincipal) -> bool:
+    """Return True only for explicit admin principals."""
+    if bool(getattr(principal, "is_admin", False)):
+        return True
+    roles = {
+        str(role).strip().lower()
+        for role in (principal.roles or [])
+        if str(role).strip()
+    }
+    return "admin" in roles
+
+
 def _require_mutation_permission(principal: AuthPrincipal) -> None:
     """Require mutation permission for MCP Hub write operations."""
     if _is_mutation_allowed(principal):
         return
     raise HTTPException(status_code=403, detail=f"{SYSTEM_CONFIGURE} permission required")
+
+
+def _runtime_unavailable(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "ok": False,
+            "message": message,
+            "requires_restart": True,
+        },
+    )
+
+
+def _normalize_refresh_server_id(server_id: str | None) -> str | None:
+    if server_id is None:
+        return None
+    normalized = server_id.strip()
+    if not normalized:
+        raise HTTPException(status_code=422, detail="server_id must be a non-empty string")
+    return normalized
+
+
+async def _resolve_external_federation_runtime() -> tuple[Any, Any, str]:
+    """Resolve the live MCP external federation module and its registry."""
+
+    try:
+        server = get_mcp_server()
+        if not getattr(server, "initialized", False):
+            await server.initialize()
+    except Exception as exc:
+        logger.warning("MCP runtime unavailable for external discovery refresh: {}", type(exc).__name__)
+        raise _runtime_unavailable("MCP runtime is unavailable; restart or retry after startup completes") from exc
+
+    registry = getattr(server, "module_registry", None)
+    if registry is None:
+        raise _runtime_unavailable("MCP module registry is unavailable")
+
+    try:
+        module = await registry.get_module("external_federation")
+        if module is not None:
+            return module, registry, "external_federation"
+
+        modules = await registry.get_all_modules()
+        for module_id, candidate in modules.items():
+            if candidate.__class__.__name__ == "ExternalFederationModule":
+                return candidate, registry, str(module_id)
+    except Exception as exc:
+        logger.warning("MCP external federation module lookup failed: {}", type(exc).__name__)
+        raise _runtime_unavailable("External federation module is unavailable") from exc
+
+    raise _runtime_unavailable("External federation module is unavailable")
+
+
+async def _refresh_external_server_discovery_runtime(
+    *,
+    server_id: str | None,
+) -> ExternalServerDiscoveryRefreshResponse:
+    module, registry, module_id = await _resolve_external_federation_runtime()
+    manager = getattr(module, "_manager", None)
+    if manager is None or not hasattr(manager, "reconcile_servers"):
+        raise _runtime_unavailable("External federation manager is unavailable")
+
+    try:
+        result = await manager.reconcile_servers(server_id=server_id)
+    except Exception as exc:
+        logger.warning("External server discovery reconciliation failed: {}", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "ok": False,
+                "server_id": server_id,
+                "message": "External server discovery reconciliation failed",
+                "requires_restart": False,
+            },
+        ) from exc
+
+    errors = dict(result.get("errors") or {})
+    if hasattr(module, "invalidate_capability_caches"):
+        module.invalidate_capability_caches()
+    refresh_registries = getattr(registry, "refresh_module_registries", None)
+    if callable(refresh_registries):
+        try:
+            registry_refreshed = await refresh_registries(module_id)
+        except Exception as exc:
+            logger.warning("MCP external federation registry refresh failed: {}", type(exc).__name__)
+            registry_refreshed = False
+        if registry_refreshed is False:
+            errors["module_registry"] = "module_registry_refresh_failed"
+    return ExternalServerDiscoveryRefreshResponse(
+        ok=not errors,
+        server_id=result.get("server_id") or server_id,
+        reconciled_servers=int(result.get("reconciled_servers") or 0),
+        refreshed_servers=int(result.get("refreshed_servers") or 0),
+        total_servers=int(result.get("total_servers") or 0),
+        virtual_tools=int(result.get("virtual_tools") or 0),
+        errors=errors,
+        requires_restart=False,
+        message="Discovery refreshed" if not errors else "Discovery refreshed with errors",
+    )
+
+
+def _normalize_event_type_filter(event_type: list[str] | None) -> set[str] | None:
+    values: set[str] = set()
+    for raw in event_type or []:
+        for part in str(raw or "").split(","):
+            cleaned = part.strip()
+            if cleaned:
+                values.add(cleaned)
+    return values or None
+
+
+def _format_mcp_hub_sse(event: dict[str, Any]) -> str:
+    event_id = str(event.get("event_id") or "")
+    event_name = str(event.get("event_type") or "mcp_hub.update")
+    payload = json.dumps(event, default=str)
+    return f"id: {event_id}\nevent: {event_name}\ndata: {payload}\n\n"
+
+
+def _event_matches_visible_scope(
+    event: dict[str, Any],
+    visible_scopes: list[tuple[str | None, int | None]],
+) -> bool:
+    if any(scope_type is None for scope_type, _scope_id in visible_scopes):
+        return True
+    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    raw_scope_type = metadata.get("owner_scope_type") or event.get("owner_scope_type") or "global"
+    scope_type = str(raw_scope_type or "global").strip().lower()
+    if scope_type == "global":
+        scope_id = None
+    else:
+        raw_scope_id = metadata.get("owner_scope_id") or event.get("owner_scope_id")
+        try:
+            scope_id = int(raw_scope_id)
+        except (TypeError, ValueError):
+            return False
+    return (scope_type, scope_id) in visible_scopes
 
 
 def _ensure_mutable_governance_object(row: dict[str, Any] | None, object_label: str) -> None:
@@ -917,6 +1120,50 @@ def _external_row_to_response(row: dict[str, Any]) -> ExternalServerResponse:
     )
 
 
+async def _list_visible_external_server_rows(
+    *,
+    principal: AuthPrincipal,
+    svc: McpHubService,
+    owner_scope_type: str | None = None,
+    owner_scope_id: int | None = None,
+) -> list[dict[str, Any]]:
+    filters = _resolve_visible_scope_filters(
+        principal=principal,
+        owner_scope_type=owner_scope_type,
+        owner_scope_id=owner_scope_id,
+    )
+    rows: list[dict[str, Any]] = []
+    for scope_type, scope_id in filters:
+        rows.extend(
+            await svc.list_external_servers(
+                owner_scope_type=scope_type,
+                owner_scope_id=scope_id,
+            )
+        )
+    return _dedupe_rows(rows)
+
+
+async def _get_visible_external_server_row_or_404(
+    *,
+    server_id: str,
+    principal: AuthPrincipal,
+    svc: McpHubService,
+) -> dict[str, Any]:
+    for row in await _list_visible_external_server_rows(principal=principal, svc=svc):
+        if str(row.get("id") or "") == server_id:
+            return row
+    raise HTTPException(status_code=404, detail="External server not found")
+
+
+async def _get_refresh_lock(server_id: str) -> asyncio.Lock:
+    async with _mcp_hub_refresh_locks_guard:
+        lock = _mcp_hub_refresh_locks.get(server_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _mcp_hub_refresh_locks[server_id] = lock
+        return lock
+
+
 def _permission_profile_row_to_response(row: dict[str, Any]) -> PermissionProfileResponse:
     return PermissionProfileResponse(
         id=int(row.get("id")),
@@ -1344,6 +1591,97 @@ async def get_tool_registry_summary(
     return ToolRegistrySummaryResponse(
         entries=[ToolRegistryEntryResponse.model_validate(row) for row in summary.get("entries", [])],
         modules=[ToolRegistryModuleResponse.model_validate(row) for row in summary.get("modules", [])],
+    )
+
+
+@router.get("/readiness", response_model=McpHubReadinessResponse)
+async def get_mcp_hub_readiness(
+    owner_scope_type: str | None = None,
+    owner_scope_id: int | None = None,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    svc: McpHubService = Depends(get_mcp_hub_service),
+    registry: McpHubToolRegistryService = Depends(get_mcp_hub_tool_registry_dep),
+) -> McpHubReadinessResponse:
+    """Return sanitized MCP Hub setup readiness for visible external servers."""
+    rows = await _list_visible_external_server_rows(
+        principal=principal,
+        svc=svc,
+        owner_scope_type=owner_scope_type,
+        owner_scope_id=owner_scope_id,
+    )
+    registry_entries = await registry.list_entries()
+    return McpHubReadinessResponse.model_validate(
+        build_hub_readiness_payload(rows, registry_entries)
+    )
+
+
+@router.post(
+    "/external-servers/{server_id}/validate",
+    response_model=McpServerReadinessResponse,
+)
+async def validate_external_server(
+    server_id: str,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    svc: McpHubService = Depends(get_mcp_hub_service),
+    registry: McpHubToolRegistryService = Depends(get_mcp_hub_tool_registry_dep),
+) -> McpServerReadinessResponse:
+    """Return the current server readiness snapshot after visibility checks."""
+    row = await _get_visible_external_server_row_or_404(
+        server_id=server_id,
+        principal=principal,
+        svc=svc,
+    )
+    registry_entries = await registry.list_entries()
+    return McpServerReadinessResponse.model_validate(
+        build_server_readiness_payload(row, registry_entries=registry_entries)
+    )
+
+
+@router.post(
+    "/external-servers/{server_id}/refresh-discovery",
+    response_model=McpServerReadinessResponse,
+)
+async def refresh_single_external_server_discovery(
+    server_id: str,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    svc: McpHubService = Depends(get_mcp_hub_service),
+    registry: McpHubToolRegistryService = Depends(get_mcp_hub_tool_registry_dep),
+    refresh_executor: Callable[[str], Awaitable[dict[str, Any]]] = Depends(
+        get_mcp_hub_external_refresh_executor
+    ),
+) -> McpServerReadinessResponse:
+    """Refresh external-server tool discovery through the existing federation runtime."""
+    _require_mutation_permission(principal)
+    row = await _get_visible_external_server_row_or_404(
+        server_id=server_id,
+        principal=principal,
+        svc=svc,
+    )
+    if not is_available_for_discovery_refresh(row):
+        raise HTTPException(status_code=409, detail="External server is not available for discovery refresh")
+    lock = await _get_refresh_lock(server_id)
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=_MCP_HUB_REFRESH_LOCK_TIMEOUT_SECONDS)
+    except TimeoutError as exc:
+        raise HTTPException(status_code=409, detail="Discovery refresh is already running") from exc
+    try:
+        raw_result = await refresh_executor(server_id)
+    finally:
+        lock.release()
+
+    refresh_result = sanitize_discovery_refresh_result_payload(raw_result)
+    row = await _get_visible_external_server_row_or_404(
+        server_id=server_id,
+        principal=principal,
+        svc=svc,
+    )
+    registry_entries = await registry.list_entries()
+    return McpServerReadinessResponse.model_validate(
+        build_server_readiness_payload(
+            row,
+            registry_entries=registry_entries,
+            refresh_result=refresh_result,
+        )
     )
 
 
@@ -2601,6 +2939,149 @@ async def list_governance_audit_findings(
     )
 
 
+@router.get(
+    "/events/stream",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "MCP Hub governance event stream.",
+            "content": {"text/event-stream": {}},
+        },
+    },
+)
+async def stream_mcp_hub_events(
+    request: Request,
+    after_event_id: str | None = Query(
+        default=None,
+        description="Replay only events after this SSE event id when retained in the MCP Hub event ring.",
+    ),
+    event_type: list[str] | None = Query(
+        default=None,
+        description="Optional repeated or comma-separated MCP Hub event type filters.",
+    ),
+    owner_scope_type: str | None = Query(
+        default=None,
+        description="Optional scope filter constrained by the authenticated principal's visible MCP Hub scopes.",
+    ),
+    owner_scope_id: int | None = Query(
+        default=None,
+        description="Optional scope id used with owner_scope_type.",
+    ),
+    replay: bool = Query(
+        default=True,
+        description="Replay retained matching events before following the live stream.",
+    ),
+    limit: int | None = Query(
+        default=None,
+        ge=1,
+        le=1000,
+        description="Optional maximum number of matching events to emit before closing.",
+    ),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> StreamingResponse:
+    """Stream MCP Hub governance mutation events over SSE.
+
+    Events are emitted from the same mutation path that writes durable audit
+    records. Replay reads unified audit first and then falls back to the bounded
+    in-process ring for process-local events that were not audit-backed.
+    """
+    bus = await get_mcp_hub_event_bus()
+    event_types = _normalize_event_type_filter(event_type)
+    visible_scopes = _resolve_visible_scope_filters(
+        principal=principal,
+        owner_scope_type=owner_scope_type,
+        owner_scope_id=owner_scope_id,
+    )
+    allow_cross_tenant_replay = _is_admin_principal(principal)
+    replay_user_id = (
+        None
+        if allow_cross_tenant_replay or principal.user_id is None
+        else str(principal.user_id)
+    )
+
+    async def event_generator():
+        sent = 0
+        queue = None
+        sent_event_ids: set[str] = set()
+        try:
+            queue = await bus.subscribe()
+            if replay:
+                durable_replayed = await replay_mcp_hub_audit_events(
+                    principal_user_id=principal.user_id,
+                    user_id=replay_user_id,
+                    after_event_id=after_event_id,
+                    event_types=event_types,
+                    limit=None,
+                    allow_cross_tenant=allow_cross_tenant_replay,
+                )
+                for event in durable_replayed:
+                    if not _event_matches_visible_scope(event, visible_scopes):
+                        continue
+                    event_id = str(event.get("event_id") or "")
+                    if event_id:
+                        sent_event_ids.add(event_id)
+                    yield _format_mcp_hub_sse(event)
+                    sent += 1
+                    if limit is not None and sent >= limit:
+                        return
+
+                replayed = await bus.replay(
+                    after_event_id=after_event_id,
+                    event_types=event_types,
+                )
+                for event in replayed:
+                    event_id = str(event.get("event_id") or "")
+                    if event_id and event_id in sent_event_ids:
+                        continue
+                    if not _event_matches_visible_scope(event, visible_scopes):
+                        continue
+                    if event_id:
+                        sent_event_ids.add(event_id)
+                    yield _format_mcp_hub_sse(event)
+                    sent += 1
+                    if limit is not None and sent >= limit:
+                        return
+
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+                    continue
+                if event is None:
+                    break
+                if event_types and str(event.get("event_type") or "") not in event_types:
+                    continue
+                event_id = str(event.get("event_id") or "")
+                if event_id and event_id in sent_event_ids:
+                    continue
+                if not _event_matches_visible_scope(event, visible_scopes):
+                    continue
+                if event_id:
+                    sent_event_ids.add(event_id)
+                yield _format_mcp_hub_sse(event)
+                sent += 1
+                if limit is not None and sent >= limit:
+                    return
+        except (asyncio.CancelledError, GeneratorExit):
+            return
+        finally:
+            if queue is not None:
+                await bus.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.put("/shared-workspaces/{shared_workspace_id}", response_model=SharedWorkspaceResponse)
 async def update_shared_workspace(
     shared_workspace_id: int,
@@ -3156,6 +3637,44 @@ async def get_effective_policy(
     )
 
 
+@router.post("/effective-permission-preview", response_model=EffectivePermissionPreviewResponse)
+async def preview_effective_permission(
+    payload: EffectivePermissionPreviewRequest,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    resolver: McpHubPolicyResolver = Depends(get_mcp_hub_policy_resolver_dep),
+    path_enforcer: McpHubPathEnforcementService = Depends(get_mcp_hub_path_enforcement_service_dep),
+) -> EffectivePermissionPreviewResponse:
+    """Explain the effective path permission for a candidate tool call without exposing absolute paths."""
+    if principal.user_id is None:
+        raise HTTPException(status_code=403, detail="Authenticated user required")
+
+    metadata: dict[str, Any] = {"mcp_policy_context_enabled": True}
+    for key in ("persona_id", "group_id", "workspace_id", "cwd"):
+        value = getattr(payload, key)
+        if value:
+            metadata[key] = value
+    if payload.org_id is not None:
+        metadata["org_id"] = payload.org_id
+    if payload.team_id is not None:
+        metadata["team_id"] = payload.team_id
+
+    effective_policy = await resolver.resolve_for_context(
+        user_id=principal.user_id,
+        metadata=metadata,
+    )
+    preview = await path_enforcer.preview_effective_path_permission(
+        effective_policy=effective_policy,
+        context=SimpleNamespace(
+            user_id=principal.user_id,
+            metadata=metadata,
+        ),
+        tool_name=payload.tool_name,
+        action=payload.action,
+        path=payload.path,
+    )
+    return EffectivePermissionPreviewResponse.model_validate(preview)
+
+
 @router.get("/acp-profiles", response_model=list[ACPProfileResponse])
 async def list_acp_profiles(
     owner_scope_type: str | None = None,
@@ -3287,6 +3806,28 @@ async def create_external_server(
     except McpHubConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _external_row_to_response(row)
+
+
+@router.post(
+    "/external-servers/refresh-discovery",
+    response_model=ExternalServerDiscoveryRefreshResponse,
+)
+async def refresh_external_servers_discovery(
+    payload: ExternalServerDiscoveryRefreshRequest | None = Body(default=None),
+    server_id: str | None = Query(default=None),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> ExternalServerDiscoveryRefreshResponse:
+    """Reconcile live MCP external federation discovery with managed storage."""
+    _require_mutation_permission(principal)
+    body_server_id = _normalize_refresh_server_id(payload.server_id if payload is not None else None)
+    query_server_id = _normalize_refresh_server_id(server_id)
+    if body_server_id is not None and query_server_id is not None and body_server_id != query_server_id:
+        raise HTTPException(
+            status_code=422,
+            detail="server_id query parameter conflicts with request body server_id",
+        )
+    effective_server_id = query_server_id if query_server_id is not None else body_server_id
+    return await _refresh_external_server_discovery_runtime(server_id=effective_server_id)
 
 
 @router.post("/external-servers/{server_id}/import", response_model=ExternalServerResponse, status_code=201)

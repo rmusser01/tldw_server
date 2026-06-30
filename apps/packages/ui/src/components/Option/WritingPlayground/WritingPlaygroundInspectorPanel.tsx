@@ -15,6 +15,7 @@ type WritingPlaygroundInspectorPanelProps = {
   context: ReactNode
   setup: ReactNode
   inspect: ReactNode
+  annotations?: ReactNode
   characters?: ReactNode
   research?: ReactNode
   agent?: ReactNode
@@ -43,6 +44,11 @@ const TAB_DEFINITIONS: TabDefinition[] = [
     key: "inspect",
     label: "Analysis",
     testId: "writing-inspector-tab-inspect"
+  },
+  {
+    key: "annotations",
+    label: "Annotations",
+    testId: "writing-inspector-tab-annotations"
   },
   {
     key: "characters",
@@ -76,6 +82,7 @@ export const WritingPlaygroundInspectorPanel: FC<
   context,
   setup,
   inspect,
+  annotations,
   characters,
   research,
   agent,
@@ -100,6 +107,7 @@ export const WritingPlaygroundInspectorPanel: FC<
     context,
     setup,
     inspect,
+    annotations: annotations ?? null,
     characters: characters ?? null,
     research: research ?? null,
     agent: agent ?? null,

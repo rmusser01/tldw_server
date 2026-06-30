@@ -8,6 +8,16 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
+
 
 # ---------------------------------------------------------------------------
 # Project
@@ -68,6 +78,15 @@ class ManuscriptProjectResponse(BaseModel):
 class ManuscriptProjectListResponse(BaseModel):
     projects: list[ManuscriptProjectResponse]
     total: int
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 # ---------------------------------------------------------------------------
@@ -591,6 +610,220 @@ class ManuscriptCitationResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Annotations
+# ---------------------------------------------------------------------------
+
+
+AnnotationTargetType = Literal["scene", "chapter", "project"]
+AnnotationStatus = Literal["open", "resolved"]
+AnnotationSource = Literal["user", "ai_selected_text", "ai_scene_review"]
+AnnotationCategory = Literal[
+    "style",
+    "clarity",
+    "pacing",
+    "continuity",
+    "character",
+    "worldbuilding",
+    "structure",
+    "research",
+    "other",
+]
+AnnotationAnchorStatus = Literal["attached", "reattached", "needs_review", "scene_level"]
+
+
+class ManuscriptAnnotationCreate(BaseModel):
+    """Request payload for creating a user-authored manuscript annotation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_type: AnnotationTargetType = Field(..., description="Annotation target type")
+    target_id: str = Field(..., min_length=1, description="Annotation target ID")
+    category: AnnotationCategory = Field(..., description="Annotation category")
+    body: str = Field(..., min_length=1, max_length=2000, description="Annotation body")
+    tags: list[str] = Field(default_factory=list, max_length=10, description="Annotation tags")
+    suggested_fix: str | None = Field(None, max_length=8000, description="Optional suggested fix")
+    followup_note: str | None = Field(None, max_length=2000, description="Optional follow-up note")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Annotation metadata")
+    scene_version: int | None = Field(None, ge=0, description="Scene version for range anchors")
+    start: int | None = Field(None, ge=0, description="Start offset for a scene range")
+    end: int | None = Field(None, ge=0, description="End offset for a scene range")
+    selected_text: str | None = Field(None, min_length=1, max_length=12000, description="Selected scene text")
+
+    @model_validator(mode="after")
+    def validate_range_fields(self) -> "ManuscriptAnnotationCreate":
+        """Require complete scene range fields and reject ranges on non-scene annotations."""
+        range_fields = {
+            "scene_version": self.scene_version,
+            "start": self.start,
+            "end": self.end,
+            "selected_text": self.selected_text,
+        }
+        has_range = any(value is not None for value in range_fields.values())
+        if self.target_type != "scene":
+            if has_range:
+                raise ValueError("Chapter and project annotations cannot include range fields.")
+            return self
+        if has_range:
+            missing = [name for name, value in range_fields.items() if value is None]
+            if missing:
+                raise ValueError(
+                    "Scene range annotations require scene_version, start, end, and selected_text."
+                )
+            if self.end <= self.start:
+                raise ValueError("Scene range end must be greater than start.")
+        return self
+
+
+class ManuscriptSelectedTextAnnotationReviewRequest(BaseModel):
+    """Request payload for AI review of one selected saved scene range."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(..., min_length=1, description="LLM provider override")
+    model: str = Field(..., min_length=1, description="Model override")
+    scene_version: int = Field(..., ge=0, description="Scene version being reviewed")
+    start: int = Field(..., ge=0, description="Selected text start offset")
+    end: int = Field(..., ge=0, description="Selected text end offset")
+    selected_text: str = Field(..., min_length=1, max_length=12000, description="Selected scene text")
+    category_hints: list[AnnotationCategory] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Optional preferred annotation categories",
+    )
+    instruction: str | None = Field(None, max_length=4000, description="Optional review instruction")
+
+    @field_validator("provider", "model")
+    @classmethod
+    def validate_required_override(cls, value: str) -> str:
+        """Normalize required LLM override fields."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("provider and model must be non-empty")
+        return normalized
+
+    @field_validator("instruction")
+    @classmethod
+    def normalize_instruction(cls, value: str | None) -> str | None:
+        """Trim optional selected-text review instructions."""
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "ManuscriptSelectedTextAnnotationReviewRequest":
+        """Ensure the selected range is non-empty."""
+        if self.end <= self.start:
+            raise ValueError("Selected text end must be greater than start.")
+        return self
+
+
+class ManuscriptSceneAnnotationReviewRequest(BaseModel):
+    """Request payload for queueing an AI full-scene annotation review."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(..., min_length=1, description="LLM provider override")
+    model: str = Field(..., min_length=1, description="Model override")
+    scene_version: int = Field(..., ge=0, description="Scene version being reviewed")
+    max_comments: int = Field(
+        5,
+        ge=1,
+        le=10,
+        description="Maximum scene-level annotations to create",
+    )
+    category_filters: list[AnnotationCategory] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Optional annotation categories to request",
+    )
+    review_focus: str | None = Field(None, max_length=4000, description="Optional scene-review focus")
+
+    @field_validator("provider", "model")
+    @classmethod
+    def validate_required_override(cls, value: str) -> str:
+        """Normalize required LLM override fields."""
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("provider and model must be non-empty")
+        return normalized
+
+    @field_validator("review_focus")
+    @classmethod
+    def normalize_review_focus(cls, value: str | None) -> str | None:
+        """Trim optional full-scene review focus text."""
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class ManuscriptSceneAnnotationReviewJobResponse(BaseModel):
+    job_id: int
+    job_uuid: str | None = None
+    status: str
+    job_type: str
+    project_id: str
+    scene_id: str
+    scene_version: int
+
+
+class ManuscriptAnnotationUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: AnnotationStatus | None = Field(None, description="Annotation status")
+    category: AnnotationCategory | None = Field(None, description="Annotation category")
+    body: str | None = Field(None, min_length=1, max_length=2000, description="Annotation body")
+    tags: list[str] | None = Field(None, max_length=10, description="Annotation tags")
+    suggested_fix: str | None = Field(None, max_length=8000, description="Optional suggested fix")
+    followup_note: str | None = Field(None, max_length=2000, description="Optional follow-up note")
+    metadata: dict[str, Any] | None = Field(None, description="Annotation metadata")
+
+
+class ManuscriptAnnotationResponse(BaseModel):
+    id: str
+    project_id: str
+    target_type: AnnotationTargetType
+    target_id: str
+    status: AnnotationStatus
+    category: AnnotationCategory
+    tags: list[str] = Field(default_factory=list)
+    source: AnnotationSource
+    body: str
+    suggested_fix: str | None = None
+    followup_note: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    scene_version: int | None = None
+    anchor_start: int | None = None
+    anchor_end: int | None = None
+    selected_text: str | None = None
+    anchor_status: AnnotationAnchorStatus
+    derived_start: int | None = None
+    derived_end: int | None = None
+    scene_level: bool = False
+    created_at: datetime
+    last_modified: datetime
+    deleted: bool = False
+    client_id: str
+    version: int
+
+
+class ManuscriptAnnotationListResponse(BaseModel):
+    annotations: list[ManuscriptAnnotationResponse]
+    total: int
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self) -> "ManuscriptAnnotationListResponse":
+        """Populate backwards-compatible pagination aliases."""
+        return _default_offset_pagination_aliases(self)
+
+
+# ---------------------------------------------------------------------------
 # Scene linking
 # ---------------------------------------------------------------------------
 
@@ -689,3 +922,40 @@ class ManuscriptAnalysisResponse(BaseModel):
 class ManuscriptAnalysisListResponse(BaseModel):
     analyses: list[ManuscriptAnalysisResponse]
     total: int
+
+
+class ManuscriptVersionCreateRequest(BaseModel):
+    label: str | None = Field(None, max_length=255, description="Optional human label for this manual snapshot")
+
+
+class ManuscriptVersionResponse(BaseModel):
+    id: str
+    entity_type: Literal["manuscript", "chapter", "scene"]
+    entity_id: str
+    project_id: str
+    version_number: int
+    label: str | None = None
+    payload: dict[str, Any]
+    created_at: datetime
+    client_id: str
+
+
+class ManuscriptVersionListResponse(BaseModel):
+    versions: list[ManuscriptVersionResponse]
+    total: int
+
+
+class ManuscriptTrashListResponse(BaseModel):
+    items: list[dict[str, Any]]
+    total: int
+
+
+class ManuscriptRestoredEntityResponse(BaseModel):
+    """Typed response for restored project/manuscript/chapter/scene records."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    title: str
+    deleted: bool
+    version: int

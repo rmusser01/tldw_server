@@ -29,12 +29,14 @@ from tldw_Server_API.app.core.Security.crypto import (
 )
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _is_test_mode,
+)
+from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
 
 from .audit_bridge import submit_job_audit_event
-from .fair_share import FairShareScheduler
 from .event_stream import emit_job_event
+from .fair_share import FairShareScheduler
 from .metrics import (
     ensure_jobs_metrics_registered,
     increment_cancelled,
@@ -252,7 +254,11 @@ class JobManager:
     # Standard queues across domains
     STANDARD_QUEUES = ("default", "high", "low")
     DOMAIN_ALLOWED_QUEUES: ClassVar[dict[str, tuple[str, ...]]] = {
+        "llamacpp": ("acquisition",),
         "reading": ("reading-digest",),
+        "vn_assets": ("generation",),
+        "persona_visuals": ("generation",),
+        "writing": ("writing-review", "writing-ai"),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---
@@ -1330,7 +1336,11 @@ class JobManager:
                                     "job_type": job_type,
                                 }
                             )
-                            emitted_job = {**d, "request_id": request_id, "trace_id": trace_id}
+                            emitted_job = {
+                                **d,
+                                "request_id": d.get("request_id") or request_id,
+                                "trace_id": d.get("trace_id") or trace_id,
+                            }
                             # Counters bump (PG, idempotent insert occurred)
                             try:
                                 if was_insert and JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
@@ -1550,8 +1560,8 @@ class JobManager:
                                     INSERT OR IGNORE INTO jobs (
                                       uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
                                       idempotency_key, payload, result, status, priority, max_retries,
-                                      retry_count, available_at, created_at, updated_at
-                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?)
+                                      retry_count, available_at, created_at, updated_at, request_id, trace_id
+                                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, ?, ?, ?, ?, ?)
                                     """,
                                     (
                                         uuid_val,
@@ -1572,6 +1582,8 @@ class JobManager:
                                         ),
                                         now,
                                         now,
+                                        request_id,
+                                        trace_id,
                                     ),
                                 )
                                 inserted = bool(getattr(conn, "total_changes", 0))
@@ -2166,8 +2178,11 @@ class JobManager:
         self,
         *,
         domain: str | None = None,
+        queue: str | None = None,
         status: str | None = None,
         owner_user_id: str | None = None,
+        job_type: str | None = None,
+        batch_group: str | None = None,
     ) -> int:
         """
         Return the number of jobs matching the provided filters.
@@ -2180,12 +2195,21 @@ class JobManager:
                 if domain:
                     query += " AND domain = %s"
                     params.append(domain)
+                if queue:
+                    query += " AND queue = %s"
+                    params.append(queue)
                 if status:
                     query += " AND status = %s"
                     params.append(status)
                 if owner_user_id:
                     query += " AND owner_user_id = %s"
                     params.append(owner_user_id)
+                if job_type:
+                    query += " AND job_type = %s"
+                    params.append(job_type)
+                if batch_group:
+                    query += " AND batch_group = %s"
+                    params.append(batch_group)
                 with self._pg_cursor(conn) as cur:
                     cur.execute(query, params)
                     row = cur.fetchone()
@@ -2201,13 +2225,32 @@ class JobManager:
                 if domain:
                     query += " AND domain = ?"
                     params.append(domain)
+                if queue:
+                    query += " AND queue = ?"
+                    params.append(queue)
                 if status:
                     query += " AND status = ?"
                     params.append(status)
                 if owner_user_id:
                     query += " AND owner_user_id = ?"
                     params.append(owner_user_id)
-                row = conn.execute(query, params).fetchone()
+                if job_type:
+                    query += " AND job_type = ?"
+                    params.append(job_type)
+                if batch_group:
+                    query += " AND batch_group = ?"
+                    params.append(batch_group)
+                try:
+                    row = conn.execute(query, params).fetchone()
+                except sqlite3.OperationalError as exc:
+                    if (
+                        batch_group
+                        and self._sqlite_missing_column_error(exc, "batch_group")
+                        and self._sqlite_ensure_batch_group(conn)
+                    ):
+                        row = conn.execute(query, params).fetchone()
+                    else:
+                        raise
                 if not row:
                     return 0
                 try:
@@ -2222,13 +2265,52 @@ class JobManager:
         *,
         after_id: int = 0,
         limit: int = 100,
+        domain: str | None = None,
+        queue: str | None = None,
+        job_type: str | None = None,
+        job_id: int | None = None,
+        owner_user_id: str | None = None,
         event_types: tuple[str, ...] | list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """List job events after a cursor id, optionally filtered by event type."""
+        """List raw job events after a cursor id, optionally filtered by event metadata."""
 
         bounded_limit = max(1, min(1000, int(limit)))
         normalized_after = max(0, int(after_id))
-        normalized_types = tuple(str(v) for v in (event_types or ()) if str(v).strip())
+        normalized_types = tuple(str(v).strip() for v in (event_types or ()) if str(v).strip())
+        normalized_job_id = int(job_id) if job_id is not None else None
+
+        def _clean_filter(value: str | None) -> str | None:
+            if value is None:
+                return None
+            cleaned = str(value).strip()
+            return cleaned or None
+
+        scalar_filters: tuple[tuple[str, Any], ...] = (
+            ("domain", _clean_filter(domain)),
+            ("queue", _clean_filter(queue)),
+            ("job_type", _clean_filter(job_type)),
+            ("job_id", normalized_job_id),
+            ("owner_user_id", _clean_filter(owner_user_id)),
+        )
+        selected_columns = (
+            "id",
+            "event_type",
+            "attrs_json",
+            "job_id",
+            "domain",
+            "queue",
+            "job_type",
+            "owner_user_id",
+            "request_id",
+            "trace_id",
+            "created_at",
+        )
+
+        def _row_to_event_dict(row: Any) -> dict[str, Any]:
+            if isinstance(row, dict):
+                return {column: row.get(column) for column in selected_columns}
+            return {column: row[index] for index, column in enumerate(selected_columns)}
+
         conn = self._connect()
         try:
             if self.backend == "postgres":
@@ -2237,6 +2319,11 @@ class JobManager:
                     "request_id, trace_id, created_at FROM job_events WHERE id > %s"
                 )
                 params: list[Any] = [normalized_after]
+                for column, value in scalar_filters:
+                    if value is None:
+                        continue
+                    query += f" AND {column} = %s"
+                    params.append(value)
                 if normalized_types:
                     placeholders = ", ".join(["%s"] * len(normalized_types))
                     query += f" AND event_type IN ({placeholders})"
@@ -2246,13 +2333,18 @@ class JobManager:
                 with self._pg_cursor(conn) as cur:
                     cur.execute(query, params)
                     rows = cur.fetchall() or []
-                return [dict(r) for r in rows]
+                return [_row_to_event_dict(row) for row in rows]
 
             query = (
                 "SELECT id, event_type, attrs_json, job_id, domain, queue, job_type, owner_user_id, "
                 "request_id, trace_id, created_at FROM job_events WHERE id > ?"
             )
             params = [normalized_after]
+            for column, value in scalar_filters:
+                if value is None:
+                    continue
+                query += f" AND {column} = ?"
+                params.append(value)
             if normalized_types:
                 placeholders = ",".join(["?"] * len(normalized_types))
                 query += f" AND event_type IN ({placeholders})"
@@ -2260,28 +2352,7 @@ class JobManager:
             query += " ORDER BY id ASC LIMIT ?"
             params.append(bounded_limit)
             rows = conn.execute(query, tuple(params)).fetchall() or []
-
-            out: list[dict[str, Any]] = []
-            for row in rows:
-                if isinstance(row, dict):
-                    out.append(dict(row))
-                    continue
-                out.append(
-                    {
-                        "id": row[0],
-                        "event_type": row[1],
-                        "attrs_json": row[2],
-                        "job_id": row[3],
-                        "domain": row[4],
-                        "queue": row[5],
-                        "job_type": row[6],
-                        "owner_user_id": row[7],
-                        "request_id": row[8],
-                        "trace_id": row[9],
-                        "created_at": row[10],
-                    }
-                )
-            return out
+            return [_row_to_event_dict(row) for row in rows]
         finally:
             conn.close()
 
@@ -2412,6 +2483,7 @@ class JobManager:
         lease_seconds: int,
         worker_id: str,
         owner_user_id: str | None = None,
+        job_type: str | None = None,
     ) -> dict[str, Any] | None:
         """Atomically acquire the next eligible job and start a lease.
 
@@ -2420,13 +2492,16 @@ class JobManager:
 
         Reclaims expired processing jobs by allowing acquisition when
         `leased_until` is NULL or in the past.
+
+        When provided, `job_type` restricts acquisition to matching jobs in the
+        selected domain and queue.
         """
         # Honor global acquire gate for graceful shutdown
         _test_mode = _is_test_mode()
         if _test_mode:
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 logger.info(
-                    f"[JM TEST] acquire_next_job enter backend={self.backend} domain={domain} queue={queue} owner={owner_user_id} gate={JobManager._ACQUIRE_GATE_ENABLED} db={(str(self.db_path) if getattr(self, 'db_path', None) else self.db_url)}"
+                    f"[JM TEST] acquire_next_job enter backend={self.backend} domain={domain} queue={queue} job_type={job_type} owner={owner_user_id} gate={JobManager._ACQUIRE_GATE_ENABLED} db={(str(self.db_path) if getattr(self, 'db_path', None) else self.db_url)}"
                 )
         if JobManager._ACQUIRE_GATE_ENABLED:
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
@@ -2477,7 +2552,7 @@ class JobManager:
             req = 0
         if req <= 0 and JobManager._is_truthy(os.getenv("JOBS_ADAPTIVE_LEASE_ENABLE", "")):
             try:
-                req = self._adaptive_lease_seconds(domain, queue, None)
+                req = self._adaptive_lease_seconds(domain, queue, job_type)
             except _JOB_NONCRITICAL_EXCEPTIONS:
                 req = 30
         lease_seconds = max(1, min(max_lease, int(req)))
@@ -2505,6 +2580,7 @@ class JobManager:
                             else:
                                 _order = f" ORDER BY priority {prio_dir}, COALESCE(available_at, created_at) ASC, id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"
                             _cond_owner = " AND owner_user_id = %s" if owner_user_id else ""
+                            _cond_job_type = " AND job_type = %s" if job_type else ""
                             _sql = "".join(
                                 [
                                     "WITH picked AS (",
@@ -2514,6 +2590,7 @@ class JobManager:
                                     "  )",
                                     dep_cond,
                                     _cond_owner,
+                                    _cond_job_type,
                                     _order,
                                     ") ",
                                     "UPDATE jobs SET status='processing', started_at = COALESCE(started_at, NOW()), acquired_at = COALESCE(acquired_at, NOW()), leased_until = NOW() + (%s || ' seconds')::interval, worker_id = %s, lease_id = %s ",
@@ -2525,6 +2602,7 @@ class JobManager:
                                 (
                                     [domain, queue]
                                     + ([owner_user_id] if owner_user_id else [])
+                                    + ([job_type] if job_type else [])
                                     + [int(lease_seconds), worker_id, str(_uuid.uuid4())]
                                 ),
                             )
@@ -2545,6 +2623,9 @@ class JobManager:
                             if owner_user_id:
                                 base += " AND owner_user_id = %s"
                                 params.append(owner_user_id)
+                            if job_type:
+                                base += " AND job_type = %s"
+                                params.append(job_type)
                             # Stable ordering: allow env-based override
                             prio_dir = self._priority_dir_for(domain, backend="pg")
                             tie = self._tie_break_for(domain, backend="pg")
@@ -2672,6 +2753,9 @@ class JobManager:
                         if owner_user_id:
                             sub += " AND owner_user_id = ?"
                             params_sub.append(owner_user_id)
+                        if job_type:
+                            sub += " AND job_type = ?"
+                            params_sub.append(job_type)
                         # Ordering: env-based override; else default FIFO
                         prio_dir = self._priority_dir_for(domain, backend="sqlite")
                         tie = self._tie_break_for(domain, backend="sqlite")
@@ -2766,6 +2850,9 @@ class JobManager:
                         if owner_user_id:
                             base += " AND owner_user_id = ?"
                             params.append(owner_user_id)
+                        if job_type:
+                            base += " AND job_type = ?"
+                            params.append(job_type)
                         # Ordering: env-based override; otherwise default FIFO for most domains.
                         prio_dir = self._priority_dir_for(domain, backend="sqlite")
                         tie = self._tie_break_for(domain, backend="sqlite")
@@ -2779,10 +2866,16 @@ class JobManager:
                             # Only 'chatbooks' uses the dynamic tie-break by default; others stick to FIFO
                             if str(domain) == "chatbooks":
                                 try:
-                                    _r = conn.execute(
-                                        "SELECT 1 FROM jobs WHERE domain=? AND queue=? AND status='queued' AND (available_at IS NOT NULL AND available_at > DATETIME('now')) LIMIT 1",
-                                        (domain, queue),
-                                    ).fetchone()
+                                    if job_type:
+                                        _r = conn.execute(
+                                            "SELECT 1 FROM jobs WHERE domain=? AND queue=? AND job_type=? AND status='queued' AND (available_at IS NOT NULL AND available_at > DATETIME('now')) LIMIT 1",
+                                            (domain, queue, job_type),
+                                        ).fetchone()
+                                    else:
+                                        _r = conn.execute(
+                                            "SELECT 1 FROM jobs WHERE domain=? AND queue=? AND status='queued' AND (available_at IS NOT NULL AND available_at > DATETIME('now')) LIMIT 1",
+                                            (domain, queue),
+                                        ).fetchone()
                                     _has_sched = bool(_r)
                                 except _JOB_NONCRITICAL_EXCEPTIONS:
                                     _has_sched = False
@@ -6136,6 +6229,7 @@ class JobManager:
         lease_seconds: int,
         worker_id: str,
         owner_user_id: str | None = None,
+        job_type: str | None = None,
         limit: int = 1,
     ) -> list[dict[str, Any]]:
         """Acquire up to `limit` jobs. Simple loop over acquire_next_job for now."""
@@ -6148,6 +6242,7 @@ class JobManager:
                 lease_seconds=lease_seconds,
                 worker_id=worker_id,
                 owner_user_id=owner_user_id,
+                job_type=job_type,
             )
             if not j:
                 break

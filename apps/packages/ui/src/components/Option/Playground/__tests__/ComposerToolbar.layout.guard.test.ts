@@ -7,12 +7,15 @@ describe("ComposerToolbar layout guard", () => {
     const sourcePath = path.resolve(__dirname, "../ComposerToolbar.tsx")
     const source = fs.readFileSync(sourcePath, "utf8")
 
+    expect(source).toContain('data-testid="composer-options-panel"')
     expect(source).toContain('data-playground-toolbar-layout="casual"')
     expect(source).toContain('data-playground-toolbar-layout="pro-split"')
     expect(source).toContain('data-testid="composer-pro-context-panel"')
     expect(source).toContain('data-testid="composer-pro-generation-panel"')
     expect(source).toContain('data-testid="composer-casual-advanced-chip"')
-    expect(source).toContain('data-testid="composer-casual-advanced-controls-row"')
+    expect(source).toContain(
+      'data-testid="composer-casual-advanced-controls-row"'
+    )
     expect(source).toContain('data-testid="composer-formatting-guide-toggle"')
     expect(source).toContain("composer-session-status-chip")
     expect(source).toContain('data-testid="composer-casual-persistence-chip"')
@@ -20,7 +23,11 @@ describe("ComposerToolbar layout guard", () => {
     expect(source).toContain('data-playground-toolbar-row="primary"')
     expect(source).toContain('data-playground-toolbar-row="actions"')
     expect(source).toContain('data-testid="composer-advanced-toggle"')
-    expect(source).not.toContain('data-testid="composer-casual-runtime-context-chip"')
+    expect(source).toContain('sendControlPlacement = "toolbar"')
+    expect(source).toContain("optionsExpanded = true")
+    expect(source).not.toContain(
+      'data-testid="composer-casual-runtime-context-chip"'
+    )
     expect(source).toContain("playgroundComposerAdvancedControlsOpen")
     expect(source).toContain("playgroundComposerCasualAdvancedControlsOpen")
     expect(source).toContain(

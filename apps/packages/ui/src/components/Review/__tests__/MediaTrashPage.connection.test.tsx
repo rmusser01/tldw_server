@@ -39,7 +39,10 @@ vi.mock("react-i18next", () => ({
     ) => {
       if (typeof fallbackOrOptions === "string") return fallbackOrOptions
       const template = fallbackOrOptions?.defaultValue || key
-      return interpolate(template, fallbackOrOptions as Record<string, unknown> | undefined)
+      return interpolate(
+        template,
+        fallbackOrOptions as Record<string, unknown> | undefined
+      )
     }
   })
 }))
@@ -51,7 +54,10 @@ vi.mock("react-router-dom", () => ({
 vi.mock("@tanstack/react-query", () => ({
   keepPreviousData: {},
   useQuery: () => ({
-    data: { items: [], pagination: { page: 1, total_pages: 1, total_items: 0 } },
+    data: {
+      items: [],
+      pagination: { page: 1, total_pages: 1, total_items: 0 }
+    },
     isLoading: false,
     isFetching: false,
     isError: false,
@@ -105,39 +111,6 @@ vi.mock("@/services/tldw/path-utils", () => ({
   toAllowedPath: (path: string) => path
 }))
 
-vi.mock("@/components/Common/FeatureEmptyState", () => ({
-  default: ({
-    title,
-    description,
-    primaryActionLabel,
-    onPrimaryAction,
-    secondaryActionLabel,
-    onSecondaryAction
-  }: {
-    title: React.ReactNode
-    description?: React.ReactNode
-    primaryActionLabel?: React.ReactNode
-    onPrimaryAction?: () => void
-    secondaryActionLabel?: React.ReactNode
-    onSecondaryAction?: () => void
-  }) => (
-    <div data-testid="feature-empty-state">
-      <div>{title}</div>
-      {description ? <div>{description}</div> : null}
-      {primaryActionLabel ? (
-        <button type="button" onClick={onPrimaryAction}>
-          {primaryActionLabel}
-        </button>
-      ) : null}
-      {secondaryActionLabel ? (
-        <button type="button" onClick={onSecondaryAction}>
-          {secondaryActionLabel}
-        </button>
-      ) : null}
-    </div>
-  )
-}))
-
 vi.mock("@/components/Media/Pagination", () => ({
   Pagination: () => <div />
 }))
@@ -161,7 +134,11 @@ describe("MediaTrashPage connection states", () => {
 
     render(<MediaTrashPage />)
 
-    expect(screen.getByText("Add your credentials to use Media")).toBeInTheDocument()
+    const title = screen.getByText("Add your credentials to use Media")
+    expect(title).toBeInTheDocument()
+    expect(
+      title.closest('[data-ds-component="EmptyState"]')
+    ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Open Settings" }))
     expect(mocks.navigate).toHaveBeenCalledWith("/settings/tldw")
@@ -193,7 +170,9 @@ describe("MediaTrashPage connection states", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry connection" }))
     expect(mocks.checkOnce).toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole("button", { name: "Health & diagnostics" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Health & diagnostics" })
+    )
     expect(mocks.navigate).toHaveBeenCalledWith("/settings/health")
   })
 })

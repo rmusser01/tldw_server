@@ -38,7 +38,9 @@ def _enumerate_user_ids() -> list[int]:
     try:
         base = DatabasePaths.get_user_db_base_dir()
     except _FILES_EXPORT_GC_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"files_export_gc: failed to resolve user db base dir: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "files_export_gc: failed to resolve user db base dir"
+        )
         return []
     uids: list[int] = []
     for p in base.iterdir():
@@ -51,7 +53,9 @@ def _enumerate_user_ids() -> list[int]:
         try:
             uids = [DatabasePaths.get_single_user_id()]
         except _FILES_EXPORT_GC_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"files_export_gc: failed to derive single user id: {exc}")
+            logger.bind(error_type=type(exc).__name__).debug(
+                "files_export_gc: failed to derive single user id"
+            )
             uids = []
     return sorted(set(uids))
 
@@ -76,9 +80,13 @@ async def _purge_expired_exports_for_user(user_id: int, now_iso: str) -> tuple[i
                         path.unlink()
                         files_deleted += 1
                 except StoragePathValidationError as exc:
-                    logger.warning(f"files_export_gc: invalid export path for file {file_id}: {exc}")
+                    logger.bind(error_type=type(exc).__name__).warning(
+                        f"files_export_gc: invalid export path for file {file_id}"
+                    )
                 except (OSError, PermissionError) as exc:
-                    logger.warning(f"files_export_gc: failed to delete export file for {file_id}: {exc}")
+                    logger.bind(error_type=type(exc).__name__).warning(
+                        f"files_export_gc: failed to delete export file for {file_id}"
+                    )
             try:
                 cdb.update_file_artifact_export(
                     file_id,
@@ -95,7 +103,9 @@ async def _purge_expired_exports_for_user(user_id: int, now_iso: str) -> tuple[i
             except KeyError:
                 logger.debug(f"files_export_gc: file artifact not found for {file_id}")
             except _FILES_EXPORT_GC_NONCRITICAL_EXCEPTIONS as exc:
-                logger.warning(f"files_export_gc: failed to clear export state for {file_id}: {exc}")
+                logger.bind(error_type=type(exc).__name__).warning(
+                    f"files_export_gc: failed to clear export state for {file_id}"
+                )
         return cleared, files_deleted
 
 
@@ -108,7 +118,9 @@ async def start_file_artifacts_export_gc_scheduler() -> asyncio.Task | None:
         interval = int(os.getenv("FILES_EXPORT_GC_INTERVAL_SEC", "3600"))
         interval = max(interval, MIN_INTERVAL_SECONDS)
     except (TypeError, ValueError) as exc:
-        logger.debug(f"files_export_gc: invalid FILES_EXPORT_GC_INTERVAL_SEC; using default: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "files_export_gc: invalid FILES_EXPORT_GC_INTERVAL_SEC; using default"
+        )
         interval = max(3600, MIN_INTERVAL_SECONDS)
 
     async def _runner():
@@ -125,7 +137,7 @@ async def start_file_artifacts_export_gc_scheduler() -> asyncio.Task | None:
                 if total_cleared or total_files:
                     logger.info(f"Files export GC: cleared={total_cleared} files_deleted={total_files}")
             except _FILES_EXPORT_GC_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"files_export_gc: run failed: {exc}")
+                logger.bind(error_type=type(exc).__name__).debug("files_export_gc: run failed")
             await asyncio.sleep(interval)
 
     task = asyncio.create_task(_runner(), name="file_artifacts_export_gc")

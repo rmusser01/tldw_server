@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  buildSourceUploadAccept,
   DEFAULT_SOURCE_UPLOAD_MAX_SIZE_MB,
   mapSourceIngestionError,
   parseSourceCreatedAt,
@@ -55,6 +56,23 @@ describe("source-ingestion-utils", () => {
       code: "file_too_large",
       fileName: "large.pdf",
       maxSizeBytes: 1_000
+    })
+  })
+
+  it("builds an upload accept string aligned with backend document support", () => {
+    expect(buildSourceUploadAccept()).toMatchInlineSnapshot(
+      `".pdf,.docx,.txt,.md,.markdown,.epub,.html,.htm,.xhtml,.xml,.json,.mp3,.wav,.m4a,.ogg,.flac,.mp4,.webm,.mkv,.avi,.mov"`
+    )
+  })
+
+  it.each([
+    { name: "notes.markdown", type: "" },
+    { name: "page.xhtml", type: "application/xhtml+xml" },
+    { name: "feed.xml", type: "application/xml" },
+    { name: "data.json", type: "application/json" }
+  ])("accepts expanded document upload type $name", (file) => {
+    expect(validateSourceUploadFile({ ...file, size: 1024 }, 10 * 1024 * 1024)).toEqual({
+      valid: true
     })
   })
 

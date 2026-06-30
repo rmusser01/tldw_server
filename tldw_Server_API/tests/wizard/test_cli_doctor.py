@@ -60,6 +60,7 @@ def test_doctor_yes_applies_env_gitignore(monkeypatch):
         assert gitignore.exists()
         gitignore_content = gitignore.read_text(encoding="utf-8")
         assert ".env" in gitignore_content
+        assert ".env.*.bak" in gitignore_content
         assert ".env.local" in gitignore_content
         assert "wizard.log" in gitignore_content
 

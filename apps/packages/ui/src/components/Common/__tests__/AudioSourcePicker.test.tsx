@@ -17,6 +17,25 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>();
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key);
+
+        return {
+          ...state,
+          label:
+            key === "unavailable" ? "Unavailable via registry" : state.label,
+        };
+      },
+    ),
+  };
+});
+
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: useStorageMock,
 }));
@@ -192,7 +211,7 @@ describe("AudioSourcePicker", () => {
     );
 
     expect(
-      screen.getByText("Studio microphone (Unavailable)"),
+      screen.getByText("Studio microphone (Unavailable via registry)"),
     ).toBeInTheDocument();
     expect(screen.getByText("Source fallback active")).toBeInTheDocument();
   });

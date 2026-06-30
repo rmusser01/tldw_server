@@ -657,6 +657,8 @@ def test_keyless_provider_proceeds_without_key(  # Added default_chat_request_da
     valid_auth_token,
     mock_media_db,
     mock_chat_db,
+    monkeypatch,
+    bypass_api_limits,
 ):
     mock_load_template.return_value = None  # Default passthrough
     mock_apply_template.side_effect = lambda template_str, data: data.get(
@@ -666,20 +668,33 @@ def test_keyless_provider_proceeds_without_key(  # Added default_chat_request_da
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_media_db
     app.dependency_overrides[get_chacha_db_for_user] = lambda: mock_chat_db
 
+    monkeypatch.delenv("CUSTOM_OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("CUSTOM_OPENAI_API_KEY_99", raising=False)
+    monkeypatch.delenv("CUSTOM_OPENAI_API_KEY_1", raising=False)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.AuthNZ.byok_runtime.resolve_server_default_key",
+        lambda _provider: None,
+    )
+
     with (
+        bypass_api_limits(app),
         patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {}, clear=True),
+        patch.dict("tldw_Server_API.app.api.v1.schemas.chat_request_schemas.API_KEYS", {}, clear=True),
+        patch("tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys", return_value={}),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_chat_api_call,
     ):
-        mock_chat_api_call.return_value = {"id": "res_ollama"}
-        request_data_ollama = default_chat_request_data.model_copy(update={"api_provider": "ollama"})
+        mock_chat_api_call.return_value = {"id": "res_custom_openai"}
+        request_data_keyless = default_chat_request_data.model_copy(update={"api_provider": "custom-openai-api"})
 
         response = client.post_with_csrf(
-            "/api/v1/chat/completions", json=request_data_ollama.model_dump(), headers={"Authorization": valid_auth_token}
+            "/api/v1/chat/completions",
+            json=request_data_keyless.model_dump(),
+            headers={"Authorization": valid_auth_token},
         )
         assert response.status_code == status.HTTP_200_OK
         mock_chat_api_call.assert_called_once()
         api_key = mock_chat_api_call.call_args[1].get("api_key")
-        assert api_key is None, f"Expected None for keyless provider, got: {api_key!r}"
+        assert api_key is None, f"Expected None for custom-openai-api, got: {api_key!r}"
     # Clean up only the overrides we added (not the auth override from fixture)
     app.dependency_overrides.pop(get_media_db_for_user, None)
     app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -1262,6 +1277,18 @@ def test_create_chat_completion_character_not_found_uses_defaults(
 ):
     # Mock DB to return None for character
     mock_chat_db.get_character_card_by_id.return_value = None
+    default_character_card = {
+        "id": "mock_default_char_id_123",
+        "name": DEFAULT_CHARACTER_NAME,
+        "system_prompt": "Mock default system prompt",
+    }
+
+    def get_character_card_by_name(name):
+        if name == DEFAULT_CHARACTER_NAME:
+            return default_character_card
+        return None
+
+    mock_chat_db.get_character_card_by_name.side_effect = get_character_card_by_name
     mock_load_template.return_value = DEFAULT_RAW_PASSTHROUGH_TEMPLATE  # Or a specific test template
 
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_media_db
@@ -1293,8 +1320,10 @@ def test_create_chat_completion_character_not_found_uses_defaults(
         called_args_to_shim.get("system_message") is not None
     )  # It will be at least "" if DEFAULT_RAW_PASSTHROUGH_TEMPLATE is used
 
-    # Verify DB was called
-    mock_chat_db.get_character_card_by_name.assert_called_once_with("non_existent_char_id")
+    # Verify the requested character was attempted and the default character was used as fallback.
+    name_lookups = [lookup_call.args[0] for lookup_call in mock_chat_db.get_character_card_by_name.call_args_list]
+    assert name_lookups.count("non_existent_char_id") == 1
+    assert DEFAULT_CHARACTER_NAME in name_lookups
     mock_chat_db.get_character_card_by_id.assert_not_called()
 
     # Clean up only the overrides we added (not the auth override from fixture)

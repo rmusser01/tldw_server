@@ -23,14 +23,18 @@ def test_billing_package_lazy_subscription_exports() -> None:
 @pytest.mark.parametrize(
     "module_name",
     [
-        "tldw_Server_API.app.api.v1.endpoints.billing",
+        # Note: endpoints.billing (billing-status router) is intentionally retained
+        # in OSS builds (billing is disabled at runtime, but the status endpoint and
+        # its router registration still exist — see admin.py and the AuthNZ/Services
+        # router-group contract tests). Only the payment-processing modules are removed.
         "tldw_Server_API.app.api.v1.endpoints.billing_webhooks",
         "tldw_Server_API.app.core.Billing.stripe_client",
+        "tldw_Server_API.app.core.Billing.billing_audit",
         "tldw_Server_API.app.services.stripe_metering_service",
     ],
 )
 def test_oss_runtime_removes_public_billing_modules(module_name: str) -> None:
-    """OSS should not ship public billing or Stripe runtime modules."""
+    """OSS should not ship Stripe / payment-processing runtime modules."""
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module(module_name)
 

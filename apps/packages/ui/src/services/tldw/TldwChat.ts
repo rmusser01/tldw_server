@@ -9,21 +9,10 @@ import { extractTokenFromChunk } from "@/utils/extract-token-from-chunk"
 import {
   captureChatRequestDebugSnapshot,
   getLastChatCompletionDebugSnapshot,
-  type ChatCompletionDebugSnapshot
+  type ChatCompletionDebugSnapshot,
+  type ChatRequestDebugMetadata
 } from "./chat-request-debug"
-
-type ToolFunctionSchema = Record<string, unknown>
-type ToolFunction = {
-  name: string
-  description?: string
-  parameters?: ToolFunctionSchema
-}
-type OpenAiTool = {
-  type: "function"
-  function: ToolFunction
-}
-
-const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/
+import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
 
 const normalizeProvider = (value?: string): string =>
   String(value || "").trim().toLowerCase()
@@ -259,85 +248,6 @@ const buildRequestMessages = (
   )
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-
-const sanitizeToolName = (name: string): string | null => {
-  const trimmed = name.trim()
-  if (!trimmed) return null
-  if (TOOL_NAME_PATTERN.test(trimmed)) return trimmed
-
-  let sanitized = trimmed.replace(/[^a-zA-Z0-9_-]+/g, "_")
-  sanitized = sanitized.replace(/^_+|_+$/g, "")
-  if (!sanitized) return null
-  if (sanitized.length > 64) sanitized = sanitized.slice(0, 64)
-  return TOOL_NAME_PATTERN.test(sanitized) ? sanitized : null
-}
-
-const normalizeChatTools = (
-  tools?: Record<string, unknown>[]
-): Record<string, unknown>[] | undefined => {
-  if (!Array.isArray(tools) || tools.length === 0) return undefined
-
-  const seen = new Set<string>()
-  const normalized = tools
-    .map((tool) => {
-      if (!isRecord(tool)) return null
-
-      const functionRecord = isRecord(tool.function) ? tool.function : undefined
-      const rawName =
-        (typeof tool.name === "string" && tool.name) ||
-        (functionRecord &&
-        typeof functionRecord.name === "string" &&
-        functionRecord.name
-          ? functionRecord.name
-          : "")
-      const name = rawName ? sanitizeToolName(rawName) : null
-      if (!name || seen.has(name)) return null
-
-      if (rawName !== name) {
-        console.warn(
-          `[tldw] Tool name "${rawName}" normalized to "${name}" to satisfy server schema.`
-        )
-      }
-      seen.add(name)
-
-      const description =
-        typeof tool.description === "string"
-          ? tool.description
-          : functionRecord &&
-              typeof functionRecord.description === "string"
-            ? functionRecord.description
-            : undefined
-
-      const schemaCandidates: Array<unknown> = [
-        functionRecord?.parameters,
-        tool.parameters,
-        tool.input_schema,
-        tool.json_schema
-      ]
-      const parameters =
-        (schemaCandidates.find((candidate) =>
-          isRecord(candidate)
-        ) as ToolFunctionSchema | undefined) || {
-          type: "object",
-          properties: {}
-        }
-
-      return {
-        type: "function",
-        function: {
-          name,
-          description,
-          parameters
-        }
-      } as OpenAiTool
-    })
-    .filter(Boolean) as Record<string, unknown>[]
-
-  return normalized.length > 0 ? normalized : undefined
-}
-
 export interface TldwChatOptions {
   model: string
   routing?: ChatCompletionRequest["routing"]
@@ -368,6 +278,7 @@ export interface TldwChatOptions {
   grammarOverride?: string
   jsonMode?: boolean
   researchContext?: ChatResearchContext
+  chatDebugMetadata?: ChatRequestDebugMetadata
 }
 export { getLastChatCompletionDebugSnapshot }
 export type { ChatCompletionDebugSnapshot }
@@ -422,8 +333,15 @@ export class TldwChatService {
   ): Promise<string> {
     try {
       await tldwClient.initialize()
-      const normalizedTools = normalizeChatTools(options.tools)
-      const toolChoice = normalizedTools ? options.toolChoice : undefined
+      const normalizedTools =
+        options.toolChoice === "none"
+          ? undefined
+          : normalizeChatToolsForRequest(options.tools)
+      const toolChoice =
+        normalizedTools &&
+        (options.toolChoice === "auto" || options.toolChoice === "required")
+          ? options.toolChoice
+          : undefined
       const requestMessages = buildRequestMessages(messages, options)
       if (requestMessages.length === 0) {
         throw new Error(
@@ -447,8 +365,12 @@ export class TldwChatService {
         frequency_penalty: options.frequencyPenalty,
         presence_penalty: options.presencePenalty,
         reasoning_effort: options.reasoningEffort,
-        tool_choice: toolChoice,
-        tools: normalizedTools,
+        ...(normalizedTools
+          ? {
+              ...(toolChoice ? { tool_choice: toolChoice } : {}),
+              tools: normalizedTools
+            }
+          : {}),
         save_to_db: options.saveToDb,
         conversation_id: options.conversationId,
         history_message_limit: options.historyMessageLimit,
@@ -469,10 +391,13 @@ export class TldwChatService {
         endpoint: "/api/v1/chat/completions",
         method: "POST",
         mode: "non-stream",
-        body: request
+        body: request,
+        metadata: options.chatDebugMetadata
       })
 
-      const response = await tldwClient.createChatCompletion(request)
+      const response = await tldwClient.createChatCompletion(request, {
+        debugMetadata: options.chatDebugMetadata
+      })
       const data = await response.json().catch(() => null)
       if (onResponse) {
         onResponse(data)
@@ -498,8 +423,15 @@ export class TldwChatService {
   ): AsyncGenerator<string, void, unknown> {
     try {
       await tldwClient.initialize()
-      const normalizedTools = normalizeChatTools(options.tools)
-      const toolChoice = normalizedTools ? options.toolChoice : undefined
+      const normalizedTools =
+        options.toolChoice === "none"
+          ? undefined
+          : normalizeChatToolsForRequest(options.tools)
+      const toolChoice =
+        normalizedTools &&
+        (options.toolChoice === "auto" || options.toolChoice === "required")
+          ? options.toolChoice
+          : undefined
       const requestMessages = buildRequestMessages(messages, options)
       if (requestMessages.length === 0) {
         throw new Error(
@@ -536,8 +468,12 @@ export class TldwChatService {
         frequency_penalty: options.frequencyPenalty,
         presence_penalty: options.presencePenalty,
         reasoning_effort: options.reasoningEffort,
-        tool_choice: toolChoice,
-        tools: normalizedTools,
+        ...(normalizedTools
+          ? {
+              ...(toolChoice ? { tool_choice: toolChoice } : {}),
+              tools: normalizedTools
+            }
+          : {}),
         save_to_db: options.saveToDb,
         conversation_id: options.conversationId,
         history_message_limit: options.historyMessageLimit,
@@ -558,7 +494,8 @@ export class TldwChatService {
         endpoint: "/api/v1/chat/completions",
         method: "POST",
         mode: "stream",
-        body: request
+        body: request,
+        metadata: options.chatDebugMetadata
       })
 
       const startupTimeoutMs = coercePositiveTimeout(
@@ -571,7 +508,8 @@ export class TldwChatService {
       )
       const stream = tldwClient.streamChatCompletion(request, {
         signal: this.currentController.signal,
-        streamIdleTimeoutMs
+        streamIdleTimeoutMs,
+        debugMetadata: options.chatDebugMetadata
       })
 
       let idleTimer: ReturnType<typeof setTimeout> | null = null
@@ -666,7 +604,7 @@ export class TldwChatService {
         clearStartupTimer()
       }
     } catch (error) {
-      console.error('Stream completion failed:', error)
+      console.warn('Stream completion failed:', readErrorMessage(error))
       if (isAbortLikeError(error)) {
         throw createAbortError(readErrorMessage(error))
       }

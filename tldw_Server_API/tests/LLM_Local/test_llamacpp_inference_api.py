@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Any, Tuple
 
 import pytest
 from fastapi import FastAPI
@@ -8,6 +8,7 @@ from starlette.requests import Request
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import llamacpp as lp
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import InferenceError
 
 
 def _admin_principal() -> AuthPrincipal:
@@ -29,6 +30,16 @@ def _admin_principal() -> AuthPrincipal:
 class _Logger:
     def error(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
         return
+
+
+class _CapturingLogger:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+        self.kwargs: list[dict[str, Any]] = []
+
+    def error(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.errors.append(message.format(*args) if args else message)
+        self.kwargs.append(kwargs)
 
 
 class _DefaultMgr:
@@ -155,3 +166,75 @@ def test_llamacpp_inference_falls_back_to_manager_when_handler_missing():
     assert body["model"] == "mock.gguf"
     assert body["choices"][0]["message"]["content"] == "hi"
     assert body["backend"] == "llamacpp"
+
+
+@pytest.mark.integration
+def test_llamacpp_inference_generic_failure_log_is_sanitized():
+    class _ExplodingInferenceMgr:
+        llamacpp = True
+
+        def __init__(self, logger: _CapturingLogger) -> None:
+            self.logger = logger
+
+        async def get_server_status(self, backend: str):
+            return {"backend": backend, "model": "mock.gguf"}
+
+        async def run_inference(self, **kwargs: Any):
+            raise RuntimeError("llamacpp inference exploded at /private/llama.cpp")
+
+    logger = _CapturingLogger()
+    app = _make_app_with_manager(_ExplodingInferenceMgr(logger))
+    payload = {
+        "model": "ignored-by-server",
+        "messages": [{"role": "user", "content": "Hello!"}],
+        "temperature": 0.7,
+    }
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/llamacpp/inference",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "An unexpected error occurred."
+    assert logger.errors == ["Unexpected error during Llama.cpp inference"]
+    assert all(not kwargs.get("exc_info") for kwargs in logger.kwargs)
+    logged = "\n".join(logger.errors)
+    assert "llamacpp inference exploded" not in logged
+    assert "/private/llama.cpp" not in logged
+
+
+@pytest.mark.integration
+def test_llamacpp_inference_inference_error_returns_safe_unavailable_detail():
+    class _InferenceErrorMgr:
+        llamacpp = None
+        logger = _Logger()
+
+        async def get_server_status(self, backend: str):
+            raise InferenceError("backend exploded at /private/llama.cpp with api_key=abc123")
+
+        async def run_inference(self, **kwargs: Any):
+            raise AssertionError("run_inference should not be reached")
+
+    app = _make_app_with_manager(_InferenceErrorMgr())
+    payload = {
+        "model": "ignored-by-server",
+        "messages": [{"role": "user", "content": "Hello!"}],
+        "temperature": 0.7,
+    }
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/llamacpp/inference",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "managed llama.cpp backend is not configured" in detail.lower()
+    assert "backend exploded" not in detail
+    assert "/private/llama.cpp" not in detail
+    assert "api_key" not in detail.lower()

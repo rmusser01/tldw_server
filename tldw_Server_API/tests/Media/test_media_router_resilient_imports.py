@@ -3,9 +3,26 @@ from __future__ import annotations
 import importlib
 import sys
 import types
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import APIRouter
+
+
+@pytest.mark.unit
+def test_media_optional_import_sanitizes_failure_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import media as media_module
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(media_module, "logger", fake_logger)
+
+    def _failing_import_module(_name: str):
+        raise RuntimeError("media import leaked /private/media-import.py")
+
+    monkeypatch.setattr(media_module.importlib, "import_module", _failing_import_module)
+
+    assert media_module._optional_import_module("leaky.private.module") is None
+    fake_logger.warning.assert_called_once_with("Media import skipped: optional module unavailable")
 
 
 @pytest.mark.unit

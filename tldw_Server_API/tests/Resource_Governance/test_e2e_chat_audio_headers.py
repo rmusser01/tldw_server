@@ -70,6 +70,15 @@ def _reset_rg_state(app) -> None:
             continue
 
 
+def _ensure_audio_transcriptions_route(app) -> None:
+    if any(getattr(route, "path", None) == "/api/v1/audio/transcriptions" for route in app.routes):
+        return
+
+    from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
+
+    app.include_router(audio_router, prefix="/api/v1/audio", tags=["audio"])
+
+
 def _install_stub_chacha_db(app, *, user_id: int):
     """
     Avoid cross-test flakiness from ChaChaNotes threadpool lifecycle by
@@ -453,6 +462,7 @@ async def test_e2e_audio_transcriptions_headers_and_mocked_stt(monkeypatch, tmp_
     )
 
     monkeypatch.setenv("MINIMAL_TEST_APP", "1")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
     monkeypatch.setenv("RG_ENABLED", "1")
     monkeypatch.setenv("RG_BACKEND", rg_backend)
     monkeypatch.setenv("RG_POLICY_STORE", "file")
@@ -547,6 +557,7 @@ async def test_e2e_audio_transcriptions_headers_and_mocked_stt(monkeypatch, tmp_
 
     from tldw_Server_API.app.main import app
 
+    _ensure_audio_transcriptions_route(app)
     _reset_rg_state(app)
 
     with _with_rg_middleware(app):

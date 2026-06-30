@@ -7,6 +7,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
 
 ########################################################################################################################
 # Enums
@@ -99,6 +100,18 @@ class ListResponse(StandardResponse):
     """Standard list response with pagination"""
     data: list[Any]
     metadata: PaginationMetadata
+
+
+class PageListResponse(ListResponse):
+    """Prompt Studio list response with canonical page pagination metadata."""
+
+    pagination: PagePaginationMeta
+
+
+class PageStandardResponse(StandardResponse):
+    """Standard Prompt Studio response with canonical page pagination metadata."""
+
+    pagination: PagePaginationMeta
 
 ########################################################################################################################
 # Security Shim

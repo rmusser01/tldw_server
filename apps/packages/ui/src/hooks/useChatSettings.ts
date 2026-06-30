@@ -60,6 +60,10 @@ export const useChatSettings = () => {
     "useMarkdownForUserMessage",
     DEFAULT_CHAT_SETTINGS.useMarkdownForUserMessage
   )
+  const [renderMermaidDiagrams, setRenderMermaidDiagrams] = useStorage(
+    "renderMermaidDiagrams",
+    DEFAULT_CHAT_SETTINGS.renderMermaidDiagrams
+  )
   const [chatRichTextMode, setChatRichTextMode] = useStorage(
     "chatRichTextMode",
     DEFAULT_CHAT_SETTINGS.chatRichTextMode
@@ -185,6 +189,8 @@ export const useChatSettings = () => {
     setAutoCopyResponseToClipboard,
     useMarkdownForUserMessage,
     setUseMarkdownForUserMessage,
+    renderMermaidDiagrams,
+    setRenderMermaidDiagrams,
     chatRichTextMode,
     setChatRichTextMode,
     chatRichTextStylePreset,

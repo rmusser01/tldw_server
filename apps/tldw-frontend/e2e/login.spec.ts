@@ -98,7 +98,7 @@ if (hostedMode) {
     await serverInput.waitFor({ state: "visible" })
     await serverInput.fill(serverUrl)
 
-    const apiKeyInput = page.getByLabel(/api key/i)
+    const apiKeyInput = page.locator("#apiKey")
     await apiKeyInput.fill(apiKey)
 
     await page.getByRole("button", { name: /save/i }).click()
@@ -125,6 +125,6 @@ if (hostedMode) {
     )
 
     await page.goto("/chat", { waitUntil: "domcontentloaded" })
-    await expect(page.getByTestId("chat-header")).toBeVisible()
+    await expect(page.getByPlaceholder(/type a message/i).first()).toBeVisible()
   })
 }

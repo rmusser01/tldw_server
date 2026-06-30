@@ -10,6 +10,7 @@
 #######################################################################################################################
 from .db_helpers import (
     cleanup_old_sessions,
+    count_user_voice_sessions,
     delete_voice_command,
     delete_voice_session,
     get_active_voice_session_count,
@@ -81,6 +82,7 @@ __all__ = [
     "get_user_voice_sessions",
     "delete_voice_session",
     "cleanup_old_sessions",
+    "count_user_voice_sessions",
     "record_persona_live_voice_event",
     "record_voice_command_event",
     "get_voice_command_usage_stats",

@@ -1,8 +1,7 @@
 import json
 import pytest
-from fastapi.testclient import TestClient
 
-from tldw_Server_API.tests.Audio.ws_test_helpers import ws_session_or_skip
+from tldw_Server_API.tests.Audio.ws_test_helpers import ws_client_without_lifespan, ws_session_or_skip
 
 
 def test_audio_ws_invalid_json_yields_validation_error(monkeypatch):
@@ -13,7 +12,7 @@ def test_audio_ws_invalid_json_yields_validation_error(monkeypatch):
 
     token = get_settings().SINGLE_USER_API_KEY
 
-    with TestClient(app) as client:
+    with ws_client_without_lifespan(app) as client:
         try:
             ws = client.websocket_connect(f"/api/v1/audio/stream/transcribe?token={token}")
         except Exception:

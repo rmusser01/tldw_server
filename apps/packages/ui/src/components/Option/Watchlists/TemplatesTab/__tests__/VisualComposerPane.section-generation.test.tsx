@@ -130,4 +130,81 @@ describe("VisualComposerPane section generation", () => {
     const ids = nextAst.nodes.map((node) => node.id)
     expect(new Set(ids).size).toBe(ids.length)
   })
+
+  it("renders the empty composer callout through the design-system Alert primitive", () => {
+    render(
+      <VisualComposerPane
+        ast={{ schema_version: "1.0.0", nodes: [] }}
+        onChange={vi.fn()}
+      />
+    )
+
+    const emptyTitle = screen.getByText(/No visual blocks yet/)
+    const emptyAlert = emptyTitle.closest('[data-ds-component="Alert"]')
+    expect(emptyTitle).toBeInTheDocument()
+    expect(emptyAlert).not.toBeNull()
+    expect(emptyAlert).toHaveAttribute("aria-live", "off")
+    expect(
+      screen.getByText("Add blocks above to start building this template.")
+    ).toBeInTheDocument()
+  })
+
+  it("renders generation error and warning callouts through the design-system Alert primitive", async () => {
+    const ast: ComposerAst = {
+      schema_version: "1.0.0",
+      nodes: [
+        {
+          id: "intro-1",
+          type: "IntroSummaryBlock",
+          source: "",
+          config: {
+            prompt: "Write a concise intro."
+          }
+        }
+      ]
+    }
+
+    const onGenerateSection = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Section generation unavailable"))
+      .mockResolvedValueOnce({
+        block_id: "intro-1",
+        content: "Generated introduction paragraph.",
+        warnings: ["Prompt trimmed", "No source summary"],
+        diagnostics: {}
+      })
+
+    render(
+      <VisualComposerPane
+        ast={ast}
+        onChange={vi.fn()}
+        runs={[{ id: 88, label: "Run #88" }]}
+        selectedRunId={88}
+        onSelectedRunIdChange={vi.fn()}
+        onGenerateSection={onGenerateSection}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("visual-generate-intro-1"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Section generation unavailable")).toBeInTheDocument()
+    })
+    expect(
+      screen
+        .getByText("Section generation unavailable")
+        .closest('[data-ds-component="Alert"]')
+    ).not.toBeNull()
+
+    fireEvent.click(screen.getByTestId("visual-generate-intro-1"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Prompt trimmed; No source summary")).toBeInTheDocument()
+    })
+    expect(
+      screen
+        .getByText("Prompt trimmed; No source summary")
+        .closest('[data-ds-component="Alert"]')
+    ).not.toBeNull()
+  })
 })

@@ -126,6 +126,6 @@ async def run_email_send_adapter(config: dict[str, Any], context: dict[str, Any]
 
         return {"sent": True, "recipients": to, "subject": subject}
 
-    except Exception as e:
-        logger.exception(f"Email send error: {e}")
-        return {"sent": False, "error": str(e)}
+    except Exception:
+        logger.exception("Email send failed")
+        return {"sent": False, "error": "Email send failed"}

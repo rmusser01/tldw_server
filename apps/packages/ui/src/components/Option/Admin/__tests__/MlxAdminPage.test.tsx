@@ -1,6 +1,6 @@
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import MlxAdminPage from "../MlxAdminPage"
 
 const apiMock = vi.hoisted(() => ({
@@ -39,6 +39,14 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 vi.mock("@/components/Common/PageShell", () => ({
   PageShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>
 }))
+
+const expectDesignSystemAlertForText = async (text: string) => {
+  const title = await screen.findByText(text)
+  const alert = title.closest('[data-ds-component="Alert"]')
+
+  expect(alert).not.toBeNull()
+  return alert as HTMLElement
+}
 
 describe("MlxAdminPage", () => {
   beforeEach(() => {
@@ -100,7 +108,8 @@ describe("MlxAdminPage", () => {
 
     render(<MlxAdminPage />)
 
-    expect(await screen.findByText("Admin APIs not available")).toBeTruthy()
+    const alert = await expectDesignSystemAlertForText("Admin APIs not available")
+    expect(alert).toHaveAttribute("role", "alert")
     expect(screen.queryByText("Load Model")).toBeNull()
   })
 
@@ -109,13 +118,44 @@ describe("MlxAdminPage", () => {
 
     render(<MlxAdminPage />)
 
-    expect(
-      await screen.findByText(
-        "MLX controls are temporarily unavailable until status checks succeed."
-      )
-    ).toBeTruthy()
+    const alert = await expectDesignSystemAlertForText(
+      "MLX controls are temporarily unavailable until status checks succeed."
+    )
+    expect(alert).toHaveAttribute("role", "alert")
 
     expect(screen.getByRole("button", { name: "Load Model" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Unload Model" })).toBeDisabled()
+  })
+
+  it("renders the active-model notice through the design-system Alert primitive", async () => {
+    apiMock.getMlxStatus.mockResolvedValueOnce({
+      active: true,
+      model: "mlx-community/test-model",
+      max_concurrent: 2
+    })
+
+    render(<MlxAdminPage />)
+
+    const alert = await expectDesignSystemAlertForText(
+      "A model is currently loaded. Unload it first or load a different model to replace it."
+    )
+    expect(alert).toHaveAttribute("role", "status")
+  })
+
+  it("renders the trust-remote-code warning through the design-system Badge primitive", async () => {
+    render(<MlxAdminPage />)
+
+    fireEvent.click(await screen.findByText("Advanced Settings"))
+    await screen.findByText("Trust remote code:")
+
+    const trustRemoteCodeLabel = screen.getByText("Trust remote code:")
+    const trustRemoteCodeRow = trustRemoteCodeLabel.closest("div")
+    expect(trustRemoteCodeRow).not.toBeNull()
+
+    fireEvent.click(within(trustRemoteCodeRow as HTMLElement).getByRole("switch"))
+
+    const warning = await screen.findByText("Security risk")
+    const badge = warning.closest('[data-ds-component="Badge"]')
+    expect(badge).not.toBeNull()
   })
 })

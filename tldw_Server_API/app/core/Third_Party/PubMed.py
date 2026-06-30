@@ -159,8 +159,10 @@ def search_pubmed(
             items.append(_normalize_item(str(uid), raw))
 
         return items, total, None
-    except Exception as e:
-        return None, 0, f"Unexpected error during PubMed search: {str(e)}"
+    except TimeoutError:
+        return None, 0, "PubMed request timed out."
+    except Exception:
+        return None, 0, "PubMed request failed."
 
 
 def get_pubmed_by_id(pmid: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -208,5 +210,7 @@ def get_pubmed_by_id(pmid: str) -> tuple[dict[str, Any] | None, str | None]:
         if abstract_text:
             base["abstract"] = abstract_text
         return base, None
-    except Exception as e:
-        return None, f"Unexpected error during PubMed by-id lookup: {str(e)}"
+    except TimeoutError:
+        return None, "PubMed by-id request timed out."
+    except Exception:
+        return None, "PubMed by-id request failed."

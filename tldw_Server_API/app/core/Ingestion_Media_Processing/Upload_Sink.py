@@ -30,6 +30,7 @@ import zipfile
 #
 # Local Imports (adjust path as per your project structure)
 from tldw_Server_API.app.core.config import MAGIC_FILE_PATH, loaded_config_data
+from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 # If the above import fails in a different context, fallback to standard logging:
@@ -86,6 +87,16 @@ def _get_python_magic_module():
         logging.warning(f"Failed to import python-magic fallback: {exc}")
         _python_magic = None
     return _python_magic
+
+
+def _is_epub_archive(file_path: Path) -> bool:
+    """Return True when a ZIP-shaped file has the required EPUB marker."""
+    try:
+        with zipfile.ZipFile(file_path, "r") as archive:
+            marker = archive.read("mimetype", pwd=None)
+    except (OSError, KeyError, RuntimeError, zipfile.BadZipFile, zipfile.LargeZipFile):
+        return False
+    return marker.strip() == b"application/epub+zip"
 
 
 class FileValidationError(Exception):
@@ -151,13 +162,13 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
     "audio": {
         "allowed_extensions": {'.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'},
         "allowed_mimetypes": {'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/flac', 'audio/aac', 'audio/ogg',
-                              'audio/mp4', 'audio/x-m4a', 'audio/mp4a-latm'},
+                              'audio/mp4', 'audio/x-m4a', 'audio/mp4a-latm', 'application/ogg'},
         "max_size_mb": media_config.get('max_audio_file_size_mb', 500),
     },
     "video": {
         "allowed_extensions": {'.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv'},
         "allowed_mimetypes": {'video/mp4', 'video/x-msvideo', 'video/quicktime', 'video/x-matroska', 'video/webm',
-                              'video/x-flv'},
+                              'video/x-flv', 'video/avi'},
         "max_size_mb": media_config.get('max_video_file_size_mb', 1000),
     },
     "image": {
@@ -168,17 +179,20 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
     },
     "document": {  # Generic documents (JSON supported as document)
         "allowed_extensions": {
-            '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
-            '.txt', '.md', '.rtf', '.json', '.srt', '.vtt', '.ass',
+            '.pdf', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
+            '.txt', '.md', '.markdown', '.rtf', '.html', '.htm',
+            '.xhtml', '.xml', '.json', '.srt', '.vtt', '.ass',
         },
         "allowed_mimetypes": {
-            'application/pdf', 'application/msword',
+            'application/pdf',
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             'application/vnd.ms-powerpoint',
             'application/vnd.openxmlformats-officedocument.presentationml.presentation',
             'application/vnd.ms-excel',
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'text/plain', 'text/markdown', 'text/rtf', 'application/rtf', 'application/x-rtf', 'application/json',
+            'text/plain', 'text/markdown', 'text/html', 'text/xml',
+            'application/xml', 'application/xhtml+xml', 'text/rtf',
+            'application/rtf', 'application/x-rtf', 'application/json',
             'text/vtt', 'application/x-subrip', 'text/x-ssa', 'text/x-ass', 'application/x-ass',
         },
         "max_size_mb": media_config.get('max_document_file_size_mb', 50),
@@ -203,8 +217,8 @@ DEFAULT_MEDIA_TYPE_CONFIG = {
         "max_size_mb": media_config.get('max_document_file_size_mb', 50),
     },
     "html": {
-        "allowed_extensions": {'.html', '.htm'},
-        "allowed_mimetypes": {'text/html'},
+        "allowed_extensions": {'.html', '.htm', '.xhtml'},
+        "allowed_mimetypes": {'text/html', 'application/xhtml+xml', 'text/xml', 'application/xml'},
         "max_size_mb": 5,
         "sanitize": bool(media_config.get('sanitize_html_uploads', True)),
     },
@@ -252,11 +266,11 @@ EXT_TO_MEDIA_TYPE_KEY = {
     # Route SVG to XML pipeline so sanitizer applies
     '.svg': 'xml',
     '.pdf': 'pdf',
-    '.doc': 'document', '.docx': 'document', '.ppt': 'document', '.pptx': 'document', '.xls': 'document',
+    '.docx': 'document', '.ppt': 'document', '.pptx': 'document', '.xls': 'document',
     '.xlsx': 'document',
-    '.txt': 'document', '.md': 'document', '.rtf': 'document',
+    '.txt': 'document', '.md': 'document', '.markdown': 'document', '.rtf': 'document',
     '.epub': 'ebook', '.mobi': 'ebook', '.azw': 'ebook',
-    '.html': 'html', '.htm': 'html',
+    '.html': 'html', '.htm': 'html', '.xhtml': 'html',
     '.xml': 'xml', '.opml': 'xml',
     '.zip': 'archive', '.tar': 'archive', '.tgz': 'archive', '.tbz2': 'archive', '.txz': 'archive',
     '.tar.gz': 'archive', '.tar.bz2': 'archive', '.tar.xz': 'archive',
@@ -675,12 +689,21 @@ class FileValidator:
             if detected_mime_type:
                 detected_lower = detected_mime_type.lower()
                 if detected_lower not in normalized_allowed_mimetypes:
-                    # Hard-fail if we have a detected MIME and it is not allowed.
-                    # Do NOT fall back to extension-derived MIME in this case.
-                    issues.append(
-                        f"Detected MIME type '{detected_mime_type}' for file '{_original_filename}' is not allowed. "
-                        f"Allowed: {final_allowed_mimetypes}"
+                    is_epub_zip = (
+                        media_type_key == "ebook"
+                        and detected_lower in {"application/zip", "application/x-zip-compressed"}
+                        and ".epub" in claimed_candidates
+                        and _is_epub_archive(current_file_path)
                     )
+                    if is_epub_zip:
+                        detected_mime_type = "application/epub+zip"
+                    else:
+                        # Hard-fail if we have a detected MIME and it is not allowed.
+                        # Do NOT fall back to extension-derived MIME in this case.
+                        issues.append(
+                            f"Detected MIME type '{detected_mime_type}' for file '{_original_filename}' is not allowed. "
+                            f"Allowed: {final_allowed_mimetypes}"
+                        )
             else:
                 # No detected MIME available; rely on extension guess if present
                 if fallback_lower is None or fallback_lower not in normalized_allowed_mimetypes:
@@ -835,9 +858,9 @@ class FileValidator:
                                 issues.append(f"Archive contains potentially malicious path: {member_filename}")
                                 continue
 
-                            # Additional check: ensure the extracted path stays within extract_dir
-                            intended_path = (extract_dir / member_filename).resolve()
-                            if not str(intended_path).startswith(str(extract_dir.resolve())):
+                            # Additional check: ensure the extracted path stays within extract_dir.
+                            intended_path = resolve_safe_local_path(extract_dir / member_filename, extract_dir)
+                            if intended_path is None:
                                 logging.warning(f"Path traversal attempt detected: {member_filename}")
                                 issues.append(f"Archive contains path traversal attempt: {member_filename}")
                                 continue
@@ -893,7 +916,7 @@ class FileValidator:
                             # Now that we've validated the path, proceed with extraction
                             try:
                                 zip_ref.extract(member, path=extract_dir)
-                                internal_file_path = extract_dir / member.filename
+                                internal_file_path = intended_path
 
                                 # Determine media_type_key for internal file based on its extension
                                 internal_media_type_key = _resolve_media_type_key(internal_file_path)
@@ -981,8 +1004,8 @@ class FileValidator:
                                         continue
                                 except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
                                     pass
-                                intended_path = (extract_dir / member_filename).resolve()
-                                if not str(intended_path).startswith(str(extract_dir.resolve())):
+                                intended_path = resolve_safe_local_path(extract_dir / member_filename, extract_dir)
+                                if intended_path is None:
                                     logging.warning(f"Path traversal attempt detected: {member_filename}")
                                     issues.append(f"Archive contains path traversal attempt: {member_filename}")
                                     continue
@@ -1007,7 +1030,7 @@ class FileValidator:
                                         # Older Python versions without 'filter' support: we validated member type
                                         # and path above; continue extracting with the safer prerequisites enforced.
                                         tar.extract(member, path=extract_dir)
-                                    internal_file_path = extract_dir / member.name
+                                    internal_file_path = intended_path
                                     internal_media_type_key = _resolve_media_type_key(internal_file_path)
 
                                     if not internal_media_type_key:
@@ -1148,25 +1171,8 @@ class FileValidator:
         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
             raise FileValidationError(f"Invalid XML content: {e}") from e
 
-        # Optionally strip comments and processing instructions
-        try:
-            from xml.etree.ElementTree import Comment, ProcessingInstruction  # type: ignore
-            strip_comments = bool((config or {}).get("strip_comments", True))
-            strip_pi = bool((config or {}).get("strip_processing_instructions", True))
-            if strip_comments or strip_pi:
-                def _strip(parent):
-                    for elem in list(parent):
-                        tag_repr = getattr(elem, 'tag', None)
-                        if strip_comments and tag_repr is Comment:
-                            parent.remove(elem)
-                            continue
-                        if strip_pi and tag_repr is ProcessingInstruction:
-                            parent.remove(elem)
-                            continue
-                        _strip(elem)
-                _strip(root)
-        except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
-            pass
+        # defusedxml's default parser does not preserve comments or processing
+        # instructions, so no stdlib XML comment handling is needed here.
 
         try:
             cleaned = DET.tostring(root, encoding='unicode')

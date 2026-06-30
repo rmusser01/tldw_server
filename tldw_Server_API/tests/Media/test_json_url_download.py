@@ -12,6 +12,14 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils import (
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _allow_fake_client_egress(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils._validate_egress_or_raise",
+        lambda *_args, **_kwargs: None,
+    )
+
+
 class _FakeResponse:
     def __init__(self, url: str, headers: dict[str, str], content: bytes):
         from types import SimpleNamespace

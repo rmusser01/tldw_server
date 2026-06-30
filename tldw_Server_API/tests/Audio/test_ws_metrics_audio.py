@@ -1,11 +1,10 @@
 import json
 
 import pytest
-from fastapi.testclient import TestClient
 
 import tldw_Server_API.app.core.Metrics.metrics_manager as metrics_manager
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
-from tldw_Server_API.tests.Audio.ws_test_helpers import ws_session_or_skip
+from tldw_Server_API.tests.Audio.ws_test_helpers import ws_client_without_lifespan, ws_session_or_skip
 
 
 @pytest.mark.asyncio
@@ -27,7 +26,7 @@ async def test_audio_ws_v2_config_emits_configured_status(monkeypatch: pytest.Mo
     settings = get_settings()
     token = settings.SINGLE_USER_API_KEY
 
-    with TestClient(app) as client:
+    with ws_client_without_lifespan(app) as client:
         try:
             ws = client.websocket_connect(f"/api/v1/audio/stream/transcribe?token={token}")
         except Exception:
@@ -59,7 +58,7 @@ async def test_audio_ws_emits_bounded_stt_session_metrics_on_commit():
         before_ended = reg.get_cumulative_counter_total("audio_stt_streaming_sessions_ended_total")
         before_requests = reg.get_cumulative_counter_total("audio_stt_requests_total")
 
-        with TestClient(app) as client:
+        with ws_client_without_lifespan(app) as client:
             try:
                 ws = client.websocket_connect(f"/api/v1/audio/stream/transcribe?token={token}")
             except Exception:

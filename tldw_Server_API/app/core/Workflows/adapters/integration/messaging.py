@@ -8,12 +8,14 @@ This module includes adapters for application-specific integrations:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import os
 from pathlib import Path
 from typing import Any
 
+from fastapi import HTTPException
 from loguru import logger
 
 from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
@@ -34,6 +36,70 @@ from tldw_Server_API.app.core.Workflows.adapters.integration._config import (
     ChatbooksConfig,
     KanbanConfig,
 )
+
+
+_SAFE_ADAPTER_ERROR_PREFIXES = ("invalid_", "missing_")
+
+
+def _safe_adapter_error_message(exc: AdapterError) -> str:
+    message = str(exc).strip()
+    if message.startswith(_SAFE_ADAPTER_ERROR_PREFIXES) and all(ch.isalnum() or ch == "_" for ch in message):
+        return message
+    return "adapter_error"
+
+
+def _safe_kanban_error_detail(exc: Exception) -> str:
+    if isinstance(exc, InputError):
+        return "Invalid kanban request"
+    if isinstance(exc, NotFoundError):
+        return "Kanban resource not found"
+    if isinstance(exc, ConflictError):
+        return "Kanban conflict"
+    return "Kanban operation failed"
+
+
+def _extract_character_chat_response_text(response: Any) -> str:
+    """Extract assistant text from common chat adapter response shapes."""
+    if response is None:
+        return ""
+    if isinstance(response, str):
+        return response
+    if isinstance(response, dict):
+        choices = response.get("choices")
+        if isinstance(choices, list) and choices:
+            first_choice = choices[0]
+            if isinstance(first_choice, dict):
+                message = first_choice.get("message")
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    if content is not None:
+                        return str(content)
+                text = first_choice.get("text")
+                if text is not None:
+                    return str(text)
+        for key in ("response", "content", "text"):
+            value = response.get(key)
+            if value is not None:
+                return str(value)
+    return str(response)
+
+
+def _coerce_optional_positive_int(value: Any, field: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+    if isinstance(value, bool):
+        raise AdapterError(f"invalid_{field}")
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError) as exc:
+        raise AdapterError(f"invalid_{field}") from exc
+    if coerced <= 0:
+        raise AdapterError(f"invalid_{field}")
+    return coerced
 
 
 @registry.register(
@@ -517,9 +583,13 @@ async def run_kanban_adapter(config: dict[str, Any], context: dict[str, Any]) ->
         return {"error": f"unsupported_action:{action}"}
 
     except AdapterError as exc:
-        return {"error": str(exc) or "adapter_error"}
+        return {"error": _safe_adapter_error_message(exc)}
     except (InputError, ConflictError, NotFoundError, KanbanDBError) as exc:
-        return {"error": "kanban_error", "error_type": exc.__class__.__name__, "detail": str(exc)}
+        return {
+            "error": "kanban_error",
+            "error_type": exc.__class__.__name__,
+            "detail": _safe_kanban_error_detail(exc),
+        }
     finally:
         with contextlib.suppress(AttributeError, RuntimeError, TypeError, ValueError):
             db.close()
@@ -593,7 +663,7 @@ async def run_chatbooks_adapter(config: dict[str, Any], context: dict[str, Any])
         # Initialize user's notes database for chatbook service
         try:
             user_id_int = int(user_id)
-            notes_db_path = DatabasePaths.get_chachanotes_db_path(user_id_int)
+            notes_db_path = DatabasePaths.get_chacha_db_path(user_id_int)
         except (OverflowError, TypeError, ValueError):
             user_id_int = None
             notes_db_path = Path("Databases") / "user_databases" / user_id / "ChaChaNotes.db"
@@ -664,9 +734,9 @@ async def run_chatbooks_adapter(config: dict[str, Any], context: dict[str, Any])
 
         return {"error": f"unknown_action:{action}"}
 
-    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.exception(f"Chatbooks adapter error: {e}")
-        return {"error": f"chatbooks_error:{e}"}
+    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
+        logger.exception("Chatbooks adapter error")
+        return {"error": "chatbooks_error"}
 
 
 @registry.register(
@@ -741,21 +811,28 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
         return {"error": f"unknown_action:{action}", "simulated": True}
 
     try:
+        from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
+        from tldw_Server_API.app.core.Character_Chat.character_limits import check_message_limit
         from tldw_Server_API.app.core.Character_Chat.modules.character_chat import (
             load_chat_and_character,
             post_message_to_conversation,
             start_new_chat_session,
         )
-        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+            CharactersRAGDB,
+            CharactersRAGDBError as CharacterDBError,
+            ConflictError as CharacterConflictError,
+            InputError as CharacterInputError,
+        )
 
         # Initialize user's character DB
         try:
             user_id_int = int(user_id)
-            db_path = DatabasePaths.get_chachanotes_db_path(user_id_int)
+            db_path = DatabasePaths.get_chacha_db_path(user_id_int)
         except (OverflowError, TypeError, ValueError):
             db_path = Path("Databases") / "user_databases" / user_id / "ChaChaNotes.db"
 
-        db = CharactersRAGDB(db_path=db_path, client_id="workflow_engine")
+        db = await asyncio.to_thread(CharactersRAGDB, db_path=db_path, client_id="workflow_engine")
 
         if action == "start":
             character_id = config.get("character_id")
@@ -764,7 +841,8 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
 
             custom_title = _render(config.get("title")) if config.get("title") else None
 
-            conversation_id, char_data, initial_history, _ = start_new_chat_session(
+            conversation_id, char_data, initial_history, _ = await asyncio.to_thread(
+                start_new_chat_session,
                 db=db,
                 character_id=int(character_id),
                 user_name=user_name,
@@ -772,7 +850,7 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
             )
 
             if not conversation_id:
-                return {"error": "failed_to_start_chat_session"}
+                return {"error": "failed_to_start_chat_session", "character_id": character_id}
 
             char_name = char_data.get("name", "Character") if char_data else "Character"
             greeting = ""
@@ -792,7 +870,8 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
             if not conversation_id:
                 return {"error": "missing_conversation_id"}
 
-            char_data, history, _ = load_chat_and_character(
+            char_data, history, _ = await asyncio.to_thread(
+                load_chat_and_character,
                 db=db,
                 conversation_id_str=str(conversation_id),
                 user_name=user_name,
@@ -828,35 +907,128 @@ async def run_character_chat_adapter(config: dict[str, Any], context: dict[str, 
             if not message:
                 return {"error": "missing_message"}
 
-            api_name = _render(config.get("api_name") or config.get("api_provider") or "openai")
+            api_name = _render(config.get("api_name") or config.get("api_provider") or config.get("provider") or "openai")
             temperature = float(config.get("temperature") or 0.8)
-
-            # Post message and get response
-            result = await post_message_to_conversation(
-                db=db,
-                conversation_id=str(conversation_id),
-                user_message=message,
-                user_name=user_name,
-                api_name=api_name,
-                temperature=temperature,
+            model = _render(config.get("model")) if config.get("model") else None
+            max_tokens = _coerce_optional_positive_int(
+                _render(config.get("max_tokens")) if config.get("max_tokens") is not None else None,
+                "max_tokens",
             )
+            system_prompt = _render(config.get("system_prompt")) if config.get("system_prompt") else None
 
-            if result is None:
-                return {"error": "failed_to_post_message"}
+            char_data, history, _ = await asyncio.to_thread(
+                load_chat_and_character,
+                db=db,
+                conversation_id_str=str(conversation_id),
+                user_name=user_name,
+            )
+            if char_data is None:
+                return {"error": "conversation_not_found", "conversation_id": conversation_id}
 
-            response_text = result.get("response") or result.get("content") or ""
-            char_name = result.get("character_name") or "Character"
+            char_name = char_data.get("name", "Character") if char_data else "Character"
+            messages_payload: list[dict[str, str]] = []
+            for user_msg, char_msg in history:
+                if user_msg:
+                    messages_payload.append({"role": "user", "content": str(user_msg)})
+                if char_msg:
+                    messages_payload.append({"role": "assistant", "content": str(char_msg)})
+            messages_payload.append({"role": "user", "content": message})
+
+            try:
+                current_message_count = await asyncio.to_thread(
+                    db.count_messages_for_conversation,
+                    str(conversation_id),
+                )
+                check_message_limit(str(conversation_id), current_message_count + 1)
+            except HTTPException as exc:
+                return {
+                    "error": "message_limit_exceeded",
+                    "conversation_id": conversation_id,
+                    "detail": str(exc.detail),
+                }
+            except (CharacterDBError, CharacterConflictError, CharacterInputError, AttributeError, RuntimeError, TypeError, ValueError) as exc:
+                logger.error(
+                    "Failed to check message limit before workflow character chat call for conversation {}: {}",
+                    conversation_id,
+                    exc,
+                )
+                return {"error": "failed_to_check_message_limit", "conversation_id": conversation_id}
+
+            effective_system_prompt = system_prompt or (char_data.get("system_prompt") if char_data else None)
+            llm_response = await perform_chat_api_call_async(
+                api_endpoint=api_name,
+                messages_payload=messages_payload,
+                system_message=effective_system_prompt,
+                model=model,
+                temp=temperature,
+                max_tokens=max_tokens,
+            )
+            response_text = _extract_character_chat_response_text(llm_response).strip()
+
+            try:
+                user_message_id = await asyncio.to_thread(
+                    post_message_to_conversation,
+                    db=db,
+                    conversation_id=str(conversation_id),
+                    character_name=char_name,
+                    message_content=message,
+                    is_user_message=True,
+                )
+            except HTTPException as exc:
+                if exc.status_code == 403:
+                    return {
+                        "error": "message_limit_exceeded",
+                        "conversation_id": conversation_id,
+                        "detail": str(exc.detail),
+                    }
+                logger.error(
+                    "Failed to post workflow user message for conversation {}: {}",
+                    conversation_id,
+                    exc,
+                )
+                return {"error": "failed_to_post_message", "conversation_id": conversation_id, "message_role": "user"}
+            except (CharacterDBError, CharacterConflictError, CharacterInputError, RuntimeError, TypeError, ValueError) as exc:
+                logger.error(
+                    "Failed to post workflow user message for conversation {}: {}",
+                    conversation_id,
+                    exc,
+                )
+                return {"error": "failed_to_post_message", "conversation_id": conversation_id, "message_role": "user"}
+            if not user_message_id:
+                return {"error": "failed_to_post_message", "conversation_id": conversation_id, "message_role": "user"}
+
+            try:
+                assistant_message_id = await asyncio.to_thread(
+                    post_message_to_conversation,
+                    db=db,
+                    conversation_id=str(conversation_id),
+                    character_name=char_name,
+                    message_content=response_text or " ",
+                    is_user_message=False,
+                    parent_message_id=user_message_id,
+                )
+            except (CharacterDBError, CharacterConflictError, CharacterInputError, HTTPException, RuntimeError, TypeError, ValueError) as exc:
+                logger.error(
+                    "Failed to post workflow assistant message for conversation {}: {}",
+                    conversation_id,
+                    exc,
+                )
+                return {"error": "failed_to_post_message", "conversation_id": conversation_id, "message_role": "assistant"}
+            if not assistant_message_id:
+                return {"error": "failed_to_post_message", "conversation_id": conversation_id, "message_role": "assistant"}
 
             return {
                 "response": response_text,
                 "text": response_text,  # Alias for downstream steps
                 "conversation_id": conversation_id,
                 "character_name": char_name,
-                "turn_count": result.get("turn_count", 0),
+                "turn_count": len(messages_payload) + 1,
             }
 
         return {"error": f"unknown_action:{action}"}
 
-    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logger.exception(f"Character chat adapter error: {e}")
-        return {"error": f"character_chat_error:{e}"}
+    except AdapterError as exc:
+        return {"error": _safe_adapter_error_message(exc)}
+    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError):
+        logger.exception("Character chat adapter error")
+        return {"error": "character_chat_error"}

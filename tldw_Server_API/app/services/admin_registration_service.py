@@ -82,11 +82,15 @@ async def update_registration_settings(
         try:
             await reset_registration_service()
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Registration service reset failed: {}", exc)
+            logger.warning("Registration service reset failed")
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        logger.warning("Invalid registration settings update")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid registration settings",
+        ) from exc
     except Exception as exc:
-        logger.error(f"Failed to update registration settings: {exc}")
+        logger.error("Failed to update registration settings")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update registration settings",
@@ -302,7 +306,7 @@ async def create_registration_code(
         return response, audit_info
 
     except Exception as exc:
-        logger.error(f"Failed to create registration code: {exc}")
+        logger.error("Failed to create registration code")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create registration code",
@@ -420,7 +424,7 @@ async def list_registration_codes(
         return RegistrationCodeListResponse(codes=codes)
 
     except Exception as exc:
-        logger.error(f"Failed to list registration codes: {exc}")
+        logger.error("Failed to list registration codes")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve registration codes",
@@ -462,7 +466,7 @@ async def delete_registration_code(
         return {"message": f"Registration code {code_id} revoked"}, audit_info
 
     except Exception as exc:
-        logger.error(f"Failed to delete registration code {code_id}: {exc}")
+        logger.error("Failed to delete registration code")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete registration code",

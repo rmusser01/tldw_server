@@ -10,37 +10,60 @@ type ChatModelSelectorDropdownProps = {
   apiModelLabel: string
   connectionStatusLabel: string
   connectionStatusWarning?: boolean
+  catalogControls?: React.ReactNode
+  modelUsabilityLabel?: string
+  modelUsabilityTitle?: string
+  modelUsabilityWarning?: boolean
   modelDropdownMenuItems: any[]
   modelDropdownOpen: boolean
-  modelSearchQuery: string
+  modelSearchQuery?: string
   modelSelectorWarning?: boolean
-  modelSortMode: ModelSortMode
+  modelSortMode?: ModelSortMode
   placement?: "topLeft" | "bottomLeft"
   resolvedProviderKey: string
-  selectedModel: string | null | undefined
+  selectedModel?: string | null | undefined
   setModelDropdownOpen: (open: boolean) => void
   setModelSearchQuery: (query: string) => void
-  setModelSortMode: (mode: ModelSortMode) => void
+  setModelSortMode?: (mode: ModelSortMode) => void
 }
 
 export const ChatModelSelectorDropdown = React.memo(
   function ChatModelSelectorDropdown({
     apiModelLabel,
+    catalogControls,
     connectionStatusLabel,
     connectionStatusWarning = false,
+    modelUsabilityLabel,
+    modelUsabilityTitle,
+    modelUsabilityWarning = false,
     modelDropdownMenuItems,
     modelDropdownOpen,
-    modelSearchQuery,
+    modelSearchQuery = "",
     modelSelectorWarning = false,
-    modelSortMode,
+    modelSortMode = "favorites",
     placement = "topLeft",
     resolvedProviderKey,
     selectedModel,
     setModelDropdownOpen,
     setModelSearchQuery,
-    setModelSortMode
+    setModelSortMode = () => undefined
   }: ChatModelSelectorDropdownProps) {
     const { t } = useTranslation(["playground", "common"])
+    // When no model is selected, the provider connection may well be "Healthy",
+    // but showing that green badge next to "Select a model" is contradictory —
+    // you cannot chat yet. Surface a truthful "No model selected" state instead.
+    const noModelSelected = !selectedModel
+    const statusLabel =
+      modelUsabilityLabel ??
+      (noModelSelected
+        ? t("playground:composer.providerStatusNoModel", "No model selected")
+        : connectionStatusLabel)
+    const statusTitle = modelUsabilityTitle ?? apiModelLabel
+    const statusWarning =
+      noModelSelected ||
+      modelUsabilityWarning ||
+      connectionStatusWarning ||
+      modelSelectorWarning
 
     return (
       <Dropdown
@@ -58,51 +81,53 @@ export const ChatModelSelectorDropdown = React.memo(
         }}
         popupRender={(menu) => (
           <div className="rounded-lg border border-border bg-surface shadow-lg">
-            <div className="flex items-center gap-2 border-b border-border p-2">
-              <Input
-                size="small"
-                placeholder={t(
-                  "playground:composer.modelSearchPlaceholder",
-                  "Search models"
-                )}
-                value={modelSearchQuery}
-                allowClear
-                className="flex-1"
-                onChange={(event) => setModelSearchQuery(event.target.value)}
-                onKeyDown={(event) => event.stopPropagation()}
-              />
-              <Select
-                size="small"
-                value={modelSortMode}
-                onChange={(value) => setModelSortMode(value as ModelSortMode)}
-                options={[
-                  {
-                    value: "favorites",
-                    label: t(
-                      "playground:composer.sort.favorites",
-                      "Favorites"
-                    )
-                  },
-                  {
-                    value: "az",
-                    label: t("playground:composer.sort.az", "A-Z")
-                  },
-                  {
-                    value: "provider",
-                    label: t("playground:composer.sort.provider", "Provider")
-                  },
-                  {
-                    value: "localFirst",
-                    label: t(
-                      "playground:composer.sort.localFirst",
-                      "Local-first"
-                    )
-                  }
-                ]}
-                className="min-w-[120px]"
-                onKeyDown={(event) => event.stopPropagation()}
-              />
-            </div>
+            {catalogControls ?? (
+              <div className="flex items-center gap-2 border-b border-border p-2">
+                <Input
+                  size="small"
+                  placeholder={t(
+                    "playground:composer.modelSearchPlaceholder",
+                    "Search models"
+                  )}
+                  value={modelSearchQuery}
+                  allowClear
+                  className="flex-1"
+                  onChange={(event) => setModelSearchQuery(event.target.value)}
+                  onKeyDown={(event) => event.stopPropagation()}
+                />
+                <Select
+                  size="small"
+                  value={modelSortMode}
+                  onChange={(value) => setModelSortMode(value as ModelSortMode)}
+                  options={[
+                    {
+                      value: "favorites",
+                      label: t(
+                        "playground:composer.sort.favorites",
+                        "Favorites"
+                      )
+                    },
+                    {
+                      value: "az",
+                      label: t("playground:composer.sort.az", "A-Z")
+                    },
+                    {
+                      value: "provider",
+                      label: t("playground:composer.sort.provider", "Provider")
+                    },
+                    {
+                      value: "localFirst",
+                      label: t(
+                        "playground:composer.sort.localFirst",
+                        "Local-first"
+                      )
+                    }
+                  ]}
+                  className="min-w-[120px]"
+                  onKeyDown={(event) => event.stopPropagation()}
+                />
+              </div>
+            )}
             <div className="no-scrollbar max-h-[400px] overflow-y-auto">
               {menu}
             </div>
@@ -129,19 +154,17 @@ export const ChatModelSelectorDropdown = React.memo(
       >
         <Tooltip
           title={
-            modelSelectorWarning
-              ? t(
-                  "playground:composer.selectModelTooltip",
-                  "Click to select a model"
-                )
-              : apiModelLabel
+            statusTitle ||
+            (modelSelectorWarning
+              ? t("playground:composer.selectModelTooltip", "Click to select a model")
+              : apiModelLabel)
           }
           placement="top"
         >
           <button
             type="button"
-            title={apiModelLabel}
-            aria-label={apiModelLabel}
+            title={statusTitle}
+            aria-label={statusTitle}
             aria-haspopup="listbox"
             aria-expanded={modelDropdownOpen}
             data-testid="model-selector"
@@ -154,13 +177,13 @@ export const ChatModelSelectorDropdown = React.memo(
             <ProviderIcons
               provider={resolvedProviderKey}
               className={`h-3 w-3 ${
-                modelSelectorWarning ? "text-warn" : "text-text-subtle"
+                statusWarning ? "text-warn" : "text-text-subtle"
               }`}
             />
             <span className="max-w-[120px] truncate">{apiModelLabel}</span>
             <span
               className={`rounded-full px-1.5 py-0.5 text-[9px] ${
-                connectionStatusWarning
+                statusWarning
                   ? "bg-warn/10 text-warn"
                   : "bg-success/10 text-success"
               }`}
@@ -171,7 +194,7 @@ export const ChatModelSelectorDropdown = React.memo(
                 ) as string
               }
             >
-              {connectionStatusLabel}
+              {statusLabel}
             </span>
           </button>
         </Tooltip>

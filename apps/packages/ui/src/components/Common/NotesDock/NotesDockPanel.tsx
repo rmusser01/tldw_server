@@ -21,6 +21,20 @@ import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { classNames } from "@/libs/class-name"
 import { useNavigate } from "react-router-dom"
 import { getQueryClient } from "@/services/query-client"
+import TaskChecklistPreview, {
+  type TaskChecklistTogglePayload
+} from "@/components/Notes/TaskChecklistPreview"
+import TaskActivityNotice from "@/components/Notes/TaskActivityNotice"
+import { toggleChecklistItemMarker } from "@/components/Notes/task-markdown"
+import {
+  listNoteTasks,
+  listTaskActivity,
+  markTaskActivityRead,
+  setNoteTaskStatus,
+  type NoteTask,
+  type NoteTaskActivityEvent,
+  type NoteTaskReconciliationSummary
+} from "@/services/notes-tasks"
 
 const { TextArea } = Input
 
@@ -179,11 +193,18 @@ export const NotesDockPanel: React.FC = () => {
   const [syncingNotesList, setSyncingNotesList] = useState(false)
   const [keywordsInput, setKeywordsInput] = useState<Record<string, string>>({})
   const [archiveCollapsed, setArchiveCollapsed] = useState(false)
+  const [activeNoteTasks, setActiveNoteTasks] = useState<NoteTask[]>([])
+  const [taskReconciliation, setTaskReconciliation] =
+    useState<NoteTaskReconciliationSummary | null>(null)
+  const [taskActivityEvents, setTaskActivityEvents] = useState<NoteTaskActivityEvent[]>([])
+  const [dismissingTaskActivityId, setDismissingTaskActivityId] = useState<string | null>(null)
 
   const dockRef = useRef<HTMLDivElement | null>(null)
   const dragStateRef = useRef<DragState | null>(null)
   const searchTimeoutRef = useRef<number | null>(null)
   const fetchRequestIdRef = useRef(0)
+  const taskRequestIdRef = useRef(0)
+  const activeServerNoteIdRef = useRef<string | null>(null)
   const cacheSyncInFlightRef = useRef(0)
   const unsavedModalReturnFocusRef = useRef<HTMLElement | null>(null)
 
@@ -196,6 +217,10 @@ export const NotesDockPanel: React.FC = () => {
     () => notes.find((note) => note.localId === activeNoteId) ?? null,
     [notes, activeNoteId]
   )
+
+  useEffect(() => {
+    activeServerNoteIdRef.current = activeNote?.id != null ? String(activeNote.id) : null
+  }, [activeNote?.id])
 
   const openNoteIds = useMemo(() => {
     return new Set(notes.map((note) => note.id).filter(Boolean))
@@ -352,6 +377,56 @@ export const NotesDockPanel: React.FC = () => {
     }
   }
 
+  const refreshTaskStateForNote = useCallback(
+    async (noteId: string | number | null | undefined) => {
+      const noteIdText = noteId != null ? String(noteId) : null
+      if (noteIdText && activeServerNoteIdRef.current !== noteIdText) {
+        return
+      }
+      const requestId = ++taskRequestIdRef.current
+      if (!noteIdText || editorDisabled) {
+        setActiveNoteTasks([])
+        setTaskReconciliation(null)
+        setTaskActivityEvents([])
+        return
+      }
+
+      try {
+        const response = await listNoteTasks(noteId, { limit: 500 })
+        if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText) return
+        setActiveNoteTasks(Array.isArray(response.tasks) ? response.tasks : [])
+        setTaskReconciliation(response.reconciliation ?? null)
+      } catch {
+        if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText) return
+        setActiveNoteTasks([])
+        setTaskReconciliation(null)
+      }
+
+      try {
+        const response = await listTaskActivity({ note_id: noteId, limit: 50 })
+        if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText) return
+        const events = Array.isArray(response.events)
+          ? response.events.filter((event) => {
+              return (
+                String(event.note_id || "") === noteIdText &&
+                !event.dismissed_at &&
+                event.actor_type === "agent"
+              )
+            })
+          : []
+        setTaskActivityEvents(events)
+      } catch {
+        if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText) return
+        setTaskActivityEvents([])
+      }
+    },
+    [editorDisabled]
+  )
+
+  useEffect(() => {
+    void refreshTaskStateForNote(activeNote?.id)
+  }, [activeNote?.id, refreshTaskStateForNote])
+
   const syncNotesPageCache = useCallback(async () => {
     cacheSyncInFlightRef.current += 1
     setSyncingNotesList(true)
@@ -421,9 +496,13 @@ export const NotesDockPanel: React.FC = () => {
         title: saved.title ?? note.title,
         content: saved.content ?? note.content,
         keywords: extractedKeywords.length > 0 ? extractedKeywords : note.keywords,
-        version: saved.version ?? note.version ?? null
+          version: saved.version ?? note.version ?? null
       })
 
+      const savedId = saved.id ?? note.id
+      if (savedId != null) {
+        await refreshTaskStateForNote(savedId)
+      }
       void syncNotesPageCache()
       message.success(t("option:notesDock.saved", "Note saved"))
       return true
@@ -443,6 +522,102 @@ export const NotesDockPanel: React.FC = () => {
       setSavingNoteId(null)
     }
   }
+
+  const toggleTaskCheckboxLocal = useCallback(
+    (payload: TaskChecklistTogglePayload) => {
+      if (!activeNote) return
+      const nextContent = toggleChecklistItemMarker(
+        activeNote.content,
+        payload.lineNumber,
+        payload.nextStatus === "done"
+      )
+      if (nextContent === activeNote.content) return
+      updateNote(activeNote.localId, { content: nextContent })
+    },
+    [activeNote, updateNote]
+  )
+
+  const toggleTaskCheckboxStatus = useCallback(
+    async (payload: TaskChecklistTogglePayload) => {
+      if (!activeNote) return
+      const task = payload.task
+      if (activeNote.isDirty || !task || !activeNote.id) {
+        toggleTaskCheckboxLocal(payload)
+        return
+      }
+
+      const expectedNoteVersion = activeNote.version ?? task.projection?.note_version ?? null
+      if (expectedNoteVersion == null) {
+        message.error(
+          t(
+            "option:notesSearch_taskConflictNotice",
+            "Task changed on the server. Reload the note and try again."
+          )
+        )
+        return
+      }
+
+      try {
+        await setNoteTaskStatus([
+          {
+            task_id: task.id,
+            status: payload.nextStatus,
+            expected_task_version: task.version,
+            expected_note_version: expectedNoteVersion
+          }
+        ])
+        const detail = await bgRequest<NoteListItem>({
+          path: `/api/v1/notes/${activeNote.id}` as AllowedPath,
+          method: "GET"
+        })
+        const keywords = extractKeywords(detail)
+        markSaved(activeNote.localId, {
+          id: detail.id ?? activeNote.id,
+          title: detail.title ?? activeNote.title,
+          content: detail.content ?? activeNote.content,
+          keywords,
+          version: detail.version ?? activeNote.version ?? null
+        })
+        await refreshTaskStateForNote(activeNote.id)
+        void syncNotesPageCache()
+      } catch (error: any) {
+        if (error?.status === 409 || error?.message?.includes("version")) {
+          message.error(
+            t(
+              "option:notesSearch_taskConflictNotice",
+              "Task changed on the server. Reload the note and try again."
+            )
+          )
+        } else {
+          message.error(t("option:notesSearch_taskUpdateError", "Task update failed"))
+        }
+      }
+    },
+    [
+      activeNote,
+      markSaved,
+      message,
+      refreshTaskStateForNote,
+      syncNotesPageCache,
+      t,
+      toggleTaskCheckboxLocal
+    ]
+  )
+
+  const dismissTaskActivity = useCallback(
+    async (eventId: string) => {
+      setDismissingTaskActivityId(eventId)
+      try {
+        await markTaskActivityRead(eventId, { dismissed: true })
+        setTaskActivityEvents((current) => current.filter((event) => event.id !== eventId))
+      } catch {
+        message.error(t("option:notesSearch_taskActivityDismissError", "Failed to dismiss task activity"))
+      } finally {
+        setDismissingTaskActivityId(null)
+      }
+    },
+    [message, t]
+  )
 
   const saveAllDirtyNotes = async () => {
     const dirtyNotes = notes.filter((note) => note.isDirty)
@@ -571,6 +746,7 @@ export const NotesDockPanel: React.FC = () => {
 
   const portalRoot = ensurePortalRoot()
   if (!portalRoot) return null
+  const hasIncompleteTaskReconciliation = taskReconciliation?.status === "incomplete"
 
   const panel = (
     <div
@@ -843,6 +1019,23 @@ export const NotesDockPanel: React.FC = () => {
                 {t("option:notesDock.unsaved", "Unsaved changes")}
               </div>
             )}
+            <TaskActivityNotice
+              events={taskActivityEvents}
+              noteTitle={activeNote?.title || null}
+              testId="notes-dock-task-activity-notice"
+              compact
+              dismissingEventId={dismissingTaskActivityId}
+              onInspect={() => navigate("/notes")}
+              onDismiss={(eventId) => void dismissTaskActivity(eventId)}
+            />
+            {hasIncompleteTaskReconciliation && (
+              <div className="mt-2 text-[11px] text-warning" data-testid="notes-dock-task-reconciliation-warning">
+                {t(
+                  "option:notesSearch_taskIncompleteReconciliationWarning",
+                  "Some task updates are still reconciling."
+                )}
+              </div>
+            )}
             {syncingNotesList && (
               <div className="mt-2 text-[11px] text-text-subtle" data-testid="notes-dock-sync-indicator">
                 {t("option:notesDock.syncingNotesList", "Syncing notes list...")}
@@ -852,19 +1045,30 @@ export const NotesDockPanel: React.FC = () => {
 
           <div className="min-h-0 flex-1 p-3">
             {activeNote ? (
-              <TextArea
-                value={activeNote.content}
-                onChange={(event) =>
-                  updateNote(activeNote.localId, { content: event.target.value })
-                }
-                placeholder={t(
-                  "option:notesDock.contentPlaceholder",
-                  "Jot down notes, ideas, or observations..."
-                )}
-                className="h-full resize-none text-sm"
-                style={{ height: "100%" }}
-                disabled={editorDisabled}
-              />
+              <div className="flex h-full min-h-0 flex-col gap-2">
+                <TaskChecklistPreview
+                  content={activeNote.content}
+                  tasks={activeNoteTasks}
+                  isDirty={activeNote.isDirty}
+                  disabled={editorDisabled}
+                  compact
+                  onToggleLocal={toggleTaskCheckboxLocal}
+                  onToggleTaskStatus={toggleTaskCheckboxStatus}
+                />
+                <TextArea
+                  value={activeNote.content}
+                  onChange={(event) =>
+                    updateNote(activeNote.localId, { content: event.target.value })
+                  }
+                  placeholder={t(
+                    "option:notesDock.contentPlaceholder",
+                    "Jot down notes, ideas, or observations..."
+                  )}
+                  className="min-h-0 flex-1 resize-none text-sm"
+                  style={{ height: "100%" }}
+                  disabled={editorDisabled}
+                />
+              </div>
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-text-subtle">
                 {t(

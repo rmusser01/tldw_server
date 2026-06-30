@@ -122,10 +122,56 @@ describe("background clipper rollout guard", () => {
       onActionIconClickChange: vi.fn(),
       onContextMenuClickChange: vi.fn()
     })
+    await flushPromises()
 
     expect(mocks.contextMenusCreate).not.toHaveBeenCalledWith(
       expect.objectContaining({ id: "save-to-clipper-pa" })
     )
+  })
+
+  it("does not block startup on capability refreshes or model warmup", async () => {
+    let resolveCapabilities: (value: { hasWebClipper: boolean }) => void = () => {}
+    mocks.getServerCapabilities.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCapabilities = resolve
+        })
+    )
+    warmModels.mockImplementationOnce(
+      () => new Promise(() => undefined)
+    )
+
+    const result = await Promise.race([
+      initBackground({
+        storage: storage as never,
+        contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
+        saveToClipperMenuId: "save-to-clipper-pa",
+        saveToCompanionMenuId: "save-to-companion-pa",
+        saveToNotesMenuId: "save-to-notes-pa",
+        narrateSelectionMenuId: "narrate-selection-pa",
+        transcribeMenuId: {
+          transcribe: "transcribe-media-pa",
+          transcribeAndSummarize: "transcribe-and-summarize-media-pa"
+        },
+        warmModels,
+        capabilities: {
+          sendToTldw: false,
+          processLocal: false,
+          transcribe: false,
+          openApiCheck: false
+        },
+        onActionIconClickChange: vi.fn(),
+        onContextMenuClickChange: vi.fn()
+      }),
+      new Promise((resolve) => setTimeout(() => resolve("timeout"), 25))
+    ])
+
+    expect(result).toEqual(
+      expect.objectContaining({ modelWarmAlarmName: "tldw:model-warm" })
+    )
+
+    resolveCapabilities({ hasWebClipper: true })
+    await flushPromises()
   })
 
   it("removes the clipper menu after config changes to a server without clipper support", async () => {
@@ -150,6 +196,7 @@ describe("background clipper rollout guard", () => {
       onActionIconClickChange: vi.fn(),
       onContextMenuClickChange: vi.fn()
     })
+    await flushPromises()
 
     expect(mocks.contextMenusCreate).toHaveBeenCalledWith(
       expect.objectContaining({ id: "save-to-clipper-pa" })

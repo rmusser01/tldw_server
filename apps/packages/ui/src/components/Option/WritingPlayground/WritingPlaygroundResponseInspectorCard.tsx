@@ -1,5 +1,6 @@
 import type { FC } from "react"
-import { Alert, Button, Tag } from "antd"
+import { Button, Tag } from "antd"
+import { Alert } from "@/components/ui/primitives"
 import type { ResponseInspectorCardProps } from "./WritingPlaygroundDiagnostics.types"
 
 export const WritingPlaygroundResponseInspectorCard: FC<
@@ -59,9 +60,8 @@ export const WritingPlaygroundResponseInspectorCard: FC<
     </div>
     {!settingsLogprobsEnabled ? (
       <Alert
-        type="info"
-        showIcon
-        message={t(
+        variant="info"
+        title={t(
           "option:writingPlayground.responseInspectorDisabled",
           "Enable logprobs in generation settings to capture response token scores."
         )}

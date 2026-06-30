@@ -90,6 +90,8 @@ def test_adapter_midstream_error_raises(monkeypatch, adapter_path: str):
 
     adapter = Adapter()
     req: Dict[str, Any] = {"messages": [{"role": "user", "content": "hi"}], "model": "x", "api_key": "k", "stream": True}
+    if cls_name == "CustomOpenAIAdapter2":
+        req["base_url"] = "http://mock-custom-openai.local/v1"
 
     with pytest.raises(Exception) as ei:
         list(adapter.stream(req))

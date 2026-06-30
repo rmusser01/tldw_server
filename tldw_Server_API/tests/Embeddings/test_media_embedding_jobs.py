@@ -1,13 +1,11 @@
 import os
-import time
+from types import SimpleNamespace
+
 import pytest
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
 import redis
 import redis.asyncio as aioredis
-from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.config import settings
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 
 
 class _FakeMediaDB:
@@ -38,6 +36,46 @@ class _FakeRedisClient:
         return None
 
 
+@pytest.mark.asyncio
+async def test_list_media_embedding_jobs_includes_canonical_overfetch_pagination(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import media_embeddings as media_embeddings_endpoint
+
+    class _FakeJobsAdapter:
+        def list_jobs(self, *, user_id, status=None, limit=50, offset=0):
+            assert user_id == "1"
+            assert status == "queued"
+            assert limit in {2, 3}
+            assert offset == 0
+            rows = [
+                {"id": "job-1", "status": "queued"},
+                {"id": "job-2", "status": "queued"},
+                {"id": "job-3", "status": "queued"},
+            ]
+            return rows[:limit]
+
+    monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _FakeJobsAdapter)
+
+    response = await media_embeddings_endpoint.list_media_embedding_jobs(
+        current_user=SimpleNamespace(id=1),
+        status="queued",
+        limit=2,
+        offset=0,
+    )
+
+    assert [row["id"] for row in response["data"]] == ["job-1", "job-2"]
+    assert response["pagination"] == {
+        "mode": "offset",
+        "limit": 2,
+        "offset": 0,
+        "total": None,
+        "has_more": True,
+        "next_offset": 2,
+        "count": 2,
+    }
+    assert response["has_more"] is True
+    assert response["next_offset"] == 2
+
+
 @pytest.fixture(autouse=True)
 def _stub_redis_clients(monkeypatch):
     def _make_client(*_args, **_kwargs):
@@ -47,57 +85,79 @@ def _stub_redis_clients(monkeypatch):
     monkeypatch.setattr(redis, "from_url", _make_client, raising=False)
 
 
-from contextlib import contextmanager
-
-
-@contextmanager
-def _client():
-    with TestClient(app) as c:
-        c.cookies.set("csrf_token", "test-csrf")
-        yield c
-
-
-def test_media_embedding_job_lifecycle():
+@pytest.mark.asyncio
+async def test_media_embedding_job_lifecycle(monkeypatch):
     os.environ["TESTING"] = "true"
     try:
+        from tldw_Server_API.app.api.v1.endpoints import media_embeddings as media_embeddings_endpoint
+
+        class _LifecycleJobsAdapter:
+            _jobs: list[dict] = []
+
+            def create_job(self, **kwargs):
+                row = {
+                    "id": "job-123",
+                    "uuid": "job-123",
+                    "media_id": int(kwargs["media_id"]),
+                    "user_id": str(kwargs["user_id"]),
+                    "status": "queued",
+                    "embedding_model": kwargs["embedding_model"],
+                    "embedding_count": None,
+                    "chunks_processed": None,
+                }
+                type(self)._jobs = [row]
+                return row
+
+            def get_job(self, job_id, user_id):
+                for row in type(self)._jobs:
+                    if str(row["id"]) == str(job_id) and str(row["user_id"]) == str(user_id):
+                        return dict(row)
+                return None
+
+            def list_jobs(self, *, user_id, status=None, limit=50, offset=0):
+                rows = [
+                    dict(row)
+                    for row in type(self)._jobs
+                    if str(row["user_id"]) == str(user_id) and (status is None or row["status"] == status)
+                ]
+                return rows[int(offset) : int(offset) + int(limit)]
+
         original_allowed_providers = settings.get("ALLOWED_EMBEDDING_PROVIDERS")
         original_allowed_models = settings.get("ALLOWED_EMBEDDING_MODELS")
         original_model_limits = settings.get("EMBEDDING_MODEL_MAX_TOKENS")
-        # Keep token limits permissive
         settings["ALLOWED_EMBEDDING_PROVIDERS"] = ["openai", "huggingface"]
         settings["ALLOWED_EMBEDDING_MODELS"] = ["text-embedding-3-small", "sentence-transformers/all-MiniLM-L6-v2"]
         settings["EMBEDDING_MODEL_MAX_TOKENS"] = {"openai:text-embedding-3-small": 8192}
+        monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _LifecycleJobsAdapter)
 
-        # Override media DB dependency
-        app.dependency_overrides[get_media_db_for_user] = lambda: _FakeMediaDB()
+        current_user = SimpleNamespace(id=1)
+        response = await media_embeddings_endpoint.generate_embeddings(
+            media_id=123,
+            request=media_embeddings_endpoint.GenerateEmbeddingsRequest(),
+            db=_FakeMediaDB(),
+            current_user=current_user,
+        )
+        assert response.status == "accepted"
+        job_id = response.job_id
+        assert job_id
 
-        with _client() as client:
-            # Start job
-            api_key = get_settings().SINGLE_USER_API_KEY
-            r = client.post("/api/v1/media/123/embeddings", json={}, headers={"X-API-KEY": api_key})
-            assert r.status_code == 200
-            body = r.json()
-            assert body.get("status") == "accepted"
-            job_id = body.get("job_id")
-            assert job_id
+        data = await media_embeddings_endpoint.get_media_embedding_job(
+            job_id,
+            current_user=current_user,
+        )
+        assert data.get("id") == job_id
+        assert data.get("media_id") == 123
+        assert data.get("status") in ("queued", "processing", "completed", "failed")
 
-            # Get job status (may be processing/completed/failed depending on environment)
-            r2 = client.get(f"/api/v1/media/embeddings/jobs/{job_id}", headers={"X-API-KEY": api_key})
-            assert r2.status_code == 200
-            data = r2.json()
-            assert data.get("id") == job_id
-            assert data.get("media_id") == 123
-            assert data.get("status") in ("queued", "processing", "completed", "failed")
-
-            # List jobs
-            r3 = client.get("/api/v1/media/embeddings/jobs", headers={"X-API-KEY": api_key})
-            assert r3.status_code == 200
-            j = r3.json()
-            assert isinstance(j.get("data"), list)
-            assert any(row.get("id") == job_id for row in j["data"])
+        listed = await media_embeddings_endpoint.list_media_embedding_jobs(
+            current_user=current_user,
+            limit=50,
+            offset=0,
+        )
+        assert isinstance(listed.get("data"), list)
+        assert any(row.get("id") == job_id for row in listed["data"])
     finally:
         os.environ.pop("TESTING", None)
-        app.dependency_overrides.pop(get_media_db_for_user, None)
         if original_allowed_providers is None:
             settings.pop("ALLOWED_EMBEDDING_PROVIDERS", None)
         else:
@@ -112,7 +172,8 @@ def test_media_embedding_job_lifecycle():
             settings["EMBEDDING_MODEL_MAX_TOKENS"] = original_model_limits
 
 
-def test_media_embedding_job_returns_500_when_job_creation_fails(monkeypatch):
+@pytest.mark.asyncio
+async def test_media_embedding_job_returns_500_when_job_creation_fails(monkeypatch):
     os.environ["TESTING"] = "true"
     try:
         from tldw_Server_API.app.api.v1.endpoints import media_embeddings as media_embeddings_endpoint
@@ -121,20 +182,23 @@ def test_media_embedding_job_returns_500_when_job_creation_fails(monkeypatch):
             def create_job(self, **_kwargs):
                 raise RuntimeError("queue unavailable")
 
-        app.dependency_overrides[get_media_db_for_user] = lambda: _FakeMediaDB()
         monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _FailingAdapter)
 
-        with _client() as client:
-            api_key = get_settings().SINGLE_USER_API_KEY
-            resp = client.post("/api/v1/media/123/embeddings", json={}, headers={"X-API-KEY": api_key})
-            assert resp.status_code == 500
-            assert resp.json().get("detail") == "Failed to queue embedding job"
+        with pytest.raises(HTTPException) as exc_info:
+            await media_embeddings_endpoint.generate_embeddings(
+                media_id=123,
+                request=media_embeddings_endpoint.GenerateEmbeddingsRequest(),
+                db=_FakeMediaDB(),
+                current_user=SimpleNamespace(id=1),
+            )
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to queue embedding job"
     finally:
         os.environ.pop("TESTING", None)
-        app.dependency_overrides.pop(get_media_db_for_user, None)
 
 
-def test_media_embedding_job_returns_500_when_job_id_missing(monkeypatch):
+@pytest.mark.asyncio
+async def test_media_embedding_job_returns_500_when_job_id_missing(monkeypatch):
     os.environ["TESTING"] = "true"
     try:
         from tldw_Server_API.app.api.v1.endpoints import media_embeddings as media_embeddings_endpoint
@@ -143,20 +207,23 @@ def test_media_embedding_job_returns_500_when_job_id_missing(monkeypatch):
             def create_job(self, **_kwargs):
                 return {}
 
-        app.dependency_overrides[get_media_db_for_user] = lambda: _FakeMediaDB()
         monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _EmptyAdapter)
 
-        with _client() as client:
-            api_key = get_settings().SINGLE_USER_API_KEY
-            resp = client.post("/api/v1/media/123/embeddings", json={}, headers={"X-API-KEY": api_key})
-            assert resp.status_code == 500
-            assert resp.json().get("detail") == "Failed to queue embedding job"
+        with pytest.raises(HTTPException) as exc_info:
+            await media_embeddings_endpoint.generate_embeddings(
+                media_id=123,
+                request=media_embeddings_endpoint.GenerateEmbeddingsRequest(),
+                db=_FakeMediaDB(),
+                current_user=SimpleNamespace(id=1),
+            )
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Failed to queue embedding job"
     finally:
         os.environ.pop("TESTING", None)
-        app.dependency_overrides.pop(get_media_db_for_user, None)
 
 
-def test_media_embedding_batch_returns_partial_on_partial_enqueue_failure(monkeypatch):
+@pytest.mark.asyncio
+async def test_media_embedding_batch_returns_partial_on_partial_enqueue_failure(monkeypatch):
     os.environ["TESTING"] = "true"
     try:
         from tldw_Server_API.app.api.v1.endpoints import media_embeddings as media_embeddings_endpoint
@@ -168,29 +235,24 @@ def test_media_embedding_batch_returns_partial_on_partial_enqueue_failure(monkey
                     raise RuntimeError("enqueue failed")
                 return {"uuid": f"job-{media_id}"}
 
-        app.dependency_overrides[get_media_db_for_user] = lambda: _FakeMediaDB(media_ids=[123, 456])
         monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _PartialAdapter)
 
-        with _client() as client:
-            api_key = get_settings().SINGLE_USER_API_KEY
-            resp = client.post(
-                "/api/v1/media/embeddings/batch",
-                json={"media_ids": [123, 456]},
-                headers={"X-API-KEY": api_key},
-            )
-            assert resp.status_code == 202
-            body = resp.json()
-            assert body.get("status") == "partial"
-            assert body.get("job_ids") == ["job-123"]
-            assert body.get("submitted") == 1
-            assert body.get("failed_media_ids") == [456]
-            assert body.get("failure_reasons") == ["media_id=456: RuntimeError"]
+        body = await media_embeddings_endpoint.generate_embeddings_batch(
+            request=media_embeddings_endpoint.BatchMediaEmbeddingsRequest(media_ids=[123, 456]),
+            db=_FakeMediaDB(media_ids=[123, 456]),
+            current_user=SimpleNamespace(id=1),
+        )
+        assert body.status == "partial"
+        assert body.job_ids == ["job-123"]
+        assert body.submitted == 1
+        assert body.failed_media_ids == [456]
+        assert body.failure_reasons == ["media_id=456: RuntimeError"]
     finally:
         os.environ.pop("TESTING", None)
-        app.dependency_overrides.pop(get_media_db_for_user, None)
 
 
-def test_media_embedding_batch_returns_accepted_with_empty_failure_lists(monkeypatch):
+@pytest.mark.asyncio
+async def test_media_embedding_batch_returns_accepted_with_empty_failure_lists(monkeypatch):
     os.environ["TESTING"] = "true"
     try:
         from tldw_Server_API.app.api.v1.endpoints import media_embeddings as media_embeddings_endpoint
@@ -200,29 +262,24 @@ def test_media_embedding_batch_returns_accepted_with_empty_failure_lists(monkeyp
                 media_id = int(kwargs["media_id"])
                 return {"uuid": f"job-{media_id}"}
 
-        app.dependency_overrides[get_media_db_for_user] = lambda: _FakeMediaDB(media_ids=[123, 456])
         monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _SuccessfulAdapter)
 
-        with _client() as client:
-            api_key = get_settings().SINGLE_USER_API_KEY
-            resp = client.post(
-                "/api/v1/media/embeddings/batch",
-                json={"media_ids": [123, 456]},
-                headers={"X-API-KEY": api_key},
-            )
-            assert resp.status_code == 202
-            body = resp.json()
-            assert body.get("status") == "accepted"
-            assert body.get("job_ids") == ["job-123", "job-456"]
-            assert body.get("submitted") == 2
-            assert body.get("failed_media_ids") == []
-            assert body.get("failure_reasons") == []
+        body = await media_embeddings_endpoint.generate_embeddings_batch(
+            request=media_embeddings_endpoint.BatchMediaEmbeddingsRequest(media_ids=[123, 456]),
+            db=_FakeMediaDB(media_ids=[123, 456]),
+            current_user=SimpleNamespace(id=1),
+        )
+        assert body.status == "accepted"
+        assert body.job_ids == ["job-123", "job-456"]
+        assert body.submitted == 2
+        assert body.failed_media_ids == []
+        assert body.failure_reasons == []
     finally:
         os.environ.pop("TESTING", None)
-        app.dependency_overrides.pop(get_media_db_for_user, None)
 
 
-def test_media_embedding_batch_returns_500_when_nothing_queued(monkeypatch):
+@pytest.mark.asyncio
+async def test_media_embedding_batch_returns_500_when_nothing_queued(monkeypatch):
     os.environ["TESTING"] = "true"
     try:
         from tldw_Server_API.app.api.v1.endpoints import media_embeddings as media_embeddings_endpoint
@@ -231,28 +288,26 @@ def test_media_embedding_batch_returns_500_when_nothing_queued(monkeypatch):
             def create_job(self, **_kwargs):
                 raise RuntimeError("enqueue failed")
 
-        app.dependency_overrides[get_media_db_for_user] = lambda: _FakeMediaDB(media_ids=[456])
         monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _FailingAdapter)
 
-        with _client() as client:
-            api_key = get_settings().SINGLE_USER_API_KEY
-            resp = client.post(
-                "/api/v1/media/embeddings/batch",
-                json={"media_ids": [456]},
-                headers={"X-API-KEY": api_key},
+        with pytest.raises(HTTPException) as exc_info:
+            await media_embeddings_endpoint.generate_embeddings_batch(
+                request=media_embeddings_endpoint.BatchMediaEmbeddingsRequest(media_ids=[456]),
+                db=_FakeMediaDB(media_ids=[456]),
+                current_user=SimpleNamespace(id=1),
             )
-            assert resp.status_code == 500
-            detail = (resp.json() or {}).get("detail") or {}
-            assert detail.get("error") == "batch_enqueue_failed"
-            assert detail.get("submitted") == 0
-            assert detail.get("failed_media_ids") == [456]
-            assert detail.get("failure_reasons") == ["media_id=456: RuntimeError"]
+        assert exc_info.value.status_code == 500
+        detail = exc_info.value.detail or {}
+        assert detail.get("error") == "batch_enqueue_failed"
+        assert detail.get("submitted") == 0
+        assert detail.get("failed_media_ids") == [456]
+        assert detail.get("failure_reasons") == ["media_id=456: RuntimeError"]
     finally:
         os.environ.pop("TESTING", None)
-        app.dependency_overrides.pop(get_media_db_for_user, None)
 
 
-def test_media_embedding_batch_returns_500_when_batch_job_id_missing(monkeypatch):
+@pytest.mark.asyncio
+async def test_media_embedding_batch_returns_500_when_batch_job_id_missing(monkeypatch):
     os.environ["TESTING"] = "true"
     try:
         from tldw_Server_API.app.api.v1.endpoints import media_embeddings as media_embeddings_endpoint
@@ -261,22 +316,19 @@ def test_media_embedding_batch_returns_500_when_batch_job_id_missing(monkeypatch
             def create_job(self, **_kwargs):
                 return {}
 
-        app.dependency_overrides[get_media_db_for_user] = lambda: _FakeMediaDB(media_ids=[456])
         monkeypatch.setattr(media_embeddings_endpoint, "EmbeddingsJobsAdapter", _MissingIdAdapter)
 
-        with _client() as client:
-            api_key = get_settings().SINGLE_USER_API_KEY
-            resp = client.post(
-                "/api/v1/media/embeddings/batch",
-                json={"media_ids": [456]},
-                headers={"X-API-KEY": api_key},
+        with pytest.raises(HTTPException) as exc_info:
+            await media_embeddings_endpoint.generate_embeddings_batch(
+                request=media_embeddings_endpoint.BatchMediaEmbeddingsRequest(media_ids=[456]),
+                db=_FakeMediaDB(media_ids=[456]),
+                current_user=SimpleNamespace(id=1),
             )
-            assert resp.status_code == 500
-            detail = (resp.json() or {}).get("detail") or {}
-            assert detail.get("error") == "batch_enqueue_failed"
-            assert detail.get("submitted") == 0
-            assert detail.get("failed_media_ids") == [456]
-            assert detail.get("failure_reasons") == ["media_id=456: ValueError"]
+        assert exc_info.value.status_code == 500
+        detail = exc_info.value.detail or {}
+        assert detail.get("error") == "batch_enqueue_failed"
+        assert detail.get("submitted") == 0
+        assert detail.get("failed_media_ids") == [456]
+        assert detail.get("failure_reasons") == ["media_id=456: ValueError"]
     finally:
         os.environ.pop("TESTING", None)
-        app.dependency_overrides.pop(get_media_db_for_user, None)

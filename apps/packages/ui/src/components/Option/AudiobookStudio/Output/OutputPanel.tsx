@@ -21,7 +21,6 @@ import {
   Check,
   Clock,
   AlertCircle,
-  FileAudio,
   Merge,
   Subtitles,
   ChevronDown
@@ -240,7 +239,7 @@ export const OutputPanel: React.FC = () => {
       dataIndex: "order",
       key: "order",
       width: 50,
-      render: (_: any, __: any, index: number) => index + 1
+      render: (_value: number, _record: AudioChapter, index: number) => index + 1
     },
     {
       title: t("audiobook:output.columnTitle", "Title"),
@@ -286,7 +285,7 @@ export const OutputPanel: React.FC = () => {
       title: t("audiobook:output.actions", "Actions"),
       key: "actions",
       width: 150,
-      render: (_: any, record: AudioChapter) => (
+      render: (_value: undefined, record: AudioChapter) => (
         <Space size="small">
           {record.status === "completed" && record.audioUrl && (
             <>
@@ -328,12 +327,20 @@ export const OutputPanel: React.FC = () => {
       <Card>
         <Empty
           description={
-            <Text type="secondary">
-              {t(
-                "audiobook:output.noChapters",
-                "No chapters to export. Add content and generate audio first."
-              )}
-            </Text>
+            <div className="text-center">
+              <Text type="secondary" className="block">
+                {t(
+                  "audiobook:output.generatedChaptersAppearHere",
+                  "Generated chapters appear here after generation."
+                )}
+              </Text>
+              <Text type="secondary" className="text-xs">
+                {t(
+                  "audiobook:output.noChapters",
+                  "Add content, split it into chapters, then generate audio."
+                )}
+              </Text>
+            </div>
           }
         />
       </Card>

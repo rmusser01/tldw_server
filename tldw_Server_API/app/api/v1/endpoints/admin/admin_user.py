@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import PlainTextResponse
 from loguru import logger
 from pydantic import BaseModel, EmailStr, Field
@@ -13,12 +13,13 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_password_service_dep,
     get_registration_service_dep,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
-    AdminPrivilegedActionRequest,
     AdminMfaRequirementRequest,
     AdminMfaRequirementResponse,
     AdminPasswordResetRequest,
     AdminPasswordResetResponse,
+    AdminPrivilegedActionRequest,
     AdminUserCreateRequest,
     UserDetailResponse,
     UserListResponse,
@@ -32,16 +33,24 @@ from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services import admin_users_service
 from tldw_Server_API.app.services.admin_system_ops_service import (
     create_invitation as svc_create_invitation,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
     list_invitations as svc_list_invitations,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
     resend_invitation as svc_resend_invitation,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
     revoke_invitation as svc_revoke_invitation,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
     update_invitation_email_status as svc_update_invitation_email_status,
 )
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Invitation Schemas
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class InviteUserRequest(BaseModel):
     email: EmailStr
@@ -68,6 +77,7 @@ class InvitationItem(BaseModel):
 class InvitationListResponse(BaseModel):
     items: list[InvitationItem]
     total: int
+
 
 router = APIRouter()
 
@@ -129,10 +139,7 @@ async def list_users(
             )
         except Exception as diag_exc:  # noqa: BLE001 - diagnostics only, do not fail request
             response.headers["X-TLDW-Admin-Diag-Error"] = str(diag_exc)
-            logger.debug(
-                "Admin list_users TEST_MODE diagnostics failed: {}",
-                diag_exc,
-            )
+            logger.debug("Admin list_users TEST_MODE diagnostics failed")
 
     try:
         users, total = await admin_users_service.list_users(
@@ -152,28 +159,45 @@ async def list_users(
             page=page,
             limit=limit,
             pages=(total + limit - 1) // limit if limit else 0,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=(page - 1) * limit,
+                count=len(users),
+            ),
         )
     except HTTPException as e:
         try:
             if is_test_mode():
                 response.headers["X-TLDW-Admin-Error"] = str(e)
-        except Exception as diag_exc:
-            logger.debug("TEST_MODE header assignment failed: {}", diag_exc)
+        except Exception:
+            logger.debug("TEST_MODE header assignment failed")
         raise
     except Exception as e:
-        logger.error("Failed to list users: {}", e)
+        logger.error("Failed to list users")
         try:
             if is_test_mode():
                 response.headers["X-TLDW-Admin-Error"] = str(e)
-        except Exception as diag_exc:
-            logger.debug("TEST_MODE header assignment failed: {}", diag_exc)
+        except Exception:
+            logger.debug("TEST_MODE header assignment failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve users",
         ) from e
 
 
-@router.get("/users/export")
+@router.get(
+    "/users/export",
+    responses={
+        200: {
+            "description": "User export as JSON or CSV.",
+            "content": {
+                "application/json": {},
+                "text/csv": {},
+            },
+        },
+    },
+)
 async def export_users(
     role: str | None = None,
     is_active: bool | None = None,
@@ -203,13 +227,13 @@ async def export_users(
         if not filename:
             filename = default_name
         if filename:
-            safe = filename.replace("\n", " ").replace("\r", " ").replace("\"", "_")
-            resp.headers["Content-Disposition"] = f"attachment; filename=\"{safe}\""
+            safe = filename.replace("\n", " ").replace("\r", " ").replace('"', "_")
+            resp.headers["Content-Disposition"] = f'attachment; filename="{safe}"'
         return resp
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to export users: {}", exc)
+        logger.error("Failed to export users")
         raise HTTPException(status_code=500, detail="Failed to export users") from exc
 
 
@@ -218,6 +242,7 @@ async def export_users(
 # NOTE: These static routes MUST be registered before /users/{user_id}
 # to avoid FastAPI matching "invite" or "invitations" as a user_id.
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @router.post("/users/invite", response_model=InvitationItem)
 async def invite_user(
@@ -261,6 +286,7 @@ async def invite_user(
     email_error: str | None = None
     try:
         from tldw_Server_API.app.core.AuthNZ.email_service import get_email_service
+
         email_service = get_email_service()
         email_sent = await email_service.send_user_invitation_email(
             to_email=invitation["email"],
@@ -272,7 +298,7 @@ async def invite_user(
             email_error = "Email delivery returned false"
     except Exception as exc:
         email_error = str(exc)
-        logger.warning("Failed to send invitation email to {}: {}", invitation["email"], exc)
+        logger.warning("Failed to send invitation email")
 
     svc_update_invitation_email_status(
         invitation_id=invitation["id"],
@@ -290,9 +316,7 @@ async def invite_user(
         email_sent,
     )
 
-    return InvitationItem(**{
-        k: v for k, v in invitation.items() if k in InvitationItem.model_fields
-    })
+    return InvitationItem(**{k: v for k, v in invitation.items() if k in InvitationItem.model_fields})
 
 
 @router.get("/users/invitations", response_model=InvitationListResponse)
@@ -305,11 +329,11 @@ async def list_user_invitations(
     items = []
     for inv in invitations:
         try:
-            items.append(InvitationItem(**{
-                k: v for k, v in inv.items() if k in InvitationItem.model_fields
-            }))
-        except Exception:
-            continue
+            item = InvitationItem(**{k: v for k, v in inv.items() if k in InvitationItem.model_fields})
+        except (AttributeError, TypeError, ValueError):
+            logger.warning("Skipping invalid invitation record")
+        else:
+            items.append(item)
     return InvitationListResponse(items=items, total=len(items))
 
 
@@ -341,9 +365,7 @@ async def revoke_user_invitation(
     actor = getattr(principal, "username", None) or str(getattr(principal, "user_id", "admin"))
     logger.info("Invitation {} revoked by {}", invitation_id, actor)
 
-    return InvitationItem(**{
-        k: v for k, v in result.items() if k in InvitationItem.model_fields
-    })
+    return InvitationItem(**{k: v for k, v in result.items() if k in InvitationItem.model_fields})
 
 
 @router.post("/users/invitations/{invitation_id}/resend", response_model=InvitationItem)
@@ -384,6 +406,7 @@ async def resend_user_invitation(
     email_error: str | None = None
     try:
         from tldw_Server_API.app.core.AuthNZ.email_service import get_email_service
+
         email_service = get_email_service()
         email_sent = await email_service.send_user_invitation_email(
             to_email=invitation["email"],
@@ -395,7 +418,7 @@ async def resend_user_invitation(
             email_error = "Email delivery returned false"
     except Exception as exc:
         email_error = str(exc)
-        logger.warning("Failed to resend invitation email to {}: {}", invitation["email"], exc)
+        logger.warning("Failed to resend invitation email")
 
     svc_update_invitation_email_status(
         invitation_id=invitation["id"],
@@ -415,14 +438,13 @@ async def resend_user_invitation(
         email_sent,
     )
 
-    return InvitationItem(**{
-        k: v for k, v in invitation.items() if k in InvitationItem.model_fields
-    })
+    return InvitationItem(**{k: v for k, v in invitation.items() if k in InvitationItem.model_fields})
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # User Detail Endpoints (dynamic user_id routes)
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 @router.get("/users/{user_id}", response_model=UserDetailResponse)
 async def get_user_details(

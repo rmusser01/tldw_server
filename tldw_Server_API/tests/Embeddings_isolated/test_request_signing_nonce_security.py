@@ -24,12 +24,8 @@ def test_invalid_signature_does_not_consume_nonce(monkeypatch):
         lambda **_kwargs: None,
     )
 
-    monkeypatch.setattr(
-        request_signing_module,
-        "_request_signer",
-        request_signing_module.RequestSigner(secret_key="k" * 32),
-        raising=False,
-    )
+    monkeypatch.setenv("EMBEDDINGS_REQUEST_SIGNING_SECRET", "k" * 32)
+    monkeypatch.setattr(request_signing_module, "_request_signer", None, raising=False)
     monkeypatch.setattr(
         request_signing_module,
         "_nonce_manager",
@@ -67,12 +63,8 @@ def test_valid_signature_replay_is_rejected(monkeypatch):
         lambda **_kwargs: None,
     )
 
-    monkeypatch.setattr(
-        request_signing_module,
-        "_request_signer",
-        request_signing_module.RequestSigner(secret_key="k" * 32),
-        raising=False,
-    )
+    monkeypatch.setenv("EMBEDDINGS_REQUEST_SIGNING_SECRET", "k" * 32)
+    monkeypatch.setattr(request_signing_module, "_request_signer", None, raising=False)
     monkeypatch.setattr(
         request_signing_module,
         "_nonce_manager",

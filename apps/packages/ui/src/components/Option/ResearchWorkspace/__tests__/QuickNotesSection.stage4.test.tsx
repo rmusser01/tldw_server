@@ -195,4 +195,19 @@ describe("QuickNotesSection Stage 4 layout and export", () => {
       screen.getByPlaceholderText("Jot down notes, ideas, or observations...")
     ).toBeInTheDocument()
   })
+
+  it("exposes durable labels for note fields and compact note actions", async () => {
+    render(<QuickNotesSection />)
+
+    expect(screen.getByLabelText("Note title")).toHaveValue("My Study Note")
+    expect(screen.getByLabelText("Note keywords")).toBeInTheDocument()
+    expect(screen.getByLabelText("Note content")).toHaveValue("Line one\nLine two")
+    expect(
+      screen.getByRole("button", { name: "Clear current note" })
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Load note" }))
+
+    expect(await screen.findByLabelText("Search notes")).toBeInTheDocument()
+  })
 })

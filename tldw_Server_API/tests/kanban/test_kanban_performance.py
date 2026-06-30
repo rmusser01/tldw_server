@@ -13,7 +13,7 @@ Tests use pytest-benchmark when available, otherwise fall back to timing asserti
 import tempfile
 import time
 import uuid
-from typing import Generator
+from typing import Any, Callable, Generator
 import statistics
 
 import pytest
@@ -28,6 +28,55 @@ BOARD_LOAD_THRESHOLD_MEDIUM = 1.0  # Board with ~100 cards
 BOARD_LOAD_THRESHOLD_LARGE = 3.0  # Board with ~500 cards
 SEARCH_THRESHOLD = 0.5  # FTS search should be fast
 BULK_OPERATION_THRESHOLD = 2.0  # Bulk operations
+
+
+class _TimingBenchmarkFallback:
+    """Small benchmark adapter used when pytest-benchmark is not registered."""
+
+    def __init__(self) -> None:
+        self.stats: dict[str, float] = {}
+
+    def __call__(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        elapsed = time.perf_counter() - start
+        self.stats = {
+            "mean": elapsed,
+            "min": elapsed,
+            "max": elapsed,
+        }
+        return result
+
+    def pedantic(
+        self,
+        func: Callable[..., Any],
+        *,
+        iterations: int = 1,
+        rounds: int = 1,
+        **_: Any,
+    ) -> Any:
+        result = None
+        times: list[float] = []
+        for _round in range(rounds):
+            start = time.perf_counter()
+            for _iteration in range(iterations):
+                result = func()
+            times.append((time.perf_counter() - start) / iterations)
+        self.stats = {
+            "mean": statistics.mean(times),
+            "min": min(times),
+            "max": max(times),
+        }
+        return result
+
+
+@pytest.fixture
+def benchmark_runner(request: pytest.FixtureRequest) -> Any:
+    """Return pytest-benchmark's fixture when loaded, otherwise use a timing fallback."""
+    try:
+        return request.getfixturevalue("benchmark")
+    except pytest.FixtureLookupError:
+        return _TimingBenchmarkFallback()
 
 
 @pytest.fixture
@@ -471,34 +520,26 @@ class TestExportImportPerformance:
         )
 
 
-# Benchmark tests using pytest-benchmark (if available)
-try:
-    import pytest_benchmark
-    HAS_BENCHMARK = True
-except ImportError:
-    HAS_BENCHMARK = False
-
-
-@pytest.mark.skipif(not HAS_BENCHMARK, reason="pytest-benchmark not installed")
+@pytest.mark.benchmark
 class TestBenchmarks:
-    """Benchmarks using pytest-benchmark for detailed performance analysis."""
+    """Benchmarks using pytest-benchmark when loaded, with a timing fallback."""
 
-    def test_benchmark_board_load(self, benchmark, perf_db: KanbanDB, populated_board_medium: dict):
+    def test_benchmark_board_load(self, benchmark_runner, perf_db: KanbanDB, populated_board_medium: dict):
         """Benchmark board load operation."""
         board_id = populated_board_medium["id"]
 
-        result = benchmark(perf_db.get_board_with_lists_and_cards, board_id)
+        result = benchmark_runner(perf_db.get_board_with_lists_and_cards, board_id)
         assert result is not None
 
-    def test_benchmark_search(self, benchmark, perf_db: KanbanDB, populated_board_medium: dict):
+    def test_benchmark_search(self, benchmark_runner, perf_db: KanbanDB, populated_board_medium: dict):
         """Benchmark search operation."""
         def search_op():
             return perf_db.search_cards("performance", limit=50)
 
-        result = benchmark(search_op)
+        result = benchmark_runner(search_op)
         assert result[0] is not None  # results
 
-    def test_benchmark_card_create(self, benchmark, perf_db: KanbanDB):
+    def test_benchmark_card_create(self, benchmark_runner, perf_db: KanbanDB):
         """Benchmark card creation."""
         # Create a fresh board and list for each benchmark run to avoid hitting limits
         board = perf_db.create_board(
@@ -524,5 +565,5 @@ class TestBenchmarks:
             )
 
         # Use pedantic mode with fewer iterations to stay under the per-list card limit.
-        result = benchmark.pedantic(create_card, iterations=10, rounds=10)
+        result = benchmark_runner.pedantic(create_card, iterations=10, rounds=10)
         assert result is not None

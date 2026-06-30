@@ -1,4 +1,3 @@
-import React from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Character } from "@/types/character"
@@ -8,10 +7,12 @@ const mocks = vi.hoisted(() => {
   const assistantSync = new Map<string, unknown>()
   const characterLocal = new Map<string, unknown>()
   const characterSync = new Map<string, unknown>()
+  const operations: string[] = []
 
-  const createStorageMock = (map: Map<string, unknown>) => ({
+  const createStorageMock = (name: string, map: Map<string, unknown>) => ({
     get: vi.fn(async (key: string) => (map.has(key) ? map.get(key) : null)),
     set: vi.fn(async (key: string, value: unknown) => {
+      operations.push(`${name}.set:${key}`)
       if (value == null) {
         map.delete(key)
         return
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => {
       map.set(key, value)
     }),
     remove: vi.fn(async (key: string) => {
+      operations.push(`${name}.remove:${key}`)
       map.delete(key)
     })
   })
@@ -28,6 +30,7 @@ const mocks = vi.hoisted(() => {
     assistantSync,
     characterLocal,
     characterSync,
+    operations,
     parseStoredValue: (value: unknown): Record<string, unknown> | null => {
       if (!value) return null
       if (typeof value === "string") {
@@ -44,10 +47,10 @@ const mocks = vi.hoisted(() => {
         ? (value as Record<string, unknown>)
         : null
     },
-    assistantStorage: createStorageMock(assistantLocal),
-    assistantSyncStorage: createStorageMock(assistantSync),
-    characterStorage: createStorageMock(characterLocal),
-    characterSyncStorage: createStorageMock(characterSync)
+    assistantStorage: createStorageMock("assistantLocal", assistantLocal),
+    assistantSyncStorage: createStorageMock("assistantSync", assistantSync),
+    characterStorage: createStorageMock("characterLocal", characterLocal),
+    characterSyncStorage: createStorageMock("characterSync", characterSync)
   }
 })
 
@@ -87,6 +90,9 @@ vi.mock("@plasmohq/storage/hook", async () => {
           typeof next === "function"
             ? (next as (prev: unknown) => unknown)(getStoredValue())
             : next
+        mocks.operations.push(
+          `useStorage.${key}.set:${resolved == null ? "null" : "value"}`
+        )
         if (resolved == null) {
           store.delete(key)
           setRenderValue(null)
@@ -130,6 +136,7 @@ describe("useSelectedAssistant", () => {
     mocks.assistantSync.clear()
     mocks.characterLocal.clear()
     mocks.characterSync.clear()
+    mocks.operations.length = 0
     mocks.assistantStorage.get.mockClear()
     mocks.assistantStorage.set.mockClear()
     mocks.assistantStorage.remove.mockClear()
@@ -203,6 +210,151 @@ describe("useSelectedAssistant", () => {
     })
 
     expect(mocks.characterLocal.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
+  })
+
+  it("does not mirror overlay character selections into legacy character storage", async () => {
+    const { result } = renderHook(() => useSelectedAssistant())
+
+    await act(async () => {
+      await result.current[1]({
+        kind: "character",
+        id: "char-overlay",
+        name: "Overlay Guide",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current[0]).toMatchObject({
+        kind: "character",
+        id: "char-overlay",
+        name: "Overlay Guide",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    expect(mocks.characterLocal.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
+    expect(mocks.characterSync.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
+  })
+
+  it("preserves overlay mode when a same-id assistant update omits metadata", async () => {
+    const { result } = renderHook(() => useSelectedAssistant())
+
+    await act(async () => {
+      await result.current[1]({
+        kind: "character",
+        id: "char-overlay",
+        name: "Overlay Guide",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    await act(async () => {
+      await result.current[1]({
+        kind: "character",
+        id: "char-overlay",
+        name: "Overlay Guide",
+        avatar_url: "https://example.com/overlay.png"
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current[0]).toMatchObject({
+        kind: "character",
+        id: "char-overlay",
+        avatar_url: "https://example.com/overlay.png",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+  })
+
+  it("clears legacy character mirrors before broadcasting a null assistant", async () => {
+    mocks.assistantLocal.set(SELECTED_ASSISTANT_STORAGE_KEY, {
+      kind: "character",
+      id: "char-legacy",
+      name: "Legacy Guide"
+    })
+    mocks.characterLocal.set(SELECTED_CHARACTER_STORAGE_KEY, {
+      id: "char-legacy",
+      name: "Legacy Guide"
+    })
+    mocks.characterSync.set(SELECTED_CHARACTER_STORAGE_KEY, {
+      id: "char-legacy",
+      name: "Legacy Guide"
+    })
+    mocks.assistantSync.set(SELECTED_ASSISTANT_STORAGE_KEY, {
+      kind: "character",
+      id: "char-legacy",
+      name: "Legacy Guide"
+    })
+
+    const first = renderHook(() => useSelectedAssistant())
+    const second = renderHook(() => useSelectedAssistant())
+
+    await waitFor(() => {
+      expect(first.result.current[0]).toMatchObject({
+        kind: "character",
+        id: "char-legacy",
+        name: "Legacy Guide"
+      })
+    })
+
+    mocks.operations.length = 0
+
+    await act(async () => {
+      await first.result.current[1](null)
+    })
+
+    await waitFor(() => {
+      expect(first.result.current[0]).toBeNull()
+      expect(second.result.current[0]).toBeNull()
+    })
+
+    const localMirrorClearIndex = mocks.operations.indexOf(
+      `characterLocal.remove:${SELECTED_CHARACTER_STORAGE_KEY}`
+    )
+    const nullAssistantBroadcastIndex = mocks.operations.indexOf(
+      `useStorage.${SELECTED_ASSISTANT_STORAGE_KEY}.set:null`
+    )
+
+    expect(localMirrorClearIndex).toBeGreaterThanOrEqual(0)
+    expect(nullAssistantBroadcastIndex).toBeGreaterThanOrEqual(0)
+    expect(localMirrorClearIndex).toBeLessThan(nullAssistantBroadcastIndex)
+    expect(mocks.characterLocal.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
+    expect(mocks.characterSync.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
+    expect(mocks.assistantSync.has(SELECTED_ASSISTANT_STORAGE_KEY)).toBe(false)
+  })
+
+  it("keeps selected assistant identity stable across unchanged rerenders", async () => {
+    mocks.assistantLocal.set(SELECTED_ASSISTANT_STORAGE_KEY, {
+      kind: "character",
+      id: "char-stable",
+      name: "Stable Guide",
+      greeting: "Ready"
+    })
+
+    const { result, rerender } = renderHook(() => useSelectedAssistant())
+
+    await waitFor(() => {
+      expect(result.current[0]).toMatchObject({
+        kind: "character",
+        id: "char-stable",
+        name: "Stable Guide"
+      })
+    })
+
+    const firstSelection = result.current[0]
+    rerender()
+
+    expect(result.current[0]).toBe(firstSelection)
   })
 
   it("normalizes and preserves mirrored persona buddy summaries from stored selections", async () => {
@@ -358,6 +510,104 @@ describe("useSelectedAssistant", () => {
         name: "Guide",
         greeting: "Ready when you are",
         alternateGreetings: ["Let's begin"]
+      })
+    })
+  })
+
+  it("preserves overlay selection mode when useSelectedCharacter updates the active character", async () => {
+    const { result } = renderHook(() => {
+      const assistantState = useSelectedAssistant()
+      const characterState = useSelectedCharacter<Character | null>(null)
+      return { assistantState, characterState }
+    })
+
+    await act(async () => {
+      await result.current.assistantState[1]({
+        kind: "character",
+        id: "char-overlay",
+        name: "Overlay Guide",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.assistantState[0]).toMatchObject({
+        kind: "character",
+        id: "char-overlay",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    await act(async () => {
+      await result.current.characterState[1]({
+        id: "char-overlay",
+        name: "Overlay Guide",
+        avatar_url: "https://example.com/overlay.png"
+      } as Character)
+    })
+
+    await waitFor(() => {
+      expect(result.current.assistantState[0]).toMatchObject({
+        kind: "character",
+        id: "char-overlay",
+        avatar_url: "https://example.com/overlay.png",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+  })
+
+  it("does not override an explicit selection mode when useSelectedCharacter updates the active character", async () => {
+    const { result } = renderHook(() => {
+      const assistantState = useSelectedAssistant()
+      const characterState = useSelectedCharacter<Character | null>(null)
+      return { assistantState, characterState }
+    })
+
+    await act(async () => {
+      await result.current.assistantState[1]({
+        kind: "character",
+        id: "char-explicit",
+        name: "Overlay Guide",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    await waitFor(() => {
+      expect(result.current.assistantState[0]).toMatchObject({
+        kind: "character",
+        id: "char-explicit",
+        metadata: {
+          selectionMode: "overlay"
+        }
+      })
+    })
+
+    await act(async () => {
+      await result.current.characterState[1]({
+        id: "char-explicit",
+        name: "Tracked Guide",
+        metadata: {
+          selectionMode: "tracked"
+        }
+      } as Character & { metadata: { selectionMode: "tracked" } })
+    })
+
+    await waitFor(() => {
+      expect(result.current.assistantState[0]).toMatchObject({
+        kind: "character",
+        id: "char-explicit",
+        name: "Tracked Guide",
+        metadata: {
+          selectionMode: "tracked"
+        }
       })
     })
   })

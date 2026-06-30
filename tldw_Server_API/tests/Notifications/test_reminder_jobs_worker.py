@@ -98,3 +98,97 @@ async def test_reminder_job_deduplicates_by_run_slot(reminder_job_env):
     assert second["status"] == "succeeded"
     rows = cdb.list_user_notifications(limit=10, offset=0)
     assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_reminder_job_skips_disabled_task_without_notification(reminder_job_env: None) -> None:
+    """Disabled queued reminder tasks are marked skipped without notifications."""
+    user_id = 902
+    cdb, task_id, run_slot = _seed_one_time_task(user_id=user_id)
+    cdb.update_reminder_task(task_id, {"enabled": False})
+    fake_job = {
+        "id": 125,
+        "owner_user_id": str(user_id),
+        "payload": {
+            "task_id": task_id,
+            "user_id": user_id,
+            "scheduled_for": run_slot,
+        },
+    }
+
+    result = await handle_reminder_job(fake_job)
+
+    assert result == {
+        "status": "skipped",
+        "reason": "task_disabled",
+        "task_id": task_id,
+        "run_id": result["run_id"],
+    }
+    assert cdb.list_user_notifications(limit=10, offset=0) == []
+    run = cdb.get_reminder_task_run_by_slot(task_id=task_id, run_slot_key=run_slot)
+    assert run.status == "skipped"
+    assert run.error == "task_disabled"
+    assert cdb.get_reminder_task(task_id).last_status == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_reminder_job_honors_disabled_reminder_notifications(reminder_job_env: None) -> None:
+    """Disabled reminder notification preferences suppress due notifications."""
+    user_id = 903
+    cdb, task_id, run_slot = _seed_one_time_task(user_id=user_id)
+    cdb.update_notification_preferences(reminder_enabled=False)
+    fake_job = {
+        "id": 126,
+        "owner_user_id": str(user_id),
+        "payload": {
+            "task_id": task_id,
+            "user_id": user_id,
+            "scheduled_for": run_slot,
+        },
+    }
+
+    result = await handle_reminder_job(fake_job)
+
+    assert result == {
+        "status": "skipped",
+        "reason": "reminder_notifications_disabled",
+        "task_id": task_id,
+        "run_id": result["run_id"],
+    }
+    assert cdb.list_user_notifications(limit=10, offset=0) == []
+    run = cdb.get_reminder_task_run_by_slot(task_id=task_id, run_slot_key=run_slot)
+    assert run.status == "skipped"
+    assert run.error == "reminder_notifications_disabled"
+    refreshed_task = cdb.get_reminder_task(task_id)
+    assert refreshed_task.enabled is False
+    assert refreshed_task.last_status == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_reminder_job_skips_missing_task_without_worker_failure(reminder_job_env: None) -> None:
+    """Deleted queued snooze tasks are recorded as skipped instead of failed."""
+    user_id = 904
+    cdb, task_id, run_slot = _seed_one_time_task(user_id=user_id)
+    assert cdb.delete_reminder_task(task_id) is True
+    fake_job = {
+        "id": 127,
+        "owner_user_id": str(user_id),
+        "payload": {
+            "task_id": task_id,
+            "user_id": user_id,
+            "scheduled_for": run_slot,
+        },
+    }
+
+    result = await handle_reminder_job(fake_job)
+
+    assert result == {
+        "status": "skipped",
+        "reason": "task_missing",
+        "task_id": task_id,
+        "run_id": result["run_id"],
+    }
+    assert cdb.list_user_notifications(limit=10, offset=0) == []
+    run = cdb.get_reminder_task_run_by_slot(task_id=task_id, run_slot_key=run_slot)
+    assert run.status == "skipped"
+    assert run.error == "task_missing"

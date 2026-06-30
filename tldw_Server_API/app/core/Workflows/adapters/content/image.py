@@ -8,6 +8,7 @@ This module includes adapters for image operations:
 from __future__ import annotations
 
 import base64
+import asyncio
 import time
 import uuid
 from typing import Any
@@ -110,6 +111,7 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
         normalize_prompt_refinement_mode,
         refine_image_prompt,
     )
+    from tldw_Server_API.app.core.Image_Generation.request_validation import validate_image_generation_request
 
     image_generation_cfg = get_image_generation_config()
     prompt_refinement_mode = normalize_prompt_refinement_mode(config.get("prompt_refinement"))
@@ -126,24 +128,55 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
         negative_prompt = apply_template_to_string(str(neg_prompt_t), context) or str(neg_prompt_t)
 
     # Parameters
-    backend = str(config.get("backend") or "stable_diffusion_cpp").strip().lower()
-    width = int(config.get("width") or 512)
-    height = int(config.get("height") or 512)
-    steps = int(config.get("steps") or 20)
-    cfg_scale = float(config.get("cfg_scale") or 7.0)
-    seed = config.get("seed")
-    if seed is not None:
-        try:
+    try:
+        backend = str(config.get("backend") or "stable_diffusion_cpp").strip().lower()
+        width = _coerce_int_param(config.get("width"), 512)
+        height = _coerce_int_param(config.get("height"), 512)
+        steps = _coerce_int_param(config.get("steps"), 20)
+        cfg_scale = _coerce_float_param(config.get("cfg_scale"), 7.0)
+        seed = config.get("seed")
+        if seed is not None:
+            if isinstance(seed, bool):
+                return {"error": "image_params_invalid"}
             seed = int(seed)
-        except Exception:
-            seed = None
-    sampler = config.get("sampler")
-    model = config.get("model")
-    img_format = str(config.get("format") or "png").strip().lower()
-    if img_format not in ("png", "jpg", "jpeg", "webp"):
-        img_format = "png"
+        sampler = config.get("sampler")
+        model = config.get("model")
+        img_format = str(config.get("format") or "png").strip().lower()
+        if img_format == "jpeg":
+            img_format = "jpg"
+        if img_format not in ("png", "jpg", "webp"):
+            img_format = "png"
+        extra_params = config.get("extra_params")
+        extra_params = {} if extra_params is None else extra_params
+        if not isinstance(extra_params, dict):
+            return {"error": "image_params_invalid"}
+        extra_params = dict(extra_params)
+    except (TypeError, ValueError):
+        return {"error": "image_params_invalid"}
+
     save_artifact = config.get("save_artifact")
     save_artifact = True if save_artifact is None else bool(save_artifact)
+
+    validation_issues = validate_image_generation_request(
+        {
+            "backend": backend,
+            "prompt": prompt,
+            "width": width,
+            "height": height,
+            "steps": steps,
+            "cfg_scale": cfg_scale,
+            "extra_params": extra_params,
+        },
+        config=image_generation_cfg,
+    )
+    if validation_issues:
+        return {
+            "error": "image_params_invalid",
+            "validation_errors": [
+                {"code": issue.code, "message": issue.message, "path": issue.path}
+                for issue in validation_issues
+            ],
+        }
 
     # Test mode simulation
     if is_test_mode():
@@ -197,12 +230,12 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
             sampler=sampler,
             model=model,
             format=img_format,
-            extra_params=dict(config.get("extra_params") or {}),
+            extra_params=extra_params,
         )
 
         # Generate
         start_ts = time.time()
-        result = adapter.generate(request)
+        result = await asyncio.to_thread(adapter.generate, request)
         duration_ms = (time.time() - start_ts) * 1000
 
         # Save image artifact
@@ -254,8 +287,8 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
                     },
                 )
                 artifact_registered = True
-            except Exception as art_e:
-                logger.warning(f"Image gen: failed to register artifact: {art_e}")
+            except Exception:
+                logger.warning("Image gen: failed to register artifact", exc_info=True)
 
         return {
             "images": images_output,
@@ -267,9 +300,25 @@ async def run_image_gen_adapter(config: dict[str, Any], context: dict[str, Any])
             "artifact_registered": artifact_registered,
         }
 
-    except Exception as e:
-        logger.exception(f"Image gen adapter error: {e}")
-        return {"error": f"image_gen_error:{e}"}
+    except Exception:
+        logger.exception("Image gen adapter error")
+        return {"error": "image_gen_error"}
+
+
+def _coerce_int_param(value: Any, default: int) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError("boolean is not a valid integer parameter")
+    return int(value)
+
+
+def _coerce_float_param(value: Any, default: float) -> float:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError("boolean is not a valid float parameter")
+    return float(value)
 
 
 @registry.register(
@@ -311,8 +360,8 @@ async def run_image_describe_adapter(config: dict[str, Any], context: dict[str, 
             path = resolve_workflow_file_path(config.get("image_path"), context, config)
             with open(path, "rb") as f:
                 image_data = base64.b64encode(f.read()).decode("utf-8")
-        except Exception as e:
-            return {"description": "", "error": f"image_read_error: {e}"}
+        except Exception:
+            return {"description": "", "error": "image_read_error"}
 
     if not image_data and not image_url:
         return {"description": "", "error": "missing_image"}
@@ -336,6 +385,6 @@ async def run_image_describe_adapter(config: dict[str, Any], context: dict[str, 
         description = extract_openai_content(response) or ""
         return {"description": description, "text": description}
 
-    except Exception as e:
-        logger.exception(f"Image describe error: {e}")
-        return {"description": "", "error": str(e)}
+    except Exception:
+        logger.exception("Image describe error")
+        return {"description": "", "error": "image_describe_error"}

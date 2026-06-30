@@ -6,6 +6,27 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { TemplatePreviewPane } from "../TemplatePreviewPane"
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (
+      key: string,
+      fallbackOrOptions?: string | { defaultValue?: string }
+    ) => {
+      if (typeof fallbackOrOptions === "string") {
+        return fallbackOrOptions
+      }
+      if (
+        fallbackOrOptions &&
+        typeof fallbackOrOptions === "object" &&
+        typeof fallbackOrOptions.defaultValue === "string"
+      ) {
+        return fallbackOrOptions.defaultValue
+      }
+      return key
+    }
+  })
+}))
+
 vi.mock("antd", () => {
   const RadioButton = ({ value, children, checked, onSelect }: any) => (
     <button
@@ -47,7 +68,7 @@ vi.mock("antd", () => {
     </select>
   )
 
-  const Button = ({ children, onClick, ...rest }: any) => (
+  const Button = ({ children, onClick, loading: _loading, ...rest }: any) => (
     <button type="button" onClick={() => onClick?.()} {...rest}>
       {children}
     </button>

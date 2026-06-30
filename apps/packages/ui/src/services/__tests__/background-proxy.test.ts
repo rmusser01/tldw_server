@@ -192,6 +192,220 @@ describe("background proxy fallback safety", () => {
     expect(detail?.source).toBe("direct")
   })
 
+  it("keeps workspace migration chunk network failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/workspaces/migrations/mig-1/chunks/chunk-1",
+          method: "PUT",
+          body: { sha256: "a".repeat(64), byte_count: 1 }
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps workspace source refresh network failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/workspaces/ws-1/sources",
+          method: "GET"
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps workspace upsert reconciliation failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/workspaces/ws-1",
+          method: "PUT",
+          body: { name: "Recovered workspace" }
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps Research Workspace chat command bootstrap failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/chat/commands",
+          method: "GET"
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps optional audio voice bootstrap failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/audio/voices/catalog?provider=kitten_tts",
+          method: "GET"
+        })
+      ).rejects.toMatchObject({ status: 0 })
+      await expect(
+        bgRequest({
+          path: "/api/v1/audio/voices",
+          method: "GET"
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps optional ingestion-source capability bootstrap failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/ingestion-sources/capabilities",
+          method: "GET"
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
+  it("keeps caller-handled best-effort failures scoped out of the global backend-unreachable modal", async () => {
+    mocks.sendMessage.mockRejectedValue(
+      new Error("Could not establish connection. Receiving end does not exist.")
+    )
+    mocks.tldwRequest.mockResolvedValue({
+      ok: false,
+      status: 0,
+      error: "Failed to fetch"
+    })
+
+    const eventSpy = vi.fn()
+    const eventName = "tldw:backend-unreachable"
+    window.addEventListener(eventName, eventSpy as EventListener)
+
+    try {
+      const { bgRequest } = await importProxy()
+      await expect(
+        bgRequest({
+          path: "/api/v1/media/3/keywords",
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: { keywords: ["workspace:test"], mode: "add" },
+          suppressBackendUnavailableEvent: true
+        })
+      ).rejects.toMatchObject({ status: 0 })
+    } finally {
+      window.removeEventListener(eventName, eventSpy as EventListener)
+    }
+
+    expect(eventSpy).not.toHaveBeenCalled()
+  })
+
   it("classifies aborted direct fallback requests as AbortError", async () => {
     mocks.sendMessage.mockRejectedValue(
       new Error("Could not establish connection. Receiving end does not exist.")
@@ -255,6 +469,116 @@ describe("background proxy fallback safety", () => {
     expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
   })
 
+  it("bypasses extension messaging for audio-studio artifact media arrayBuffer requests", async () => {
+    const buffer = new Uint8Array([1, 2, 3]).buffer
+    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { via: "runtime" } })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: buffer
+    })
+
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest({
+        path: "/api/v1/audio-studio/projects/p1/artifacts/a1/media",
+        method: "GET",
+        responseType: "arrayBuffer"
+      })
+    ).resolves.toBe(buffer)
+
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(mocks.tldwRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/audio-studio/projects/p1/artifacts/a1/media",
+        method: "GET",
+        responseType: "arrayBuffer"
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it("does not bypass extension messaging for unrelated audio-studio arrayBuffer requests", async () => {
+    const buffer = new Uint8Array([4, 5, 6]).buffer
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: buffer
+    })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { via: "direct" }
+    })
+
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest({
+        path: "/api/v1/audio-studio/projects/p1/artifacts",
+        method: "GET",
+        responseType: "arrayBuffer"
+      })
+    ).resolves.toBe(buffer)
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("falls back to direct arrayBuffer requests while preserving response metadata", async () => {
+    const buffer = new Uint8Array([7, 8, 9]).buffer
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {},
+      headers: {
+        "content-disposition": 'attachment; filename="runtime.zip"'
+      }
+    })
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: buffer,
+      headers: {
+        "content-disposition": 'attachment; filename="direct.zip"'
+      }
+    })
+
+    const { bgRequest } = await importProxy()
+
+    await expect(
+      bgRequest<{
+        ok: boolean
+        status: number
+        data: ArrayBuffer
+        headers: Record<string, string>
+      }>({
+        path: "/api/v1/skills/client-skill/export",
+        method: "GET",
+        responseType: "arrayBuffer",
+        returnResponse: true
+      })
+    ).resolves.toEqual({
+      ok: true,
+      status: 200,
+      data: buffer,
+      headers: {
+        "content-disposition": 'attachment; filename="direct.zip"'
+      }
+    })
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(mocks.tldwRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/skills/client-skill/export",
+        method: "GET",
+        responseType: "arrayBuffer"
+      }),
+      expect.any(Object)
+    )
+  })
+
   it("does not fall back to direct request on POST extension timeout", async () => {
     vi.useFakeTimers()
     mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))
@@ -264,13 +588,64 @@ describe("background proxy fallback safety", () => {
     const pending = bgRequest({
       path: "/api/v1/notes/search/",
       method: "POST",
-      body: { q: "hello" }
+      body: { q: "hello" },
+      timeoutMs: 100
     })
     const assertion = expect(pending).rejects.toThrow("Extension messaging timeout")
 
-    await vi.advanceTimersByTimeAsync(3001)
+    await vi.advanceTimersByTimeAsync(5001)
 
     await assertion
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
+  })
+
+  it("falls back to direct request for idempotent Web Clipper saves on extension timeout", async () => {
+    vi.useFakeTimers()
+    mocks.sendMessage.mockImplementation(() => new Promise(() => undefined))
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { via: "direct" }
+    })
+
+    const { bgRequest } = await importProxy()
+    const pending = bgRequest<{ via: string }>({
+      path: "/api/v1/web-clipper/save",
+      method: "POST",
+      body: { clip_id: "clip-1" },
+      timeoutMs: 100
+    })
+
+    await vi.advanceTimersByTimeAsync(5001)
+
+    await expect(pending).resolves.toEqual({ via: "direct" })
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("waits beyond the short safe-method timeout for unsafe background writes", async () => {
+    vi.useFakeTimers()
+    mocks.sendMessage.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () => resolve({ ok: true, status: 200, data: { via: "runtime" } }),
+            3500
+          )
+        })
+    )
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { via: "direct" } })
+
+    const { bgRequest } = await importProxy()
+    const pending = bgRequest<{ via: string }>({
+      path: "/api/v1/web-clipper/save",
+      method: "POST",
+      body: { clip_id: "clip-1" }
+    })
+
+    await vi.advanceTimersByTimeAsync(3001)
+    await vi.advanceTimersByTimeAsync(500)
+
+    await expect(pending).resolves.toEqual({ via: "runtime" })
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
@@ -319,6 +694,118 @@ describe("background proxy fallback safety", () => {
 
     expect(mocks.sendMessage).not.toHaveBeenCalled()
     expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("appends multiple named files for direct-preferred uploads", async () => {
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+
+    const { bgUpload } = await importProxy()
+    const source = Uint8Array.from([1, 2, 3])
+    const target = Uint8Array.from([4, 5, 6])
+
+    await bgUpload({
+      path: "/api/v1/audio/voice-conversion",
+      method: "POST",
+      fields: { response_format: "wav", stream: false },
+      files: [
+        {
+          fieldName: "source_audio",
+          name: "source.wav",
+          type: "audio/wav",
+          data: source
+        },
+        {
+          fieldName: "target_voice",
+          name: "target.wav",
+          type: "audio/wav",
+          data: target
+        }
+      ],
+      preferDirect: true,
+      responseType: "arrayBuffer"
+    })
+
+    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
+    const requestPayload = mocks.tldwRequest.mock.calls[0][0] as { body?: FormData; responseType?: string }
+    expect(requestPayload.responseType).toBe("arrayBuffer")
+    const body = requestPayload.body as FormData
+    expect(body.get("response_format")).toBe("wav")
+    expect(body.get("stream")).toBe("false")
+    expect(body.get("source_audio")).toBeInstanceOf(Blob)
+    expect(body.get("target_voice")).toBeInstanceOf(Blob)
+  })
+
+  it("appends single direct-fallback uploads to files and the legacy file alias", async () => {
+    mocks.tldwRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+
+    const { bgUpload } = await importProxy()
+
+    await bgUpload({
+      path: "/api/v1/media/add",
+      method: "POST",
+      file: {
+        name: "clip.wav",
+        type: "audio/wav",
+        data: Uint8Array.from([7, 8, 9])
+      },
+      preferDirect: true
+    })
+
+    const requestPayload = mocks.tldwRequest.mock.calls[0][0] as { body?: FormData }
+    const body = requestPayload.body as FormData
+    expect(body.get("files")).toBeInstanceOf(Blob)
+    expect(body.get("file")).toBeInstanceOf(Blob)
+  })
+
+  it("forwards multiple files through extension upload messaging", async () => {
+    mocks.sendMessage.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ok: true }
+    })
+
+    const { bgUpload } = await importProxy()
+    await bgUpload({
+      path: "/api/v1/audio/voice-conversion",
+      method: "POST",
+      files: [
+        {
+          fieldName: "source_audio",
+          name: "source.wav",
+          type: "audio/wav",
+          data: Uint8Array.from([1])
+        },
+        {
+          fieldName: "target_voice",
+          name: "target.wav",
+          type: "audio/wav",
+          data: Uint8Array.from([2])
+        }
+      ],
+      responseType: "arrayBuffer"
+    })
+
+    expect(mocks.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tldw:upload",
+        payload: expect.objectContaining({
+          responseType: "arrayBuffer",
+          files: [
+            expect.objectContaining({ fieldName: "source_audio", name: "source.wav" }),
+            expect.objectContaining({ fieldName: "target_voice", name: "target.wav" })
+          ]
+        })
+      })
+    )
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
   it("does not fall back to direct upload on POST extension timeout", async () => {
@@ -454,7 +941,7 @@ describe("background proxy fallback safety", () => {
         body: {
           getReader: () => reader
         }
-      } as Response
+      } as unknown as Response
     })
     vi.stubGlobal("fetch", fetchSpy as any)
 
@@ -799,7 +1286,10 @@ describe("background proxy fallback safety", () => {
     }
 
     expect(fetchSpy).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchSpy.mock.calls[0] as [RequestInfo | URL, RequestInit?]
+    const [url, init] = fetchSpy.mock.calls[0] as unknown as [
+      RequestInfo | URL,
+      RequestInit?
+    ]
     const requestHeaders = new Headers(init?.headers)
     expect(url).toBe("/api/proxy/chat/completions")
     expect(requestHeaders.get("Authorization")).toBeNull()
@@ -1206,5 +1696,76 @@ describe("background proxy fallback safety", () => {
       '{"choices":[{"delta":{"content":"D"}}]}',
       '{"choices":[{"delta":{"content":"E"}}]}'
     ])
+  })
+})
+
+describe("background proxy GET coalescing", () => {
+  beforeEach(() => {
+    vi.resetModules()
+    mocks.sendMessage.mockReset()
+    mocks.tldwRequest.mockReset()
+    mocks.storageGet.mockReset()
+    mocks.storageSet.mockReset()
+    mocks.storageGet.mockResolvedValue(null)
+    mocks.storageSet.mockResolvedValue(undefined)
+  })
+
+  it("coalesces concurrent identical GETs into a single underlying request", async () => {
+    let resolveSend: (value: unknown) => void = () => {}
+    const pending = new Promise((resolve) => {
+      resolveSend = resolve
+    })
+    mocks.sendMessage.mockReturnValue(pending)
+
+    const { bgRequest } = await importProxy()
+
+    // Two identical concurrent GETs + one different concurrent GET.
+    const a1 = bgRequest({ path: "/api/v1/users/me/profile?sections=preferences", method: "GET" })
+    const a2 = bgRequest({ path: "/api/v1/users/me/profile?sections=preferences", method: "GET" })
+    const b1 = bgRequest({ path: "/api/v1/config/providers", method: "GET" })
+
+    resolveSend({ ok: true, status: 200, data: { ok: true } })
+    const [ra1, ra2] = await Promise.all([a1, a2])
+    await b1
+
+    // Identical pair shares one underlying call; the different path makes its own.
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+    expect(ra1).toBe(ra2)
+  })
+
+  it("does not coalesce POST requests", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/users/me/profile", method: "POST", body: { a: 1 } }),
+      bgRequest({ path: "/api/v1/users/me/profile", method: "POST", body: { a: 1 } })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not coalesce GETs with different timeoutMs", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "/api/v1/config/providers", method: "GET", timeoutMs: 5000 }),
+      bgRequest({ path: "/api/v1/config/providers", method: "GET", timeoutMs: 30000 })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not coalesce absolute-URL GETs that differ only by noAuth omitted vs false", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    const { bgRequest } = await importProxy()
+
+    await Promise.all([
+      bgRequest({ path: "https://api.example.com/api/v1/health", method: "GET" }),
+      bgRequest({ path: "https://api.example.com/api/v1/health", method: "GET", noAuth: false })
+    ])
+
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(2)
   })
 })

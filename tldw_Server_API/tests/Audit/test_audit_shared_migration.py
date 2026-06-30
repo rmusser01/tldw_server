@@ -257,6 +257,86 @@ async def test_migration_resume_checkpoint(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_migration_resume_includes_late_older_timestamp_rows(tmp_path):
+    """Resume should not skip appended source rows whose timestamps are older."""
+    user_base = tmp_path / "user_dbs"
+    user_id = "212"
+    user_db_path = user_base / user_id / "audit" / "unified_audit.db"
+    shared_db_path = tmp_path / "Databases" / "audit_shared.db"
+    user_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    svc_user = UnifiedAuditService(
+        db_path=str(user_db_path),
+        storage_mode="per_user",
+        enable_pii_detection=False,
+        enable_risk_scoring=False,
+        buffer_size=1,
+        flush_interval=0.1,
+    )
+    await svc_user.initialize(start_background_tasks=False)
+    await svc_user.stop()
+
+    async with aiosqlite.connect(user_db_path) as db:
+        await db.execute(
+            "INSERT INTO audit_events (event_id, timestamp, category, event_type, severity) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("evt-first", "2025-01-02T00:00:00+00:00", "api_call", "api.request", "info"),
+        )
+        await db.execute(
+            "INSERT INTO audit_events (event_id, timestamp, category, event_type, severity) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("evt-second", "2025-01-03T00:00:00+00:00", "api_call", "api.request", "info"),
+        )
+        await db.commit()
+
+    report1 = await migrate_to_shared_audit_db(
+        shared_db_path=shared_db_path,
+        user_db_base_dir=user_base,
+        default_db_path=None,
+        system_tenant_id="system",
+        chunk_size=100,
+    )
+    assert report1.total_events_inserted == 2
+
+    async with aiosqlite.connect(user_db_path) as db:
+        await db.execute(
+            "INSERT INTO audit_events (event_id, timestamp, category, event_type, severity) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("evt-late-older", "2025-01-01T00:00:00+00:00", "api_call", "api.request", "info"),
+        )
+        await db.commit()
+
+    report2 = await migrate_to_shared_audit_db(
+        shared_db_path=shared_db_path,
+        user_db_base_dir=user_base,
+        default_db_path=None,
+        system_tenant_id="system",
+        chunk_size=100,
+    )
+    source_counts = next(c for c in report2.sources if c.source.label == f"user:{user_id}")
+    assert source_counts.events_read == 1
+    assert source_counts.events_inserted == 1
+
+    async with aiosqlite.connect(shared_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT event_id FROM audit_events") as cur:
+            rows = await cur.fetchall()
+    event_ids = {row["event_id"] for row in rows}
+    assert {"evt-first", "evt-second", "evt-late-older"} <= event_ids
+
+    report3 = await migrate_to_shared_audit_db(
+        shared_db_path=shared_db_path,
+        user_db_base_dir=user_base,
+        default_db_path=None,
+        system_tenant_id="system",
+        chunk_size=100,
+    )
+    source_counts3 = next(c for c in report3.sources if c.source.label == f"user:{user_id}")
+    assert source_counts3.events_read == 0
+    assert source_counts3.events_inserted == 0
+
+
+@pytest.mark.asyncio
 async def test_migration_checkpoint_handles_empty_timestamp_resume(tmp_path, monkeypatch):
     user_base = tmp_path / "user_dbs"
     user_id = "909"

@@ -5,8 +5,8 @@ from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, RequireRole, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, require_roles
 from tldw_Server_API.app.api.v1.endpoints.discord_oauth_admin import discord_oauth_start_impl
 from tldw_Server_API.app.api.v1.endpoints.discord_support import (
     _decrypt_discord_payload,
@@ -66,7 +66,6 @@ from tldw_Server_API.app.api.v1.schemas.telegram_schemas import (
     TelegramLinkedActorListResponse,
     TelegramLinkedActorRevokeResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos import get_workspace_provider_installations_repo
@@ -533,7 +532,7 @@ async def delete_personal_integration(
     )
 
 
-@router.get("/workspace", dependencies=[Depends(require_roles("admin"))], response_model=IntegrationOverviewResponse)
+@router.get("/workspace", dependencies=[Depends(RequireRole("admin"))], response_model=IntegrationOverviewResponse)
 async def list_workspace_integrations(
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
@@ -550,7 +549,7 @@ async def list_workspace_integrations(
 
 @router.get(
     "/workspace/slack/policy",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
     response_model=SlackWorkspacePolicyResponse,
 )
 async def get_workspace_slack_policy(
@@ -564,7 +563,7 @@ async def get_workspace_slack_policy(
 
 @router.put(
     "/workspace/slack/policy",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
     response_model=SlackWorkspacePolicyResponse,
 )
 async def put_workspace_slack_policy(
@@ -579,7 +578,7 @@ async def put_workspace_slack_policy(
 
 @router.get(
     "/workspace/discord/policy",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
     response_model=DiscordWorkspacePolicyResponse,
 )
 async def get_workspace_discord_policy(
@@ -593,7 +592,7 @@ async def get_workspace_discord_policy(
 
 @router.put(
     "/workspace/discord/policy",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
     response_model=DiscordWorkspacePolicyResponse,
 )
 async def put_workspace_discord_policy(
@@ -608,7 +607,7 @@ async def put_workspace_discord_policy(
 
 @router.get(
     "/workspace/telegram/bot",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
     response_model=TelegramBotConfigResponse,
 )
 async def get_workspace_telegram_bot(
@@ -620,7 +619,7 @@ async def get_workspace_telegram_bot(
 
 @router.put(
     "/workspace/telegram/bot",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
     response_model=TelegramBotConfigResponse,
 )
 async def put_workspace_telegram_bot(
@@ -631,7 +630,7 @@ async def put_workspace_telegram_bot(
     return await telegram_admin_put_bot_impl(principal=principal, payload=payload, request=request)
 
 
-@router.post("/workspace/telegram/pairing-code", dependencies=[Depends(require_roles("admin"))])
+@router.post("/workspace/telegram/pairing-code", dependencies=[Depends(RequireRole("admin"))])
 async def create_workspace_telegram_pairing_code(
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
@@ -641,7 +640,7 @@ async def create_workspace_telegram_pairing_code(
 
 @router.get(
     "/workspace/telegram/linked-actors",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
     response_model=TelegramLinkedActorListResponse,
 )
 async def list_workspace_telegram_linked_actors(
@@ -653,7 +652,7 @@ async def list_workspace_telegram_linked_actors(
 
 @router.delete(
     "/workspace/telegram/linked-actors/{actor_id}",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
     response_model=TelegramLinkedActorRevokeResponse,
 )
 async def revoke_workspace_telegram_linked_actor(

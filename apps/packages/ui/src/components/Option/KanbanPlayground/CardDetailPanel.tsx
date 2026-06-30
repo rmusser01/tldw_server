@@ -3,7 +3,6 @@ import {
   Drawer,
   Input,
   Select,
-  DatePicker,
   Button,
   Popconfirm,
   Space,
@@ -11,12 +10,15 @@ import {
 } from "antd"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Trash2, Archive, Copy, Send } from "lucide-react"
-import dayjs from "dayjs"
 
 import type { Card, CardUpdate, ListWithCards, PriorityType, Comment } from "@/types/kanban"
 import { copyCard, listComments, createComment, generateClientId } from "@/services/kanban"
 import { LabelManager } from "./LabelManager"
 import { ChecklistSection } from "./ChecklistSection"
+import {
+  formatKanbanDateTimeLocalValue,
+  parseKanbanDateTimeLocalValue
+} from "./kanbanDateTime"
 
 interface CardDetailPanelProps {
   card: Card | null
@@ -24,7 +26,7 @@ interface CardDetailPanelProps {
   lists: ListWithCards[]
   open: boolean
   onClose: () => void
-  onSave: (cardId: number, data: CardUpdate) => void
+  onSave: (cardId: number, data: CardUpdate) => void | Promise<void>
   onDelete: (cardId: number) => void
   onArchive?: (cardId: number, cardTitle: string) => void
   onMove: (cardId: number, targetListId: number) => void
@@ -55,7 +57,8 @@ export const CardDetailPanel = ({
   // Form state
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
-  const [dueDate, setDueDate] = useState<dayjs.Dayjs | null>(null)
+  const [dueDateInput, setDueDateInput] = useState("")
+  const [dueDateTouched, setDueDateTouched] = useState(false)
   const [priority, setPriority] = useState<PriorityType | null>(null)
   const [newComment, setNewComment] = useState("")
 
@@ -102,13 +105,14 @@ export const CardDetailPanel = ({
     if (card) {
       setTitle(card.title)
       setDescription(card.description || "")
-      setDueDate(card.due_date ? dayjs(card.due_date) : null)
+      setDueDateInput(formatKanbanDateTimeLocalValue(card.due_date))
+      setDueDateTouched(false)
       setPriority(card.priority || null)
       setIsDirty(false)
     }
   }, [card])
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!card) return
 
     const updates: CardUpdate = {}
@@ -117,29 +121,21 @@ export const CardDetailPanel = ({
     if (description !== (card.description ?? "")) {
       updates.description = description === "" ? null : description
     }
-    const newDueDate = dueDate?.toISOString() ?? null
-    const oldDueDate = card.due_date ?? null
-    let hasDateChanged = false
-    if (dueDate) {
-      if (!oldDueDate) {
-        hasDateChanged = true
-      } else {
-        const oldParsed = dayjs(oldDueDate)
-        hasDateChanged = !oldParsed.isValid() || !oldParsed.isSame(dueDate)
-      }
-    } else {
-      hasDateChanged = oldDueDate !== null
-    }
-    if (hasDateChanged) {
-      updates.due_date = newDueDate
+    if (dueDateTouched) {
+      updates.due_date = parseKanbanDateTimeLocalValue(dueDateInput)
     }
     if (priority !== (card.priority ?? null)) updates.priority = priority
 
-    // Only save if there are changes
-    if (Object.keys(updates).length > 0) {
-      onSave(card.id, updates)
+    try {
+      // Only save if there are changes
+      if (Object.keys(updates).length > 0) {
+        await onSave(card.id, updates)
+      }
+    } catch {
+      return
     }
 
+    setDueDateTouched(false)
     setIsDirty(false)
   }
 
@@ -199,7 +195,7 @@ export const CardDetailPanel = ({
       }
       open={open}
       onClose={onClose}
-      width={400}
+      styles={{ wrapper: { width: 400 } }}
       footer={
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>Cancel</Button>
@@ -282,17 +278,22 @@ export const CardDetailPanel = ({
 
           {/* Due Date */}
           <div>
-            <label className="block text-sm font-medium mb-1">Due Date</label>
-            <DatePicker
-              value={dueDate}
-              onChange={(date) => {
-                setDueDate(date)
+            <label
+              className="block text-sm font-medium mb-1"
+              htmlFor="kanban-card-due-date"
+            >
+              Due Date
+            </label>
+            <input
+              id="kanban-card-due-date"
+              type="datetime-local"
+              value={dueDateInput}
+              onChange={(event) => {
+                setDueDateInput(event.target.value)
+                setDueDateTouched(true)
                 setIsDirty(true)
               }}
-              className="w-full"
-              showTime={{ format: "HH:mm" }}
-              format="YYYY-MM-DD HH:mm"
-              allowClear
+              className="w-full rounded border border-border bg-background px-2 py-1 text-sm text-text focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
 

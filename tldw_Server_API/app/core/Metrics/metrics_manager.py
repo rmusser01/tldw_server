@@ -5,6 +5,7 @@ This module provides a unified interface for all metric operations,
 supporting both OpenTelemetry and fallback implementations.
 """
 
+import hashlib
 import os
 import re
 import statistics
@@ -57,6 +58,7 @@ class MetricsRegistry:
 
     _PROM_METRIC_NAME_RE = re.compile(r"[^a-zA-Z0-9_:]")
     _PROM_LABEL_KEY_RE = re.compile(r"[^a-zA-Z0-9_]")
+    _SENSITIVE_LABEL_RENAMES = {"user_id": "user_hash"}
 
     def __init__(self):
         """Initialize the metrics registry."""
@@ -87,6 +89,7 @@ class MetricsRegistry:
         self.instruments: dict[str, Any] = {}
         # Rolling window of metric samples; size configurable via METRICS_RING_BUFFER_MAXLEN_OR_UNBOUNDED.
         self.values: dict[str, deque] = defaultdict(lambda: deque(maxlen=buffer_maxlen))
+        self._latest_gauges: dict[str, dict[tuple[tuple[str, str], ...], MetricValue]] = defaultdict(dict)
         # Cumulative aggregates for Prometheus export (monotonic counters, full histograms).
         self._cumulative_counters: dict[str, dict[tuple[tuple[str, str], ...], float]] = defaultdict(dict)
         self._cumulative_histograms: dict[str, dict[tuple[tuple[str, str], ...], dict[str, Any]]] = defaultdict(dict)
@@ -149,6 +152,17 @@ class MetricsRegistry:
             normalized = f"label_{normalized}"
         return normalized
 
+    @staticmethod
+    def _hash_sensitive_label_value(value: Any) -> str:
+        """Return a stable non-reversible public label value."""
+        if value is None:
+            return "unknown"
+        value_str = str(value)
+        if not value_str:
+            return "unknown"
+        digest = hashlib.sha256(value_str.encode("utf-8")).hexdigest()[:16]
+        return f"u_{digest}"
+
     @classmethod
     def _normalize_labels(
         cls,
@@ -165,7 +179,11 @@ class MetricsRegistry:
         normalized: dict[str, str] = {}
         for key, value in labels.items():
             normalized_key = cls._normalize_label_name(str(key))
-            normalized_value = "" if value is None else str(value)
+            if normalized_key in cls._SENSITIVE_LABEL_RENAMES:
+                normalized_key = cls._SENSITIVE_LABEL_RENAMES[normalized_key]
+                normalized_value = cls._hash_sensitive_label_value(value)
+            else:
+                normalized_value = "" if value is None else str(value)
             if normalized_key in normalized and normalized[normalized_key] != normalized_value:
                 if reject_collisions:
                     raise ValueError(
@@ -215,6 +233,34 @@ class MetricsRegistry:
             labels=list(definition.labels),
             buckets=list(definition.buckets) if definition.buckets is not None else None,
         )
+
+    @staticmethod
+    def _metric_definitions_compatible(existing: MetricDefinition, candidate: MetricDefinition) -> bool:
+        """Return True when a duplicate registration preserves metric semantics."""
+        return (
+            existing.type == candidate.type
+            and existing.description == candidate.description
+            and existing.unit == candidate.unit
+            and existing.labels == candidate.labels
+            and (existing.buckets or None) == (candidate.buckets or None)
+        )
+
+    @classmethod
+    def _normalize_label_lookup_name(cls, label_name: str) -> str:
+        """Normalize caller-supplied label names for lookups."""
+        normalized_label = cls._normalize_label_name(label_name)
+        return cls._SENSITIVE_LABEL_RENAMES.get(normalized_label, normalized_label)
+
+    @classmethod
+    def _normalize_definition_label_names(cls, labels: list[str]) -> list[str]:
+        """Normalize label names declared by metric definitions."""
+        normalized_labels: list[str] = []
+        for label in labels:
+            normalized_label = cls._normalize_label_name(label)
+            normalized_label = cls._SENSITIVE_LABEL_RENAMES.get(normalized_label, normalized_label)
+            if normalized_label not in normalized_labels:
+                normalized_labels.append(normalized_label)
+        return normalized_labels
 
     def _register_standard_metrics(self):
         """Register standard application metrics."""
@@ -370,7 +416,7 @@ class MetricsRegistry:
                 type=MetricType.COUNTER,
                 description="Cumulative LLM API cost in dollars by user",
                 unit="$",
-                labels=["provider", "model", "user_id"],
+                labels=["provider", "model", "user_hash"],
             )
         )
 
@@ -450,7 +496,7 @@ class MetricsRegistry:
                 name="llm_tokens_used_total_by_user",
                 type=MetricType.COUNTER,
                 description="Total number of tokens used by user",
-                labels=["provider", "model", "type", "user_id"],
+                labels=["provider", "model", "type", "user_hash"],
             )
         )
         self.register_metric(
@@ -1279,7 +1325,7 @@ class MetricsRegistry:
                 name="uploads_total",
                 type=MetricType.COUNTER,
                 description="Total number of uploaded files",
-                labels=["user_id", "media_type"]
+                labels=["user_hash", "media_type"]
             )
         )
         self.register_metric(
@@ -1288,7 +1334,7 @@ class MetricsRegistry:
                 type=MetricType.COUNTER,
                 description="Total bytes uploaded",
                 unit="bytes",
-                labels=["user_id", "media_type"]
+                labels=["user_hash", "media_type"]
             )
         )
         self.register_metric(
@@ -1499,7 +1545,7 @@ class MetricsRegistry:
                 type=MetricType.GAUGE,
                 description="Per-user storage used in MB",
                 unit="MB",
-                labels=["user_id"],
+                labels=["user_hash"],
             )
         )
         self.register_metric(
@@ -1508,7 +1554,7 @@ class MetricsRegistry:
                 type=MetricType.GAUGE,
                 description="Per-user storage quota in MB",
                 unit="MB",
-                labels=["user_id"],
+                labels=["user_hash"],
             )
         )
 
@@ -1742,34 +1788,38 @@ class MetricsRegistry:
             if normalized_name != definition.name:
                 logger.debug(f"Normalizing metric name: {definition.name} -> {normalized_name}")
 
+            candidate = self._clone_metric_definition(definition)
+            candidate.name = normalized_name
+            candidate.labels = self._normalize_definition_label_names(candidate.labels)
+
             if normalized_name in self.metrics:
-                logger.warning(f"Metric {normalized_name} already registered")
+                existing = self.metrics[normalized_name]
+                if self._metric_definitions_compatible(existing, candidate):
+                    logger.debug(f"Metric {normalized_name} already registered with compatible definition")
+                    return True
+                logger.warning(
+                    "Metric {} already registered with incompatible definition: existing type={}, labels={}; "
+                    "candidate type={}, labels={}",
+                    normalized_name,
+                    existing.type.value,
+                    existing.labels,
+                    candidate.type.value,
+                    candidate.labels,
+                )
                 return False
 
-            if normalized_name != definition.name:
-                definition = self._clone_metric_definition(
-                    MetricDefinition(
-                        name=normalized_name,
-                        type=definition.type,
-                        description=definition.description,
-                        unit=definition.unit,
-                        labels=definition.labels,
-                        buckets=definition.buckets,
-                    )
-                )
-
             if persistent:
-                self._persistent_metric_definitions[normalized_name] = self._clone_metric_definition(definition)
+                self._persistent_metric_definitions[normalized_name] = self._clone_metric_definition(candidate)
 
-            self.metrics[normalized_name] = definition
+            self.metrics[normalized_name] = candidate
 
             # Create OpenTelemetry instrument
             if OTEL_AVAILABLE and self.meter and getattr(self.telemetry, "config", None) and self.telemetry.config.enable_metrics:
-                instrument = self._create_instrument(definition)
+                instrument = self._create_instrument(candidate)
                 if instrument:
-                    self.instruments[definition.name] = instrument
+                    self.instruments[candidate.name] = instrument
 
-            logger.debug(f"Registered metric: {definition.name}")
+            logger.debug(f"Registered metric: {candidate.name}")
             return True
 
     def normalize_metric_name(self, name: str) -> str:
@@ -1831,11 +1881,7 @@ class MetricsRegistry:
             # Group latest value by label set
             latest_by_labels: dict[tuple[tuple[str, str], ...], MetricValue] = {}
             with self._lock:
-                if metric_name in self.values:
-                    for mv in self.values[metric_name]:
-                        # Build a stable key from sorted labels
-                        label_key = self._normalize_label_key(mv.labels)
-                        latest_by_labels[label_key] = mv
+                latest_by_labels.update(self._latest_gauges.get(metric_name, {}))
 
             for mv in latest_by_labels.values():
                 observations.append(Observation(value=mv.value, attributes=mv.labels))
@@ -1881,6 +1927,10 @@ class MetricsRegistry:
             label_key = self._normalize_label_key(labels)
             store_sample = True
 
+            if definition.type == MetricType.COUNTER and value < 0:
+                logger.warning("Rejecting negative counter increment for metric {}: {}", metric_name, value)
+                return
+
             if definition.type in (MetricType.COUNTER, MetricType.UP_DOWN_COUNTER):
                 series = self._cumulative_counters[metric_name]
                 if (
@@ -1913,6 +1963,22 @@ class MetricsRegistry:
                         )
                         self._cumulative_series_warned.add(metric_name)
                     store_sample = False
+            elif definition.type == MetricType.GAUGE:
+                series = self._latest_gauges[metric_name]
+                if (
+                    label_key not in series
+                    and self._cumulative_series_cap is not None
+                    and len(series) >= self._cumulative_series_cap
+                ):
+                    self._cumulative_series_dropped[metric_name] += 1
+                    if metric_name not in self._cumulative_series_warned:
+                        logger.warning(
+                            "Gauge series cap reached for metric {} (cap={}); dropping new label sets",
+                            metric_name,
+                            self._cumulative_series_cap,
+                        )
+                        self._cumulative_series_warned.add(metric_name)
+                    store_sample = False
 
             if store_sample:
                 # Store value for aggregation only when the series is admitted.
@@ -1938,6 +2004,8 @@ class MetricsRegistry:
                         for bucket in definition.buckets:
                             if value <= bucket:
                                 hist["buckets"][bucket] += 1
+                elif definition.type == MetricType.GAUGE:
+                    self._latest_gauges[metric_name][label_key] = metric_value
 
             instrument = self.instruments.get(metric_name)
             callbacks = list(self.callbacks.get(metric_name, []))
@@ -1991,6 +2059,12 @@ class MetricsRegistry:
             value: Amount to increment (default 1)
             labels: Optional labels
         """
+        if not self._allows_metric_operation(
+            metric_name,
+            {MetricType.COUNTER, MetricType.UP_DOWN_COUNTER},
+            "increment",
+        ):
+            return
         self.record(metric_name, value, labels)
 
     def set_gauge(self, metric_name: str, value: float, labels: Optional[dict[str, str]] = None):
@@ -2002,6 +2076,8 @@ class MetricsRegistry:
             value: Value to set
             labels: Optional labels
         """
+        if not self._allows_metric_operation(metric_name, {MetricType.GAUGE}, "set_gauge"):
+            return
         self.record(metric_name, value, labels)
 
     def observe(self, metric_name: str, value: float, labels: Optional[dict[str, str]] = None):
@@ -2013,7 +2089,29 @@ class MetricsRegistry:
             value: Value to observe
             labels: Optional labels
         """
+        if not self._allows_metric_operation(metric_name, {MetricType.HISTOGRAM}, "observe"):
+            return
         self.record(metric_name, value, labels)
+
+    def _allows_metric_operation(
+        self,
+        metric_name: str,
+        expected_types: set[MetricType],
+        operation: str,
+    ) -> bool:
+        """Return False when a typed helper is used with an incompatible metric."""
+        normalized_name = self._normalize_metric_name(metric_name)
+        with self._lock:
+            definition = self.metrics.get(normalized_name)
+        if definition is None or definition.type in expected_types:
+            return True
+        logger.warning(
+            "Rejecting {} for metric {} registered as {}",
+            operation,
+            normalized_name,
+            definition.type.value,
+        )
+        return False
 
     @contextmanager
     def timer(self, metric_name: str, labels: Optional[dict[str, str]] = None):
@@ -2063,7 +2161,7 @@ class MetricsRegistry:
     def get_cumulative_counter_totals_by_label(self, metric_name: str, label_name: str) -> dict[str, float]:
         """Aggregate cumulative counter totals grouped by a specific label key."""
         metric_name = self._normalize_metric_name(metric_name)
-        normalized_label = self._normalize_label_name(label_name)
+        normalized_label = self._normalize_label_lookup_name(label_name)
         totals: dict[str, float] = defaultdict(float)
         with self._lock:
             series = self._cumulative_counters.get(metric_name, {})
@@ -2114,6 +2212,31 @@ class MetricsRegistry:
             "latest": numeric_values[-1],
             "latest_timestamp": values[-1].timestamp
         }
+
+    def get_metric_sample_counts_by_label(
+        self,
+        metric_name: str,
+        label_name: str,
+        *,
+        missing_label: str,
+    ) -> dict[str, int]:
+        """Return sample counts grouped by a normalized label key."""
+        metric_name = self._normalize_metric_name(metric_name)
+        normalized_label = self._normalize_label_lookup_name(label_name)
+        totals: dict[str, int] = defaultdict(int)
+        with self._lock:
+            histogram_series = dict(self._cumulative_histograms.get(metric_name, {}))
+            if histogram_series:
+                for label_key, histogram in histogram_series.items():
+                    label_value = dict(label_key).get(normalized_label) or missing_label
+                    totals[str(label_value)] += int(histogram.get("count", 0))
+                return dict(sorted(totals.items()))
+            values = list(self.values.get(metric_name, ()))
+
+        for metric_value in values:
+            label_value = metric_value.labels.get(normalized_label) or missing_label
+            totals[str(label_value)] += 1
+        return dict(sorted(totals.items()))
 
     def get_all_metrics(self) -> dict[str, dict[str, Any]]:
         """
@@ -2224,6 +2347,21 @@ class MetricsRegistry:
                             lines.append(f"{metric_name}_sum {hist['sum']}")
                             lines.append(f"{metric_name}_count {hist['count']}")
 
+                elif definition.type == MetricType.GAUGE:
+                    series = self._latest_gauges.get(metric_name)
+                    if not series:
+                        continue
+
+                    lines.append(f"# HELP {metric_name} {definition.description}")
+                    lines.append(f"# TYPE {metric_name} {prom_type}")
+
+                    for label_key, latest in series.items():
+                        label_dict = dict(label_key)
+                        label_str = self._format_label_str(label_dict)
+                        if label_str:
+                            lines.append(f"{metric_name}{{{label_str}}} {latest.value}")
+                        else:
+                            lines.append(f"{metric_name} {latest.value}")
                 else:
                     if metric_name not in self.values:
                         continue
@@ -2259,6 +2397,7 @@ class MetricsRegistry:
             self.instruments.clear()
             self.callbacks.clear()
             self.values.clear()
+            self._latest_gauges.clear()
             self._cumulative_counters.clear()
             self._cumulative_histograms.clear()
             self._cumulative_series_dropped.clear()

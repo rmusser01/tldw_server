@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from loguru import logger
@@ -8,6 +9,7 @@ from tldw_Server_API.app.core.AuthNZ.database import (
     build_postgres_in_clause,
     build_sqlite_in_clause,
 )
+from tldw_Server_API.app.core.DB_Management import Tool_Catalog_DB as tool_catalog_db
 from tldw_Server_API.app.core.exceptions import ToolCatalogConflictError
 
 
@@ -27,6 +29,24 @@ def _is_postgres_connection(db: Any) -> bool:
 
     # Last-resort interface hint for test doubles and adapters.
     return callable(getattr(db, "fetchrow", None))
+
+
+async def resolve_tool_catalog_filter_names(
+    db: Any,
+    *,
+    catalog_name: str | None,
+    catalog_id: Any,
+    metadata: Mapping[str, Any] | None,
+    strict: bool,
+) -> set[str] | None:
+    """Resolve MCP catalog request parameters through the DB_Management layer."""
+    return await tool_catalog_db.resolve_tool_catalog_filter_names(
+        db,
+        catalog_name=catalog_name,
+        catalog_id=catalog_id,
+        metadata=metadata,
+        strict=strict,
+    )
 
 
 async def list_tool_catalogs(db, *, org_id: int | None, team_id: int | None, limit: int, offset: int) -> list[dict[str, Any]]:
@@ -68,8 +88,8 @@ async def list_tool_catalogs(db, *, org_id: int | None, team_id: int | None, lim
             {"id": r[0], "name": r[1], "description": r[2], "org_id": r[3], "team_id": r[4], "is_active": bool(r[5]), "created_at": r[6], "updated_at": r[7]}
             for r in rows
         ]
-    except Exception as e:
-        logger.error(f"admin_tool_catalog_service.list_tool_catalogs failed: {e}")
+    except Exception:
+        logger.error("Failed to list tool catalogs")
         raise
 
 
@@ -214,8 +234,8 @@ async def list_visible_tool_catalogs(
             await _extend_rows(rows)
 
         return visible_rows
-    except Exception as e:
-        logger.error(f"admin_tool_catalog_service.list_visible_tool_catalogs failed: {e}")
+    except Exception:
+        logger.error("Failed to list visible tool catalogs")
         raise
 
 
@@ -256,8 +276,8 @@ async def create_tool_catalog(db, *, name: str, description: str | None, org_id:
         )
         r = await cur2.fetchone()
         return {"id": r[0], "name": r[1], "description": r[2], "org_id": r[3], "team_id": r[4], "is_active": bool(r[5]), "created_at": r[6], "updated_at": r[7]}
-    except Exception as e:
-        logger.error(f"admin_tool_catalog_service.create_tool_catalog failed: {e}")
+    except Exception:
+        logger.error("Failed to create tool catalog")
         raise
 
 
@@ -287,8 +307,8 @@ async def get_tool_catalog(db, catalog_id: int) -> dict[str, Any] | None:
             "created_at": r[6],
             "updated_at": r[7],
         }
-    except Exception as e:
-        logger.error(f"admin_tool_catalog_service.get_tool_catalog failed: {e}")
+    except Exception:
+        logger.error("Failed to get tool catalog")
         raise
 
 
@@ -302,8 +322,8 @@ async def delete_tool_catalog(db, catalog_id: int) -> None:
         commit = getattr(db, "commit", None)
         if callable(commit):
             await commit()
-    except Exception as e:
-        logger.error(f"admin_tool_catalog_service.delete_tool_catalog failed: {e}")
+    except Exception:
+        logger.error("Failed to delete tool catalog")
         raise
 
 
@@ -329,8 +349,8 @@ async def list_tool_catalog_entries(
         )
         rows = await cur.fetchall()
         return [{"catalog_id": r[0], "tool_name": r[1], "module_id": r[2]} for r in rows]
-    except Exception as e:
-        logger.error(f"admin_tool_catalog_service.list_tool_catalog_entries failed: {e}")
+    except Exception:
+        logger.error("Failed to list tool catalog entries")
         raise
 
 
@@ -351,8 +371,8 @@ async def add_tool_catalog_entry(db, catalog_id: int, tool_name: str, module_id:
             cur2 = await db.execute("SELECT catalog_id, tool_name, module_id FROM tool_catalog_entries WHERE catalog_id = ? AND tool_name = ?", (catalog_id, tool_name))
             r = await cur2.fetchone()
         return {"catalog_id": r[0], "tool_name": r[1], "module_id": r[2]} if r else {"catalog_id": catalog_id, "tool_name": tool_name, "module_id": module_id}
-    except Exception as e:
-        logger.error(f"admin_tool_catalog_service.add_tool_catalog_entry failed: {e}")
+    except Exception:
+        logger.error("Failed to add tool catalog entry")
         raise
 
 
@@ -366,6 +386,6 @@ async def delete_tool_catalog_entry(db, catalog_id: int, tool_name: str) -> None
         commit = getattr(db, "commit", None)
         if callable(commit):
             await commit()
-    except Exception as e:
-        logger.error(f"admin_tool_catalog_service.delete_tool_catalog_entry failed: {e}")
+    except Exception:
+        logger.error("Failed to delete tool catalog entry")
         raise

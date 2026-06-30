@@ -4,6 +4,9 @@
 import { type Page, type Locator, expect } from "@playwright/test"
 import { dispatchKeyboardShortcut, waitForAppShell, waitForConnection } from "../helpers"
 
+const escapeRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
 export class KnowledgeQAPage {
   readonly page: Page
   readonly searchShell: Locator
@@ -194,6 +197,77 @@ export class KnowledgeQAPage {
     }
   }
 
+  async setWebFallback(enabled: boolean): Promise<void> {
+    const toggle = this.page
+      .getByRole("button", { name: /Web fallback is currently/i })
+      .first()
+    await expect(toggle).toBeVisible({ timeout: 15_000 })
+    const pressed = (await toggle.getAttribute("aria-pressed")) === "true"
+    if (pressed !== enabled) {
+      await toggle.click()
+      await expect(toggle).toHaveAttribute("aria-pressed", enabled ? "true" : "false", {
+        timeout: 10_000,
+      })
+    }
+  }
+
+  async openSourceScope(): Promise<Locator> {
+    const existingDialog = this.getSourceScopeDialog()
+    if (await existingDialog.isVisible().catch(() => false)) {
+      return existingDialog
+    }
+
+    const openButton = this.page
+      .getByRole("button", { name: /Open source scope and saved profiles/i })
+      .first()
+    await expect(openButton).toBeVisible({ timeout: 15_000 })
+    await openButton.click()
+
+    const dialog = this.getSourceScopeDialog()
+    await expect(dialog).toBeVisible({ timeout: 15_000 })
+    return dialog
+  }
+
+  async selectSpecificSource(
+    sourceKind: "media" | "notes",
+    title: string
+  ): Promise<void> {
+    const scope = await this.openSourceScope()
+    const specificButton = scope.getByRole("button", { name: /^Specific:/i }).first()
+    await expect(specificButton).toBeVisible({ timeout: 15_000 })
+    await specificButton.click()
+
+    const selector = this.page.getByRole("dialog", { name: "Specific source selector" })
+    await expect(selector).toBeVisible({ timeout: 15_000 })
+
+    const tabPattern =
+      sourceKind === "media" ? /Documents & Media/i : /^Notes\b/i
+    await selector.getByRole("button", { name: tabPattern }).click()
+
+    const filter = selector.getByPlaceholder(
+      sourceKind === "media" ? /Filter docs by title/i : /Filter notes by title/i
+    )
+    await expect(filter).toBeVisible({ timeout: 15_000 })
+    await filter.fill(title)
+
+    const checkbox = selector
+      .getByRole("checkbox", { name: new RegExp(escapeRegExp(title), "i") })
+      .first()
+    await expect(checkbox).toBeVisible({ timeout: 20_000 })
+    await checkbox.check()
+
+    await expect(scope.getByText(/Searching \d+ item/i).first()).toBeVisible({
+      timeout: 10_000,
+    })
+
+    await this.page.keyboard.press("Escape").catch(() => {})
+    const closeScope = scope.getByRole("button", { name: "Close source scope" })
+    if (await closeScope.isVisible().catch(() => false)) {
+      await closeScope.click()
+      await expect(scope).toBeHidden({ timeout: 10_000 })
+    }
+  }
+
   // ── Follow-Up Questions ─────────────────────────────────────────────
 
   async getFollowUpInput(): Promise<Locator> {
@@ -285,6 +359,10 @@ export class KnowledgeQAPage {
     return this.page.getByRole("dialog", { name: /RAG Settings/i })
   }
 
+  getSourceScopeDialog(): Locator {
+    return this.page.getByRole("dialog", { name: "Source scope and profiles" })
+  }
+
   getHistorySidebar(): Locator {
     return this.page.locator(
       "[data-testid='knowledge-history-desktop-open'], [data-testid='knowledge-history-mobile-overlay']"
@@ -297,6 +375,57 @@ export class KnowledgeQAPage {
 
   getCitationButtons(): Locator {
     return this.page.locator("[data-knowledge-citation-index]")
+  }
+
+  getEvidenceSourceCards(): Locator {
+    return this.getEvidencePanel().locator("[id^='source-card-']")
+  }
+
+  async openEvidenceDetails(): Promise<void> {
+    const detailsTab = this.getEvidencePanel().getByRole("button", { name: /^Details$/i })
+    await expect(detailsTab).toBeVisible({ timeout: 15_000 })
+    await detailsTab.click()
+    await expect(detailsTab).toHaveAttribute("aria-pressed", "true", {
+      timeout: 10_000,
+    })
+  }
+
+  async openExportDialog(): Promise<Locator> {
+    const exportButton = this.resultsShell.getByRole("button", { name: /^Export$/i })
+    await expect(exportButton).toBeVisible({ timeout: 15_000 })
+    await exportButton.click()
+    const dialog = this.page.getByRole("dialog", { name: /Export Conversation/i })
+    await expect(dialog).toBeVisible({ timeout: 15_000 })
+    return dialog
+  }
+
+  async copyExportMarkdown(): Promise<string> {
+    const dialog = this.page.getByRole("dialog", { name: /Export Conversation/i })
+    await expect(dialog).toBeVisible({ timeout: 15_000 })
+
+    const markdownButton = dialog.getByRole("button", { name: /^Markdown\b/i })
+    if (await markdownButton.isVisible().catch(() => false)) {
+      await markdownButton.click()
+    }
+
+    const unsupportedAcknowledgement = dialog.getByRole("checkbox", {
+      name: /I understand this unsupported draft/i,
+    })
+    if (await unsupportedAcknowledgement.isVisible().catch(() => false)) {
+      await unsupportedAcknowledgement.check()
+    }
+
+    const exportButton = dialog.getByRole("button", { name: /^Export$/i })
+    await expect(exportButton).toBeEnabled({ timeout: 15_000 })
+    await exportButton.click()
+
+    const preview = dialog.locator("pre").first()
+    await expect(preview).toBeVisible({ timeout: 15_000 })
+    const copyButton = dialog.getByRole("button", { name: /^Copy$/i })
+    if (await copyButton.isEnabled().catch(() => false)) {
+      await copyButton.click()
+    }
+    return ((await preview.textContent()) ?? "").trim()
   }
 
   getExpertModeToggle(): Locator {

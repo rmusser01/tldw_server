@@ -28,6 +28,14 @@ import RateLimitingPage from "../RateLimitingPage"
 const fetchMock = vi.fn()
 vi.stubGlobal("fetch", fetchMock)
 
+const expectDesignSystemAlertForText = async (text: string) => {
+  const title = await screen.findByText(text)
+  const alert = title.closest('[data-ds-component="Alert"]')
+
+  expect(alert).not.toBeNull()
+  return alert as HTMLElement
+}
+
 describe("RateLimitingPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -67,6 +75,52 @@ describe("RateLimitingPage", () => {
       unprotected: [],
       coverage_pct: 100
     })
+    mocks.listAdminRateLimits.mockResolvedValue([])
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        paths: {
+          "/api/v1/admin/rate-limits": {}
+        }
+      })
+    })
+  })
+
+  it("renders forbidden guard feedback through the design-system Alert primitive", async () => {
+    mocks.getGovernorPolicy.mockRejectedValueOnce({ status: 403 })
+
+    render(<RateLimitingPage />)
+
+    const alert = await expectDesignSystemAlertForText("Access Denied")
+    expect(alert).toHaveAttribute("role", "alert")
+    expect(alert).toHaveTextContent(
+      "You don't have permission to access rate limiting administration."
+    )
+  })
+
+  it("renders missing-endpoint guard feedback through the design-system Alert primitive", async () => {
+    mocks.getGovernorPolicy.mockRejectedValueOnce({ status: 404 })
+
+    render(<RateLimitingPage />)
+
+    const alert = await expectDesignSystemAlertForText("Not Available")
+    expect(alert).toHaveAttribute("role", "alert")
+    expect(alert).toHaveTextContent(
+      "Rate limiting administration is not available on this server."
+    )
+  })
+
+  it("renders empty policy and coverage feedback through the design-system Alert primitive", async () => {
+    mocks.getGovernorPolicy.mockResolvedValueOnce(null)
+    mocks.getGovernorCoverage.mockResolvedValueOnce(null)
+
+    render(<RateLimitingPage />)
+
+    const policyAlert = await expectDesignSystemAlertForText("No policy data loaded yet.")
+    expect(policyAlert).toHaveAttribute("role", "status")
+
+    const coverageAlert = await expectDesignSystemAlertForText("No coverage data loaded yet.")
+    expect(coverageAlert).toHaveAttribute("role", "status")
   })
 
   it("shows an unsupported-state message without calling admin rate-limits when the route is absent", async () => {
@@ -82,6 +136,10 @@ describe("RateLimitingPage", () => {
     expect(
       await screen.findByText("Rate limits listing endpoint is not available on this server.")
     ).toBeInTheDocument()
+    const alert = await expectDesignSystemAlertForText(
+      "Rate limits listing endpoint is not available on this server."
+    )
+    expect(alert).toHaveAttribute("role", "status")
     expect(mocks.listAdminRateLimits).not.toHaveBeenCalled()
   })
 })

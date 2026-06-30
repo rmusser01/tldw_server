@@ -1,6 +1,7 @@
 import React from "react"
-import { Alert, Button, Input, Select, Space } from "antd"
+import { Button, Input, Select, Space } from "antd"
 
+import { Alert } from "@/components/ui/primitives/Alert"
 import type { TemplateComposerSectionResult } from "@/services/watchlists"
 
 import {
@@ -201,11 +202,12 @@ export const VisualComposerPane: React.FC<VisualComposerPaneProps> = ({
 
       {nodes.length === 0 ? (
         <Alert
-          type="info"
-          showIcon
+          variant="info"
+          aria-live="off"
           title="No visual blocks yet"
-          description="Add blocks above to start building this template."
-        />
+        >
+          Add blocks above to start building this template.
+        </Alert>
       ) : null}
 
       {nodes.map((node) => {
@@ -279,10 +281,10 @@ export const VisualComposerPane: React.FC<VisualComposerPaneProps> = ({
                   Generate section
                 </Button>
                 {state?.error ? (
-                  <Alert type="error" showIcon title={state.error} />
+                  <Alert variant="error" title={state.error} />
                 ) : null}
                 {state?.warnings?.length ? (
-                  <Alert type="warning" showIcon title={state.warnings.join("; ")} />
+                  <Alert variant="warning" title={state.warnings.join("; ")} />
                 ) : null}
               </div>
             ) : null}

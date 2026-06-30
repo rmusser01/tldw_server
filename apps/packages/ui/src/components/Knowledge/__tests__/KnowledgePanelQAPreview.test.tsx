@@ -1,19 +1,138 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { KnowledgePanel } from "../KnowledgePanel"
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockUseKnowledgeSettings = vi.fn()
 const mockUseKnowledgeSearch = vi.fn()
 const mockUseFileSearch = vi.fn()
 const mockUseQASearch = vi.fn()
 const mockWithFullMediaTextIfAvailable = vi.fn()
+let KnowledgePanel: typeof import("../KnowledgePanel").KnowledgePanel
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string) => fallback ?? _key
   })
 }))
+
+vi.mock(
+  "antd",
+  () => {
+    const ButtonComponent = ({
+      children,
+      disabled,
+      htmlType,
+      onClick,
+      title,
+      "aria-label": ariaLabel
+    }: any) => (
+      <button
+        type={htmlType === "submit" ? "submit" : "button"}
+        disabled={disabled}
+        onClick={onClick}
+        title={title}
+        aria-label={ariaLabel}
+      >
+        {children}
+      </button>
+    )
+
+    const InputComponent = React.forwardRef<HTMLInputElement, any>(
+      ({ value, onChange, onPressEnter, placeholder, disabled }, ref) => (
+        <input
+          ref={ref}
+          value={value ?? ""}
+          onChange={(event) => onChange?.(event)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") onPressEnter?.(event)
+          }}
+          placeholder={placeholder}
+          disabled={disabled}
+        />
+      )
+    )
+    InputComponent.displayName = "MockAntdInput"
+
+    const SelectComponent = ({ value, options = [], onChange, disabled }: any) => (
+      <select
+        value={Array.isArray(value) ? value[0] ?? "" : value ?? ""}
+        onChange={(event) => onChange?.(event.target.value)}
+        disabled={disabled}
+      >
+        {Array.isArray(options)
+          ? options.map((option: any) => (
+              <option
+                key={String(option?.value)}
+                value={String(option?.value ?? "")}
+              >
+                {typeof option?.label === "string"
+                  ? option.label
+                  : String(option?.value ?? "")}
+              </option>
+            ))
+          : null}
+      </select>
+    )
+
+    const Modal = Object.assign(
+      ({
+        children,
+        open,
+        title
+      }: {
+        children?: React.ReactNode
+        open?: boolean
+        title?: React.ReactNode
+      }) =>
+        open ? (
+          <div
+            role="dialog"
+            aria-label={typeof title === "string" ? title : undefined}
+          >
+            {title ? <h2>{title}</h2> : null}
+            {children}
+          </div>
+        ) : null,
+      { confirm: vi.fn() }
+    )
+
+    return {
+      AutoComplete: InputComponent,
+      Button: ButtonComponent,
+      Checkbox: ({ children }: { children?: React.ReactNode }) => (
+        <label>{children}</label>
+      ),
+      Input: InputComponent,
+      InputNumber: InputComponent,
+      Modal,
+      Radio: {
+        Group: ({ children }: { children?: React.ReactNode }) => (
+          <div>{children}</div>
+        ),
+        Button: ButtonComponent
+      },
+      Select: SelectComponent,
+      Spin: ({ children }: { children?: React.ReactNode }) => (
+        <div>{children}</div>
+      ),
+      Switch: ({ checked, onChange, disabled }: any) => (
+        <input
+          type="checkbox"
+          checked={Boolean(checked)}
+          onChange={(event) => onChange?.(event.target.checked)}
+          disabled={disabled}
+        />
+      ),
+      Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>
+    }
+  }
+)
 
 vi.mock("../hooks", () => {
   const toPinnedResult = (item: any) => ({
@@ -76,6 +195,10 @@ describe("KnowledgePanel QA chunk preview", () => {
     metadata: { title: "QA Doc Title", source: "qa-source" },
     score: 0.8
   }
+
+  beforeAll(async () => {
+    ;({ KnowledgePanel } = await import("../KnowledgePanel"))
+  })
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -213,5 +336,40 @@ describe("KnowledgePanel QA chunk preview", () => {
         { ignorePinnedResults: true }
       )
     })
+  })
+
+  it("resolves shared preview modal context before Ask", async () => {
+    const onAsk = vi.fn()
+    mockWithFullMediaTextIfAvailable.mockResolvedValueOnce({
+      id: "pin-doc-1",
+      title: "QA Doc Title",
+      snippet: "Resolved preview context"
+    })
+
+    render(
+      <KnowledgePanel
+        open
+        showToggle={false}
+        onInsert={vi.fn()}
+        onAsk={onAsk}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ask" }))
+
+    await waitFor(() => {
+      expect(onAsk).toHaveBeenCalledWith(
+        expect.stringContaining("Resolved preview context"),
+        { ignorePinnedResults: true }
+      )
+    })
+    expect(mockWithFullMediaTextIfAvailable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "QA Doc Title",
+        snippet: "Chunk preview text"
+      })
+    )
   })
 })

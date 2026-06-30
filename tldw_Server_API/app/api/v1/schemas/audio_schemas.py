@@ -12,6 +12,8 @@ from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
+
 
 class NormalizationOptions(BaseModel):
     """Options for the normalization system"""
@@ -50,7 +52,8 @@ class OpenAISpeechRequest(BaseModel):
         description=(
             "The model to use for generation. This must be sent explicitly by the caller or its "
             "user-configured defaults. Supported choices include tts-1, tts-1-hd, kokoro, "
-            "kitten_tts, KittenML/kitten-tts-nano-0.8, higgs, chatterbox, and vibevoice."
+            "kitten_tts, KittenML/kitten-tts-nano-0.8, higgs, chatterbox, chatterbox-emotion, "
+            "chatterbox-multilingual, chatterbox-turbo, and vibevoice."
         ),
     )
     input: str = Field(..., description="The text to generate audio for")
@@ -63,6 +66,13 @@ class OpenAISpeechRequest(BaseModel):
         description=(
             "The format to return audio in. Supported formats: mp3, opus, aac, flac, wav, pcm, ogg, webm, ulaw. "
             "PCM format returns raw 16-bit samples without headers."
+        ),
+    )
+    output_format: Optional[Literal["mp3", "opus", "aac", "flac", "wav", "pcm", "ogg", "webm", "ulaw"]] = Field(
+        default=None,
+        description=(
+            "Chatterbox compatibility alias for response_format. Used only for Chatterbox-family "
+            "models when response_format was not provided."
         ),
     )
     download_format: Optional[Literal["mp3", "opus", "aac", "flac", "wav", "pcm", "ogg", "webm", "ulaw"]] = (
@@ -99,6 +109,13 @@ class OpenAISpeechRequest(BaseModel):
         default=None,
         description="Optional language code to use for text processing. If not provided, will use first letter of voice name.",
     )
+    language: Optional[str] = Field(
+        default=None,
+        description=(
+            "Chatterbox compatibility alias for lang_code. Used only for Chatterbox-family "
+            "models when lang_code was not provided."
+        ),
+    )
     normalization_options: Optional[NormalizationOptions] = Field(
         default=NormalizationOptions(),
         description="Options for the normalization system",
@@ -107,7 +124,9 @@ class OpenAISpeechRequest(BaseModel):
         default=None,
         description=(
             "Base64-encoded audio data for voice cloning/reference. Supported by PocketTTS, NeuTTS, "
-            "Higgs (3-10s), Chatterbox (5-20s), VibeVoice, and IndexTTS2 models."
+            "OmniVoice, Higgs (3-10s), Chatterbox (5-20s), VibeVoice, and IndexTTS2 models. "
+            "OmniVoice cloning also requires `extra_params.reference_text`, whether the reference "
+            "audio is uploaded directly here or loaded from a stored `custom:<voice_id>` voice."
         ),
     )
     reference_duration_min: Optional[float] = Field(
@@ -118,7 +137,15 @@ class OpenAISpeechRequest(BaseModel):
     )
     extra_params: Optional[dict[str, Any]] = Field(
         default=None,
-        description="Provider-specific parameters passed through to adapters (e.g., stability, clarity, cfg_scale).",
+        description=(
+            "Provider-specific parameters passed through to adapters (e.g., stability, clarity, cfg_scale). "
+            "For Chatterbox, supported keys include exaggeration, cfg_weight, temperature, top_p, top_k, "
+            "speed_factor, split_text, chunk_size, and the safe stored-voice alias "
+            "`voice_mode='predefined'` plus `predefined_voice_id`; server-side reference_audio_filename "
+            "paths are not dereferenced. "
+            "For OmniVoice cloning, include `reference_text` describing the spoken transcript of the "
+            "reference audio."
+        ),
     )
 
 
@@ -128,7 +155,7 @@ class VoiceEncodeRequest(BaseModel):
     provider: str = Field(default="neutts", description="Target provider for encoding artifacts")
     reference_text: Optional[str] = Field(
         default=None,
-        description="Reference text associated with the stored audio (required for NeuTTS)",
+        description="Reference text associated with the stored audio (required for NeuTTS and OmniVoice)",
     )
     force: bool = Field(
         default=False,
@@ -143,6 +170,63 @@ class VoiceEncodeResponse(BaseModel):
     cached: bool = False
     ref_codes_len: Optional[int] = None
     reference_text: Optional[str] = None
+
+
+class FishS2ReferenceResponse(BaseModel):
+    """Response schema for one managed Fish S2 reference."""
+    model_config = ConfigDict(extra="allow")
+
+    reference_id: str = Field(..., description="Local managed reference identifier")
+    voice_id: Optional[str] = Field(default=None, description="Stored voice ID backing the reference")
+    remote_reference_id: Optional[str] = Field(default=None, description="Fish-hosted reference/model ID")
+    reference_text: Optional[str] = Field(default=None, description="Transcript associated with the reference")
+    name: Optional[str] = Field(default=None, description="Display name for the reference")
+    description: Optional[str] = Field(default=None, description="Optional reference description")
+    cached: Optional[bool] = Field(default=None, description="Whether an existing remote reference was reused")
+
+
+class FishS2ReferenceDeleteResponse(BaseModel):
+    """Response schema for deleting one managed Fish S2 reference."""
+    model_config = ConfigDict(extra="allow")
+
+    reference_id: str = Field(..., description="Deleted local managed reference identifier")
+    deleted: bool = Field(..., description="Whether the managed reference was deleted")
+
+
+class FishS2ReferenceListResponse(BaseModel):
+    """Response schema for listing managed Fish S2 references."""
+    references: list[FishS2ReferenceResponse] = Field(default_factory=list)
+    count: int = Field(..., ge=0)
+
+
+class FishS2ReferenceImportErrorItem(BaseModel):
+    """Per-item import failure for Fish S2 reference imports."""
+    index: int = Field(..., ge=0)
+    message: str = Field(..., min_length=1)
+    code: Optional[str] = None
+
+
+class FishS2ReferenceImportResult(BaseModel):
+    """Per-item success payload for Fish S2 reference imports."""
+    model_config = ConfigDict(extra="allow")
+
+    index: int = Field(..., ge=0)
+    reference_id: Optional[str] = Field(default=None, description="Local managed reference identifier")
+    voice_id: Optional[str] = Field(default=None, description="Stored voice ID backing the reference")
+    remote_reference_id: Optional[str] = Field(default=None, description="Fish-hosted reference/model ID")
+    reference_text: Optional[str] = Field(default=None, description="Transcript associated with the reference")
+    name: Optional[str] = Field(default=None, description="Display name for the reference")
+    description: Optional[str] = Field(default=None, description="Optional reference description")
+    cached: Optional[bool] = Field(default=None, description="Whether an existing remote reference was reused")
+    result: Optional[Any] = Field(default=None, description="Fallback result payload for non-dict service responses")
+
+
+class FishS2ReferenceImportResponse(BaseModel):
+    """Response schema for Fish S2 reference imports."""
+    results: list[FishS2ReferenceImportResult] = Field(default_factory=list)
+    errors: list[FishS2ReferenceImportErrorItem] = Field(default_factory=list)
+    imported: int = Field(..., ge=0)
+    failed: int = Field(..., ge=0)
 
 
 class AudioTokenizerEncodeRequest(BaseModel):
@@ -273,7 +357,8 @@ class OpenAITranscriptionRequest(BaseModel):
     model: Optional[str] = Field(
         default=None,
         description=(
-            "ID of the model to use. Options: whisper-1, parakeet, canary, qwen2audio. "
+            "ID of the model to use. Options: parakeet-tdt-0.6b-v3-onnx, "
+            "parakeet-onnx, whisper-1, parakeet, canary, qwen2audio. "
             "Defaults to the configured STT provider when omitted."
         ),
     )
@@ -608,6 +693,7 @@ class TTSHistoryListResponse(BaseModel):
     limit: int
     offset: int
     next_cursor: Optional[str] = None
+    pagination: CursorPaginationMeta
 
 
 class TTSHistoryDetailResponse(BaseModel):

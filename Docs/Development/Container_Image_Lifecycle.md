@@ -59,7 +59,7 @@ Three GitHub Actions workflows manage the lifecycle:
 
 **Trigger:** Push to `main` (fires on every merge).
 
-**What it does:** Builds and pushes snapshot images for `app`, `webui`, and `admin-ui` to GHCR. These snapshots let operators and CI test the latest `main` without waiting for a release.
+**What it does:** Builds and pushes snapshot images for `app`, `webui`, and `admin-ui` to GHCR. These snapshots let operators and CI test the latest `main` without waiting for a release, and they continue to republish on every `main` push independently of GitHub Release publication.
 
 **Key details:**
 - Registry: GHCR only (not Docker Hub).
@@ -78,9 +78,9 @@ Three GitHub Actions workflows manage the lifecycle:
 
 **File:** `.github/workflows/publish-docker.yml`
 
-**Trigger:** Release (published event), plus `workflow_dispatch` with an optional `manual_tag` input for ad-hoc builds.
+**Trigger:** GitHub Release publication (`release.published`), plus `workflow_dispatch` with an optional `manual_tag` input for ad-hoc builds.
 
-**What it does:** Builds and pushes release images for `app`, `worker`, and `audio-worker` to both Docker Hub and GHCR.
+**What it does:** Builds and pushes release images for `app`, `worker`, and `audio-worker` to both Docker Hub and GHCR. GitHub Release publication is the release-driving event for this workflow in v1.
 
 **Key details:**
 - Registries: both Docker Hub and GHCR.

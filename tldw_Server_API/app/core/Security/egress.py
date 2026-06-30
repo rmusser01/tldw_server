@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-import contextlib
 import ipaddress
+import math
 import os
 import socket
+import threading
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from urllib.parse import urlparse
+
+from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_truthy
 
@@ -23,6 +27,61 @@ PROFILENAME = "WORKFLOWS_EGRESS_PROFILE"  # strict | permissive | custom
 # Webhook-specific per-tenant allow/deny controls
 WEBHOOK_ALLOWLIST_ENV = "WORKFLOWS_WEBHOOK_ALLOWLIST"
 WEBHOOK_DENYLIST_ENV = "WORKFLOWS_WEBHOOK_DENYLIST"
+DNS_RESOLVER_MAX_OUTSTANDING_ENV = "WORKFLOWS_EGRESS_DNS_MAX_OUTSTANDING"
+DNS_RESOLVER_SLOT_WAIT_SECONDS_ENV = "WORKFLOWS_EGRESS_DNS_SLOT_WAIT_SECONDS"
+
+_DNS_RESOLVER_MAX_OUTSTANDING_DEFAULT = 64
+_DNS_RESOLVER_SLOT_WAIT_SECONDS_DEFAULT = 0.05
+
+
+def _log_invalid_dns_config(name: str, raw: object, default: int | float, reason: str) -> None:
+    """Log invalid DNS resolver environment configuration with queryable fields."""
+    logger.bind(
+        env_var=name,
+        raw_value=str(raw),
+        default_value=default,
+        reason=reason,
+        event="invalid_egress_dns_config",
+    ).warning("Invalid egress DNS configuration; using default")
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    """Return a positive integer env override or the supplied default."""
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        _log_invalid_dns_config(name, raw, default, "invalid_integer")
+        return default
+    if value < 1:
+        _log_invalid_dns_config(name, raw, default, "not_positive")
+        return default
+    return value
+
+
+def _nonnegative_float_env(name: str, default: float) -> float:
+    """Return a finite non-negative float env override or the supplied default."""
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        _log_invalid_dns_config(name, raw, default, "invalid_float")
+        return default
+    if not math.isfinite(value) or value < 0:
+        _log_invalid_dns_config(name, raw, default, "not_finite_or_negative")
+        return default
+    return value
+
+
+_DNS_RESOLVER_MAX_OUTSTANDING = _positive_int_env(
+    DNS_RESOLVER_MAX_OUTSTANDING_ENV,
+    _DNS_RESOLVER_MAX_OUTSTANDING_DEFAULT,
+)
+_DNS_RESOLVER_SLOTS = threading.BoundedSemaphore(_DNS_RESOLVER_MAX_OUTSTANDING)
 
 
 PRIVATE_RANGES = [
@@ -99,6 +158,133 @@ def _host_matches_allowlist(host: str, allowlist: Sequence[str]) -> bool:
     return False
 
 
+def _dns_slot_wait_seconds(timeout_s: float) -> float:
+    """Bound DNS slot wait time by the caller's resolver timeout budget."""
+    if not math.isfinite(timeout_s) or timeout_s <= 0:
+        return 0.0
+    configured = _nonnegative_float_env(
+        DNS_RESOLVER_SLOT_WAIT_SECONDS_ENV,
+        _DNS_RESOLVER_SLOT_WAIT_SECONDS_DEFAULT,
+    )
+    return min(configured, timeout_s)
+
+
+def _release_dns_resolver_slot(host: str, reason: str) -> None:
+    """Release one DNS resolver slot and log impossible double-release cases."""
+    try:
+        _DNS_RESOLVER_SLOTS.release()
+    except ValueError as exc:
+        logger.bind(
+            host=host,
+            reason=reason,
+            exception_type=type(exc).__name__,
+            event="dns_resolver_slot_release_failed",
+        ).debug("DNS resolver slot release failed")
+
+
+def _remaining_dns_budget(start_time: float, timeout_s: float) -> float:
+    """Return the remaining DNS timeout budget after elapsed wall-clock time."""
+    return max(0.0, timeout_s - (time.monotonic() - start_time))
+
+
+def _getaddrinfo_with_timeout(host: str, timeout_s: float = 2.0) -> list[tuple]:
+    """Resolve a host with fail-closed timeout and DNS worker saturation guards."""
+    if not math.isfinite(timeout_s) or timeout_s <= 0:
+        logger.bind(
+            host=host,
+            timeout_s=timeout_s,
+            event="dns_resolver_invalid_timeout",
+        ).warning("Invalid DNS resolver timeout; failing closed")
+        return []
+
+    start_time = time.monotonic()
+    slot_wait_s = _dns_slot_wait_seconds(timeout_s)
+    acquired = (
+        _DNS_RESOLVER_SLOTS.acquire(blocking=False)
+        if slot_wait_s <= 0
+        else _DNS_RESOLVER_SLOTS.acquire(timeout=slot_wait_s)
+    )
+    if not acquired:
+        logger.bind(
+            host=host,
+            slot_wait_s=slot_wait_s,
+            elapsed_s=time.monotonic() - start_time,
+            timeout_s=timeout_s,
+            event="dns_resolver_slots_exhausted",
+        ).warning("DNS resolver slots exhausted; failing closed")
+        return []
+
+    remaining_s = _remaining_dns_budget(start_time, timeout_s)
+    if remaining_s <= 0:
+        _release_dns_resolver_slot(host, "timeout budget exhausted before worker start")
+        logger.bind(
+            host=host,
+            elapsed_s=time.monotonic() - start_time,
+            timeout_s=timeout_s,
+            event="dns_resolver_timeout_budget_exhausted",
+        ).warning("DNS resolver timeout budget exhausted before worker start; failing closed")
+        return []
+
+    result: list[list[tuple]] = []
+    error: list[BaseException] = []
+
+    def _worker() -> None:
+        """Run the blocking OS resolver and always release the resolver slot."""
+        try:
+            result.append(
+                socket.getaddrinfo(
+                    host,
+                    None,
+                    family=socket.AF_UNSPEC,  # both IPv4 and IPv6
+                    type=socket.SOCK_STREAM,
+                )
+            )
+        except (OSError, ValueError) as exc:
+            error.append(exc)
+        finally:
+            _release_dns_resolver_slot(host, "worker completion")
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    try:
+        thread.start()
+    except RuntimeError as exc:
+        _release_dns_resolver_slot(host, "thread start failure")
+        logger.bind(
+            host=host,
+            exception_type=type(exc).__name__,
+            event="dns_resolver_worker_start_failed",
+        ).opt(exception=exc).warning("DNS resolver worker could not start; failing closed")
+        return []
+
+    remaining_s = _remaining_dns_budget(start_time, timeout_s)
+    if remaining_s <= 0:
+        logger.bind(
+            host=host,
+            elapsed_s=time.monotonic() - start_time,
+            timeout_s=timeout_s,
+            event="dns_resolver_timeout",
+        ).warning("DNS resolver timed out before waiting for worker; failing closed")
+        return []
+    thread.join(remaining_s)
+    if thread.is_alive():
+        logger.bind(
+            host=host,
+            elapsed_s=time.monotonic() - start_time,
+            timeout_s=timeout_s,
+            event="dns_resolver_timeout",
+        ).warning("DNS resolver timed out; failing closed")
+        return []
+    if error:
+        exc = error[0]
+        logger.bind(
+            host=host,
+            exception_type=type(exc).__name__,
+            event="dns_resolver_error",
+        ).debug("DNS resolver failed; failing closed")
+        return []
+    return result[0] if result else []
+
+
 def _resolve_host_ips(host: str) -> list[str]:
     """Resolve the host to all A/AAAA addresses with a short timeout.
 
@@ -106,26 +292,9 @@ def _resolve_host_ips(host: str) -> list[str]:
     in an empty list which callers must treat as unsafe.
     """
     try:
-        prev_timeout = None
-        try:
-            prev_timeout = socket.getdefaulttimeout()
-            # Short timeout to avoid long blocks during DNS resolution
-            socket.setdefaulttimeout(2.0)
-        except (OSError, TypeError, ValueError):
-            prev_timeout = None
-
-        try:
-            infos = socket.getaddrinfo(
-                host,
-                None,
-                family=socket.AF_UNSPEC,  # both IPv4 and IPv6
-                type=socket.SOCK_STREAM,
-            )
-        except (OSError, ValueError):
+        infos = _getaddrinfo_with_timeout(host)
+        if not infos:
             return []
-        finally:
-            with contextlib.suppress(OSError, TypeError, ValueError):
-                socket.setdefaulttimeout(prev_timeout)
 
         addrs: list[str] = []
         for _family, _stype, _proto, _canon, sockaddr in infos:
@@ -137,7 +306,12 @@ def _resolve_host_ips(host: str) -> list[str]:
                 continue
         # Preserve order but deduplicate
         return list(dict.fromkeys(addrs))
-    except (OSError, TypeError, ValueError):
+    except (OSError, TypeError, ValueError) as exc:
+        logger.debug(
+            "Host resolution failed for {} with {}; treating as unsafe",
+            host,
+            type(exc).__name__,
+        )
         return []
 
 
@@ -162,6 +336,12 @@ def _normalize_resolved_ips(ips: Sequence[str] | None) -> tuple[str, ...]:
         seen.add(ip)
         out.append(ip)
     return tuple(out)
+
+
+def _same_resolved_ip_set(left: Sequence[str], right: Sequence[str]) -> bool:
+    return {str(ip).strip() for ip in left if str(ip).strip()} == {
+        str(ip).strip() for ip in right if str(ip).strip()
+    }
 
 
 def _resolve_and_check_private(host: str) -> tuple[bool, list[str]]:
@@ -196,6 +376,7 @@ def evaluate_url_policy(
     denylist: Sequence[str] | None = None,
     block_private_override: bool | None = None,
     resolved_ips_override: Sequence[str] | None = None,
+    pinned_resolved_ips: Sequence[str] | None = None,
 ) -> URLPolicyResult:
     """Evaluate whether a URL passes the egress policy."""
     try:
@@ -292,8 +473,14 @@ def evaluate_url_policy(
                 if not resolved_ips:
                     return URLPolicyResult(False, "Host could not be resolved")
                 return URLPolicyResult(False, "URL resolves to a private or reserved address", resolved_ips)
+        pinned_ips = _normalize_resolved_ips(pinned_resolved_ips)
+        if pinned_ips and not _same_resolved_ip_set(resolved_ips, pinned_ips):
+            return URLPolicyResult(False, "DNS resolution changed since policy check", resolved_ips)
     else:
         resolved_ips = _normalize_resolved_ips(resolved_ips_override)
+        pinned_ips = _normalize_resolved_ips(pinned_resolved_ips)
+        if pinned_ips and resolved_ips and not _same_resolved_ip_set(resolved_ips, pinned_ips):
+            return URLPolicyResult(False, "DNS resolution changed since policy check", resolved_ips)
 
     return URLPolicyResult(True, None, resolved_ips)
 

@@ -1,16 +1,15 @@
 """Tests for Agent Orchestration service (Phase 4)."""
-from __future__ import annotations
 
-from pathlib import Path
+from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core.Agent_Orchestration import db_factory
 from tldw_Server_API.app.core.Agent_Orchestration.models import (
     TaskStatus,
     RunStatus,
     is_valid_transition,
 )
-import tldw_Server_API.app.core.Agent_Orchestration.orchestration_service as orchestration_service_module
 from tldw_Server_API.app.core.Agent_Orchestration.orchestration_service import (
     CycleDependencyError,
     OrchestrationService,
@@ -26,6 +25,7 @@ def svc():
 
 
 # ---- State machine tests ----
+
 
 def test_valid_transitions():
     assert is_valid_transition(TaskStatus.TODO, TaskStatus.IN_PROGRESS)
@@ -47,6 +47,7 @@ def test_invalid_transitions():
 
 
 # ---- Project CRUD tests ----
+
 
 @pytest.mark.asyncio
 async def test_create_project(svc):
@@ -79,12 +80,15 @@ async def test_delete_project_cascades(svc):
 
 # ---- Task CRUD tests ----
 
+
 @pytest.mark.asyncio
 async def test_create_task(svc):
     project = await svc.create_project(name="P1", user_id=1)
     task = await svc.create_task(
-        project.id, title="Task 1",
-        description="Do something", agent_type="claude_code",
+        project.id,
+        title="Task 1",
+        description="Do something",
+        agent_type="claude_code",
         user_id=1,
     )
     assert task.id == 1
@@ -114,6 +118,7 @@ async def test_list_tasks_with_status_filter(svc):
 
 
 # ---- Dependency tests ----
+
 
 @pytest.mark.asyncio
 async def test_dependency_gating(svc):
@@ -154,6 +159,7 @@ async def test_no_dependency_always_ready(svc):
 
 # ---- State transition tests ----
 
+
 @pytest.mark.asyncio
 async def test_transition_todo_to_inprogress(svc):
     project = await svc.create_project(name="P1", user_id=1)
@@ -173,6 +179,7 @@ async def test_invalid_transition_raises(svc):
 
 
 # ---- Run tests ----
+
 
 @pytest.mark.asyncio
 async def test_create_and_complete_run(svc):
@@ -200,22 +207,28 @@ async def test_fail_run(svc):
     assert failed.error == "Timeout"
 
 
-def test_get_orchestration_db_uses_safe_for_user_factory(monkeypatch, tmp_path):
+def test_legacy_sqlite_factory_reexports_dedicated_factory():
+    """Legacy service imports should continue to expose the durable DB factory."""
+    assert get_orchestration_db is db_factory.get_orchestration_db
+
+
+def test_sqlite_factory_is_available_from_dedicated_module(monkeypatch, tmp_path):
+    """The dedicated factory should construct per-user OrchestrationDB instances."""
     sentinel = object()
 
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_dbs"))
-    get_orchestration_db.cache_clear()
+    db_factory.get_orchestration_db.cache_clear()
     monkeypatch.setattr(
-        orchestration_service_module.OrchestrationDB,
+        db_factory.OrchestrationDB,
         "for_user",
         classmethod(lambda cls, user_id: sentinel),
         raising=False,
     )
 
     try:
-        assert get_orchestration_db(7) is sentinel
+        assert db_factory.get_orchestration_db(7) is sentinel
     finally:
-        get_orchestration_db.cache_clear()
+        db_factory.get_orchestration_db.cache_clear()
 
 
 @pytest.mark.asyncio
@@ -231,6 +244,7 @@ async def test_list_runs(svc):
 
 
 # ---- Reviewer gate tests ----
+
 
 @pytest.mark.asyncio
 async def test_review_approved(svc):
@@ -283,6 +297,7 @@ async def test_review_on_non_review_task_raises(svc):
 
 
 # ---- Summary test ----
+
 
 @pytest.mark.asyncio
 async def test_project_summary(svc):

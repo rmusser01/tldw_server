@@ -488,7 +488,7 @@ const maybeAnnotateCorsMismatchError = ({
 
 type ConnectionStore = {
   state: ConnectionState
-  checkOnce: () => Promise<void>
+  checkOnce: (options?: { force?: boolean }) => Promise<void>
   setServerUrl: (url: string) => Promise<void>
   enableOfflineBypass: () => Promise<void>
   disableOfflineBypass: () => Promise<void>
@@ -591,7 +591,7 @@ const deriveOnboardingConfigStep = (
 export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, get) => ({
   state: initialState,
 
-  async checkOnce() {
+  async checkOnce(options = {}) {
     const prev = get().state
 
     // Avoid overlapping checks
@@ -684,6 +684,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
     const now = Date.now()
     const nextChecksSinceConfigChange = currentState.checksSinceConfigChange + 1
     if (
+      !options.force &&
       currentState.isConnected &&
       currentState.phase === ConnectionPhase.CONNECTED &&
       currentState.lastCheckedAt != null &&

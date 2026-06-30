@@ -1,0 +1,41 @@
+{
+  "response_base_dir": "../responses",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 0,
+    "cors_origins": ["*"],
+    "log_requests": true,
+    "simulate_errors": false,
+    "error_rate": 0,
+    "require_auth": false
+  },
+  "streaming": {
+    "enabled": true,
+    "chunk_delay_ms": 5,
+    "words_per_chunk": 6
+  },
+  "models": [
+    { "id": "llama3.2:3b", "object": "model", "owned_by": "ollama" },
+    {
+      "id": "local-uat-chat",
+      "object": "model",
+      "owned_by": "local-openai-compatible"
+    },
+    { "id": "text-embedding-3-small", "object": "model", "owned_by": "openai" }
+  ],
+  "responses": {
+    "chat_completions": {
+      "patterns": [
+        {
+          "match": { "content_regex": "(?i).*(summarize|source|research note).*" },
+          "response_file": "chat/source-summary.json",
+          "priority": 10
+        }
+      ],
+      "default": "chat/default.json"
+    },
+    "embeddings": {
+      "default": "embeddings/default.json"
+    }
+  }
+}

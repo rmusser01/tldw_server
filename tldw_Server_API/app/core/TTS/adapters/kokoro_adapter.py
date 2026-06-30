@@ -20,6 +20,8 @@ from typing import Any, Optional
 import numpy as np
 from loguru import logger
 
+from ...testing import env_flag_enabled, is_explicit_pytest_runtime, is_test_mode
+from ...Utils.torch_import_guard import safe_import_torch
 from ..phoneme_overrides import (
     PhonemeOverrideEntry,
     apply_overrides_to_text,
@@ -35,10 +37,8 @@ from ..tts_exceptions import (
     TTSProviderNotConfiguredError,
 )
 from ..tts_resource_manager import get_resource_manager as _get_resource_manager
-from ...testing import env_flag_enabled, is_explicit_pytest_runtime, is_test_mode
-from ...Utils.torch_import_guard import safe_import_torch
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool
+from ..utils import parse_bool, run_tts_blocking_next
 
 #
 # Local Imports
@@ -542,6 +542,7 @@ class KokoroAdapter(TTSAdapter):
 
                 if callable(orig_create_audio) and not getattr(_konnx.Kokoro, "_tldw_speed_patch", False):
                     def _patched_create_audio(self_k, phonemes, voice, speed):
+                        """Create Kokoro ONNX audio while passing speed with a compatible dtype."""
                         from kokoro_onnx.config import MAX_PHONEME_LENGTH, SAMPLE_RATE  # type: ignore
                         from kokoro_onnx.log import log as _log  # type: ignore
 
@@ -554,9 +555,10 @@ class KokoroAdapter(TTSAdapter):
                         import time as _time
                         start_t = _time.time()
                         tokens = _np.array(self_k.tokenizer.tokenize(phonemes), dtype=_np.int64)
-                        assert len(tokens) <= MAX_PHONEME_LENGTH, (
-                            f"Context length is {MAX_PHONEME_LENGTH}, but leave room for the pad token 0 at the start & end"
-                        )
+                        if len(tokens) > MAX_PHONEME_LENGTH:
+                            raise ValueError(
+                                f"Context length is {MAX_PHONEME_LENGTH}, but leave room for the pad token 0 at the start & end"
+                            )
 
                         voice_vec = voice[len(tokens)]
                         tokens = [[0, *tokens, 0]]
@@ -908,11 +910,15 @@ class KokoroAdapter(TTSAdapter):
                 if hasattr(base_iter, "__aiter__") or inspect.isasyncgen(base_iter):
                     stream_iter = base_iter
                 else:
-                    def _sync_source():
-                        yield from base_iter
+                    sync_iterator = iter(base_iter)
+                    sentinel = object()
 
                     async def _async_wrap():
-                        for item in _sync_source():
+                        """Adapt Kokoro ONNX's synchronous stream iterator for async streaming."""
+                        while True:
+                            item = await run_tts_blocking_next(sync_iterator, sentinel)
+                            if item is sentinel:
+                                break
                             yield item
                     stream_iter = _async_wrap()
             else:
@@ -953,12 +959,17 @@ class KokoroAdapter(TTSAdapter):
                         )
                 pipeline = self.kokoro_pt_pipelines[key]
 
-                # Define a sync generator wrapper to async iterate
-                def _sync_iter():
-                    yield from pipeline(text, voice=voice_path, speed=request.speed, model=self.kokoro_pt_model)
+                sync_iterator = iter(
+                    pipeline(text, voice=voice_path, speed=request.speed, model=self.kokoro_pt_model)
+                )
+                sentinel = object()
 
                 async def _async_iter():
-                    for result in _sync_iter():
+                    """Adapt Kokoro PyTorch's synchronous stream iterator for async streaming."""
+                    while True:
+                        result = await run_tts_blocking_next(sync_iterator, sentinel)
+                        if result is sentinel:
+                            break
                         yield result
 
                 stream_iter = _async_iter()

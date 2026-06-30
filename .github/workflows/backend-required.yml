@@ -51,6 +51,7 @@ jobs:
         if: needs.changes.outputs.backend_changed == 'true'
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Setup Python and dependencies
@@ -109,6 +110,6 @@ jobs:
           TEST_MODE: "true"
           DISABLE_HEAVY_STARTUP: "1"
         run: |
-          pytest -q --maxfail=1 --disable-warnings -p pytest_asyncio.plugin \
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "unit and not e2e and not jobs" \
             tldw_Server_API/tests/unit

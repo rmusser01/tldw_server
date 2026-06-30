@@ -10,13 +10,14 @@ job management, conflict resolution, and user isolation.
 """
 
 import pytest
+import asyncio
 import json
 import tempfile
 import zipfile
 import os
 import shutil
 from unittest.mock import MagicMock, patch, AsyncMock
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 from pathlib import Path
 
@@ -33,6 +34,7 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ContentType,
     ConflictResolution,
 )
+from tldw_Server_API.app.core.Chatbooks.exceptions import QuotaExceededError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -158,6 +160,18 @@ class TestChatbookService:
         # Check job was saved - looking for INSERT OR REPLACE
         call_args = mock_db.execute_query.call_args[0]
         assert "INSERT OR REPLACE INTO export_jobs" in call_args[0]
+
+    @pytest.mark.asyncio
+    async def test_create_chatbook_sync_wrapper_reraises_cancelled_error(self, service):
+        """Task cancellation should not be converted into a failed export result."""
+        service._collect_notes = MagicMock(side_effect=asyncio.CancelledError())
+
+        with pytest.raises(asyncio.CancelledError):
+            await service._create_chatbook_sync_wrapper(
+                name="Cancelled Export",
+                description="cancel test",
+                content_selections={ContentType.NOTE: ["note-1"]},
+            )
 
     def test_get_media_db_uses_shared_factory_and_caches_result(self, mock_db, tmp_path, monkeypatch):
         """Media DB lookup should use the shared factory and cache the instance."""
@@ -782,6 +796,126 @@ class TestChatbookService:
             "status": "pending",
             "content_summary": {},
         }
+
+    @pytest.mark.asyncio
+    async def test_async_export_rejects_when_concurrent_quota_is_full(self, tmp_path, monkeypatch):
+        """Async export admission checks and inserts the Chatbooks job atomically."""
+        monkeypatch.delenv("CHATBOOKS_DISABLE_QUOTAS", raising=False)
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TESTING", raising=False)
+        monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+
+        db = CharactersRAGDB(db_path=str(tmp_path / "quota.db"), client_id="quota-test")
+        service = ChatbookService(user_id="123", db=db, user_tier="free")
+
+        for index in range(2):
+            service._save_export_job(
+                ExportJob(
+                    job_id=f"existing-{index}",
+                    user_id="123",
+                    status=ExportStatus.PENDING,
+                    chatbook_name=f"Existing {index}",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+
+        with pytest.raises(QuotaExceededError) as exc_info:
+            await service.create_chatbook(
+                name="Over quota",
+                description="Should be rejected",
+                content_selections={},
+                async_mode=True,
+            )
+
+        assert "Maximum concurrent jobs (2)" in str(exc_info.value)
+        assert exc_info.value.context["quota_type"] == "concurrent_jobs"
+        assert exc_info.value.context["limit"] == 2
+        assert service.count_export_jobs(status=ExportStatus.PENDING.value) == 2
+
+    @pytest.mark.asyncio
+    async def test_sync_export_rejects_when_concurrent_quota_is_full(self, tmp_path, monkeypatch):
+        """Sync export uses the same Chatbooks admission check before building an archive."""
+        monkeypatch.delenv("CHATBOOKS_DISABLE_QUOTAS", raising=False)
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.delenv("TEST_MODE", raising=False)
+        monkeypatch.delenv("TESTING", raising=False)
+        monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+
+        db = CharactersRAGDB(db_path=str(tmp_path / "sync-quota.db"), client_id="sync-quota-test")
+        service = ChatbookService(user_id="123", db=db, user_tier="free")
+
+        for index in range(2):
+            service._save_export_job(
+                ExportJob(
+                    job_id=f"existing-sync-{index}",
+                    user_id="123",
+                    status=ExportStatus.PENDING,
+                    chatbook_name=f"Existing sync {index}",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+
+        with pytest.raises(QuotaExceededError) as exc_info:
+            await service.create_chatbook(
+                name="Over sync quota",
+                description="Should be rejected before archive work",
+                content_selections={},
+                async_mode=False,
+            )
+
+        assert "Maximum concurrent jobs (2)" in str(exc_info.value)
+        assert service.count_export_jobs(status=ExportStatus.PENDING.value) == 2
+
+    def test_postgres_quota_admission_lock_precedes_job_insert(self, monkeypatch):
+        """Postgres quota admission serializes count-and-insert with an advisory transaction lock."""
+        monkeypatch.delenv("CHATBOOKS_DISABLE_QUOTAS", raising=False)
+
+        class _BackendType:
+            value = "postgresql"
+
+        class _Transaction:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class _PostgresQuotaDB:
+            backend_type = _BackendType()
+
+            def __init__(self):
+                self.calls = []
+
+            def transaction(self):
+                return _Transaction()
+
+            def execute_query(self, query, params=None, *, commit=False, script=False):
+                self.calls.append((query, params, commit, script))
+                if "COUNT(1)" in query:
+                    return [(0,)]
+                return []
+
+        db = _PostgresQuotaDB()
+        service = object.__new__(ChatbookService)
+        service.user_id = "123"
+        service.user_tier = "free"
+        service.db = db
+
+        service._save_export_job_with_quota(
+            ExportJob(
+                job_id="new-export",
+                user_id="123",
+                status=ExportStatus.PENDING,
+                chatbook_name="New export",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+
+        queries = [call[0] for call in db.calls]
+        lock_index = next(index for index, query in enumerate(queries) if "pg_advisory_xact_lock" in query)
+        insert_index = next(index for index, query in enumerate(queries) if "INSERT OR REPLACE INTO export_jobs" in query)
+        assert lock_index < insert_index
 
     def test_import_skips_unsupported_content_types(self, service, tmp_path):
         """Unsupported content types should be skipped with warnings."""

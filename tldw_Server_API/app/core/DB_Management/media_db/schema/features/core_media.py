@@ -72,6 +72,7 @@ _POSTGRES_REQUIRED_TABLES = [
     "sync_log",
     "chunkingtemplates",
     "claims",
+    "audio_presets",
 ]
 
 _SQLITE_ADDITIONAL_CORE_SCHEMA_SQL = """
@@ -196,6 +197,7 @@ class SupportsSqliteCoreMediaSchema(Protocol):
     _CLAIMS_TABLE_SQL: str
     _MEDIA_FILES_TABLE_SQL: str
     _TTS_HISTORY_TABLE_SQL: str
+    _AUDIO_PRESETS_TABLE_SQL: str
     _DATA_TABLES_SQL: str
     _CURRENT_SCHEMA_VERSION: int
 
@@ -209,6 +211,7 @@ class SupportsPostgresCoreMediaSchema(Protocol):
     _CLAIMS_TABLE_SQL: str
     _MEDIA_FILES_TABLE_SQL: str
     _TTS_HISTORY_TABLE_SQL: str
+    _AUDIO_PRESETS_TABLE_SQL: str
     _DATA_TABLES_SQL: str
     _INDICES_SQL_V1: str
     _CURRENT_SCHEMA_VERSION: int
@@ -228,6 +231,7 @@ def _build_sqlite_core_schema_script(db: SupportsSqliteCoreMediaSchema) -> str:
         {db._CLAIMS_TABLE_SQL}
         {db._MEDIA_FILES_TABLE_SQL}
         {db._TTS_HISTORY_TABLE_SQL}
+        {db._AUDIO_PRESETS_TABLE_SQL}
         {db._DATA_TABLES_SQL}
         {_SQLITE_ADDITIONAL_CORE_SCHEMA_SQL}
     """
@@ -332,6 +336,7 @@ def apply_postgres_core_media_schema(
     table_statements += db._convert_sqlite_sql_to_postgres_statements(db._CLAIMS_TABLE_SQL)
     table_statements += db._convert_sqlite_sql_to_postgres_statements(db._MEDIA_FILES_TABLE_SQL)
     table_statements += db._convert_sqlite_sql_to_postgres_statements(db._TTS_HISTORY_TABLE_SQL)
+    table_statements += db._convert_sqlite_sql_to_postgres_statements(db._AUDIO_PRESETS_TABLE_SQL)
     table_statements += db._convert_sqlite_sql_to_postgres_statements(db._DATA_TABLES_SQL)
 
     create_tables = [

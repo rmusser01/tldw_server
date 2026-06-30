@@ -9,8 +9,10 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+from tldw_Server_API.app.core.PrivilegeMaps.db_utils import execute_transaction_sql
 
 MAX_SNAPSHOT_DETAIL_ROWS = 50_000
 DETAIL_INSERT_BATCH_SIZE = 500
@@ -153,6 +155,12 @@ class PrivilegeSnapshotStore:
             "page": page,
             "page_size": page_size,
             "total_items": total_items,
+            "pagination": build_page_pagination_meta(
+                page=page,
+                per_page=page_size,
+                total=total_items,
+                total_pages=(total_items + page_size - 1) // page_size,
+            ),
             "items": items,
             "filters": {
                 "date_from": date_from.isoformat() if date_from else None,
@@ -202,7 +210,9 @@ class PrivilegeSnapshotStore:
                 )
 
         async with pool.transaction() as conn:
-            await conn.execute(
+            await execute_transaction_sql(
+                pool,
+                conn,
                 """
                 INSERT INTO privilege_snapshots (
                     snapshot_id,
@@ -242,20 +252,22 @@ class PrivilegeSnapshotStore:
                     now_iso,
                 ),
             )
-            await conn.execute(
+            await execute_transaction_sql(
+                pool,
+                conn,
                 "DELETE FROM privilege_snapshot_details WHERE snapshot_id = ?",
                 (snapshot_id,),
             )
             if detail_payload:
-                await self._insert_snapshot_details(conn, snapshot_id, detail_payload, now_iso)
+                await self._insert_snapshot_details(pool, conn, snapshot_id, detail_payload, now_iso)
 
     async def clear(self) -> None:
         pool = await self._get_pool()
         await self._ensure_schema(pool)
         try:
             async with pool.transaction() as conn:
-                await conn.execute("DELETE FROM privilege_snapshots")
-                await conn.execute("DELETE FROM privilege_snapshot_details")
+                await execute_transaction_sql(pool, conn, "DELETE FROM privilege_snapshots")
+                await execute_transaction_sql(pool, conn, "DELETE FROM privilege_snapshot_details")
         except TransactionError as exc:
             detail = str(exc).lower()
             if "no such table" in detail:
@@ -265,6 +277,7 @@ class PrivilegeSnapshotStore:
 
     async def _insert_snapshot_details(
         self,
+        pool: DatabasePool,
         conn: Any,
         snapshot_id: str,
         detail_rows: Sequence[dict[str, Any]],
@@ -275,7 +288,9 @@ class PrivilegeSnapshotStore:
             chunk = detail_rows[chunk_start : chunk_start + DETAIL_INSERT_BATCH_SIZE]
             for item in chunk:
                 row_json = self._encode_detail_item(item)
-                await conn.execute(
+                await execute_transaction_sql(
+                    pool,
+                    conn,
                     """
                     INSERT INTO privilege_snapshot_details (
                         snapshot_id,
@@ -363,6 +378,12 @@ class PrivilegeSnapshotStore:
             "page": page,
             "page_size": page_size,
             "total_items": total_items,
+            "pagination": build_page_pagination_meta(
+                page=page,
+                per_page=page_size,
+                total=total_items,
+                total_pages=(total_items + page_size - 1) // page_size,
+            ),
             "items": detail_items,
         }
 

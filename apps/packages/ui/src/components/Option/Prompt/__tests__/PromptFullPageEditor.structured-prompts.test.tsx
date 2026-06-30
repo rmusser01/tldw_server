@@ -80,7 +80,10 @@ describe("PromptFullPageEditor structured prompts", () => {
       screen.getByRole("button", { name: /convert to structured/i })
     )
 
-    expect(await screen.findByText("Structured prompt")).toBeInTheDocument()
+    const structuredPromptTitle = await screen.findByText("Structured prompt")
+    expect(structuredPromptTitle).toBeInTheDocument()
+    const alert = structuredPromptTitle.closest('[data-ds-component="Alert"]')
+    expect(alert).not.toBeNull()
     expect(screen.getByTestId("full-editor-system-prompt")).toBeDisabled()
     expect(screen.getByTestId("full-editor-user-prompt")).toBeDisabled()
     expect(screen.getByTestId("structured-block-list")).toBeInTheDocument()

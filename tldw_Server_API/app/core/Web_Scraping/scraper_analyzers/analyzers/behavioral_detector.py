@@ -86,4 +86,4 @@ def detect_honeypots(url: str, scan_depth: ScanDepth = "default") -> dict[str, A
     except PlaywrightTimeoutError:
         return {"status": "error", "message": "Page load timed out.", "error_code": "timeout"}
     except Exception as exc:  # pragma: no cover - defensive catch
-        return {"status": "error", "message": str(exc)}
+        return {"status": "error", "message": "Honeypot detection failed."}

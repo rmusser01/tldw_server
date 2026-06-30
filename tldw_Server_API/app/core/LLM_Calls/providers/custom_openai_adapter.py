@@ -8,6 +8,11 @@ from typing import Any
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
 )
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_endpoint_env_keys,
+    custom_openai_provider_name,
+    custom_openai_section_name,
+)
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
 from tldw_Server_API.app.core.LLM_Calls.sse import (
@@ -28,7 +33,7 @@ class CustomOpenAIAdapter(ChatProvider):
     name = "custom-openai-api"
     config_section = "custom_openai_api"
     default_base_url = "http://127.0.0.1:11434/v1"
-    default_base_url_env: tuple[str, ...] = ("CUSTOM_OPENAI_API_IP_1",)
+    default_base_url_env: tuple[str, ...] = custom_openai_endpoint_env_keys(1)
 
     def capabilities(self) -> dict[str, Any]:
         return {
@@ -89,6 +94,7 @@ class CustomOpenAIAdapter(ChatProvider):
         return h
 
     def _resolve_base(self, request: dict[str, Any]) -> str:
+        """Resolve the endpoint base URL from request, app config, env, or defaults."""
         override = (request or {}).get("base_url")
         if isinstance(override, str) and override.strip():
             return override.strip().rstrip("/")
@@ -103,7 +109,10 @@ class CustomOpenAIAdapter(ChatProvider):
                     base = env_val.strip()
                     break
         if not base:
-            base = self.default_base_url
+            if self.default_base_url:
+                base = self.default_base_url
+            else:
+                raise RuntimeError(f"{self.name} requires an explicit base URL")
         return str(base).rstrip("/")
 
     @staticmethod
@@ -268,7 +277,27 @@ class CustomOpenAIAdapter(ChatProvider):
 class CustomOpenAIAdapter2(CustomOpenAIAdapter):
     name = "custom-openai-api-2"
     config_section = "custom_openai_api_2"
-    default_base_url_env = ("CUSTOM_OPENAI_API_IP_2", "CUSTOM_OPENAI_API_IP_1")
+    default_base_url = ""
+    default_base_url_env = custom_openai_endpoint_env_keys(2)
+
+
+def make_custom_openai_adapter_class(number: int) -> type[CustomOpenAIAdapter]:
+    """Create or return the adapter class for a custom OpenAI provider slot."""
+    if number == 1:
+        return CustomOpenAIAdapter
+    if number == 2:
+        return CustomOpenAIAdapter2
+    return type(
+        f"CustomOpenAIAdapter{number}",
+        (CustomOpenAIAdapter,),
+        {
+            "name": custom_openai_provider_name(number),
+            "config_section": custom_openai_section_name(number),
+            "default_base_url": "",
+            "default_base_url_env": custom_openai_endpoint_env_keys(number),
+            "__module__": __name__,
+        },
+    )
 
 
 class NovitaAdapter(CustomOpenAIAdapter):

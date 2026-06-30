@@ -73,6 +73,11 @@ async def test_backup_schedule_roundtrip_crud(tmp_path) -> None:
         assert list_resp.status_code == 200, list_resp.text
         payload = list_resp.json()
         assert payload["total"] == 1
+        assert payload["pagination"]["total"] == 1
+        assert payload["pagination"]["limit"] == 100
+        assert payload["pagination"]["offset"] == 0
+        assert payload["has_more"] == payload["pagination"]["has_more"]
+        assert payload["next_offset"] == payload["pagination"]["next_offset"]
         assert payload["items"][0]["id"] == schedule_id
 
         update_resp = client.patch(
@@ -239,6 +244,9 @@ async def test_list_backup_schedules_hides_platform_rows_and_reports_visible_tot
             assert response.status_code == 200, response.text
             payload = response.json()
             assert payload["total"] == 1
+            assert payload["pagination"]["total"] == 1
+            assert payload["pagination"]["limit"] == 100
+            assert payload["pagination"]["offset"] == 0
             assert [item["id"] for item in payload["items"]] == [media_schedule["id"]]
     finally:
         app.dependency_overrides.clear()

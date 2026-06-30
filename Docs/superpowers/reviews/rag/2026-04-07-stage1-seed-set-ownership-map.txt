@@ -1,0 +1,10 @@
+tldw_Server_API/app/api/v1/endpoints/rag_unified.py:238:def _build_effective_request_payload(
+tldw_Server_API/app/api/v1/utils/rag_cache.py:59:            create_from_settings_for_user,
+tldw_Server_API/app/api/v1/utils/rag_cache.py:68:            adapter = create_from_settings_for_user(_settings, user_id)
+tldw_Server_API/app/api/v1/utils/rag_cache.py:84:def invalidate_rag_caches(
+tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py:765:async def agentic_rag_pipeline(
+tldw_Server_API/app/core/RAG/rag_service/profiles.py:273:def get_profile_kwargs(
+tldw_Server_API/app/core/RAG/rag_service/types.py:13:class DataSource(Enum):
+tldw_Server_API/app/core/RAG/rag_service/types.py:145:class Document:
+tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py:1160:async def unified_rag_pipeline(
+tldw_Server_API/app/core/RAG/rag_service/vector_stores/factory.py:176:def create_from_settings_for_user(settings: dict, user_id: str = "0") -> Optional[VectorStoreAdapter]:

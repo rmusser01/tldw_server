@@ -5,6 +5,12 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.permissions import (
+    WORKFLOWS_RUNS_CONTROL,
+    WORKFLOWS_RUNS_READ,
+)
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 
@@ -16,13 +22,33 @@ def client_with_wf(tmp_path, auth_headers):
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
 
     async def override_user():
-        return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
+        return User(
+            id=1,
+            username="tester",
+            email="t@e.com",
+            is_active=True,
+            is_admin=True,
+            tenant_id="default",
+            roles=["admin"],
+            permissions=[WORKFLOWS_RUNS_READ, WORKFLOWS_RUNS_CONTROL],
+        )
+
+    async def override_principal():
+        return AuthPrincipal(
+            kind="user",
+            user_id=1,
+            username="tester",
+            email="t@e.com",
+            roles=["admin"],
+            permissions=[WORKFLOWS_RUNS_READ, WORKFLOWS_RUNS_CONTROL],
+        )
 
     def override_db():
 
         return db
 
     app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_auth_principal] = override_principal
     app.dependency_overrides[wf_mod._get_db] = override_db
 
     with TestClient(app, headers=auth_headers) as client:
@@ -87,7 +113,9 @@ def test_retry_from_failed_step(client_with_wf: TestClient):
 
     # Wait until failed
     for _ in range(200):
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
+        response = client.get(f"/api/v1/workflows/runs/{run_id}")
+        assert response.status_code == 200, response.text
+        data = response.json()
         if data["status"] in ("failed", "succeeded"):
             break
         time.sleep(0.02)
@@ -98,9 +126,16 @@ def test_retry_from_failed_step(client_with_wf: TestClient):
     assert rr.status_code == 200
 
     # Poll until completion
+    saw_retry_transition = False
     for _ in range(200):
-        data2 = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data2["status"] in ("failed", "succeeded"):
+        response = client.get(f"/api/v1/workflows/runs/{run_id}")
+        assert response.status_code == 200, response.text
+        data2 = response.json()
+        if data2["status"] == "running":
+            saw_retry_transition = True
+        if data2["status"] == "succeeded":
+            break
+        if saw_retry_transition and data2["status"] == "failed":
             break
         time.sleep(0.02)
     assert data2["status"] == "succeeded"

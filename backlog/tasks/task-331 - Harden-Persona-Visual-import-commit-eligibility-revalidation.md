@@ -1,0 +1,93 @@
+---
+id: TASK-331
+title: Harden Persona Visual import-commit eligibility revalidation
+status: Done
+assignee:
+  - codex
+created_date: '2026-05-14 03:19'
+updated_date: '2026-05-23'
+labels:
+  - persona
+dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/issues/1510'
+  - 'https://github.com/rmusser01/tldw_server/issues/1657'
+  - 'https://github.com/rmusser01/tldw_server/pull/1678'
+priority: medium
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Add a narrow Persona/Buddy visual-pack hardening slice for GitHub #1657. Current origin/dev rejects blocked Manifest V2 renderer import previews at the API because their preview status is blocked, but the import-commit worker revalidates the archive and does not fail closed when the revalidated result is blocked or non-committable. Harden the server-side commit path so stale completed previews or capability-state changes cannot create partial draft packs/assets for unsupported renderer imports. Keep this scoped to Persona Visual Pack import-commit safety; do not add Live2D runtime activation, new renderer implementations, Persona Garden UI changes unless required by API contract, MCP provider expansion, VN/CYOA behavior, or live response mutation.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Import-commit worker/importer fails closed when revalidated preview status is not completed or proposed_plan.commit_eligible is false.
+- [x] #2 Stored preview metadata that already indicates commit ineligible is rejected before queuing a commit job when available.
+- [x] #3 Blocked or non-committable renderer previews do not create draft visual packs or imported assets during failed commit attempts.
+- [x] #4 Focused backend regression tests cover the stale completed/non-committable revalidation path and the API prequeue guard.
+- [x] #5 Relevant Persona visual-pack docs or task notes are updated only if behavior/contract wording changes.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Add red regression coverage in Persona visual import-commit tests for a stale completed preview whose archive revalidates as blocked/non-committable, asserting no draft pack/assets are created.
+2. Add API regression coverage for a stored completed preview whose proposed_plan marks commit_eligible=false, asserting the commit request is rejected before queuing a job.
+3. Add a small shared eligibility guard for preview metadata and apply it in the API prequeue path plus importer revalidation path.
+4. Keep behavior limited to Persona Visual Pack import-commit safety; do not change renderer capabilities, activation, Persona Garden UI, MCP provider behavior, VN/CYOA, or live responses.
+5. Run focused Persona visual portability/API tests, git diff checks, and Bandit on touched backend code before PR.
+<!-- SECTION:PLAN:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->
+
+## Implementation Notes
+<!-- SECTION:NOTES:BEGIN -->
+Implemented shared import preview commit eligibility guards for API enqueue and worker revalidation paths.
+
+Verification: red tests first confirmed stale blocked revalidation still created packs and commit-ineligible completed preview still queued a job before the fix.
+
+Verification after fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q --tb=short` passed 11 tests.
+
+Verification after fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q --tb=short` passed 40 tests.
+
+Verification after fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_import_preview_validators.py -q --tb=short` passed 21 tests.
+
+Verification after fix: `git diff --check` passed.
+
+Verification after fix: `python -m bandit tldw_Server_API/app/core/Persona/visual_portability/commit_eligibility.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py` reported no issues.
+
+Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1678. GitHub checks were pending at creation time; human-authored Change summary remains required before merge per repo policy.
+
+PR review follow-up: added helper-level regression coverage for malformed proposed plans, missing revalidated proposed plans, null blocker filtering, and legacy renderer previews without `can_commit`. The shared guard now fails closed for non-mapping plans, ignores null blocker values, and only treats `renderer_import_preview.can_commit` as a blocker when that key is explicitly present and not true.
+
+Verification after review fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_import_commit_eligibility.py -q --tb=short` passed 4 tests.
+
+Verification after review fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q --tb=short` passed 11 tests.
+
+Verification after review fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_api.py -q --tb=short` passed 40 tests.
+
+Verification after review fix: `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_import_preview_validators.py -q --tb=short` passed 21 tests.
+
+Verification after review fix: `git diff --check` passed.
+
+Verification after review fix: `python -m bandit tldw_Server_API/app/core/Persona/visual_portability/commit_eligibility.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py` reported no issues.
+
+Closeout 2026-05-23: PR #1678 is merged into `dev` at `7f426d80f155b900b999884d829065ee9a27f47e`; no active PR or review blocker remains for this task. The implementation and review-fix verification above satisfy the acceptance criteria. No additional code changes were made in this closeout.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed the Persona Visual import-commit eligibility hardening task. The merged implementation fails closed for non-committable revalidated previews, rejects known commit-ineligible stored preview metadata before queuing, prevents blocked renderer previews from creating draft assets, and includes focused backend tests plus Bandit verification from PR #1678.
+<!-- SECTION:FINAL_SUMMARY:END -->

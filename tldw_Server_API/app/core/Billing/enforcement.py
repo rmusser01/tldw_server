@@ -118,6 +118,11 @@ class UsageSummary:
     concurrent_jobs: int = 0
 
 
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a sanitized exception label suitable for operator logs."""
+    return exc.__class__.__name__
+
+
 class BillingEnforcer:
     """
     Enforces billing limits by integrating with the subscription service
@@ -187,13 +192,22 @@ class BillingEnforcer:
             try:
                 self._overage_policy = OveragePolicy.from_env()
             except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
-                logger.warning(f"Overage policy initialization skipped: {exc}")
+                logger.warning(
+                    "Overage policy initialization skipped ({})",
+                    _safe_exception_label(exc),
+                )
                 self._overage_policy = None
         return self._overage_policy
 
     @classmethod
     def _fail_closed_on_data_error(cls) -> bool:
         return cls._get_failure_mode() == _BILLING_ENFORCEMENT_FAILURE_MODE_CLOSED
+
+    @staticmethod
+    def _log_source_failure(level: str, message: str, org_id: int, exc: BaseException) -> None:
+        """Log data-source failures without including raw backend exception text."""
+        log_fn = getattr(logger, level)
+        log_fn("{} for org {} ({})", message, org_id, _safe_exception_label(exc))
 
     @staticmethod
     def _permissive_limit_fallbacks() -> dict[str, Any]:
@@ -262,15 +276,15 @@ class BillingEnforcer:
         except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
             if self._fail_closed_on_data_error():
                 logger.error(
-                    "Failed to get org limits for {}: {}. Applying fail-closed fallback.",
+                    "Failed to get org limits for {} ({}). Applying fail-closed fallback.",
                     org_id,
-                    exc,
+                    _safe_exception_label(exc),
                 )
                 return self._restrictive_limit_fallbacks()
             logger.warning(
-                "Failed to get org limits for {}: {}. Applying fail-open fallback.",
+                "Failed to get org limits for {} ({}). Applying fail-open fallback.",
                 org_id,
-                exc,
+                _safe_exception_label(exc),
             )
             return self._permissive_limit_fallbacks()
 
@@ -317,7 +331,11 @@ class BillingEnforcer:
 
         except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
             # Log at ERROR level since this affects billing enforcement
-            logger.error(f"Failed to get org usage for {org_id}: {exc}")
+            logger.error(
+                "Failed to get org usage for {} ({}).",
+                org_id,
+                _safe_exception_label(exc),
+            )
             # Try to return cached value if available (even if expired)
             if org_id in self._usage_cache:
                 cached, _ = self._usage_cache[org_id]
@@ -364,14 +382,27 @@ class BillingEnforcer:
                         ),
                     )
                     result = 0
+                    query_succeeded = False
+                    last_query_error: BaseException | None = None
                     for query, params in query_variants:
                         try:
                             fetched = await conn.fetchval(query, *params)
                             result = int(fetched or 0)
+                            query_succeeded = True
                             break
-                        except Exception as exc:  # noqa: BLE001 - schema variance fallback
-                            logger.debug("usage_daily PG query variant failed: {}", exc)
+                        except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
+                            last_query_error = exc
+                            logger.debug(
+                                "usage_daily PG query variant failed ({})",
+                                _safe_exception_label(exc),
+                            )
                             continue
+                    if (
+                        not query_succeeded
+                        and last_query_error is not None
+                        and self._fail_closed_on_data_error()
+                    ):
+                        raise last_query_error
                 else:
                     query_variants = (
                         (
@@ -392,19 +423,34 @@ class BillingEnforcer:
                         ),
                     )
                     result = 0
+                    query_succeeded = False
+                    last_query_error = None
                     for query, params in query_variants:
                         try:
                             cur = await conn.execute(query, params)
                             row = await cur.fetchone()
                             result = int((row[0] if row else 0) or 0)
+                            query_succeeded = True
                             break
-                        except Exception as exc:  # noqa: BLE001 - schema variance fallback
-                            logger.debug("usage_daily SQLite query variant failed: {}", exc)
+                        except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
+                            last_query_error = exc
+                            logger.debug(
+                                "usage_daily SQLite query variant failed ({})",
+                                _safe_exception_label(exc),
+                            )
                             continue
+                    if (
+                        not query_succeeded
+                        and last_query_error is not None
+                        and self._fail_closed_on_data_error()
+                    ):
+                        raise last_query_error
 
                 return int(result or 0)
         except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to get API calls for org {org_id}: {exc}")
+            self._log_source_failure("debug", "Failed to get API calls", org_id, exc)
+            if self._fail_closed_on_data_error():
+                raise
             return 0
 
     async def _get_llm_tokens_month(self, org_id: int) -> int:
@@ -488,7 +534,9 @@ class BillingEnforcer:
 
                 return int(result or 0)
         except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to get LLM tokens for org {org_id}: {exc}")
+            self._log_source_failure("debug", "Failed to get LLM tokens", org_id, exc)
+            if self._fail_closed_on_data_error():
+                raise
             return 0
 
     async def _get_team_member_count(self, org_id: int) -> int:
@@ -520,7 +568,9 @@ class BillingEnforcer:
 
             return total_members
         except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to get team members for org {org_id}: {exc}")
+            self._log_source_failure("debug", "Failed to get team members", org_id, exc)
+            if self._fail_closed_on_data_error():
+                raise
             return 0
 
     async def _get_concurrent_jobs(self, org_id: int) -> int:
@@ -588,7 +638,9 @@ class BillingEnforcer:
 
             return int(total_active)
         except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to get concurrent jobs for org {org_id}: {exc}")
+            self._log_source_failure("debug", "Failed to get concurrent jobs", org_id, exc)
+            if self._fail_closed_on_data_error():
+                raise
             return 0
 
     async def _get_storage_bytes(self, org_id: int) -> int:
@@ -650,7 +702,9 @@ class BillingEnforcer:
             # Convert MB to bytes
             return int(total_mb * 1024 * 1024)
         except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to get storage for org {org_id}: {exc}")
+            self._log_source_failure("debug", "Failed to get storage", org_id, exc)
+            if self._fail_closed_on_data_error():
+                raise
             return 0
 
     async def _get_transcription_minutes_month(self, org_id: int) -> int:
@@ -676,7 +730,9 @@ class BillingEnforcer:
 
             return int(window.get("total", 0)) if window else 0
         except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to get transcription minutes for org {org_id}: {exc}")
+            self._log_source_failure("debug", "Failed to get transcription minutes", org_id, exc)
+            if self._fail_closed_on_data_error():
+                raise
             return 0
 
     async def _get_rag_queries_today(self, org_id: int) -> int:
@@ -703,7 +759,9 @@ class BillingEnforcer:
 
             return int(total or 0)
         except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to get RAG queries for org {org_id}: {exc}")
+            self._log_source_failure("debug", "Failed to get RAG queries", org_id, exc)
+            if self._fail_closed_on_data_error():
+                raise
             return 0
 
     async def check_limit(
@@ -810,7 +868,10 @@ class BillingEnforcer:
                     f"{percent_used:.0f}% used"
                 )
         except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Overage policy evaluation skipped: {exc}")
+            logger.warning(
+                "Overage policy evaluation skipped ({})",
+                _safe_exception_label(exc),
+            )
 
         return LimitCheckResult(
             category=category.value,
@@ -980,12 +1041,12 @@ async def check_billing_with_rg(
         enforcer = get_billing_enforcer()
         result = await enforcer.check_limit(org_id, category, requested_units=units)
         return not result.should_block
-    except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
+    except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS:
         fail_closed = BillingEnforcer._fail_closed_on_data_error()
         if fail_closed:
-            logger.error(f"Billing RG check failed, denying (fail-closed): {exc}")
+            logger.error("Billing RG check failed, denying (fail-closed).")
             return False
-        logger.warning(f"Billing RG check failed, allowing (fail-open): {exc}")
+        logger.warning("Billing RG check failed, allowing (fail-open).")
         return True
 
 

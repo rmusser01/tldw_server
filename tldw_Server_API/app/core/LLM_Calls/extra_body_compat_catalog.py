@@ -4,6 +4,11 @@ import os
 from copy import deepcopy
 from typing import Any
 
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_provider_number,
+    custom_openai_section_name,
+)
+
 _TRUE_SET = {"1", "true", "yes", "on"}
 
 _MIKUPAD_KNOWN_PARAMS = [
@@ -100,6 +105,9 @@ def _normalize_provider(provider: str | None) -> str:
     raw = str(provider or "").strip().lower()
     if not raw:
         return ""
+    custom_number = custom_openai_provider_number(raw)
+    if custom_number is not None:
+        return custom_openai_section_name(custom_number)
     compact = raw.replace(" ", "")
     normalized = compact.replace("-", "_")
     return _PROVIDER_ALIASES.get(compact) or _PROVIDER_ALIASES.get(normalized) or normalized
@@ -138,6 +146,8 @@ def _fallback_payload() -> dict[str, Any]:
 
 def _provider_payload(provider: str) -> dict[str, Any]:
     entry = _CATALOG.get(provider)
+    if entry is None and custom_openai_provider_number(provider) is not None:
+        entry = _CATALOG.get("custom_openai_api")
     if not entry:
         return _fallback_payload()
     provider_default = entry.get("provider_default")

@@ -5,6 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkspaceConnectionGate } from "../WorkspaceConnectionGate"
 
 const navigateMock = vi.fn()
+let currentLocation = {
+  pathname: "/collections",
+  search: "",
+  hash: ""
+}
 
 let uxState:
   | "connected_ok"
@@ -17,7 +22,8 @@ let uxState:
 let hasCompletedFirstRun = true
 
 vi.mock("react-router-dom", () => ({
-  useNavigate: () => navigateMock
+  useNavigate: () => navigateMock,
+  useLocation: () => currentLocation
 }))
 
 vi.mock("@/hooks/useConnectionState", () => ({
@@ -79,6 +85,11 @@ describe("WorkspaceConnectionGate", () => {
   beforeEach(() => {
     uxState = "connected_ok"
     hasCompletedFirstRun = true
+    currentLocation = {
+      pathname: "/collections",
+      search: "",
+      hash: ""
+    }
     navigateMock.mockReset()
   })
 
@@ -116,6 +127,27 @@ describe("WorkspaceConnectionGate", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Finish Setup" }))
     expect(navigateMock).toHaveBeenCalledWith("/")
+  })
+
+  it("preserves character-chat route intent when first-run users start from Characters", () => {
+    uxState = "unconfigured"
+    hasCompletedFirstRun = false
+    currentLocation = {
+      pathname: "/characters",
+      search: "?from=header-select&create=true",
+      hash: ""
+    }
+
+    render(
+      <WorkspaceConnectionGate featureName="Characters">
+        <div>Characters content</div>
+      </WorkspaceConnectionGate>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish Setup" }))
+    expect(navigateMock).toHaveBeenCalledWith(
+      "/?intent=character-chat&returnTo=%2Fcharacters%3Ffrom%3Dheader-select%26create%3Dtrue"
+    )
   })
 
   it("surfaces unreachable server guidance with a diagnostics path", () => {

@@ -155,7 +155,9 @@ def _shutdown_sync_executor() -> None:
             # Python < 3.9 doesn't support cancel_futures
             _SYNC_EXECUTOR.shutdown(wait=True)
         except Exception as shutdown_error:  # noqa: BLE001 - shutdown must not raise during exit
-            logger.debug("Chat orchestrator sync executor shutdown raised non-fatal error", exc_info=shutdown_error)
+            logger.bind(error_type=type(shutdown_error).__name__).debug(
+                "Chat orchestrator sync executor shutdown raised non-fatal error"
+            )
 
 
 # Register cleanup on interpreter shutdown
@@ -300,7 +302,7 @@ def approximate_token_count(history):
         total_tokens = len(total_text.split())
         return total_tokens
     except _CHAT_ORCHESTRATOR_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Error calculating token count: {str(e)}")
+        logging.bind(error_type=type(e).__name__).error("Error calculating token count")
         return 0
 
 #
@@ -337,6 +339,7 @@ def chat_api_call(
     # Provider-specific extensions (e.g., Bedrock guardrails)
     extra_headers: Optional[dict[str, str]] = None,
     extra_body: Optional[dict[str, Any]] = None,
+    inference_prefix_cache_intent: Optional[dict[str, Any]] = None,
     # Optional preloaded config to reduce repeated IO in hot paths
     app_config: Optional[dict[str, Any]] = None,
     # Testing hooks
@@ -430,6 +433,7 @@ def chat_api_call(
         "user_identifier": user_identifier,
         "extra_headers": extra_headers,
         "extra_body": extra_body,
+        "inference_prefix_cache_intent": inference_prefix_cache_intent,
         "app_config": app_config,
         "http_client_factory": http_client_factory,
         "http_fetcher": http_fetcher,
@@ -572,6 +576,7 @@ async def chat_api_call_async(
     user_identifier: Optional[str] = None,
     extra_headers: Optional[dict[str, str]] = None,
     extra_body: Optional[dict[str, Any]] = None,
+    inference_prefix_cache_intent: Optional[dict[str, Any]] = None,
     app_config: Optional[dict[str, Any]] = None,
     http_client_factory: Optional[Callable[[int], Any]] = None,
     http_fetcher: Optional[Callable[..., Any]] = None,
@@ -614,6 +619,7 @@ async def chat_api_call_async(
         "user_identifier": user_identifier,
         "extra_headers": extra_headers,
         "extra_body": extra_body,
+        "inference_prefix_cache_intent": inference_prefix_cache_intent,
         "app_config": app_config,
         "http_client_factory": http_client_factory,
         "http_fetcher": http_fetcher,

@@ -69,13 +69,8 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             tm = get_tracing_manager()
             tm.set_baggage("request_id", request_id)
             tm.set_baggage("session_id", session_id)
-        except Exception as e:
-            logger.exception(
-                "Failed to set tracing baggage for request_id={} session_id={}: {}",
-                request_id,
-                session_id,
-                e,
-            )
+        except Exception:
+            logger.error("Failed to set tracing baggage")
 
         response: Response = await call_next(request)
         response.headers.setdefault(self.header_name, request_id)

@@ -7,7 +7,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from tldw_Server_API.app.core.http_client import fetch_json
+from tldw_Server_API.app.core.exceptions import ThirdPartyHTTPStatusError
+from tldw_Server_API.app.core.Third_Party._http_helpers import (
+    fetch_json_checked,
+)
+
+
+def fetch_json(**kwargs: Any) -> Any:
+    return fetch_json_checked(**kwargs)
 
 
 def _missing_key_error() -> str:
@@ -99,8 +106,12 @@ def search_springer(
         records = data.get("records") or []
         items = [_normalize_record(rec) for rec in records]
         return items, total, None
-    except Exception as e:
-        return None, 0, f"Springer error: {str(e)}"
+    except ThirdPartyHTTPStatusError as exc:
+        return None, 0, f"Springer API HTTP Error: {exc.status_code}"
+    except TimeoutError:
+        return None, 0, "Springer request timed out."
+    except Exception:
+        return None, 0, "Springer request failed."
 
 
 def get_springer_by_doi(doi: str) -> tuple[dict | None, str | None]:
@@ -119,5 +130,11 @@ def get_springer_by_doi(doi: str) -> tuple[dict | None, str | None]:
         if not records:
             return None, None
         return _normalize_record(records[0]), None
-    except Exception as e:
-        return None, f"Springer error: {str(e)}"
+    except ThirdPartyHTTPStatusError as exc:
+        if exc.status_code == 404:
+            return None, None
+        return None, f"Springer API HTTP Error: {exc.status_code}"
+    except TimeoutError:
+        return None, "Springer request timed out."
+    except Exception:
+        return None, "Springer request failed."

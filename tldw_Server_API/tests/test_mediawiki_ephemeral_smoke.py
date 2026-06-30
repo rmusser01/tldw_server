@@ -15,7 +15,55 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
+from tldw_Server_API.app.api.v1.endpoints.media import process_mediawiki
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+
+
+class _LoggerStub:
+    def __init__(self):
+        self.errors = []
+        self.error_args = []
+        self.error_kwargs = []
+        self.warnings = []
+        self.warning_args = []
+        self.warning_kwargs = []
+
+    def error(self, message, *args, **kwargs):
+        self.errors.append(message)
+        self.error_args.append(args)
+        self.error_kwargs.append(kwargs)
+
+    def warning(self, message, *args, **kwargs):
+        self.warnings.append(message)
+        self.warning_args.append(args)
+        self.warning_kwargs.append(kwargs)
+
+    def info(self, *args, **kwargs):
+        pass
+
+
+class _FailingAiofilesOpen:
+    async def __aenter__(self):
+        raise OSError("mediawiki backend exploded")
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def _build_mediawiki_client(monkeypatch, tmp_path: Path) -> TestClient:
+    # Force temp dirs outside CWD so allowed_dir enforcement is required
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-12345")
+
+    app = FastAPI()
+    app.include_router(media_router, prefix="/api/v1/media")
+
+    async def _override_user() -> User:
+        return User(id=1, username="tester", email=None, is_active=True, is_admin=True)
+
+    app.dependency_overrides[get_request_user] = _override_user
+    return TestClient(app, headers={"X-API-KEY": "test-api-key-12345"})
 
 
 def _mini_mediawiki_xml() -> str:
@@ -60,20 +108,7 @@ def _gz_bytes(data: str) -> bytes:
 
 @pytest.mark.integration
 def test_mediawiki_process_dump_ephemeral_stream(monkeypatch, tmp_path: Path):
-    # Force temp dirs outside CWD so allowed_dir enforcement is required
-    monkeypatch.setenv("TMPDIR", str(tmp_path))
-    monkeypatch.setenv("AUTH_MODE", "single_user")
-    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-12345")
-
-    app = FastAPI()
-    app.include_router(media_router, prefix="/api/v1/media")
-
-    async def _override_user() -> User:
-        return User(id=1, username="tester", email=None, is_active=True, is_admin=True)
-
-    app.dependency_overrides[get_request_user] = _override_user
-    client = TestClient(app, headers={"X-API-KEY": "test-api-key-12345"})
-
+    client = _build_mediawiki_client(monkeypatch, tmp_path)
     gz = _gz_bytes(_mini_mediawiki_xml())
 
     files = {
@@ -121,3 +156,68 @@ def test_mediawiki_process_dump_ephemeral_stream(monkeypatch, tmp_path: Path):
     assert progress_seen, "Did not see progress_total"
     assert page_seen, "Did not see validated page object"
     assert summary_seen, "Did not see summary"
+
+
+@pytest.mark.integration
+def test_mediawiki_process_dump_save_failure_log_is_sanitized(monkeypatch, tmp_path: Path):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(process_mediawiki, "logger", logger_stub)
+    monkeypatch.setattr(
+        process_mediawiki.aiofiles,
+        "open",
+        lambda *args, **kwargs: _FailingAiofilesOpen(),
+    )
+    client = _build_mediawiki_client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/api/v1/media/mediawiki/process-dump",
+        files={"dump_file": ("mini.xml.gz", _gz_bytes(_mini_mediawiki_xml()), "application/gzip")},
+        data={
+            "wiki_name": "TestWiki",
+            "namespaces_str": "0",
+            "skip_redirects": "true",
+            "chunk_max_size": "500",
+            "api_name_vector_db": "",
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to save uploaded file"
+    assert logger_stub.errors == ["Failed to save uploaded MediaWiki dump"]
+    assert logger_stub.error_args == [()]
+    assert logger_stub.error_kwargs == [{}]
+
+
+@pytest.mark.integration
+def test_mediawiki_process_dump_cleanup_failure_log_is_sanitized(monkeypatch, tmp_path: Path):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(process_mediawiki, "logger", logger_stub)
+    monkeypatch.setattr(
+        process_mediawiki,
+        "core_import_mediawiki_dump",
+        lambda **kwargs: iter([{"type": "summary", "message": "Processed 1 page"}]),
+    )
+
+    def _failing_rmtree(*args, **kwargs):
+        raise OSError("cleanup path exploded")
+
+    monkeypatch.setattr(process_mediawiki.shutil, "rmtree", _failing_rmtree)
+    client = _build_mediawiki_client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/api/v1/media/mediawiki/process-dump",
+        files={"dump_file": ("mini.xml.gz", _gz_bytes(_mini_mediawiki_xml()), "application/gzip")},
+        data={
+            "wiki_name": "TestWiki",
+            "namespaces_str": "0",
+            "skip_redirects": "true",
+            "chunk_max_size": "500",
+            "api_name_vector_db": "",
+        },
+    )
+
+    assert response.status_code == 200
+    assert json.loads(response.text)["type"] == "summary"
+    assert logger_stub.warnings == ["Failed to cleanup temporary directory"]
+    assert logger_stub.warning_args == [()]
+    assert logger_stub.warning_kwargs == [{}]

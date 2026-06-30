@@ -85,6 +85,7 @@ type CriticalRoute = {
 
 const CRITICAL_ROUTES: CriticalRoute[] = [
   { path: "/chat", name: "Chat" },
+  { path: "/chat-workspace", name: "Chat Workspace" },
   { path: "/settings", name: "Settings" },
   { path: "/chat/settings", name: "Chat Settings", expectedPath: "/settings/chat" },
   { path: "/settings/chatbooks", name: "Chatbooks Settings" },
@@ -99,6 +100,7 @@ const CRITICAL_ROUTES: CriticalRoute[] = [
     allowRedirectPanel: true
   },
   { path: "/research-workspace", name: "Research Workspace" },
+  { path: "/writing-playground", name: "Writing Playground" },
   { path: "/stt", name: "STT" },
   { path: "/speech", name: "Speech" }
 ]

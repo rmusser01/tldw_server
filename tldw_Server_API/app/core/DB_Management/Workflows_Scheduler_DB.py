@@ -430,6 +430,38 @@ class WorkflowsSchedulerDB:
             )
         return out
 
+    def list_all_schedules(
+        self,
+        *,
+        user_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[WorkflowSchedule]:
+        params: list[Any] = []
+        sql = "SELECT * FROM workflow_schedules"
+        if user_id:
+            sql += " WHERE user_id = ?"
+            params.append(user_id)
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        with self.backend.transaction() as conn:
+            res = self.backend.execute(sql, tuple(params), connection=conn)
+        out: list[WorkflowSchedule] = []
+        for r in self._rows(res):
+            out.append(
+                WorkflowSchedule(
+                    id=r["id"], tenant_id=r["tenant_id"], user_id=r["user_id"], workflow_id=r.get("workflow_id"), name=r.get("name"),
+                    cron=r["cron"], timezone=r.get("timezone"), inputs_json=r["inputs_json"], run_mode=r.get("run_mode") or "async",
+                    validation_mode=r.get("validation_mode") or "block", enabled=bool(r.get("enabled") in (1, True, "1")),
+                    require_online=bool(r.get("require_online") in (1, True, "1")),
+                    concurrency_mode=(r.get("concurrency_mode") or "skip"), misfire_grace_sec=int(r.get("misfire_grace_sec") or 300),
+                    coalesce=bool(r.get("coalesce") in (1, True, "1")), jitter_sec=int(r.get("jitter_sec") or 0), acp_config_json=r.get("acp_config_json"),
+                    last_run_at=r.get("last_run_at"), next_run_at=r.get("next_run_at"),
+                    last_status=r.get("last_status"), created_at=r.get("created_at"), updated_at=r.get("updated_at")
+                )
+            )
+        return out
+
     # Convenience helpers to mutate history
     def set_history(self, id: str, *, last_run_at: str | None = None, next_run_at: str | None = None, last_status: str | None = None) -> None:
         update: dict[str, Any] = {}

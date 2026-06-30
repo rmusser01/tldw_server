@@ -4,13 +4,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { Modal, message } from "antd"
 import { JobFormModal } from "../JobFormModal"
+import { setViewport } from "../../__tests__/test-utils/viewport"
 
 const servicesMock = vi.hoisted(() => ({
+  applyWatchlistOutputPreset: vi.fn(),
   createWatchlistJob: vi.fn(),
+  createWatchlistOutputPreset: vi.fn(),
+  deleteWatchlistOutputPreset: vi.fn(),
   updateWatchlistJob: vi.fn(),
+  updateWatchlistOutputPreset: vi.fn(),
   fetchWatchlistSources: vi.fn(),
   fetchWatchlistGroups: vi.fn(),
   fetchJobOutputTemplates: vi.fn(),
+  fetchWatchlistOutputPresets: vi.fn(),
   fetchWatchlistTemplates: vi.fn(),
   previewWatchlistJob: vi.fn(),
   testWatchlistAudioSettings: vi.fn()
@@ -64,11 +70,16 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/services/watchlists", () => ({
+  applyWatchlistOutputPreset: (...args: unknown[]) => servicesMock.applyWatchlistOutputPreset(...args),
   createWatchlistJob: (...args: unknown[]) => servicesMock.createWatchlistJob(...args),
+  createWatchlistOutputPreset: (...args: unknown[]) => servicesMock.createWatchlistOutputPreset(...args),
+  deleteWatchlistOutputPreset: (...args: unknown[]) => servicesMock.deleteWatchlistOutputPreset(...args),
   updateWatchlistJob: (...args: unknown[]) => servicesMock.updateWatchlistJob(...args),
+  updateWatchlistOutputPreset: (...args: unknown[]) => servicesMock.updateWatchlistOutputPreset(...args),
   fetchWatchlistSources: (...args: unknown[]) => servicesMock.fetchWatchlistSources(...args),
   fetchWatchlistGroups: (...args: unknown[]) => servicesMock.fetchWatchlistGroups(...args),
   fetchJobOutputTemplates: (...args: unknown[]) => servicesMock.fetchJobOutputTemplates(...args),
+  fetchWatchlistOutputPresets: (...args: unknown[]) => servicesMock.fetchWatchlistOutputPresets(...args),
   fetchWatchlistTemplates: (...args: unknown[]) => servicesMock.fetchWatchlistTemplates(...args),
   previewWatchlistJob: (...args: unknown[]) => servicesMock.previewWatchlistJob(...args),
   testWatchlistAudioSettings: (...args: unknown[]) => servicesMock.testWatchlistAudioSettings(...args)
@@ -163,6 +174,7 @@ describe("JobFormModal live summary", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    setViewport(1024)
     telemetryMock.trackWatchlistsPreventionTelemetry.mockResolvedValue(undefined)
     vi.spyOn(Modal, "confirm").mockImplementation((config: any) => {
       config?.onOk?.()
@@ -171,22 +183,6 @@ describe("JobFormModal live summary", () => {
         update: vi.fn()
       } as any
     })
-    if (!window.matchMedia) {
-      Object.defineProperty(window, "matchMedia", {
-        writable: true,
-        value: vi.fn().mockImplementation((query: string) => ({
-          matches: false,
-          media: query,
-          onchange: null,
-          addListener: vi.fn(),
-          removeListener: vi.fn(),
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-          dispatchEvent: vi.fn()
-        }))
-      })
-    }
-
     servicesMock.fetchWatchlistSources.mockResolvedValue({
       items: [
         {
@@ -218,9 +214,34 @@ describe("JobFormModal live summary", () => {
       items: [],
       total: 0
     })
+    servicesMock.fetchWatchlistOutputPresets.mockResolvedValue({
+      items: []
+    })
     servicesMock.fetchWatchlistTemplates.mockResolvedValue({
       items: []
     })
+    servicesMock.createWatchlistOutputPreset.mockImplementation(async (payload) => ({
+      id: 44,
+      name: payload.name,
+      description: payload.description ?? null,
+      output_prefs: payload.output_prefs,
+      is_default: Boolean(payload.is_default),
+      created_at: "2026-01-15T00:00:00Z",
+      updated_at: "2026-01-15T00:00:00Z"
+    }))
+    servicesMock.updateWatchlistOutputPreset.mockImplementation(async (presetId, payload) => ({
+      id: presetId,
+      name: payload.name ?? "Saved preset",
+      description: payload.description ?? null,
+      output_prefs: payload.output_prefs ?? {},
+      is_default: Boolean(payload.is_default),
+      created_at: "2026-01-15T00:00:00Z",
+      updated_at: "2026-01-16T00:00:00Z"
+    }))
+    servicesMock.applyWatchlistOutputPreset.mockResolvedValue({
+      output_prefs: {}
+    })
+    servicesMock.deleteWatchlistOutputPreset.mockResolvedValue(undefined)
     servicesMock.previewWatchlistJob.mockResolvedValue({
       items: [],
       total: 0,
@@ -235,6 +256,24 @@ describe("JobFormModal live summary", () => {
       createObjectUrlMock
     ;(URL as unknown as { revokeObjectURL?: (url: string) => void }).revokeObjectURL =
       revokeObjectUrlMock
+  })
+
+  it("uses full-width constrained modal chrome with visible create and cancel actions", async () => {
+    setViewport(420)
+
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+      expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
+    })
+
+    const modal = document.querySelector(".ant-modal") as HTMLElement | null
+    expect(modal).not.toBeNull()
+    expect(modal?.style.width).toBe("100vw")
+    expect(modal?.style.maxWidth).toBe("100vw")
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument()
   })
 
   it("updates the live summary as authoring fields change", async () => {
@@ -398,7 +437,344 @@ describe("JobFormModal live summary", () => {
         })
       })
     )
-  })
+  }, 15_000)
+
+  it("keeps recurring reports opt-in separately from delivery and audio settings", async () => {
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+      expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
+    })
+
+    fireEvent.change(screen.getByPlaceholderText("e.g., Daily Tech News"), {
+      target: { value: "Scheduled Audio Brief" }
+    })
+    fireEvent.click(screen.getByTestId("scope-setter"))
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    const collapseHeaders = Array.from(document.querySelectorAll(".ant-collapse-header"))
+    fireEvent.click(collapseHeaders[1] as Element)
+    fireEvent.click(screen.getByTestId("schedule-setter"))
+    fireEvent.click(screen.getByText("Output & Delivery"))
+    fireEvent.click(screen.getByTestId("job-form-audio-enabled-switch"))
+
+    expect(screen.getByTestId("job-form-summary-output")).toHaveTextContent(
+      "Manual/test reports only"
+    )
+    expect(screen.getByTestId("job-form-summary-delivery")).toHaveTextContent(
+      "Reports tab only"
+    )
+    expect(screen.getByTestId("job-form-summary-audio")).toHaveTextContent(
+      "Audio briefing requested"
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+
+    await waitFor(() => {
+      expect(servicesMock.createWatchlistJob).toHaveBeenCalledTimes(1)
+    })
+
+    const payload = servicesMock.createWatchlistJob.mock.calls[0][0]
+    expect(payload.output_prefs).toEqual(
+      expect.objectContaining({
+        generate_audio: true
+      })
+    )
+    expect(payload.output_prefs).not.toHaveProperty("auto_output")
+  }, 15_000)
+
+  it("enables scheduled report generation only when the recurring report switch is on", async () => {
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+      expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
+    })
+
+    fireEvent.change(screen.getByPlaceholderText("e.g., Daily Tech News"), {
+      target: { value: "Scheduled Audio Brief" }
+    })
+    fireEvent.click(screen.getByTestId("scope-setter"))
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    const collapseHeaders = Array.from(document.querySelectorAll(".ant-collapse-header"))
+    fireEvent.click(collapseHeaders[1] as Element)
+    fireEvent.click(screen.getByTestId("schedule-setter"))
+    fireEvent.click(screen.getByText("Output & Delivery"))
+    fireEvent.click(screen.getByTestId("job-form-create-scheduled-output-switch"))
+    fireEvent.click(screen.getByTestId("job-form-audio-enabled-switch"))
+
+    expect(screen.getByTestId("job-form-summary-output")).toHaveTextContent(
+      "Create a report after each scheduled run"
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+
+    await waitFor(() => {
+      expect(servicesMock.createWatchlistJob).toHaveBeenCalledTimes(1)
+    })
+
+    expect(servicesMock.createWatchlistJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        output_prefs: expect.objectContaining({
+          auto_output: expect.objectContaining({
+            enabled: true,
+            type: "briefing_markdown"
+          }),
+          generate_audio: true
+        })
+      })
+    )
+  }, 15_000)
+
+  it("saves the current output, delivery, and audio setup as a server-backed preset", async () => {
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistOutputPresets).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    fireEvent.click(screen.getByText("Output & Delivery"))
+    fireEvent.click(screen.getByTestId("job-form-audio-enabled-switch"))
+    fireEvent.change(screen.getByTestId("job-form-output-preset-name-input"), {
+      target: { value: "Narrated newsletter" }
+    })
+    fireEvent.click(screen.getByTestId("job-form-output-preset-save-button"))
+
+    await waitFor(() => {
+      expect(servicesMock.createWatchlistOutputPreset).toHaveBeenCalledTimes(1)
+    })
+
+    expect(servicesMock.createWatchlistOutputPreset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "Narrated newsletter",
+        output_prefs: expect.objectContaining({
+          generate_audio: true,
+          audio_voice: "alloy",
+          audio_speed: 1,
+          target_audio_minutes: 8
+        })
+      })
+    )
+  }, 15_000)
+
+  it("applies server-backed presets without losing unknown output prefs on save", async () => {
+    servicesMock.fetchWatchlistOutputPresets.mockResolvedValueOnce({
+      items: [
+        {
+          id: 12,
+          name: "Podcast preset",
+          description: "Narrated digest",
+          output_prefs: {
+            template: { default_name: "podcast_script", default_format: "md" },
+            generate_audio: true,
+            audio_voice: "nova"
+          },
+          is_default: false,
+          created_at: "2026-01-15T00:00:00Z",
+          updated_at: "2026-01-15T00:00:00Z"
+        }
+      ]
+    })
+    servicesMock.applyWatchlistOutputPreset.mockResolvedValueOnce({
+      output_prefs: {
+        template: {
+          default_name: "podcast_script",
+          default_format: "md",
+          experimental_renderer: "keep"
+        },
+        deliveries: {
+          email: { enabled: true, recipients: ["ops@example.com"] },
+          webhook: { url: "https://hooks.example.com/watchlists" }
+        },
+        generate_audio: true,
+        audio_voice: "nova",
+        raw_advanced: { preserve: true }
+      }
+    })
+    servicesMock.updateWatchlistJob.mockResolvedValueOnce({ id: 78 })
+
+    render(
+      <JobFormModal
+        open
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        initialValues={{
+          id: 78,
+          name: "Existing raw prefs monitor",
+          description: "existing",
+          scope: { sources: [1] },
+          schedule_expr: "0 9 * * *",
+          timezone: "UTC",
+          active: true,
+          output_prefs: {
+            template: { default_name: "old", experimental_renderer: "keep" },
+            deliveries: {
+              webhook: { url: "https://hooks.example.com/watchlists" }
+            },
+            raw_advanced: { preserve: true }
+          },
+          job_filters: null,
+          created_at: "2026-01-15T00:00:00Z"
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistOutputPresets).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    fireEvent.click(screen.getByText("Output & Delivery"))
+    fireEvent.mouseDown(screen.getByTestId("job-form-output-preset-select"))
+    fireEvent.click(await screen.findByText("Podcast preset"))
+    fireEvent.click(screen.getByTestId("job-form-output-preset-apply-button"))
+
+    await waitFor(() => {
+      expect(servicesMock.applyWatchlistOutputPreset).toHaveBeenCalledWith(12, {
+        base_output_prefs: expect.objectContaining({
+          raw_advanced: { preserve: true }
+        })
+      })
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      expect(servicesMock.updateWatchlistJob).toHaveBeenCalledTimes(1)
+    })
+
+    const [, payload] = servicesMock.updateWatchlistJob.mock.calls[0]
+    expect(payload.output_prefs).toEqual(
+      expect.objectContaining({
+        template: expect.objectContaining({
+          default_name: "podcast_script",
+          default_format: "md",
+          experimental_renderer: "keep"
+        }),
+        deliveries: expect.objectContaining({
+          email: expect.objectContaining({
+            enabled: true,
+            recipients: ["ops@example.com"]
+          }),
+          webhook: { url: "https://hooks.example.com/watchlists" }
+        }),
+        generate_audio: true,
+        audio_voice: "nova",
+        raw_advanced: { preserve: true }
+      })
+    )
+  }, 15_000)
+
+  it("updates and deletes selected server-backed output presets", async () => {
+    servicesMock.fetchWatchlistOutputPresets.mockResolvedValueOnce({
+      items: [
+        {
+          id: 34,
+          name: "Reusable newsletter",
+          description: null,
+          output_prefs: { template: { default_name: "newsletter_html" } },
+          is_default: false,
+          created_at: "2026-01-15T00:00:00Z",
+          updated_at: "2026-01-15T00:00:00Z"
+        }
+      ]
+    })
+
+    render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistOutputPresets).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
+    fireEvent.click(screen.getByText("Output & Delivery"))
+    fireEvent.mouseDown(screen.getByTestId("job-form-output-preset-select"))
+    fireEvent.click(await screen.findByText("Reusable newsletter"))
+    fireEvent.click(screen.getByTestId("job-form-audio-enabled-switch"))
+    fireEvent.click(screen.getByTestId("job-form-output-preset-update-button"))
+
+    await waitFor(() => {
+      expect(servicesMock.updateWatchlistOutputPreset).toHaveBeenCalledTimes(1)
+    })
+
+    expect(servicesMock.updateWatchlistOutputPreset).toHaveBeenCalledWith(
+      34,
+      expect.objectContaining({
+        name: "Reusable newsletter",
+        output_prefs: expect.objectContaining({ generate_audio: true })
+      })
+    )
+
+    vi.mocked(Modal.confirm).mockClear()
+    fireEvent.click(screen.getByTestId("job-form-output-preset-delete-button"))
+    expect(Modal.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Delete output preset?"
+      })
+    )
+    await waitFor(() => {
+      expect(servicesMock.deleteWatchlistOutputPreset).toHaveBeenCalledWith(34)
+    })
+  }, 15_000)
+
+  it("sends an explicit disabled auto_output record when scheduled reports are turned off during edit", async () => {
+    servicesMock.updateWatchlistJob.mockResolvedValueOnce({ id: 78 })
+
+    render(
+      <JobFormModal
+        open
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+        initialValues={{
+          id: 78,
+          name: "Existing scheduled reports monitor",
+          description: "existing",
+          scope: { sources: [1] },
+          schedule_expr: "0 9 * * *",
+          timezone: "UTC",
+          active: true,
+          output_prefs: {
+            template: { default_name: "briefing_markdown" },
+            auto_output: {
+              enabled: true,
+              type: "briefing_markdown",
+              template_name: "briefing_markdown"
+            }
+          },
+          job_filters: null,
+          created_at: "2026-01-15T00:00:00Z"
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(servicesMock.fetchWatchlistSources).toHaveBeenCalled()
+      expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
+    })
+
+    fireEvent.click(screen.getByText("Output & Delivery"))
+    const scheduledReportsSwitch = screen.getByTestId("job-form-create-scheduled-output-switch")
+    expect(scheduledReportsSwitch).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(scheduledReportsSwitch)
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => {
+      expect(servicesMock.updateWatchlistJob).toHaveBeenCalledTimes(1)
+    })
+
+    const [, payload] = servicesMock.updateWatchlistJob.mock.calls[0]
+    expect(payload.output_prefs).toEqual(
+      expect.objectContaining({
+        auto_output: expect.objectContaining({
+          enabled: false,
+          type: "briefing_markdown",
+          template_name: "briefing_markdown"
+        })
+      })
+    )
+  }, 15_000)
 
   it("shows practical audio setup guidance in monitor form", async () => {
     render(<JobFormModal open onClose={vi.fn()} onSuccess={vi.fn()} />)
@@ -533,7 +909,7 @@ describe("JobFormModal live summary", () => {
     expect(servicesMock.testWatchlistAudioSettings).not.toHaveBeenCalled()
 
     messageErrorSpy.mockRestore()
-  })
+  }, 15_000)
 
   it("guides basic mode through scope and schedule before review step", async () => {
     const messageErrorSpy = vi
@@ -951,8 +1327,8 @@ describe("JobFormModal live summary", () => {
       expect(servicesMock.fetchWatchlistGroups).toHaveBeenCalled()
     })
 
-    expect(screen.getByTestId("job-form-summary-delivery")).toHaveTextContent("No automatic delivery")
-    expect(screen.getByTestId("job-form-summary-audio")).toHaveTextContent("Disabled")
+    expect(screen.getByTestId("job-form-summary-delivery")).toHaveTextContent("Reports tab only")
+    expect(screen.getByTestId("job-form-summary-audio")).toHaveTextContent("Text report only")
 
     fireEvent.click(screen.getByTestId("job-form-mode-advanced"))
     fireEvent.click(screen.getByText("Output & Delivery"))
@@ -962,7 +1338,7 @@ describe("JobFormModal live summary", () => {
     })
 
     expect(screen.getByTestId("job-form-summary-audio")).toHaveTextContent(
-      "Enabled (alloy, 8 min target)"
+      "Audio briefing requested (alloy, 8 min target)"
     )
     fireEvent.click(screen.getByTestId("job-form-mode-basic"))
 

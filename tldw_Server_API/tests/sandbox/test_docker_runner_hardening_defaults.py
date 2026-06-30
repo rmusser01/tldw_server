@@ -1,16 +1,44 @@
 from __future__ import annotations
 
+import os
+import stat
+import subprocess
+from pathlib import Path
+
 import pytest
 
+import tldw_Server_API.app.core.Sandbox.runners.docker_runner as docker_module
 from tldw_Server_API.app.core.Sandbox.models import RunSpec, RuntimeType
 from tldw_Server_API.app.core.Sandbox.runners.docker_runner import DockerRunner
 
 
 class _StopAfterCreate(Exception):
+    """Sentinel used to stop DockerRunner after docker create is assembled."""
+
     pass
 
 
-def _capture_docker_create_command(monkeypatch, spec: RunSpec) -> list[str]:
+class _FakeLogger:
+    def __init__(self) -> None:
+        self.info_messages: list[str] = []
+        self.warning_messages: list[str] = []
+        self.debug_messages: list[str] = []
+
+    def info(self, message: str, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+        self.info_messages.append(message)
+
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+        self.warning_messages.append(message)
+
+    def debug(self, message: str, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+        self.debug_messages.append(message)
+
+
+def _capture_docker_create_command(monkeypatch: pytest.MonkeyPatch, spec: RunSpec) -> list[str]:
+    """Return the docker create command without starting a real container."""
     monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
     monkeypatch.delenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", raising=False)
     recorded_cmds: list[list[str]] = []
@@ -35,7 +63,192 @@ def _capture_docker_create_command(monkeypatch, spec: RunSpec) -> list[str]:
 
 
 @pytest.mark.unit
-def test_docker_runner_defaults_to_non_root_uid_gid_and_read_only_rootfs(monkeypatch) -> None:
+def test_docker_runner_fails_closed_when_configured_security_opt_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Configured seccomp/AppArmor hardening should not be silently removed."""
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
+    monkeypatch.delenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", raising=False)
+    monkeypatch.setenv("SANDBOX_DOCKER_SECCOMP", "/tmp/tldw-test-seccomp.json")
+    create_attempts: list[list[str]] = []
+
+    def _fake_check_output(cmd, text: bool = False, timeout: int | None = None) -> str:
+        del text, timeout
+        cmd_list = list(cmd)
+        if cmd_list[:3] == ["docker", "version", "--format"]:
+            return "24.0.0"
+        if cmd_list[:2] == ["docker", "create"]:
+            create_attempts.append(cmd_list)
+            if len(create_attempts) == 1:
+                raise subprocess.CalledProcessError(125, cmd_list)
+            raise AssertionError("docker create retried without required security options")
+        raise AssertionError(f"Unexpected check_output call: {cmd_list!r}")
+
+    monkeypatch.setattr("subprocess.check_output", _fake_check_output)
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "-c", "print('ok')"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+    )
+
+    with pytest.raises(RuntimeError, match="docker create failed"):
+        DockerRunner().start_run(run_id="rid-seccomp-fail", spec=spec)
+
+    assert len(create_attempts) == 1
+    assert "seccomp=/tmp/tldw-test-seccomp.json" in create_attempts[0]
+
+
+@pytest.mark.unit
+def test_docker_runner_redacts_env_values_from_logged_create_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docker command logging should not expose user-provided environment values."""
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(docker_module, "logger", fake_logger)
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "-c", "print('ok')"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+        env={"API_TOKEN": "secret-token-value"},
+    )
+
+    _capture_docker_create_command(monkeypatch, spec)
+
+    logged = "\n".join(fake_logger.info_messages)
+    assert "secret-token-value" not in logged
+    assert "API_TOKEN=<redacted>" in logged
+
+
+@pytest.mark.unit
+def test_docker_runner_redacts_env_values_from_start_debug_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The early RunSpec debug log should not print env values."""
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(docker_module, "logger", fake_logger)
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "-c", "print('ok')"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+        env={"API_TOKEN": "secret-token-value"},
+    )
+
+    _capture_docker_create_command(monkeypatch, spec)
+
+    logged = "\n".join(fake_logger.debug_messages)
+    assert "secret-token-value" not in logged
+
+
+@pytest.mark.unit
+def test_docker_runner_redacts_env_values_from_create_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docker create failures should not leak env values through exception strings."""
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
+    monkeypatch.delenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", raising=False)
+    create_attempts: list[list[str]] = []
+
+    def _fake_check_output(cmd, text: bool = False, timeout: int | None = None) -> str:
+        del text, timeout
+        cmd_list = list(cmd)
+        if cmd_list[:3] == ["docker", "version", "--format"]:
+            return "24.0.0"
+        if cmd_list[:2] == ["docker", "create"]:
+            create_attempts.append(cmd_list)
+            raise subprocess.CalledProcessError(125, cmd_list)
+        raise AssertionError(f"Unexpected check_output call: {cmd_list!r}")
+
+    monkeypatch.setattr("subprocess.check_output", _fake_check_output)
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "-c", "print('ok')"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+        env={"API_TOKEN": "secret-token-value"},
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        DockerRunner().start_run(run_id="rid-create-failure-redaction", spec=spec)
+
+    message = str(exc_info.value)
+    assert create_attempts
+    assert "secret-token-value" not in message
+    assert "API_TOKEN=<redacted>" in message
+
+
+@pytest.mark.unit
+def test_redact_docker_command_preserves_env_flag_without_assignment() -> None:
+    """Docker --env can name a host env var without an inline value."""
+    redacted = DockerRunner._redact_docker_command(
+        ["docker", "create", "-e", "PYTEST_ADDOPTS", "--env", "API_TOKEN=secret", "image"]
+    )
+
+    assert redacted == [
+        "docker",
+        "create",
+        "-e",
+        "PYTEST_ADDOPTS",
+        "--env",
+        "API_TOKEN=<redacted>",
+        "image",
+    ]
+
+
+def _staged_mount_source(create_cmd: list[str]) -> str:
+    """Extract the host source path for the read-only staged input mount."""
+    staged_mount = next(
+        (
+            create_cmd[idx + 1]
+            for idx, token in enumerate(create_cmd[:-1])
+            if token == "--mount" and "dst=/tldw-staged-workspace" in create_cmd[idx + 1]
+        ),
+        "",
+    )
+    if not staged_mount:
+        pytest.fail(f"Expected staged input mount, got: {create_cmd!r}")
+    src_part = next((part for part in staged_mount.split(",") if part.startswith("src=")), "")
+    if not src_part:
+        pytest.fail(f"Expected staged input mount src, got: {staged_mount!r}")
+    return src_part.removeprefix("src=")
+
+
+def _capture_staged_input_dir(monkeypatch, spec: RunSpec, session_workspace: str | None = None) -> str:
+    """Return the staged input directory while DockerRunner is still preparing create."""
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
+    monkeypatch.delenv("TLDW_SANDBOX_DOCKER_FAKE_EXEC", raising=False)
+
+    def _fake_check_output(cmd, text: bool = False, timeout: int | None = None) -> str:
+        cmd_list = list(cmd)
+        if cmd_list[:3] == ["docker", "version", "--format"]:
+            return "24.0.0"
+        if cmd_list[:2] == ["docker", "create"]:
+            staged_src = _staged_mount_source(cmd_list)
+            raise _StopAfterCreate(staged_src)
+        raise AssertionError(f"Unexpected check_output call before docker create: {cmd_list!r}")
+
+    monkeypatch.setattr("subprocess.check_output", _fake_check_output)
+    runner = DockerRunner()
+    with pytest.raises(_StopAfterCreate) as exc_info:
+        runner.start_run(run_id="rid-staged-inputs-1234", spec=spec, session_workspace=session_workspace)
+    return str(exc_info.value)
+
+
+@pytest.mark.unit
+def test_docker_runner_defaults_to_non_root_uid_gid_and_read_only_rootfs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default hardened Docker runs should use non-root uid/gid and read-only rootfs."""
     monkeypatch.delenv("SANDBOX_DOCKER_DEFAULT_UID", raising=False)
     monkeypatch.delenv("SANDBOX_DOCKER_DEFAULT_GID", raising=False)
     spec = RunSpec(
@@ -59,7 +272,112 @@ def test_docker_runner_defaults_to_non_root_uid_gid_and_read_only_rootfs(monkeyp
 
 
 @pytest.mark.unit
-def test_docker_runner_uses_configured_non_root_uid_gid(monkeypatch) -> None:
+def test_docker_runner_bind_mounts_staged_workspace_for_inline_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inline files should be staged via read-only mount while /workspace stays tmpfs."""
+    monkeypatch.delenv("SANDBOX_DOCKER_BIND_WORKSPACE", raising=False)
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "/workspace/hello.py"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+        files_inline=[("hello.py", b"print('ok')\n")],
+    )
+
+    create_cmd = _capture_docker_create_command(monkeypatch, spec)
+
+    staged_mounts = [
+        create_cmd[idx + 1]
+        for idx, token in enumerate(create_cmd[:-1])
+        if token == "--mount" and "dst=/tldw-staged-workspace" in create_cmd[idx + 1]
+    ]
+    workspace_tmpfs = [
+        create_cmd[idx + 1]
+        for idx, token in enumerate(create_cmd[:-1])
+        if token == "--tmpfs" and create_cmd[idx + 1].startswith("/workspace:")
+    ]
+    if not staged_mounts:
+        pytest.fail(f"Expected read-only staged input mount, got: {create_cmd!r}")
+    if "readonly" not in staged_mounts[0]:
+        pytest.fail(f"Expected staged input mount to be readonly, got: {staged_mounts[0]!r}")
+    if not workspace_tmpfs:
+        pytest.fail(f"Expected hardened /workspace tmpfs to remain, got: {create_cmd!r}")
+    shell_cmd = create_cmd[-1]
+    if "/tldw-staged-workspace/." not in shell_cmd:
+        pytest.fail(f"Expected shell prelude to copy staged inputs, got: {shell_cmd!r}")
+    if "cp -a" in shell_cmd:
+        pytest.fail(f"Expected staged copy not to preserve host ownership, got: {shell_cmd!r}")
+
+
+@pytest.mark.unit
+def test_docker_runner_skips_symlinked_session_workspace_inputs(monkeypatch, tmp_path: Path) -> None:
+    """Session workspace staging should not copy symlinked files outside the workspace."""
+    outside_file = tmp_path.parent / "outside-workspace.txt"
+    outside_file.write_text("outside\n", encoding="utf-8")
+    workspace_dir = tmp_path / "workspace"
+    workspace_dir.mkdir()
+    (workspace_dir / "safe.txt").write_text("safe\n", encoding="utf-8")
+    try:
+        os.symlink(outside_file, workspace_dir / "escaped.txt")
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "-c", "print('ok')"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+    )
+
+    staged_src = _capture_staged_input_dir(monkeypatch, spec, session_workspace=str(workspace_dir))
+
+    if not os.path.exists(os.path.join(staged_src, "safe.txt")):
+        pytest.fail(f"Expected safe file to be staged under {staged_src!r}")
+    if os.path.exists(os.path.join(staged_src, "escaped.txt")):
+        pytest.fail(f"Expected symlinked file to be skipped under {staged_src!r}")
+
+
+@pytest.mark.unit
+def test_docker_runner_normalizes_staged_input_modes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inline staged files and parent directories should stay readable under restrictive umask."""
+    spec = RunSpec(
+        session_id=None,
+        runtime=RuntimeType.docker,
+        base_image="python:3.11-slim",
+        command=["python", "/workspace/nested/deep/hello.py"],
+        timeout_sec=5,
+        network_policy="deny_all",
+        run_as_root=False,
+        read_only_root=True,
+        files_inline=[("nested/deep/hello.py", b"print('ok')\n")],
+    )
+
+    previous_umask = os.umask(0o077)
+    try:
+        staged_src = _capture_staged_input_dir(monkeypatch, spec)
+    finally:
+        os.umask(previous_umask)
+    nested_dir_mode = stat.S_IMODE(os.stat(os.path.join(staged_src, "nested")).st_mode)
+    deep_dir_mode = stat.S_IMODE(os.stat(os.path.join(staged_src, "nested", "deep")).st_mode)
+    file_mode = stat.S_IMODE(os.stat(os.path.join(staged_src, "nested", "deep", "hello.py")).st_mode)
+
+    if not nested_dir_mode & stat.S_IROTH or not nested_dir_mode & stat.S_IXOTH:
+        pytest.fail(f"Expected staged dirs to be world-readable/executable, got {oct(nested_dir_mode)}")
+    if not deep_dir_mode & stat.S_IROTH or not deep_dir_mode & stat.S_IXOTH:
+        pytest.fail(f"Expected staged dirs to be world-readable/executable, got {oct(deep_dir_mode)}")
+    if not file_mode & stat.S_IROTH:
+        pytest.fail(f"Expected staged inline files to be world-readable, got {oct(file_mode)}")
+
+
+@pytest.mark.unit
+def test_docker_runner_uses_configured_non_root_uid_gid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configured Docker uid/gid should override hardened non-root defaults."""
     monkeypatch.setenv("SANDBOX_DOCKER_DEFAULT_UID", "2001")
     monkeypatch.setenv("SANDBOX_DOCKER_DEFAULT_GID", "3002")
     spec = RunSpec(
@@ -81,7 +399,8 @@ def test_docker_runner_uses_configured_non_root_uid_gid(monkeypatch) -> None:
 
 
 @pytest.mark.unit
-def test_docker_runner_adds_ssh_caps_for_acp_internal_ssh_port(monkeypatch) -> None:
+def test_docker_runner_adds_ssh_caps_for_acp_internal_ssh_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ACP internal SSH mappings should receive the minimal OpenSSH capability set."""
     spec = RunSpec(
         session_id=None,
         runtime=RuntimeType.docker,

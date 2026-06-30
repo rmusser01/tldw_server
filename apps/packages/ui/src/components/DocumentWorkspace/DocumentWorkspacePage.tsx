@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, Suspense } from "react
 import { useTranslation } from "react-i18next"
 import { useSearchParams } from "react-router-dom"
 import { useStorage } from "@plasmohq/storage/hook"
-import { Alert, Drawer, Dropdown, Modal, notification, Tabs, Tooltip } from "antd"
+import { Drawer, Dropdown, Modal, notification, Tabs, Tooltip } from "antd"
 import {
   FileText,
   MessageSquare,
@@ -23,6 +23,7 @@ import {
   ChevronDown,
   CircleHelp
 } from "lucide-react"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 import { useMobile, useTablet } from "@/hooks/useMediaQuery"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
@@ -427,6 +428,7 @@ const WorkspaceHeader: React.FC<{
             onClick={() => onOpenPicker("library")}
             className="rounded p-1.5 hover:bg-hover text-text-subtle hover:text-text"
             aria-label={t("option:documentWorkspace.openDocument", "Open document")}
+            data-testid="document-open-picker-button"
           >
             <Plus className="h-5 w-5" />
           </button>
@@ -928,37 +930,35 @@ export const DocumentWorkspacePage: React.FC = () => {
     if (alreadyOpen) {
       // Just clear the param
       autoOpenHandledRef.current = true
-      setSearchParams((prev) => {
-        prev.delete("open")
-        return prev
-      }, { replace: true })
+      const nextParams = new URLSearchParams(searchParams)
+      nextParams.delete("open")
+      setSearchParams(nextParams, { replace: true })
       return
     }
 
     autoOpenHandledRef.current = true
     // Remove the param from the URL first so it doesn't re-trigger
-    setSearchParams((prev) => {
-      prev.delete("open")
-      return prev
-    }, { replace: true })
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete("open")
+    setSearchParams(nextParams, { replace: true })
     void openDocumentById(mediaId)
-  }, [autoOpenId, loadingDocumentId, openDocuments, openDocumentById, setSearchParams])
+  }, [autoOpenId, loadingDocumentId, openDocuments, openDocumentById, searchParams, setSearchParams])
 
   const loadingAlert =
     loadingDocumentId !== null ? (
       <div className="px-4 pt-2">
-        <Alert
-          type="info"
-          showIcon
+        <DesignSystemAlert
+          variant="info"
           title={t(
             "option:documentWorkspace.loadingDocument",
             "Loading document..."
           )}
-          description={t(
+        >
+          {t(
             "option:documentWorkspace.loadingDocumentHint",
             "Fetching the document file. This can take a moment for large files."
           )}
-        />
+        </DesignSystemAlert>
       </div>
     ) : null
 
@@ -983,29 +983,27 @@ export const DocumentWorkspacePage: React.FC = () => {
   const healthAlert =
     healthIssues.length > 0 ? (
       <div className="px-4 pt-2">
-        <Alert
-          type="warning"
-          showIcon
+        <DesignSystemAlert
+          variant="warning"
           title={t(
             "option:documentWorkspace.healthWarningTitle",
             "Document workspace storage unavailable"
           )}
-          description={
-            <div className="space-y-1">
-              <ul className="list-disc pl-5">
-                {healthIssues.map((issue, index) => (
-                  <li key={`${index}-${issue}`}>{issue}</li>
-                ))}
-              </ul>
-              <div className="text-xs text-text-muted">
-                {t(
-                  "option:documentWorkspace.healthWarningHint",
-                  "Some workspace features are temporarily unavailable. This usually resolves after restarting the server. If this persists, contact your administrator."
-                )}
-              </div>
+        >
+          <div className="space-y-1">
+            <ul className="list-disc pl-5">
+            {healthIssues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+            </ul>
+            <div className="text-xs text-text-muted">
+              {t(
+                "option:documentWorkspace.healthWarningHint",
+                "Some workspace features are temporarily unavailable. This usually resolves after restarting the server. If this persists, contact your administrator."
+              )}
             </div>
-          }
-        />
+          </div>
+        </DesignSystemAlert>
       </div>
     ) : null
 
@@ -1034,7 +1032,10 @@ export const DocumentWorkspacePage: React.FC = () => {
 
     return (
       <DocumentWorkspaceErrorBoundary>
-        <div className="flex h-full min-h-0 flex-col bg-bg text-text">
+        <div
+          className="flex h-full min-h-0 flex-col bg-bg text-text"
+          data-testid="document-workspace-root"
+        >
           <WorkspaceHeader
             leftPaneOpen={false}
             rightPaneOpen={false}
@@ -1096,7 +1097,10 @@ export const DocumentWorkspacePage: React.FC = () => {
   // Tablet/Desktop layout
   return (
     <DocumentWorkspaceErrorBoundary>
-      <div className="flex h-full min-h-0 flex-col bg-bg text-text">
+      <div
+        className="flex h-full min-h-0 flex-col bg-bg text-text"
+        data-testid="document-workspace-root"
+      >
         <WorkspaceHeader
           leftPaneOpen={!!leftPaneOpen}
           rightPaneOpen={!!rightPaneOpen}

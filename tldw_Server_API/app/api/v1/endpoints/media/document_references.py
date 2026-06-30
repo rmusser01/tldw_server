@@ -12,9 +12,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.document_references import (
     DocumentReferencesResponse,
     ReferenceEntry,
@@ -24,9 +25,11 @@ from tldw_Server_API.app.api.v1.utils.cache import (
     get_cache_client,
     get_cached_response,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_latest_transcription,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.document_workspace_repository import (
+    DocumentWorkspaceRepository,
 )
 
 router = APIRouter(tags=["Document Workspace"])
@@ -72,7 +75,6 @@ REFERENCE_SECTION_END_CORE_PATTERN = re.compile(
 )
 
 REFERENCE_TAIL_NUMBERED_PATTERN = re.compile(r"^\s*(?:\[+\d{1,6}\]|\d+[\.\)])\s+")
-PARSED_REFERENCES_CACHE_TABLE = "document_parsed_references_cache"
 
 # DOI/arXiv extraction patterns
 DOI_PATTERN = r"(?:https?://(?:dx\.)?doi\.org/)?10\.\d{4,}/[^\s\]\)>\"']+"
@@ -134,10 +136,7 @@ def _is_rate_limited(err: str | None) -> bool:
     if not err:
         return False
     lowered = err.lower()
-    return any(
-        token in lowered
-        for token in ("429", "too many requests", "rate limit", "throttl")
-    )
+    return any(token in lowered for token in ("429", "too many requests", "rate limit", "throttl"))
 
 
 def _make_external_cache_key(provider: str, lookup: str) -> str:
@@ -203,143 +202,9 @@ def _hash_reference_content(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
 
 
-def _ensure_parsed_references_cache_table(db: Any) -> None:
-    """Ensure persistent parsed-reference cache table exists."""
-    create_sql = f"""
-    CREATE TABLE IF NOT EXISTS {PARSED_REFERENCES_CACHE_TABLE} (
-        media_id INTEGER NOT NULL,
-        user_id TEXT NOT NULL,
-        parser_version TEXT NOT NULL,
-        content_hash TEXT NOT NULL,
-        references_json TEXT NOT NULL,
-        total_detected INTEGER NOT NULL DEFAULT 0,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY (media_id, user_id, parser_version, content_hash)
-    )
-    """
-    lookup_index_sql = f"""
-    CREATE INDEX IF NOT EXISTS idx_doc_refs_cache_lookup
-    ON {PARSED_REFERENCES_CACHE_TABLE}(media_id, user_id, parser_version)
-    """
-    try:
-        with db.transaction() as conn:
-            db.execute_query(create_sql, connection=conn)
-            db.execute_query(lookup_index_sql, connection=conn)
-    except Exception as exc:
-        logger.warning("Could not ensure parsed references cache table: {}", exc)
-
-
-def _normalize_cached_reference_list(raw: Any) -> list[str]:
-    """Normalize cached reference payloads to a list of non-empty strings."""
-    if not isinstance(raw, list):
-        return []
-    out: list[str] = []
-    for item in raw:
-        if isinstance(item, str):
-            text = item
-        elif isinstance(item, dict):
-            text = str(item.get("raw_text", ""))
-        else:
-            text = str(item)
-        cleaned = text.strip()
-        if cleaned:
-            out.append(cleaned)
-    return out
-
-
-def _load_parsed_references_cache(
-    db: Any,
-    *,
-    media_id: int,
-    user_id: str,
-    content_hash: str,
-) -> tuple[list[str], int] | None:
-    """Return cached parsed references for the current content hash, if available."""
-    query_template = """
-    SELECT references_json, total_detected
-    FROM {PARSED_REFERENCES_CACHE_TABLE}
-    WHERE media_id = ? AND user_id = ? AND parser_version = ? AND content_hash = ?
-    LIMIT 1
-    """
-    query = query_template.format(
-        PARSED_REFERENCES_CACHE_TABLE=PARSED_REFERENCES_CACHE_TABLE
-    )  # nosec B608
-    try:
-        cursor = db.execute_query(
-            query,
-            (media_id, user_id, REFERENCES_PARSER_VERSION, content_hash),
-        )
-        row = cursor.fetchone()
-        if not row:
-            return None
-        row_dict = dict(row)
-        payload = row_dict.get("references_json")
-        if not isinstance(payload, str) or not payload:
-            return None
-        parsed_payload = json.loads(payload)
-        parsed_refs = _normalize_cached_reference_list(parsed_payload)
-        total_detected = int(row_dict.get("total_detected") or len(parsed_refs))
-        if not parsed_refs and total_detected <= 0:
-            return None
-        return parsed_refs, max(total_detected, len(parsed_refs))
-    except Exception as exc:
-        logger.debug("Failed loading parsed references cache: {}", exc)
-        return None
-
-
-def _save_parsed_references_cache(
-    db: Any,
-    *,
-    media_id: int,
-    user_id: str,
-    content_hash: str,
-    references: list[str],
-    total_detected: int,
-) -> None:
-    """Persist parsed references in DB for fast future reads."""
-    delete_sql_template = """
-    DELETE FROM {PARSED_REFERENCES_CACHE_TABLE}
-    WHERE media_id = ? AND user_id = ? AND parser_version = ?
-    """
-    delete_sql = delete_sql_template.format(
-        PARSED_REFERENCES_CACHE_TABLE=PARSED_REFERENCES_CACHE_TABLE
-    )  # nosec B608
-    insert_sql_template = """
-    INSERT INTO {PARSED_REFERENCES_CACHE_TABLE}
-    (media_id, user_id, parser_version, content_hash, references_json, total_detected, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    """
-    insert_sql = insert_sql_template.format(
-        PARSED_REFERENCES_CACHE_TABLE=PARSED_REFERENCES_CACHE_TABLE
-    )  # nosec B608
-    references_json = json.dumps(references, ensure_ascii=False)
-    updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    try:
-        with db.transaction() as conn:
-            db.execute_query(
-                delete_sql,
-                (media_id, user_id, REFERENCES_PARSER_VERSION),
-                connection=conn,
-            )
-            db.execute_query(
-                insert_sql,
-                (
-                    media_id,
-                    user_id,
-                    REFERENCES_PARSER_VERSION,
-                    content_hash,
-                    references_json,
-                    int(total_detected),
-                    updated_at,
-                ),
-                connection=conn,
-            )
-    except Exception as exc:
-        logger.debug("Failed saving parsed references cache: {}", exc)
-
-
 def _find_reference_section(content: str) -> str | None:
     """Find and extract the references section from document content."""
+
     def _line_offset(line_idx: int, lines: list[str]) -> int:
         # Keep offsets deterministic without relying on regex line iterators.
         return sum(len(line) + 1 for line in lines[:line_idx])
@@ -539,9 +404,7 @@ def _split_references_with_meta(
         if re.match(r"^\[[^\]]+\]\((?:https?|mailto):[^)]+\)\s*$", stripped, flags=re.IGNORECASE):
             return True
         # Broken markdown fragment form: "Label](https://...)"
-        if re.match(r"^[^\s\[\]]{2,120}\]\((?:https?|mailto):[^)]+\)\s*$", stripped, flags=re.IGNORECASE):
-            return True
-        return False
+        return bool(re.match(r"^[^\s\[\]]{2,120}\]\((?:https?|mailto):[^)]+\)\s*$", stripped, flags=re.IGNORECASE))
 
     def _looks_like_prose_sentence_start(text: str) -> bool:
         candidate = text.strip()
@@ -656,16 +519,9 @@ def _split_references_with_meta(
         has_url = bool(re.search(URL_PATTERN, text, re.IGNORECASE))
         is_markdown_fragment = _is_markdown_url_fragment_line(text)
 
-        if (
-            is_markdown_fragment
-            and markdown_label is None
-            and not (has_doi or has_arxiv)
-        ):
+        if is_markdown_fragment and markdown_label is None and not (has_doi or has_arxiv):
             return False
-        if (
-            not (is_numbered or is_labeled)
-            and _looks_like_prose_sentence_start(text)
-        ):
+        if not (is_numbered or is_labeled) and _looks_like_prose_sentence_start(text):
             return False
 
         if not (has_doi or has_arxiv or has_year):
@@ -679,9 +535,7 @@ def _split_references_with_meta(
         if has_doi or has_arxiv:
             return True
         # Link-heavy astronomy/physics bibliographies often encode references as markdown links.
-        if has_year and has_url and len(text) > 45:
-            return True
-        return False
+        return bool(has_year and has_url and len(text) > 45)
 
     def _looks_like_continuation_reference(text: str) -> bool:
         candidate = text.strip()
@@ -693,8 +547,7 @@ def _split_references_with_meta(
         has_year = bool(re.search(YEAR_PATTERN, candidate))
         has_doi = bool(re.search(DOI_PATTERN, candidate, re.IGNORECASE))
         has_arxiv = bool(
-            re.search(ARXIV_PATTERN, candidate, re.IGNORECASE) or
-            re.search(ARXIV_OLD_PATTERN, candidate, re.IGNORECASE)
+            re.search(ARXIV_PATTERN, candidate, re.IGNORECASE) or re.search(ARXIV_OLD_PATTERN, candidate, re.IGNORECASE)
         )
         has_url = bool(re.search(URL_PATTERN, candidate, re.IGNORECASE))
 
@@ -707,14 +560,10 @@ def _split_references_with_meta(
                 label,
             ):
                 return True
-            if not has_year and (has_doi or has_arxiv or has_url):
-                return True
-            return False
+            return bool(not has_year and (has_doi or has_arxiv or has_url))
 
         # Non-markdown fragment: "prints, p. arXiv:..." or similar.
-        if re.match(r"(?i)^prints?,\s*p\.\s*arxiv:", candidate):
-            return True
-        return False
+        return bool(re.match(r"(?i)^prints?,\s*p\.\s*arxiv:", candidate))
 
     # Try explicit list formats first: [1], [TAG], 1., 1)
     list_pattern = r"(?m)^\s*(?:\[+\d+\]|\[[^\n]{1,180}\]|\d+[\.\)])\s+"
@@ -770,11 +619,7 @@ def _split_references_with_meta(
             current_ref = f"{current_ref} {line}".strip()
             continue
         line_has_explicit_label = _has_explicit_reference_label(line)
-        if (
-            current_ref
-            and _has_explicit_reference_label(current_ref)
-            and not line_has_explicit_label
-        ):
+        if current_ref and _has_explicit_reference_label(current_ref) and not line_has_explicit_label:
             current_ref = f"{current_ref} {line}".strip()
             continue
         if current_ref and _looks_like_new_reference(line):
@@ -806,8 +651,7 @@ def _split_references_with_meta(
     filtered = [ref for ref in references if _looks_like_reference(ref)]
     removed = [ref for ref in references if ref not in filtered]
     removed_all_obvious_noise = bool(removed) and all(
-        _looks_like_prose_sentence_start(ref) or _is_markdown_url_fragment_line(ref)
-        for ref in removed
+        _looks_like_prose_sentence_start(ref) or _is_markdown_url_fragment_line(ref) for ref in removed
     )
     if len(filtered) >= 3 or (filtered and removed_all_obvious_noise):
         references = filtered
@@ -995,7 +839,11 @@ def _parse_reference_basic(raw_text: str) -> ReferenceEntry:
     # Try to extract venue (journal/conference)
     venue = None
     # Look for common venue patterns: "In Proceedings of", "Journal of", etc.
-    venue_match = re.search(r"(?:In\s+)?(?:Proceedings\s+of\s+)?(?:the\s+)?([A-Z][^,\.]{5,60}(?:Conference|Journal|Symposium|Workshop|Review|Letters|Transactions))", display_text, re.IGNORECASE)
+    venue_match = re.search(
+        r"(?:In\s+)?(?:Proceedings\s+of\s+)?(?:the\s+)?([A-Z][^,\.]{5,60}(?:Conference|Journal|Symposium|Workshop|Review|Letters|Transactions))",
+        display_text,
+        re.IGNORECASE,
+    )
     if venue_match:
         venue = venue_match.group(1).strip()
 
@@ -1070,8 +918,8 @@ async def _enrich_with_semantic_scholar(references: list[ReferenceEntry]) -> tup
                     enriched.append(enriched_ref)
                     enriched.extend(refs_to_enrich[idx + 1 :])
                     break
-            except REFERENCE_ENRICH_EXCEPTIONS as e:
-                logger.debug("DOI lookup failed for {}: {}", ref.doi, e)
+            except REFERENCE_ENRICH_EXCEPTIONS:
+                logger.debug("Semantic Scholar DOI lookup failed")
 
         # Try to look up by arXiv ID
         if ref.arxiv_id:
@@ -1100,8 +948,8 @@ async def _enrich_with_semantic_scholar(references: list[ReferenceEntry]) -> tup
                     enriched.append(enriched_ref)
                     enriched.extend(refs_to_enrich[idx + 1 :])
                     break
-            except REFERENCE_ENRICH_EXCEPTIONS as e:
-                logger.debug("arXiv lookup failed for {}: {}", ref.arxiv_id, e)
+            except REFERENCE_ENRICH_EXCEPTIONS:
+                logger.debug("Semantic Scholar arXiv lookup failed")
 
         # Try title search as fallback
         if ref.title:
@@ -1137,8 +985,8 @@ async def _enrich_with_semantic_scholar(references: list[ReferenceEntry]) -> tup
                     enriched.append(enriched_ref)
                     enriched.extend(refs_to_enrich[idx + 1 :])
                     break
-            except REFERENCE_ENRICH_EXCEPTIONS as e:
-                logger.debug("Title search failed for {}: {}", ref.title, e)
+            except REFERENCE_ENRICH_EXCEPTIONS:
+                logger.debug("Semantic Scholar title search failed")
 
         enriched.append(enriched_ref)
 
@@ -1297,8 +1145,8 @@ async def _enrich_with_crossref(references: list[ReferenceEntry]) -> tuple[list[
                     enriched.append(enriched_ref)
                     enriched.extend(refs_to_enrich[idx + 1 :])
                     break
-            except REFERENCE_ENRICH_EXCEPTIONS as e:
-                logger.debug("Crossref lookup failed for {}: {}", ref.doi, e)
+            except REFERENCE_ENRICH_EXCEPTIONS:
+                logger.debug("Crossref lookup failed")
         enriched.append(enriched_ref)
 
     enriched.extend(unenriched_remainder)
@@ -1347,8 +1195,8 @@ async def _enrich_with_arxiv(references: list[ReferenceEntry]) -> tuple[list[Ref
                     enriched.append(enriched_ref)
                     enriched.extend(refs_to_enrich[idx + 1 :])
                     break
-            except REFERENCE_ENRICH_EXCEPTIONS as e:
-                logger.debug("arXiv lookup failed for {}: {}", ref.arxiv_id, e)
+            except REFERENCE_ENRICH_EXCEPTIONS:
+                logger.debug("arXiv lookup failed")
         enriched.append(enriched_ref)
 
     enriched.extend(unenriched_remainder)
@@ -1362,9 +1210,7 @@ async def _enrich_with_arxiv(references: list[ReferenceEntry]) -> tuple[list[Ref
     response_model=DocumentReferencesResponse,
     dependencies=[Depends(rbac_rate_limit("media.references"))],
     responses={
-        200: {
-            "description": "References retrieved (may be empty if document has no references section)"
-        },
+        200: {"description": "References retrieved (may be empty if document has no references section)"},
         404: {"description": "Media item not found"},
         429: {"description": "Rate limit exceeded"},
         500: {"description": "Server error (database or extraction failure)"},
@@ -1395,16 +1241,12 @@ async def get_document_references(
         None,
         ge=1,
         le=MAX_PARSED_REFERENCES_CAP,
-        description=(
-            "Optional cap on parsed references before pagination. "
-            "Unset means no parser cap."
-        ),
+        description=("Optional cap on parsed references before pagination. " "Unset means no parser cap."),
     ),
     search: str | None = Query(
         None,
         description=(
-            "Optional case-insensitive substring filter applied to the full "
-            "reference list before pagination."
+            "Optional case-insensitive substring filter applied to the full " "reference list before pagination."
         ),
     ),
     db: Any = Depends(get_media_db_for_user),
@@ -1462,6 +1304,18 @@ async def get_document_references(
     cached = get_cached_response(cache_key)
     if cached is not None:
         _etag, payload = cached
+        if "pagination" not in payload:
+            payload = dict(payload)
+            cached_refs = payload.get("references") or []
+            cached_count = int(payload.get("returned_count") or len(cached_refs))
+            cached_limit = int(payload.get("limit") or cached_count or 1)
+            raw_total_available = payload.get("total_available")
+            payload["pagination"] = build_offset_pagination_meta(
+                total=int(raw_total_available if raw_total_available is not None else cached_count or 0),
+                limit=max(1, cached_limit),
+                offset=int(payload.get("offset") or 0),
+                count=cached_count,
+            )
         logger.debug("Returning cached references for media_id={}", media_id)
         return DocumentReferencesResponse(**payload)
 
@@ -1476,7 +1330,7 @@ async def get_document_references(
     try:
         media = db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
     except Exception as e:
-        logger.error("Database error fetching media_id={}: {}", media_id, e)
+        logger.error("Database error fetching media item")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error while fetching media item",
@@ -1549,14 +1403,18 @@ async def get_document_references(
         return response
 
     # 4. Parse individual references (with DB-backed parsed-reference cache)
-    _ensure_parsed_references_cache_table(db)
+    repo = DocumentWorkspaceRepository.from_media_db(db)
     refs_hash = _hash_reference_content(refs_section)
-    cached_parsed = _load_parsed_references_cache(
-        db,
-        media_id=media_id,
-        user_id=user_id,
-        content_hash=refs_hash,
-    )
+    try:
+        cached_parsed = repo.get_parsed_references_cache(
+            media_id=media_id,
+            user_id=user_id,
+            parser_version=REFERENCES_PARSER_VERSION,
+            content_hash=refs_hash,
+        )
+    except Exception:
+        logger.debug("Failed loading parsed references cache")
+        cached_parsed = None
     if cached_parsed is not None:
         raw_refs_all, total_detected = cached_parsed
     else:
@@ -1565,14 +1423,18 @@ async def get_document_references(
             max_references=None,
         )
         if raw_refs_all:
-            _save_parsed_references_cache(
-                db,
-                media_id=media_id,
-                user_id=user_id,
-                content_hash=refs_hash,
-                references=raw_refs_all,
-                total_detected=total_detected,
-            )
+            try:
+                repo.upsert_parsed_references_cache(
+                    media_id=media_id,
+                    user_id=user_id,
+                    parser_version=REFERENCES_PARSER_VERSION,
+                    content_hash=refs_hash,
+                    references=raw_refs_all,
+                    total_detected=total_detected,
+                    updated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                )
+            except Exception:
+                logger.debug("Failed saving parsed references cache")
 
     if not raw_refs_all:
         logger.debug("No individual references parsed from media_id={}", media_id)
@@ -1605,9 +1467,7 @@ async def get_document_references(
     normalized_search = re.sub(r"\s+", " ", (search or "").strip().lower())
     if normalized_search:
         filtered_refs = [
-            ref
-            for ref in capped_refs
-            if normalized_search in _normalize_reference_display_text(ref).lower()
+            ref for ref in capped_refs if normalized_search in _normalize_reference_display_text(ref).lower()
         ]
     else:
         filtered_refs = capped_refs
@@ -1633,6 +1493,12 @@ async def get_document_references(
             total_available=total_available,
             has_more=False,
             next_offset=None,
+            pagination=build_offset_pagination_meta(
+                total=total_available,
+                limit=limit,
+                offset=offset,
+                count=0,
+            ),
         )
         cache_response(cache_key, response.model_dump(), media_id=media_id)
         return response
@@ -1650,9 +1516,7 @@ async def get_document_references(
     # 7. Enrich with external APIs if requested
     enrichment_sources: set[str] = set()
     before_enrichment = [_enrichment_fingerprint(ref) for ref in references]
-    enrichment_limited = bool(
-        enrich and reference_index is None and len(references) > MAX_ENRICHMENT_REFS
-    )
+    enrichment_limited = bool(enrich and reference_index is None and len(references) > MAX_ENRICHMENT_REFS)
     if enrich and references:
         try:
             if reference_index is not None:
@@ -1703,16 +1567,13 @@ async def get_document_references(
                             "Enriched references with arXiv for media_id={}",
                             media_id,
                         )
-        except REFERENCE_ENRICH_EXCEPTIONS as e:
-            logger.warning(
-                "Failed to enrich references for media_id={}: {}",
-                media_id,
-                e,
-            )
+        except REFERENCE_ENRICH_EXCEPTIONS:
+            logger.warning("Failed to enrich references")
             # Continue without enrichment
 
     enriched_count = sum(
-        1 for idx, ref in enumerate(references)
+        1
+        for idx, ref in enumerate(references)
         if idx < len(before_enrichment) and _enrichment_fingerprint(ref) != before_enrichment[idx]
     )
     enrichment_source = ",".join(sorted(enrichment_sources)) if enrichment_sources else None
@@ -1733,6 +1594,12 @@ async def get_document_references(
         total_available=total_available,
         has_more=has_more,
         next_offset=page_end if has_more else None,
+        pagination=build_offset_pagination_meta(
+            total=total_available,
+            limit=limit,
+            offset=offset,
+            count=returned_count,
+        ),
     )
     cache_response(cache_key, response.model_dump(), media_id=media_id)
     return response

@@ -10,7 +10,9 @@ from datetime import datetime
 from typing import Literal
 
 # 3rd-party Libraries
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 #
 # Local Imports
@@ -21,6 +23,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Skill name validation: lowercase letters, numbers, and hyphens only
 SKILL_NAME_PATTERN = re.compile(r'^[a-z][a-z0-9-]{0,63}$')
+SkillContext = Literal["inline", "fork"]
+SkillListSort = Literal["name", "context", "created_at", "last_modified"]
+SkillListOrder = Literal["asc", "desc"]
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 SUPPORTING_FILE_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$')
 
 # Aggregate limits for supporting files
@@ -92,11 +105,27 @@ class SkillFrontmatter(BaseModel):
     argument_hint: str | None = Field(None, max_length=100, description="Hint shown in UI (e.g., '[issue-number]')")
     disable_model_invocation: bool = Field(False, description="If true, only user can invoke (not auto-invoked by LLM)")
     user_invocable: bool = Field(True, description="If false, hidden from user UI (background knowledge only)")
-    allowed_tools: list[str] | None = Field(None, description="Tools allowed without permission when skill is active")
+    allowed_tools: list[str] | None = Field(None, description="Declared tool strings")
     model: str | None = Field(None, description="Override model for this skill")
-    context: Literal["inline", "fork"] = Field("inline", description="'inline' or 'fork' (fork runs in isolated subagent)")
+    context: SkillContext = Field("inline", description="'inline' or 'fork' (fork runs in isolated subagent)")
 
     model_config = ConfigDict(extra='ignore')
+
+
+class SkillRuntimeMetadata(BaseModel):
+    """Read-only runtime declarations derived from skill metadata."""
+    execution_mode: SkillContext = Field("inline", description="Declared execution context mode")
+    test_run_may_call_model: bool = Field(
+        False,
+        description="Whether a non-dry user-triggered test run may call the configured model",
+    )
+    declares_tools: bool = Field(False, description="Whether the skill declares tool strings")
+    declared_tool_count: int = Field(0, ge=0, description="Count of declared tool strings")
+    model_override: str | None = Field(None, description="Declared model override")
+    auto_invocation_enabled: bool = Field(
+        True,
+        description="Whether the skill can be advertised for model auto-invocation context",
+    )
 
 
 class SkillBase(BaseModel):
@@ -106,9 +135,13 @@ class SkillBase(BaseModel):
     argument_hint: str | None = Field(None, max_length=100, description="Hint shown in UI")
     disable_model_invocation: bool = Field(False, description="If true, only user can invoke")
     user_invocable: bool = Field(True, description="If false, hidden from user UI")
-    allowed_tools: list[str] | None = Field(None, description="Tools allowed during skill execution")
+    allowed_tools: list[str] | None = Field(None, description="Declared tool strings")
     model: str | None = Field(None, description="Override model for this skill")
-    context: Literal["inline", "fork"] = Field("inline", description="Execution context mode")
+    context: SkillContext = Field("inline", description="Execution context mode")
+    runtime: SkillRuntimeMetadata = Field(
+        default_factory=SkillRuntimeMetadata,
+        description="Read-only runtime declarations derived from skill metadata",
+    )
 
     @field_validator("name")
     @classmethod
@@ -180,9 +213,47 @@ class SkillSummary(BaseModel):
     argument_hint: str | None = Field(None, description="Hint shown in UI")
     user_invocable: bool = Field(..., description="If false, hidden from user UI")
     disable_model_invocation: bool = Field(..., description="If true, only user can invoke")
-    context: Literal["inline", "fork"] = Field(..., description="Execution context mode")
+    allowed_tools: list[str] | None = Field(None, description="Declared tool strings")
+    model: str | None = Field(None, description="Declared model override")
+    context: SkillContext = Field(..., description="Execution context mode")
+    runtime: SkillRuntimeMetadata = Field(
+        default_factory=SkillRuntimeMetadata,
+        description="Read-only runtime declarations derived from skill metadata",
+    )
+    version: int = Field(..., description="Version for optimistic locking")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SkillBulkDeleteItem(BaseModel):
+    """One skill selected for bulk deletion."""
+    name: str = Field(..., min_length=1, max_length=64, description="Skill identifier")
+    version: int | None = Field(
+        None,
+        ge=1,
+        description="Optional optimistic-lock version from the selected row",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return _normalize_and_validate_skill_name(value)
+
+
+class SkillBulkDeleteRequest(BaseModel):
+    """Request to delete multiple selected skills."""
+    skills: list[SkillBulkDeleteItem] = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Selected skills to delete",
+    )
+
+
+class SkillBulkDeleteResponse(BaseModel):
+    """Response for a successful bulk delete."""
+    deleted: list[str] = Field(..., description="Names deleted in request order")
+    count: int = Field(..., ge=0, description="Number of deleted skills")
 
 
 class SkillsListResponse(BaseModel):
@@ -192,23 +263,35 @@ class SkillsListResponse(BaseModel):
     total: int = Field(..., description="Total number of skills")
     limit: int = Field(..., description="Pagination limit")
     offset: int = Field(..., description="Pagination offset")
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical pagination metadata")
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class SkillExecuteRequest(BaseModel):
     """Request to execute/preview a skill."""
     args: str | None = Field(None, max_length=10000, description="Arguments to pass to the skill")
+    dry_run: bool = Field(
+        False,
+        description="Render the skill prompt without invoking model, fork, or tool execution",
+    )
 
 
 class SkillExecutionResult(BaseModel):
     """Result of skill execution."""
     skill_name: str = Field(..., description="Name of the executed skill")
     rendered_prompt: str = Field(..., description="Prompt with arguments substituted")
-    allowed_tools: list[str] | None = Field(None, description="Tools allowed for this skill")
+    allowed_tools: list[str] | None = Field(None, description="Declared tool strings")
     model_override: str | None = Field(None, description="Model override if specified")
-    execution_mode: Literal["inline", "fork"] = Field(..., description="How the skill was executed")
+    execution_mode: SkillContext = Field(..., description="How the skill was executed")
     fork_output: str | None = Field(None, description="Output from fork execution (if applicable)")
+    dry_run: bool = Field(False, description="Whether the result came from a dry render")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -240,6 +323,36 @@ class SkillImportRequest(BaseModel):
             allow_deletes=False,
         )
         return validated  # type: ignore[return-value]
+
+
+class SkillImportPreviewRequest(BaseModel):
+    """Request to preview a skill import from text content."""
+    name: str | None = Field(
+        None,
+        min_length=1,
+        max_length=64,
+        description="Optional skill name override (uses frontmatter name if omitted)",
+    )
+    content: str = Field(..., min_length=1, max_length=500000, description="SKILL.md content")
+    supporting_files: dict[str, str] | None = Field(None, description="Additional files")
+
+
+class SkillImportPreviewResponse(BaseModel):
+    """Read-only preview of an import before it mutates stored skills."""
+    valid: bool = Field(..., description="Whether the import can be submitted")
+    errors: list[str] = Field(default_factory=list, description="Validation errors to fix before import")
+    name: str | None = Field(None, description="Resolved skill name")
+    description: str | None = Field(None, description="Parsed skill description")
+    argument_hint: str | None = Field(None, description="Parsed argument hint")
+    disable_model_invocation: bool | None = Field(None, description="Whether model invocation is disabled")
+    user_invocable: bool | None = Field(None, description="Whether users can invoke the skill directly")
+    allowed_tools: list[str] | None = Field(None, description="Parsed declared tool strings")
+    model: str | None = Field(None, description="Parsed model override")
+    context: SkillContext | None = Field(None, description="Parsed execution context")
+    supporting_file_count: int = Field(0, description="Number of supporting files included in the import")
+    conflict: bool = Field(False, description="Whether an active skill with this name already exists")
+    can_overwrite: bool = Field(False, description="Whether overwrite can be offered for this preview")
+    existing_version: int | None = Field(None, description="Existing skill version when a conflict exists")
 
 
 class SkillContextPayload(BaseModel):

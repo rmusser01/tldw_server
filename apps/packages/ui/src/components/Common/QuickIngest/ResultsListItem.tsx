@@ -31,21 +31,25 @@ export const ResultsListItem: React.FC<ResultsListItemProps> = React.memo(
         ? t("quickIngest.resultStatusSkipped", "Skipped")
         : outcome === "cancelled"
           ? t("quickIngest.resultStatusCancelled", "Cancelled")
-        : outcome === "processed"
-          ? t("quickIngest.resultStatusProcessed", "Processed")
-          : outcome === "ingested"
-            ? t("quickIngest.resultStatusIngested", "Ingested")
-            : t("quickIngest.statusFailed", "Failed")
+          : outcome === "submit_failed"
+            ? t("quickIngest.resultStatusSubmitFailed", "Not submitted")
+            : outcome === "processed"
+              ? t("quickIngest.resultStatusProcessed", "Processed")
+              : outcome === "ingested"
+                ? t("quickIngest.resultStatusIngested", "Ingested")
+                : t("quickIngest.statusFailed", "Failed")
     const outcomeColor =
       outcome === "skipped"
         ? "gold"
         : outcome === "cancelled"
           ? "orange"
-        : outcome === "processed"
-          ? "blue"
-          : outcome === "ingested"
-            ? "green"
-            : "red"
+          : outcome === "submit_failed"
+            ? "volcano"
+            : outcome === "processed"
+              ? "blue"
+              : outcome === "ingested"
+                ? "green"
+                : "red"
     const handleDownloadJson = React.useCallback(() => {
       onDownloadJson(item)
     }, [item, onDownloadJson])

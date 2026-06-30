@@ -51,6 +51,7 @@ def test_llm_models_metadata_refresh_openrouter_includes_live_models(monkeypatch
 
     refreshed = asyncio.run(
         llm_providers.get_models_metadata(
+            request=None,
             refresh_openrouter=True,
             model_type=None,
             input_modality=None,
@@ -63,6 +64,7 @@ def test_llm_models_metadata_refresh_openrouter_includes_live_models(monkeypatch
 
     cached = asyncio.run(
         llm_providers.get_models_metadata(
+            request=None,
             refresh_openrouter=False,
             model_type=None,
             input_modality=None,

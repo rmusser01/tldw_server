@@ -1,0 +1,46 @@
+{
+  "baseUrl": "http://127.0.0.1:8080",
+  "serverUrl": "http://127.0.0.1:8000",
+  "uniqueName": "P1 Smoke Character 1778350769434",
+  "states": [
+    {
+      "name": "01-characters-entry",
+      "url": "http://127.0.0.1:8080/characters",
+      "text": "tldw Assistant\nSearch\n⌘K\nTemp\nCharacter\n?\nCharacters\n\nCreate reusable characters you can pick from the chat header and reuse across conversations.\n\nSkip to characters content\nUpload character\nKeyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal\nNew character\n/\nActive\nTrash\nFilters\nDisplay\n3 characters found\n\t\nName\n\tTags\t\nCreator\n\t\nActivity\n\tActions\n\n\t\nReaudit Character 20260509173128\nRe-audit test character for UX walkthrough.\n\t\t\t\n48m ago\nUpdated 48m ago\n\t\n\n\n\t\nHelpful AI Assistant\nA default, friendly assistant created automatically by the system.\n\t\ndefault\nneutral\n+1\n\t\nSystem\n\t\n1h ago\nUpdated 1h ago\n\t\n\n\n\t\nDefault Assistant\nA general-purpose assistant.\n\t\t\nSystem\n\t\n6h ago\nUpdated 6h ago\n\t\n1\n10 / page"
+    },
+    {
+      "name": "02-character-visible",
+      "url": "http://127.0.0.1:8080/characters",
+      "text": "tldw Assistant\nSearch\n⌘K\nTemp\nCharacter\n?\nCharacters\n\nCreate reusable characters you can pick from the chat header and reuse across conversations.\n\nSkip to characters content\nUpload character\nKeyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal\nNew character\n/\nActive\nTrash\nFilters\nDisplay\n4 characters found\n\t\nName\n\tTags\t\nCreator\n\t\nActivity\n\tActions\n\n\t\nP1 Smoke Character 1778350769434\nP1 smoke test character.\n\t\t\t\nJust now\nUpdated Just now\n\t\n\n\n\t\nReaudit Character 20260509173128\nRe-audit test character for UX walkthrough.\n\t\t\t\n48m ago\nUpdated 48m ago\n\t\n\n\n\t\nHelpful AI Assistant\nA default, friendly assistant created automatically by the system.\n\t\ndefault\nneutral\n+1\n\t\nSystem\n\t\n1h ago\nUpdated 1h ago\n\t\n\n\n\t\nDefault Assistant\nA general-purpose assistant.\n\t\t\nSystem\n\t\n6h ago\nUpdated 6h ago\n\t\n1\n10 / page"
+    },
+    {
+      "name": "03-row-chat-local-blocker",
+      "url": "http://127.0.0.1:8080/characters",
+      "text": "tldw Assistant\nSearch\n⌘K\nTemp\nCharacter\n?\nCharacters\n\nCreate reusable characters you can pick from the chat header and reuse across conversations.\n\nSkip to characters content\nUpload character\nKeyboard shortcuts: N New character. / Focus search. G T Table view. G G Gallery view. Esc Close modal\nNew character\n/\nActive\nTrash\nFilters\nDisplay\n4 characters found\n\t\nName\n\tTags\t\nCreator\n\t\nActivity\n\tActions\n\n\t\nP1 Smoke Character 1778350769434\nP1 smoke test character.\n\t\t\t\nJust now\nUpdated Just now\n\t\n\n\n\t\nReaudit Character 20260509173128\nRe-audit test character for UX walkthrough.\n\t\t\t\n48m ago\nUpdated 48m ago\n\t\n\n\n\t\nHelpful AI Assistant\nA default, friendly assistant created automatically by the system.\n\t\ndefault\nneutral\n+1\n\t\nSystem\n\t\n1h ago\nUpdated 1h ago\n\t\n\n\n\t\nDefault Assistant\nA general-purpose assistant.\n\t\t\nSystem\n\t\n6h ago\nUpdated 6h ago\n\t\n1\n10 / page\nCharacter chat setup\nChoose a chat model before chatting as P1 Smoke Character 1778350769434\nSaved characters are still available. Configure a chat model, then return here to continue with P1 Smoke Character 1778350769434.\nReturn to character\nRetry character chat\nOpen model settings"
+    }
+  ],
+  "events": [
+    {
+      "type": "console-error",
+      "text": "Warning: Instance created by `useForm` is not connected to any Form element. Forget to pass `form` prop?"
+    },
+    {
+      "type": "requestfailed",
+      "url": "http://127.0.0.1:8000/api/v1/llm/models/metadata",
+      "failure": "net::ERR_ABORTED"
+    },
+    {
+      "type": "requestfailed",
+      "url": "http://127.0.0.1:8000/api/v1/notifications/stream?after=0",
+      "failure": "net::ERR_ABORTED"
+    },
+    {
+      "type": "console-error",
+      "text": "Failed to fetch models from tldw: JSHandle@error"
+    },
+    {
+      "type": "console-error",
+      "text": "Warning: Instance created by `useForm` is not connected to any Form element. Forget to pass `form` prop?"
+    }
+  ]
+}

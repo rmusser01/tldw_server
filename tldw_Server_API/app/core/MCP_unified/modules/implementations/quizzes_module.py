@@ -478,11 +478,8 @@ class QuizzesModule(BaseModule):
     def _cleanup_generated_quiz(self, db: CharactersRAGDB, quiz_id: int, *, reason: str) -> bool:
         try:
             deleted = db.delete_quiz(quiz_id, hard_delete=True)
-        except Exception as exc:
-            logger.error(
-                f"Exception during cleanup of generated quiz {quiz_id} after {reason}: {exc}",
-                exc_info=True,
-            )
+        except Exception:
+            logger.error(f"Exception during cleanup of generated quiz {quiz_id}; details redacted")
             return False
         if not deleted:
             logger.error(f"Failed to clean up generated quiz {quiz_id} after {reason}")
@@ -540,6 +537,9 @@ class QuizzesModule(BaseModule):
         except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
             return "mcp_quizzes"
 
+    def _log_db_close_failure(self) -> None:
+        logger.debug("Failed to close DB")
+
     # Quiz CRUD
 
     async def _list_quizzes(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -582,8 +582,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _get_quiz(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         quiz_id = args.get("quiz_id")
@@ -599,8 +599,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _create_quiz(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._create_quiz_sync, context, args)
@@ -623,8 +623,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _update_quiz(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._update_quiz_sync, context, args)
@@ -656,8 +656,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _delete_quiz(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._delete_quiz_sync, context, args)
@@ -685,8 +685,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     # Questions
 
@@ -720,8 +720,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _create_question(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._create_question_sync, context, args)
@@ -749,8 +749,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _update_question(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._update_question_sync, context, args)
@@ -782,8 +782,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _delete_question(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._delete_question_sync, context, args)
@@ -811,8 +811,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     # Attempts
 
@@ -833,8 +833,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _submit_attempt(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._submit_attempt_sync, context, args)
@@ -854,8 +854,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _list_attempts(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._list_attempts_sync, context, args)
@@ -883,8 +883,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     async def _get_attempt(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._get_attempt_sync, context, args)
@@ -906,8 +906,8 @@ class QuizzesModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()
 
     # Generation
 
@@ -947,7 +947,7 @@ class QuizzesModule(BaseModule):
             response_text = await self._call_llm(prompt, provider=provider, model=model)
             questions_data = self._parse_generated_questions(response_text)
         except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Quiz generation failed: {e}")
+            logger.error("Quiz generation failed; details redacted")
             raise ValueError(f"Failed to generate quiz: {e}") from e
 
         # Create quiz and questions
@@ -971,8 +971,8 @@ class QuizzesModule(BaseModule):
                 if not media:
                     return None
                 return media.get("content") or media.get("transcript") or media.get("summary")
-        except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to get media content: {e}")
+        except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+            logger.error("Failed to get media content; details redacted")
             return None
 
     def _build_generation_prompt(
@@ -1018,7 +1018,7 @@ Return ONLY the JSON array, no other text."""
                 return json.loads(json_match.group())
             return json.loads(response)
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse generated questions: {e}")
+            logger.error("Failed to parse generated questions; details redacted")
             raise ValueError("Failed to parse generated questions from LLM response") from e
 
     def _resolve_llm_settings(self, args: dict[str, Any]) -> tuple[str, Optional[str]]:
@@ -1097,8 +1097,8 @@ Return ONLY the JSON array, no other text."""
                 try:
                     self._validate_question_payload(q, require_core_fields=True)
                     valid_questions.append(q)
-                except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as e:
-                    logger.warning(f"Failed to validate generated question {i}: {e}")
+                except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                    logger.warning(f"Failed to validate generated question {i}; details redacted")
 
             if not valid_questions:
                 raise ValueError("Failed to generate quiz: no valid questions were created")
@@ -1126,8 +1126,8 @@ Return ONLY the JSON array, no other text."""
                             client_id=client_id,
                         )
                         created_questions.append(qid)
-                    except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as e:
-                        logger.warning(f"Failed to create question {i}: {e}")
+                    except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                        logger.warning(f"Failed to create question {i}; details redacted")
             except Exception:
                 self._cleanup_generated_quiz(
                     db,
@@ -1154,5 +1154,5 @@ Return ONLY the JSON array, no other text."""
         finally:
             try:
                 db.close_all_connections()
-            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
+                self._log_db_close_failure()

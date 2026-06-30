@@ -53,6 +53,7 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     can_start_job,
     can_start_stream,
     check_daily_minutes_allow,
+    consume_daily_minutes,
     finish_job,
     finish_stream,
     get_daily_minutes_used,
@@ -70,6 +71,13 @@ from . import audio_tts as audio_tts
 # Endpoint helpers that tests patch at package scope.
 create_speech = audio_tts.create_speech
 get_tts_service = audio_tts.get_tts_service
+
+
+def create_voice_conversion(*args, **kwargs):
+    """Lazy wrapper for the Chatterbox voice conversion endpoint."""
+    from .audio_voice_conversion import create_voice_conversion as _impl
+
+    return _impl(*args, **kwargs)
 
 
 async def websocket_audio_chat_stream(*args, **kwargs):
@@ -136,8 +144,8 @@ def _get_failopen_cap_minutes() -> float:
             f = float(v)
             if f > 0:
                 return f
-        except (ValueError, TypeError) as exc:
-            logger.debug(f"AUDIO_FAILOPEN_CAP_MINUTES parse failed: {exc}")
+        except (ValueError, TypeError):
+            logger.debug("AUDIO_FAILOPEN_CAP_MINUTES parse failed")
     try:
         cfg = load_comprehensive_config()
         if cfg is not None:
@@ -146,17 +154,17 @@ def _get_failopen_cap_minutes() -> float:
                     f = float(cfg.get("Audio-Quota", "failopen_cap_minutes", fallback=""))
                     if f > 0:
                         return f
-                except (ValueError, TypeError) as exc:
-                    logger.debug(f"[Audio-Quota].failopen_cap_minutes parse failed: {exc}")
+                except (ValueError, TypeError):
+                    logger.debug("[Audio-Quota].failopen_cap_minutes parse failed")
             if cfg.has_section("Audio"):
                 try:
                     f = float(cfg.get("Audio", "failopen_cap_minutes", fallback=""))
                     if f > 0:
                         return f
-                except (ValueError, TypeError) as exc:
-                    logger.debug(f"[Audio].failopen_cap_minutes parse failed: {exc}")
-    except Exception as exc:
-        logger.debug(f"Config read for failopen cap failed: {exc}")
+                except (ValueError, TypeError):
+                    logger.debug("[Audio].failopen_cap_minutes parse failed")
+    except Exception:
+        logger.debug("Config read for failopen cap failed")
     return 5.0
 
 
@@ -166,6 +174,7 @@ _LEGACY_AUDIO_ATTRS = {
     "create_speech_metadata",
     "list_tts_providers",
     "list_tts_voices",
+    "get_tts_provider_model_info",
     "reset_tts_metrics",
     "encode_audio_tokenizer",
     "decode_audio_tokenizer",
@@ -184,6 +193,7 @@ _LEGACY_AUDIO_ATTRS = {
     "get_voice_details",
     "delete_voice",
     "preview_voice",
+    "create_voice_conversion",
     "CHAT_HISTORY_MAX_MESSAGES",
 }
 

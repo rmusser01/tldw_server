@@ -1,23 +1,32 @@
 import React from "react"
 import { Button, Checkbox, Input, Select, Tag, Typography } from "antd"
-import { CheckCircle2, Send, XCircle } from "lucide-react"
+import { CheckCircle2, Download, Send, XCircle } from "lucide-react"
 import {
   useLocation,
   useNavigate
 } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 
-import { useSetBuddyShellRenderContext } from "@/components/Common/PersonaBuddy"
+import {
+  resolvePersonaVisualState,
+  useSetBuddyShellRenderContext
+} from "@/components/Common/PersonaBuddy"
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
 import { PersonaPolicySummary } from "@/components/Option/MCPHub"
 import type { PersonaTurnDetectionValues } from "@/components/PersonaGarden/PersonaTurnDetectionControls"
 import { AssistantVoiceCard } from "@/components/PersonaGarden/AssistantVoiceCard"
 import { AssistantDefaultsPanel } from "@/components/PersonaGarden/AssistantDefaultsPanel"
+import { PersonaBuddyDiagnosticsPanel } from "@/components/PersonaGarden/PersonaBuddyDiagnosticsPanel"
+import {
+  buildPersonaBuddyDiagnostics,
+  type PersonaBuddyProfileState
+} from "@/components/PersonaGarden/personaBuddyDiagnostics"
 import {
   PersonaSetupHandoffCard,
 } from "@/components/PersonaGarden/PersonaSetupHandoffCard"
 import { AssistantSetupWizard } from "@/components/PersonaGarden/AssistantSetupWizard"
 import { PersonaGardenTabs } from "@/components/PersonaGarden/PersonaGardenTabs"
+import { VisualBuddySetupChoiceCard } from "@/components/PersonaGarden/VisualBuddySetupChoiceCard"
 import {
   SetupSafetyConnectionsStep,
 } from "@/components/PersonaGarden/SetupSafetyConnectionsStep"
@@ -35,6 +44,7 @@ import { useConnectionUxState } from "@/hooks/useConnectionState"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import {
   type PersonaGardenTabKey
 } from "@/utils/persona-garden-route"
@@ -124,6 +134,33 @@ const LazyVoiceExamplesPanel = React.lazy(() =>
   }))
 )
 
+const LazyVisualPackEditor = React.lazy(() =>
+  import("@/components/PersonaGarden/VisualPackEditor").then((module) => ({
+    default: module.VisualPackEditor
+  }))
+)
+
+const normalizeWakeTriggerPhrases = (phrases?: string[] | null): string[] => {
+  const seen = new Set<string>()
+  const next: string[] = []
+  for (const phrase of phrases || []) {
+    const trimmed = String(phrase || "").trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    next.push(trimmed)
+  }
+  return next
+}
+
+const normalizePersonaRuntimeMode = (
+  mode?: string | null
+): "session_scoped" | "persistent_scoped" =>
+  mode === "persistent_scoped" ? "persistent_scoped" : "session_scoped"
+
+const formatPersonaRuntimeMode = (
+  mode: "session_scoped" | "persistent_scoped"
+) => mode.replace(/_/g, " ")
+
 const SidepanelPersona = ({
   mode = "persona",
   shell = "sidepanel"
@@ -170,6 +207,9 @@ const SidepanelPersona = ({
     number | null
   >(null)
   const [personaProfileLoading, setPersonaProfileLoading] = React.useState(false)
+  const [personaProfileError, setPersonaProfileError] = React.useState<string | null>(
+    null
+  )
   const [liveSessionVoiceDefaultsBaseline, setLiveSessionVoiceDefaultsBaseline] =
     React.useState<PersonaVoiceDefaults | null>(null)
   const [activeTab, setActiveTab] = React.useState<PersonaGardenTabKey>("live")
@@ -189,6 +229,8 @@ const SidepanelPersona = ({
   const [input, setInput] = React.useState("")
   const [logs, setLogs] = React.useState<PersonaLogEntry[]>([])
   const [pendingPlan, setPendingPlan] = React.useState<PendingPlan | null>(null)
+  const [transcriptExportConfirmOpen, setTranscriptExportConfirmOpen] =
+    React.useState(false)
   const [activeSessionPersonaId, setActiveSessionPersonaId] = React.useState<string | null>(
     null
   )
@@ -198,6 +240,18 @@ const SidepanelPersona = ({
     setSelectedPersonaId
   })
   const setBuddyShellRenderContext = useSetBuddyShellRenderContext()
+  const visualRuntimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
+  const visualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
+    (state) => state.runtimeDiagnostics
+  )
+  const [buddyShellLiveContext, setBuddyShellLiveContext] = React.useState({
+    live_voice_state: "idle",
+    live_voice_is_listening: false,
+    active_tool_name: "",
+    active_tool_status: "",
+    wake_armed: false,
+    recovery_mode: "none"
+  })
   const selectedCatalogPersona = React.useMemo(
     () =>
       catalog.find((persona) => String(persona.id || "") === String(selectedPersonaId || "")) ??
@@ -233,6 +287,14 @@ const SidepanelPersona = ({
             : null) ??
           selectedCatalogPersona?.buddy_summary ??
           null,
+        live_session_id: sessionId,
+        live_voice_state: buddyShellLiveContext.live_voice_state,
+        live_voice_is_listening:
+          buddyShellLiveContext.live_voice_is_listening,
+        active_tool_name: buddyShellLiveContext.active_tool_name,
+        active_tool_status: buddyShellLiveContext.active_tool_status,
+        wake_armed: buddyShellLiveContext.wake_armed,
+        recovery_mode: buddyShellLiveContext.recovery_mode,
         persona_source: "route-local"
       }
     }
@@ -252,6 +314,8 @@ const SidepanelPersona = ({
     savedPersonaBuddySummaryPersonaId,
     setBuddyShellRenderContext,
     shell,
+    sessionId,
+    buddyShellLiveContext,
     uxState
   ])
 
@@ -265,6 +329,7 @@ const SidepanelPersona = ({
       setSavedPersonaSetup(null)
       setSavedPersonaProfileVersion(null)
       setPersonaProfileLoading(false)
+      setPersonaProfileError(null)
       if (!connected) {
         setLiveSessionVoiceDefaultsBaseline(null)
       }
@@ -275,6 +340,7 @@ const SidepanelPersona = ({
     setSavedPersonaBuddySummary(null)
     setSavedPersonaBuddySummaryPersonaId(null)
     setPersonaProfileLoading(true)
+    setPersonaProfileError(null)
     ;(async () => {
       try {
         const response = await tldwClient.fetchWithAuth(
@@ -293,14 +359,20 @@ const SidepanelPersona = ({
           setSavedPersonaProfileVersion(
             typeof payload?.version === "number" ? payload.version : null
           )
+          setPersonaProfileError(null)
         }
-      } catch {
+      } catch (profileError) {
         if (!cancelled) {
           setSavedPersonaBuddySummary(null)
           setSavedPersonaBuddySummaryPersonaId(null)
           setSavedPersonaVoiceDefaults(null)
           setSavedPersonaSetup(null)
           setSavedPersonaProfileVersion(null)
+          setPersonaProfileError(
+            profileError instanceof Error
+              ? profileError.message
+              : "Failed to load persona profile"
+          )
         }
       } finally {
         if (!cancelled) {
@@ -491,6 +563,7 @@ const SidepanelPersona = ({
     personaStateContextProfileDefault,
     updatingPersonaStateContextDefault,
     savingCompanionCheckIn,
+    transcriptExporting,
     companionPrompts,
     canSend,
     canSaveCompanionCheckIn,
@@ -501,6 +574,7 @@ const SidepanelPersona = ({
     sendUserMessage,
     sendSetupLiveTestMessage,
     loadSessionHistory,
+    exportSelectedSessionTranscript,
     confirmPlanWithMap,
     cancelPlan,
     handleResumeSessionSelectionChange,
@@ -517,21 +591,56 @@ const SidepanelPersona = ({
   const confirmPlan = React.useCallback(() => {
     confirmPlanWithMap(approvedStepMap)
   }, [approvedStepMap, confirmPlanWithMap])
+  const confirmTranscriptExport = React.useCallback(() => {
+    setTranscriptExportConfirmOpen(false)
+    void exportSelectedSessionTranscript()
+  }, [exportSelectedSessionTranscript])
 
   // ── Voice controller ──
   const resolvedLivePersonaVoiceDefaults = useResolvedPersonaVoiceDefaults(
     connected ? liveSessionVoiceDefaultsBaseline : savedPersonaVoiceDefaults
   )
+  const wakeTriggerPhrases = React.useMemo(
+    () =>
+      normalizeWakeTriggerPhrases(
+        savedPersonaVoiceDefaults?.voice_chat_trigger_phrases
+      ),
+    [savedPersonaVoiceDefaults]
+  )
   const livePersonaId = connected ? activeSessionPersonaId || selectedPersonaId : selectedPersonaId
+
+  React.useEffect(() => {
+    setTranscriptExportConfirmOpen(false)
+  }, [activeSessionPersonaId, sessionId])
+
   const liveVoiceController = usePersonaLiveVoiceController({
     ws: wsRef.current,
     connected,
     sessionId: sessionId || "",
     personaId: String(livePersonaId || "").trim(),
     resolvedDefaults: resolvedLivePersonaVoiceDefaults,
-    canUseServerStt: Boolean(capabilities?.hasAudio)
+    canUseServerStt: Boolean(capabilities?.hasAudio),
+    wakeTriggerPhrases
   })
   liveVoiceControllerRef.current = liveVoiceController
+
+  React.useEffect(() => {
+    setBuddyShellLiveContext({
+      live_voice_state: liveVoiceController.state,
+      live_voice_is_listening: liveVoiceController.isListening,
+      active_tool_name: liveVoiceController.activeToolName,
+      active_tool_status: liveVoiceController.activeToolStatus,
+      wake_armed: liveVoiceController.wakeArmed,
+      recovery_mode: liveVoiceController.recoveryMode
+    })
+  }, [
+    liveVoiceController.activeToolName,
+    liveVoiceController.activeToolStatus,
+    liveVoiceController.isListening,
+    liveVoiceController.recoveryMode,
+    liveVoiceController.state,
+    liveVoiceController.wakeArmed
+  ])
 
   React.useEffect(() => {
     liveVoiceAnalyticsSnapshotRef.current = {
@@ -555,6 +664,7 @@ const SidepanelPersona = ({
     consumeSetupHandoffAction: setupOrch.consumeSetupHandoffAction,
     emitSetupAnalyticsEvent,
     liveVoiceController,
+    personaId: String(selectedPersonaId || "").trim(),
     personaSetupWizardCurrentStep: setupOrch.personaSetupWizard.currentStep,
     personaSetupWizardIsSetupRequired: setupOrch.personaSetupWizard.isSetupRequired,
     resolvedApprovalSnapshot,
@@ -663,6 +773,7 @@ const SidepanelPersona = ({
 
   const handleReconnectPersonaSessionFromRecovery = React.useCallback(() => {
     if (connecting) return
+    void liveVoiceController.stopWakeListening("stop_live_voice")
     liveVoiceController.resetTurn()
     triggerRecoveryReconnect()
     disconnect({ force: true })
@@ -817,6 +928,9 @@ const SidepanelPersona = ({
     ),
     [renderSetupHandoffCard]
   )
+  const effectiveActiveTab: PersonaGardenTabKey = setupOrch.setupVisualDetour
+    ? "visuals"
+    : activeTab
 
   const renderLazyPersonaTab = React.useCallback(
     (
@@ -826,7 +940,7 @@ const SidepanelPersona = ({
         includeSetupHandoff?: boolean
       }
     ) => {
-      if (activeTab !== tab) {
+      if (effectiveActiveTab !== tab) {
         return null
       }
 
@@ -842,7 +956,7 @@ const SidepanelPersona = ({
 
       return withSetupHandoff(tab, tabContent)
     },
-    [activeTab, withSetupHandoff]
+    [effectiveActiveTab, withSetupHandoff]
   )
 
   // ── Persona unsupported check ──
@@ -885,116 +999,176 @@ const SidepanelPersona = ({
     }
     openSettings()
   }
+  const selectedPersonaRuntimeMode = normalizePersonaRuntimeMode(
+    selectedCatalogPersona?.mode
+  )
+  const personaStateContextModeAvailable =
+    selectedPersonaRuntimeMode === "persistent_scoped"
+  const personaStateContextStatus = !personaStateContextEnabled
+    ? t("sidepanel:persona.memoryStatus.stateContextOff", "off")
+    : personaStateContextModeAvailable
+      ? t("sidepanel:persona.memoryStatus.stateContextAvailable", "available")
+      : t(
+          "sidepanel:persona.memoryStatus.stateContextUnavailableSession",
+          "unavailable in session scoped"
+        )
+  const handlePersonaTabChange = React.useCallback(
+    (key: string) => {
+      const nextTab = key as PersonaGardenTabKey
+      if (activeTabRef.current === "live" && nextTab !== "live") {
+        void liveVoiceController.stopWakeListening("tab_switch")
+      }
+      setActiveTab(nextTab)
+    },
+    [liveVoiceController]
+  )
 
   // ── JSX: live session controls ──
   const liveSessionControls = (
-    <div className="flex flex-wrap items-center gap-2">
-      {!isCompanionMode ? (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {!isCompanionMode ? (
+          <Select
+            size="small"
+            className="min-w-[180px]"
+            value={selectedPersonaId}
+            disabled={connected}
+            aria-label={t("sidepanel:persona.select", "Select persona")}
+            onChange={(value) => {
+              void liveVoiceController.stopWakeListening("persona_switch")
+              handlePersonaSelectionChange(String(value))
+            }}
+            options={catalog.map((persona) => ({
+              label: persona.name || persona.id,
+              value: persona.id
+            }))}
+            placeholder={t("sidepanel:persona.select", "Select persona")}
+          />
+        ) : null}
         <Select
+          data-testid="persona-resume-session-select"
           size="small"
           className="min-w-[180px]"
-          value={selectedPersonaId}
+          value={resumeSessionId || "__new__"}
+          aria-label={t("sidepanel:persona.resume", "Resume session")}
           disabled={connected}
-          aria-label={t("sidepanel:persona.select", "Select persona")}
-          onChange={(value) => handlePersonaSelectionChange(String(value))}
-          options={catalog.map((persona) => ({
-            label: persona.name || persona.id,
-            value: persona.id
-          }))}
-          placeholder={t("sidepanel:persona.select", "Select persona")}
+          onChange={(value) => {
+            void liveVoiceController.stopWakeListening("persona_switch")
+            handleResumeSessionSelectionChange(String(value))
+          }}
+          options={[
+            { label: t("sidepanel:persona.newSession", "New session"), value: "__new__" },
+            ...sessionHistory.map((session) => ({
+              label: session.session_id,
+              value: session.session_id
+            }))
+          ]}
+          placeholder={t("sidepanel:persona.resume", "Resume session")}
         />
-      ) : null}
-      <Select
-        data-testid="persona-resume-session-select"
-        size="small"
-        className="min-w-[180px]"
-        value={resumeSessionId || "__new__"}
-        aria-label={t("sidepanel:persona.resume", "Resume session")}
-        disabled={connected}
-        onChange={(value) => handleResumeSessionSelectionChange(String(value))}
-        options={[
-          { label: t("sidepanel:persona.newSession", "New session"), value: "__new__" },
-          ...sessionHistory.map((session) => ({
-            label: session.session_id,
-            value: session.session_id
-          }))
-        ]}
-        placeholder={t("sidepanel:persona.resume", "Resume session")}
-      />
-      <Checkbox
-        data-testid="persona-memory-toggle"
-        checked={memoryEnabled}
-        onChange={(event) => setMemoryEnabled(event.target.checked)}
-      >
-        {t("sidepanel:persona.memoryToggle", "Memory")}
-      </Checkbox>
-      {!isCompanionMode ? (
         <Checkbox
-          data-testid="persona-state-context-toggle"
-          checked={personaStateContextEnabled}
-          onChange={(event) => setPersonaStateContextEnabled(event.target.checked)}
+          data-testid="persona-memory-toggle"
+          checked={memoryEnabled}
+          onChange={(event) => setMemoryEnabled(event.target.checked)}
         >
-          {t("sidepanel:persona.stateContextToggle", "State context")}
+          {t("sidepanel:persona.memoryToggle", "Memory")}
         </Checkbox>
-      ) : null}
-      {!isCompanionMode ? (
-        <Checkbox
-          data-testid="persona-companion-context-toggle"
-          checked={companionContextEnabled}
-          onChange={(event) => setCompanionContextEnabled(event.target.checked)}
-        >
-          {t("sidepanel:persona.companionContextToggle", "Companion context")}
-        </Checkbox>
-      ) : null}
-      {!isCompanionMode ? (
-        <Checkbox
-          data-testid="persona-state-context-default-toggle"
-          checked={personaStateContextProfileDefault}
-          disabled={!connected || updatingPersonaStateContextDefault}
-          onChange={(event) => {
-            void updatePersonaStateContextDefault(event.target.checked)
-          }}
-        >
-          {t("sidepanel:persona.stateContextDefaultToggle", "Profile default")}
-        </Checkbox>
-      ) : null}
-      <Select
-        data-testid="persona-memory-topk-select"
-        size="small"
-        className="w-[150px]"
-        value={memoryTopK}
-        aria-label={t("sidepanel:persona.memoryTopK", "Memory results")}
-        disabled={!memoryEnabled}
-        onChange={(value) => setMemoryTopK(Number(value))}
-        options={MEMORY_TOP_K_OPTIONS.map((k) => ({
-          label: formatMemoryResultsLabel(k),
-          value: k
-        }))}
-        placeholder={t("sidepanel:persona.memoryTopK", "Memory results")}
-      />
-      {!connected ? (
-        <Button
+        {!isCompanionMode ? (
+          <Checkbox
+            data-testid="persona-state-context-toggle"
+            checked={personaStateContextEnabled}
+            onChange={(event) => setPersonaStateContextEnabled(event.target.checked)}
+          >
+            {t("sidepanel:persona.stateContextToggle", "State context")}
+          </Checkbox>
+        ) : null}
+        {!isCompanionMode ? (
+          <Checkbox
+            data-testid="persona-companion-context-toggle"
+            checked={companionContextEnabled}
+            onChange={(event) => setCompanionContextEnabled(event.target.checked)}
+          >
+            {t("sidepanel:persona.companionContextToggle", "Companion context")}
+          </Checkbox>
+        ) : null}
+        {!isCompanionMode ? (
+          <Checkbox
+            data-testid="persona-state-context-default-toggle"
+            checked={personaStateContextProfileDefault}
+            disabled={!connected || updatingPersonaStateContextDefault}
+            onChange={(event) => {
+              void updatePersonaStateContextDefault(event.target.checked)
+            }}
+          >
+            {t("sidepanel:persona.stateContextDefaultToggle", "Profile default")}
+          </Checkbox>
+        ) : null}
+        <Select
+          data-testid="persona-memory-topk-select"
           size="small"
-          type="primary"
-          loading={connecting}
-          onClick={() => {
-            void connect()
-          }}
+          className="w-[150px]"
+          value={memoryTopK}
+          aria-label={t("sidepanel:persona.memoryTopK", "Memory results")}
+          disabled={!memoryEnabled}
+          onChange={(value) => setMemoryTopK(Number(value))}
+          options={MEMORY_TOP_K_OPTIONS.map((k) => ({
+            label: formatMemoryResultsLabel(k),
+            value: k
+          }))}
+          placeholder={t("sidepanel:persona.memoryTopK", "Memory results")}
+        />
+        {!connected ? (
+          <Button
+            size="small"
+            type="primary"
+            loading={connecting}
+            onClick={() => {
+              void liveVoiceController.stopWakeListening("persona_switch")
+              void connect()
+            }}
+          >
+            {t("sidepanel:persona.connect", "Connect")}
+          </Button>
+        ) : (
+          <Button size="small" onClick={() => {
+            void liveVoiceController.stopWakeListening("stop_live_voice")
+            disconnect()
+          }}>
+            {t("sidepanel:persona.disconnect", "Disconnect")}
+          </Button>
+        )}
+        {sessionId ? <Tag color="blue">{`session: ${sessionId.slice(0, 8)}`}</Tag> : null}
+        {sessionId ? (
+          <Button size="small" onClick={() => void loadSessionHistory()}>
+            {t("sidepanel:persona.loadHistory", "Load history")}
+          </Button>
+        ) : null}
+      </div>
+      {!isCompanionMode ? (
+        <div
+          data-testid="persona-memory-status"
+          className="flex flex-wrap items-center gap-1 text-xs text-text-muted"
         >
-          {t("sidepanel:persona.connect", "Connect")}
-        </Button>
-      ) : (
-        <Button size="small" onClick={() => {
-          disconnect()
-        }}>
-          {t("sidepanel:persona.disconnect", "Disconnect")}
-        </Button>
-      )}
-      {sessionId ? <Tag color="blue">{`session: ${sessionId.slice(0, 8)}`}</Tag> : null}
-      {sessionId ? (
-        <Button size="small" onClick={() => void loadSessionHistory()}>
-          {t("sidepanel:persona.loadHistory", "Load history")}
-        </Button>
+          <Tag color={personaStateContextModeAvailable ? "green" : "default"}>
+            {`${t("sidepanel:persona.memoryStatus.mode", "Mode")}: ${formatPersonaRuntimeMode(selectedPersonaRuntimeMode)}`}
+          </Tag>
+          <Tag color={memoryEnabled ? "green" : "default"}>
+            {`${t("sidepanel:persona.memoryStatus.memory", "Memory")}: ${
+              memoryEnabled ? t("common:on", "on") : t("common:off", "off")
+            }`}
+          </Tag>
+          <Tag color="blue">
+            {`${t("sidepanel:persona.memoryStatus.topK", "Top-k")}: ${memoryTopK}`}
+          </Tag>
+          <Tag
+            color={
+              personaStateContextEnabled && personaStateContextModeAvailable
+                ? "green"
+                : "default"
+            }
+          >
+            {`${t("sidepanel:persona.memoryStatus.stateContext", "State context")}: ${personaStateContextStatus}`}
+          </Tag>
+        </div>
       ) : null}
     </div>
   )
@@ -1003,6 +1177,118 @@ const SidepanelPersona = ({
     <div className="rounded-md border border-danger/30 bg-danger/10 p-2 text-xs text-danger">
       {error}
     </div>
+  ) : null
+
+  const normalizedLivePersonaId = String(livePersonaId || "").trim()
+  const applicableVisualOverride =
+    visualRuntimeOverride &&
+    visualRuntimeOverride.personaId === normalizedLivePersonaId &&
+    (!sessionId ||
+      !visualRuntimeOverride.sessionId ||
+      visualRuntimeOverride.sessionId === sessionId) &&
+    visualRuntimeOverride.expiresAt > Date.now()
+      ? visualRuntimeOverride
+      : null
+  const resolvedLiveVisualState = resolvePersonaVisualState({
+    liveVoiceState: liveVoiceController.state,
+    activeToolStatus: liveVoiceController.activeToolStatus,
+    wakeArmed: liveVoiceController.wakeArmed,
+    recovering: liveVoiceController.recoveryMode !== "none",
+    runtimeOverride: applicableVisualOverride,
+    mcpRuntimeReason: applicableVisualOverride?.reason
+  })
+  const visualStateFeedback: React.ComponentProps<
+    typeof AssistantVoiceCard
+  >["visualStateFeedback"] = !isCompanionMode
+    ? {
+        state: resolvedLiveVisualState,
+        source: applicableVisualOverride
+          ? "override"
+          : liveVoiceController.recoveryMode !== "none" ||
+              liveVoiceController.state === "error"
+            ? "error_recovery"
+            : liveVoiceController.activeToolStatus
+              ? "live"
+              : "default",
+        reason: applicableVisualOverride?.reason ?? null,
+        fallbackReason: null
+      }
+    : undefined
+
+  const activeBuddySummary =
+    (savedPersonaBuddySummaryPersonaId === selectedPersonaId
+      ? savedPersonaBuddySummary
+      : null) ??
+    selectedCatalogPersona?.buddy_summary ??
+    null
+  const personaProfileState: PersonaBuddyProfileState = personaProfileLoading
+    ? "loading"
+    : personaProfileError
+      ? "error"
+      : selectedPersonaId
+        ? "loaded"
+        : "idle"
+  const activeVisualRuntimeDiagnostics =
+    visualRuntimeDiagnostics &&
+    visualRuntimeDiagnostics.personaId === normalizedLivePersonaId &&
+    (!sessionId ||
+      !visualRuntimeDiagnostics.sessionId ||
+      visualRuntimeDiagnostics.sessionId === sessionId)
+      ? visualRuntimeDiagnostics
+      : null
+  const liveSessionLastEvent = error
+    ? `error: ${error}`
+    : connecting
+      ? "connecting"
+      : connected
+        ? "connected"
+        : sessionId
+          ? "disconnected"
+          : null
+  const personaBuddyDiagnostics = buildPersonaBuddyDiagnostics({
+    selectedPersona: {
+      id: selectedPersonaId,
+      name: selectedPersonaName
+    },
+    profileState: personaProfileState,
+    profileError: personaProfileError,
+    buddySummary: activeBuddySummary,
+    capabilities,
+    capabilitiesLoading: capsLoading,
+    liveSession: {
+      connected,
+      connecting,
+      sessionId,
+      error,
+      lastEvent: liveSessionLastEvent
+    },
+    liveVoice: {
+      state: liveVoiceController.state,
+      recoveryMode: liveVoiceController.recoveryMode,
+      warning: liveVoiceController.warning,
+      warningReasonCode: liveVoiceController.warningReasonCode,
+      activeToolStatus: liveVoiceController.activeToolStatus,
+      textOnlyDueToTtsFailure: liveVoiceController.textOnlyDueToTtsFailure,
+      manualModeRequired: liveVoiceController.manualModeRequired
+    },
+    wake: {
+      armed: liveVoiceController.wakeArmed,
+      detectorState: liveVoiceController.wakeDetectorState,
+      warning: liveVoiceController.wakeWarning,
+      warningReasonCode: liveVoiceController.wakeWarningReasonCode,
+      triggerPhrases: liveVoiceController.wakeTriggerPhrases,
+      behavior: liveVoiceController.sessionWakeBehavior
+    },
+    visual: {
+      packId: activeVisualRuntimeDiagnostics?.packId ?? null,
+      packTitle: activeVisualRuntimeDiagnostics?.packTitle ?? null,
+      packLoadStatus: activeVisualRuntimeDiagnostics?.packLoadStatus ?? "idle",
+      visualState: activeVisualRuntimeDiagnostics?.visualState ?? resolvedLiveVisualState,
+      diagnostic: activeVisualRuntimeDiagnostics?.diagnostic ?? null
+    }
+  })
+  const personaBuddyDiagnosticsPanel = !isCompanionMode ? (
+    <PersonaBuddyDiagnosticsPanel diagnostics={personaBuddyDiagnostics} />
   ) : null
 
   const assistantVoiceCard = (
@@ -1025,16 +1311,24 @@ const SidepanelPersona = ({
       savingCurrentSettingsAsDefaults={savingLiveVoiceDefaults}
       sessionAutoResume={liveVoiceController.sessionAutoResume}
       sessionBargeIn={liveVoiceController.sessionBargeIn}
+      wakeArmed={liveVoiceController.wakeArmed}
+      wakeDetectorState={liveVoiceController.wakeDetectorState}
+      wakeWarning={liveVoiceController.wakeWarning}
+      wakeTriggerPhrases={liveVoiceController.wakeTriggerPhrases}
+      sessionWakeBehavior={liveVoiceController.sessionWakeBehavior}
       autoCommitEnabled={liveVoiceController.autoCommitEnabled}
       vadPreset={liveVoiceController.vadPreset}
       vadThreshold={liveVoiceController.vadThreshold}
       minSilenceMs={liveVoiceController.minSilenceMs}
       turnStopSecs={liveVoiceController.turnStopSecs}
       minUtteranceSecs={liveVoiceController.minUtteranceSecs}
+      visualStateFeedback={visualStateFeedback}
       onToggleListening={liveVoiceController.toggleListening}
       onSendNow={liveVoiceController.sendCurrentTranscriptNow}
       onSessionAutoResumeChange={liveVoiceController.setSessionAutoResume}
       onSessionBargeInChange={liveVoiceController.setSessionBargeIn}
+      onToggleWakeArmed={liveVoiceController.toggleWakeArmed}
+      onSessionWakeBehaviorChange={liveVoiceController.setSessionWakeBehavior}
       onAutoCommitEnabledChange={liveVoiceController.setAutoCommitEnabled}
       onVadPresetChange={liveVoiceController.setVadPreset}
       onVadThresholdChange={liveVoiceController.setVadThreshold}
@@ -1197,13 +1491,18 @@ const SidepanelPersona = ({
     <>
       {setupOrch.setupLiveDetour ? (
         <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-100">
-          <div>Finish this live test, then return to setup.</div>
+          <div>
+            {t(
+              "sidepanel:persona.setupLiveDetourNotice",
+              "Finish this live test, then return to setup."
+            )}
+          </div>
           <button
             type="button"
             className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-sky-100"
             onClick={setupOrch.handleReturnToSetupFromLiveDetour}
           >
-            Return to setup
+            {t("sidepanel:persona.returnToSetup", "Return to setup")}
           </button>
         </div>
       ) : null}
@@ -1215,6 +1514,23 @@ const SidepanelPersona = ({
     </>
   )
 
+  const setupVisualDetourReturnPanel = setupOrch.setupVisualDetour ? (
+    <div className="mb-3 rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-100">
+      <div>
+        {t(
+          "sidepanel:persona.setupVisualDetourNotice",
+          "Review visual setup, then return to assistant setup."
+        )}
+      </div>
+      <button
+        type="button"
+        className="mt-2 rounded-md border border-sky-500/40 px-3 py-2 text-sm font-medium text-sky-100"
+        onClick={setupOrch.handleReturnToSetupFromVisualDetour}
+      >
+        {t("sidepanel:persona.returnToSetup", "Return to setup")}
+      </button>
+    </div>
+  ) : null
   const pendingPlanCard = pendingPlan ? (
     <div className="rounded-lg border border-border bg-surface p-3">
       <Typography.Text strong>
@@ -1467,6 +1783,19 @@ const SidepanelPersona = ({
                     >
                       {t("sidepanel:persona.stateRestore", "Restore")}
                     </Button>
+                    {entry.is_active ? (
+                      <Button
+                        data-testid={`persona-state-archive-${entry.entry_id}`}
+                        size="small"
+                        danger
+                        loading={stateDocs.archivingStateEntryId === entry.entry_id}
+                        onClick={() => {
+                          void stateDocs.archivePersonaStateHistoryEntry(entry.entry_id)
+                        }}
+                      >
+                        {t("sidepanel:persona.stateArchive", "Archive")}
+                      </Button>
+                    ) : null}
                   </div>
                   <div className="mt-1 whitespace-pre-wrap text-text">
                     {String(entry.content || "")}
@@ -1511,6 +1840,61 @@ const SidepanelPersona = ({
 
   const transcriptPanel = (
     <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border bg-surface p-3">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <Typography.Text className="text-xs font-medium text-text">
+          {t("sidepanel:persona.transcript", "Transcript")}
+        </Typography.Text>
+        {sessionId ? (
+          <Button
+            data-testid="persona-transcript-export-button"
+            size="small"
+            icon={<Download size={14} />}
+            loading={transcriptExporting}
+            onClick={() => {
+              setTranscriptExportConfirmOpen(true)
+            }}
+          >
+            {t("sidepanel:persona.exportTranscript", "Export transcript")}
+          </Button>
+        ) : null}
+      </div>
+      {sessionId && transcriptExportConfirmOpen ? (
+        <div
+          data-testid="persona-transcript-export-confirmation"
+          className="mb-3 rounded-md border border-warning/40 bg-warning/5 p-2 text-xs text-text"
+        >
+          <div className="font-medium">
+            {t(
+              "sidepanel:persona.exportTranscriptConfirmTitle",
+              "Export selected Persona session?"
+            )}
+          </div>
+          <div className="mt-1 text-text-muted">
+            {t(
+              "sidepanel:persona.exportTranscriptConfirmDescription",
+              "This downloads a redacted transcript for the selected live session only."
+            )}
+          </div>
+          <div className="mt-1 text-text-muted">{`Session: ${sessionId}`}</div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              size="small"
+              type="primary"
+              loading={transcriptExporting}
+              onClick={confirmTranscriptExport}
+            >
+              {t("sidepanel:persona.confirmExportTranscript", "Confirm export")}
+            </Button>
+            <Button
+              size="small"
+              disabled={transcriptExporting}
+              onClick={() => setTranscriptExportConfirmOpen(false)}
+            >
+              {t("common:cancel", "Cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <div className="space-y-2">
         {logs.length === 0 ? (
           <Typography.Text type="secondary" className="text-xs">
@@ -1666,6 +2050,7 @@ const SidepanelPersona = ({
         <LazyLiveSessionPanel
           controls={liveSessionControls}
           assistantVoice={assistantVoiceCard}
+          diagnostics={personaBuddyDiagnosticsPanel}
           error={liveSessionStatusPanels}
           pendingPlan={pendingPlanCard}
           transcript={transcriptPanel}
@@ -1725,6 +2110,25 @@ const SidepanelPersona = ({
       )
     },
     {
+      key: "visuals",
+      label: t("sidepanel:persona.tabVisuals", "Visuals"),
+      content: renderLazyPersonaTab(
+        "visuals",
+        <LazyVisualPackEditor
+          selectedPersonaId={selectedPersonaId}
+          selectedPersonaName={selectedPersonaName}
+          isActive={effectiveActiveTab === "visuals"}
+          onOpenPersonaVisuals={(personaId) => {
+            setSelectedPersonaId(personaId)
+            setActiveTab("visuals")
+          }}
+        />,
+        {
+          includeSetupHandoff: false
+        }
+      )
+    },
+    {
       key: "connections",
       label: t("sidepanel:persona.tabConnections", "Connections"),
       content: renderLazyPersonaTab(
@@ -1767,7 +2171,10 @@ const SidepanelPersona = ({
       label: t("sidepanel:persona.tabScopes", "Scopes"),
       content: renderLazyPersonaTab(
         "scopes",
-        <LazyScopesPanel selectedPersonaName={selectedPersonaName} />,
+        <LazyScopesPanel
+          selectedPersonaId={selectedPersonaId}
+          selectedPersonaName={selectedPersonaName}
+        />,
         {
           includeSetupHandoff: false
         }
@@ -1778,13 +2185,21 @@ const SidepanelPersona = ({
       label: t("sidepanel:persona.tabPolicies", "Policies"),
       content: renderLazyPersonaTab(
         "policies",
-        <LazyPoliciesPanel hasPendingPlan={Boolean(pendingPlan)} />,
+        <LazyPoliciesPanel
+          selectedPersonaId={selectedPersonaId}
+          personaCapabilities={selectedCatalogPersona?.capabilities || []}
+          personaDefaultTools={selectedCatalogPersona?.default_tools || []}
+          hasPendingPlan={Boolean(pendingPlan)}
+        />,
         {
           includeSetupHandoff: false
         }
       )
     }
   ]
+  const visibleTabItems = setupOrch.setupVisualDetour
+    ? tabItems.filter((item) => item.key === "visuals")
+    : tabItems
 
   // ── Early-return gates ──
   if (uxState === "error_auth" || uxState === "configuring_auth") {
@@ -1937,7 +2352,7 @@ const SidepanelPersona = ({
         </div>
       ) : (
         <div className="flex flex-1 flex-col p-3">
-          {setupOrch.personaSetupWizard.isSetupRequired && !setupOrch.setupCommandDetour && !setupOrch.setupLiveDetour ? (
+          {setupOrch.personaSetupWizard.isSetupRequired && !setupOrch.setupCommandDetour && !setupOrch.setupLiveDetour && !setupOrch.setupVisualDetour ? (
             <AssistantSetupWizard
               catalog={catalog.map((persona) => ({
                 id: String(persona.id || ""),
@@ -1948,6 +2363,16 @@ const SidepanelPersona = ({
               postSetupTargetTab={setupOrch.setupIntentTargetTab || activeTab}
               progressItems={setupOrch.assistantSetupProgressItems}
               onResetSetup={setupOrch.handleResetSetup}
+              visualSetupContent={
+                <VisualBuddySetupChoiceCard
+                  selectedPersonaId={selectedPersonaId}
+                  selectedPersonaName={selectedPersonaName}
+                  hasActiveVisual={false}
+                  packCount={0}
+                  compact
+                  onOpenVisuals={setupOrch.handleOpenVisualSetupDetour}
+                />
+              }
               voiceStepContent={
                 setupOrch.personaSetupWizard.currentStep === "voice" ? (
                   <AssistantDefaultsPanel
@@ -2038,11 +2463,14 @@ const SidepanelPersona = ({
               onCreatePersona={setupOrch.handleCreatePersonaForSetup}
             />
           ) : (
-            <PersonaGardenTabs
-              activeKey={activeTab}
-              onChange={(key) => setActiveTab(key as PersonaGardenTabKey)}
-              items={tabItems}
-            />
+            <>
+              {setupVisualDetourReturnPanel}
+              <PersonaGardenTabs
+                activeKey={effectiveActiveTab}
+                onChange={handlePersonaTabChange}
+                items={visibleTabItems}
+              />
+            </>
           )}
         </div>
       )}

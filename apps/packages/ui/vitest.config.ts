@@ -5,11 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "~": path.resolve(__dirname, "./src"),
-      "wxt/browser": path.resolve(
-        __dirname,
-        "../../tldw-frontend/extension/shims/wxt-browser.ts"
-      )
+      "~": path.resolve(__dirname, "./src")
     }
   },
   test: {

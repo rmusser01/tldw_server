@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.Storage import get_storage_backend
 from tldw_Server_API.app.core.Storage.storage_interface import StorageError
 
@@ -118,7 +118,13 @@ def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | 
                 "application/octet-stream": {},
             },
         },
-        206: {"description": "Partial content (Range request)"},
+        206: {
+            "description": "Partial content (Range request)",
+            "content": {
+                "application/pdf": {},
+                "application/octet-stream": {},
+            },
+        },
         304: {"description": "Not modified (ETag match)"},
         404: {"description": "Media item or file not found"},
         416: {"description": "Range not satisfiable"},
@@ -180,11 +186,7 @@ async def get_media_file(
 
     storage_path = file_record.get("storage_path")
     if not storage_path:
-        logger.error(
-            "File record exists but storage_path is empty for media_id={}, file_type={}",
-            media_id,
-            file_type,
-        )
+        logger.error("File record has empty storage path")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="File record is corrupted",
@@ -206,11 +208,7 @@ async def get_media_file(
                 detail="File not found on storage (may have been deleted)",
             )
     except StorageError as e:
-        logger.error(
-            "Storage error checking file existence for {}: {}",
-            storage_path,
-            e,
-        )
+        logger.error("Storage error checking file existence")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error accessing file storage",

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "backlog-py"
+version = "0.1.0"
+description = "Python compatibility clone of Backlog.md"
+requires-python = ">=3.10"
+dependencies = [
+  "click>=8.0.0",
+  "loguru>=0.7.0",
+  "PyYAML>=6.0.0",
+]
+
+[project.scripts]
+backlog-py = "backlog_py.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

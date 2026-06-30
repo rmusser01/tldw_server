@@ -1,44 +1,64 @@
 # Tools
 
-## 1. Descriptive of Current Feature Set
+The Tools module is the server-side bridge for invoking MCP Unified tools from
+API handlers and services without making those callers speak MCP protocol
+directly. It wraps tool discovery, permission preflight, idempotency keys, and
+tool-call error mapping around MCP Unified request contexts.
 
-- Purpose: Server-side wrapper to execute MCP Unified tools from within API handlers or services, decoupling call sites from MCP protocol details and centralizing permission/argument checks.
-- Capabilities:
-  - List available tools (respecting RBAC and catalog scoping) and check `canExecute`.
-  - Execute tools with optional idempotency keys and validation-only mode.
-  - Propagate request/user context to MCP via `RequestContext`.
-- Inputs/Outputs:
-  - Input: tool name, arguments dict, optional idempotency key, caller context (user_id, client_id).
-  - Output: tool result payload or an error with reason.
-- Related Endpoints (MCP Unified routes):
-  - POST `/api/v1/mcp/request` (HTTP JSON-RPC proxy) — tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py:252
-  - WS `/api/v1/mcp/ws` — tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py:206
-  - Tool execution helper endpoint (HTTP wrapper) — `/api/v1/mcp/tools/execute`: tldw_Server_API/app/api/v1/endpoints/mcp_unified_endpoint.py:622
-- Related Types
-  - `MCPRequest`, `RequestContext`: tldw_Server_API/app/core/MCP_unified/protocol.py:58, 106
+## Start Here
 
-## 2. Technical Details of Features
+- Core wrapper: `tool_executor.py`.
+- API surfaces: `app/api/v1/endpoints/tools.py` for generic tool routes and
+  `app/api/v1/endpoints/mcp_unified_endpoint.py` for MCP JSON-RPC, WebSocket,
+  and `/mcp/tools/execute` flows.
+- Related core module: `app/core/MCP_unified/`.
+- Tests: `tests/Tools/`, `tests/AuthNZ_Unit/test_tools_permissions_claims.py`,
+  `tests/MCP/test_mcp_tools_execute_authz.py`, and Chat tool auto-execution
+  tests under `tests/Chat/unit/`.
 
-- Architecture & Data Flow
-  - `ToolExecutor` wraps MCP Unified’s server protocol to provide two entry points: `list_tools(...)` and `execute(...)`: tldw_Server_API/app/core/Tools/tool_executor.py:1
-  - Validation-only flow calls `tools/list` and inspects `canExecute` for the requested tool.
-  - Execution flow calls `tools/call` with `arguments` and optional `idempotencyKey`.
-  - Context includes `user_id`, `client_id`, optional `request_id`, and `admin_override` metadata (for admin-only flows).
+## Responsibilities
 
-- Error Handling
-  - Raises `ToolExecutionError` on MCP error responses or permission denials; callers map to appropriate HTTP responses.
+- List MCP tools available to a caller and surface `canExecute` metadata.
+- Execute a named tool with arguments, caller context, and optional idempotency
+  key.
+- Provide validation-only preflight so UI and chat flows can fail before a
+  mutating tool call.
+- Raise `ToolExecutionError` for denied calls or MCP error responses so endpoint
+  layers can map them consistently.
 
-- Security
-  - Relies on MCP Unified auth + RBAC. Do not bypass `canExecute` checks; prefer `validate_only=True` to preflight from UI flows.
+## Module Map
 
-## 3. Developer-Related/Relevant Information for Contributors
+- `tool_executor.py` defines `ToolExecutor` and `ToolExecutionError`.
 
-- Folder Structure
-  - `tool_executor.py` — thin MCP wrapper and error type.
-- Extension Points
-  - Add convenience wrappers per domain (e.g., `execute_media_search(...)`) in calling modules, keeping this module protocol-focused.
-- Tests (selection)
-  - MCP HTTP/JSON-RPC behavior for `tools/list`: tldw_Server_API/tests/e2e/test_mcp_basic.py:54–60
-  - Permission mapping (403), `tools/list` shape: tldw_Server_API/tests/MCP/test_mcp_http_403_mapping.py:22
-- Local Dev Tips
-  - Ensure MCP Unified server is configured and running (or initialized in-process) before invoking `ToolExecutor`.
+## How It Connects
+
+- `Chat/tool_auto_exec.py` uses this module when chat auto-executes model tool
+  calls.
+- MCP Unified owns the actual tool registry, module registry, RBAC decisions,
+  and execution runtime.
+- AuthNZ permissions and MCP Hub policy decide whether the caller can execute a
+  tool; this package should not duplicate that policy.
+
+## Extension Points
+
+- Add domain-specific convenience helpers in the consuming module, not here, when
+  a workflow needs a narrower wrapper around `execute(...)`.
+- Keep new arguments JSON-serializable because MCP requests cross protocol and
+  worker boundaries.
+
+## Testing
+
+- Route behavior and sanitized error logs: `tests/Tools/test_tools_routes.py` and
+  `tests/Tools/test_tools_endpoint_error_logs.py`.
+- Permission checks: `tests/Tools/test_tools_permissions.py`,
+  `tests/AuthNZ_Unit/test_tools_permissions_claims.py`, and
+  `tests/MCP/test_mcp_tools_execute_authz.py`.
+- Chat integration: `tests/Chat/unit/test_tool_auto_exec.py` and
+  `tests/Chat/unit/test_chat_service_tool_autoexec.py`.
+
+## Gotchas
+
+- Do not bypass MCP Unified `canExecute` checks. If a caller only needs to know
+  whether an action is available, use validation-only execution.
+- Preserve caller identity and request metadata in `RequestContext`; audit and
+  policy layers rely on it.

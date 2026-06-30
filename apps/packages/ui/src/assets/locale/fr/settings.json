@@ -3,7 +3,13 @@
     "serverAndAuth": "Serveur et Auth",
     "knowledgeTools": "Outils de connaissances",
     "workspace": "Espace de travail",
-    "about": "À propos"
+    "about": "À propos",
+    "connect": "Connexion",
+    "aiModels": "IA et modèles",
+    "experience": "Expérience",
+    "knowledgeWorkspace": "Connaissances et espace de travail",
+    "safetyAdmin": "Sécurité et administration",
+    "dataManagement": "Gestion des données"
   },
   "healthNav": "Santé",
   "worldBooksNav": "Livres du monde",
@@ -1660,5 +1666,11 @@
     "subtitle": "Configurez les valeurs par défaut, les préréglages et le comportement d'Ingestion rapide."
   },
   "acpPlaygroundNav": "Atelier ACP",
-  "skillsNav": "Compétences"
+  "skillsNav": "Compétences",
+  "providerKeys": {
+    "navTitle": "Clés des fournisseurs"
+  },
+  "dataManagement": {
+    "navTitle": "Gestion des données"
+  }
 }

@@ -1,7 +1,10 @@
 import json as _json
+from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.exceptions import InvalidMetadataOrderKeyError
 from tldw_Server_API.app.main import app
 
 
@@ -126,6 +129,29 @@ class _FakeAdapterPaginated:
         return {"items": items, "total": self._total}
 
 
+class _FakeAdapterInvalidMetadataOrder:
+    """Adapter double that raises PGVector metadata order validation errors."""
+
+    def __init__(self) -> None:
+        self._initialized = True
+
+    async def initialize(self) -> None:  # pragma: no cover
+        """Mirror the vector adapter initialization contract."""
+        self._initialized = True
+
+    async def list_vectors_paginated(
+        self,
+        store_id: str,
+        limit: int,
+        offset: int,
+        filter: dict[str, Any] | None = None,
+        order_by: str | None = None,
+        order_dir: str | None = None,
+    ) -> dict[str, Any]:
+        """Raise the adapter validation error that PGVector emits for unsafe ordering."""
+        raise InvalidMetadataOrderKeyError("metadata.score;drop")
+
+
 @pytest.mark.unit
 def test_list_vectors_pagination_next_offset_chroma_fallback(monkeypatch, disable_heavy_startup, admin_user):
      # Fake adapter without list_vectors_paginated triggers Chroma fallback path
@@ -152,8 +178,9 @@ def test_list_vectors_pagination_next_offset_chroma_fallback(monkeypatch, disabl
 
 
 @pytest.mark.unit
-def test_list_vectors_pagination_next_offset_adapter_path(monkeypatch, disable_heavy_startup, admin_user):
-     # Adapter with list_vectors_paginated sets total explicitly
+def test_list_vectors_pagination_next_offset_adapter_path(monkeypatch, disable_heavy_startup, admin_user) -> None:
+    """Adapter pagination should include canonical offset metadata."""
+    # Adapter with list_vectors_paginated sets total explicitly
     from tldw_Server_API.app.api.v1.endpoints import vector_stores_openai as vs_mod
 
     async def _fake_get_adapter_for_user(user, dim):  # noqa: ANN001
@@ -167,12 +194,16 @@ def test_list_vectors_pagination_next_offset_adapter_path(monkeypatch, disable_h
     r1 = client.get("/api/v1/vector_stores/store-abc/vectors", params={"limit": 2, "offset": 0})
     assert r1.status_code == 200
     p1 = r1.json().get("pagination", {})
+    assert p1.get("mode") == "offset"
+    assert p1.get("has_more") is True
     assert p1.get("next_offset") == 2
 
     # offset 3, limit 2 → returned 2, offset+returned == total → next_offset None
     r2 = client.get("/api/v1/vector_stores/store-abc/vectors", params={"limit": 2, "offset": 3})
     assert r2.status_code == 200
     p2 = r2.json().get("pagination", {})
+    assert p2.get("mode") == "offset"
+    assert p2.get("has_more") is False
     assert p2.get("next_offset") is None
 
 
@@ -224,6 +255,52 @@ def test_list_vectors_invalid_order_by_returns_400(monkeypatch, disable_heavy_st
     )
     assert r.status_code == 400
     assert "invalid_order_by" in r.text
+
+
+@pytest.mark.unit
+def test_list_vectors_invalid_metadata_order_key_returns_400(
+    monkeypatch: pytest.MonkeyPatch,
+    disable_heavy_startup: Any,
+    admin_user: Any,
+) -> None:
+    """Reject unsafe metadata order keys before the adapter receives the request."""
+    from tldw_Server_API.app.api.v1.endpoints import vector_stores_openai as vs_mod
+
+    async def _fake_get_adapter_for_user(user: Any, dim: int) -> _FakeAdapter:
+        return _FakeAdapter()
+
+    monkeypatch.setattr(vs_mod, "_get_adapter_for_user", _fake_get_adapter_for_user, raising=True)
+
+    client = TestClient(app)
+    r = client.get(
+        "/api/v1/vector_stores/store-xyz/vectors",
+        params={"order_by": "metadata.score;drop", "order_dir": "asc"},
+    )
+    assert r.status_code == 400  # nosec B101
+    assert "invalid_order_by" in r.text  # nosec B101
+
+
+@pytest.mark.unit
+def test_list_vectors_adapter_invalid_metadata_order_key_returns_400(
+    monkeypatch: pytest.MonkeyPatch,
+    disable_heavy_startup: Any,
+    admin_user: Any,
+) -> None:
+    """Map adapter-raised metadata order validation errors to HTTP 400."""
+    from tldw_Server_API.app.api.v1.endpoints import vector_stores_openai as vs_mod
+
+    async def _fake_get_adapter_for_user(user: Any, dim: int) -> _FakeAdapterInvalidMetadataOrder:
+        return _FakeAdapterInvalidMetadataOrder()
+
+    monkeypatch.setattr(vs_mod, "_get_adapter_for_user", _fake_get_adapter_for_user, raising=True)
+
+    client = TestClient(app)
+    r = client.get(
+        "/api/v1/vector_stores/store-xyz/vectors",
+        params={"order_by": "metadata.score", "order_dir": "asc"},
+    )
+    assert r.status_code == 400  # nosec B101
+    assert "invalid_order_by" in r.text  # nosec B101
 
 
 @pytest.mark.unit

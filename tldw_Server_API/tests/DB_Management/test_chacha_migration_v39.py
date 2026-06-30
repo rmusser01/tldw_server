@@ -20,6 +20,73 @@ def _downgrade_schema_version_to_v38(db_path: str) -> None:
         conn.commit()
 
 
+def _missing_sqlite_migration_steps() -> list[int]:
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    steps = db._sqlite_linear_migration_steps()
+    return [
+        version
+        for version in range(4, CharactersRAGDB._CURRENT_SCHEMA_VERSION)
+        if version not in steps
+    ]
+
+
+def test_sqlite_linear_migration_registry_covers_current_schema() -> None:
+    assert _missing_sqlite_migration_steps() == []  # nosec B101
+
+
+def test_sqlite_linear_migration_registry_covers_v50_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _migrate_from_v49_to_v50(_self: CharactersRAGDB, _conn: sqlite3.Connection) -> None:
+        return None
+
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 50)
+    monkeypatch.setattr(
+        CharactersRAGDB,
+        "_migrate_from_v49_to_v50",
+        _migrate_from_v49_to_v50,
+        raising=False,
+    )
+
+    assert _missing_sqlite_migration_steps() == []  # nosec B101
+
+
+def test_sqlite_legacy_reopen_uses_registry_for_v50(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "chacha_v38_to_v50.db"
+
+    db = CharactersRAGDB(db_path=str(db_path), client_id="migration-v50-bootstrap")
+    db.close_connection()
+
+    _downgrade_schema_version_to_v38(str(db_path))
+
+    def _migrate_from_v49_to_v50(self: CharactersRAGDB, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
+            (50, self._SCHEMA_NAME),
+        )
+
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 50)
+    monkeypatch.setattr(
+        CharactersRAGDB,
+        "_migrate_from_v49_to_v50",
+        _migrate_from_v49_to_v50,
+        raising=False,
+    )
+
+    migrated_db = CharactersRAGDB(db_path=str(db_path), client_id="migration-v50-reopen")
+    migrated_db.close_connection()
+
+    with sqlite3.connect(db_path) as conn:
+        version = conn.execute(
+            "SELECT version FROM db_schema_version WHERE schema_name = ?",
+            ("rag_char_chat_schema",),
+        ).fetchone()[0]
+        assert version == 50  # nosec B101
+
+
 def test_sqlite_migration_v38_to_v39_reopens_legacy_database(tmp_path) -> None:
     db_path = tmp_path / "chacha_v38.db"
 

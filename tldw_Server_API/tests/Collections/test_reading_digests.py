@@ -17,6 +17,8 @@ from tldw_Server_API.app.core.Collections.reading_digest_jobs import (
     READING_DIGEST_DOMAIN,
     READING_DIGEST_JOB_TYPE,
     _normalize_suggestions_config,
+    _render_default_html,
+    _render_default_markdown,
     _score_suggestion_candidate,
     handle_reading_digest_job,
     reading_digest_queue,
@@ -162,6 +164,27 @@ def test_reading_digest_suggestions_flags_accept_y():
     assert cfg["include_archived"] is True
     assert "read" in cfg["status"]
     assert "archived" in cfg["status"]
+
+
+def test_default_digest_renderers_do_not_link_unsafe_urls() -> None:
+    """Default digest renderers keep unsafe URLs and markdown injection inert."""
+    items = [
+        {
+            "title": "Unsafe](javascript:alert(1))",
+            "url": "javascript:alert(1)",
+            "summary": "Summary [bad](javascript:alert(2))",
+        }
+    ]
+
+    html = _render_default_html("Digest", items)
+    markdown = _render_default_markdown("Digest", items)
+
+    assert 'href="javascript:alert(1)"' not in html
+    assert "](javascript:alert(1))" not in markdown
+    assert "[bad](javascript:alert(2))" not in markdown
+    assert "javascript:" not in markdown
+    assert "Unsafe" in html
+    assert "Unsafe" in markdown
 
 
 def test_reading_digest_schedule_crud(client_with_user):
@@ -395,7 +418,11 @@ def test_reading_digest_scheduler_claims_single_enqueue(client_with_user):
     asyncio.run(_runner())
 
     jm = JobManager()
-    jobs = jm.list_jobs(domain=READING_DIGEST_DOMAIN, job_type=READING_DIGEST_JOB_TYPE)
+    jobs = [
+        job
+        for job in jm.list_jobs(domain=READING_DIGEST_DOMAIN, job_type=READING_DIGEST_JOB_TYPE)
+        if (job.get("payload") or {}).get("schedule_id") == schedule_id
+    ]
     assert len(jobs) == 1
     updated = db.get_reading_digest_schedule(schedule_id)
     assert updated.next_run_at is not None
@@ -497,7 +524,11 @@ def test_reading_digest_scheduler_skips_disabled_after_claim(client_with_user, m
     asyncio.run(_runner())
 
     jm = JobManager()
-    jobs = jm.list_jobs(domain=READING_DIGEST_DOMAIN, job_type=READING_DIGEST_JOB_TYPE)
+    jobs = [
+        job
+        for job in jm.list_jobs(domain=READING_DIGEST_DOMAIN, job_type=READING_DIGEST_JOB_TYPE)
+        if (job.get("payload") or {}).get("schedule_id") == schedule_id
+    ]
     assert jobs == []
     updated = db.get_reading_digest_schedule(schedule_id)
     assert updated.enabled is False

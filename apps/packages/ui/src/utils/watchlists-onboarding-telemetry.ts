@@ -61,6 +61,7 @@ export type WatchlistsPipelinePreviewStatus =
   | "error"
 export type WatchlistsPipelineFailureStage =
   | "validation"
+  | "source_create"
   | "job_create"
   | "run_trigger"
   | "output_create"
@@ -294,6 +295,7 @@ const DEFAULT_PIPELINE_PREVIEW_COUNTERS: PipelinePreviewCounters = {
 
 const DEFAULT_PIPELINE_FAILURE_COUNTERS: PipelineFailureCounters = {
   validation: 0,
+  source_create: 0,
   job_create: 0,
   run_trigger: 0,
   output_create: 0,

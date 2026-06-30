@@ -5,6 +5,87 @@ export const ALLOWED_IMAGE_MIME_TYPES = new Set([
   "image/webp"
 ])
 
+export const IMAGE_ATTACHMENT_MIME_BY_EXTENSION = new Map<string, string>([
+  ["avif", "image/avif"],
+  ["bmp", "image/bmp"],
+  ["gif", "image/gif"],
+  ["heic", "image/heic"],
+  ["heif", "image/heif"],
+  ["ico", "image/ico"],
+  ["jpeg", "image/jpeg"],
+  ["jpg", "image/jpeg"],
+  ["png", "image/png"],
+  ["svg", "image/svg+xml"],
+  ["tif", "image/tiff"],
+  ["tiff", "image/tiff"],
+  ["webp", "image/webp"]
+])
+
+export const IMAGE_ATTACHMENT_MIME_TYPES = new Set<string>([
+  ...IMAGE_ATTACHMENT_MIME_BY_EXTENSION.values(),
+  "image/ico",
+  "image/jpg"
+])
+
+export const GENERIC_IMAGE_FALLBACK_MIME_TYPES = new Set([
+  "",
+  "application/octet-stream"
+])
+
+export interface ImageAttachmentFileLike {
+  name: string
+  type?: string | null
+}
+
+function getFileExtension(fileName: string): string | null {
+  const dotIndex = fileName.lastIndexOf(".")
+  if (dotIndex <= 0 || dotIndex === fileName.length - 1) return null
+
+  return fileName.slice(dotIndex + 1).toLowerCase()
+}
+
+/**
+ * Normalizes browser-provided MIME strings before comparing them with the
+ * shared attachment image policy.
+ */
+export function normalizeAttachmentMimeType(
+  mimeType: string | null | undefined
+): string {
+  return typeof mimeType === "string" ? mimeType.trim().toLowerCase() : ""
+}
+
+/**
+ * Infers the effective image MIME for uploads whose browser MIME is missing or
+ * generic by consulting the shared extension policy.
+ */
+export function inferImageAttachmentMimeType(
+  file: ImageAttachmentFileLike
+): string | null {
+  const fileType = normalizeAttachmentMimeType(file.type)
+  if (fileType.startsWith("image/")) return fileType
+  if (!GENERIC_IMAGE_FALLBACK_MIME_TYPES.has(fileType)) return null
+
+  const extension = getFileExtension(file.name)
+  return extension ? IMAGE_ATTACHMENT_MIME_BY_EXTENSION.get(extension) ?? null : null
+}
+
+/**
+ * Rewrites generic data URLs with the inferred image MIME while leaving existing
+ * image data URLs and unknown MIME cases untouched.
+ */
+export function normalizeImageDataUrlMime(
+  dataUrl: string,
+  mimeType: string | null | undefined
+): string {
+  if (dataUrl.toLowerCase().startsWith("data:image/")) return dataUrl
+
+  const commaIndex = dataUrl.indexOf(",")
+  if (commaIndex === -1) return dataUrl
+  if (!mimeType) return dataUrl
+
+  return `data:${mimeType};base64,${dataUrl.slice(commaIndex + 1)}`
+}
+
 function isBase64ImageChar(code: number): boolean {
   return (
     (code >= 0x41 && code <= 0x5a) || // A-Z
@@ -41,6 +122,10 @@ function isValidBase64ImagePayload(value: string): boolean {
   return true
 }
 
+/**
+ * Decodes a small prefix of a base64 payload so image signatures can be checked
+ * without decoding the full attachment.
+ */
 export function decodeBase64Header(
   value: string,
   maxChars = 128,
@@ -62,6 +147,10 @@ export function decodeBase64Header(
   }
 }
 
+/**
+ * Detects the supported image MIME type from magic bytes used by chat image
+ * validation.
+ */
 export function detectImageMime(bytes: Uint8Array): string | null {
   const isPng =
     bytes.length >= 4 &&
@@ -103,6 +192,10 @@ export function detectImageMime(bytes: Uint8Array): string | null {
   return null
 }
 
+/**
+ * Builds a safe image data URL from raw base64 only when the payload has an
+ * allowed image signature.
+ */
 export function createImageDataUrl(base64: string): string | null {
   if (!base64 || typeof base64 !== "string") return null
 
@@ -120,6 +213,10 @@ export function createImageDataUrl(base64: string): string | null {
   return `data:${mime};base64,${trimmed}`
 }
 
+/**
+ * Validates unknown input from chat state and returns a normalized image data
+ * URL or an empty string for unsupported values.
+ */
 export function validateAndCreateImageDataUrl(value: unknown): string {
   if (typeof value !== "string") return ""
 

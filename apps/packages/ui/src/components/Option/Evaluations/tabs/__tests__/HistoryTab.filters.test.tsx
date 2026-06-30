@@ -5,6 +5,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { HistoryTab } from "../HistoryTab"
 
 const fetchSpy = vi.fn()
+const fetchHistoryState = {
+  mutate: fetchSpy,
+  isPending: false,
+  isError: false,
+  error: null as Error | null
+}
 
 const storeState = {
   historyResults: [
@@ -75,10 +81,7 @@ vi.mock("../../hooks/useHistory", async () => {
   const actual = await vi.importActual<any>("../../hooks/useHistory")
   return {
     ...actual,
-    useFetchHistory: () => ({
-      mutate: fetchSpy,
-      isPending: false
-    })
+    useFetchHistory: () => fetchHistoryState
   }
 })
 
@@ -120,6 +123,9 @@ describe("HistoryTab filters and rendering", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    fetchHistoryState.isPending = false
+    fetchHistoryState.isError = false
+    fetchHistoryState.error = null
   })
 
   it("uses evaluation_type filters and renders backend evaluation rows", async () => {
@@ -148,5 +154,23 @@ describe("HistoryTab filters and rendering", () => {
         })
       )
     })
+  })
+
+  it("shows history recovery diagnostics without clearing entered filters", async () => {
+    fetchHistoryState.isError = true
+    fetchHistoryState.error = new Error("HTTP 503")
+
+    render(<HistoryTab />)
+
+    fireEvent.change(screen.getByTestId("history-user-filter"), {
+      target: { value: "user_456" }
+    })
+
+    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Unable to fetch history")).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/evaluations/history"
+    )
+    expect(screen.getByTestId("history-user-filter")).toHaveValue("user_456")
   })
 })

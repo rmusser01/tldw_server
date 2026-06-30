@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react"
-import { Alert, Collapse, Form, Input, Select } from "antd"
+import { Collapse, Form, Input, Select } from "antd"
 import { useTranslation } from "react-i18next"
 import { ArrowLeft, Save } from "lucide-react"
+import { Alert } from "@/components/ui/primitives"
 import type { PromptFormat, StructuredPromptDefinition } from "@/db/dexie/types"
 import {
   previewStructuredPromptServer,
@@ -430,12 +431,17 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
               )}
               {promptFormat === "structured" && (
                 <Alert
-                  type="info"
-                  showIcon
+                  variant="info"
                   className="mb-4"
-                  title="Structured prompt"
-                  description="This prompt now uses ordered blocks. The raw system and user fields are locked for compatibility; save and preview use the structured definition."
-                />
+                  title={t("managePrompts.fullEditor.structuredPromptTitle", {
+                    defaultValue: "Structured prompt"
+                  })}
+                >
+                  {t("managePrompts.fullEditor.structuredPromptDesc", {
+                    defaultValue:
+                      "This prompt now uses ordered blocks. The raw system and user fields are locked for compatibility; save and preview use the structured definition."
+                  })}
+                </Alert>
               )}
               <Form.Item
                 name="system_prompt"

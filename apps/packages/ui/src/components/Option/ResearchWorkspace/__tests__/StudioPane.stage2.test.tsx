@@ -4,12 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import type { WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
-const { mockScheduleWorkspaceUndoAction, mockUndoWorkspaceAction } = vi.hoisted(
-  () => ({
-    mockScheduleWorkspaceUndoAction: vi.fn(),
-    mockUndoWorkspaceAction: vi.fn()
-  })
-)
+const {
+  mockScheduleWorkspaceUndoAction,
+  mockUndoWorkspaceAction,
+  mockMermaidDiagramBlock
+} = vi.hoisted(() => ({
+  mockScheduleWorkspaceUndoAction: vi.fn(),
+  mockUndoWorkspaceAction: vi.fn(),
+  mockMermaidDiagramBlock: vi.fn()
+}))
 
 const {
   mockGenerateQuiz,
@@ -284,6 +287,29 @@ vi.mock("@/store/workspace", () => ({
 
 vi.mock("@/components/Common/Mermaid", () => ({
   default: ({ code }: { code: string }) => <div data-testid="mermaid">{code}</div>
+}))
+
+vi.mock("@/components/Common/MermaidDiagramBlock", () => ({
+  MermaidDiagramBlock: (props: {
+    source: string
+    enableArtifactAction?: boolean
+  }) => {
+    mockMermaidDiagramBlock(props)
+
+    return (
+      <section data-testid="research-shared-mermaid-block">
+        <div role="img" aria-label="Mock research Mermaid diagram">
+          {props.source}
+        </div>
+        {props.enableArtifactAction ? (
+          <button type="button">View Mermaid diagram</button>
+        ) : null}
+        <button type="button">Open Mermaid preview</button>
+        <button type="button">Copy Mermaid source</button>
+        <button type="button">Download Mermaid SVG</button>
+      </section>
+    )
+  }
 }))
 
 vi.mock("../undo-manager", () => ({
@@ -626,7 +652,12 @@ describe("StudioPane Stage 2 workflows", () => {
         model: "gpt-4o-mini",
         response_format: { type: "json_object" }
       }),
-      expect.any(Object)
+      expect.objectContaining({
+        timeoutMs: expect.any(Number)
+      })
+    )
+    expect(mockCreateChatCompletion.mock.calls[0]?.[1]?.timeoutMs).toBeGreaterThanOrEqual(
+      120_000
     )
 
     expect(mockUpsertWorkspace).toHaveBeenCalledWith("workspace-a", {
@@ -749,12 +780,38 @@ describe("StudioPane Stage 2 workflows", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "View" }))
 
-    expect(await screen.findByTestId("mermaid")).toHaveTextContent(
+    expect(
+      await screen.findByTestId("research-shared-mermaid-block")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("img", { name: "Mock research Mermaid diagram" })
+    ).toHaveTextContent(
       /mindmap\s+root\(\(Workspace\)\)\s+Findings/
     )
+    expect(mockMermaidDiagramBlock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: expect.stringContaining("mindmap"),
+        enableArtifactAction: false
+      })
+    )
     expect(
-      await screen.findByRole("button", { name: "Export SVG" })
+      screen.getByRole("button", { name: "Open Mermaid preview" })
     ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Copy Mermaid source" })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Download Mermaid SVG" })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "View Mermaid diagram" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Export SVG" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Export PNG" })
+    ).not.toBeInTheDocument()
   })
 
   it("falls back to raw content for non-mermaid mind map output", async () => {
@@ -807,7 +864,7 @@ describe("StudioPane Stage 2 workflows", () => {
     renderStudioPane()
     fireEvent.click(screen.getByRole("button", { name: "View" }))
 
-    fireEvent.change(await screen.findByPlaceholderText("Filter table rows"), {
+    fireEvent.change(await screen.findByLabelText("Filter table rows"), {
       target: { value: "Bob" }
     })
 
@@ -851,10 +908,10 @@ describe("StudioPane Stage 2 workflows", () => {
     renderStudioPane()
     fireEvent.click(screen.getByTestId("studio-artifact-edit-artifact-flashcards"))
 
-    fireEvent.change(await screen.findByPlaceholderText("Front (question or term)"), {
+    fireEvent.change(await screen.findByLabelText("Flashcard front 1"), {
       target: { value: "Updated front" }
     })
-    fireEvent.change(await screen.findByPlaceholderText("Back (answer or definition)"), {
+    fireEvent.change(await screen.findByLabelText("Flashcard back 1"), {
       target: { value: "Updated back" }
     })
     const flashcardSaveButtons = screen.getAllByRole("button", { name: "Save changes" })
@@ -948,16 +1005,16 @@ describe("StudioPane Stage 2 workflows", () => {
     renderStudioPane()
     fireEvent.click(screen.getByTestId("studio-artifact-edit-artifact-quiz"))
 
-    fireEvent.change(await screen.findByPlaceholderText("Question prompt"), {
+    fireEvent.change(await screen.findByLabelText("Question prompt 1"), {
       target: { value: "Updated question" }
     })
-    fireEvent.change(await screen.findByPlaceholderText("Options (one per line)"), {
+    fireEvent.change(await screen.findByLabelText("Question options 1"), {
       target: { value: "Option A\nOption B" }
     })
-    fireEvent.change(await screen.findByPlaceholderText("Correct answer"), {
+    fireEvent.change(await screen.findByLabelText("Correct answer 1"), {
       target: { value: "Option A" }
     })
-    fireEvent.change(await screen.findByPlaceholderText("Explanation (optional)"), {
+    fireEvent.change(await screen.findByLabelText("Question explanation 1"), {
       target: { value: "Updated explanation" }
     })
     const quizSaveButtons = screen.getAllByRole("button", { name: "Save changes" })
@@ -1078,6 +1135,7 @@ describe("StudioPane Stage 2 workflows", () => {
     expect(mockGenerateFlashcardsService).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining("DSPy Prompting Talk"),
+        num_cards: 6,
         model: "gpt-4o-mini",
         provider: "openai"
       })
@@ -1233,7 +1291,7 @@ describe("StudioPane Stage 2 workflows", () => {
     expect(mockCreateFlashcard).not.toHaveBeenCalled()
   }, 15000)
 
-  it("falls back to the first available chat model for flashcards when no model is selected", async () => {
+  it("gates flashcards when no chat model is selected", () => {
     messageOptionStoreState.selectedModel = null
     mockGetChatModels.mockResolvedValue([
       {
@@ -1251,24 +1309,22 @@ describe("StudioPane Stage 2 workflows", () => {
 
     renderStudioPane()
 
+    expect(screen.getByTestId("studio-prerequisite-warning")).toHaveTextContent(
+      "Select a chat model before generating Studio outputs."
+    )
+    expect(screen.getByRole("button", { name: "Flashcards" })).toBeDisabled()
+
     fireEvent.click(screen.getByRole("button", { name: "Flashcards" }))
 
-    await waitFor(() => {
-      expect(mockGenerateFlashcardsService).toHaveBeenCalledWith(
-        expect.objectContaining({
-          model: "gpt-4o-mini",
-          provider: "openai"
-        })
-      )
-    })
-  }, 15000)
+    expect(mockGenerateFlashcardsService).not.toHaveBeenCalled()
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+  })
 
   it("disables compare sources generation when fewer than two sources are selected", () => {
     workspaceStoreState.selectedSourceIds = ["source-1"]
     workspaceStoreState.getSelectedMediaIds = () => [101]
 
     renderStudioPane()
-    expandMoreOutputsSection()
 
     const compareButton = screen.getByRole("button", { name: "Compare Sources" })
     expect(compareButton).toBeDisabled()
@@ -1465,7 +1521,7 @@ describe("StudioPane Stage 2 workflows", () => {
     })
   }, 15000)
 
-  it("falls back to the first available chat model for mind maps when no model is selected", async () => {
+  it("gates mind maps when no chat model is selected", () => {
     messageOptionStoreState.selectedModel = null
     mockGetChatModels.mockResolvedValue([
       {
@@ -1508,19 +1564,13 @@ describe("StudioPane Stage 2 workflows", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Mind Map" }))
 
-    await waitFor(() => {
-      expect(mockCreateChatCompletion).toHaveBeenCalled()
-    })
-
-    expect(mockCreateChatCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: "gpt-4o-mini"
-      }),
-      expect.objectContaining({
-        signal: expect.any(AbortSignal)
-      })
+    expect(screen.getByTestId("studio-prerequisite-warning")).toHaveTextContent(
+      "Select a chat model before generating Studio outputs."
     )
-  }, 15000)
+    expect(screen.getByRole("button", { name: "Mind Map" })).toBeDisabled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+  })
 
   it("marks mind map generation failed when completion is not Mermaid syntax", async () => {
     mockGetMediaDetails.mockResolvedValue({
@@ -1629,7 +1679,7 @@ describe("StudioPane Stage 2 workflows", () => {
       expect(mockGetMediaDetails).toHaveBeenCalledTimes(2)
     })
 
-    expect(mockCreateChatCompletion).toHaveBeenCalledWith(
+    expect(mockCreateChatCompletion.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         model: "gpt-4o-mini",
         temperature: 0.7,
@@ -1665,7 +1715,7 @@ describe("StudioPane Stage 2 workflows", () => {
     })
   }, 15000)
 
-  it("falls back to the first available chat model for data tables when no model is selected", async () => {
+  it("gates data tables when no chat model is selected", () => {
     messageOptionStoreState.selectedModel = null
     mockGetChatModels.mockResolvedValue([
       {
@@ -1709,16 +1759,13 @@ describe("StudioPane Stage 2 workflows", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Data Table" }))
 
-    await waitFor(() => {
-      expect(mockCreateChatCompletion).toHaveBeenCalled()
-    })
-
-    expect(mockCreateChatCompletion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: "gpt-4o-mini"
-      })
+    expect(screen.getByTestId("studio-prerequisite-warning")).toHaveTextContent(
+      "Select a chat model before generating Studio outputs."
     )
-  }, 15000)
+    expect(screen.getByRole("button", { name: "Data Table" })).toBeDisabled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+  })
 
   it("renders cumulative workspace usage and per-artifact usage", async () => {
     Modal.destroyAll()

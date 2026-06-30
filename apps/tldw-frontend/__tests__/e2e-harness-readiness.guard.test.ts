@@ -169,6 +169,17 @@ describe("e2e harness readiness contracts", () => {
     expect(stage6Stage2Source).not.toContain('waitForLoadState("networkidle"')
   })
 
+  it("keeps writing playground in Stage 5 instead of the all-pages traversal", () => {
+    const pageInventorySource = readSource("e2e/smoke/page-inventory.ts")
+    const stage5GateSource = readSource("e2e/smoke/stage5-release-gate.spec.ts")
+
+    expect(stage5GateSource).toContain('{ path: "/writing-playground", name: "Writing Playground" }')
+    expect(pageInventorySource).toContain('path: "/writing-playground"')
+    expect(pageInventorySource).toContain(
+      'skip: "Covered in Stage 5 release gate; intermittently trips the global error boundary during full all-pages traversal in CI."'
+    )
+  })
+
   it("keeps the interactive review harness on app-shell readiness instead of direct networkidle waits", () => {
     const interactiveReviewSource = readSource("e2e/interactive-review.ts")
 

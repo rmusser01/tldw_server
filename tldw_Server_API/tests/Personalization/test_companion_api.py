@@ -67,6 +67,13 @@ def test_companion_activity_endpoint_returns_provenance(client_with_companion_db
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["total"] == 1
+    assert payload["pagination"]["total"] == 1
+    assert payload["pagination"]["limit"] == 10
+    assert payload["pagination"]["offset"] == 0
+    assert payload["pagination"]["has_more"] is False
+    assert payload["pagination"]["next_offset"] is None
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
     assert len(payload["items"]) == 1
     assert payload["items"][0]["event_type"] == "reading.saved"
     assert payload["items"][0]["provenance"]["capture_mode"] == "explicit"

@@ -3,6 +3,7 @@ import concurrent.futures
 import time
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps as deps
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
@@ -37,6 +38,22 @@ class _StoppingService:
 
     async def stop(self) -> None:
         self.stopped = True
+
+
+class _SensitiveFailingStopService:
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self.db_path = "/tmp/audit-secret-token/Media_DB_v2.db"
+        self.storage_mode = "per_user"
+
+    @property
+    def owner_loop(self):
+        return self._loop
+
+    async def stop(self) -> None:
+        raise RuntimeError(
+            "failed opening /tmp/audit-secret-token/Media_DB_v2.db with password=hunter2"
+        )
 
 
 class _BlockingStopService:
@@ -152,8 +169,9 @@ async def test_schedule_service_stop_clears_flag_on_failure(monkeypatch):
 
     deps._schedule_service_stop(1, svc, "test")
 
-    for _ in range(20):
-        await asyncio.sleep(0)
+    deadline = loop.time() + 1.0
+    while loop.time() < deadline:
+        await asyncio.sleep(0.01)
         if not getattr(svc, "_tldw_stop_scheduled", True):
             break
 
@@ -210,6 +228,32 @@ async def test_shutdown_all_audit_services_returns_summary_and_can_raise(monkeyp
     assert summary.errors
     assert "stop failed" in summary.errors[0]
     assert state.cache == {}
+
+
+@pytest.mark.asyncio
+async def test_shutdown_all_audit_services_logs_sanitized_stop_failure(monkeypatch):
+    loop = asyncio.get_running_loop()
+    service = _SensitiveFailingStopService(loop)
+    state = deps._LoopState(cache={1: service}, loop=loop)
+    messages = []
+    sink_id = logger.add(messages.append, format="{message}")
+
+    monkeypatch.setattr(deps, "_all_loop_states", lambda: [state])
+
+    try:
+        summary = await deps.shutdown_all_audit_services(raise_on_error=False)
+    finally:
+        logger.remove(sink_id)
+
+    rendered_logs = "\n".join(messages)
+
+    assert summary.error_count == 1
+    assert "password=hunter2" in summary.errors[0]
+    assert "/tmp/audit-secret-token/Media_DB_v2.db" in summary.errors[0]
+    assert "password=hunter2" not in rendered_logs
+    assert "/tmp/audit-secret-token/Media_DB_v2.db" not in rendered_logs
+    assert "RuntimeError" in rendered_logs
+
 
 @pytest.mark.asyncio
 async def test_shutdown_all_audit_services_runs_stop_fan_out_concurrently(monkeypatch):
@@ -269,6 +313,40 @@ async def test_get_or_create_does_not_recache_service_after_shutdown(monkeypatch
         await asyncio.wait_for(init_task, timeout=5)
 
     assert state.cache == {}
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_init_failure_logs_sanitized_backend_error(monkeypatch):
+    state = deps._LoopState(cache={}, loop=asyncio.get_running_loop())
+    wait_event = asyncio.Event()
+    state.initializing_events[123] = wait_event
+    messages = []
+    sink_id = logger.add(messages.append, format="{message}")
+
+    async def _fake_create(_user_id):
+        raise RuntimeError(
+            "failed opening /tmp/audit-secret-token/Audit_DB.db with password=hunter2"
+        )
+
+    monkeypatch.setattr(deps, "_resolve_audit_storage_mode", lambda: "per_user")
+    monkeypatch.setattr(deps, "_state_for_loop", lambda: state)
+    monkeypatch.setattr(deps, "_create_audit_service_for_user", _fake_create)
+
+    try:
+        with pytest.raises(RuntimeError):
+            await deps._get_or_create_audit_service_for_key(123)
+    finally:
+        logger.remove(sink_id)
+
+    rendered_logs = "\n".join(messages)
+
+    assert state.cache.get(123) is None
+    assert 123 not in state.initializing_users
+    assert 123 not in state.initializing_events
+    assert wait_event.is_set()
+    assert "RuntimeError" in rendered_logs
+    assert "password=hunter2" not in rendered_logs
+    assert "/tmp/audit-secret-token/Audit_DB.db" not in rendered_logs
 
 
 @pytest.mark.asyncio

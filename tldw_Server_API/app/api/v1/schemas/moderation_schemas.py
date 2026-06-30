@@ -167,3 +167,134 @@ class ModerationSettingsUpdate(BaseModel):
     pii_enabled: Optional[bool] = None
     categories_enabled: Optional[list[str]] = None
     persist: Optional[bool] = Field(False, description="Persist runtime overrides to file")
+
+
+ModerationReviewStatus = Literal[
+    "needs_review",
+    "approved",
+    "blocked",
+    "redacted",
+    "dismissed",
+    "escalated",
+]
+ModerationDecisionAction = Literal["approve", "block", "redact", "dismiss", "escalate"]
+ModerationSeverity = Literal["low", "medium", "high", "critical"]
+
+
+class ModerationReviewMatch(BaseModel):
+    rule_id: str | None = None
+    pattern_type: Literal["literal", "regex", "pii", "category"] | None = None
+    category: str | None = None
+    action: Literal["pass", "block", "redact", "warn"] | None = None
+    sample: str | None = None
+    confidence: float | None = Field(None, ge=0, le=1)
+
+
+class ModerationReviewDecisionHistoryEntry(BaseModel):
+    id: str
+    action: ModerationDecisionAction
+    status: ModerationReviewStatus
+    previous_status: ModerationReviewStatus
+    actor_id: str
+    reason: str | None = None
+    decided_at: str
+    undo_eligible: bool = False
+    undo_expires_at: str | None = None
+    undone_at: str | None = None
+    redaction_state: Literal["not_redacted", "redacted"] = "not_redacted"
+
+
+class ModerationReviewItem(BaseModel):
+    id: str
+    status: ModerationReviewStatus
+    phase: Literal["input", "output"]
+    source_type: str | None = None
+    source_id: str | None = None
+    user_id: str | None = None
+    session_id: str | None = None
+    created_at: str
+    updated_at: str | None = None
+    severity: ModerationSeverity | None = None
+    category: str | None = None
+    safe_fields: dict[str, bool] = Field(default_factory=dict)
+    excerpt: str
+    context: dict[str, Any] | None = None
+    effective_policy: dict[str, Any] = Field(default_factory=dict)
+    matches: list[ModerationReviewMatch] = Field(default_factory=list)
+    recommended_action: ModerationDecisionAction | None = None
+    retention_expires_at: str | None = None
+    content_redacted_at: str | None = None
+    decision_history: list[ModerationReviewDecisionHistoryEntry] = Field(default_factory=list)
+
+
+class ModerationReviewListResponse(BaseModel):
+    items: list[ModerationReviewItem]
+    next_cursor: str | None = None
+    total: int | None = None
+
+
+class ModerationReviewDecisionRequest(BaseModel):
+    action: ModerationDecisionAction
+    reason: str | None = Field(None, max_length=2000)
+    actor_id: str | None = Field(None, description="Ignored; actor is always derived from the authenticated principal")
+
+
+class ModerationReviewDecision(BaseModel):
+    id: str
+    item_id: str
+    action: ModerationDecisionAction
+    status: ModerationReviewStatus
+    previous_status: ModerationReviewStatus
+    decided_by: str
+    reason: str | None = None
+    decided_at: str
+    undo_expires_at: str | None = None
+    undone_at: str | None = None
+    undo_token: str | None = None
+
+
+class ModerationReviewDecisionResponse(BaseModel):
+    item: ModerationReviewItem
+    decision: ModerationReviewDecision
+    undo_token: str | None = None
+
+
+class ModerationReviewUndoRequest(BaseModel):
+    undo_token: str = Field(..., min_length=1)
+
+
+class ModerationReviewBulkDecisionRequest(BaseModel):
+    item_ids: list[str] = Field(..., min_length=1, max_length=500)
+    action: ModerationDecisionAction
+    reason: str | None = Field(None, max_length=2000)
+
+
+class ModerationReviewBulkDecisionResult(BaseModel):
+    item_id: str
+    ok: bool
+    item: ModerationReviewItem | None = None
+    decision: ModerationReviewDecision | None = None
+    undo_token: str | None = None
+    error: str | None = None
+
+
+class ModerationReviewBulkDecisionResponse(BaseModel):
+    results: list[ModerationReviewBulkDecisionResult]
+    ok_count: int
+    error_count: int
+
+
+class ModerationReviewAuditEvent(BaseModel):
+    id: str
+    item_id: str | None = None
+    decision_id: str | None = None
+    actor_id: str | None = None
+    action: str
+    summary: str | None = None
+    created_at: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ModerationReviewAuditResponse(BaseModel):
+    events: list[ModerationReviewAuditEvent]
+    next_cursor: str | None = None

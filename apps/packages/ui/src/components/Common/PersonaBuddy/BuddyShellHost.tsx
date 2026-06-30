@@ -3,20 +3,44 @@ import { createPortal } from "react-dom"
 
 import { useSetting } from "@/hooks/useSetting"
 import { useDesktop } from "@/hooks/useMediaQuery"
+import { usePersonaLiveControl } from "@/hooks/usePersonaLiveControl"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import {
+  getPersonaVisualPack,
+  listPersonaVisualPacks
+} from "@/services/persona-visuals"
 import { PERSONA_BUDDY_SHELL_ENABLED_SETTING } from "@/services/settings/ui-settings"
 import {
   clampPersonaBuddyShellPosition,
   DEFAULT_PERSONA_BUDDY_SHELL_POSITIONS,
   usePersonaBuddyShellStore
 } from "@/store/persona-buddy-shell"
+import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
 import type {
   PersonaBuddyPositionBucket,
+  PersonaBuddyLiveControlView,
+  PersonaBuddyRenderContext,
   PersonaBuddySummary
 } from "@/types/persona-buddy"
+import {
+  asPersonaVisualCustomStateId,
+  isPersonaVisualCustomStateIdText,
+  PERSONA_VISUAL_PACK_ACTIVATED_EVENT
+} from "@/types/persona-visuals"
+import type {
+  PersonaVisualManifest,
+  PersonaVisualPack
+} from "@/types/persona-visuals"
 
 import { useBuddyShellRenderContext } from "./BuddyShellRenderContext"
 import { BuddyShellDock } from "./BuddyShellDock"
+import {
+  getPrimaryPersonaVisualDiagnostic,
+  type PersonaVisualDiagnostic,
+  type PersonaVisualDiagnosticCode
+} from "./personaVisualDiagnostics"
+import { resolvePersonaVisualState } from "./personaVisualState"
 
 type BuddyShellHostProps = {
   root: "web" | "sidepanel"
@@ -25,12 +49,62 @@ type BuddyShellHostProps = {
 type DragState = {
   offsetX: number
   offsetY: number
+  lastClientX: number
+  accumulatedDeltaX: number
+}
+
+type BuddyMovementState = "moving_left" | "moving_right"
+
+type BuddyMovementContext = {
+  activePersonaId: string | null
+  sessionId: string | null
+  manifest: PersonaVisualManifest | null
 }
 
 type ResolvedPersonaShellState = {
   hasTargetPersona: boolean
+  activePersonaId: string | null
   fallbackName: string | null
   buddySummary: PersonaBuddySummary | null
+}
+
+const BUDDY_DRAG_MOVEMENT_THRESHOLD_PX = 2
+const BUDDY_DRAG_MOVEMENT_OVERRIDE_MS = 300
+
+const hasVisualMovementState = (
+  manifest: PersonaVisualManifest | null | undefined,
+  state: BuddyMovementState
+): boolean => {
+  const stateId = asPersonaVisualCustomStateId(state)
+  return Boolean(manifest?.states?.[stateId] || manifest?.state_catalog?.[stateId])
+}
+
+const clearBuddyDragOverride = (context: BuddyMovementContext) => {
+  const runtimeStore = usePersonaVisualRuntimeStore.getState()
+  const current = runtimeStore.override
+  if (
+    current?.reason === "buddy_drag" &&
+    (!context.activePersonaId || current.personaId === context.activePersonaId)
+  ) {
+    runtimeStore.clearOverride()
+  }
+}
+
+const setBuddyDragMovementOverride = (
+  context: BuddyMovementContext,
+  state: BuddyMovementState
+) => {
+  if (!context.activePersonaId || !hasVisualMovementState(context.manifest, state)) {
+    return
+  }
+
+  usePersonaVisualRuntimeStore.getState().setOverride({
+    personaId: context.activePersonaId,
+    sessionId: context.sessionId,
+    state: asPersonaVisualCustomStateId(state),
+    reason: "buddy_drag",
+    expiresAt: Date.now() + BUDDY_DRAG_MOVEMENT_OVERRIDE_MS
+  })
 }
 
 const ensurePortalRoot = () => {
@@ -75,11 +149,7 @@ const resolveActivePersonaSelection = ({
   selectedAssistant
 }: {
   renderContext:
-    | {
-        surface_active: boolean
-        active_persona_id: string | null
-        buddy_summary?: PersonaBuddySummary | null
-      }
+    | PersonaBuddyRenderContext
     | null
     | undefined
   selectedAssistant: unknown
@@ -87,6 +157,7 @@ const resolveActivePersonaSelection = ({
   if (!renderContext?.surface_active) {
     return {
       hasTargetPersona: false,
+      activePersonaId: null,
       fallbackName: null,
       buddySummary: null
     }
@@ -109,6 +180,7 @@ const resolveActivePersonaSelection = ({
     if (renderContext.buddy_summary) {
       return {
         hasTargetPersona: true,
+        activePersonaId: renderContext.active_persona_id || selectedPersona?.id || null,
         fallbackName: renderContext.buddy_summary.persona_name,
         buddySummary: renderContext.buddy_summary
       }
@@ -116,6 +188,7 @@ const resolveActivePersonaSelection = ({
 
     return {
       hasTargetPersona: hasExplicitTargetPersona,
+      activePersonaId: renderContext.active_persona_id || selectedPersona?.id || null,
       fallbackName: selectionMatches ? selectedPersona.name : null,
       buddySummary: null
     }
@@ -124,6 +197,7 @@ const resolveActivePersonaSelection = ({
   if (selectionMatches) {
     return {
       hasTargetPersona: true,
+      activePersonaId: selectedPersona.id,
       fallbackName: selectedPersona.name,
       buddySummary: selectedPersona.buddy_summary ?? null
     }
@@ -131,9 +205,20 @@ const resolveActivePersonaSelection = ({
 
   return {
     hasTargetPersona: false,
+    activePersonaId: null,
     fallbackName: null,
     buddySummary: null
   }
+}
+
+const hasVisualPackAssetMap = (pack: PersonaVisualPack | null): boolean =>
+  Boolean(pack?.assets_by_id && Object.keys(pack.assets_by_id).length > 0)
+
+type PersonaVisualPackLoadStatus = "idle" | "loading" | "loaded" | "error"
+
+type PersonaVisualRenderErrorState = {
+  key: string
+  error: PersonaVisualDiagnosticCode
 }
 
 type BuddyShellHostInnerProps = {
@@ -149,6 +234,11 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
 }) => {
   const dockRef = React.useRef<HTMLDivElement | null>(null)
   const dragStateRef = React.useRef<DragState | null>(null)
+  const movementContextRef = React.useRef<BuddyMovementContext>({
+    activePersonaId: null,
+    sessionId: null,
+    manifest: null
+  })
 
   const positionBucket: PersonaBuddyPositionBucket =
     renderContext?.position_bucket ??
@@ -192,18 +282,39 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
         }
       )
 
+      const deltaX = event.clientX - dragStateRef.current.lastClientX
+      dragStateRef.current.lastClientX = event.clientX
+      dragStateRef.current.accumulatedDeltaX += deltaX
+      if (
+        Math.abs(dragStateRef.current.accumulatedDeltaX) >=
+        BUDDY_DRAG_MOVEMENT_THRESHOLD_PX
+      ) {
+        setBuddyDragMovementOverride(
+          movementContextRef.current,
+          dragStateRef.current.accumulatedDeltaX > 0
+            ? "moving_right"
+            : "moving_left"
+        )
+        dragStateRef.current.accumulatedDeltaX = 0
+      }
+
       setPosition(positionBucket, nextPosition)
     }
 
     const handlePointerUp = () => {
+      if (dragStateRef.current) {
+        clearBuddyDragOverride(movementContextRef.current)
+      }
       dragStateRef.current = null
     }
 
     window.addEventListener("pointermove", handlePointerMove)
     window.addEventListener("pointerup", handlePointerUp)
+    window.addEventListener("pointercancel", handlePointerUp)
     return () => {
       window.removeEventListener("pointermove", handlePointerMove)
       window.removeEventListener("pointerup", handlePointerUp)
+      window.removeEventListener("pointercancel", handlePointerUp)
     }
   }, [positionBucket, setPosition])
 
@@ -250,8 +361,11 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       const rect = dockRef.current.getBoundingClientRect()
       dragStateRef.current = {
         offsetX: event.clientX - rect.left,
-        offsetY: event.clientY - rect.top
+        offsetY: event.clientY - rect.top,
+        lastClientX: event.clientX,
+        accumulatedDeltaX: 0
       }
+      event.currentTarget.setPointerCapture?.(event.pointerId)
       event.preventDefault()
     },
     []
@@ -265,9 +379,228 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
       }),
     [renderContext, selectedAssistant]
   )
+  const { capabilities } = useServerCapabilities()
+  const liveControlEnabled = Boolean(capabilities?.hasPersonaLiveControl)
+  const liveControl = usePersonaLiveControl({
+    autoLoad: resolvedPersona.hasTargetPersona && liveControlEnabled,
+    defaultPersonaId: resolvedPersona.activePersonaId,
+    surface: renderContext.surface_id
+  })
+  const [visualPack, setVisualPack] = React.useState<PersonaVisualPack | null>(null)
+  const [visualPackLoadStatus, setVisualPackLoadStatus] =
+    React.useState<PersonaVisualPackLoadStatus>("idle")
+  const [visualPackLoadError, setVisualPackLoadError] =
+    React.useState<unknown>(null)
+  const [visualPackRefreshNonce, setVisualPackRefreshNonce] = React.useState(0)
+  const [visualRenderError, setVisualRenderError] =
+    React.useState<PersonaVisualRenderErrorState | null>(null)
+  const runtimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
+  const setVisualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
+    (state) => state.setRuntimeDiagnostics
+  )
+  const clearVisualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
+    (state) => state.clearRuntimeDiagnostics
+  )
+  const clearExpiredVisualOverride = usePersonaVisualRuntimeStore(
+    (state) => state.clearExpired
+  )
+  const visualDiagnosticsSourceId = `${root}:${
+    renderContext.surface_id || "unknown"
+  }`
+
+  React.useEffect(() => {
+    clearExpiredVisualOverride()
+    if (typeof window === "undefined") return undefined
+    const timer = window.setInterval(() => clearExpiredVisualOverride(), 1000)
+    return () => window.clearInterval(timer)
+  }, [clearExpiredVisualOverride])
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return undefined
+    const handlePackActivated = (event: Event) => {
+      const detail = (event as CustomEvent<{ personaId?: unknown }>).detail
+      const eventPersonaId = String(detail?.personaId ?? "").trim()
+      const activePersonaId = String(resolvedPersona.activePersonaId ?? "").trim()
+      if (eventPersonaId && eventPersonaId === activePersonaId) {
+        setVisualPackRefreshNonce((current) => current + 1)
+      }
+    }
+    window.addEventListener(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, handlePackActivated)
+    return () => {
+      window.removeEventListener(
+        PERSONA_VISUAL_PACK_ACTIVATED_EVENT,
+        handlePackActivated
+      )
+    }
+  }, [resolvedPersona.activePersonaId])
+
+  React.useEffect(() => {
+    const activePersonaId = String(resolvedPersona.activePersonaId || "").trim()
+    if (!resolvedPersona.hasTargetPersona || !activePersonaId) {
+      setVisualPack(null)
+      setVisualPackLoadStatus("idle")
+      setVisualPackLoadError(null)
+      return undefined
+    }
+
+    let cancelled = false
+    setVisualPack(null)
+    setVisualPackLoadStatus("loading")
+    setVisualPackLoadError(null)
+    ;(async () => {
+      try {
+        const response = await listPersonaVisualPacks(activePersonaId)
+        let activePack =
+          response.active_pack ??
+          response.packs.find((pack) => pack.status === "active") ??
+          null
+        if (activePack && !hasVisualPackAssetMap(activePack)) {
+          activePack = await getPersonaVisualPack(activePersonaId, activePack.id)
+        }
+        if (!cancelled) {
+          setVisualPack(activePack)
+          setVisualPackLoadStatus("loaded")
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setVisualPack(null)
+          setVisualPackLoadStatus("error")
+          setVisualPackLoadError(error)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    resolvedPersona.activePersonaId,
+    resolvedPersona.hasTargetPersona,
+    visualPackRefreshNonce
+  ])
+
+  React.useEffect(() => {
+    movementContextRef.current = {
+      activePersonaId: resolvedPersona.activePersonaId,
+      sessionId: renderContext.live_session_id ?? null,
+      manifest: visualPack?.manifest ?? null
+    }
+  }, [
+    renderContext.live_session_id,
+    resolvedPersona.activePersonaId,
+    visualPack?.manifest
+  ])
 
   const buddySummary = resolvedPersona.buddySummary
   const isDormant = resolvedPersona.hasTargetPersona && !buddySummary?.has_buddy
+  const applicableRuntimeOverride =
+    runtimeOverride &&
+    runtimeOverride.personaId === resolvedPersona.activePersonaId &&
+    (!renderContext.live_session_id ||
+      !runtimeOverride.sessionId ||
+      runtimeOverride.sessionId === renderContext.live_session_id)
+      ? runtimeOverride
+      : null
+  const runtimeStateIds = React.useMemo(() => {
+    const states = visualPack?.manifest?.states
+    const stateCatalog = visualPack?.manifest?.state_catalog
+    return Array.from(
+      new Set([...Object.keys(states || {}), ...Object.keys(stateCatalog || {})])
+    ).filter(isPersonaVisualCustomStateIdText)
+  }, [visualPack])
+  const visualState =
+    renderContext.visual_state ??
+    resolvePersonaVisualState({
+      liveVoiceState: renderContext.live_voice_state,
+      activeToolName: renderContext.active_tool_name,
+      activeToolStatus: renderContext.active_tool_status,
+      wakeArmed: renderContext.wake_armed,
+      recovering:
+        Boolean(renderContext.recovery_mode) &&
+        renderContext.recovery_mode !== "none",
+      runtimeOverride: applicableRuntimeOverride,
+      runtimeStateIds,
+      authoredTriggers: visualPack?.manifest?.authored_triggers,
+      mcpRuntimeReason: applicableRuntimeOverride?.reason
+    })
+  const visualRenderKey = `${resolvedPersona.activePersonaId || ""}:${
+    visualPack?.id || ""
+  }:${visualState}`
+  const activeVisualRenderError =
+    visualRenderError?.key === visualRenderKey ? visualRenderError.error : null
+  const handleVisualRenderError = React.useCallback(
+    (error: PersonaVisualDiagnosticCode | null) => {
+      if (!error) {
+        setVisualRenderError((current) =>
+          current?.key === visualRenderKey ? null : current
+        )
+        return
+      }
+      setVisualRenderError({ key: visualRenderKey, error })
+    },
+    [visualRenderKey]
+  )
+  const visualDiagnostic: PersonaVisualDiagnostic | null = React.useMemo(
+    () =>
+      getPrimaryPersonaVisualDiagnostic({
+        pack: visualPack,
+        visualState,
+        loadStatus: visualPackLoadStatus,
+        loadError: visualPackLoadError,
+        renderError: activeVisualRenderError,
+        includeNoActivePack: visualPackLoadStatus === "loaded"
+      }),
+    [
+      activeVisualRenderError,
+      visualPack,
+      visualPackLoadError,
+      visualPackLoadStatus,
+      visualState
+    ]
+  )
+  const liveControlView: PersonaBuddyLiveControlView | null =
+    liveControlEnabled
+      ? {
+          ...liveControl,
+          voiceIsListening: renderContext.live_voice_is_listening ?? undefined,
+          voiceState: renderContext.live_voice_state ?? null
+        }
+      : null
+
+  React.useEffect(() => {
+    const activePersonaId = String(resolvedPersona.activePersonaId || "").trim()
+    if (!resolvedPersona.hasTargetPersona || !activePersonaId) {
+      clearVisualRuntimeDiagnostics(visualDiagnosticsSourceId)
+      return undefined
+    }
+
+    setVisualRuntimeDiagnostics({
+      sourceId: visualDiagnosticsSourceId,
+      personaId: activePersonaId,
+      sessionId: renderContext.live_session_id ?? null,
+      packId: visualPack?.id ?? null,
+      packTitle: visualPack?.title ?? null,
+      packLoadStatus: visualPackLoadStatus,
+      visualState,
+      diagnostic: visualDiagnostic,
+      updatedAt: Date.now()
+    })
+    return () => {
+      clearVisualRuntimeDiagnostics(visualDiagnosticsSourceId)
+    }
+  }, [
+    clearVisualRuntimeDiagnostics,
+    renderContext.live_session_id,
+    resolvedPersona.activePersonaId,
+    resolvedPersona.hasTargetPersona,
+    setVisualRuntimeDiagnostics,
+    visualDiagnostic,
+    visualDiagnosticsSourceId,
+    visualPack?.id,
+    visualPack?.title,
+    visualPackLoadStatus,
+    visualState
+  ])
   const portalRoot = ensurePortalRoot()
 
   if (!resolvedPersona.hasTargetPersona) {
@@ -291,8 +624,14 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   return createPortal(
     <BuddyShellDock
       buddySummary={dockSummary}
+      personaId={resolvedPersona.activePersonaId}
       isOpen={isOpen}
       isDormant={isDormant}
+      visualPack={visualPack}
+      visualState={visualState}
+      visualDiagnostic={visualDiagnostic}
+      liveControl={liveControlView}
+      onVisualRenderError={handleVisualRenderError}
       position={position}
       onToggle={() => setOpen(!isOpen)}
       onDragHandlePointerDown={handleDragHandlePointerDown}

@@ -1,0 +1,88 @@
+Recent-history baseline by hotspot
+
+## unified_pipeline.py
+18049f109 Gate rerank debug snapshots behind explicit opt-in
+5a693d625 Merge origin/dev into codex/evaluations-recipe-framework
+7139d61d7 ui
+29f79260b Address PR 936 review feedback
+5eadd58f4 fix: address remaining qodo review items
+eb92c1b06 fix: optimize recipe run reuse lookup
+ef55db88b feat: execute rag retrieval tuning recipe runs
+b0f8c1d61 merge: bring main into dev preferring dev conflicts
+95bc78798 fixes
+3a64ad034 Merge branch 'dev' of https://github.com/rmusser01/tldw_server into dev
+14b0c2ab9 fix: close rag and quiz review threads
+392e9dd93 fix: harden workspace live audit coverage
+2bc759039 refactor: manage rag unified pipeline db lifecycle
+daec456c0 feat(rag): integrate sql retriever source into unified pipeline
+5c072205c fix(rag): address PR #796 review callouts
+466a16f23 feat(rag-pipeline): emit profile-resolution metadata and degrade two-tier safely
+804a2cfc3 rag+UI
+bc08cf579 UI
+58312fd53 bandit fixes + UI/UX in webui/extension + Claims fixups
+9c4781538 various fixes
+
+## rag_unified.py
+7139d61d7 ui
+182ac69ff refactor: trim endpoint media db type imports
+5c072205c fix(rag): address PR #796 review callouts
+5568bf467 feat(rag-api): apply request rag_profile defaults with explicit override precedence
+804a2cfc3 rag+UI
+58312fd53 bandit fixes + UI/UX in webui/extension + Claims fixups
+ef1088b3c fixes
+8c56189ff UI+Chat
+ea00186d9 progress
+f700785d2 progress
+d5aab417d progress
+4c6008050 fixes
+9f2e87005 ruff+guardian module
+de0083327 fixes + ruff
+2dfe5aa96 lint fixes + tts
+e0a30c0b8 linting + fixes
+f89a6d599 splitting and moving and linting
+21589cdee some linting
+d4fff86a6 doing some fixins
+835a6084c fixes+tts
+
+## database_retrievers.py
+b0f8c1d61 merge: bring main into dev preferring dev conflicts
+95bc78798 fixes
+3a64ad034 Merge branch 'dev' of https://github.com/rmusser01/tldw_server into dev
+e69c5f53a Merge branch 'codex/knowledge-qa-layout-and-retrieval' into dev
+4923d39ec fix: add knowledge qa media retrieval fallback
+c2ae70a98 test: harden media db v2 delete boundary
+91806e5c3 fix: address non-threaded pr review followups
+392e9dd93 fix: harden workspace live audit coverage
+dc6a98121 refactor: route rag retrievers through db factory
+3bc772bfc feat(text2sql): harden sql retriever and enforce result budgets
+daec456c0 feat(rag): integrate sql retriever source into unified pipeline
+40beb3561 bandit+personas
+9c4781538 various fixes
+a84fa9862 prgoress
+7f2596979 fixes
+de0083327 fixes + ruff
+e0a30c0b8 linting + fixes
+814d52974 checkpoint
+21589cdee some linting
+70ac82dd3 codeql fixes
+
+## advanced_reranking.py
+58312fd53 bandit fixes + UI/UX in webui/extension + Claims fixups
+de0083327 fixes + ruff
+57226f8fc rerank fix; watchlists; ruff
+05245a3d5 ruff + claims + RAG + fix for crash on opentelem
+e0a30c0b8 linting + fixes
+f89a6d599 splitting and moving and linting
+21589cdee some linting
+df90dcea0 fixes+tts
+9e3184cdb Writing Module+API
+ffd3108e1 fixes
+dca010283 pre-commit doc cleanup
+a7b30cca7 bugfixes
+594bbdf60 refactor
+419fc8657 refactoring
+cd11cce5a Test fixes + Prompt studio fixes/upgrades
+22fb127aa Non-Functional. Docs update via one-at-a-time refactor, +more
+a208c34bb prompts
+7a01db43d evals, rag, webui fixes/tests
+b920641be rag work

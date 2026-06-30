@@ -1,5 +1,4 @@
 import React from "react"
-import type { TFunction } from "i18next"
 import { X } from "lucide-react"
 import type {
   ModelRecommendation,
@@ -7,7 +6,7 @@ import type {
 } from "./model-recommendations"
 
 type Props = {
-  t: TFunction
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
   recommendations: ModelRecommendation[]
   showOpenInsights: boolean
   onOpenInsights: () => void

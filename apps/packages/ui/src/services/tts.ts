@@ -4,6 +4,7 @@ import {
   getSetting,
   setSetting,
   coerceBoolean,
+  coerceBooleanOrNull,
   coerceNumber,
   coerceOptionalString,
   coerceString
@@ -90,6 +91,16 @@ const ELEVEN_LABS_MODEL_SETTING = defineSetting(
   undefined as string | undefined,
   coerceOptionalString
 )
+const ELEVEN_LABS_KEY_VALID_SETTING = defineSetting(
+  "elevenLabsKeyValid",
+  null as boolean | null,
+  coerceBooleanOrNull
+)
+const ELEVEN_LABS_KEY_TESTED_AT_SETTING = defineSetting(
+  "elevenLabsKeyTestedAt",
+  "",
+  (value) => coerceOptionalString(value) || ""
+)
 const OPENAI_TTS_BASE_URL_SETTING = defineSetting(
   "openAITTSBaseUrl",
   "https://api.openai.com/v1",
@@ -109,6 +120,16 @@ const OPENAI_TTS_VOICE_SETTING = defineSetting(
   "openAITTSVoice",
   "alloy",
   (value) => coerceString(value, "alloy")
+)
+const OPENAI_TTS_KEY_VALID_SETTING = defineSetting(
+  "openAITTSKeyValid",
+  null as boolean | null,
+  coerceBooleanOrNull
+)
+const OPENAI_TTS_KEY_TESTED_AT_SETTING = defineSetting(
+  "openAITTSKeyTestedAt",
+  "",
+  (value) => coerceOptionalString(value) || ""
 )
 const RESPONSE_SPLITTING_SETTING = defineSetting(
   "ttsResponseSplitting",
@@ -273,6 +294,24 @@ export const setElevenLabsModel = async (elevenLabsModel: string) => {
   await setSetting(ELEVEN_LABS_MODEL_SETTING, elevenLabsModel)
 }
 
+export const getElevenLabsKeyValid = async () =>
+  getSetting(ELEVEN_LABS_KEY_VALID_SETTING)
+
+export const setElevenLabsKeyValid = async (
+  elevenLabsKeyValid: boolean | null
+) => {
+  await setSetting(ELEVEN_LABS_KEY_VALID_SETTING, elevenLabsKeyValid)
+}
+
+export const getElevenLabsKeyTestedAt = async () =>
+  getSetting(ELEVEN_LABS_KEY_TESTED_AT_SETTING)
+
+export const setElevenLabsKeyTestedAt = async (
+  elevenLabsKeyTestedAt: string
+) => {
+  await setSetting(ELEVEN_LABS_KEY_TESTED_AT_SETTING, elevenLabsKeyTestedAt)
+}
+
 export const getOpenAITTSBaseUrl = async () =>
   getSetting(OPENAI_TTS_BASE_URL_SETTING)
 
@@ -299,6 +338,24 @@ export const getOpenAITTSVoice = async () =>
 
 export const setOpenAITTSVoice = async (openAITTSVoice: string) => {
   await setSetting(OPENAI_TTS_VOICE_SETTING, openAITTSVoice)
+}
+
+export const getOpenAITTSKeyValid = async () =>
+  getSetting(OPENAI_TTS_KEY_VALID_SETTING)
+
+export const setOpenAITTSKeyValid = async (
+  openAITTSKeyValid: boolean | null
+) => {
+  await setSetting(OPENAI_TTS_KEY_VALID_SETTING, openAITTSKeyValid)
+}
+
+export const getOpenAITTSKeyTestedAt = async () =>
+  getSetting(OPENAI_TTS_KEY_TESTED_AT_SETTING)
+
+export const setOpenAITTSKeyTestedAt = async (
+  openAITTSKeyTestedAt: string
+) => {
+  await setSetting(OPENAI_TTS_KEY_TESTED_AT_SETTING, openAITTSKeyTestedAt)
 }
 
 export const getResponseSplitting = async () =>
@@ -436,6 +493,8 @@ export const getTTSSettings = async () => {
     elevenLabsApiKey,
     elevenLabsVoiceId,
     elevenLabsModel,
+    elevenLabsKeyValid,
+    elevenLabsKeyTestedAt,
     responseSplitting,
     removeReasoningTagTTS,
     // OPENAI
@@ -443,6 +502,8 @@ export const getTTSSettings = async () => {
     openAITTSApiKey,
     openAITTSModel,
     openAITTSVoice,
+    openAITTSKeyValid,
+    openAITTSKeyTestedAt,
     // UTILS
     ttsAutoPlay,
     playbackSpeed,
@@ -470,6 +531,8 @@ export const getTTSSettings = async () => {
     getElevenLabsApiKey(),
     getElevenLabsVoiceId(),
     getElevenLabsModel(),
+    getElevenLabsKeyValid(),
+    getElevenLabsKeyTestedAt(),
     getResponseSplitting(),
     getRemoveReasoningTagTTS(),
     // OPENAI
@@ -477,6 +540,8 @@ export const getTTSSettings = async () => {
     getOpenAITTSApiKey(),
     getOpenAITTSModel(),
     getOpenAITTSVoice(),
+    getOpenAITTSKeyValid(),
+    getOpenAITTSKeyTestedAt(),
     // UTILS
     isTTSAutoPlayEnabled(),
     getSpeechPlaybackSpeed(),
@@ -506,6 +571,8 @@ export const getTTSSettings = async () => {
     elevenLabsApiKey,
     elevenLabsVoiceId,
     elevenLabsModel,
+    elevenLabsKeyValid,
+    elevenLabsKeyTestedAt,
     responseSplitting,
     removeReasoningTagTTS,
     // OPENAI
@@ -513,6 +580,8 @@ export const getTTSSettings = async () => {
     openAITTSApiKey,
     openAITTSModel,
     openAITTSVoice,
+    openAITTSKeyValid,
+    openAITTSKeyTestedAt,
     ttsAutoPlay,
     playbackSpeed,
     tldwTtsModel,
@@ -540,12 +609,16 @@ export const setTTSSettings = async ({
   elevenLabsApiKey,
   elevenLabsVoiceId,
   elevenLabsModel,
+  elevenLabsKeyValid,
+  elevenLabsKeyTestedAt,
   responseSplitting,
   removeReasoningTagTTS,
   openAITTSBaseUrl,
   openAITTSApiKey,
   openAITTSModel,
   openAITTSVoice,
+  openAITTSKeyValid,
+  openAITTSKeyTestedAt,
   ttsAutoPlay,
   playbackSpeed,
   tldwTtsModel,
@@ -570,12 +643,16 @@ export const setTTSSettings = async ({
   elevenLabsApiKey: string
   elevenLabsVoiceId: string
   elevenLabsModel: string
+  elevenLabsKeyValid?: boolean | null
+  elevenLabsKeyTestedAt?: string
   responseSplitting: string
   removeReasoningTagTTS: boolean
   openAITTSBaseUrl: string
   openAITTSApiKey: string
   openAITTSModel: string
   openAITTSVoice: string
+  openAITTSKeyValid?: boolean | null
+  openAITTSKeyTestedAt?: string
   ttsAutoPlay: boolean
   playbackSpeed: number
   tldwTtsModel: string
@@ -593,7 +670,7 @@ export const setTTSSettings = async ({
   tldwTtsNormalizePhones: boolean
   tldwTtsNormalizePlurals: boolean
 }) => {
-  await Promise.all([
+  const updates = [
     setTTSEnabled(ttsEnabled),
     setTTSProvider(ttsProvider),
     setVoice(voice),
@@ -623,5 +700,18 @@ export const setTTSSettings = async ({
     setTldwTTSNormalizeEmails(tldwTtsNormalizeEmails),
     setTldwTTSNormalizePhones(tldwTtsNormalizePhones),
     setTldwTTSNormalizePlurals(tldwTtsNormalizePlurals)
-  ])
+  ]
+  if (elevenLabsKeyValid !== undefined) {
+    updates.push(setElevenLabsKeyValid(elevenLabsKeyValid))
+  }
+  if (elevenLabsKeyTestedAt !== undefined) {
+    updates.push(setElevenLabsKeyTestedAt(elevenLabsKeyTestedAt))
+  }
+  if (openAITTSKeyValid !== undefined) {
+    updates.push(setOpenAITTSKeyValid(openAITTSKeyValid))
+  }
+  if (openAITTSKeyTestedAt !== undefined) {
+    updates.push(setOpenAITTSKeyTestedAt(openAITTSKeyTestedAt))
+  }
+  await Promise.all(updates)
 }

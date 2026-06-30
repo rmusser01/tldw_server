@@ -19,9 +19,12 @@ from loguru import logger
 
 try:
     import bleach  # type: ignore
-    from bleach.css_sanitizer import CSSSanitizer  # type: ignore
-except Exception:  # pragma: no cover - bleach is a declared dependency
+except ImportError:  # pragma: no cover - bleach is a declared dependency
     bleach = None
+
+try:
+    from bleach.css_sanitizer import CSSSanitizer  # type: ignore
+except ImportError:  # pragma: no cover - CSS sanitizer depends on optional tinycss2
     CSSSanitizer = None  # type: ignore
 
 try:
@@ -426,6 +429,17 @@ def _sanitize_markdown(markdown_text: str) -> str:
         protocols=_ALLOWED_PROTOCOLS,
         strip=True,
         strip_comments=True,
+    )
+
+
+def _json_for_inline_script(value: Any) -> str:
+    return (
+        json.dumps(value, ensure_ascii=True)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
     )
 
 
@@ -926,7 +940,7 @@ def export_presentation_bundle(
 ) -> bytes:
     resolved_assets = _resolve_assets_dir(assets_dir)
     _validate_reveal_assets(resolved_assets, theme)
-    settings_json = json.dumps(settings or {}, ensure_ascii=True)
+    settings_json = _json_for_inline_script(settings or {})
     sanitized_css = _sanitize_custom_css(
         _compose_export_css(custom_css=custom_css, visual_style_snapshot=visual_style_snapshot)
     )
@@ -1030,7 +1044,7 @@ def export_presentation_pdf(
 
     resolved_assets = _resolve_assets_dir(assets_dir)
     _validate_reveal_assets(resolved_assets, theme)
-    settings_json = json.dumps(settings or {}, ensure_ascii=True)
+    settings_json = _json_for_inline_script(settings or {})
     sanitized_css = _sanitize_custom_css(
         _compose_export_css(custom_css=custom_css, visual_style_snapshot=visual_style_snapshot)
     )

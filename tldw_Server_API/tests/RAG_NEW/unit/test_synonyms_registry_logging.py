@@ -2,6 +2,44 @@ from pathlib import Path
 from loguru import logger
 
 
+def test_get_corpus_synonyms_load_failure_log_omits_exception_details(tmp_path, monkeypatch):
+    config_dir = tmp_path / "etc" / "tldw"
+    syn_dir = config_dir / "Synonyms"
+    syn_dir.mkdir(parents=True)
+    config_file = config_dir / "config.txt"
+    config_file.write_text("# dummy config", encoding="utf-8")
+
+    corpus = "safe_corpus"
+    (syn_dir / f"{corpus}.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_file))
+
+    from tldw_Server_API.app.core.RAG.rag_service import synonyms_registry as sr
+
+    secret = "/private/rag-synonyms.db?token=secret-token"
+
+    def _raise_load(_file):
+        raise RuntimeError(f"failed to load {secret}")
+
+    monkeypatch.setattr(sr.json, "load", _raise_load)
+
+    messages: list[str] = []
+    sink_id = sr.logger.add(
+        lambda message: messages.append(str(message.record.get("message") or "")),
+        level="WARNING",
+    )
+    try:
+        out = sr.get_corpus_synonyms(corpus)
+    finally:
+        sr.logger.remove(sink_id)
+
+    assert out == {}
+    assert messages == [f"Failed to load synonyms for corpus '{corpus}'"]
+    joined = "\n".join(messages)
+    assert "/private/" not in joined
+    assert "rag-synonyms.db" not in joined
+    assert "secret-token" not in joined
+
+
 def test_get_corpus_synonyms_logs_selection_and_does_not_create(tmp_path, monkeypatch):
 
 

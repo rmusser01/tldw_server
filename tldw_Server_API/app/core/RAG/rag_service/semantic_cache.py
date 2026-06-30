@@ -154,8 +154,8 @@ class SemanticCache:
                 embedding_array = embedding_array / norm
 
             return embedding_array
-        except (AttributeError, TypeError, ValueError, RuntimeError, np.linalg.LinAlgError) as e:
-            logger.error(f"Failed to generate embedding: {e}")
+        except (AttributeError, TypeError, ValueError, RuntimeError, np.linalg.LinAlgError):
+            logger.error("Failed to generate embedding")
             return None
 
     def _compute_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
@@ -470,7 +470,7 @@ class SemanticCache:
 
                 logger.info(f"Saved semantic cache state ({len(self._cache)} entries)")
         except (OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to save semantic cache: {e}")
+            logger.error(f"Failed to save semantic cache: {type(e).__name__}")
 
     def load(self) -> None:
         """Load cache state from disk."""
@@ -524,7 +524,7 @@ class SemanticCache:
         except FileNotFoundError:
             logger.debug(f"No cache file found at {self.persist_path}")
         except (json.JSONDecodeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to load semantic cache: {e}")
+            logger.error(f"Failed to load semantic cache: {type(e).__name__}")
 
 
 class AdaptiveCache(SemanticCache):
@@ -653,7 +653,7 @@ def _resolve_default_cache_dir() -> Optional[Path]:
         cfg = load_and_log_configs() or {}
         project_root = cfg.get("PROJECT_ROOT")
     except (ImportError, AttributeError, KeyError, TypeError) as exc:
-        logger.warning("Semantic cache: could not load config for PROJECT_ROOT: {}", exc)
+        logger.warning("Semantic cache: could not load config for PROJECT_ROOT: {}", type(exc).__name__)
         return None
     if project_root:
         try:
@@ -662,15 +662,14 @@ def _resolve_default_cache_dir() -> Optional[Path]:
             return _DEFAULT_CACHE_DIR
         except (OSError, RuntimeError, ValueError) as exc:
             logger.error(
-                "Semantic cache: failed to resolve cache path from PROJECT_ROOT {}: {}",
-                project_root,
-                exc,
+                "Semantic cache: failed to resolve cache path from PROJECT_ROOT: {}",
+                type(exc).__name__,
             )
             return None
-        except Exception:
-            logger.exception(
-                "Semantic cache: unexpected error resolving cache path from PROJECT_ROOT {}",
-                project_root,
+        except Exception as exc:
+            logger.error(
+                "Semantic cache: unexpected error resolving cache path from PROJECT_ROOT: {}",
+                type(exc).__name__,
             )
             raise
     return None
@@ -684,15 +683,14 @@ def _default_persist_path(namespace_key: str) -> Optional[str]:
         base_dir_resolved = base_dir.expanduser().resolve(strict=False)
     except (OSError, RuntimeError, ValueError) as exc:
         logger.error(
-            "Semantic cache: failed to resolve base dir {} for default persist path: {}",
-            base_dir,
-            exc,
+            "Semantic cache: failed to resolve base dir for default persist path: {}",
+            type(exc).__name__,
         )
         return None
-    except Exception:
-        logger.exception(
-            "Semantic cache: unexpected error resolving base dir {} for default persist path",
-            base_dir,
+    except Exception as exc:
+        logger.error(
+            "Semantic cache: unexpected error resolving base dir for default persist path: {}",
+            type(exc).__name__,
         )
         raise
     # Normalize and bound the namespace key before embedding it in the filename.
@@ -702,35 +700,31 @@ def _default_persist_path(namespace_key: str) -> Optional[str]:
         full_path = candidate.resolve(strict=False)
     except (OSError, RuntimeError, ValueError) as exc:
         logger.error(
-            "Semantic cache: failed to resolve default persist path {}: {}",
-            candidate,
-            exc,
+            "Semantic cache: failed to resolve default persist path: {}",
+            type(exc).__name__,
         )
         return None
-    except Exception:
-        logger.exception(
-            "Semantic cache: unexpected error resolving default persist path {}",
-            candidate,
+    except Exception as exc:
+        logger.error(
+            "Semantic cache: unexpected error resolving default persist path: {}",
+            type(exc).__name__,
         )
         raise
     # Verify that the final path is contained within the base cache directory.
     try:
         if not (full_path == base_dir_resolved or base_dir_resolved in full_path.parents):
-            logger.warning(f"Refusing to use out-of-root cache path: {full_path}")
+            logger.warning("Refusing to use out-of-root semantic cache path.")
             return None
     except (OSError, RuntimeError, ValueError) as exc:
         logger.error(
-            "Semantic cache: failed to validate cache path {} against base dir {}: {}",
-            full_path,
-            base_dir_resolved,
-            exc,
+            "Semantic cache: failed to validate cache path against base dir: {}",
+            type(exc).__name__,
         )
         return None
-    except Exception:
-        logger.exception(
-            "Semantic cache: unexpected error validating cache path {} against base dir {}",
-            full_path,
-            base_dir_resolved,
+    except Exception as exc:
+        logger.error(
+            "Semantic cache: unexpected error validating cache path against base dir: {}",
+            type(exc).__name__,
         )
         raise
     return str(full_path)
@@ -757,9 +751,8 @@ def _sanitize_persist_path(persist_path: Optional[str], namespace_key: str) -> O
         base_dir_resolved = base_dir.expanduser().resolve(strict=False)
     except (OSError, RuntimeError, ValueError) as exc:
         logger.error(
-            "Semantic cache: failed to resolve base cache dir {} in sanitize: {}",
-            base_dir,
-            exc,
+            "Semantic cache: failed to resolve base cache dir in sanitize: {}",
+            type(exc).__name__,
         )
         # If we cannot resolve the base directory safely, use the default path or disable.
         fallback = _default_persist_path(namespace_key)
@@ -768,10 +761,10 @@ def _sanitize_persist_path(persist_path: Optional[str], namespace_key: str) -> O
             return fallback
         logger.warning("Failed to resolve base cache dir; persistence disabled.")
         return None
-    except Exception:
-        logger.exception(
-            "Semantic cache: unexpected error resolving base cache dir {} in sanitize",
-            base_dir,
+    except Exception as exc:
+        logger.error(
+            "Semantic cache: unexpected error resolving base cache dir in sanitize: {}",
+            type(exc).__name__,
         )
         raise
     candidate_path = Path(persist_path).expanduser()
@@ -781,13 +774,13 @@ def _sanitize_persist_path(persist_path: Optional[str], namespace_key: str) -> O
         else:
             resolved_path = (base_dir_resolved / candidate_path).resolve(strict=False)
     except (OSError, RuntimeError, ValueError) as exc:
-        logger.error("Semantic cache: failed to resolve persist_path {}: {}", persist_path, exc)
+        logger.error("Semantic cache: failed to resolve persist_path: {}", type(exc).__name__)
         logger.warning("Failed to resolve semantic cache persist_path; using default cache path.")
         return _default_persist_path(namespace_key)
-    except Exception:
-        logger.exception(
-            "Semantic cache: unexpected error resolving persist_path {}",
-            persist_path,
+    except Exception as exc:
+        logger.error(
+            "Semantic cache: unexpected error resolving persist_path: {}",
+            type(exc).__name__,
         )
         raise
     if not resolved_path.is_relative_to(base_dir_resolved):

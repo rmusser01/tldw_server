@@ -5,7 +5,7 @@ import { forceConnected, waitForConnectionStore } from "./utils/connection"
 const API_KEY = "THIS-IS-A-SECURE-KEY-123-FAKE-KEY"
 
 test.describe("Quick ingest cancel flow", () => {
-  test("quick ingest cancel mid-process is immediate after confirmation", async () => {
+  test("quick ingest cancel all reaches terminal wizard results", async () => {
     const { context, page, optionsUrl } = await launchWithBuiltExtension({
       seedConfig: {
         serverUrl: "http://127.0.0.1:8000",
@@ -121,45 +121,36 @@ test.describe("Quick ingest cancel flow", () => {
       await expect(openQuickIngestButton).toBeVisible()
       await openQuickIngestButton.click()
 
-      const urlInput = page
+      const dialog = page.getByRole("dialog", { name: /quick ingest/i }).first()
+      await expect(dialog).toBeVisible()
+
+      const urlInput = dialog
         .getByLabel(/Paste URLs input/i)
-        .or(page.getByPlaceholder(/https:\/\/example\.com/i))
+        .or(dialog.getByLabel(/URL input area/i))
+        .or(dialog.getByPlaceholder(/https:\/\/example\.com/i))
         .first()
       await expect(urlInput).toBeEnabled({ timeout: 20000 })
       await urlInput.fill("https://example.com/cancel-me")
-      await page.getByRole("button", { name: /add urls/i }).first().click()
+      await dialog.getByRole("button", { name: /add urls/i }).first().click()
 
-      const runButton = page.getByTestId("quick-ingest-run").first()
-      await expect(runButton).toBeVisible()
-      await runButton.click()
+      const useDefaultsButton = dialog
+        .getByRole("button", { name: /use defaults & process/i })
+        .first()
+      await expect(useDefaultsButton).toBeVisible()
+      await useDefaultsButton.click()
 
-      const cancelButton = page.getByTestId("quick-ingest-cancel").first()
+      const cancelButton = dialog.getByRole("button", { name: /cancel all/i }).first()
       await expect(cancelButton).toBeVisible({ timeout: 10000 })
 
       await cancelButton.click()
-      const keepRunningButton = page.getByRole("button", { name: /keep running/i })
-      await expect(keepRunningButton).toBeVisible({ timeout: 10000 })
-      await keepRunningButton.click()
 
-      await expect(cancelButton).toBeVisible()
-
-      await cancelButton.click()
-      const confirmCancelButton = page.getByRole("button", { name: /cancel run/i })
-      await expect(confirmCancelButton).toBeVisible({ timeout: 10000 })
-      await confirmCancelButton.click()
-
-      const resultsTab = page.getByRole("tab", { name: /results/i }).first()
-      if (await resultsTab.count()) {
-        await resultsTab.click()
-      }
-
-      const cancelledSummary = page
-        .getByText(/ingest run cancelled/i)
-        .first()
-      await expect(cancelledSummary).toBeVisible({ timeout: 10000 })
+      await expect(dialog.getByTestId("wizard-results-step")).toBeVisible({
+        timeout: 10000
+      })
+      await expect(dialog.getByRole("region", { name: /error items/i })).toBeVisible()
 
       await page.waitForTimeout(1200)
-      await expect(cancelledSummary).toBeVisible()
+      await expect(dialog.getByTestId("wizard-results-step")).toBeVisible()
     } finally {
       try {
         await page.evaluate(() => {

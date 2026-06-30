@@ -172,6 +172,13 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
 // Send control props
 // ---------------------------------------------------------------------------
 
+export type PlaygroundSendBlocker = {
+  active: boolean
+  title: string
+  actionLabel: string
+  onAction: () => void
+}
+
 export interface PlaygroundSendControlProps {
   isProMode: boolean
   isMobileViewport: boolean
@@ -184,6 +191,7 @@ export interface PlaygroundSendControlProps {
   onStopStreaming: () => void
   onStopListening: () => void
   onSubmitForm: () => void
+  characterChatSendBlocker?: PlaygroundSendBlocker | null
 
   // Send menu
   sendMenuOpen: boolean
@@ -210,13 +218,18 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       onStopStreaming,
       onStopListening,
       onSubmitForm,
+      characterChatSendBlocker,
       sendMenuOpen,
       onSendMenuChange,
       t
     } = props
 
+    const activeCharacterSendBlocker =
+      characterChatSendBlocker?.active === true
     const shouldQueuePrimaryAction = isSending || !isConnectionReady
-    const primaryActionLabel = shouldQueuePrimaryAction
+    const primaryActionLabel = activeCharacterSendBlocker
+      ? characterChatSendBlocker.actionLabel
+      : shouldQueuePrimaryAction
       ? t("common:queue", "Queue")
       : sendLabel
     const isMac =
@@ -227,6 +240,8 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
           "playground:composer.validationCompareMinModelsInline",
           "Select at least two models for Compare mode."
         ) as string)
+      : activeCharacterSendBlocker
+        ? characterChatSendBlocker.title
       : shouldQueuePrimaryAction
         ? ((isSending
             ? t(
@@ -248,6 +263,28 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 ? "Send message (\u2318+Enter)"
                 : "Send message (Ctrl+Enter)"
             ) as string)
+    const primaryActionAriaLabel = activeCharacterSendBlocker
+      ? characterChatSendBlocker.actionLabel
+      : shouldQueuePrimaryAction
+        ? (t(
+            "playground:composer.queue.primaryAria",
+            "Queue request"
+          ) as string)
+        : (t(
+            "playground:composer.submitAria",
+            "Send message"
+          ) as string)
+    const handlePrimaryButtonClick =
+      activeCharacterSendBlocker || shouldQueuePrimaryAction
+        ? () => {
+            onStopListening()
+            if (activeCharacterSendBlocker) {
+              characterChatSendBlocker.onAction()
+              return
+            }
+            onSubmitForm()
+          }
+        : undefined
 
     return (
       <div className="flex items-center gap-2">
@@ -264,15 +301,12 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                   ? "middle"
                   : "small"
             }
-            htmlType={shouldQueuePrimaryAction ? "button" : "submit"}
-            onClick={
-              shouldQueuePrimaryAction
-                ? () => {
-                    onStopListening()
-                    onSubmitForm()
-                  }
-                : undefined
+            htmlType={
+              activeCharacterSendBlocker || shouldQueuePrimaryAction
+                ? "button"
+                : "submit"
             }
+            onClick={handlePrimaryButtonClick}
             disabled={compareNeedsMoreModels}
             className={
               isMobileViewport
@@ -280,24 +314,16 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 : undefined
             }
             title={primaryActionTitle}
-            aria-label={
-              shouldQueuePrimaryAction
-                ? (t(
-                    "playground:composer.queue.primaryAria",
-                    "Queue request"
-                  ) as string)
-                : (t(
-                    "playground:composer.submitAria",
-                    "Send message"
-                  ) as string)
-            }
+            aria-label={primaryActionAriaLabel}
           >
             <div
               className={`inline-flex items-center ${
                 isProMode ? "gap-2" : "gap-1"
               }`}
             >
-              {!shouldQueuePrimaryAction && sendWhenEnter ? (
+              {!activeCharacterSendBlocker &&
+              !shouldQueuePrimaryAction &&
+              sendWhenEnter ? (
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   fill="none"
@@ -363,13 +389,13 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
               aria-label={
                 t(
                   "playground:composer.sendOptions",
-                  "Open send options"
+                  "Open message delivery options"
                 ) as string
               }
               title={
                 t(
                   "playground:composer.sendOptions",
-                  "Open send options"
+                  "Open message delivery options"
                 ) as string
               }
               icon={

@@ -16,6 +16,10 @@ export interface ResearchWorkspaceServerClient {
     workspaceId: string,
     data: WorkspaceSourceCreateRequest
   ) => Promise<WorkspaceSourceApiResponse>
+  updateWorkspaceSourceSelection?: (
+    workspaceId: string,
+    selectedSourceIds: string[]
+  ) => Promise<unknown>
 }
 
 export interface ResearchWorkspaceServerReconcileResult {
@@ -31,6 +35,7 @@ export interface ResearchWorkspaceServerReconcileInput {
   workspaceId: string
   workspaceName?: string | null
   sources: WorkspaceSource[]
+  selectedSourceIds?: string[]
 }
 
 const DEFAULT_RESEARCH_WORKSPACE_NAME = "Research Workspace"
@@ -72,7 +77,8 @@ const appendReconcileError = (
 
 const buildSourceCreateRequest = (
   source: WorkspaceSource,
-  position: number
+  position: number,
+  selectedSourceIds?: Set<string>
 ): WorkspaceSourceCreateRequest | null => {
   if (!source.id.trim() || !isValidMediaId(source.mediaId)) {
     return null
@@ -85,7 +91,7 @@ const buildSourceCreateRequest = (
     source_type: source.type,
     url: source.url || null,
     position,
-    selected: true
+    selected: selectedSourceIds ? selectedSourceIds.has(source.id) : true
   }
 }
 
@@ -109,7 +115,8 @@ export const reconcileResearchWorkspaceServerState = async ({
   client,
   workspaceId,
   workspaceName,
-  sources
+  sources,
+  selectedSourceIds
 }: ResearchWorkspaceServerReconcileInput): Promise<ResearchWorkspaceServerReconcileResult> => {
   const result: ResearchWorkspaceServerReconcileResult = {
     workspaceReady: false,
@@ -151,9 +158,16 @@ export const reconcileResearchWorkspaceServerState = async ({
       .map((source) => source.media_id)
       .filter((mediaId): mediaId is number => isValidMediaId(mediaId))
   )
+  const selectedSourceIdSet = Array.isArray(selectedSourceIds)
+    ? new Set(selectedSourceIds)
+    : undefined
 
   for (const [position, source] of sources.entries()) {
-    const sourceRequest = buildSourceCreateRequest(source, position)
+    const sourceRequest = buildSourceCreateRequest(
+      source,
+      position,
+      selectedSourceIdSet
+    )
     if (
       sourceRequest === null ||
       existingSourceIds.has(source.id) ||
@@ -172,6 +186,17 @@ export const reconcileResearchWorkspaceServerState = async ({
       appendReconcileError(
         result,
         `Failed to add source ${source.id}: ${describeReconcileError(error)}`
+      )
+    }
+  }
+
+  if (Array.isArray(selectedSourceIds) && client.updateWorkspaceSourceSelection) {
+    try {
+      await client.updateWorkspaceSourceSelection(workspaceId, selectedSourceIds)
+    } catch (error) {
+      appendReconcileError(
+        result,
+        `Failed to update source selection: ${describeReconcileError(error)}`
       )
     }
   }

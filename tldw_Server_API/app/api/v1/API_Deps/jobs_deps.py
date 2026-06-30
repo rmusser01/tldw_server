@@ -58,3 +58,12 @@ def get_job_manager() -> JobManager:
         job_manager = _build_job_manager(db_url, db_path or None)
         _job_manager_cache[cache_key] = job_manager
         return job_manager
+
+
+def try_get_job_manager() -> JobManager | None:
+    """Resolve the Jobs manager for non-critical status paths without failing requests."""
+    try:
+        return get_job_manager()
+    except Exception as exc:
+        logger.warning("Jobs manager unavailable: {}", exc)
+        return None

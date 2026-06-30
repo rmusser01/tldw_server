@@ -255,7 +255,7 @@ class PostGenerationVerifier:
                     claims_payload = (run or {}).get("claims")
                     summary_payload = (run or {}).get("summary")
         except Exception as e:  # noqa: BLE001 - claims verification best-effort
-            logger.warning(f"Post-check claims verification failed: {e}")
+            logger.warning(f"Post-check claims verification failed: {_safe_exception_label(e)}")
 
         # Compute unsupported ratio
         unsupported = 0
@@ -281,8 +281,8 @@ class PostGenerationVerifier:
         try:
             from tldw_Server_API.app.core.Claims_Extraction.monitoring import record_postcheck_metrics
             record_postcheck_metrics(total, unsupported)
-        except Exception as metrics_error:  # noqa: BLE001 - metrics best-effort
-            logger.debug("Post-generation verifier metrics recording failed", exc_info=metrics_error)
+        except Exception:  # noqa: BLE001 - metrics best-effort
+            logger.debug("Post-generation verifier metrics recording failed")
 
         # Decide if we should attempt a repair
         if ratio <= self._threshold or self._max_retries <= 0:
@@ -328,8 +328,8 @@ class PostGenerationVerifier:
                                     expanded = await expand_fn(query, strategies=["acronym", "synonym", "domain"])  # light expansion
                                     if isinstance(expanded, list):
                                         candidate_queries.extend([q for q in expanded if isinstance(q, str) and q.strip()])
-                            except Exception as expansion_error:  # noqa: BLE001 - expansion best-effort
-                                logger.debug("Adaptive fix query expansion failed; continuing", exc_info=expansion_error)
+                            except Exception:  # noqa: BLE001 - expansion best-effort
+                                logger.debug("Adaptive fix query expansion failed; continuing")
                             # Optional HyDE vector for the base query
                             hyde_vector = None
                             try:
@@ -358,14 +358,14 @@ class PostGenerationVerifier:
                                         if prev is None or float(getattr(d, "score", 0.0)) > float(getattr(prev, "score", 0.0)):
                                             docs_union[getattr(d, "id", "")] = d
                                 except Exception:  # noqa: BLE001 - per-query retrieval best-effort
-                                    continue
+                                    logger.debug("Adaptive per-query retrieval failed; continuing")
 
                             merged_docs = sorted(docs_union.values(), key=lambda x: getattr(x, "score", 0.0), reverse=True)
                             merged_docs = merged_docs[: max(5, min(30, top_k * 2))]
                             # Apply simple diversity filter to reduce near-duplicates
                             new_docs = _select_diverse(merged_docs, k=max(5, min(15, top_k)))
             except Exception as e:  # noqa: BLE001 - fallback to base docs
-                logger.debug(f"Adaptive retrieval failed; using base docs. Reason: {e}")
+                logger.debug(f"Adaptive retrieval failed; using base docs. Reason: {_safe_exception_label(e)}")
                 new_docs = base_documents[:]
 
             # Regenerate if possible
@@ -382,7 +382,7 @@ class PostGenerationVerifier:
                 else:
                     new_answer = None
             except Exception as e:  # noqa: BLE001 - regeneration best-effort
-                logger.debug(f"Adaptive regeneration failed: {e}")
+                logger.debug(f"Adaptive regeneration failed: {_safe_exception_label(e)}")
                 new_answer = None
 
             # If we couldn't regenerate, stop
@@ -425,7 +425,7 @@ class PostGenerationVerifier:
                 else:
                     sum2 = {}
             except Exception as e:  # noqa: BLE001 - recheck best-effort
-                logger.debug(f"Adaptive recheck failed: {e}")
+                logger.debug(f"Adaptive recheck failed: {_safe_exception_label(e)}")
                 sum2 = {}
 
             try:
@@ -449,8 +449,8 @@ class PostGenerationVerifier:
             outcome.new_answer = new_answer
             try:
                 increment_counter("rag_adaptive_fix_success_total", 1)
-            except Exception as metrics_error:  # noqa: BLE001 - metrics best-effort
-                logger.debug("Post-generation adaptive-fix success metric failed", exc_info=metrics_error)
+            except Exception:  # noqa: BLE001 - metrics best-effort
+                logger.debug("Post-generation adaptive-fix success metric failed")
             observe_histogram("rag_postcheck_duration_seconds", time.time() - start_ts, labels={"outcome": "fixed"})
         else:
             observe_histogram("rag_postcheck_duration_seconds", time.time() - start_ts, labels={"outcome": "unfixed"})
@@ -462,6 +462,10 @@ async def _maybe_await(value):  # pragma: no cover - trivial helper
     if asyncio.iscoroutine(value):
         return await value
     return value
+
+
+def _safe_exception_label(exc: BaseException) -> str:
+    return type(exc).__name__
 
 
 def _jaccard(a: str, b: str) -> float:

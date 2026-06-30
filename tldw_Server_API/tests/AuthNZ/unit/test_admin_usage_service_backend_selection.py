@@ -119,6 +119,29 @@ class _PostgresTxConnWithSqliteTrap:
         ]
 
 
+class _PostgresSummaryFallbackConn:
+    def __init__(self) -> None:
+        self._is_sqlite = False
+        self.fetch_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    async def fetch(self, query: str, *args: Any) -> list[dict[str, Any]]:
+        self.fetch_calls.append((str(query), tuple(args)))
+        if len(self.fetch_calls) == 1:
+            raise RuntimeError("cache columns missing")
+        return [
+            {
+                "group_value": "openai",
+                "requests": 2,
+                "errors": 0,
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "total_tokens": 120,
+                "total_cost_usd": 0.02,
+                "latency_avg_ms": 11.5,
+            }
+        ]
+
+
 @pytest.mark.asyncio
 async def test_fetch_usage_daily_sqlite_tx_path_ignores_pool_helpers(
 ) -> None:
@@ -183,3 +206,42 @@ async def test_fetch_usage_daily_postgres_tx_path_uses_fetch_helpers() -> None:
     assert db.fetchval_calls
     assert db.fetch_calls
     assert not db.execute_calls
+
+
+@pytest.mark.asyncio
+async def test_fetch_llm_usage_summary_postgres_fallback_preserves_cache_shape() -> None:
+    db = _PostgresSummaryFallbackConn()
+
+    rows = await admin_usage_service.fetch_llm_usage_summary(
+        db,
+        group_by="provider",
+        provider=None,
+        start=None,
+        end=None,
+        org_ids=None,
+    )
+
+    assert len(db.fetch_calls) == 2
+    assert rows == [
+        {
+            "group_value": "openai",
+            "requests": 2,
+            "errors": 0,
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "total_tokens": 120,
+            "total_cost_usd": 0.02,
+            "latency_avg_ms": 11.5,
+            "group_value_secondary": None,
+            "cached_input_tokens": 0,
+            "cache_write_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "billable_input_tokens": 0,
+            "provider_usage_count": 0,
+            "stream_estimate_count": 0,
+            "disconnect_estimate_count": 0,
+            "missing_usage_count": 0,
+            "local_diagnostic_count": 0,
+            "estimated_usage_count": 0,
+        }
+    ]

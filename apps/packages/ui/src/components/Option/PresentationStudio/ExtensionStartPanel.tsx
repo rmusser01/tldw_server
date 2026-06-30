@@ -1,10 +1,12 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 
 import { useConnectionState } from "@/hooks/useConnectionState"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { getScreenshotFromCurrentTab } from "@/libs/get-screenshot"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { EMPTY_STATE_LABEL, READY_STATE_LABEL } from "@/design-system"
 
 type SeedImage = {
   dataB64: string
@@ -80,6 +82,7 @@ const getActiveTabTitle = async (): Promise<string | null> => {
 }
 
 export const ExtensionStartPanel: React.FC = () => {
+  const { t } = useTranslation("option")
   const isOnline = useServerOnline()
   const { capabilities, loading } = useServerCapabilities()
   const { serverUrl } = useConnectionState()
@@ -105,6 +108,8 @@ export const ExtensionStartPanel: React.FC = () => {
 
   const hasSeedContent = narrationSeed.trim().length > 0 || imageSeed !== null
   const serverOrigin = resolveServerOrigin(serverUrl)
+  const readyStateLabel = t("presentationStudio.start.status.ready", READY_STATE_LABEL)
+  const emptyStateLabel = t("presentationStudio.start.status.empty", EMPTY_STATE_LABEL)
 
   const handleImageFileChange = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -395,11 +400,15 @@ export const ExtensionStartPanel: React.FC = () => {
             </div>
             <div className="flex items-center justify-between gap-3">
               <dt className="text-slate-500">Narration seed</dt>
-              <dd className="text-slate-700">{narrationSeed.trim().length > 0 ? "Ready" : "Empty"}</dd>
+              <dd className="text-slate-700">
+                {narrationSeed.trim().length > 0 ? readyStateLabel : emptyStateLabel}
+              </dd>
             </div>
             <div className="flex items-center justify-between gap-3">
               <dt className="text-slate-500">Image seed</dt>
-              <dd className="text-slate-700">{imageSeed ? "Ready" : "Empty"}</dd>
+              <dd className="text-slate-700">
+                {imageSeed ? readyStateLabel : emptyStateLabel}
+              </dd>
             </div>
           </dl>
 

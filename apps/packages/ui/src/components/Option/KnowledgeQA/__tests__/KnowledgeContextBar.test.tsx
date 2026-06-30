@@ -84,6 +84,102 @@ describe("KnowledgeContextBar", () => {
     ).toBeInTheDocument()
   })
 
+  it("discloses server-default web fallback behavior near the web control", () => {
+    render(
+      <KnowledgeContextBar
+        preset="balanced"
+        onPresetChange={vi.fn()}
+        sources={["media_db"]}
+        onSourcesChange={vi.fn()}
+        includeMediaIds={[]}
+        onIncludeMediaIdsChange={vi.fn()}
+        includeNoteIds={[]}
+        onIncludeNoteIdsChange={vi.fn()}
+        webEnabled={false}
+        onToggleWeb={vi.fn()}
+        generationProvider={null}
+        generationModel={null}
+        onGenerationProviderChange={vi.fn()}
+        onGenerationModelChange={vi.fn()}
+        contextChangedSinceLastRun={false}
+        onOpenSettings={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByText(/Queries stay on your tldw server unless web fallback is enabled/i)
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/When enabled, fallback uses your configured server default provider/i)
+    ).toBeInTheDocument()
+  })
+
+  it("closes source selectors on Escape before nested controls can trap the event", async () => {
+    render(
+      <KnowledgeContextBar
+        preset="balanced"
+        onPresetChange={vi.fn()}
+        sources={["media_db", "notes"]}
+        onSourcesChange={vi.fn()}
+        includeMediaIds={[]}
+        onIncludeMediaIdsChange={vi.fn()}
+        includeNoteIds={[]}
+        onIncludeNoteIdsChange={vi.fn()}
+        webEnabled={false}
+        onToggleWeb={vi.fn()}
+        generationProvider={null}
+        generationModel={null}
+        onGenerationProviderChange={vi.fn()}
+        onGenerationModelChange={vi.fn()}
+        contextChangedSinceLastRun={false}
+        onOpenSettings={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Sources:/i }))
+    const sourceMenu = screen.getByRole("menu", { name: /Source selector/i })
+    sourceMenu.addEventListener("keydown", (event) => event.stopPropagation())
+    fireEvent.keyDown(sourceMenu, { key: "Escape" })
+    expect(screen.queryByRole("menu", { name: /Source selector/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /Specific:/i }))
+    const specificDialog = await screen.findByRole("dialog", {
+      name: /Specific source selector/i,
+    })
+    specificDialog.addEventListener("keydown", (event) => event.stopPropagation())
+    fireEvent.keyDown(specificDialog, { key: "Escape" })
+    expect(
+      screen.queryByRole("dialog", { name: /Specific source selector/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it("labels answer generation as Server default until the user chooses an explicit provider or model", () => {
+    render(
+      <KnowledgeContextBar
+        preset="balanced"
+        onPresetChange={vi.fn()}
+        sources={["media_db"]}
+        onSourcesChange={vi.fn()}
+        includeMediaIds={[]}
+        onIncludeMediaIdsChange={vi.fn()}
+        includeNoteIds={[]}
+        onIncludeNoteIdsChange={vi.fn()}
+        webEnabled={false}
+        onToggleWeb={vi.fn()}
+        generationProvider={null}
+        generationModel={null}
+        onGenerationProviderChange={vi.fn()}
+        onGenerationModelChange={vi.fn()}
+        contextChangedSinceLastRun={false}
+        onOpenSettings={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Choose answer model" })).toHaveTextContent(
+      "AI: Server default"
+    )
+  })
+
   it("lets users update source scope from the dropdown", () => {
     const onSourcesChange = vi.fn()
     render(
@@ -300,7 +396,7 @@ describe("KnowledgeContextBar", () => {
     fireEvent.click(screen.getByRole("button", { name: /Specific:/i }))
     expect(await screen.findByText("Quarterly Planning Doc")).toBeInTheDocument()
 
-    expect(screen.getByText(/1 of 5 categories selected/)).toBeInTheDocument()
+    expect(screen.getByText(/1 of 8 categories selected/)).toBeInTheDocument()
     expect(screen.queryByText(/0 items in scope/)).not.toBeInTheDocument()
   })
 })

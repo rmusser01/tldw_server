@@ -240,6 +240,19 @@ def test_create_job_backfills_missing_batch_group(tmp_path, monkeypatch):
               request_id TEXT,
               trace_id TEXT
             );
+            CREATE TABLE job_events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              job_id INTEGER,
+              domain TEXT,
+              queue TEXT,
+              job_type TEXT,
+              event_type TEXT NOT NULL,
+              attrs_json TEXT,
+              owner_user_id TEXT,
+              request_id TEXT,
+              trace_id TEXT,
+              created_at TEXT NOT NULL DEFAULT (DATETIME('now'))
+            );
             """
         )
         conn.commit()
@@ -262,6 +275,64 @@ def test_create_job_backfills_missing_batch_group(tmp_path, monkeypatch):
         owner_user_id="1",
     )
     assert job["status"] == "queued"
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        assert "batch_group" in cols
+    finally:
+        conn.close()
+
+
+def test_count_jobs_backfills_missing_batch_group(tmp_path, monkeypatch):
+    db_path = tmp_path / "jobs_legacy_count.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE jobs (
+              id INTEGER PRIMARY KEY,
+              uuid TEXT UNIQUE,
+              domain TEXT NOT NULL,
+              queue TEXT NOT NULL,
+              job_type TEXT NOT NULL,
+              owner_user_id TEXT,
+              project_id INTEGER,
+              idempotency_key TEXT,
+              payload TEXT,
+              result TEXT,
+              status TEXT NOT NULL,
+              priority INTEGER DEFAULT 5,
+              max_retries INTEGER DEFAULT 3,
+              retry_count INTEGER DEFAULT 0,
+              available_at TEXT,
+              created_at TEXT,
+              updated_at TEXT,
+              request_id TEXT,
+              trace_id TEXT
+            );
+            INSERT INTO jobs (
+              id, uuid, domain, queue, job_type, owner_user_id, payload, status,
+              priority, max_retries, retry_count, created_at, updated_at
+            ) VALUES (
+              1, 'job-1', 'chatbooks', 'default', 'export', '1', '{}', 'queued',
+              5, 3, 0, '2026-04-30 00:00:00', '2026-04-30 00:00:00'
+            );
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    import tldw_Server_API.app.core.Jobs.manager as jobs_manager
+
+    def _no_migrate(path=None):
+        return path if path is not None else db_path
+
+    monkeypatch.setattr(jobs_manager, "ensure_jobs_tables", _no_migrate, raising=True)
+
+    jm = jobs_manager.JobManager(db_path)
+    assert jm.count_jobs(domain="chatbooks", batch_group="batch-1") == 0
 
     conn = sqlite3.connect(db_path)
     try:

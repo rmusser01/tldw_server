@@ -23,6 +23,7 @@ import {
 } from './notes-manager-utils'
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NotesRecentOpenedEntry } from '@/services/settings/ui-settings'
+import { CAPTURED_NOTE_KEYWORD } from '@/services/notes-capture'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -96,6 +97,9 @@ export interface NotesSidebarProps {
 
   // Fetching / online
   isFetching: boolean
+  hasListError?: boolean
+  listErrorMessage?: string | null
+  isStaleResults?: boolean
   isOnline: boolean
   demoEnabled: boolean
   capsLoading: boolean
@@ -123,6 +127,7 @@ export interface NotesSidebarProps {
   setSelectedMoodboardId: (id: number | null) => void
   setSelectedNotebookId: (id: number | null) => void
   setSearchTipsQuery: (query: string) => void
+  retryList: () => void
 
   // Callbacks - actions
   handleNewNote: () => Promise<void>
@@ -150,6 +155,7 @@ export interface NotesSidebarProps {
   exportAllCSV: () => Promise<void>
   exportAllJSON: () => Promise<void>
   openImportPicker: () => void
+  onSyncFolder: () => void
   resetEditor: () => void
   renderKeywordLabelWithFrequency: (
     keyword: string,
@@ -224,6 +230,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
 
   // Fetching / online
   isFetching,
+  hasListError = false,
+  listErrorMessage = null,
+  isStaleResults = false,
   isOnline,
   demoEnabled,
   capsLoading,
@@ -251,6 +260,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   setSelectedMoodboardId,
   setSelectedNotebookId,
   setSearchTipsQuery,
+  retryList,
 
   // Callbacks - actions
   handleNewNote,
@@ -278,6 +288,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   exportAllCSV,
   exportAllJSON,
   openImportPicker,
+  onSyncFolder,
   resetEditor,
   renderKeywordLabelWithFrequency,
 
@@ -301,9 +312,58 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
 
   // Compute active filter count for badge
   const activeFilterCount =
+    (listViewMode === 'inbox' ? 1 : 0) +
     keywordTokens.length +
     (selectedNotebookId != null ? 1 : 0) +
     (queryInput.trim() ? 1 : 0)
+  const headerCountLabel = hasListError
+    ? t('option:notesSearch.headerRefreshFailed', {
+        defaultValue: 'Refresh failed'
+      })
+    : hasActiveFilters
+      ? t('option:notesSearch.headerCount', {
+          defaultValue: '{{visible}} of {{total}}',
+          visible: filteredCount,
+          total
+        })
+      : t('option:notesSearch.headerCountFallback', {
+          defaultValue: '{{total}} total',
+          total
+        })
+  const capturedFilterActive = keywordTokens.some(
+    (keyword) => keyword.trim().toLocaleLowerCase() === CAPTURED_NOTE_KEYWORD
+  )
+
+  const switchViewMode = React.useCallback(
+    (mode: NotesListViewMode) => {
+      setListViewMode(mode)
+      setPage(1)
+    },
+    [setListViewMode, setPage]
+  )
+
+  const listErrorState = hasListError ? (
+    <div
+      className="rounded-md border border-error/30 bg-error/5 px-3 py-4 text-sm text-text"
+      data-testid="notes-list-error-state"
+      role="alert"
+    >
+      <div className="font-medium">
+        {t('option:notesSearch.listErrorTitle', {
+          defaultValue: 'Could not load notes'
+        })}
+      </div>
+      <div className="mt-1 text-text-muted">
+        {listErrorMessage ||
+          t('option:notesSearch.listErrorFallback', {
+            defaultValue: 'The notes list is unavailable right now.'
+          })}
+      </div>
+      <Button size="small" className="mt-3" onClick={retryList}>
+        {t('common:retry', { defaultValue: 'Retry' })}
+      </Button>
+    </div>
+  ) : null
 
   return (
       <aside
@@ -316,10 +376,10 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
         data-testid="notes-list-region"
         className={
           isMobileViewport
-            ? `absolute left-0 top-0 z-40 h-full w-[min(92vw,420px)] max-w-full transform border-r border-border bg-surface shadow-xl transition-transform duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-focus ${
+            ? `absolute left-0 top-0 z-40 h-full w-[min(92vw,420px)] max-w-full transform border-r border-border bg-surface shadow-xl transition-transform duration-300 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-focus ${
                 mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
               }`
-            : `flex-shrink-0 transition-all duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-focus ${
+            : `flex-shrink-0 transition-all duration-300 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-focus ${
                 sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-[300px] lg:w-[340px] xl:w-[380px]'
               }`
         }
@@ -338,19 +398,12 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           <div className="flex-shrink-0 border-b border-border p-4 bg-surface">
             {/* ---- Always visible: Header row ---- */}
             <div className="flex items-center justify-between mb-3">
-              <div className="text-xs uppercase tracking-[0.16em] text-text-muted">
-                {t('option:notesSearch.headerLabel', { defaultValue: 'Notes' })}
-                <span className="ml-2 text-text-subtle">
-                  {hasActiveFilters
-                    ? t('option:notesSearch.headerCount', {
-                        defaultValue: '{{visible}} of {{total}}',
-                        visible: filteredCount,
-                        total
-                      })
-                    : t('option:notesSearch.headerCountFallback', {
-                        defaultValue: '{{total}} total',
-                        total
-                      })}
+              <div className="flex min-w-0 items-baseline">
+                <div className="text-xs uppercase tracking-[0.16em] text-text-muted">
+                  {t('option:notesSearch.headerLabel', { defaultValue: 'Notes' })}
+                </div>
+                <span className="ml-2 text-xs uppercase tracking-[0.16em] text-text-subtle">
+                  {headerCountLabel}
                 </span>
               </div>
               <Tooltip
@@ -419,11 +472,11 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                     })}
                   </Button>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <Button
                     size="small"
                     type={listViewMode === 'list' ? 'primary' : 'default'}
-                    onClick={() => setListViewMode('list')}
+                    onClick={() => switchViewMode('list')}
                     disabled={listMode !== 'active'}
                     data-testid="notes-view-mode-list"
                   >
@@ -434,7 +487,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   <Button
                     size="small"
                     type={listViewMode === 'timeline' ? 'primary' : 'default'}
-                    onClick={() => setListViewMode('timeline')}
+                    onClick={() => switchViewMode('timeline')}
                     disabled={listMode !== 'active'}
                     data-testid="notes-view-mode-timeline"
                   >
@@ -444,10 +497,20 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   </Button>
                   <Button
                     size="small"
+                    type={listViewMode === 'inbox' ? 'primary' : 'default'}
+                    onClick={() => switchViewMode('inbox')}
+                    disabled={listMode !== 'active'}
+                    data-testid="notes-view-mode-inbox"
+                  >
+                    {t('option:notesSearch.viewModeInbox', {
+                      defaultValue: 'Inbox'
+                    })}
+                  </Button>
+                  <Button
+                    size="small"
                     type={listViewMode === 'moodboard' ? 'primary' : 'default'}
                     onClick={() => {
-                      setListViewMode('moodboard')
-                      setPage(1)
+                      switchViewMode('moodboard')
                     }}
                     disabled={listMode !== 'active'}
                     data-testid="notes-view-mode-moodboard"
@@ -494,6 +557,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                     <Select
                       className="w-full"
                       size="small"
+                      aria-label={t('option:notesSearch.moodboardSelectAriaLabel', {
+                        defaultValue: 'Collection'
+                      })}
                       value={selectedMoodboardId == null ? undefined : selectedMoodboardId}
                       onChange={(value) => {
                         if (value == null) {
@@ -580,6 +646,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       <Select
                         className="min-w-0 flex-1"
                         size="small"
+                        aria-label={t('option:notesSearch.notebookSelectAriaLabel', {
+                          defaultValue: 'Saved filter'
+                        })}
                         value={selectedNotebookId ?? undefined}
                         onChange={(value) => {
                           if (value == null) {
@@ -661,6 +730,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                         })}
                         prefix={(<SearchIcon className="w-4 h-4 text-text-subtle" />)}
                         value={queryInput}
+                        aria-label={t('option:notesSearch.searchInputAriaLabel', {
+                          defaultValue: 'Search notes'
+                        })}
                         onChange={(e) => {
                           setQueryInput(e.target.value)
                         }}
@@ -723,7 +795,27 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                     storageKey="filters"
                     testId="notes-section-filters"
                   >
-                    <div className="flex items-center justify-end">
+                    <div className="flex items-center justify-between gap-2">
+                      <Tooltip
+                        title={t('option:notesSearch.capturedFilterTooltip', {
+                          defaultValue: 'Show notes saved from browser capture.'
+                        })}
+                      >
+                        <Button
+                          size="small"
+                          type={capturedFilterActive ? 'primary' : 'default'}
+                          aria-pressed={capturedFilterActive}
+                          onClick={() => {
+                            handleKeywordFilterChange([CAPTURED_NOTE_KEYWORD])
+                            setPage(1)
+                          }}
+                          data-testid="notes-captured-filter"
+                        >
+                          {t('option:notesSearch.capturedFilterAction', {
+                            defaultValue: 'Captured'
+                          })}
+                        </Button>
+                      </Tooltip>
                       <Popover
                         trigger="click"
                         content={searchTipsContent}
@@ -751,6 +843,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       mode="tags"
                       allowClear
                       placeholder={t('option:notesSearch.keywordsPlaceholder', {
+                        defaultValue: 'Filter by tag'
+                      })}
+                      aria-label={t('option:notesSearch.keywordFilterAriaLabel', {
                         defaultValue: 'Filter by tag'
                       })}
                       className="w-full"
@@ -812,7 +907,11 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                         data-testid="notes-active-filter-summary"
                       >
                         <div className="text-[11px] font-medium text-text">
-                          {activeFilterSummary.countText}
+                          {hasListError
+                            ? t('option:notesSearch.headerRefreshFailed', {
+                                defaultValue: 'Refresh failed'
+                              })
+                            : activeFilterSummary.countText}
                         </div>
                         {activeFilterSummary.detailsText ? (
                           <div
@@ -895,7 +994,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           <div className="flex-1 overflow-y-auto">
             {listMode === 'active' && listViewMode === 'timeline' ? (
               <div className="h-full overflow-y-auto px-3 py-3" data-testid="notes-timeline-view">
-                {isFetching && (
+                {listErrorState || (isFetching && (
                   <div className="mb-3 inline-flex items-center gap-2 text-xs text-text-muted">
                     <Spin size="small" />
                     <span>
@@ -904,8 +1003,8 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       })}
                     </span>
                   </div>
-                )}
-                {timelineSections.length === 0 ? (
+                ))}
+                {!listErrorState && timelineSections.length === 0 ? (
                   <div
                     className="rounded-md border border-dashed border-border bg-surface2 px-3 py-4 text-sm text-text-muted"
                     data-testid="notes-timeline-empty"
@@ -914,7 +1013,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       defaultValue: 'No notes match the current filters.'
                     })}
                   </div>
-                ) : (
+                ) : !listErrorState ? (
                   <div className="space-y-4">
                     {timelineSections.map((section) => (
                       <section key={section.key} data-testid={`notes-timeline-group-${section.key}`}>
@@ -964,11 +1063,13 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       </section>
                     ))}
                   </div>
-                )}
+                ) : null}
               </div>
             ) : listMode === 'active' && listViewMode === 'moodboard' ? (
               <div className="h-full overflow-y-auto px-3 py-3" data-testid="notes-moodboard-view">
-                {selectedMoodboard == null ? (
+                {listErrorState ? (
+                  listErrorState
+                ) : selectedMoodboard == null ? (
                   <div
                     className="rounded-md border border-dashed border-border bg-surface2 px-3 py-4 text-sm text-text-muted"
                     data-testid="notes-moodboard-empty-selection"
@@ -1140,6 +1241,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 bulkSelectedIds={bulkSelectedIds}
                 isOnline={isOnline}
                 isFetching={isFetching}
+                hasError={hasListError}
+                errorMessage={listErrorMessage}
+                isStaleResults={isStaleResults}
                 demoEnabled={demoEnabled}
                 capsLoading={capsLoading}
                 capabilities={capabilities || null}
@@ -1147,6 +1251,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 total={total}
                 page={page}
                 pageSize={pageSize}
+                hasActiveFilters={hasActiveFilters}
                 selectedId={selectedId}
                 pinnedNoteIds={pinnedNoteIds}
                 onSelectNote={(id) => {
@@ -1161,6 +1266,11 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   const sizeChanged = normalizedPageSize !== pageSize
                   setPageSize(normalizedPageSize)
                   setPage(sizeChanged ? 1 : nextPage)
+                }}
+                onRetry={retryList}
+                onClearFilters={handleClearFilters}
+                onCreateNote={() => {
+                  void handleNewNote()
                 }}
                 onResetEditor={() => {
                   if (listMode === 'trash') {
@@ -1184,6 +1294,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   void exportAllJSON()
                 }}
                 onImportNotes={openImportPicker}
+                onSyncFolder={onSyncFolder}
                 importInProgress={importSubmitting}
                 exportProgress={exportProgress}
               />

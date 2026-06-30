@@ -6,7 +6,12 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    default_offset_pagination_aliases,
+)
 
 
 class SyntheticEvalProvenance(str, Enum):
@@ -166,6 +171,13 @@ class SyntheticEvalQueueResponse(BaseModel):
 
     data: list[SyntheticEvalDraftSampleRecord] = Field(default_factory=list)
     total: int = 0
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return default_offset_pagination_aliases(self)
 
 
 class SyntheticEvalReviewRequest(BaseModel):

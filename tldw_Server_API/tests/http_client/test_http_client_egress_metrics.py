@@ -33,7 +33,7 @@ def test_egress_denial_increments_metric(monkeypatch):
 
     # Error should be clear
     msg = str(ei.value).lower()
-    assert any(kw in msg for kw in ("egress", "not allowed", "private"))
+    assert any(kw in msg for kw in ("egress", "not allowed", "private", "allowlist"))
 
     after_total = reg.get_metric_stats("http_client_egress_denials_total").get("sum", 0) or 0
     assert after_total >= before_total + 1

@@ -1,7 +1,7 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { message, Skeleton } from "antd"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useConnectionUxState } from "@/hooks/useConnectionState"
 import { testModeration } from "@/services/moderation"
@@ -31,6 +31,10 @@ const TABS = [
 ] as const
 
 type TabKey = (typeof TABS)[number]["key"]
+const TAB_KEYS = new Set<TabKey>(TABS.map((tab) => tab.key))
+
+const isTabKey = (value: string | null): value is TabKey =>
+  Boolean(value && TAB_KEYS.has(value as TabKey))
 
 const HERO_STYLE: React.CSSProperties = {
   background:
@@ -49,9 +53,19 @@ export const ModerationPlaygroundShell: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   const online = useServerOnline()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { uxState } = useConnectionUxState()
   const [messageApi, contextHolder] = message.useMessage()
   const [activeTab, setActiveTab] = React.useState<TabKey>("policy")
+  const requestedTab = searchParams.get("tab")
+  const tabPanelBaseId = React.useId()
+  const tabRefs = React.useRef<Record<TabKey, HTMLButtonElement | null>>({
+    policy: null,
+    blocklist: null,
+    overrides: null,
+    test: null,
+    advanced: null
+  })
   const markMilestone = useMilestoneStore((s) => s.markMilestone)
   const startTutorial = useTutorialStore((s) => s.startTutorial)
   const isTutorialCompleted = useTutorialStore((s) => s.isCompleted)
@@ -65,6 +79,40 @@ export const ModerationPlaygroundShell: React.FC = () => {
 
   const policy = settings.policyQuery.data || {}
   const hasUnsavedChanges = settings.isDirty || overrides.isDirty || blocklist.isDirtyRaw
+
+  const getTabId = (tab: TabKey) => `${tabPanelBaseId}-${tab}-tab`
+  const getTabPanelId = (tab: TabKey) => `${tabPanelBaseId}-${tab}-panel`
+
+  const activateTab = (tab: TabKey) => {
+    setActiveTab(tab)
+    tabRefs.current[tab]?.focus()
+  }
+
+  React.useEffect(() => {
+    if (isTabKey(requestedTab) && requestedTab !== activeTab) {
+      setActiveTab(requestedTab)
+    }
+  }, [activeTab, requestedTab])
+
+  const handleTabKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    currentTab: TabKey
+  ) => {
+    const currentIndex = TABS.findIndex((tab) => tab.key === currentTab)
+    let nextIndex: number | null = null
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (currentIndex + 1) % TABS.length
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (currentIndex - 1 + TABS.length) % TABS.length
+    } else if (event.key === "Home") {
+      nextIndex = 0
+    } else if (event.key === "End") {
+      nextIndex = TABS.length - 1
+    }
+    if (nextIndex == null) return
+    event.preventDefault()
+    activateTab(TABS[nextIndex].key)
+  }
 
   // Authorization check — show error if backend returns 401/403
   const hasPermissionError = [settings.settingsQuery?.error, settings.policyQuery?.error, overrides.overridesQuery?.error]
@@ -281,13 +329,13 @@ export const ModerationPlaygroundShell: React.FC = () => {
       {/* Onboarding */}
       {showOnboarding && (
         <div className="mx-4 sm:mx-6 lg:mx-8 mb-4 p-5 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
-          <p className="text-base font-semibold">
-            {t("option:moderationPlayground.onboarding.title", "Welcome to Content Controls")}
+            <p className="text-base font-semibold">
+            {t("option:moderationPlayground.onboarding.title", "Welcome to Content Rules")}
           </p>
           <p className="text-sm text-text-muted mt-1">
             {t(
               "option:moderationPlayground.onboarding.description",
-              "Set up content safety rules to protect your family or enforce server guardrails."
+              "Set up content safety rules, blocklists, overrides, and test cases."
             )}
           </p>
 
@@ -325,15 +373,15 @@ export const ModerationPlaygroundShell: React.FC = () => {
         style={HERO_STYLE}
       >
         <div className="absolute inset-0" style={HERO_GRID_STYLE} />
-        <div className="relative flex flex-wrap items-center justify-between gap-4">
-          <div>
+        <div className="relative flex min-w-0 flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0 max-w-full">
             <h2 className="text-xl sm:text-2xl font-display font-bold">
-              {t("option:moderationPlayground.title", "Moderation Playground")}
+              {t("option:moderationPlayground.title", "Content Rules")}
             </h2>
-            <p className="text-text-muted text-sm mt-1">
+            <p className="text-text-muted text-sm mt-1 break-words">
               {t(
                 "option:moderationPlayground.subtitle",
-                "Family safety controls and server guardrails in one place."
+                "Configure moderation policies, blocklists, user overrides, and rule tests."
               )}
             </p>
             <div className="mt-2">
@@ -373,14 +421,21 @@ export const ModerationPlaygroundShell: React.FC = () => {
 
       {/* Tab bar */}
       <div className="border-b border-border mx-4 sm:mx-6 lg:mx-8">
-        <div className="flex overflow-x-auto -mb-px" role="tablist">
+        <div className="flex max-w-full overflow-x-auto -mb-px" role="tablist" aria-label="Content rules sections">
           {TABS.map((tab) => (
             <button
               key={tab.key}
+              id={getTabId(tab.key)}
+              ref={(node) => {
+                tabRefs.current[tab.key] = node
+              }}
               data-testid={`moderation-tab-${tab.key}`}
               role="tab"
               aria-selected={activeTab === tab.key}
+              aria-controls={activeTab === tab.key ? getTabPanelId(tab.key) : undefined}
+              tabIndex={activeTab === tab.key ? 0 : -1}
               onClick={() => setActiveTab(tab.key)}
+              onKeyDown={(event) => handleTabKeyDown(event, tab.key)}
               className={`
                 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors
                 ${
@@ -402,7 +457,14 @@ export const ModerationPlaygroundShell: React.FC = () => {
       </div>
 
       {/* Tab content */}
-      <div className="mx-4 sm:mx-6 lg:mx-8 py-6">{renderPanel()}</div>
+      <div
+        id={getTabPanelId(activeTab)}
+        role="tabpanel"
+        aria-labelledby={getTabId(activeTab)}
+        className="mx-4 min-w-0 sm:mx-6 lg:mx-8 py-6"
+      >
+        {renderPanel()}
+      </div>
       </>}
     </div>
   )

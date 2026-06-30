@@ -1,15 +1,34 @@
 import React from "react"
-import { Button, Checkbox, Tag, Typography } from "antd"
+import { Button, Checkbox, Select, Tag, Typography } from "antd"
 
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import {
   PersonaTurnDetectionControls,
   type PersonaTurnDetectionPreset
 } from "@/components/PersonaGarden/PersonaTurnDetectionControls"
-import type { ResolvedPersonaVoiceDefaults } from "@/hooks/useResolvedPersonaVoiceDefaults"
+import type { WakeDetectorState } from "@/hooks/personaWakeDetector"
+import type {
+  PersonaWakeBehavior,
+  ResolvedPersonaVoiceDefaults
+} from "@/hooks/useResolvedPersonaVoiceDefaults"
 import type {
   PersonaLiveVoiceRecoveryMode,
   PersonaLiveVoiceState
 } from "@/hooks/usePersonaLiveVoiceController"
+import type { PersonaVisualStateId } from "@/types/persona-visuals"
+
+export type PersonaVisualStateFeedback = {
+  state: PersonaVisualStateId
+  source:
+    | "live"
+    | "default"
+    | "override"
+    | "authored_trigger"
+    | "fallback"
+    | "error_recovery"
+  reason?: string | null
+  fallbackReason?: string | null
+}
 
 type AssistantVoiceCardProps = {
   resolvedDefaults: ResolvedPersonaVoiceDefaults
@@ -30,16 +49,24 @@ type AssistantVoiceCardProps = {
   savingCurrentSettingsAsDefaults?: boolean
   sessionAutoResume: boolean
   sessionBargeIn: boolean
+  wakeArmed?: boolean
+  wakeDetectorState?: WakeDetectorState
+  wakeWarning?: string | null
+  wakeTriggerPhrases?: string[]
+  sessionWakeBehavior?: PersonaWakeBehavior
   autoCommitEnabled?: boolean
   vadPreset?: PersonaTurnDetectionPreset
   vadThreshold?: number
   minSilenceMs?: number
   turnStopSecs?: number
   minUtteranceSecs?: number
+  visualStateFeedback?: PersonaVisualStateFeedback
   onToggleListening: () => void
   onSendNow: () => void
   onSessionAutoResumeChange: (next: boolean) => void
   onSessionBargeInChange: (next: boolean) => void
+  onToggleWakeArmed?: () => void
+  onSessionWakeBehaviorChange?: (next: PersonaWakeBehavior) => void
   onAutoCommitEnabledChange?: (next: boolean) => void
   onVadPresetChange?: (next: Exclude<PersonaTurnDetectionPreset, "custom">) => void
   onVadThresholdChange?: (next: number) => void
@@ -77,16 +104,24 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
   savingCurrentSettingsAsDefaults = false,
   sessionAutoResume,
   sessionBargeIn,
+  wakeArmed = false,
+  wakeDetectorState = "idle",
+  wakeWarning = null,
+  wakeTriggerPhrases,
+  sessionWakeBehavior,
   autoCommitEnabled = true,
   vadPreset = "balanced",
   vadThreshold = 0.5,
   minSilenceMs = 250,
   turnStopSecs = 0.2,
   minUtteranceSecs = 0.4,
+  visualStateFeedback,
   onToggleListening,
   onSendNow,
   onSessionAutoResumeChange,
   onSessionBargeInChange,
+  onToggleWakeArmed = () => undefined,
+  onSessionWakeBehaviorChange = () => undefined,
   onAutoCommitEnabledChange = () => undefined,
   onVadPresetChange = () => undefined,
   onVadThresholdChange = () => undefined,
@@ -102,6 +137,16 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
   onReconnectPersonaSession
 }) => {
   const sessionControlsDisabled = !connected
+  const effectiveWakeTriggerPhrases = wakeTriggerPhrases ?? []
+  const effectiveSessionWakeBehavior =
+    sessionWakeBehavior ?? resolvedDefaults.wakeBehavior
+  const normalizedWakeTriggerPhrases = React.useMemo(
+    () =>
+      (effectiveWakeTriggerPhrases || [])
+        .map((phrase) => String(phrase || "").trim())
+        .filter(Boolean),
+    [effectiveWakeTriggerPhrases]
+  )
   const turnDetectionDisabled = sessionControlsDisabled || manualModeRequired
   const turnDetectionHelperText = !connected
     ? "Connect to tune live turn detection for this session."
@@ -170,6 +215,25 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
         </div>
       </div>
 
+      {visualStateFeedback ? (
+        <div
+          data-testid="live-visual-state-feedback"
+          className="mt-3 rounded border border-border bg-surface2 px-2 py-1.5 text-xs text-text"
+        >
+          <div className="text-text-muted">Visual state</div>
+          <div className="mt-1 flex flex-wrap gap-2">
+            <span>{visualStateFeedback.state}</span>
+            <span>{visualStateFeedback.source}</span>
+            {visualStateFeedback.reason ? (
+              <span>{visualStateFeedback.reason}</span>
+            ) : null}
+            {visualStateFeedback.fallbackReason ? (
+              <span>{visualStateFeedback.fallbackReason}</span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       <div className="mt-3 flex flex-wrap items-center gap-4 text-xs">
         <Checkbox
           data-testid="live-voice-auto-resume"
@@ -187,6 +251,66 @@ export const AssistantVoiceCard: React.FC<AssistantVoiceCardProps> = ({
         >
           Barge-in (session only)
         </Checkbox>
+      </div>
+
+      <div className="mt-3 rounded-md border border-border bg-surface2 p-3 text-xs text-text">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <Typography.Text strong>Wake phrase</Typography.Text>
+            <Typography.Text type="secondary" className="mt-1 block text-xs">
+              Active only while this Persona Live surface is open.
+            </Typography.Text>
+          </div>
+          <Button
+            data-testid="live-wake-toggle"
+            size="small"
+            type={wakeArmed ? "default" : "primary"}
+            disabled={
+              sessionControlsDisabled || normalizedWakeTriggerPhrases.length === 0
+            }
+            onClick={onToggleWakeArmed}
+          >
+            {wakeArmed ? "Stop wake listening" : "Listen for wake phrase"}
+          </Button>
+        </div>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          <div>
+            <div className="text-text-muted">Saved wake phrases</div>
+            <div data-testid="live-wake-phrases">
+              {normalizedWakeTriggerPhrases.length > 0
+                ? normalizedWakeTriggerPhrases.join(", ")
+                : "Add a trigger phrase in voice defaults."}
+            </div>
+          </div>
+          <div>
+            <div className="text-text-muted">Wake state</div>
+            <div data-testid="live-wake-state">
+              {wakeArmed ? wakeDetectorState : "idle"}
+            </div>
+          </div>
+          <div>
+            <div className="text-text-muted">After wake</div>
+            <Select
+              data-testid="live-wake-behavior"
+              size="small"
+              value={effectiveSessionWakeBehavior}
+              disabled={sessionControlsDisabled}
+              onChange={onSessionWakeBehaviorChange}
+              options={[
+                { value: "one_shot", label: "One turn" },
+                { value: "continuous", label: "Continuous" },
+                { value: "push_to_talk_after_wake", label: "Push to talk" }
+              ]}
+            />
+          </div>
+        </div>
+        {wakeWarning ? (
+          <DesignSystemAlert
+            className="mt-2"
+            variant="warning"
+            title={wakeWarning}
+          />
+        ) : null}
       </div>
 
       <PersonaTurnDetectionControls

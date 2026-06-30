@@ -1,8 +1,9 @@
-**Embeddings Module**
+# Embeddings
 
 ## 1. Descriptive of Current Feature Set
 
 - Purpose: OpenAI-compatible embeddings API with production safeguards and a Redis Streams worker for media embeddings stages (Jobs remains the root status/billing record). Focus on reliability (circuit breaker, retries), performance (TTL cache, connection pooling, batching), and observability (metrics, health, DLQ tools).
+- Covering ADR: `Docs/ADR/022-embeddings-api-and-media-pipeline.md`
 - Capabilities:
   - OpenAI-compatible embeddings endpoint with provider auto-detect (OpenAI, HuggingFace/Transformers, ONNX, Local API)
   - TTL cache, request batching, connection pooling, per-provider circuit breakers
@@ -85,7 +86,7 @@
   - `dimensions` applies only to models that support it (OpenAI t-e-3 family); HF/ONNX outputs are fixed
   - Policy enforcement may block unknown providers/models; set enforcement flags accordingly in dev
   - Backpressure may reject requests when queues are deep; check health and stage status endpoints
-- Roadmap/TODOs:
+- Follow-up candidates:
   - Expand pgvector-first pathway and tests; unify Chroma/pgvector adapters
   - Stabilize re-embed scheduling; improve compactor heuristics
   - Extend providers list and add auto-tuning for batch sizes per model

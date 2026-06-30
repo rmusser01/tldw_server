@@ -318,7 +318,7 @@ describe("SearchBar behavior", () => {
     })
   })
 
-  it("disables submit when no sources selected and web fallback is off", async () => {
+  it("disables submit with visible inline recovery copy when no sources selected and web fallback is off", async () => {
     state.query = "test query"
     state.settings.sources = []
     state.settings.enable_web_fallback = false
@@ -328,10 +328,53 @@ describe("SearchBar behavior", () => {
     const submit = screen.getByRole("button", { name: "Ask" })
     expect(submit).toBeDisabled()
     expect(submit).not.toHaveAttribute("title")
+    expect(
+      screen.getByText("Select source categories or enable web fallback before asking Knowledge QA.")
+    ).toBeInTheDocument()
+    expect(submit).toHaveAttribute(
+      "aria-describedby",
+      "knowledge-search-no-source-explanation"
+    )
 
     fireEvent.mouseEnter(submit.parentElement!)
     expect(
       await screen.findByText("Select source categories or enable web fallback to search")
+    ).toBeInTheDocument()
+  })
+
+  it("disables submit with server-capability copy when web fallback is unavailable", () => {
+    state.query = "test query"
+    state.settings.sources = []
+    state.settings.enable_web_fallback = true
+
+    render(<SearchBar autoFocus={false} webFallbackAvailable={false} />)
+
+    const submit = screen.getByRole("button", { name: "Ask" })
+    expect(submit).toBeDisabled()
+    expect(
+      screen.getByText(
+        "Web fallback is not available on this server. Select personal-library sources before asking Knowledge QA."
+      )
+    ).toBeInTheDocument()
+    expect(state.search).not.toHaveBeenCalled()
+  })
+
+  it("disables submit with an explicit recovery reason when the library cannot be searched", () => {
+    state.query = "test query"
+    state.settings.sources = ["media_db", "notes"]
+    state.settings.enable_web_fallback = false
+
+    render(
+      <SearchBar
+        autoFocus={false}
+        searchBlockedMessage="Add or index library sources before asking Knowledge QA."
+      />
+    )
+
+    const submit = screen.getByRole("button", { name: "Ask" })
+    expect(submit).toBeDisabled()
+    expect(
+      screen.getByText("Add or index library sources before asking Knowledge QA.")
     ).toBeInTheDocument()
   })
 

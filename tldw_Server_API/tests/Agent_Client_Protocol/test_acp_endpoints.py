@@ -1,6 +1,8 @@
 import importlib.machinery
+import json
 import sys
 import types
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -58,6 +60,7 @@ class StubRunnerClient:
         self.prompt_calls = []
         self.create_session_calls = []
         self.denied_sessions = set()
+        self.session_metadata = {}
         self._updates = {
             "session-123": [
                 {"sessionId": "session-123", "event": "message", "content": "hello"}
@@ -89,6 +92,10 @@ class StubRunnerClient:
         )
         return "session-123"
 
+    async def get_session_metadata(self, session_id: str, user_id: int | None = None) -> dict[str, Any]:
+        del user_id
+        return self.session_metadata.get(session_id, {})
+
     async def verify_session_access(self, session_id: str, user_id: int) -> bool:
         return session_id not in self.denied_sessions
 
@@ -105,6 +112,9 @@ class StubRunnerClient:
     def pop_updates(self, session_id: str, limit: int = 100):
         updates = list(self._updates.get(session_id, []))
         return updates[:limit]
+
+    def has_websocket_connections(self, session_id: str) -> bool:
+        return False
 
 
 @pytest.fixture()
@@ -220,6 +230,488 @@ def test_acp_session_new_forwards_tenancy_fields(client_user_only, stub_runner_c
     assert isinstance(call["user_id"], int) and call["user_id"] > 0
 
 
+def test_acp_session_new_persists_sandbox_metadata_for_session_detail(
+    client_user_only,
+    stub_runner_client,
+    tmp_path,
+):
+    stub_runner_client.session_metadata["session-123"] = {
+        "sandbox_session_id": "sandbox-session-123",
+        "sandbox_run_id": "sandbox-run-456",
+        "workspace_id": "workspace-alpha",
+        "workspace_group_id": "group-alpha",
+        "scope_snapshot_id": "scope-alpha",
+    }
+
+    create_resp = client_user_only.post(
+        "/api/v1/acp/sessions/new",
+        json={
+            "cwd": str(tmp_path),
+            "agent_type": "codex",
+            "workspace_id": "workspace-alpha",
+        },
+    )
+
+    assert create_resp.status_code == 200
+    create_payload = create_resp.json()
+    assert create_payload["sandbox_session_id"] == "sandbox-session-123"
+    assert create_payload["sandbox_run_id"] == "sandbox-run-456"
+
+    detail_resp = client_user_only.get("/api/v1/acp/sessions/session-123/detail")
+    assert detail_resp.status_code == 200
+    detail_payload = detail_resp.json()
+    assert detail_payload["sandbox_session_id"] == "sandbox-session-123"
+    assert detail_payload["sandbox_run_id"] == "sandbox-run-456"
+    assert detail_payload["workspace_context"]["workspace_id"] == "workspace-alpha"
+    assert detail_payload["workspace_context"]["sandbox_session_id"] == "sandbox-session-123"
+
+
+def test_acp_list_sessions_filters_by_workspace_id(
+    client_user_only,
+    stub_runner_client,
+    tmp_path,
+):
+    import asyncio
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    async def _seed_sessions() -> None:
+        store = await acp_endpoints.get_acp_session_store()
+        await store.register_session(
+            session_id="workspace-session",
+            user_id=1,
+            agent_type="codex",
+            name="Workspace Session",
+            cwd=str(tmp_path),
+            workspace_id="workspace-alpha",
+        )
+        await store.register_session(
+            session_id="other-session",
+            user_id=1,
+            agent_type="codex",
+            name="Other Session",
+            cwd=str(tmp_path),
+            workspace_id="workspace-beta",
+        )
+
+    asyncio.run(_seed_sessions())
+
+    resp = client_user_only.get(
+        "/api/v1/acp/sessions",
+        params={"workspace_id": "workspace-alpha"},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["total"] == 1
+    assert [session["session_id"] for session in payload["sessions"]] == ["workspace-session"]
+    assert payload["sessions"][0]["workspace_context"]["workspace_id"] == "workspace-alpha"
+
+
+def test_acp_session_diagnostics_includes_bounded_workspace_context(
+    client_user_only,
+    stub_runner_client,
+    tmp_path,
+):
+    import asyncio
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    async def _seed_session() -> None:
+        store = await acp_endpoints.get_acp_session_store()
+        await store.register_session(
+            session_id="workspace-diagnostics-session",
+            user_id=1,
+            agent_type="codex",
+            name="Workspace Diagnostics",
+            cwd=str(tmp_path / "private-project"),
+            mcp_servers=[
+                {
+                    "name": "filesystem",
+                    "type": "stdio",
+                    "command": "/private/bin/mcp-filesystem",
+                    "args": ["--token", "sk-should-not-leak"],
+                    "env": {"OPENAI_API_KEY": "sk-should-not-leak"},
+                }
+            ],
+            workspace_id="workspace-alpha",
+            workspace_group_id="group-alpha",
+            scope_snapshot_id="scope-alpha",
+            sandbox_session_id="sandbox-session-123",
+            sandbox_run_id="sandbox-run-456",
+            policy_snapshot_version="policy-v1",
+            policy_snapshot_fingerprint="policy-fingerprint-abc",
+            policy_refresh_error="policy refresh failed",
+        )
+
+    asyncio.run(_seed_session())
+
+    resp = client_user_only.get(
+        "/api/v1/acp/sessions/workspace-diagnostics-session/diagnostics"
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    context = payload["workspace_context"]
+    assert context["workspace_id"] == "workspace-alpha"
+    assert context["workspace_group_id"] == "group-alpha"
+    assert context["scope_snapshot_id"] == "scope-alpha"
+    assert context["mcp_server_count"] == 1
+    assert context["mcp_server_names"] == ["filesystem"]
+    assert context["sandbox_session_id"] == "sandbox-session-123"
+    assert context["sandbox_run_id"] == "sandbox-run-456"
+    assert context["policy_snapshot_version"] == "policy-v1"
+    assert context["policy_snapshot_fingerprint"] == "policy-fingerprint-abc"
+    assert context["policy_refresh_error"] == "policy refresh failed"
+    assert context["agent_type"] == "codex"
+    assert context["runtime_backend"] == "acp_downstream"
+    assert context["entrypoint_strategy"] == "external_acp_adapter"
+    assert context["adapter_source"] == "zed-industries/codex-acp"
+    assert context["adapter_package"] == "@zed-industries/codex-acp"
+    assert context["adapter_version"] == "0.15.0"
+    assert context["support_state"] == "supported_with_caveats"
+    assert context["verification_level"] == "live_e2e_tested"
+
+    serialized_payload = json.dumps(payload)
+    assert "sk-should-not-leak" not in serialized_payload
+    assert "OPENAI_API_KEY" not in serialized_payload
+    assert "/private/bin/mcp-filesystem" not in serialized_payload
+
+
+def test_acp_workspace_context_adapter_source_redacts_local_paths():
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    assert acp_endpoints._redact_acp_adapter_source(
+        "zed-industries/codex-acp"
+    ) == "zed-industries/codex-acp"
+    assert acp_endpoints._redact_acp_adapter_source(
+        "/Users/example/.local/bin/codex-acp"
+    ) == "[redacted]"
+    assert acp_endpoints._redact_acp_adapter_source(
+        "C:\\Users\\example\\codex-acp"
+    ) == "[redacted]"
+
+
+def test_acp_session_new_preserves_explicit_empty_mcp_servers(
+    client_user_only,
+    stub_runner_client,
+    tmp_path,
+):
+    resp = client_user_only.post(
+        "/api/v1/acp/sessions/new",
+        json={
+            "cwd": str(tmp_path),
+            "agent_type": "hermes",
+            "mcp_servers": [],
+        },
+    )
+
+    assert resp.status_code == 200
+    call = stub_runner_client.create_session_calls[-1]
+    assert call["agent_type"] == "hermes"
+    assert call["mcp_servers"] == []
+
+
+def test_acp_session_new_rejects_relative_cwd(
+    client_user_only,
+    stub_runner_client,
+):
+    resp = client_user_only.post(
+        "/api/v1/acp/sessions/new",
+        json={
+            "cwd": "relative/project",
+        },
+    )
+
+    assert resp.status_code == 422
+    assert stub_runner_client.create_session_calls == []
+    assert "absolute" in resp.text
+
+
+def test_acp_session_new_rejects_relative_stdio_mcp_command(
+    client_user_only,
+    stub_runner_client,
+    tmp_path,
+):
+    resp = client_user_only.post(
+        "/api/v1/acp/sessions/new",
+        json={
+            "cwd": str(tmp_path),
+            "mcp_servers": [
+                {
+                    "name": "workspace",
+                    "type": "stdio",
+                    "command": "mcp-filesystem",
+                }
+            ],
+        },
+    )
+
+    assert resp.status_code == 422
+    assert stub_runner_client.create_session_calls == []
+    assert "absolute" in resp.text
+
+
+def test_acp_session_new_records_sanitized_audit_event(
+    client_user_only,
+    stub_runner_client,
+    tmp_path,
+):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        acp_endpoints._ACP_AUDIT_EVENTS.clear()
+
+    response = client_user_only.post(
+        "/api/v1/acp/sessions/new",
+        json={
+            "cwd": str(tmp_path / "secret-project"),
+            "agent_type": "codex",
+            "mcp_servers": [
+                {
+                    "name": "private-mcp",
+                    "type": "stdio",
+                    "command": "/private/bin/acp-mcp",
+                    "args": ["--token", "sk-should-not-leak"],
+                    "env": {"OPENAI_API_KEY": "sk-should-not-leak"},
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        events = list(acp_endpoints._ACP_AUDIT_EVENTS)
+    event = next(item for item in events if item["action"] == "session_created")
+    assert event["session_id"] == response.json()["session_id"]
+    assert event["metadata"]["agent_type"] == "codex"
+    assert event["metadata"]["mcp_server_count"] == 1
+    serialized = json.dumps(event["metadata"])
+    assert str(tmp_path) not in serialized
+    assert "sk-should-not-leak" not in serialized
+    assert "OPENAI_API_KEY" not in serialized
+    assert "/private/bin/acp-mcp" not in serialized
+
+
+def test_acp_agent_registration_records_sanitized_audit_event(
+    client_user_only,
+    monkeypatch,
+):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry as registry_mod
+
+    class _Registry:
+        def register_agent(self, **kwargs):
+            return types.SimpleNamespace(type=kwargs["type"], name=kwargs["name"])
+
+    async def _admin_user():
+        return types.SimpleNamespace(id=1, is_admin=True)
+
+    monkeypatch.setattr(registry_mod, "get_agent_registry", lambda: _Registry())
+    client_user_only.app.dependency_overrides[acp_endpoints.get_request_user] = _admin_user
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        acp_endpoints._ACP_AUDIT_EVENTS.clear()
+    try:
+        response = client_user_only.post(
+            "/api/v1/acp/agents/register",
+            json={
+                "agent_type": "audit_agent",
+                "name": "Audit Agent",
+                "command": "/private/bin/audit-agent",
+                "args": ["--api-key", "sk-should-not-leak"],
+                "env": {"ANTHROPIC_API_KEY": "sk-should-not-leak"},
+                "requires_api_key": "ANTHROPIC_API_KEY",
+            },
+        )
+    finally:
+        client_user_only.app.dependency_overrides.pop(acp_endpoints.get_request_user, None)
+
+    assert response.status_code == 200
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        events = list(acp_endpoints._ACP_AUDIT_EVENTS)
+    event = next(item for item in events if item["action"] == "agent_registered")
+    assert event["session_id"] == "agent:audit_agent"
+    assert event["metadata"]["agent_type"] == "audit_agent"
+    assert event["metadata"]["requires_api_key"] is True
+    serialized = json.dumps(event["metadata"])
+    assert "sk-should-not-leak" not in serialized
+    assert "ANTHROPIC_API_KEY" not in serialized
+    assert "/private/bin/audit-agent" not in serialized
+
+
+def test_acp_agent_registration_forwards_entrypoint_kwargs(
+    client_user_only,
+    monkeypatch,
+):
+    """Dynamic registration imports legacy strategy aliases before registry writes."""
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry as registry_mod
+
+    captured: dict[str, object] = {}
+
+    class _Registry:
+        def register_agent(self, **kwargs):
+            captured.update(kwargs)
+            return types.SimpleNamespace(type=kwargs["type"], name=kwargs["name"])
+
+    async def _admin_user():
+        return types.SimpleNamespace(id=1, is_admin=True)
+
+    monkeypatch.setattr(registry_mod, "get_agent_registry", lambda: _Registry())
+    client_user_only.app.dependency_overrides[acp_endpoints.get_request_user] = _admin_user
+    try:
+        response = client_user_only.post(
+            "/api/v1/acp/agents/register",
+            json={
+                "agent_type": "adapter_agent",
+                "name": "Adapter Agent",
+                "entrypoint_strategy": "adapter_acp",
+                "acp_command": "adapter-agent-acp",
+                "acp_args": ["--stdio"],
+                "adapter_source": "https://example.test/adapter",
+                "adapter_docs_url": "https://example.test/adapter/docs",
+                "certification_blocker": "adapter_missing",
+            },
+        )
+    finally:
+        client_user_only.app.dependency_overrides.pop(acp_endpoints.get_request_user, None)
+
+    assert response.status_code == 200
+    assert captured["entrypoint_strategy"] == "external_acp_adapter"
+    assert captured["acp_command"] == "adapter-agent-acp"
+    assert captured["acp_args"] == ["--stdio"]
+    assert captured["adapter_source"] == "https://example.test/adapter"
+    assert captured["adapter_docs_url"] == "https://example.test/adapter/docs"
+    assert captured["certification_blocker"] == "adapter_missing"
+
+
+def test_entrypoint_setup_steps_include_live_certification_required() -> None:
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    steps = acp_endpoints._entrypoint_setup_steps({
+        "primary_blocker": "live_certification_required",
+        "blockers": ["live_certification_required"],
+    })
+
+    assert steps == ["Run live ACP certification before claiming this agent is supported."]
+
+
+def test_acp_list_audit_events_reads_persisted_rows(tmp_path, monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_mod
+
+    audit_db = audit_db_mod.ACPAuditDB(db_path=str(tmp_path / "acp_audit.db"))
+    monkeypatch.setattr(audit_db_mod, "_audit_db", audit_db)
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        acp_endpoints._ACP_AUDIT_EVENTS.clear()
+    try:
+        audit_db.record_event(
+            action="session_created",
+            user_id=1,
+            session_id="persisted-session",
+            metadata={"agent_type": "codex"},
+        )
+        audit_db.flush()
+
+        events = acp_endpoints._acp_list_audit_events(session_id="persisted-session")
+    finally:
+        audit_db.close()
+
+    assert len(events) == 1
+    assert events[0]["action"] == "session_created"
+    assert events[0]["metadata"]["agent_type"] == "codex"
+
+
+def test_acp_list_audit_events_filters_in_memory_events_by_retention(monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_mod
+
+    class _EmptyAuditDB:
+        _retention_days = 1
+
+        def flush(self):
+            return 0
+
+        def query_events(self, **_kwargs):
+            return []
+
+        def get_hot_cache(self, **_kwargs):
+            return []
+
+    monkeypatch.setattr(audit_db_mod, "get_acp_audit_db", lambda: _EmptyAuditDB())
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        acp_endpoints._ACP_AUDIT_EVENTS.clear()
+        acp_endpoints._ACP_AUDIT_EVENTS.append(
+            {
+                "timestamp": "2000-01-01T00:00:00+00:00",
+                "action": "old",
+                "user_id": 1,
+                "session_id": "retention-session",
+                "metadata": {},
+            }
+        )
+        acp_endpoints._ACP_AUDIT_EVENTS.append(
+            {
+                "timestamp": "2999-01-01T00:00:00+00:00",
+                "action": "fresh",
+                "user_id": 1,
+                "session_id": "retention-session",
+                "metadata": {},
+            }
+        )
+    try:
+        events = acp_endpoints._acp_list_audit_events(session_id="retention-session")
+    finally:
+        with acp_endpoints._ACP_AUDIT_LOCK:
+            acp_endpoints._ACP_AUDIT_EVENTS.clear()
+
+    assert [event["action"] for event in events] == ["fresh"]
+
+
+def test_agent_audit_scope_is_admin_readable_without_runner_session(
+    client_user_only,
+    monkeypatch,
+):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    import tldw_Server_API.app.core.DB_Management.ACP_Audit_DB as audit_db_mod
+
+    class _EmptyAuditDB:
+        def flush(self):
+            return 0
+
+        def query_events(self, **_kwargs):
+            return []
+
+        def get_hot_cache(self, **_kwargs):
+            return []
+
+    async def _admin_user():
+        return types.SimpleNamespace(id=1, is_admin=True)
+
+    monkeypatch.setattr(audit_db_mod, "get_acp_audit_db", lambda: _EmptyAuditDB())
+    client_user_only.app.dependency_overrides[acp_endpoints.get_request_user] = _admin_user
+    with acp_endpoints._ACP_AUDIT_LOCK:
+        acp_endpoints._ACP_AUDIT_EVENTS.clear()
+        acp_endpoints._ACP_AUDIT_EVENTS.append(
+            {
+                "timestamp": "2999-01-01T00:00:00+00:00",
+                "action": "agent_registered",
+                "user_id": 1,
+                "session_id": "agent:audit_agent",
+                "metadata": {"agent_type": "audit_agent"},
+            }
+        )
+    try:
+        response = client_user_only.get("/api/v1/acp/sessions/agent:audit_agent/audit")
+    finally:
+        client_user_only.app.dependency_overrides.pop(acp_endpoints.get_request_user, None)
+        with acp_endpoints._ACP_AUDIT_LOCK:
+            acp_endpoints._ACP_AUDIT_EVENTS.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == "agent:audit_agent"
+    assert payload["events"][0]["action"] == "agent_registered"
+
+
 def test_acp_session_prompt_success(client_user_only, stub_runner_client):
     resp = client_user_only.post(
         "/api/v1/acp/sessions/prompt",
@@ -248,6 +740,141 @@ def test_acp_session_cancel_and_close(client_user_only, stub_runner_client):
     assert stub_runner_client.closed == ["session-123"]
 
 
+def test_acp_session_prompt_sanitizes_runtime_errors(client_user_only, monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    leaked = "sk-prompt-secret /tmp/acp-prompt-workspace"
+    error_logs = []
+
+    class ErrorRunnerClient(StubRunnerClient):
+        async def prompt(self, session_id: str, prompt):
+            _ = (session_id, prompt)
+            raise ACPResponseError(leaked)
+
+    async def _get_runner_client():
+        return ErrorRunnerClient()
+
+    def _capture_error(*args, **kwargs):
+        error_logs.append((args, kwargs))
+
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+    monkeypatch.setattr(acp_endpoints.logger, "error", _capture_error)
+
+    resp = client_user_only.post(
+        "/api/v1/acp/sessions/prompt",
+        json={"session_id": "session-123", "prompt": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "ACP prompt failed"
+    assert error_logs
+    assert leaked not in str(error_logs)
+
+
+def test_acp_session_cancel_sanitizes_runtime_errors(client_user_only, monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    leaked = "cancel token sk-cancel-secret /Users/example/private"
+    error_logs = []
+
+    class ErrorRunnerClient(StubRunnerClient):
+        async def cancel(self, session_id: str) -> None:
+            _ = session_id
+            raise ACPResponseError(leaked)
+
+    async def _get_runner_client():
+        return ErrorRunnerClient()
+
+    def _capture_error(*args, **kwargs):
+        error_logs.append((args, kwargs))
+
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+    monkeypatch.setattr(acp_endpoints.logger, "error", _capture_error)
+
+    resp = client_user_only.post(
+        "/api/v1/acp/sessions/cancel",
+        json={"session_id": "session-123"},
+    )
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "ACP session cancel failed"
+    assert error_logs
+    assert leaked not in str(error_logs)
+
+
+def test_acp_session_close_sanitizes_runtime_errors(client_user_only, monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    leaked = "close token sk-close-secret /var/tmp/acp-close-workspace"
+    error_logs = []
+
+    class ErrorRunnerClient(StubRunnerClient):
+        async def close_session(self, session_id: str) -> None:
+            _ = session_id
+            raise ACPResponseError(leaked)
+
+    async def _get_runner_client():
+        return ErrorRunnerClient()
+
+    def _capture_error(*args, **kwargs):
+        error_logs.append((args, kwargs))
+
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+    monkeypatch.setattr(acp_endpoints.logger, "error", _capture_error)
+
+    resp = client_user_only.post(
+        "/api/v1/acp/sessions/close",
+        json={"session_id": "session-123"},
+    )
+
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "ACP session close failed"
+    assert error_logs
+    assert leaked not in str(error_logs)
+
+
+def test_acp_session_teardown_sanitizes_runtime_errors(client_user_only, monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    class ErrorRunnerClient(StubRunnerClient):
+        async def close_session(self, session_id: str) -> None:
+            _ = session_id
+            raise ACPResponseError("teardown backend exploded at /private/acp.sock")
+
+    async def _get_runner_client():
+        return ErrorRunnerClient()
+
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+
+    resp = client_user_only.post("/api/v1/acp/sessions/session-teardown-sanitize/teardown")
+
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert detail["status"] == "teardown_failed"
+    assert detail["error"] == "ACP session teardown failed"
+
+
+def test_acp_session_reconcile_sanitizes_runtime_errors(client_user_only, monkeypatch):
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+
+    class ErrorRunnerClient(StubRunnerClient):
+        async def close_session(self, session_id: str) -> None:
+            _ = session_id
+            raise ACPResponseError("reconcile backend exploded at /private/acp.sock")
+
+    async def _get_runner_client():
+        return ErrorRunnerClient()
+
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+
+    resp = client_user_only.post("/api/v1/acp/sessions/session-reconcile-sanitize/reconcile")
+
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert detail["status"] == "reconcile_failed"
+    assert detail["error"] == "ACP session reconcile failed"
+
+
 def test_acp_session_updates(client_user_only, stub_runner_client):
     resp = client_user_only.get("/api/v1/acp/sessions/session-123/updates")
     assert resp.status_code == 200
@@ -257,6 +884,7 @@ def test_acp_session_updates(client_user_only, stub_runner_client):
     ]
 
 
+@pytest.mark.usefixtures("stub_runner_client")
 def test_acp_session_new_error(client_user_only, monkeypatch, tmp_path):
     import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
 
@@ -284,7 +912,7 @@ def test_acp_session_new_error(client_user_only, monkeypatch, tmp_path):
         json={"cwd": str(tmp_path)},
     )
     assert resp.status_code == 502
-    assert resp.json()["detail"] == "boom"
+    assert resp.json()["detail"] == "Failed to create ACP session"
 
 
 def test_acp_session_prompt_denied_for_unowned_session(client_user_only, stub_runner_client):
@@ -480,3 +1108,62 @@ def test_acp_session_fork_rejects_non_bootstrappable_source(client_user_only, mo
     assert fork_resp.status_code == 409
     assert fork_resp.json()["detail"] == "fork_not_resumable"
     assert runner.create_session_calls == []
+
+
+def test_acp_session_fork_sanitizes_create_session_errors(client_user_only, monkeypatch, tmp_path):
+    import asyncio
+
+    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
+    from tldw_Server_API.app.services.admin_acp_sessions_service import ACPSessionStore
+
+    class ErrorForkRunner:
+        agent_capabilities = {"promptCapabilities": {"image": False}}
+
+        async def create_session(self, *args, **kwargs):
+            _ = (args, kwargs)
+            raise ACPResponseError("fork backend exploded")
+
+        async def verify_session_access(self, session_id: str, user_id: int) -> bool:
+            return session_id == "source-session" and user_id == 1
+
+        def has_websocket_connections(self, session_id: str) -> bool:
+            return False
+
+    runner = ErrorForkRunner()
+    _db = ACPSessionsDB(db_path=str(tmp_path / "fork_error_test.db"))
+    store = ACPSessionStore(db=_db)
+
+    async def _seed() -> None:
+        await store.register_session(
+            session_id="source-session",
+            user_id=1,
+            agent_type="codex",
+            name="Source Session",
+            cwd="/tmp/project",
+            mcp_servers=[{"name": "filesystem"}],
+        )
+        await store.record_prompt(
+            "source-session",
+            [{"role": "user", "content": "Seed question"}],
+            {"content": "Seed answer"},
+        )
+
+    asyncio.run(_seed())
+
+    async def _get_runner_client():
+        return runner
+
+    async def _get_store():
+        return store
+
+    monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
+    monkeypatch.setattr(acp_endpoints, "get_acp_session_store", _get_store)
+
+    fork_resp = client_user_only.post(
+        "/api/v1/acp/sessions/source-session/fork",
+        json={"message_index": 1, "name": "Forked Session"},
+    )
+
+    assert fork_resp.status_code == 502
+    assert fork_resp.json()["detail"] == "Failed to create forked ACP session"

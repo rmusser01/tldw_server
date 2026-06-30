@@ -6,28 +6,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from fastapi import status
-
 from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
     UserProfileErrorDetail,
 )
-
-_FORBIDDEN_MESSAGES = {
-    "forbidden",
-    "forbidden_scope",
-    "owner_required",
-    "org_membership_required",
-}
-
-_UNKNOWN_MESSAGES = {
-    "unknown_key",
-    "unsupported_key",
-    "unsupported_type",
-}
-
-_NOT_FOUND_MESSAGES = {
-    "user_not_found",
-}
+from tldw_Server_API.app.core.UserProfiles.error_mapping import (
+    classify_legacy_profile_update_skips,
+)
 
 
 def classify_profile_update_skips(
@@ -38,7 +22,6 @@ def classify_profile_update_skips(
     if not skipped_list:
         return None
 
-    messages = {str(item.get("message") or "") for item in skipped_list}
     errors = [
         UserProfileErrorDetail(
             key=str(item.get("key") or ""),
@@ -46,33 +29,13 @@ def classify_profile_update_skips(
         )
         for item in skipped_list
     ]
-
-    if messages & _NOT_FOUND_MESSAGES:
-        return (
-            status.HTTP_404_NOT_FOUND,
-            "profile_update_not_found",
-            "Target user not found",
-            errors,
-        )
-    if messages & _FORBIDDEN_MESSAGES:
-        return (
-            status.HTTP_403_FORBIDDEN,
-            "profile_update_forbidden",
-            "Caller cannot edit one or more fields",
-            errors,
-        )
-    if messages & _UNKNOWN_MESSAGES:
-        return (
-            status.HTTP_400_BAD_REQUEST,
-            "profile_update_unknown_key",
-            "One or more keys are not recognized",
-            errors,
-        )
-
+    mapped = classify_legacy_profile_update_skips(skipped_list)
+    if mapped is None:
+        return None
     return (
-        status.HTTP_422_UNPROCESSABLE_ENTITY,
-        "profile_update_invalid",
-        "One or more updates failed validation",
+        mapped.status_code,
+        mapped.error_code,
+        mapped.detail,
         errors,
     )
 

@@ -12,7 +12,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 # Import shared enums from the canonical models module to avoid divergence.
 # ConflictResolution is intentionally redefined here to constrain API input
@@ -22,13 +24,29 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ContentType,
     ExportStatus,
     ImportStatus,
+    coerce_chatbook_export_version,
 )
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 class ConflictResolution(str, Enum):
     """How to handle conflicts during import (API-constrained subset)."""
     SKIP = "skip"          # Skip conflicting items
     RENAME = "rename"      # Rename imported items
+
+
+class ChatbookImportSourceFormat(str, Enum):
+    """Supported source formats for Chatbooks import surfaces."""
+    CHATBOOK = "chatbook"
+    OPENWEBUI_JSON = "openwebui_json"
+    OPENWEBUI_DB = "openwebui_db"
 
 
 class MediaQuality(str, Enum):
@@ -78,6 +96,10 @@ class CreateChatbookRequest(BaseModel):
     include_generated_content: bool = Field(True, description="Include generated documents")
     tags: list[str] = Field(default_factory=list, max_length=50, description="Chatbook tags")
     categories: list[str] = Field(default_factory=list, max_length=20, description="Chatbook categories")
+    format_version: ChatbookVersion = Field(
+        ChatbookVersion.V1,
+        description="Chatbook manifest format version to produce"
+    )
     async_mode: bool = Field(False, description="Run as background job")
 
     @field_validator('tags', 'categories', mode='before')
@@ -91,6 +113,12 @@ class CreateChatbookRequest(BaseModel):
                 if isinstance(item, str) and len(item) > 50:
                     raise ValueError(f"Item '{item[:20]}...' exceeds maximum length of 50 characters")
         return v
+
+    @field_validator('format_version', mode='before')
+    @classmethod
+    def validate_format_version(cls: Any, v: Any) -> ChatbookVersion:
+        """Validate and canonicalize the requested export format version."""
+        return coerce_chatbook_export_version(v)
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -108,6 +136,7 @@ class CreateChatbookRequest(BaseModel):
             "include_generated_content": True,
             "tags": ["research", "AI"],
             "categories": ["Work"],
+            "format_version": ChatbookVersion.V1.value,
             "async_mode": False
         }
     })
@@ -115,6 +144,10 @@ class CreateChatbookRequest(BaseModel):
 
 class ImportChatbookRequest(BaseModel):
     """Request for importing a chatbook."""
+    source_format: ChatbookImportSourceFormat = Field(
+        ChatbookImportSourceFormat.CHATBOOK,
+        description="Uploaded source format"
+    )
     content_selections: Optional[dict[ContentType, list[str]]] = Field(
         None,
         description="Specific content to import, or None for all"
@@ -130,6 +163,10 @@ class ImportChatbookRequest(BaseModel):
     import_media: bool = Field(False, description="Import media files (not supported yet)")
     import_embeddings: bool = Field(False, description="Import embeddings (not supported yet)")
     async_mode: bool = Field(False, description="Run as background job")
+    selected_openwebui_user_id: Optional[str] = Field(
+        None,
+        description="Selected OpenWebUI source user id for database imports"
+    )
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -189,6 +226,7 @@ class ChatbookManifestResponse(BaseModel):
     total_world_books: int = 0
     total_dictionaries: int = 0
     total_documents: int = 0
+    total_explainer_sessions: int = 0
     total_size_bytes: int = 0
 
     # Metadata
@@ -249,6 +287,195 @@ class ImportConflictResponse(BaseModel):
     new_title: Optional[str] = None
 
 
+class OpenWebUIPreviewChatItem(BaseModel):
+    """Lightweight preview row for one OpenWebUI chat."""
+    external_ref: str
+    title: str
+    message_count: int = Field(ge=0)
+    branched: bool = False
+    duplicate: bool = False
+    warning_count: int = Field(default=0, ge=0)
+
+
+class OpenWebUIImportPreview(BaseModel):
+    """OpenWebUI import preview counts."""
+    chat_count: int = Field(default=0, ge=0)
+    message_count: int = Field(default=0, ge=0)
+    branched_chat_count: int = Field(default=0, ge=0)
+    duplicate_chat_count: int = Field(default=0, ge=0)
+    attachment_reference_count: int = Field(default=0, ge=0)
+    malformed_chat_count: int = Field(default=0, ge=0)
+    warnings: list[str] = Field(default_factory=list)
+    items: list[OpenWebUIPreviewChatItem] = Field(default_factory=list)
+
+
+class OpenWebUIDatabaseUserPreview(BaseModel):
+    """OpenWebUI database preview counts for one source user."""
+    source_user_id: str
+    display_label: str
+    email: Optional[str] = None
+    chat_count: int = Field(default=0, ge=0)
+    folder_count: int = Field(default=0, ge=0)
+    message_count: int = Field(default=0, ge=0)
+    branched_chat_count: int = Field(default=0, ge=0)
+    duplicate_chat_count: int = Field(default=0, ge=0)
+    archived_chat_count: int = Field(default=0, ge=0)
+    pinned_chat_count: int = Field(default=0, ge=0)
+    attachment_reference_count: int = Field(default=0, ge=0)
+    warning_count: int = Field(default=0, ge=0)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class OpenWebUIDatabasePreview(BaseModel):
+    """OpenWebUI database import preview grouped by source user."""
+    user_count: int = Field(default=0, ge=0)
+    users: list[OpenWebUIDatabaseUserPreview] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class OpenWebUIImportResult(BaseModel):
+    """OpenWebUI import result counts."""
+    imported_chats: int = Field(default=0, ge=0)
+    skipped_chats: int = Field(default=0, ge=0)
+    failed_chats: int = Field(default=0, ge=0)
+    imported_messages: int = Field(default=0, ge=0)
+    skipped_messages: int = Field(default=0, ge=0)
+    duplicate_chats: int = Field(default=0, ge=0)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class OpenWebUIDatabaseImportResult(OpenWebUIImportResult):
+    """OpenWebUI database import result for a selected source user."""
+    selected_user_id: str
+    selected_user_label: str
+    mirrored_folders: int = Field(default=0, ge=0)
+    folder_links: int = Field(default=0, ge=0)
+
+
+class OpenWebUIHydrationScopeRequest(BaseModel):
+    """Scope for OpenWebUI attachment hydration over imported tldw conversations."""
+    conversation_ids: list[str] = Field(
+        default_factory=list,
+        max_length=1000,
+        description="Imported tldw conversation ids to scan. Empty means no conversations are selected.",
+    )
+    source_user_id: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="Optional OpenWebUI source user id used for chat_file fallback lookups.",
+    )
+
+    @field_validator("conversation_ids")
+    @classmethod
+    def validate_conversation_ids(cls, value: list[str]) -> list[str]:
+        """Trim and reject empty conversation ids."""
+        cleaned: list[str] = []
+        for item in value:
+            text = str(item).strip()
+            if not text:
+                raise ValueError("conversation_ids must not contain empty values")
+            cleaned.append(text)
+        return cleaned
+
+    @field_validator("source_user_id")
+    @classmethod
+    def validate_source_user_id(cls, value: Optional[str]) -> Optional[str]:
+        """Trim and reject blank OpenWebUI source user ids."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            raise ValueError("source_user_id must not be empty")
+        return text
+
+
+class OpenWebUIHydrationPreviewRequest(BaseModel):
+    """Request to preview OpenWebUI attachment hydration."""
+    openwebui_data_root: str = Field(..., min_length=1, max_length=4096)
+    scope: OpenWebUIHydrationScopeRequest = Field(default_factory=OpenWebUIHydrationScopeRequest)
+    process_supported_files: bool = Field(
+        default=False,
+        description="Preview whether supported non-image files would be processed after registration.",
+    )
+
+    @field_validator("openwebui_data_root")
+    @classmethod
+    def validate_openwebui_data_root(cls, value: str) -> str:
+        """Trim and reject empty roots."""
+        text = str(value).strip()
+        if not text:
+            raise ValueError("openwebui_data_root must not be empty")
+        return text
+
+
+class OpenWebUIHydrationJobRequest(OpenWebUIHydrationPreviewRequest):
+    """Request to enqueue an OpenWebUI attachment hydration job."""
+
+
+class OpenWebUIHydrationItemResponse(BaseModel):
+    """One user-safe OpenWebUI attachment hydration preview/status item."""
+    conversation_id: Optional[str] = None
+    message_id: Optional[str] = None
+    file_id: Optional[str] = None
+    status: str
+    warning_code: Optional[str] = None
+    raw_ref_index: Optional[int] = None
+    source: Optional[str] = None
+    raw_ref_shape: Optional[str] = None
+    job_id: Optional[str] = None
+    source_key: Optional[str] = None
+    message_image_position: Optional[int] = None
+    file_kind: Optional[str] = None
+    mime_type: Optional[str] = None
+    media_id: Optional[int] = None
+    media_file_id: Optional[str] = None
+    checksum: Optional[str] = None
+    processing_status: Optional[str] = None
+
+
+class OpenWebUIHydrationSummaryResponse(BaseModel):
+    """Counts for an OpenWebUI attachment hydration preview or job result."""
+    referenced_files: int = Field(default=0, ge=0)
+    returned_items: int = Field(default=0, ge=0)
+    omitted_items: int = Field(default=0, ge=0)
+    resolved_files: int = Field(default=0, ge=0)
+    image_files: int = Field(default=0, ge=0)
+    media_files: int = Field(default=0, ge=0)
+    missing_files: int = Field(default=0, ge=0)
+    unsupported_files: int = Field(default=0, ge=0)
+    failed_files: int = Field(default=0, ge=0)
+    hydrated_images: int = Field(default=0, ge=0)
+    registered_media_files: int = Field(default=0, ge=0)
+    already_hydrated: int = Field(default=0, ge=0)
+    processed_files: int = Field(default=0, ge=0)
+    warning_count: int = Field(default=0, ge=0)
+
+
+class OpenWebUIHydrationPreviewResponse(BaseModel):
+    """Response for OpenWebUI attachment hydration preview."""
+    scope: OpenWebUIHydrationScopeRequest
+    process_supported_files: bool = False
+    summary: OpenWebUIHydrationSummaryResponse
+    items: list[OpenWebUIHydrationItemResponse] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class OpenWebUIHydrationJobResponse(BaseModel):
+    """Response for OpenWebUI attachment hydration job creation/status."""
+    job_id: str
+    job_uuid: Optional[str] = None
+    status: str
+    domain: str = "chatbooks"
+    queue: str = "default"
+    job_type: str = "openwebui_attachment_hydration"
+    owner_user_id: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    result: Optional[dict[str, Any]] = None
+    error: Optional[str] = None
+
+
 class CreateChatbookResponse(BaseModel):
     """Response for chatbook creation."""
     success: bool
@@ -261,10 +488,19 @@ class ImportChatbookResponse(BaseModel):
     """Response for chatbook import."""
     success: bool
     message: str
+    source_format: ChatbookImportSourceFormat = ChatbookImportSourceFormat.CHATBOOK
     job_id: Optional[str] = Field(None, description="Job ID if async mode")
     imported_items: Optional[dict[str, int]] = Field(
         None,
         description="Count of imported items by type"
+    )
+    openwebui_result: Optional[OpenWebUIImportResult] = Field(
+        None,
+        description="Structured import result for OpenWebUI JSON sources"
+    )
+    openwebui_db_result: Optional[OpenWebUIDatabaseImportResult] = Field(
+        None,
+        description="Structured import result for OpenWebUI database sources"
     )
     warnings: Optional[list[str]] = Field(
         None,
@@ -274,20 +510,63 @@ class ImportChatbookResponse(BaseModel):
 
 class PreviewChatbookResponse(BaseModel):
     """Response for chatbook preview."""
+    source_format: ChatbookImportSourceFormat = ChatbookImportSourceFormat.CHATBOOK
     manifest: Optional[ChatbookManifestResponse] = None
+    openwebui_preview: Optional[OpenWebUIImportPreview] = None
+    openwebui_db_preview: Optional[OpenWebUIDatabasePreview] = None
     error: Optional[str] = None
+    compatibility: Optional["ChatbookPreviewCompatibility"] = None
+    features: Optional["ChatbookPreviewFeatures"] = None
+    integrity: Optional["ChatbookPreviewIntegrity"] = None
+    lossiness: Optional[dict[str, int]] = None
+    source_refs: Optional[dict[str, int]] = None
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class ChatbookPreviewCompatibility(BaseModel):
+    """Chatbook reader compatibility preview details."""
+    status: str
+    reader_version: str = "1.1.0"
+    manifest_version: Optional[str] = None
+
+
+class ChatbookPreviewFeatures(BaseModel):
+    """Supported and unsupported v1.1 feature tokens."""
+    supported: list[str] = Field(default_factory=list)
+    unsupported: list[str] = Field(default_factory=list)
+
+
+class ChatbookPreviewIntegrity(BaseModel):
+    """File inventory integrity summary for preview."""
+    verified_files: int = 0
+    failed_files: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ListExportJobsResponse(BaseModel):
     """Response for listing export jobs."""
     jobs: list[ExportJobResponse]
     total: int
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ListImportJobsResponse(BaseModel):
     """Response for listing import jobs."""
     jobs: list[ImportJobResponse]
     total: int
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class CleanupExpiredExportsResponse(BaseModel):

@@ -13,6 +13,13 @@ type ResolveExplicitProviderForSelectedModelOptions = {
   explicitProvider?: string | null
 }
 
+export type ProviderQualifiedModelSelection = {
+  raw: string
+  modelId: string
+  provider?: string
+  isProviderQualified: boolean
+}
+
 const PROVIDER_ALIASES: Record<string, string> = {
   "custom_openai_api": "custom-openai-api",
   "custom-openai-api2": "custom-openai-api-2",
@@ -46,6 +53,7 @@ const KNOWN_PROVIDER_KEYS = new Set<string>([
   "mlx",
   "custom-openai-api",
   "custom-openai-api-2",
+  "custom",
   "together",
   "xai",
   "siliconflow",
@@ -94,25 +102,94 @@ const normalizeKnownProvider = (value: unknown): string => {
   return normalized
 }
 
+export const parseProviderQualifiedModelSelection = (
+  value: unknown
+): ProviderQualifiedModelSelection => {
+  const raw = String(value || "").trim()
+  const fallback = {
+    raw,
+    modelId: raw,
+    provider: undefined,
+    isProviderQualified: false
+  }
+
+  const parseCandidate = (
+    candidate: string
+  ): Omit<ProviderQualifiedModelSelection, "raw"> | null => {
+    const separatorIndex = candidate.indexOf(":")
+    if (separatorIndex <= 0 || separatorIndex === candidate.length - 1) {
+      return null
+    }
+
+    const provider = normalizeKnownProvider(candidate.slice(0, separatorIndex))
+    if (!provider) return null
+
+    const modelId = candidate.slice(separatorIndex + 1).trim()
+    if (!modelId) return null
+
+    return {
+      modelId,
+      provider,
+      isProviderQualified: true
+    }
+  }
+
+  const parsed = parseCandidate(raw)
+  if (parsed) {
+    return {
+      raw,
+      ...parsed
+    }
+  }
+
+  const normalized = normalizeModelId(raw)
+  const normalizedParsed =
+    normalized !== raw ? parseCandidate(normalized) : null
+  if (normalizedParsed) {
+    return {
+      raw,
+      ...normalizedParsed
+    }
+  }
+
+  return fallback
+}
+
 export const resolveExplicitProviderForSelectedModel = ({
   currentSelectedModel,
   requestedSelectedModel,
   explicitProvider
 }: ResolveExplicitProviderForSelectedModelOptions): string | undefined => {
-  const normalizedExplicitProvider = normalizeProvider(explicitProvider)
-  if (!normalizedExplicitProvider) return undefined
-
-  const normalizedRequestedModel = normalizeModelId(requestedSelectedModel)
-  if (!normalizedRequestedModel) {
-    return normalizedExplicitProvider
+  const requestedSelection = parseProviderQualifiedModelSelection(
+    requestedSelectedModel
+  )
+  if (requestedSelection.provider) {
+    return requestedSelection.provider
   }
 
-  const normalizedCurrentModel = normalizeModelId(currentSelectedModel)
+  const normalizedExplicitProvider = normalizeProvider(explicitProvider)
+  const normalizedRequestedModel = normalizeModelId(requestedSelection.modelId)
+  if (!normalizedRequestedModel) {
+    return normalizedExplicitProvider || undefined
+  }
+
+  const currentSelection = parseProviderQualifiedModelSelection(
+    currentSelectedModel
+  )
+  const normalizedCurrentModel = normalizeModelId(currentSelection.modelId)
   if (!normalizedCurrentModel) {
     return undefined
   }
 
-  return normalizedRequestedModel === normalizedCurrentModel
+  if (
+    currentSelection.provider &&
+    normalizedRequestedModel === normalizedCurrentModel
+  ) {
+    return currentSelection.provider
+  }
+
+  return normalizedExplicitProvider &&
+    normalizedRequestedModel === normalizedCurrentModel
     ? normalizedExplicitProvider
     : undefined
 }
@@ -159,10 +236,12 @@ export const resolveApiProviderForModel = async ({
   providerHint,
   explicitProvider
 }: ResolveApiProviderOptions): Promise<string | undefined> => {
-  const explicit = normalizeProvider(explicitProvider)
+  const modelSelection = parseProviderQualifiedModelSelection(modelId)
+  const explicit =
+    modelSelection.provider || normalizeProvider(explicitProvider)
   if (explicit) return explicit
 
-  const rawModelId = String(modelId || "").trim()
+  const rawModelId = modelSelection.modelId
   const normalizedModelId = normalizeModelId(rawModelId)
   const isTldwScopedModel = /^tldw:/i.test(rawModelId)
   if (isAutoModelId(rawModelId)) {

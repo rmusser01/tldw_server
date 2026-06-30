@@ -234,6 +234,78 @@ def normalize_fact_check_payload(raw_payload: Mapping[str, Any] | None, *, assis
     }
 
 
+def _bound_prompt_json_value(
+    value: Any,
+    *,
+    max_string_chars: int,
+    max_list_items: int,
+) -> Any:
+    """Return a JSON-friendly value with nested strings and lists bounded."""
+    if isinstance(value, str):
+        return _truncate_text(value, max_string_chars)
+    if isinstance(value, Mapping):
+        return {
+            str(key): _bound_prompt_json_value(
+                nested_value,
+                max_string_chars=max_string_chars,
+                max_list_items=max_list_items,
+            )
+            for key, nested_value in value.items()
+        }
+    if isinstance(value, list):
+        bounded_items = [
+            _bound_prompt_json_value(
+                item,
+                max_string_chars=max_string_chars,
+                max_list_items=max_list_items,
+            )
+            for item in value[:max_list_items]
+        ]
+        if len(value) > max_list_items:
+            bounded_items.append({"truncated_items": len(value) - max_list_items})
+        return bounded_items
+    return value
+
+
+def _compact_prompt_context(context: Mapping[str, Any], *, max_chars: int = 6000) -> str:
+    """Serialize bounded study context as valid JSON for prompt grounding."""
+    context_type = str(context.get("context_type") or "flashcard")
+    if context_type == "quiz_attempt_question":
+        payload = {
+            "context_type": context_type,
+            "attempt": context.get("attempt") or {},
+            "question": context.get("question") or {},
+            "history": context.get("history") or [],
+        }
+    else:
+        payload = {
+            "context_type": context_type,
+            "flashcard": context.get("flashcard") or {},
+            "study_pack": context.get("study_pack"),
+            "citations": context.get("citations") or [],
+            "primary_citation": context.get("primary_citation"),
+            "deep_dive_target": context.get("deep_dive_target"),
+            "history": context.get("history") or [],
+        }
+
+    rendered = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    if len(rendered) <= max_chars:
+        return rendered
+
+    max_string_chars = max(64, min(1000, max_chars // 4))
+    bounded_payload = _bound_prompt_json_value(
+        payload,
+        max_string_chars=max_string_chars,
+        max_list_items=8,
+    )
+    rendered = json.dumps(bounded_payload, ensure_ascii=False, sort_keys=True, default=str)
+    if len(rendered) <= max_chars:
+        return rendered
+
+    fallback = {"context_type": context_type, "truncated": True}
+    return json.dumps(fallback, ensure_ascii=False, sort_keys=True)
+
+
 def build_study_assistant_prompt_package(
     *,
     action: str,
@@ -268,6 +340,7 @@ def build_study_assistant_prompt_package(
         "user_prompt": (
             f"Context type: {context_type}\n"
             f"Anchor: {anchor_text}\n"
+            f"Study context JSON:\n{_compact_prompt_context(context)}\n"
             f"Learner message: {(user_message or '').strip() or '[none provided]'}"
         ),
     }

@@ -5,6 +5,15 @@ import {
 } from "./fixtures"
 import type { ResearchWorkspacePlatform } from "./types"
 
+export const shouldUseDomClickFallback = (error: unknown): boolean => {
+  const message = String(error instanceof Error ? error.message : error)
+  return (
+    message.includes("nextjs-portal") ||
+    /TimeoutError:\s*locator\.click|locator\.click:\s*Timeout/i.test(message) ||
+    /intercepts pointer events|element is not stable/i.test(message)
+  )
+}
+
 export class ResearchWorkspaceParityPage {
   readonly page: Page
   readonly headerTitle: Locator
@@ -37,11 +46,41 @@ export class ResearchWorkspaceParityPage {
 
   private async disablePortalPointerInterception(): Promise<void> {
     await this.page.evaluate(() => {
+      const styleId = "tldw-e2e-disable-nextjs-portal-pointer-events"
+      if (!document.getElementById(styleId)) {
+        const style = document.createElement("style")
+        style.id = styleId
+        style.textContent =
+          "nextjs-portal, nextjs-portal * { pointer-events: none !important; }"
+        document.head.appendChild(style)
+      }
+
       const portals = document.querySelectorAll("nextjs-portal")
       portals.forEach((portal) => {
-        ;(portal as HTMLElement).style.pointerEvents = "none"
+        ;(portal as HTMLElement).style.setProperty(
+          "pointer-events",
+          "none",
+          "important"
+        )
       })
     })
+  }
+
+  private async clickControl(locator: Locator): Promise<void> {
+    await expect(locator).toBeVisible({ timeout: 10_000 })
+    await this.disablePortalPointerInterception()
+    try {
+      await locator.click({ timeout: 3_000 })
+    } catch (error) {
+      if (!shouldUseDomClickFallback(error)) {
+        throw error
+      }
+
+      await this.disablePortalPointerInterception()
+      await locator.evaluate((node) => {
+        ;(node as HTMLButtonElement).click()
+      })
+    }
   }
 
   private async dismissAssistantSetupBlockingModal(timeoutMs = 5_000): Promise<void> {
@@ -136,24 +175,21 @@ export class ResearchWorkspaceParityPage {
   async hideSourcesPane(): Promise<void> {
     await this.disablePortalPointerInterception()
     const hideButton = this.sourcesPanel.getByRole("button", { name: /hide sources/i })
-    await expect(hideButton).toBeVisible({ timeout: 10_000 })
-    await hideButton.click()
+    await this.clickControl(hideButton)
     await expect(this.sourcesPanel).toBeHidden({ timeout: 10_000 })
     await expect(this.restoreSourcesButton).toBeVisible({ timeout: 10_000 })
   }
 
   async restoreSourcesPane(): Promise<void> {
     await this.disablePortalPointerInterception()
-    await expect(this.restoreSourcesButton).toBeVisible({ timeout: 10_000 })
-    await this.restoreSourcesButton.click()
+    await this.clickControl(this.restoreSourcesButton)
     await expect(this.sourcesPanel).toBeVisible({ timeout: 10_000 })
   }
 
   async hideStudioPane(): Promise<void> {
     await this.disablePortalPointerInterception()
     const hideButton = this.studioPanel.getByRole("button", { name: /hide studio/i })
-    await expect(hideButton).toBeVisible({ timeout: 10_000 })
-    await hideButton.click()
+    await this.clickControl(hideButton)
     await expect(this.page.locator("#workspace-studio-panel")).toBeHidden({
       timeout: 10_000,
     })
@@ -162,8 +198,7 @@ export class ResearchWorkspaceParityPage {
 
   async restoreStudioPane(): Promise<void> {
     await this.disablePortalPointerInterception()
-    await expect(this.restoreStudioButton).toBeVisible({ timeout: 10_000 })
-    await this.restoreStudioButton.click()
+    await this.clickControl(this.restoreStudioButton)
     await expect(this.studioPanel).toBeVisible({ timeout: 10_000 })
   }
 

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: null, isFetching: false, error: null, refetch: vi.fn() })
@@ -33,6 +34,13 @@ vi.mock("@/services/moderation", () => ({
 
 import { ModerationPlaygroundShell } from "../ModerationPlaygroundShell"
 
+const renderShell = () =>
+  render(
+    <MemoryRouter>
+      <ModerationPlaygroundShell />
+    </MemoryRouter>
+  )
+
 describe("ModerationPlayground disclosure UX", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -40,17 +48,17 @@ describe("ModerationPlayground disclosure UX", () => {
   })
 
   it("allows dismissing onboarding and persists dismissal", async () => {
-    render(<ModerationPlaygroundShell />)
+    renderShell()
 
     expect(
-      screen.getByText("Welcome to Moderation Playground")
+      screen.getByText("Welcome to Content Rules")
     ).toBeInTheDocument()
 
-    fireEvent.click(screen.getByText("Got it, let's start"))
+    fireEvent.click(screen.getByText(/explore on my own/i))
 
     await waitFor(() => {
       expect(
-        screen.queryByText("Welcome to Moderation Playground")
+        screen.queryByText("Welcome to Content Rules")
       ).not.toBeInTheDocument()
     })
 
@@ -59,7 +67,7 @@ describe("ModerationPlayground disclosure UX", () => {
 
   it("shows Policy & Settings tab content by default", async () => {
     localStorage.setItem("moderation-playground-onboarded", "true")
-    render(<ModerationPlaygroundShell />)
+    renderShell()
 
     // The Policy tab should be selected by default
     const policyTab = screen.getByRole("tab", { name: /policy/i })
@@ -71,7 +79,7 @@ describe("ModerationPlayground disclosure UX", () => {
 
   it("switches tab content when clicking a different tab", async () => {
     localStorage.setItem("moderation-playground-onboarded", "true")
-    render(<ModerationPlaygroundShell />)
+    renderShell()
 
     // Click the Blocklist Studio tab
     fireEvent.click(screen.getByRole("tab", { name: /blocklist/i }))
@@ -88,7 +96,7 @@ describe("ModerationPlayground disclosure UX", () => {
 
   it("defaults to server scope in the context bar", () => {
     localStorage.setItem("moderation-playground-onboarded", "true")
-    render(<ModerationPlaygroundShell />)
+    renderShell()
 
     const serverOption = screen.getByRole("option", {
       name: /server/i
@@ -98,7 +106,7 @@ describe("ModerationPlayground disclosure UX", () => {
 
   it("renders all 5 tabs", () => {
     localStorage.setItem("moderation-playground-onboarded", "true")
-    render(<ModerationPlaygroundShell />)
+    renderShell()
 
     expect(screen.getByRole("tab", { name: /policy/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /blocklist/i })).toBeInTheDocument()
@@ -109,7 +117,7 @@ describe("ModerationPlayground disclosure UX", () => {
 
   it("navigates to Advanced tab and shows its content", async () => {
     localStorage.setItem("moderation-playground-onboarded", "true")
-    render(<ModerationPlaygroundShell />)
+    renderShell()
 
     fireEvent.click(screen.getByRole("tab", { name: /advanced/i }))
 

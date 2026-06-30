@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next"
+import { getDesignSystemState } from "@/design-system"
 
 export type DemoFlashcardDeck = {
   id: string
@@ -13,11 +14,14 @@ export type DemoNotePreview = {
   updated_at: string
 }
 
+export type DemoMediaPreviewStatusKey = "ready" | "processing"
+
 export type DemoMediaPreview = {
   id: string
   title: string
   meta: string
-  status: "Ready" | "Processing"
+  statusKey: DemoMediaPreviewStatusKey
+  statusLabel: string
 }
 
 export type DemoQuizQuestion = {
@@ -125,38 +129,45 @@ export const getDemoNotes = (t: TFunction): DemoNotePreview[] => [
   }
 ]
 
-export const getDemoMediaItems = (t: TFunction): DemoMediaPreview[] => [
-  {
-    id: "demo-media-1",
-    title: t("review:mediaEmpty.demoSample1Title", {
-      defaultValue: "Demo media: Team call recording"
-    }),
-    meta: t("review:mediaEmpty.demoSample1Meta", {
-      defaultValue: "Video · 25 min · Keywords: standup, planning"
-    }),
-    status: "Ready"
-  },
-  {
-    id: "demo-media-2",
-    title: t("review:mediaEmpty.demoSample2Title", {
-      defaultValue: "Demo media: Product walkthrough"
-    }),
-    meta: t("review:mediaEmpty.demoSample2Meta", {
-      defaultValue: "Screen recording · 12 min · Keywords: onboarding"
-    }),
-    status: "Processing"
-  },
-  {
-    id: "demo-media-3",
-    title: t("review:mediaEmpty.demoSample3Title", {
-      defaultValue: "Demo media: Research article PDF"
-    }),
-    meta: t("review:mediaEmpty.demoSample3Meta", {
-      defaultValue: "PDF · 6 pages · Keywords: summarization"
-    }),
-    status: "Ready"
-  }
-]
+export const getDemoMediaItems = (t: TFunction): DemoMediaPreview[] => {
+  const readyStatusLabel = getDesignSystemState("ready").label
+
+  return [
+    {
+      id: "demo-media-1",
+      title: t("review:mediaEmpty.demoSample1Title", {
+        defaultValue: "Demo media: Team call recording"
+      }),
+      meta: t("review:mediaEmpty.demoSample1Meta", {
+        defaultValue: "Video · 25 min · Keywords: standup, planning"
+      }),
+      statusKey: "ready",
+      statusLabel: readyStatusLabel
+    },
+    {
+      id: "demo-media-2",
+      title: t("review:mediaEmpty.demoSample2Title", {
+        defaultValue: "Demo media: Product walkthrough"
+      }),
+      meta: t("review:mediaEmpty.demoSample2Meta", {
+        defaultValue: "Screen recording · 12 min · Keywords: onboarding"
+      }),
+      statusKey: "processing",
+      statusLabel: "Processing"
+    },
+    {
+      id: "demo-media-3",
+      title: t("review:mediaEmpty.demoSample3Title", {
+        defaultValue: "Demo media: Research article PDF"
+      }),
+      meta: t("review:mediaEmpty.demoSample3Meta", {
+        defaultValue: "PDF · 6 pages · Keywords: summarization"
+      }),
+      statusKey: "ready",
+      statusLabel: readyStatusLabel
+    }
+  ]
+}
 
 export const getDemoQuizzes = (t: TFunction): DemoQuiz[] => [
   {

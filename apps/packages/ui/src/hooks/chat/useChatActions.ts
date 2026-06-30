@@ -81,8 +81,12 @@ import {
   type ChatResearchContext,
   type ConversationState
 } from "@/services/tldw/TldwApiClient"
+import type { ChatScope } from "@/types/chat-scope"
 import { getServerCapabilities } from "@/services/tldw/server-capabilities"
 import { generateTitle } from "@/services/title"
+import { syncChatSettingsForServerChat } from "@/services/chat-settings"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { trackCompareMetric } from "@/utils/compare-metrics"
 import { MAX_COMPARE_MODELS } from "@/hooks/chat/compare-constants"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
@@ -91,8 +95,22 @@ import {
   isAbortLikeError
 } from "@/hooks/chat/abort-turn-cleanup"
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome"
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat"
+import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing"
 import {
+  aggregateChatSubmitResults,
+  chatSubmitFailed,
+  chatSubmitSkipped,
+  normalizeChatSubmitResult,
+  resolveTurnFileRetrievalEnabled,
+  resolveTurnRagMediaIds,
+  shouldUseRagForTurn,
+  type ChatSubmitResult
+} from "@/hooks/chat/chat-action-utils"
+import {
+  assistantSelectionToCharacter,
+  getAssistantSelectionMode,
   isPersonaAssistantSelection,
   type AssistantSelection
 } from "@/types/assistant-selection"
@@ -105,6 +123,7 @@ import type {
 import {
   type ChatHistory,
   type Message,
+  type MessageMetadataExtra,
   useStoreMessageOption,
   type Knowledge,
   type ReplyTarget,
@@ -112,6 +131,7 @@ import {
 } from "@/store/option"
 import type { ChatModelSettings } from "@/store/model"
 import type { SaveMessageData } from "@/types/chat-modes"
+import type { DynamicUIRequest } from "@/types/dynamic-ui"
 import {
   buildGreetingOptionsFromEntries,
   collectGreetingEntries,
@@ -139,10 +159,62 @@ type ChatModeOverrides = {
   webSearch?: boolean
   imageEventSyncPolicy?: ImageGenerationEventSyncPolicy
   researchContext?: ChatResearchContext
+  dynamicUIRequest?: DynamicUIRequest
+  userMetadataExtra?: MessageMetadataExtra
+  ragMediaIds?: number[] | null
+  fileRetrievalEnabled?: boolean
+  selectedKnowledge?: Knowledge | null
 } & Record<string, unknown>
 
 const loadActorSettings = () => import("@/services/actor-settings")
 const STREAMING_UPDATE_INTERVAL_MS = 80
+const toChatSubmitResult = normalizeChatSubmitResult
+
+const persistTrackedPersonaPlaygroundSession = async ({
+  chatId,
+  historyId,
+  assistant,
+  personaMemoryMode
+}: {
+  chatId: string
+  historyId: string | null
+  assistant: AssistantSelection & { kind: "persona" }
+  personaMemoryMode: "read_only" | "read_write"
+}) => {
+  const assistantId = String(assistant.id)
+  const trackedAssistantSelection = {
+    ...assistant,
+    id: assistantId,
+    metadata: {
+      ...(assistant.metadata ?? {}),
+      selectionMode: "tracked" as const
+    }
+  }
+
+  try {
+    const config = await tldwClient.getConfig().catch(() => null)
+    const scopeKey = buildChatSurfaceScopeKeyFromConfig(config)
+    usePlaygroundSessionStore.getState().saveSession({
+      historyId,
+      serverChatId: chatId,
+      trackedAssistantSelection,
+      trackedAssistantKind: "persona",
+      trackedAssistantId: assistantId,
+      trackedCharacterId: null,
+      trackedAssistantDisplayName:
+        typeof assistant.name === "string" ? assistant.name : null,
+      trackedAssistantAvatarUrl:
+        typeof assistant.avatar_url === "string" ? assistant.avatar_url : null,
+      serverChatPersonaMemoryMode: personaMemoryMode,
+      scopeKey
+    })
+  } catch (error) {
+    console.warn(
+      "[useChatActions] Failed to persist tracked persona session",
+      error
+    )
+  }
+}
 
 type SaveMessagePayload = Omit<SaveMessageData, "setHistoryId"> & {
   setHistoryId?: SaveMessageData["setHistoryId"]
@@ -244,11 +316,13 @@ type UseChatActionsOptions = {
   serverChatAssistantKind: "character" | "persona" | null
   serverChatAssistantId: string | null
   serverChatPersonaMemoryMode: "read_only" | "read_write" | null
+  serverChatMetaLoaded?: boolean
   serverChatState: ConversationState | null
   serverChatTopic: string | null
   serverChatClusterId: string | null
   serverChatSource: string | null
   serverChatExternalRef: string | null
+  scope?: ChatScope
   setServerChatId: (id: string | null) => void
   setServerChatTitle: (title: string | null) => void
   setServerChatCharacterId: (id: string | number | null) => void
@@ -330,6 +404,7 @@ export const useChatActions = ({
   serverChatAssistantKind,
   serverChatAssistantId,
   serverChatPersonaMemoryMode,
+  serverChatMetaLoaded = false,
   serverChatState,
   serverChatTopic,
   serverChatClusterId,
@@ -414,6 +489,51 @@ export const useChatActions = ({
     historyId,
     serverChatId
   })
+  const effectiveAssistantState = React.useMemo(
+    () =>
+      resolveEffectiveAssistantState({
+        tracked: {
+          assistantKind: serverChatAssistantKind,
+          assistantId: serverChatAssistantId,
+          characterId: serverChatCharacterId
+        },
+        settings: chatSettings ?? null,
+        draftSelection: selectedAssistant
+      }),
+    [
+      chatSettings,
+      selectedAssistant,
+      serverChatAssistantId,
+      serverChatAssistantKind,
+      serverChatCharacterId
+    ]
+  )
+  const effectiveSelectedAssistant = React.useMemo<AssistantSelection | null>(() => {
+    if (effectiveAssistantState.mode === "plain") {
+      return selectedAssistant
+    }
+
+    const matchesDraftSelection =
+      selectedAssistant?.kind === effectiveAssistantState.kind &&
+      selectedAssistant.id === effectiveAssistantState.id
+    const draftMetadata = matchesDraftSelection ? selectedAssistant : null
+
+    return {
+      ...draftMetadata,
+      kind: effectiveAssistantState.kind!,
+      id: effectiveAssistantState.id!,
+      name:
+        effectiveAssistantState.displayName ??
+        draftMetadata?.name ??
+        (effectiveAssistantState.kind === "persona" ? "Persona" : "Assistant"),
+      avatar_url:
+        effectiveAssistantState.avatarUrl ?? draftMetadata?.avatar_url ?? null,
+      system_prompt:
+        effectiveAssistantState.systemPromptSnapshot ??
+        draftMetadata?.system_prompt ??
+        null
+    }
+  }, [effectiveAssistantState, selectedAssistant])
   const greetingEnabled = chatSettings?.greetingEnabled ?? true
   const greetingSelectionId =
     typeof chatSettings?.greetingSelectionId === "string"
@@ -490,6 +610,49 @@ export const useChatActions = ({
     }
     return selectedCharacter
   }, [selectedCharacter])
+
+  const resolveTrackedCharacterForCurrentChat = React.useCallback((): Character | null => {
+    if (serverChatAssistantKind !== "character") return null
+    if (serverChatCharacterId == null) return null
+
+    const trackedCharacterId = String(serverChatCharacterId)
+    if (
+      selectedCharacter?.id != null &&
+      String(selectedCharacter.id) === trackedCharacterId
+    ) {
+      return selectedCharacter
+    }
+
+    if (
+      selectedAssistant?.kind === "character" &&
+      String(selectedAssistant.id) === trackedCharacterId
+    ) {
+      return {
+        id: trackedCharacterId,
+        name: selectedAssistant.name,
+        avatar_url:
+          typeof selectedAssistant.avatar_url === "string"
+            ? selectedAssistant.avatar_url
+            : null,
+        system_prompt:
+          typeof selectedAssistant.system_prompt === "string"
+            ? selectedAssistant.system_prompt
+            : null
+      }
+    }
+
+    return {
+      id: trackedCharacterId,
+      name: "Assistant",
+      avatar_url: null,
+      system_prompt: null
+    }
+  }, [
+    selectedAssistant,
+    selectedCharacter,
+    serverChatAssistantKind,
+    serverChatCharacterId
+  ])
 
   const baseSaveMessageOnSuccess = createSaveMessageOnSuccess(
     temporaryChat,
@@ -605,13 +768,24 @@ export const useChatActions = ({
   const saveMessageOnSuccess = async (
     payload?: SaveMessagePayload
   ): Promise<string | null> => {
+    const payloadConversationId =
+      typeof payload?.conversationId === "string"
+        ? payload.conversationId
+        : payload?.conversationId != null
+          ? String(payload.conversationId)
+          : null
     const payloadWithHistory = payload
       ? {
           ...payload,
           setHistoryId:
             payload.setHistoryId ??
             ((id: string) => {
-              setHistoryId(id)
+              setHistoryId(
+                id,
+                payloadConversationId || serverChatId
+                  ? { preserveServerChatId: true }
+                  : undefined
+              )
             })
         }
       : undefined
@@ -626,12 +800,17 @@ export const useChatActions = ({
     }
 
     let skipServerWrite = false
-    const payloadConversationId =
-      typeof payload?.conversationId === "string"
-        ? payload.conversationId
-        : payload?.conversationId != null
-          ? String(payload.conversationId)
-          : null
+    if (historyKey && payloadConversationId && !serverChatId) {
+      try {
+        await syncChatSettingsForServerChat({
+          historyId: historyKey,
+          serverChatId: payloadConversationId,
+          allowScratchFallback: true
+        })
+      } catch {
+        // Best-effort scratch-to-server settings reconciliation.
+      }
+    }
     const resolvedServerConversationId =
       payloadConversationId ??
       (serverChatId != null ? String(serverChatId) : null)
@@ -810,14 +989,18 @@ export const useChatActions = ({
           if (userContent.length > 0) {
             await tldwClient.addChatMessage(cid, {
               role: "user",
-              content: userContent
+              content: userContent,
+              ...(payload.userMetadataExtra
+                ? { metadata_extra: payload.userMetadataExtra }
+                : {})
             })
           }
 
           if (assistantContent.length > 0) {
             await tldwClient.addChatMessage(cid, {
               role: "assistant",
-              content: assistantContent
+              content: assistantContent,
+              metadata_extra: payload.assistantMetadataExtra
             })
           }
         } catch {
@@ -927,6 +1110,7 @@ export const useChatActions = ({
         serverChatAssistantKind,
         serverChatAssistantId,
         serverChatPersonaMemoryMode,
+        serverChatMetaLoaded,
         serverChatState,
         serverChatTopic,
         serverChatClusterId,
@@ -957,6 +1141,7 @@ export const useChatActions = ({
       invalidateServerChatHistory,
       serverChatAssistantId,
       serverChatAssistantKind,
+      serverChatMetaLoaded,
       serverChatClusterId,
       serverChatExternalRef,
       serverChatId,
@@ -1010,7 +1195,7 @@ export const useChatActions = ({
       impersonateUser: boolean
       forceNarrate: boolean
     }
-  }) => {
+  }): Promise<ChatSubmitResult> => {
     const activeCharacter = character ?? selectedCharacter
     if (!activeCharacter?.id) {
       throw new Error("No character selected")
@@ -1159,7 +1344,7 @@ export const useChatActions = ({
         })
         setIsProcessing(false)
         setStreaming(false)
-        return
+        return chatSubmitSkipped("No model selected for character chat")
       }
 
       const hasImageInput =
@@ -1174,7 +1359,7 @@ export const useChatActions = ({
         })
         setIsProcessing(false)
         setStreaming(false)
-        return
+        return chatSubmitSkipped("Empty character chat message")
       }
 
       await tldwClient.initialize().catch(() => null)
@@ -1268,6 +1453,9 @@ export const useChatActions = ({
       if (shouldResetServerChat) {
         setServerChatId(null)
         setServerChatCharacterId(null)
+        setServerChatAssistantKind(null)
+        setServerChatAssistantId(null)
+        setServerChatPersonaMemoryMode(null)
         setServerChatMetaLoaded(false)
         setServerChatTitle(null)
         setServerChatState("in-progress")
@@ -1332,10 +1520,19 @@ export const useChatActions = ({
           created && typeof created === "object"
             ? created.character_id ?? activeCharacter?.id ?? null
             : activeCharacter?.id ?? null
+        const normalizedCharacterAssistantId =
+          createdCharacterId != null ? String(createdCharacterId) : activeCharacterId
         setServerChatTitle(createdTitle)
         setServerChatCharacterId(createdCharacterId)
+        setServerChatAssistantKind("character")
+        setServerChatAssistantId(normalizedCharacterAssistantId)
+        setServerChatPersonaMemoryMode(null)
         setServerChatMetaLoaded(true)
         invalidateServerChatHistory()
+      } else {
+        setServerChatAssistantKind("character")
+        setServerChatAssistantId(activeCharacterId)
+        setServerChatPersonaMemoryMode(null)
       }
       activeChatId = chatId
 
@@ -1793,6 +1990,7 @@ export const useChatActions = ({
 
       setIsProcessing(false)
       setStreaming(false)
+      return toChatSubmitResult()
     } catch (e) {
       if (
         discardAbortedTurnIfRequested({
@@ -1806,7 +2004,7 @@ export const useChatActions = ({
       ) {
         setIsProcessing(false)
         setStreaming(false)
-        return
+        return chatSubmitSkipped("Character chat turn aborted")
       }
 
       cancelStreamingUpdate()
@@ -1880,6 +2078,7 @@ export const useChatActions = ({
       }
       setIsProcessing(false)
       setStreaming(false)
+      return chatSubmitFailed(interruptionReason)
     } finally {
       discardCurrentTurnOnAbortRef.current = false
       cancelStreamingUpdate()
@@ -2098,6 +2297,8 @@ export const useChatActions = ({
     imageGenerationSource,
     imageEventSyncPolicy,
     messageSteeringOverride,
+    dynamicUIRequest,
+    userMetadataExtra,
     requestOverrides,
     continueOutputTarget = "chat",
     serverChatIdOverride,
@@ -2121,11 +2322,13 @@ export const useChatActions = ({
     imageGenerationSource?: "slash-command" | "generate-modal" | "message-regen"
     imageEventSyncPolicy?: ImageGenerationEventSyncPolicy
     messageSteeringOverride?: Partial<MessageSteeringState> | null
+    dynamicUIRequest?: DynamicUIRequest
+    userMetadataExtra?: MessageMetadataExtra
     requestOverrides?: ChatModeOverrides
     continueOutputTarget?: "chat" | "composer_input"
     serverChatIdOverride?: string | null
     researchContext?: ChatResearchContext
-  }) => {
+  }): Promise<ChatSubmitResult> => {
     const effectiveSelectedModel = getEffectiveSelectedModel(
       requestOverrides?.selectedModel
     )
@@ -2170,8 +2373,29 @@ export const useChatActions = ({
       }
     }
 
+    const turnRagMediaIds = resolveTurnRagMediaIds({
+      requestOverrides,
+      ragMediaIds
+    })
+    const turnFileRetrievalEnabled = resolveTurnFileRetrievalEnabled({
+      requestOverrides,
+      fileRetrievalEnabled
+    })
+    const turnSelectedKnowledge = Object.prototype.hasOwnProperty.call(
+      requestOverrides ?? {},
+      "selectedKnowledge"
+    )
+      ? requestOverrides?.selectedKnowledge
+      : selectedKnowledge
+    const turnDynamicUIRequest =
+      dynamicUIRequest ?? requestOverrides?.dynamicUIRequest
+    const turnUserMetadataExtra =
+      userMetadataExtra ?? requestOverrides?.userMetadataExtra
     const chatModeParams = await buildChatModeParams({
       ...(requestOverrides ?? {}),
+      ragMediaIds: turnRagMediaIds,
+      fileRetrievalEnabled: turnFileRetrievalEnabled,
+      selectedKnowledge: turnSelectedKnowledge,
       selectedModel: effectiveSelectedModel,
       messageSteering: messageSteeringForTurn,
       userMessageType,
@@ -2181,7 +2405,9 @@ export const useChatActions = ({
       imageGenerationPromptMode,
       imageGenerationSource,
       imageEventSyncPolicy,
-      researchContext
+      researchContext,
+      dynamicUIRequest: turnDynamicUIRequest,
+      userMetadataExtra: turnUserMetadataExtra
     })
     const baseMessages = chatHistory || messages
     const baseHistory = memory || history
@@ -2224,14 +2450,18 @@ export const useChatActions = ({
         }))
 
         markSteeringApplied()
-        await continueChatMode(
+        const continueResult = await continueChatMode(
           continueMessages,
           continueHistory,
           signal,
           chatModeParams
         )
 
-        if (continueOutputTarget === "composer_input") {
+        const shouldApplyComposerRollback =
+          continueResult.status === "submitted" &&
+          continueOutputTarget === "composer_input"
+
+        if (shouldApplyComposerRollback) {
           const currentMessages = messagesRef.current
           const continuedMessage = continueTargetMessage?.id
             ? currentMessages.find((entry) => entry.id === continueTargetMessage.id)
@@ -2285,7 +2515,7 @@ export const useChatActions = ({
           }
         }
 
-        return
+        return toChatSubmitResult(continueResult)
       }
 
       const hasExplicitImageBackend = trimmedImageBackendOverride.length > 0
@@ -2312,7 +2542,7 @@ export const useChatActions = ({
             ? trimmedImageBackendOverride
             : undefined
         }
-        await normalChatMode(
+        const imageResult = await normalChatMode(
           message,
           image,
           isRegenerate,
@@ -2321,12 +2551,12 @@ export const useChatActions = ({
           signal,
           enhancedChatModeParams
         )
-        return
+        return toChatSubmitResult(imageResult)
       }
       // console.log("contextFiles", contextFiles)
       if (contextFiles.length > 0) {
         markSteeringApplied()
-        await documentChatMode(
+        const documentResult = await documentChatMode(
           message,
           image,
           isRegenerate,
@@ -2337,7 +2567,7 @@ export const useChatActions = ({
           chatModeParamsWithRegen
         )
         // setFileRetrievalEnabled(false)
-        return
+        return toChatSubmitResult(documentResult)
       }
 
       if (docs?.length > 0 || documentContext?.length > 0) {
@@ -2349,7 +2579,7 @@ export const useChatActions = ({
           )
         }
         markSteeringApplied()
-        await tabChatMode(
+        const tabResult = await tabChatMode(
           message,
           image,
           processingTabs,
@@ -2359,17 +2589,17 @@ export const useChatActions = ({
           signal,
           chatModeParamsWithRegen
         )
-        return
+        return toChatSubmitResult(tabResult)
       }
 
-      const hasScopedRagMediaIds =
-        Array.isArray(ragMediaIds) && ragMediaIds.length > 0
-      const shouldUseRag =
-        Boolean(selectedKnowledge) ||
-        (fileRetrievalEnabled && hasScopedRagMediaIds)
+      const shouldUseRag = shouldUseRagForTurn({
+        selectedKnowledge: turnSelectedKnowledge,
+        fileRetrievalEnabled: turnFileRetrievalEnabled,
+        ragMediaIds: turnRagMediaIds
+      })
       if (shouldUseRag) {
         markSteeringApplied()
-        await ragMode(
+        const ragResult = await ragMode(
           message,
           image,
           isRegenerate,
@@ -2378,6 +2608,7 @@ export const useChatActions = ({
           signal,
           chatModeParamsWithRegen
         )
+        return toChatSubmitResult(ragResult)
       } else {
         // Include uploaded files info even in normal mode
         const enhancedChatModeParams = {
@@ -2386,10 +2617,36 @@ export const useChatActions = ({
         }
         const baseMessages = chatHistory || messages
         const baseHistory = memory || history
+        const sendMode = resolveUseMessageSendMode({
+          effectiveMode: effectiveAssistantState.mode,
+          hasEffectiveAssistant: Boolean(
+            effectiveSelectedAssistant?.kind && effectiveSelectedAssistant?.id
+          ),
+          draftAssistantKind: selectedAssistant?.kind ?? null,
+          draftAssistantSelectionMode: getAssistantSelectionMode(
+            selectedAssistant
+          )
+        })
+        const resolvedSendMode =
+          getAssistantSelectionMode(selectedAssistant) === "tracked" &&
+          selectedAssistant?.kind === "persona"
+            ? "tracked_persona"
+            : getAssistantSelectionMode(selectedAssistant) === "tracked" &&
+                selectedAssistant?.kind === "character"
+              ? "tracked_character"
+              : sendMode
+        const trackedPersonaAssistantForSend =
+          resolvedSendMode === "tracked_persona"
+            ? isPersonaAssistantSelection(selectedAssistant) &&
+              getAssistantSelectionMode(selectedAssistant) === "tracked"
+              ? selectedAssistant
+              : isPersonaAssistantSelection(effectiveSelectedAssistant)
+                ? effectiveSelectedAssistant
+                : null
+            : null
 
         if (!compareModeActive) {
-          const resolvedSelectedCharacter = await resolveSelectedCharacter()
-          if (resolvedSelectedCharacter?.id) {
+          if (resolvedSendMode === "tracked_persona" && trackedPersonaAssistantForSend) {
             const resolvedModel = effectiveSelectedModel?.trim()
             if (!resolvedModel) {
               notification.error({
@@ -2399,51 +2656,28 @@ export const useChatActions = ({
               setIsProcessing(false)
               setStreaming(false)
               setAbortController(null)
-              return
-            }
-            markSteeringApplied()
-            await characterChatMode({
-              message,
-              image,
-              isRegenerate,
-              messages: baseMessages,
-              history: baseHistory,
-              signal,
-              model: resolvedModel,
-              regenerateFromMessage,
-              character: resolvedSelectedCharacter,
-              messageSteering: messageSteeringForTurn,
-              serverChatIdOverride
-            })
-            return
-          }
-
-          if (isPersonaAssistantSelection(selectedAssistant)) {
-            const resolvedModel = effectiveSelectedModel?.trim()
-            if (!resolvedModel) {
-              notification.error({
-                message: t("error"),
-                description: t("validationSelectModel")
-              })
-              setIsProcessing(false)
-              setStreaming(false)
-              setAbortController(null)
-              return
+              return chatSubmitSkipped("No model selected for persona chat")
             }
 
             const personaServerChat = await ensurePersonaServerChatWithState({
-              assistant: selectedAssistant,
+              assistant: trackedPersonaAssistantForSend,
               serverChatIdOverride
             })
+            await persistTrackedPersonaPlaygroundSession({
+              chatId: personaServerChat.chatId,
+              historyId: personaServerChat.historyId,
+              assistant: trackedPersonaAssistantForSend,
+              personaMemoryMode: personaServerChat.personaMemoryMode
+            })
             const assistantIdentity = {
-              name: selectedAssistant.name,
+              name: trackedPersonaAssistantForSend.name,
               avatarUrl:
-                typeof selectedAssistant.avatar_url === "string"
-                  ? selectedAssistant.avatar_url
+                typeof trackedPersonaAssistantForSend.avatar_url === "string"
+                  ? trackedPersonaAssistantForSend.avatar_url
                   : undefined
             }
             markSteeringApplied()
-            await normalChatMode(
+            const personaResult = await normalChatMode(
               message,
               image,
               isRegenerate,
@@ -2462,21 +2696,79 @@ export const useChatActions = ({
                   })
               }
             )
-            return
+            return toChatSubmitResult(personaResult)
+          }
+
+          const resolvedSelectedCharacter =
+            resolvedSendMode === "tracked_character"
+              ? (selectedAssistant?.kind === "character" &&
+                  getAssistantSelectionMode(selectedAssistant) === "tracked"
+                    ? assistantSelectionToCharacter<
+                        Character & Record<string, unknown>
+                      >(selectedAssistant)
+                    : null) ||
+                resolveTrackedCharacterForCurrentChat() ||
+                assistantSelectionToCharacter<Character & Record<string, unknown>>(
+                  effectiveSelectedAssistant
+                )
+              : null
+          if (resolvedSendMode === "tracked_character" && resolvedSelectedCharacter?.id) {
+            const resolvedModel = effectiveSelectedModel?.trim()
+            if (!resolvedModel) {
+              notification.error({
+                message: t("error"),
+                description: t("validationSelectModel")
+              })
+              setIsProcessing(false)
+              setStreaming(false)
+              setAbortController(null)
+              return chatSubmitSkipped("No model selected for character chat")
+            }
+            markSteeringApplied()
+            const characterResult = await characterChatMode({
+              message,
+              image,
+              isRegenerate,
+              messages: baseMessages,
+              history: baseHistory,
+              signal,
+              model: resolvedModel,
+              regenerateFromMessage,
+              character: resolvedSelectedCharacter,
+              messageSteering: messageSteeringForTurn,
+              serverChatIdOverride
+            })
+            return toChatSubmitResult(characterResult)
           }
         }
 
         if (!compareModeActive) {
           markSteeringApplied()
-          await normalChatMode(
+          const normalModeParams =
+            resolvedSendMode === "overlay" && effectiveSelectedAssistant
+              ? {
+                  ...enhancedChatModeParams,
+                  assistantIdentity: {
+                    name: effectiveSelectedAssistant.name,
+                    avatarUrl:
+                      typeof effectiveSelectedAssistant.avatar_url === "string"
+                        ? effectiveSelectedAssistant.avatar_url
+                        : undefined
+                  },
+                  overlaySystemPrompt:
+                    effectiveAssistantState.systemPromptSnapshot ?? undefined
+                }
+              : enhancedChatModeParams
+          const normalResult = await normalChatMode(
             message,
             image,
             isRegenerate,
             baseMessages,
             baseHistory,
             signal,
-            enhancedChatModeParams
+            normalModeParams
           )
+          return toChatSubmitResult(normalResult)
         } else {
           const maxModels =
             typeof compareMaxModels === "number" && compareMaxModels > 0
@@ -2596,6 +2888,7 @@ export const useChatActions = ({
           setIsProcessing(true)
 
           const compareChatModeParams = await buildChatModeParams({
+            ...(requestOverrides ?? {}),
             historyId: activeHistoryId,
             setHistory: () => {},
             setStreaming: () => {},
@@ -2608,25 +2901,29 @@ export const useChatActions = ({
             uploadedFiles: uploadedFiles
           }
 
-          const comparePromises = models.map((modelId) => {
+          const comparePromises = models.map(async (modelId) => {
             const historyForModel = buildHistoryForModel(baseMessages, modelId)
-            return normalChatMode(
-              message,
-              image,
-              true,
-              baseMessages,
-              baseHistory,
-              signal,
-              {
-                ...compareEnhancedParams,
-                selectedModel: modelId,
-                clusterId,
-                assistantMessageType: "compare:reply",
-                modelIdOverride: modelId,
-                assistantParentMessageId: compareUserMessageId,
-                historyForModel
-              }
-            ).catch((e) => {
+            try {
+              return toChatSubmitResult(
+                await normalChatMode(
+                  message,
+                  image,
+                  true,
+                  baseMessages,
+                  baseHistory,
+                  signal,
+                  {
+                    ...compareEnhancedParams,
+                    selectedModel: modelId,
+                    clusterId,
+                    assistantMessageType: "compare:reply",
+                    modelIdOverride: modelId,
+                    assistantParentMessageId: compareUserMessageId,
+                    historyForModel
+                  }
+                )
+              )
+            } catch (e) {
               const errorMessage =
                 e instanceof Error
                   ? e.message
@@ -2635,15 +2932,17 @@ export const useChatActions = ({
                 message: t("error"),
                 description: errorMessage
               })
-            })
+              return chatSubmitFailed(errorMessage)
+            }
           })
 
           markSteeringApplied()
-          await Promise.allSettled(comparePromises)
+          const compareResults = await Promise.all(comparePromises)
           refreshHistoryFromMessages()
           setIsProcessing(false)
           setStreaming(false)
           setAbortController(null)
+          return aggregateChatSubmitResults(compareResults)
         }
       }
     } catch (e) {
@@ -2655,6 +2954,7 @@ export const useChatActions = ({
       })
       setIsProcessing(false)
       setStreaming(false)
+      return chatSubmitFailed(errorMessage)
     } finally {
       if (replyActive && capturedReplyTargetId != null) {
         const currentReplyTarget = useStoreMessageOption.getState().replyTarget
@@ -2769,11 +3069,14 @@ export const useChatActions = ({
         return
       }
 
-      const hasScopedRagMediaIds =
-        Array.isArray(ragMediaIds) && ragMediaIds.length > 0
-      const shouldUseRag =
-        Boolean(selectedKnowledge) ||
-        (fileRetrievalEnabled && hasScopedRagMediaIds)
+      const shouldUseRag = shouldUseRagForTurn({
+        selectedKnowledge,
+        fileRetrievalEnabled,
+        ragMediaIds: resolveTurnRagMediaIds({
+          requestOverrides: null,
+          ragMediaIds
+        })
+      })
       if (shouldUseRag) {
         await ragMode(
           trimmed,

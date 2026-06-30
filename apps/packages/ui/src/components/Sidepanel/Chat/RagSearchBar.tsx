@@ -104,9 +104,13 @@ export const RagSearchBar: React.FC<Props> = ({
   onClearFiles
 }) => {
   const { t } = useTranslation(["sidepanel", "playground", "common"])
-  const sourceOptions = React.useMemo(
-    () => getRagSourceOptions((key, fallback) => t(key, fallback)),
+  const translate = React.useCallback(
+    (key: string, fallback?: string) => t(key, { defaultValue: fallback ?? key }),
     [t]
+  )
+  const sourceOptions = React.useMemo(
+    () => getRagSourceOptions(translate),
+    [translate]
   )
   const [internalOpen, setInternalOpen] = React.useState(false)
   const isControlled = typeof open === "boolean"
@@ -123,7 +127,7 @@ export const RagSearchBar: React.FC<Props> = ({
     [isControlled, onOpenChange]
   )
 
-  const search = useRagSearchState({ currentMessage, t })
+  const search = useRagSearchState({ currentMessage, t: translate })
   const resultsDisplay = useRagResultsDisplay({
     results: search.results,
     batchResults: search.batchResults,
@@ -131,12 +135,12 @@ export const RagSearchBar: React.FC<Props> = ({
     setRagPinnedResults: search.setRagPinnedResults,
     onInsert,
     onAsk,
-    t
+    t: translate
   })
   const filter = useRagFilterPanel({
     draftSettings: search.draftSettings,
     updateSetting: search.updateSetting,
-    t
+    t: translate
   })
   const history = useRagSearchHistory({
     resolvedQuery: search.resolvedQuery,

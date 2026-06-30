@@ -31,7 +31,64 @@ The following changes require a major version bump (e.g., v1 to v2):
 - Adding new enum values to existing fields
 - Relaxing validation (e.g., increasing max length)
 
+## Phase 3 / Phase 4 Compatibility Policy
+
+During the Phase 3 and Phase 4 contract cleanup work, `/api/v1/` remains
+legacy-default.
+
+This means:
+
+- existing default response bodies remain unchanged unless an additive change is
+  non-breaking under the rules above;
+- existing default error shapes and status behavior remain unchanged;
+- existing accepted pagination aliases remain valid in `v1` unless a future
+  versioned migration explicitly changes them.
+
+Standard response-envelope behavior inside `v1` is transitional and additive.
+If a first-party JSON route supports envelope-style opt-in behavior, that opt-in
+does not create a new major-version mechanism. Major default-breaking contract
+changes should move to `/api/v2/`, not to a public header-only version.
+
+### Transitional Opt-In In `v1`
+
+For first-party JSON routes, additive opt-in behavior may be exposed with:
+
+```http
+X-TLDW-Response-Envelope: v1
+```
+
+This header is a compatibility tool for additive behavior inside `v1`. It does
+not replace path-based major versioning.
+
+### Exempt Route Families
+
+The following route families are exempt from standard envelopes by default
+unless they explicitly document otherwise:
+
+- streaming responses
+- file downloads and binary exports
+- webhooks
+- WebSockets
+- `204 No Content` routes
+- OpenAI-compatible and provider-compatible payloads
+
+### Default-Breaking Migration Triggers
+
+The following changes should move to a sibling route or `/api/v2/` instead of
+changing the default `v1` contract in place:
+
+- wrapping the default response body under `data`
+- changing the default error body shape
+- removing or renaming existing response fields
+- removing accepted pagination aliases
+- changing auth requirements or auth/status behavior
+- converting provider-compatible defaults into tldw-specific normalized shapes
+
 ## Deprecation Policy
+
+The deprecation policy below applies when maintainers approve an actual
+deprecation window. It should not be interpreted to mean that additive `v1`
+pilot behavior automatically deprecates the existing default `v1` shape.
 
 ### Timeline
 

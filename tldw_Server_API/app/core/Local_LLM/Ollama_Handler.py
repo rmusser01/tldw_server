@@ -89,6 +89,8 @@ class OllamaHandler(BaseLLMHandler):
         super().__init__(config, global_app_config)
         self.config: OllamaConfig  # For type hinting
         self._serve_process: Optional[asyncio.subprocess.Process] = None
+        self._serve_host: Optional[str] = None
+        self._serve_port: Optional[int] = None
         self._serve_stream_tasks: list[asyncio.Task] = []
 
     async def _drain_stream(self, stream, label: str) -> None:
@@ -124,6 +126,8 @@ class OllamaHandler(BaseLLMHandler):
         if self._serve_process and (pid is None or self._serve_process.pid == pid):
             self._stop_stream_drainers()
             self._serve_process = None
+            self._serve_host = None
+            self._serve_port = None
     async def is_ollama_installed(self) -> bool:
         """Checks if the 'ollama' executable is available."""
         return await asyncio.to_thread(shutil.which, 'ollama') is not None
@@ -298,6 +302,8 @@ class OllamaHandler(BaseLLMHandler):
             pid = process.pid
             self.logger.info(f"Ollama server process started with PID {pid} on {host}:{port}. May run in background.")
             self._serve_process = process
+            self._serve_host = host
+            self._serve_port = int(port)
             self._start_stream_drainers(process)
             return {"status": "started", "pid": pid, "host": host, "port": port}
 
@@ -312,48 +318,49 @@ class OllamaHandler(BaseLLMHandler):
     async def stop_server(self, pid: Optional[int] = None, port: Optional[int] = None) -> str:
         """
         Stops the Ollama server.
-        If PID is given, it attempts to terminate that specific process.
-        If port is given, it attempts to find and terminate the process listening on that port.
-        Stopping `ollama serve` can be tricky as it might be managed by systemd.
-        This function primarily targets processes started by this library or manually.
+        PID and port stops are limited to the process started by this handler.
+        External Ollama services should be managed by their owning service manager.
         """
         if not await self.is_ollama_installed():
             return "Ollama is not installed."
 
         if pid:
             self.logger.info(f"Attempting to stop Ollama server with PID {pid}")
+            if not self._serve_process or self._serve_process.pid != pid:
+                return f"No managed Ollama server found with PID {pid}"
+            process = self._serve_process
             try:
-                await asyncio.to_thread(self._terminate_process, pid)
+                await self._terminate_managed_process(process)
                 self._clear_serve_process(pid)
                 return f"Attempted to stop Ollama server with PID {pid}"
             except ProcessLookupError:
                 self.logger.warning(f"No process found with PID {pid}")
+                self._clear_serve_process(pid)
                 return f"No process found with PID {pid}"
             except _OLLAMA_NONCRITICAL_EXCEPTIONS as e:
-                self.logger.exception(f"Error stopping Ollama server PID {pid}: {e}")
-                return f"Error stopping Ollama server PID {pid}: {e}"
+                self.logger.error(f"Error stopping Ollama server PID {pid}")
+                return f"Error stopping Ollama server PID {pid}"
         elif port:
-            if not PSUTIL_AVAILABLE:
-                return "Cannot stop by port: psutil not available. Please provide PID instead."
             self.logger.info(f"Attempting to stop Ollama server listening on port {port}")
-            found_pid = None
+            if (
+                not self._serve_process
+                or self._serve_port is None
+                or int(port) != int(self._serve_port)
+            ):
+                return f"No managed Ollama server found on port {port}"
+            process = self._serve_process
+            managed_pid = process.pid
             try:
-                for conn in await asyncio.to_thread(psutil.net_connections):
-                    if conn.status == psutil.CONN_LISTEN and conn.laddr.port == int(port):
-                        if conn.pid:
-                            proc_info = await asyncio.to_thread(psutil.Process, conn.pid)
-                            if "ollama" in proc_info.name().lower():
-                                found_pid = conn.pid
-                                break
-                if found_pid:
-                    await asyncio.to_thread(self._terminate_process, found_pid)
-                    self._clear_serve_process(found_pid)
-                    return f"Attempted to stop Ollama server (PID {found_pid}) on port {port}"
-                else:
-                    return f"No Ollama server found listening on port {port}"
-            except _OLLAMA_PSUTIL_EXCEPTIONS as e:
-                self.logger.exception(f"Error stopping Ollama server on port {port}: {e}")
-                return f"Error stopping Ollama server on port {port}: {e}"
+                await self._terminate_managed_process(process)
+                self._clear_serve_process(managed_pid)
+                return f"Attempted to stop Ollama server (PID {managed_pid}) on port {port}"
+            except ProcessLookupError:
+                self.logger.warning(f"No process found with PID {managed_pid}")
+                self._clear_serve_process(managed_pid)
+                return f"No process found with PID {managed_pid}"
+            except _OLLAMA_NONCRITICAL_EXCEPTIONS:
+                self.logger.error(f"Error stopping Ollama server on port {port}")
+                return f"Error stopping Ollama server on port {port}"
         else:
             # General stop command `ollama stop` - this might not exist or work as expected for `ollama serve`
             # `ollama ps` and then finding the server PID might be more reliable if `ollama stop` isn't for `serve`
@@ -365,26 +372,21 @@ class OllamaHandler(BaseLLMHandler):
             # self.logger.info(f"Ollama stop command output: {stdout}")
             return "General 'ollama stop' for a server is not a standard command. Please provide PID or manage via system services."
 
-    def _terminate_process(self, pid: int):
-        """Helper to terminate a process by PID. Requires psutil."""
-        if not PSUTIL_AVAILABLE:
-            raise ServerError("psutil not available; cannot terminate process by PID")
+    async def _terminate_managed_process(self, process: asyncio.subprocess.Process) -> None:
+        """Terminate only the subprocess object owned by this handler."""
+        if process.returncode is not None:
+            return
         try:
-            proc = psutil.Process(pid)
-            proc.terminate()  # Send SIGTERM
-            self.logger.info(f"Sent SIGTERM to process {pid}")
-            try:
-                proc.wait(timeout=5)  # Wait for termination
-                self.logger.info(f"Process {pid} terminated gracefully.")
-            except psutil.TimeoutExpired:
-                self.logger.warning(f"Process {pid} did not terminate after SIGTERM, sending SIGKILL.")
-                proc.kill()  # Send SIGKILL
-                proc.wait(timeout=5)
-                self.logger.info(f"Process {pid} killed.")
-        except psutil.NoSuchProcess:
-            raise ProcessLookupError(f"No process found with PID {pid}") from None
-        except _OLLAMA_PSUTIL_EXCEPTIONS as e:
-            raise ServerError(f"Failed to terminate process {pid}: {e}") from e
+            process.terminate()
+            self.logger.info(f"Sent SIGTERM to managed Ollama process {process.pid}")
+            await asyncio.wait_for(process.wait(), timeout=5)
+            self.logger.info(f"Managed Ollama process {process.pid} terminated gracefully.")
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                f"Managed Ollama process {process.pid} did not terminate after SIGTERM, sending SIGKILL."
+            )
+            process.kill()
+            await asyncio.wait_for(process.wait(), timeout=5)
 
     async def inference(self, model_name: str, prompt: str, system_message: Optional[str] = None,
                         port: Optional[int] = None, host: str = "127.0.0.1",

@@ -82,16 +82,21 @@ Good fit for:
 
 ## Start Here
 
-1. **Check prerequisites:** `make quickstart-prereqs` (or verify Python 3.10+ and ffmpeg manually; Docker is only required for the Docker-based profiles)
-2. **Pick your setup profile:**
+1. **Clone this repository and pick one peer setup profile.**
 
-| Profile | Best for | Command |
-|---------|----------|---------|
-| [Docker single-user + WebUI](Docs/Getting_Started/Profile_Docker_Single_User.md) | Most users (Recommended) | `make quickstart` |
-| [Docker multi-user + Postgres](Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md) | Teams, public deployments | See profile guide |
-| [Local single-user](Docs/Getting_Started/Profile_Local_Single_User.md) | Development, debugging | `make quickstart-install` |
+| Profile | Best for | Prepare | Start | Verify |
+|---------|----------|---------|-------|--------|
+| [Docker single-user + WebUI](Docs/Getting_Started/Profile_Docker_Single_User.md) | Most users (recommended) | `make setup-docker-single` | `make start-docker-single` | `make verify-docker-single` |
+| [Docker multi-user + Postgres](Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md) | Teams, public deployments | Export generated `ADMIN_USERNAME` / `ADMIN_PASSWORD`, then `make setup-docker-multi` | `make start-docker-multi` | `make verify-docker-multi` |
+| [Local single-user](Docs/Getting_Started/Profile_Local_Single_User.md) | Development, debugging | `make install-local` then `make setup-local-single` | `make start-local-single` | `make verify-local-single` |
 
-1. **Follow your profile guide** end-to-end — it covers install, run, verify, and next steps.
+`make quickstart` remains the shortest Docker single-user + WebUI alias. It runs setup, start, and verification for the first profile.
+
+For a user-facing map of key workflows across the server API, WebUI, and browser extension, start with the [User Guides documentation map](Docs/User_Guides/index.md).
+
+After cloning, you can run the optional Makefile helper checks with `make quickstart-prereqs`, or verify Python 3.10+, ffmpeg, and Docker manually for your chosen profile. On a fresh checkout, the setup targets are still the source of truth because they create the lightweight setup environment they need.
+
+2. **Follow your profile guide** end-to-end. It covers prepare, start, verify, first value, audio path, troubleshoot, and optional add-ons.
 
 Developers working on the WebUI, extension, or shared app packages should also start with [apps/DEVELOPMENT.md](apps/DEVELOPMENT.md).
 
@@ -103,9 +108,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.31` Beta status. Expect rough edges and please report issues.
+- `0.1.32` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
-- The `dev` branch currently contains additional unreleased work beyond `0.1.31`; see [CHANGELOG.md](CHANGELOG.md) for branch-level detail and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
+- The `dev` branch carries work beyond `0.1.32`, including post-`0.1.32` branch work, and is being prepared for the `0.1.32` release merge to `main`; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -139,27 +145,25 @@ Current release line:
 
 ## What's New (in the last few releases)
 
-Recently shipped:
-- Evaluations Recipe Framework for guided retrieval tuning, answer-quality runs, and recipe-first eval workflows.
-- MCP Virtual CLI plus follow-on hardening for governed, workspace-bounded command execution.
-- Writing Suite Phase 1 with manuscript CRUD, TipTap editor surfaces, tree/focus mode, and reorder support.
-- Study Packs Phase 1 for jobs-backed study-material generation and remediation handoffs.
-- Container snapshot publishing to GHCR with a unified `container-build-check` rollup job.
-- FTUE / FTUX expansion across onboarding, LLM setup, chat, watchlists, MCP Hub, moderation, quiz, and flashcards.
-- Deep Research with jobs-backed runs, SSE progress, checkpoint review, and chat handoffs.
-- Shared workspace cloning plus "Shared With Me" flows and privilege-aware sharing rules.
-- Companion Home dashboard, notifications surfaces, and integrations / scheduled-task management.
-- MCP Hub governance pack management and broader ACP workspace discovery/health support.
-- Audio installer and bundle follow-through, including curated `kitten_tts` and `pocket_tts_cpp` paths.
+<details>
+<summary>0.1.32 release-prep rollup</summary>
 
-Currently landing on `dev` (post-`0.1.31` branch work):
-- Writing Suite Phases 2-4 with characters, world info, plot/research tools, AI analysis, agent chat, and live writing feedback.
-- Persona-routed onboarding, Mission Control home flows, and storage quota warnings.
-- Browser web clipper support for capturing pages into the research workflow.
-- Study suggestions for quiz and flashcard workflows.
-- Additional sandbox / ACP ergonomics and `llama.cpp` / `chatllm` OCR backend expansion.
+Included in the `0.1.32` release-prep rollup:
+- Sandbox, MCP Gateway, and ACP expansion, including governed execution, workspace/runtime contracts, profile presets, permission evidence, and release-readiness gates.
+- Research, knowledge, and study workflow growth across Chat Workspace, Research Workspace, Deep Research, quick ingest, flashcards, Study Packs, notes tasks, and study suggestions.
+- Writing Suite follow-through with manuscript authoring, character/world/plot tooling, AI analysis, annotations, agent chat, and live writing feedback.
+- Onboarding, provider, and admin surfaces for public setup profiles, local model recovery, provider keys, companion home shortcuts, scheduled tasks, and workspace diagnostics.
+- Skills, MCP Hub, and workspace operations for server-backed Skills flows, governance packs, tool cataloging, workspace sharing, and permission simulation.
+- Release, packaging, and CI tooling for full-suite PR shard fanout, local CI runner targets, package-content checks, trusted-publishing prep, and PyPI artifact guards.
+- Security, auth, and runtime hardening for provider URL validation, secret redaction, SSRF/network policy handling, dependency floors, and test-only CodeQL suppressions.
+
+Still active on `dev`:
+- Follow-up polish and fixes may continue to land before the `0.1.32` release is published from `main`.
+- Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
+
+</details>
 
 ## Privacy & Security
 
@@ -187,7 +191,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Publishe
 - Audiobooks: parse + chapter detection, per-chapter voice settings, optional TTS provider overrides (alignment/subtitles Kokoro-only), and M4B packaging (API-only).
 - Search & retrieval (RAG): hybrid BM25 + vector (ChromaDB/pgvector), re-ranking, contextual retrieval, OpenAI-compatible embeddings, vector stores API, and media embeddings ingestion. 50+ optional parameters available for tuning.
 - Chat & providers: `/api/v1/chat/completions` (OpenAI-compatible), 16+ providers (commercial + self-hosted), character chat, budgets/allowlists, moderation endpoint.
-- Knowledge management: notes, prompt library, character cards, soft-delete with recovery, Chatbooks import/export, flashcards (.apkg), reading items/highlights.
+- Knowledge management: notes, prompt library, character cards, soft-delete with recovery, Chatbooks import/export including OpenWebUI chat JSON migration, OpenWebUI webui.db migration, and post-import attachment hydration, flashcards (.apkg), reading items/highlights.
 - Prompt Studio & evaluations: projects, prompt testing/optimization, unified evaluation APIs (G-Eval, RAG, OCR, embeddings A/B tests, batch metrics). Full evaluations and prompt management.
 - Research & web scraping: multi-provider web search, academic paper search (arXiv/PubMed/etc.), scraping jobs with cookies/progress, aggregation/final answers.
 - Connectors: Google Drive + Notion OAuth import; connector policies/quotas.
@@ -205,59 +209,86 @@ See the full [Feature Status Matrix at `Docs/Published/Overview/Feature_Status.m
 
 ## Quickstart
 
-`pip install tldw_server` is not generally available yet (PyPI publishing is in progress).
+`pip install tldw-server` is not generally available yet; the package metadata and artifact checks are prepared, but PyPI publishing is still in progress.
 For now, use this repository checkout and the setup paths below (`make` and no-`make`).
 
 ### Preflight Check (Recommended)
 
-If you plan to use Makefile quickstart targets:
+<details>
+<summary>Host prerequisite checks</summary>
+
+After cloning the repository, you can run the optional Makefile helper checks:
 ```bash
 make quickstart-prereqs
 ```
 
-If `make` is unavailable (common on Windows), run the equivalent checks manually:
+This helper checks your host Python and optional media tooling. If it reports missing project Python packages on a fresh checkout, continue with the selected setup profile; `make setup-docker-single`, `make setup-docker-multi`, and `make install-local` create the setup environments they need.
+
+If `make` is unavailable (common on Windows), run equivalent host checks manually:
 ```powershell
 py -3.12 --version  # or py -3.13 / -3.11 / -3.10
 ffmpeg -version
 docker --version    # only if using Docker paths
 ```
 
+</details>
+
 ### At-a-Glance Commands
 
-Choose one install path:
+<details>
+<summary>Public setup profiles and command shortcuts</summary>
 
-| Goal | Command |
-|------|---------|
-| API only (local Python, no Docker) | `make quickstart-install` |
-| API only (Docker) | `make quickstart-docker` |
-| API + WebUI (Docker) | `make quickstart-docker-webui` |
-| No `make` available (common on Windows) | See [No-Make Path (Windows-Friendly)](#no-make-path-windows-friendly) |
+Choose one public setup profile:
+
+| Profile | Prepare | Start | Verify |
+|------|---------|-------|--------|
+| Docker single-user + WebUI | `make setup-docker-single` | `make start-docker-single` | `make verify-docker-single` |
+| Docker multi-user + Postgres | Export generated `ADMIN_USERNAME` / `ADMIN_PASSWORD`, then `make setup-docker-multi` | `make start-docker-multi` | `make verify-docker-multi` |
+| Local single-user | `make install-local` then `make setup-local-single` | `make start-local-single` | `make verify-local-single` |
 
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git && cd tldw_server
 
-# Recommended default: Docker single-user + WebUI
+# Shortest Docker single-user + WebUI alias:
 make quickstart
 
-# API-only Docker path:
-# make quickstart-docker
+# Equivalent explicit Docker single-user + WebUI lifecycle:
+make setup-docker-single
+make start-docker-single
+make verify-docker-single
 
-# Explicit full-stack Docker path:
-# make quickstart-docker-webui
+# Docker multi-user + Postgres:
+export ADMIN_USERNAME=tldw-admin
+export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+make setup-docker-multi
+make start-docker-multi
+make verify-docker-multi
 
-# Local development path (API only):
-# make quickstart-install
+# Local single-user:
+make install-local
+make setup-local-single
+make start-local-single
+make verify-local-single
+
+# Compatibility aliases:
+# make quickstart-docker-webui  # same as make quickstart
+# make quickstart-docker        # Docker single-user API only
+# make quickstart-install       # local install only; does not start the server
 # If `python3` is older than 3.10 on your machine:
-# make quickstart-install PYTHON=python3.13  # or python3.12 / python3.11 / python3.10
+# make install-local PYTHON=python3.13  # or python3.12 / python3.11 / python3.10
 
 # Force a full image rebuild when needed:
-# make quickstart-docker DOCKER_BUILD=true
-# make quickstart-docker-webui DOCKER_BUILD=true
+# make start-docker-single DOCKER_BUILD=true
 ```
 
 If `make` is unavailable, use [No-Make Path (Windows-Friendly)](#no-make-path-windows-friendly).
 
+</details>
+
 ### Default Docker Path (Makefile)
+
+<details>
+<summary>Docker single-user + WebUI quickstart details</summary>
 
 ```bash
 # from repo root
@@ -265,8 +296,8 @@ make quickstart
 ```
 
 This target:
-- Starts the Docker single-user + WebUI setup.
-- Uses the existing `quickstart-docker-webui` flow under the hood.
+- Runs `make setup-docker-single`, `make start-docker-single`, and `make verify-docker-single`.
+- Matches the existing `quickstart-docker-webui` compatibility alias.
 - Brings up the API at `http://localhost:8000` and WebUI at `http://localhost:8080`.
 - Keeps the default browser path on same-origin browser API requests through the WebUI proxy.
 
@@ -275,16 +306,23 @@ Want a more advanced deployment?
 - API-only Docker deployment: `make quickstart-docker`
 - Use the advanced/custom-host path for LAN, reverse-proxy, or custom-domain browser access only when you need browsers to call a non-default host.
 
+</details>
+
 ### No-Docker Path (Makefile, Development)
+
+<details>
+<summary>Local single-user setup with Makefile targets</summary>
 
 ```bash
 # from repo root
-make quickstart-install
+make install-local
+make setup-local-single
+make start-local-single
 # If `python3` is older than 3.10 on your machine:
-# make quickstart-install PYTHON=python3.13  # or python3.12 / python3.11 / python3.10
+# make install-local PYTHON=python3.13  # or python3.12 / python3.11 / python3.10
 ```
 
-This target:
+These targets:
 - Creates `.venv` if missing and installs dependencies.
 - Creates `tldw_Server_API/Config_Files/.env` from `.env.example` if missing.
 - Initializes AuthNZ (non-interactive).
@@ -292,37 +330,57 @@ This target:
 
 Verify with:
 ```bash
-curl http://localhost:8000/health  # No auth needed!
+make verify-local-single
 ```
 
-Already have dependencies installed and a Python 3.10+ interpreter selected? Use `make quickstart-local` (or set `PYTHON=python3.13` / `PYTHON=python3.12` / `PYTHON=.venv/bin/python`).
+`make quickstart-install` remains a compatibility alias for local installation only. It does not start the server.
+
+</details>
 
 ### No-Make Path (Windows-Friendly)
 
+<details>
+<summary>Shortcut scripts and manual compose commands</summary>
+
 Use these paths when `make` is not available.
 
-API only (local Python, no Docker):
-- Follow [Manual Setup](#manual-setup) below (includes PowerShell commands).
+Local single-user:
+- Shortcut scripts from the repository root:
+  - macOS/Linux terminal: `./quick-launch.sh [api|webui|all]`
+  - macOS Finder: double-click `quick-launch.command` for the default `all` mode.
+  - Windows PowerShell: `.\quick-launch.ps1 [api|webui|all]`
+- These scripts create or update `.venv`, run the `local-single` setup wizard when the API is started, and default to `all`: API at `http://127.0.0.1:8000` plus WebUI at `http://127.0.0.1:8080`.
+- Use `api` for backend-only startup or `webui` when the API is already running.
+- For manual control, follow [Manual Setup](#manual-setup) below, then start with `python -m uvicorn tldw_Server_API.app.main:app --reload`.
 
-API only (Docker):
+Docker single-user + WebUI:
 ```powershell
 # from repo root
 if (!(Test-Path "tldw_Server_API/Config_Files/.env")) { Copy-Item "tldw_Server_API/Config_Files/.env.example" "tldw_Server_API/Config_Files/.env" }
-docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.yml up -d --build
+# For non-localhost browser access, uncomment both advanced/custom-host overrides:
+# $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE="advanced"
+# $env:NEXT_PUBLIC_API_URL="http://YOUR_HOST_OR_DOMAIN:8000"
+docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --build
 curl http://localhost:8000/health
 ```
 
-API + WebUI (Docker):
+Docker multi-user + Postgres:
 ```powershell
 # from repo root
 if (!(Test-Path "tldw_Server_API/Config_Files/.env")) { Copy-Item "tldw_Server_API/Config_Files/.env.example" "tldw_Server_API/Config_Files/.env" }
-# Optional for non-localhost deployments:
-# $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE="advanced"
-# $env:NEXT_PUBLIC_API_URL="http://YOUR_HOST_OR_DOMAIN:8000"
-docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.webui.yml up -d --build
+$env:ADMIN_USERNAME="tldw-admin"
+$env:ADMIN_PASSWORD = py -3.12 -c "import secrets; print(secrets.token_urlsafe(24))"
+# Run the tldw-setup init command from the multi-user profile guide first.
+$env:TLDW_ENV_FILE=(Resolve-Path "tldw_Server_API/Config_Files/.env").Path
+docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --build
 ```
 
+</details>
+
 ### Manual Setup
+
+<details>
+<summary>Manual virtualenv, environment, auth, and startup steps</summary>
 
 Supported Python versions:
 - Minimum: Python 3.10+
@@ -431,7 +489,12 @@ openssl rand -base64 32   # paste the output as the value for MCP_API_KEY_SALT
 See [MCP System Admin Guide](Docs/MCP/Unified/System_Admin_Guide.md) for details.
 </details>
 
+</details>
+
 ### Next Steps by Goal
+
+<details>
+<summary>Goal-oriented guide links</summary>
 
 | I want to... | Guide |
 |--------------|-------|
@@ -443,7 +506,22 @@ See [MCP System Admin Guide](Docs/MCP/Unified/System_Admin_Guide.md) for details
 | Deploy for a team with proper security | [Docker Multi-User + Postgres Profile](Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md) |
 | Develop the WebUI or browser extension | [Extension & Web UI Development Guide](apps/DEVELOPMENT.md) |
 
+</details>
+
 ### Local Profile: Add the WebUI
+
+<details>
+<summary>Launch the WebUI alongside a local API</summary>
+
+The repo-root quick-launch scripts start the local API and WebUI together by default:
+
+```bash
+./quick-launch.sh all
+```
+
+```powershell
+.\quick-launch.ps1 all
+```
 
 If you already completed the [Local Single-User Profile](Docs/Getting_Started/Profile_Local_Single_User.md) and your API is running at `http://127.0.0.1:8000`, this is the shortest add-on path:
 
@@ -505,7 +583,12 @@ Notes:
 - Container names are whatever Docker reports via `docker ps --format '{{.Names}}'`.
 </details>
 
+</details>
+
 ### Run the Web UI (WIP)
+
+<details>
+<summary>WebUI quickstart, development server, and LAN notes</summary>
 
 The current Next.js UI is a work in progress and may be unstable, buggy, or rough around the edges.
 Use Bun (recommended) or Node.js with npm/yarn/pnpm.
@@ -523,6 +606,10 @@ make quickstart-docker-webui
 No-`make` equivalent: use [No-Make Path (Windows-Friendly)](#no-make-path-windows-friendly).
 
 Default quickstart behavior keeps same-origin browser API requests through the WebUI proxy. When you intentionally move the browser onto an advanced/custom-host path for LAN, reverse-proxy, or custom-domain browser access, set both `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=advanced` and `NEXT_PUBLIC_API_URL`.
+
+For the Docker single-user WebUI quickstart, the WebUI container reads `AUTH_MODE` and `SINGLE_USER_API_KEY` at runtime and exposes the key to the browser only through the local runtime bootstrap path. You do not need to rebuild the WebUI image when the single-user key changes.
+
+`NEXT_PUBLIC_X_API_KEY` remains available for advanced/static WebUI builds where the operator deliberately wants to bake a public browser credential into the client bundle. Do not use it for the normal Docker quickstart path.
 
 Local WebUI development (API should already be running, for example via `make quickstart`):
 
@@ -587,7 +674,12 @@ Tip: http://127.0.0.1:8000/api/v1/config/quickstart redirects to your configured
 
 Security note: avoid exposing this quickstart setup directly to the public internet. For internet-facing access, use HTTPS with a reverse proxy and follow `Docs/Deployment/First_Time_Production_Setup.md`.
 
+</details>
+
 ### Docker Compose
+
+<details>
+<summary>Manual Docker Compose reference</summary>
 
 For the fastest Docker path, use the quickstart targets in [At-a-Glance Commands](#at-a-glance-commands).
 This section is the canonical manual/no-`make` compose reference.
@@ -595,8 +687,10 @@ Quickstart targets skip forced rebuilds by default; pass `DOCKER_BUILD=true` to 
 
 Or manually:
 ```bash
-# Single-user mode (simplest)
-docker compose --env-file tldw_Server_API/Config_Files/.env -f Dockerfiles/docker-compose.yml up -d --build
+# Docker single-user + WebUI
+docker compose --env-file tldw_Server_API/Config_Files/.env \
+  -f Dockerfiles/docker-compose.single-user.yml \
+  -f Dockerfiles/docker-compose.webui.yml up -d --build
 curl http://localhost:8000/health  # Verify
 ```
 
@@ -612,20 +706,22 @@ grep '^SINGLE_USER_API_KEY=' tldw_Server_API/Config_Files/.env
 <summary>More Docker options (multi-user, overlays)</summary>
 
 ```bash
-# Multi-user (Postgres users DB)
-export AUTH_MODE=multi_user
-export DATABASE_URL=postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users
-docker compose -f Dockerfiles/docker-compose.postgres.yml up -d
+# Multi-user + Postgres users DB
+export TLDW_ENV_FILE="$(pwd)/tldw_Server_API/Config_Files/.env"
+docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --build
 
 # Dev overlay — unified streaming (non-prod)
 docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.dev.yml up -d --build
 
-# WebUI overlay (Next.js container on :8080)
-docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.webui.yml up -d --build
+# WebUI overlay with single-user profile (Next.js container on :8080)
+# PowerShell advanced/custom-host browser access:
+# $env:NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE="advanced"
+# $env:NEXT_PUBLIC_API_URL="http://YOUR_HOST_OR_DOMAIN:8000"
+docker compose -f Dockerfiles/docker-compose.single-user.yml -f Dockerfiles/docker-compose.webui.yml up -d --build
 
 # Check status
-docker compose -f Dockerfiles/docker-compose.yml ps
-docker compose -f Dockerfiles/docker-compose.yml logs -f app
+docker compose -f Dockerfiles/docker-compose.single-user.yml ps
+docker compose -f Dockerfiles/docker-compose.single-user.yml logs -f app
 
 # Proxy overlays
 #   - Dockerfiles/docker-compose.proxy.yml (Caddy)
@@ -637,13 +733,15 @@ docker compose -f Dockerfiles/docker-compose.yml -f Dockerfiles/docker-compose.p
 </details>
 
 Notes
-- Run compose commands from the repository root. The base compose file at `Dockerfiles/docker-compose.yml` builds with context at the repo root and includes Postgres and Redis services.
+- Run compose commands from the repository root. The public profile compose files are `Dockerfiles/docker-compose.single-user.yml` and `Dockerfiles/docker-compose.multi-user-postgres.yml`.
 - For `Dockerfiles/docker-compose.webui.yml`, the default quickstart leaves `NEXT_PUBLIC_API_URL` empty so browsers stay on same-origin browser API requests through the WebUI proxy. Set `NEXT_PUBLIC_API_URL` only for the advanced/custom-host path for LAN, reverse-proxy, or custom-domain browser access.
-- `NEXT_PUBLIC_API_VERSION` and `NEXT_PUBLIC_X_API_KEY` are also build-time public values in the client bundle; set them explicitly for your target deployment/auth mode.
-- If you need per-environment API URLs without rebuilding the WebUI image, switch to a runtime env-substitution strategy instead of compile-time `NEXT_PUBLIC_*` build args.
+- Single-user WebUI auth is runtime-configured in the default Docker quickstart. The `webui` service receives `AUTH_MODE`, `SINGLE_USER_API_KEY`, and the explicit local-quickstart `TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=1` opt-in written by setup; browsers do not require `NEXT_PUBLIC_X_API_KEY`. The shared WebUI compose overlay defaults runtime-auth exposure to disabled when this opt-in is absent.
+- `NEXT_PUBLIC_API_VERSION` and `NEXT_PUBLIC_X_API_KEY` are build-time public values in the client bundle for advanced/static WebUI builds only.
 - The primary UI is the Next.js WebUI in `apps/tldw-frontend/`.
   - Run it separately for development, or use `Dockerfiles/docker-compose.webui.yml` for a containerized WebUI.
   - For unified streaming validation in non-prod, prefer the dev overlay above. You can also export `STREAMS_UNIFIED=1` directly in your environment.
+
+</details>
 
 ### Supporting Services via Docker
 
@@ -871,7 +969,8 @@ Examples
 │   ├── cli/                      # CLI entry points
 │   ├── Config_Files/             # config.txt, example YAMLs, migration helpers
 │   ├── Databases/                # Default DBs (runtime data; some are gitignored)
-│   └── tests/                    # Pytest suite
+│   ├── tests/                    # Pytest suite
+│   └── requirements.txt          # Legacy pin set (prefer pyproject extras)
 ├── admin-ui/                     # Admin dashboard
 ├── apps/tldw-frontend/                # Next.js WebUI (primary web client)
 ├── Docs/                         # Documentation (API, Development, RAG, AuthNZ, TTS, etc.)
@@ -889,102 +988,200 @@ Examples
 
 Notes
 - The primary UI is the Next.js WebUI in `apps/tldw-frontend/` (run separately).
-- SQLite is default for local dev; PostgreSQL supported for AuthNZ and content DBs.
+- SQLite is default for local dev; PostgreSQL is supported for AuthNZ, the content DBs (Media/ChaCha), Jobs, and the Scheduler.
 - `mock_openai_server/` is handy for local OpenAI-compatible API testing.
 
 </details>
 
 ## Architecture Diagram
 
+Two views are provided: a **high-level overview** of how clients, the FastAPI app, the core
+module layers, and external providers fit together; and a detailed **module → database map** that
+shows every backend datastore as its own node (no single icon stands in for multiple databases).
+
+### High-Level Overview
+
+<details>
+<summary>High-level Mermaid architecture diagram</summary>
+
 ```mermaid
-flowchart LR
-  subgraph CLIENTS [Clients]
-    WebUI["Next.js WebUI (primary web client)"]:::client
-    MCPClients[MCP Clients (IDE/tools)]:::client
-    APIClients[CLI/HTTP Clients]:::client
+flowchart TB
+  subgraph CLIENTS["Clients"]
+    direction LR
+    WebUI["Next.js WebUI"]:::client
+    AdminUI["Admin UI"]:::client
+    MCPClients["MCP Clients (IDE / tools)"]:::client
+    ACPClients["ACP Clients (agents)"]:::client
+    APIClients["CLI / HTTP Clients"]:::client
   end
 
-  subgraph API_STACK [FastAPI App]
-    API[FastAPI App /api/v1]:::api
-    Endpoints[Endpoints + Schemas]:::module
-    Dependencies[API Deps (Auth, DB, rate limits, resource governor)]:::module
-    Services[Background Services/Jobs]:::module
+  subgraph API_STACK["FastAPI Application"]
+    direction LR
+    API["FastAPI App /api/v1"]:::api
+    Endpoints["Endpoints + Schemas"]:::module
+    Deps["API Deps: Auth, DB, Rate Limits, Resource Governor"]:::module
+    Workers["Background Services / Jobs Workers"]:::module
+    Streaming["Streaming / SSE / WebSocket"]:::module
   end
 
-  subgraph CORE [Core Modules]
-    AuthNZ[AuthNZ]:::core
-    RAG[RAG]:::core
-    LLM[LLM Calls]:::core
-    Embeddings[Embeddings]:::core
-    Media[Ingestion & Media Processing]:::core
-    Chunking[Chunking]:::core
-    Chat[Chat/Characters]:::core
-    Audio[Audio STT/TTS]:::core
-    Evaluations[Evaluations]:::core
-    PromptStudio[Prompt Studio]:::core
-    Knowledge[Notes/Prompts/Chatbooks]:::core
-    MCP[MCP Unified]:::core
-    Research[Research/Web Search]:::core
+  subgraph SEC["Auth & Security"]
+    direction LR
+    AuthNZ["AuthNZ"]:::core
+    Security["Security"]:::core
+    ResourceGov["Resource Governance"]:::core
+    Moderation["Moderation / Guardian"]:::core
+    Governance["Governance"]:::core
+    PrivilegeMaps["Privilege Maps"]:::core
   end
 
-  subgraph STORAGE [Storage]
-    UsersDB[(AuthNZ DB: SQLite/PostgreSQL)]:::db
-    ContentDB[(Content DBs: Media/Notes/Chats)]:::db
-    EvalsDB[(Evaluations DB: SQLite/PostgreSQL)]:::db
-    VectorDB[(Vector DB: ChromaDB/pgvector)]:::db
+  subgraph ING["Ingestion & Media"]
+    direction LR
+    Ingestion["Ingestion & Media Processing"]:::core
+    IngestionSources["Ingestion Sources"]:::core
+    Chunking["Chunking"]:::core
+    WebScraping["Web Scraping"]:::core
+    WebClipper["Web Clipper"]:::core
+    ExternalSources["External Sources"]:::core
   end
 
-  subgraph EXTERNAL [External Providers]
-    LLMCloud["LLM APIs (OpenAI, Anthropic, etc.)"]:::ext
-    LLMOnPrem["Local LLMs (vLLM, Ollama, llama.cpp, ...)"]:::ext
-    AudioProv[STT/TTS Providers]:::ext
-    OCRVLM[OCR/VLM (tesseract, dots, points)]:::ext
-    MediaDL[yt-dlp / ffmpeg]:::ext
-    WebSearch[Web Search/Scrapers]:::ext
+  subgraph LLMLAYER["LLM & Conversation"]
+    direction LR
+    LLMCalls["LLM Calls"]:::core
+    LocalLLM["Local LLM"]:::core
+    Chat["Chat"]:::core
+    ChatWorkflows["Chat Workflows"]:::core
+    CharacterChat["Character Chat"]:::core
+    Persona["Persona"]:::core
   end
 
-  %% Client to API
-  WebUI -->|HTTP| API
-  MCPClients -->|HTTP/WebSocket| API
-  APIClients -->|HTTP/WebSocket| API
+  subgraph KNOW["Knowledge & RAG"]
+    direction LR
+    RAG["RAG"]:::core
+    Embeddings["Embeddings"]:::core
+    Notes["Notes"]:::core
+    Collections["Collections"]:::core
+    PromptMgmt["Prompt Management"]:::core
+    Chatbooks["Chatbooks"]:::core
+  end
+
+  subgraph AUD["Audio & Speech"]
+    direction LR
+    Audio["Audio (STT)"]:::core
+    TTS["TTS"]:::core
+    Audiobooks["Audiobooks"]:::core
+    VoiceAssistant["Voice Assistant"]:::core
+    Meetings["Meetings"]:::core
+  end
+
+  subgraph EVAL["Evaluation & Study"]
+    direction LR
+    Evaluations["Evaluations"]:::core
+    Flashcards["Flashcards"]:::core
+    StudyPacks["Study Packs"]:::core
+    Explainer["Explainer"]:::core
+    Claims["Claims Extraction"]:::core
+    Text2SQL["Text2SQL"]:::core
+  end
+
+  subgraph AG["Agents & Automation"]
+    direction LR
+    AgentOrch["Agent Orchestration"]:::core
+    ACP["Agent Client Protocol"]:::core
+    MCP["MCP Unified"]:::core
+    Tools["Tools"]:::core
+    Skills["Skills"]:::core
+    Workflows["Workflows"]:::core
+    Scheduler["Scheduler"]:::core
+    Sandbox["Sandbox"]:::core
+    CodeGraph["Code Graph"]:::core
+  end
+
+  subgraph RES["Research & Monitoring"]
+    direction LR
+    Research["Research"]:::core
+    WebSearch["Web Search"]:::core
+    Watchlists["Watchlists"]:::core
+    Calendar["Calendar"]:::core
+    Reminders["Reminders"]:::core
+    Monitoring["Monitoring"]:::core
+  end
+
+  subgraph OUT["Outputs & Artifacts"]
+    direction LR
+    FileArtifacts["File Artifacts"]:::core
+    Slides["Slides"]:::core
+    ImageGen["Image Generation"]:::core
+    VN["VN Assets / Play"]:::core
+    Writing["Writing"]:::core
+  end
+
+  subgraph INFRA["Platform & Infrastructure"]
+    direction LR
+    DBM["DB Management"]:::core
+    Jobs["Jobs"]:::core
+    Storage["Storage"]:::core
+    Notifications["Notifications"]:::core
+    Metrics["Metrics"]:::core
+    Billing["Billing"]:::core
+    Usage["Usage"]:::core
+    Sync["Sync"]:::core
+    Infrastructure["Infrastructure"]:::core
+  end
+
+  DATA[("Datastores — see Module → Database map below")]:::db
+
+  subgraph EXT["External Providers"]
+    direction LR
+    LLMCloud["LLM APIs (OpenAI, Anthropic, ...)"]:::ext
+    LLMOnPrem["Local LLMs (vLLM, Ollama, llama.cpp)"]:::ext
+    AudioProv["STT / TTS Providers"]:::ext
+    OCRVLM["OCR / VLM"]:::ext
+    MediaDL["yt-dlp / ffmpeg"]:::ext
+    WebProv["Web Search / Scrapers"]:::ext
+  end
+
+  %% Clients to API
+  WebUI --> API
+  AdminUI --> API
+  MCPClients --> API
+  ACPClients --> API
+  APIClients --> API
 
   %% Inside API stack
   API --> Endpoints
-  API --> Dependencies
-  API --> Services
+  API --> Deps
+  API --> Workers
+  API --> Streaming
 
-  %% Endpoints to core modules
-  Endpoints --> AuthNZ
-  Endpoints --> RAG
-  Endpoints --> LLM
-  Endpoints --> Embeddings
-  Endpoints --> Media
-  Endpoints --> Chunking
-  Endpoints --> Chat
-  Endpoints --> Audio
-  Endpoints --> Evaluations
-  Endpoints --> PromptStudio
-  Endpoints --> Knowledge
-  Endpoints --> MCP
-  Endpoints --> Research
+  %% Endpoints to module layers
+  Endpoints --> SEC
+  Endpoints --> ING
+  Endpoints --> LLMLAYER
+  Endpoints --> KNOW
+  Endpoints --> AUD
+  Endpoints --> EVAL
+  Endpoints --> AG
+  Endpoints --> RES
+  Endpoints --> OUT
+  Endpoints --> INFRA
 
-  %% Core to storage
-  AuthNZ --> UsersDB
-  Media --> ContentDB
-  Knowledge --> ContentDB
-  Chat --> ContentDB
-  Evaluations --> EvalsDB
-  RAG --> ContentDB
-  RAG --> VectorDB
-  Embeddings --> VectorDB
+  %% Module layers to storage
+  SEC --> DATA
+  ING --> DATA
+  LLMLAYER --> DATA
+  KNOW --> DATA
+  AUD --> DATA
+  EVAL --> DATA
+  AG --> DATA
+  RES --> DATA
+  OUT --> DATA
+  INFRA --> DATA
 
-  %% Core to external services
-  LLM --> LLMCloud
-  LLM --> LLMOnPrem
-  Audio --> AudioProv
-  Media --> MediaDL
-  Media --> OCRVLM
-  Research --> WebSearch
+  %% Module layers to external providers
+  LLMLAYER --> EXT
+  AUD --> EXT
+  ING --> EXT
+  RES --> EXT
 
   classDef client fill:#e8f3ff,stroke:#5b8def,color:#1f3b6e;
   classDef api fill:#fff4e6,stroke:#ff9800,color:#5d3d00;
@@ -994,7 +1191,180 @@ flowchart LR
   classDef ext fill:#fff0f0,stroke:#e57373,color:#7b1f1f;
 ```
 
+</details>
+
+### Core Modules → Databases
+
+<details>
+<summary>Module-to-database Mermaid map</summary>
+
+Each backend datastore is a separate node. Content DBs are **per-user** (under
+`Databases/user_databases/<user_id>/`); platform DBs are **shared/global** (under `Databases/`).
+SQLite is the default; PostgreSQL is supported for AuthNZ, the content DBs (Media/ChaCha, via
+`TLDW_CONTENT_DB_BACKEND=postgresql`), Jobs, and the Scheduler. Redis is an optional backend for
+caching, queues, and rate limiting.
+
+> Note: Collections, Watchlists, and Meetings persist **inside the per-user media content DB**, and VN Assets /
+> VN Play persist **inside `ChaChaNotes.db`** — they are modules that write to those DBs, not
+> separate database files.
+
+```mermaid
+flowchart LR
+  %% ---- Modules ----
+  AuthNZ["AuthNZ"]:::core
+  Audit["Audit"]:::core
+  Ingestion["Ingestion & Media"]:::core
+  Collections["Collections"]:::core
+  Watchlists["Watchlists"]:::core
+  Meetings["Meetings"]:::core
+  SearchRes["Search & Research"]:::core
+  RAG["RAG"]:::core
+  Embeddings["Embeddings"]:::core
+  Chat["Chat"]:::core
+  CharChat["Character Chat"]:::core
+  Notes["Notes"]:::core
+  Persona["Persona"]:::core
+  Research["Research"]:::core
+  Chatbooks["Chatbooks"]:::core
+  VNAssets["VN Assets"]:::core
+  VNPlay["VN Play"]:::core
+  PromptMgmt["Prompt Management"]:::core
+  Evaluations["Evaluations"]:::core
+  Personalization["Personalization"]:::core
+  Moderation["Moderation"]:::core
+  Monitoring["Monitoring"]:::core
+  Workflows["Workflows"]:::core
+  ChatWF["Chat Workflows"]:::core
+  KanbanM["Notes Tasks / Kanban"]:::core
+  SlidesM["Slides"]:::core
+  ExplainerM["Explainer"]:::core
+  AgentOrch["Agent Orchestration"]:::core
+  TTS["TTS"]:::core
+  CalendarM["Calendar"]:::core
+  ACP["Agent Client Protocol"]:::core
+  Sandbox["Sandbox"]:::core
+  Infra["Infrastructure"]:::core
+  Jobs["Jobs"]:::core
+  Scheduler["Scheduler"]:::core
+  ResourceGov["Resource Governance"]:::core
+
+  subgraph PERUSER["Per-user SQLite (Databases/user_databases/<user_id>/)"]
+    dbMedia[("Media content DB")]:::db
+    dbChaCha[("ChaChaNotes.db")]:::db
+    dbPrompts[("prompts_user_dbs/user_prompts_v2.sqlite")]:::db
+    dbPromptStudio[("prompt_studio_dbs/prompt_studio.db")]:::db
+    dbEval[("evaluations/evaluations.db")]:::db
+    dbAuditUser[("audit/unified_audit.db")]:::db
+    dbPers[("Personalization.db")]:::db
+    dbGuardian[("Guardian.db")]:::db
+    dbWF[("workflows/workflows.db")]:::db
+    dbWFSched[("workflows/workflows_scheduler.db")]:::db
+    dbResSess[("ResearchSessions.db")]:::db
+    dbKanban[("Kanban.db")]:::db
+    dbSlides[("Slides.db")]:::db
+    dbExplainer[("Explainer.db")]:::db
+    dbOrch[("orchestration.db")]:::db
+    dbVoice[("voices/voice_registry.db")]:::db
+    dbCalendar[("calendar.db")]:::db
+  end
+
+  subgraph VECTOR["Vector Store (per-user)"]
+    dbVec[("chroma_storage/ — ChromaDB / pgvector")]:::db
+  end
+
+  subgraph SHARED["Shared / Global SQLite (Databases/)"]
+    dbUsers[("users.db — AuthNZ")]:::db
+    dbAuditShared[("audit_shared.db")]:::db
+    dbJobs[("jobs.db")]:::db
+    dbJobsAudit[("jobs_audit.db")]:::db
+    dbSched[("scheduler.db")]:::db
+    dbAcpAudit[("acp_audit.db")]:::db
+    dbAcpSess[("acp_sessions.db")]:::db
+    dbSandbox[("sandbox_store.db")]:::db
+    dbCircuit[("circuit_breaker_registry.db")]:::db
+    dbMonAlerts[("monitoring_alerts.db")]:::db
+    dbAnalytics[("Analytics.db — RAG")]:::db
+  end
+
+  subgraph BACKENDS["Optional Backends"]
+    dbRedis[("Redis")]:::ext
+    dbPostgres[("PostgreSQL")]:::ext
+  end
+
+  %% ---- Per-user mappings ----
+  AuthNZ --> dbUsers
+  Audit --> dbAuditUser
+  Audit --> dbAuditShared
+  Ingestion --> dbMedia
+  Collections --> dbMedia
+  Watchlists --> dbMedia
+  Meetings --> dbMedia
+  SearchRes --> dbMedia
+  RAG --> dbMedia
+  RAG --> dbVec
+  RAG --> dbAnalytics
+  Embeddings --> dbVec
+  Chat --> dbChaCha
+  CharChat --> dbChaCha
+  Notes --> dbChaCha
+  Persona --> dbChaCha
+  Persona --> dbPers
+  Research --> dbChaCha
+  Research --> dbResSess
+  Chatbooks --> dbChaCha
+  Chatbooks --> dbPrompts
+  Chatbooks --> dbExplainer
+  Chatbooks --> dbJobs
+  VNAssets --> dbChaCha
+  VNPlay --> dbChaCha
+  PromptMgmt --> dbPrompts
+  PromptMgmt --> dbPromptStudio
+  Evaluations --> dbEval
+  Personalization --> dbPers
+  Moderation --> dbGuardian
+  Monitoring --> dbGuardian
+  Monitoring --> dbMonAlerts
+  Workflows --> dbWF
+  Workflows --> dbWFSched
+  ChatWF --> dbWF
+  KanbanM --> dbKanban
+  SlidesM --> dbSlides
+  ExplainerM --> dbExplainer
+  AgentOrch --> dbOrch
+  TTS --> dbVoice
+  CalendarM --> dbCalendar
+
+  %% ---- Shared mappings ----
+  ACP --> dbAcpAudit
+  ACP --> dbAcpSess
+  Sandbox --> dbSandbox
+  Infra --> dbCircuit
+  Jobs --> dbJobs
+  Jobs --> dbJobsAudit
+  Scheduler --> dbSched
+
+  %% ---- Optional backends ----
+  %% AuthNZ, Jobs, and the Scheduler can run on PostgreSQL instead of their SQLite files;
+  %% the content DBs (Media/ChaCha) can too via TLDW_CONTENT_DB_BACKEND=postgresql.
+  AuthNZ -.-> dbPostgres
+  dbMedia -.-> dbPostgres
+  dbChaCha -.-> dbPostgres
+  Jobs -.-> dbPostgres
+  Scheduler -.-> dbPostgres
+  Jobs -.-> dbRedis
+  ResourceGov -.-> dbRedis
+
+  classDef core fill:#eefbea,stroke:#34a853,color:#1e4620;
+  classDef db fill:#f0eaff,stroke:#8e6cf1,color:#3a2a87;
+  classDef ext fill:#fff0f0,stroke:#e57373,color:#7b1f1f;
+```
+
+</details>
+
 ## Networking & Limits
+
+<details>
+<summary>HTTP client, egress, and rate-limit references</summary>
 
 - HTTP client and TLS/pinning configuration: `tldw_Server_API/Config_Files/README.md` (timeouts, retries, redirects/proxies, JSON limits, TLS min version, cert pinning, SSE/download helpers).
 - Egress/SSRF policy and security middleware: `tldw_Server_API/app/core/Security/README.md`.
@@ -1022,6 +1392,8 @@ flowchart LR
 
 All limits are designed to be conservative by default and can be tuned using the various `*_RATE_LIMIT_*`, `MAX_*`, and RG policy settings in `Config_Files/` and environment variables.
 
+</details>
+
 ## Running Tests
 
 <details>
@@ -1037,6 +1409,9 @@ All limits are designed to be conservative by default and can be tuned using the
 
 ## Frontend Integration Testing
 
+<details>
+<summary>Frontend integration test helper</summary>
+
 Use the helper script to run frontend unit tests plus smoke checks against a live backend:
 
 ```bash
@@ -1049,6 +1424,8 @@ Notes:
 - Set `TLDW_X_API_KEY=...` for single-user mode (a temporary key is generated if missing).
 - Use `--backend-docker` to start the backend via Docker Compose, or `--skip-backend` if you already have it running.
 - Use `--no-backend-tests` to skip backend integration tests.
+
+</details>
 
 ## CI Status & Smoke Tests
 
@@ -1082,10 +1459,11 @@ Run locally
 <summary>Documentation and resources</summary>
 
 **Getting Started Guides:**
+- [User Guides Documentation Map](Docs/User_Guides/index.md) - task-oriented map for setup, WebUI, extension, API, and admin workflows
 - [Getting Started Index](Docs/Getting_Started/README.md) - choose the right setup path
-- [Local Single-User Profile](Docs/Getting_Started/Profile_Local_Single_User.md) - local API development path
-- [Docker Single-User Profile](Docs/Getting_Started/Profile_Docker_Single_User.md) - self-host with Docker
+- [Docker Single-User + WebUI Profile](Docs/Getting_Started/Profile_Docker_Single_User.md) - self-host with Docker and the WebUI
 - [Docker Multi-User + Postgres Profile](Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md) - team deployment baseline
+- [Local Single-User Profile](Docs/Getting_Started/Profile_Local_Single_User.md) - local API development path
 - [First-time audio setup: CPU systems](Docs/Getting_Started/First_Time_Audio_Setup_CPU.md) - local-first STT and TTS for CPU boxes
 - [First-time audio setup: GPU/accelerated systems](Docs/Getting_Started/First_Time_Audio_Setup_GPU_Accelerated.md) - NVIDIA and Apple Silicon speech setup
 - [GPU/STT Add-on](Docs/Getting_Started/GPU_STT_Addon.md) - legacy pointer to the accelerated guide
@@ -1118,8 +1496,10 @@ Some self-hosted OpenAI-compatible servers reject unknown fields (like `top_k`).
 
 ### Chatbook Tools Guide
 
+- User guide: `Docs/User_Guides/WebUI_Extension/Chatbook_User_Guide.md` covers Chatbook backup/restore, OpenWebUI "Export Chats" JSON import, OpenWebUI `webui.db` database import, and post-import OpenWebUI attachment hydration for restoring referenced images/files from a server-local data root.
 - Getting started: `Docs/User_Guides/WebUI_Extension/Chatbook_Tools_Getting_Started.md`
 - Product spec (PRD): `Docs/Product/Completed/Chatbook-Tools-PRD.md`
+- API reference: `Docs/API-related/Chatbook_API_Documentation.md`
 - Related endpoints (also listed above under Key Endpoints):
   - `GET /api/v1/chat/commands` — list slash commands (RBAC-filtered when enabled; returns empty list when disabled)
   - `POST /api/v1/chat/dictionaries/validate` — validate chat dictionaries (schema, regex, templates)
@@ -1130,6 +1510,7 @@ Some self-hosted OpenAI-compatible servers reject unknown fields (like `top_k`).
 
 <details>
 <summary>Deployment resources</summary>
+
 - Dockerfiles and compose templates live under `Dockerfiles/` (see `Dockerfiles/README.md`).
 - Reverse proxy samples: `Helper_Scripts/Samples/Nginx/`, `Helper_Scripts/Samples/Caddy/`.
 - Monitoring: `Docs/Deployment/Monitoring/` and `Helper_Scripts/Samples/Grafana/`.
@@ -1155,6 +1536,9 @@ Some self-hosted OpenAI-compatible servers reject unknown fields (like `top_k`).
 
 ## Troubleshooting
 
+<details>
+<summary>Common setup and runtime fixes</summary>
+
 | Issue | Solution |
 |-------|----------|
 | `Connection refused` | Server not running - check `uvicorn` or `docker compose ps` |
@@ -1167,6 +1551,8 @@ Some self-hosted OpenAI-compatible servers reject unknown fields (like `top_k`).
 | Docker issues | Check `docker compose ps` and `docker compose logs -f` |
 
 Quick verify: `curl http://localhost:8000/health` (no auth needed)
+
+</details>
 
 ## Contributing & Support
 
@@ -1201,6 +1587,9 @@ Quick verify: `curl http://localhost:8000/health` (no auth needed)
 
 ## About
 
+<details>
+<summary>Project background and support links</summary>
+
 tldw_server started as a tool to transcribe and summarize YouTube videos and has evolved into a comprehensive media analysis and knowledge management platform for researchers, students, and professionals.
 For extended background and vision, see `Docs/About.md`.
 
@@ -1214,6 +1603,8 @@ See `SECURITY.md` for reporting guidelines and disclosures.
 
 ### Project Guidelines
 See [Project_Guidelines.md](Project_Guidelines.md) for development philosophy and contribution guidelines.
+
+</details>
 
 ## Appendix (Optional)
 

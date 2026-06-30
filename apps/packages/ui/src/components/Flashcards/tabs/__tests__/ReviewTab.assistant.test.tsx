@@ -14,6 +14,7 @@ import {
   useFlashcardShortcuts,
   useHasCardsQuery,
   useNextDueQuery,
+  useRecentFlashcardReviewSessionsQuery,
   useResetFlashcardSchedulingMutation,
   useReviewAnalyticsSummaryQuery,
   useReviewFlashcardMutation,
@@ -90,7 +91,13 @@ vi.mock("../../hooks", () => ({
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
   useEndFlashcardReviewSessionMutation: vi.fn(),
-  useRecentFlashcardReviewSessionsQuery: vi.fn(),
+  useRecentFlashcardReviewSessionsQuery: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: vi.fn()
+  })),
   useGlobalFlashcardTagSuggestionsQuery: vi.fn(),
   useUpdateFlashcardMutation: vi.fn(),
   useResetFlashcardSchedulingMutation: vi.fn(),
@@ -132,6 +139,7 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 
 describe("ReviewTab study assistant panel", () => {
   let assistantQueryState: any
+  let activeReviewCard: any
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -145,30 +153,31 @@ describe("ReviewTab study assistant panel", () => {
       isLoading: false
     } as any)
     vi.mocked(useCramQueueQuery).mockReturnValue({ data: [] } as any)
-    vi.mocked(useReviewQuery).mockReturnValue({
-      data: {
-        uuid: "card-1",
-        deck_id: 1,
-        front: "What filters blood?",
-        back: "The glomerulus.",
-        notes: null,
-        extra: null,
-        is_cloze: false,
-        tags: ["renal"],
-        ef: 2.5,
-        interval_days: 2,
-        repetitions: 1,
-        lapses: 0,
-        due_at: null,
-        last_reviewed_at: null,
-        last_modified: null,
-        deleted: false,
-        client_id: "test",
-        version: 2,
-        model_type: "basic",
-        reverse: false
-      }
-    } as any)
+    activeReviewCard = {
+      uuid: "card-1",
+      deck_id: 1,
+      front: "What filters blood?",
+      back: "The glomerulus.",
+      notes: null,
+      extra: null,
+      is_cloze: false,
+      tags: ["renal"],
+      ef: 2.5,
+      interval_days: 2,
+      repetitions: 1,
+      lapses: 0,
+      due_at: null,
+      last_reviewed_at: null,
+      last_modified: null,
+      deleted: false,
+      client_id: "test",
+      version: 2,
+      model_type: "basic",
+      reverse: false
+    }
+    vi.mocked(useReviewQuery).mockImplementation(() => ({
+      data: activeReviewCard
+    } as any))
     vi.mocked(useReviewFlashcardMutation).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false
@@ -202,6 +211,13 @@ describe("ReviewTab study assistant panel", () => {
     } as any)
     vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as any)
     vi.mocked(useNextDueQuery).mockReturnValue({ data: null } as any)
+    vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn()
+    } as any)
     assistantQueryState = {
       data: {
         thread: {
@@ -296,10 +312,62 @@ describe("ReviewTab study assistant panel", () => {
       />
     )
 
-  it("renders assistant quick actions and existing history on the active card", () => {
-    renderReviewTab()
+  const openReviewHelp = () => {
+    fireEvent.click(screen.getByTestId("flashcards-review-assistant-toggle"))
+  }
+
+  const openAssistantPanel = () => {
+    openReviewHelp()
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
+  }
+
+  it("keeps review recall first and resets explicit help when the active card changes", async () => {
+    const { rerender } = renderReviewTab()
+
+    expect(screen.getByRole("button", { name: "Show answer (Space)" })).toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-review-study-assistant")).not.toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-review-assistant-toggle")).toHaveTextContent("Need help?")
+
+    openReviewHelp()
 
     expect(screen.getByTestId("flashcards-review-study-assistant")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-review-assistant-toggle")).toHaveTextContent("Hide help")
+
+    activeReviewCard = {
+      ...activeReviewCard,
+      uuid: "card-2",
+      front: "What reabsorbs glucose?",
+      back: "The proximal tubule."
+    }
+    rerender(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={1}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("flashcards-review-study-assistant")).not.toBeInTheDocument()
+    })
+    expect(screen.getByTestId("flashcards-review-assistant-toggle")).toHaveTextContent("Need help?")
+    expect(screen.getByText("What reabsorbs glucose?")).toBeInTheDocument()
+  })
+
+  it("keeps assistant actions collapsed before answer reveal and expands on demand", () => {
+    renderReviewTab()
+
+    openReviewHelp()
+
+    expect(screen.getByTestId("flashcards-review-study-assistant")).toBeInTheDocument()
+    expect(screen.getByText("Need help understanding this card?")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Explain" })).not.toBeInTheDocument()
+    expect(screen.queryByText("Earlier explanation")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
+
     expect(screen.getByRole("button", { name: "Explain" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Fact-check me" })).toBeInTheDocument()
     expect(screen.getByText("Earlier explanation")).toBeInTheDocument()
@@ -312,6 +380,7 @@ describe("ReviewTab study assistant panel", () => {
     })
     renderReviewTab()
 
+    openAssistantPanel()
     fireEvent.click(screen.getByRole("button", { name: "Explain" }))
 
     await waitFor(() => {
@@ -328,6 +397,7 @@ describe("ReviewTab study assistant panel", () => {
     })
     renderReviewTab()
 
+    openAssistantPanel()
     fireEvent.click(screen.getByRole("button", { name: "Fact-check me" }))
     expect(assistantMutateAsync).not.toHaveBeenCalled()
     expect(screen.getByText("Confirm transcript")).toBeInTheDocument()
@@ -349,9 +419,40 @@ describe("ReviewTab study assistant panel", () => {
     })
   })
 
+  it("stops voice capture and clears the transcript when the assistant is collapsed", () => {
+    const { rerender } = renderReviewTab()
+
+    openAssistantPanel()
+    fireEvent.click(screen.getByRole("button", { name: "Fact-check me" }))
+
+    expect(speechRecognitionState.start).toHaveBeenCalledTimes(1)
+    expect(screen.getByText("Confirm transcript")).toBeInTheDocument()
+
+    speechRecognitionState.isListening = true
+    speechRecognitionState.stop.mockClear()
+    speechRecognitionState.resetTranscript.mockClear()
+
+    rerender(
+      <ReviewTab
+        onNavigateToCreate={() => {}}
+        onNavigateToImport={() => {}}
+        reviewDeckId={1}
+        onReviewDeckChange={() => {}}
+        isActive
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("flashcards-study-assistant-toggle"))
+
+    expect(speechRecognitionState.stop).toHaveBeenCalledTimes(1)
+    expect(speechRecognitionState.resetTranscript).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText("Confirm transcript")).not.toBeInTheDocument()
+  })
+
   it("plays back assistant replies on demand", async () => {
     renderReviewTab()
 
+    openAssistantPanel()
     fireEvent.click(screen.getByRole("button", { name: "Play reply" }))
 
     await waitFor(() => {
@@ -365,6 +466,7 @@ describe("ReviewTab study assistant panel", () => {
     assistantMutateAsync.mockRejectedValue(new Error("assistant failed"))
     renderReviewTab()
 
+    openAssistantPanel()
     fireEvent.click(screen.getByRole("button", { name: "Explain" }))
 
     await waitFor(() => {
@@ -374,6 +476,11 @@ describe("ReviewTab study assistant panel", () => {
         )
       ).toBeInTheDocument()
     })
+    expect(screen.getByText("Study assistant unavailable")).toBeInTheDocument()
+    const banner = screen
+      .getByText("Study assistant requires an LLM provider. Configure one in Settings → LLM Providers.")
+      .closest("[role='alert']")
+    expect(banner).toHaveAttribute("data-ds-component", "Alert")
     expect(screen.getByTestId("flashcards-review-show-answer")).toBeInTheDocument()
   })
 
@@ -385,6 +492,7 @@ describe("ReviewTab study assistant panel", () => {
       })
     renderReviewTab()
 
+    openAssistantPanel()
     fireEvent.click(screen.getByRole("button", { name: "Explain" }))
 
     await waitFor(() => {
@@ -410,6 +518,7 @@ describe("ReviewTab study assistant panel", () => {
     )
     renderReviewTab()
 
+    openAssistantPanel()
     fireEvent.click(screen.getByRole("button", { name: "Explain" }))
 
     await waitFor(() => {
@@ -433,6 +542,7 @@ describe("ReviewTab study assistant panel", () => {
       })
     renderReviewTab()
 
+    openAssistantPanel()
     fireEvent.click(screen.getByRole("button", { name: "Fact-check me" }))
     fireEvent.change(screen.getByLabelText("Transcript"), {
       target: { value: "I think the glomerulus filters blood." }
@@ -530,6 +640,7 @@ describe("ReviewTab study assistant panel", () => {
     })
     renderReviewTab()
 
+    openAssistantPanel()
     fireEvent.click(screen.getByRole("button", { name: "Explain" }))
 
     await waitFor(() => {

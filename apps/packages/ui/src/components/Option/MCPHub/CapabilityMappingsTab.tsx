@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
-import { Alert, Button, Card, Descriptions, Empty, Input, List, Space, Switch, Tag, Typography } from "antd"
+import { Button, Card, Descriptions, Empty, Input, List, Space, Switch, Tag, Typography } from "antd"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 
 import {
   createCapabilityAdapterMapping,

@@ -5,9 +5,12 @@ import pytest
 pytestmark = pytest.mark.integration
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.main import app
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +29,20 @@ def client():
     async def override_user():
         return User(id=1, username='tester', email='t@e.com', is_active=True, is_admin=True)
 
+    async def override_principal():
+        return AuthPrincipal(
+            kind="user",
+            user_id=1,
+            username="tester",
+            email="t@e.com",
+            subject="user:1",
+            roles=["admin"],
+            permissions=[SYSTEM_CONFIGURE, "*"],
+            is_admin=True,
+        )
+
     app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_auth_principal] = override_principal
     settings = get_settings()
     headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
 
@@ -35,6 +51,7 @@ def client():
             yield test_client
         finally:
             app.dependency_overrides.pop(get_request_user, None)
+            app.dependency_overrides.pop(get_auth_principal, None)
 
 
 def test_vector_store_end_to_end_no_mocks(client):

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from loguru import logger
+
 
 def collect_pool_metrics(pool: Any) -> dict[str, Any]:
     """Collect metrics from a database connection pool.
@@ -31,29 +33,40 @@ def collect_pool_metrics(pool: Any) -> dict[str, Any]:
         "available": False,
     }
 
-    # asyncpg pool
-    if hasattr(pool, "get_size"):
-        metrics.update({
-            "available": True,
-            "size": pool.get_size(),
-            "free_size": (
-                pool.get_idle_size() if hasattr(pool, "get_idle_size") else None
-            ),
-            "min_size": (
-                pool.get_min_size() if hasattr(pool, "get_min_size") else None
-            ),
-            "max_size": (
-                pool.get_max_size() if hasattr(pool, "get_max_size") else None
-            ),
-        })
-
-    # Generic pool with _pool attribute (e.g. queue.Queue-based)
-    elif hasattr(pool, "_pool"):
-        inner = pool._pool
-        if hasattr(inner, "qsize"):
+    try:
+        # asyncpg pool
+        if hasattr(pool, "get_size"):
             metrics.update({
                 "available": True,
-                "size": inner.qsize(),
+                "size": pool.get_size(),
+                "free_size": (
+                    pool.get_idle_size() if hasattr(pool, "get_idle_size") else None
+                ),
+                "min_size": (
+                    pool.get_min_size() if hasattr(pool, "get_min_size") else None
+                ),
+                "max_size": (
+                    pool.get_max_size() if hasattr(pool, "get_max_size") else None
+                ),
             })
+
+        # Generic pool with _pool attribute (e.g. queue.Queue-based)
+        elif hasattr(pool, "_pool"):
+            inner = pool._pool
+            if hasattr(inner, "qsize"):
+                metrics.update({
+                    "available": True,
+                    "size": inner.qsize(),
+                })
+    except Exception as exc:  # noqa: BLE001 - health metrics must be best-effort
+        logger.debug(
+            "Failed to collect pool metrics for {}: {}",
+            type(pool).__name__,
+            type(exc).__name__,
+        )
+        metrics.update({
+            "available": False,
+            "error": type(exc).__name__,
+        })
 
     return metrics

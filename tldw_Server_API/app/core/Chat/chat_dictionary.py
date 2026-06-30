@@ -8,8 +8,8 @@ transforming user input with probability, grouping, and token-budget controls.
 from __future__ import annotations
 
 import os
-import random
 import re
+import secrets
 import warnings
 from datetime import datetime, timedelta
 from typing import Any
@@ -17,6 +17,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.Chunking.regex_safety import check_pattern as check_regex_pattern
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Templating.template_renderer import (
@@ -93,6 +94,7 @@ class _SafeMatch:
     """
 
     __slots__ = ("_m",)
+    _tldw_template_safe_methods = frozenset({"group", "groups", "groupdict", "start", "end"})
 
     def __init__(self, match: re.Match):
         self._m = match
@@ -222,7 +224,11 @@ class ChatDictionary:
     def compile_key(key: str) -> str | re.Pattern:
         """Compile a key string into a regex pattern if wrapped in '/'."""
         if key.startswith("/") and key.endswith("/"):
-            return re.compile(key[1:-1], re.IGNORECASE)
+            pattern = key[1:-1]
+            safety_error = check_regex_pattern(pattern, max_len=256)
+            if safety_error:
+                raise ValueError(f"Unsafe chat dictionary regex: {safety_error}")
+            return re.compile(pattern, re.IGNORECASE)
         return key
 
     def matches(self, text: str) -> bool:
@@ -254,7 +260,7 @@ def apply_strategy(entries: list[ChatDictionary], strategy: str = "sorted_evenly
 
 def filter_by_probability(entries: list[ChatDictionary]) -> list[ChatDictionary]:
     """Filter entries by applying their probability thresholds."""
-    return [entry for entry in entries if random.randint(1, 100) <= entry.probability]
+    return [entry for entry in entries if secrets.randbelow(100) + 1 <= entry.probability]
 
 
 def group_scoring(entries: list[ChatDictionary]) -> list[ChatDictionary]:

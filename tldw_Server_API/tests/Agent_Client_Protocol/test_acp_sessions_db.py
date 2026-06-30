@@ -1,10 +1,13 @@
 """Tests for ACP Sessions SQLite persistence."""
 import json
 import os
+import sqlite3
 import tempfile
+from datetime import datetime, timezone
 
 import pytest
 
+from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
 from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB, _ensure_column
 
 
@@ -72,6 +75,55 @@ class TestSessionCRUD:
         rec = db.get_session("s1")
         assert rec["tags"] == ["workflow", "test"]
         assert rec["mcp_servers"] == [{"name": "fs", "type": "stdio"}]
+
+    def test_register_session_persists_sandbox_context_and_filters_by_workspace(self, db):
+        db.register_session(
+            session_id="s-workspace",
+            user_id=1,
+            agent_type="codex",
+            workspace_id="workspace-1",
+            sandbox_session_id="sandbox-session-1",
+            sandbox_run_id="sandbox-run-1",
+        )
+        db.register_session(
+            session_id="s-other",
+            user_id=1,
+            agent_type="codex",
+            workspace_id="workspace-2",
+        )
+
+        row = db.get_session("s-workspace")
+        assert row["sandbox_session_id"] == "sandbox-session-1"
+        assert row["sandbox_run_id"] == "sandbox-run-1"
+
+        rows, total = db.list_sessions(user_id=1, workspace_id="workspace-1")
+        assert total == 1
+        assert rows[0]["session_id"] == "s-workspace"
+
+    def test_list_sessions_workspace_filter_uses_direct_predicate(self, db):
+        db.register_session(
+            session_id="s-workspace",
+            user_id=1,
+            agent_type="codex",
+            workspace_id="workspace-1",
+        )
+
+        statements: list[str] = []
+        conn = db._get_conn()
+        conn.set_trace_callback(statements.append)
+        try:
+            db.list_sessions(workspace_id="workspace-1")
+        finally:
+            conn.set_trace_callback(None)
+
+        session_queries = [
+            statement
+            for statement in statements
+            if "FROM sessions" in statement and "workspace_id" in statement
+        ]
+        assert session_queries
+        assert all("IS NULL OR" not in statement for statement in session_queries)
+        assert all("workspace_id =" in statement for statement in session_queries)
 
     def test_register_session_with_policy_snapshot_fields(self, db):
         row = db.register_session(
@@ -408,6 +460,45 @@ class TestQuotasAndCleanup:
         rec = db.get_session("s1")
         assert rec["status"] == "active"
 
+    def test_purge_retained_sessions_deletes_old_closed_sessions_and_messages(self, db):
+        db.register_session(session_id="old-closed", user_id=1)
+        db.record_prompt(
+            "old-closed",
+            [{"role": "user", "content": "Retained prompt"}],
+            {"content": "Retained response", "usage": {}},
+        )
+        db.close_session("old-closed")
+        db.register_session(session_id="old-active", user_id=1)
+        db.register_session(session_id="fresh-closed", user_id=1)
+        db.close_session("fresh-closed")
+
+        conn = db._get_conn()
+        conn.execute(
+            "UPDATE sessions SET created_at = ?, last_activity_at = ? WHERE session_id IN (?, ?)",
+            (
+                "2026-01-01T00:00:00+00:00",
+                "2026-01-01T00:00:00+00:00",
+                "old-closed",
+                "old-active",
+            ),
+        )
+        conn.execute(
+            "UPDATE sessions SET created_at = ?, last_activity_at = ? WHERE session_id = ?",
+            ("2026-01-12T00:00:00+00:00", "2026-01-12T00:00:00+00:00", "fresh-closed"),
+        )
+        conn.commit()
+
+        deleted = db.purge_retained_sessions(
+            retention_days=1,
+            now=datetime(2026, 1, 12, tzinfo=timezone.utc),
+        )
+
+        assert deleted == 1
+        assert db.get_session("old-closed") is None
+        assert db.get_messages("old-closed") == []
+        assert db.get_session("old-active") is not None
+        assert db.get_session("fresh-closed") is not None
+
 
 class TestCascadeDelete:
     def test_delete_session_cascades_messages(self, db):
@@ -454,6 +545,186 @@ class TestAgentRegistry:
         db.save_agent_entry({"agent_type": "a1", "name": "Updated", "source": "api"})
         entry = db.get_agent_entry("a1")
         assert entry["name"] == "Updated"
+
+    def test_agent_entrypoint_strategy_fields_round_trip(self, db):
+        saved = db.save_agent_entry({
+            "agent_type": "adapter",
+            "name": "Adapter",
+            "entrypoint_strategy": "external_acp_adapter",
+            "acp_command": "adapter-acp",
+            "acp_args": '["--stdio"]',
+            "adapter_source": "example/adapter",
+            "adapter_docs_url": "https://example.test/adapter",
+            "certification_blocker": "adapter_missing",
+            "source": "api",
+        })
+
+        assert saved["entrypoint_strategy"] == "external_acp_adapter"
+        assert saved["acp_command"] == "adapter-acp"
+        assert saved["acp_args"] == '["--stdio"]'
+        assert saved["adapter_source"] == "example/adapter"
+        assert saved["certification_blocker"] == "adapter_missing"
+
+    def test_agent_registry_adapter_metadata_round_trips(self, db):
+        saved = db.save_agent_entry({
+            "agent_type": "codex",
+            "name": "Codex",
+            "command": "codex",
+            "entrypoint_strategy": "external_acp_adapter",
+            "acp_command": "codex-acp",
+            "adapter_source": "zed-industries/codex-acp",
+            "adapter_package": "@zed-industries/codex-acp",
+            "adapter_version": "0.15.0",
+            "adapter_version_policy": "exact_pin_required",
+            "adapter_install_source": "github_release_preferred",
+            "credential_policy": "delegated_to_adapter",
+            "runtime_backend": "acp_downstream",
+            "source": "api",
+        })
+
+        assert saved["entrypoint_strategy"] == "external_acp_adapter"
+        assert saved["adapter_source"] == "zed-industries/codex-acp"
+        assert saved["adapter_package"] == "@zed-industries/codex-acp"
+        assert saved["adapter_version"] == "0.15.0"
+        assert saved["adapter_version_policy"] == "exact_pin_required"
+        assert saved["adapter_install_source"] == "github_release_preferred"
+        assert saved["credential_policy"] == "delegated_to_adapter"
+        assert saved["runtime_backend"] == "acp_downstream"
+
+        listed = db.list_agent_entries(source="api")
+        codex = next(entry for entry in listed if entry["agent_type"] == "codex")
+        assert codex["entrypoint_strategy"] == "external_acp_adapter"
+        assert codex["adapter_version"] == "0.15.0"
+        assert codex["credential_policy"] == "delegated_to_adapter"
+        assert codex["runtime_backend"] == "acp_downstream"
+
+
+def test_legacy_agent_registry_rows_get_entrypoint_defaults(tmp_path):
+    db_path = tmp_path / "legacy_acp_sessions.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE agent_registry (
+            agent_type TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            command TEXT NOT NULL DEFAULT '',
+            args TEXT NOT NULL DEFAULT '[]',
+            env TEXT NOT NULL DEFAULT '{}',
+            requires_api_key TEXT,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            install_instructions TEXT NOT NULL DEFAULT '[]',
+            docs_url TEXT,
+            mcp_orchestration TEXT NOT NULL DEFAULT 'agent_driven',
+            mcp_entry_tool TEXT NOT NULL DEFAULT 'execute',
+            mcp_structured_response INTEGER NOT NULL DEFAULT 0,
+            mcp_llm_provider TEXT,
+            mcp_llm_model TEXT,
+            mcp_max_iterations INTEGER NOT NULL DEFAULT 20,
+            mcp_refresh_tools INTEGER NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT 'api',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO agent_registry (
+            agent_type, name, command, source, created_at, updated_at
+        ) VALUES ('legacy_api', 'Legacy API', 'legacy-cli', 'api', '2026-01-01', '2026-01-01');
+        PRAGMA user_version=13;
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db = ACPSessionsDB(db_path=str(db_path))
+    try:
+        row = db.get_agent_entry("legacy_api")
+        assert row["entrypoint_strategy"] == "documented_candidate"
+        assert row["acp_command"] == ""
+        assert row["acp_args"] == "[]"
+
+        registry = AgentRegistry(yaml_path="/missing.yaml", db=db)
+        registry._load_api_entries()
+        entry = registry.get_entry("legacy_api")
+        assert entry is not None
+        assert entry.entrypoint_strategy == "documented_candidate"
+        assert entry.acp_command == ""
+        assert entry.acp_args == []
+    finally:
+        db.close()
+
+
+def test_legacy_agent_registry_rows_get_adapter_metadata_defaults(tmp_path):
+    db_path = tmp_path / "legacy_acp_sessions.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE agent_registry (
+            agent_type TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            command TEXT NOT NULL DEFAULT '',
+            args TEXT NOT NULL DEFAULT '[]',
+            env TEXT NOT NULL DEFAULT '{}',
+            requires_api_key TEXT,
+            is_default INTEGER NOT NULL DEFAULT 0,
+            install_instructions TEXT NOT NULL DEFAULT '[]',
+            docs_url TEXT,
+            mcp_orchestration TEXT NOT NULL DEFAULT 'agent_driven',
+            mcp_entry_tool TEXT NOT NULL DEFAULT 'execute',
+            mcp_structured_response INTEGER NOT NULL DEFAULT 0,
+            mcp_llm_provider TEXT,
+            mcp_llm_model TEXT,
+            mcp_max_iterations INTEGER NOT NULL DEFAULT 20,
+            mcp_refresh_tools INTEGER NOT NULL DEFAULT 0,
+            entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate',
+            acp_command TEXT NOT NULL DEFAULT '',
+            acp_args TEXT NOT NULL DEFAULT '[]',
+            adapter_source TEXT,
+            adapter_docs_url TEXT,
+            certification_blocker TEXT,
+            source TEXT NOT NULL DEFAULT 'api',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO agent_registry (
+            agent_type, name, command, source, created_at, updated_at
+        ) VALUES ('legacy_api', 'Legacy API', 'legacy-cli', 'api', '2026-01-01', '2026-01-01');
+        PRAGMA user_version=14;
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db = ACPSessionsDB(db_path=str(db_path))
+    try:
+        columns = {
+            str(row[1])
+            for row in db._get_conn().execute('PRAGMA table_info("agent_registry")').fetchall()
+        }
+        assert {
+            "adapter_package",
+            "adapter_version",
+            "adapter_version_policy",
+            "adapter_install_source",
+            "credential_policy",
+            "runtime_backend",
+        }.issubset(columns)
+
+        row = db.get_agent_entry("legacy_api")
+        assert row is not None
+        assert row["adapter_package"] is None
+        assert row["adapter_version"] is None
+        assert row["adapter_version_policy"] == "unknown"
+        assert row["adapter_install_source"] == "unknown"
+        assert row["credential_policy"] == "unknown"
+        assert row["runtime_backend"] == "acp_downstream"
+
+        listed = db.list_agent_entries(source="api")
+        assert listed[0]["agent_type"] == "legacy_api"
+        assert listed[0]["adapter_version_policy"] == "unknown"
+        assert listed[0]["runtime_backend"] == "acp_downstream"
+    finally:
+        db.close()
 
 
 class TestHealthHistory:

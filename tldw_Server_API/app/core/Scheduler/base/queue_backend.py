@@ -81,13 +81,22 @@ class QueueBackend(ABC):
         pass
 
     @abstractmethod
-    async def ack(self, task_id: str, result: Optional[Any] = None) -> bool:
+    async def ack(
+        self,
+        task_id: str,
+        result: Optional[Any] = None,
+        *,
+        lease_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ) -> bool:
         """
         Acknowledge successful task completion.
 
         Args:
             task_id: ID of completed task
             result: Task execution result
+            lease_id: Optional lease identifier that must still own the task
+            worker_id: Optional worker identifier that must still own the task
 
         Returns:
             True if task was acknowledged
@@ -95,7 +104,15 @@ class QueueBackend(ABC):
         pass
 
     @abstractmethod
-    async def nack(self, task_id: str, error: str, retry: bool = True) -> bool:
+    async def nack(
+        self,
+        task_id: str,
+        error: str,
+        retry: bool = True,
+        *,
+        lease_id: Optional[str] = None,
+        worker_id: Optional[str] = None,
+    ) -> bool:
         """
         Negative acknowledgment - task failed.
 
@@ -103,6 +120,8 @@ class QueueBackend(ABC):
             task_id: ID of failed task
             error: Error message
             retry: Whether to retry the task
+            lease_id: Optional lease identifier that must still own the task
+            worker_id: Optional worker identifier that must still own the task
 
         Returns:
             True if task was nacked

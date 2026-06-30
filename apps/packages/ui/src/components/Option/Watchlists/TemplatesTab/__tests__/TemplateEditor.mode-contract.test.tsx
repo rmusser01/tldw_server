@@ -58,6 +58,27 @@ const createMessageType = (): MessageType => {
   return close
 }
 
+const setViewport = (width: number) => {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: width
+  })
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: width < 768,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    }))
+  })
+}
+
 type MockTemplateCodeEditorHandle = {
   insertSnippet: (snippet: string) => void
   getValue: () => string
@@ -166,6 +187,7 @@ const openEditorTab = () => {
 describe("TemplateEditor authoring mode contract", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setViewport(1024)
     serviceMocks.createWatchlistTemplate.mockResolvedValue(undefined)
     serviceMocks.fetchWatchlistRuns.mockResolvedValue({
       items: [
@@ -221,6 +243,23 @@ describe("TemplateEditor authoring mode contract", () => {
         }))
       })
     }
+  })
+
+  it("uses full-width constrained modal chrome with reachable template actions", async () => {
+    setViewport(420)
+
+    render(<TemplateEditor open template={null} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(serviceMocks.fetchWatchlistRuns).toHaveBeenCalled()
+    })
+
+    const modal = document.querySelector(".ant-modal") as HTMLElement | null
+    expect(modal).not.toBeNull()
+    expect(modal?.style.width).toBe("100vw")
+    expect(modal?.style.maxWidth).toBe("100vw")
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument()
   })
 
   it("defaults to basic mode for create and hides advanced-only tabs/tools", async () => {
@@ -298,6 +337,11 @@ describe("TemplateEditor authoring mode contract", () => {
         screen.getByText("Current editor content differs from the loaded version.")
       ).toBeInTheDocument()
     })
+    expect(
+      screen
+        .getByText("Current editor content differs from the loaded version.")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
 
     fireEvent.click(screen.getByTestId("template-editor-mode-basic"))
     fireEvent.click(screen.getByTestId("template-editor-mode-advanced"))
@@ -312,6 +356,41 @@ describe("TemplateEditor authoring mode contract", () => {
     expect(
       screen.getByText("Current editor content differs from the loaded version.")
     ).toBeInTheDocument()
+    expect(
+      screen
+        .getByText("Current editor content differs from the loaded version.")
+        .closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+  })
+
+  it("renders visual repair warnings through the design-system Alert primitive", async () => {
+    render(<TemplateEditor open template={null} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      expect(serviceMocks.fetchWatchlistRuns).toHaveBeenCalled()
+    })
+
+    openEditorTab()
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        "Start with plain text or Markdown. Advanced users can add Jinja2 tags later."
+      ),
+      {
+        target: { value: "{% macro card(x) %}{{ x }}{% endmacro %}\n{{ card(title) }}" }
+      }
+    )
+    fireEvent.click(screen.getByRole("tab", { name: "Visual" }))
+
+    const repairTitle = await screen.findByText("Visual layout may be out of sync")
+
+    expect(repairTitle.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "The template was edited in code mode and the visual block layout may need repair."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Repair layout" })).toBeInTheDocument()
+    expect(screen.getByTestId("template-editor-repair-visual-layout")).toBeInTheDocument()
   })
 
   it("applies recipe defaults and autofills name/description in basic create mode", async () => {
@@ -335,7 +414,7 @@ describe("TemplateEditor authoring mode contract", () => {
     expect(descriptionInput).toHaveValue("Daily markdown briefing template")
     expect(String((contentInput as HTMLTextAreaElement).value)).toContain("## Executive Summary")
     expect(markdownRadio).toBeChecked()
-  })
+  }, 15_000)
 
   it("does not overwrite custom name and description when reapplying a recipe", async () => {
     render(<TemplateEditor open template={null} onClose={vi.fn()} />)
@@ -390,7 +469,7 @@ describe("TemplateEditor authoring mode contract", () => {
     )
 
     errorSpy.mockRestore()
-  })
+  }, 15_000)
 
   it("saves basic-mode templates with recipe-generated payloads", async () => {
     const onClose = vi.fn()

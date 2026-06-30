@@ -38,6 +38,7 @@ import contextlib
 
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
 from tldw_Server_API.app.core.AuthNZ.migrations import check_migration_status, ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.monitoring import get_authnz_monitor
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
@@ -65,6 +66,10 @@ _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
     UnicodeDecodeError,
+)
+_AUTHNZ_SINGLE_USER_OPTIONAL_BACKFILL_EXCEPTIONS = (
+    *_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS,
+    AuthNZDatabaseError,
 )
 
 #######################################################################################################################
@@ -493,7 +498,7 @@ async def setup_database():
             async with pool.transaction() as conn:
                 await ensure_baseline_rbac_seed(
                     conn,
-                    include_mcp_permissions=False,
+                    include_mcp_permissions=True,
                     is_postgres=True,
                 )
 
@@ -708,13 +713,13 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
             except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS:
                 pass
 
-            if sqlite_is_memory:
+            if sqlite_is_memory or sqlite_fs_path:
                 async with pool.transaction() as conn:  # type: ignore[attr-defined]
                     try:
                         await ensure_sqlite_rbac_tables(conn)
                     except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as table_err:
                         logger.debug(
-                            "SQLite in-memory RBAC table creation skipped (tables may already exist): {}",
+                            "SQLite RBAC table creation skipped (tables may already exist): {}",
                             table_err,
                         )
                     with contextlib.suppress(_AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS):
@@ -738,7 +743,8 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
             user_id=single_user_id,
             username="single_user",
             email="single_user@example.local",
-            password_hash="",
+            # Single-user auth uses the API key; this fixed account has no password login.
+            password_hash="",  # nosec B106
         )
 
         # Ensure single-user role assignment + primary/test API keys.
@@ -759,10 +765,22 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
                     if len(primary_api_key) > 10
                     else primary_api_key
                 )
+                key_identifier = None
+                try:
+                    from tldw_Server_API.app.core.AuthNZ.api_key_crypto import parse_api_key
+
+                    parsed = parse_api_key(primary_api_key)
+                    if parsed:
+                        key_identifier, _secret = parsed
+                except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.opt(exception=True).debug(
+                        "Failed to parse SINGLE_USER_API_KEY for seed key identifier extraction: {}",
+                        exc,
+                    )
                 await api_repo.upsert_primary_key(
                     user_id=single_user_id,
                     key_hash=key_hash,
-                    key_identifier=None,
+                    key_identifier=key_identifier,
                     key_prefix=key_prefix,
                     name="single-user primary key",
                     description="Primary API key for single-user profile",
@@ -779,17 +797,29 @@ async def ensure_single_user_rbac_seed_if_needed() -> None:
                     if len(test_api_key) > 10
                     else test_api_key
                 )
+                test_key_identifier = None
+                try:
+                    from tldw_Server_API.app.core.AuthNZ.api_key_crypto import parse_api_key
+
+                    parsed = parse_api_key(test_api_key)
+                    if parsed:
+                        test_key_identifier, _secret = parsed
+                except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.opt(exception=True).debug(
+                        "Failed to parse SINGLE_USER_TEST_API_KEY for seed key identifier extraction: {}",
+                        exc,
+                    )
                 await api_repo.upsert_primary_key(
                     user_id=single_user_id,
                     key_hash=test_key_hash,
-                    key_identifier=None,
+                    key_identifier=test_key_identifier,
                     key_prefix=test_key_prefix,
                     name="single-user test key",
                     description="Deterministic API key for test automation",
                     scope="admin",
                     is_virtual=False,
                 )
-        except _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS as role_assign_err:
+        except _AUTHNZ_SINGLE_USER_OPTIONAL_BACKFILL_EXCEPTIONS as role_assign_err:
             # Log at warning level with context so repeated failures surface operationally
             logger.warning(
                 "Single-user admin role assignment skipped in ensure_single_user_rbac_seed_if_needed "

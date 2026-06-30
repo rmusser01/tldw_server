@@ -91,4 +91,3 @@ Before implementing deletion:
 
 The old `/workspace-playground` route is not a migration entrypoint and must not
 be restored as a redirect, alias, or hidden fallback.
-

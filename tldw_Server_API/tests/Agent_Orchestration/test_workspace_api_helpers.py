@@ -90,6 +90,10 @@ class TestValidateWorkspaceRoot:
             with pytest.raises(HTTPException) as exc_info:
                 _validate_workspace_root("/not/allowed/path")
             assert exc_info.value.status_code == 403
+            assert exc_info.value.detail["code"] == "workspace_root_not_allowed"
+            assert "allowed_base_paths" not in exc_info.value.detail
+            assert "root_path" not in exc_info.value.detail
+            assert "ACP-WORKSPACE.allowed_base_paths" in exc_info.value.detail["message"]
 
     def test_empty_allowed_base_paths_rejects_workspace_creation(self):
         from fastapi import HTTPException
@@ -107,6 +111,8 @@ class TestValidateWorkspaceRoot:
             with pytest.raises(HTTPException) as exc_info:
                 _validate_workspace_root("/tmp")
             assert exc_info.value.status_code == 503
+            assert exc_info.value.detail["code"] == "workspace_roots_not_configured"
+            assert "ACP_WORKSPACE_ALLOWED_BASE_PATHS" in exc_info.value.detail["configure"]
 
 
 class TestResolveDispatchCwd:
@@ -242,7 +248,7 @@ class TestMcpResolverAcpFallback:
 
             # Patch get_orchestration_db where it's imported inside _resolve_acp_workspace
             with patch(
-                "tldw_Server_API.app.core.Agent_Orchestration.orchestration_service.get_orchestration_db",
+                "tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db",
                 return_value=db,
             ):
                 result = McpHubWorkspaceRootResolver._resolve_acp_workspace("1", str(ws.id))
@@ -255,7 +261,7 @@ class TestMcpResolverAcpFallback:
             db = OrchestrationDB(user_id=1, db_dir=tmp)
             db._ensure_schema()
             with patch(
-                "tldw_Server_API.app.core.Agent_Orchestration.orchestration_service.get_orchestration_db",
+                "tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db",
                 return_value=db,
             ):
                 result = McpHubWorkspaceRootResolver._resolve_acp_workspace("1", "99999")

@@ -27,16 +27,29 @@ const {
       mediaId: number
       title: string
       type: "pdf" | "video" | "audio" | "website" | "document" | "text"
+      status?: "processing" | "ready" | "error"
       addedAt?: Date
       url?: string
     }>,
     selectedSourceIds: [] as string[],
     selectedSourceFolderIds: [] as string[],
     getSelectedSources: () =>
-      [] as Array<{ id: string; title: string; mediaId?: number; type?: string }>,
+      [] as Array<{
+        id: string
+        title: string
+        mediaId?: number
+        type?: string
+        status?: "processing" | "ready" | "error"
+      }>,
     getSelectedMediaIds: () => [] as number[],
     getEffectiveSelectedSources: () =>
-      [] as Array<{ id: string; title: string; mediaId?: number; type?: string }>,
+      [] as Array<{
+        id: string
+        title: string
+        mediaId?: number
+        type?: string
+        status?: "processing" | "ready" | "error"
+      }>,
     getEffectiveSelectedMediaIds: () => [] as number[],
     setSelectedSourceIds: vi.fn(),
     focusSourceById: vi.fn(),
@@ -193,7 +206,9 @@ vi.mock("@/components/Common/FeatureEmptyState", () => ({
 
 vi.mock("../source-location-copy", () => ({
   getWorkspaceChatNoSourcesHint: () =>
-    "Select sources from the Sources pane, then ask questions."
+    "Select sources from the Sources pane, then ask questions.",
+  getWorkspaceChatSourcesExplainer: () =>
+    "Selected sources keep answers grounded in this workspace."
 }))
 
 vi.mock("../undo-manager", () => ({
@@ -213,6 +228,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
       size: 8
     }))
   }
+}))
+
+vi.mock("@/services/tldw-server", () => ({
+  fetchChatModels: vi.fn(async () => [])
 }))
 
 vi.mock("antd", async () => {
@@ -252,7 +271,8 @@ describe("ChatPane Stage 5 folder-derived context", () => {
         id: "source-folder",
         mediaId: 101,
         title: "Folder Source",
-        type: "pdf"
+        type: "pdf",
+        status: "ready"
       }
     ]
     workspaceStoreState.selectedSourceIds = []

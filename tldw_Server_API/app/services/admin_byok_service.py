@@ -55,7 +55,7 @@ async def get_user_byok_repo() -> AuthnzUserProviderSecretsRepo:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to initialize user BYOK repository: {exc}")
+        logger.error("Failed to initialize user BYOK repository")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="BYOK infrastructure is not available",
@@ -72,7 +72,7 @@ async def get_shared_byok_repo() -> AuthnzOrgProviderSecretsRepo:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to initialize shared BYOK repository: {exc}")
+        logger.error("Failed to initialize shared BYOK repository")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="BYOK infrastructure is not available",
@@ -149,7 +149,7 @@ async def list_user_keys(
     try:
         rows = await repo.list_secrets_for_user(user_id)
     except Exception as exc:
-        logger.error("BYOK: failed to list user keys for user_id={}: {}", user_id, exc)
+        logger.error("Failed to list user BYOK keys")
         raise HTTPException(status_code=500, detail="Failed to list user BYOK keys") from exc
     allowlist = resolve_byok_allowlist()
     items = [
@@ -184,12 +184,7 @@ async def revoke_user_key(
             revoked_by=principal.user_id,
         )
     except Exception as exc:
-        logger.error(
-            'BYOK: failed to revoke user key for user_id={} provider={}: {}',
-            user_id,
-            provider_norm,
-            exc,
-        )
+        logger.error("Failed to revoke user BYOK key")
         raise HTTPException(status_code=500, detail="Failed to revoke user BYOK key") from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Key not found")
@@ -211,7 +206,7 @@ async def upsert_shared_key(
     try:
         credential_fields = normalize_credential_fields(provider_norm, payload.credential_fields)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Invalid provider credential fields") from exc
 
     try:
         await test_provider_credentials(
@@ -221,7 +216,7 @@ async def upsert_shared_key(
             model=None,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Provider credential validation failed") from exc
     except ChatAPIError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except Exception as exc:
@@ -248,13 +243,7 @@ async def upsert_shared_key(
             updated_by=principal.user_id,
         )
     except Exception as exc:
-        logger.error(
-            'BYOK: failed to upsert shared key for {}:{} provider={}: {}',
-            payload.scope_type,
-            payload.scope_id,
-            provider_norm,
-            exc,
-        )
+        logger.error("Failed to store shared BYOK key")
         raise HTTPException(status_code=500, detail="Failed to store shared BYOK key") from exc
     return SharedProviderKeyResponse(
         scope_type=payload.scope_type,
@@ -296,7 +285,7 @@ async def test_shared_key(
             stored_payload.get("credential_fields") or {},
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Invalid provider credential fields") from exc
 
     try:
         model_used = await test_provider_credentials(
@@ -306,7 +295,7 @@ async def test_shared_key(
             model=payload.model,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Provider credential validation failed") from exc
     except ChatAPIError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except Exception as exc:
@@ -345,15 +334,9 @@ async def list_shared_keys(
             provider=provider,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Invalid shared BYOK key query") from exc
     except Exception as exc:
-        logger.error(
-            'BYOK: failed to list shared keys for scope_type={} scope_id={} provider={}: {}',
-            scope_type,
-            scope_id,
-            provider,
-            exc,
-        )
+        logger.error("Failed to list shared BYOK keys")
         raise HTTPException(status_code=500, detail="Failed to list shared BYOK keys") from exc
     items = [
         SharedProviderKeyStatusItem(
@@ -385,13 +368,7 @@ async def delete_shared_key(
             revoked_by=principal.user_id,
         )
     except Exception as exc:
-        logger.error(
-            'BYOK: failed to delete shared key for scope_type={} scope_id={} provider={}: {}',
-            scope_type,
-            scope_id,
-            provider_norm,
-            exc,
-        )
+        logger.error("Failed to delete shared BYOK key")
         raise HTTPException(status_code=500, detail="Failed to delete shared BYOK key") from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Key not found")

@@ -35,6 +35,20 @@ def get_media_by_id(
     )
 
 
+def get_media_status_by_id(
+    self,
+    media_id: int,
+    include_deleted: bool = False,
+    include_trash: bool = False,
+) -> dict[str, Any] | None:
+    return media_db_api.get_media_status_by_id(
+        self,
+        media_id,
+        include_deleted=include_deleted,
+        include_trash=include_trash,
+    )
+
+
 def get_media_by_url(
     self,
     url: str,

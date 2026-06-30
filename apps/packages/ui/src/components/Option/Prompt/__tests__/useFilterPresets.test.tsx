@@ -27,7 +27,7 @@ describe("useFilterPresets", () => {
           usageFilter: "used",
           tagFilter: [],
           tagMatchMode: "any",
-          savedView: "grid"
+          savedView: "all"
         }
       ])
     )
@@ -76,7 +76,7 @@ describe("useFilterPresets", () => {
         usageFilter: "unused",
         tagFilter: [],
         tagMatchMode: "any",
-        savedView: "grid"
+        savedView: "all"
       })
     })
 

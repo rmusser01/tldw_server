@@ -1,17 +1,23 @@
 import React from "react"
 import { Popover } from "antd"
-import { Layers, Globe, ChevronDown, Settings } from "lucide-react"
+import { Layers, Globe, ChevronDown, Settings, FolderPlus } from "lucide-react"
 import { cn } from "@/libs/utils"
 import type { RagPresetName, RagSource } from "@/services/rag/unified-rag"
 import { ALL_RAG_SOURCES, getRagSourceLabel } from "@/services/rag/sourceMetadata"
 import { AnswerModelMenu } from "./AnswerModelMenu"
+import type { KnowledgeSourceHealthState } from "../types"
+import { buildSourceHealthSummary } from "../sourceHealth"
 
 type CompactToolbarProps = {
   sources: RagSource[]
+  includeMediaIds?: number[]
+  includeNoteIds?: string[]
   preset: RagPresetName
   webEnabled: boolean
+  webFallbackAvailable?: boolean
   onToggleWeb: () => void
   onOpenSourceSelector: () => void
+  onAddSources?: () => void
   onOpenSettings: () => void
   generationProvider: string | null
   generationModel: string | null
@@ -19,6 +25,9 @@ type CompactToolbarProps = {
   onGenerationModelChange: (model: string | null) => void
   contextChangedSinceLastRun: boolean
   scopeChangeDetails?: string[]
+  sourceHealth?: KnowledgeSourceHealthState
+  onRefreshSourceHealth?: () => void
+  showAddSources?: boolean
   className?: string
 }
 
@@ -31,6 +40,21 @@ function summarizeSources(sources: RagSource[]): string {
   return `${sources.length} selected`
 }
 
+function summarizeSpecificSources(mediaIds: number[], noteIds: string[]): string | null {
+  const mediaCount = mediaIds.filter((id) => Number.isFinite(id) && id > 0).length
+  const noteCount = noteIds.filter((id) => typeof id === "string" && id.trim().length > 0).length
+  if (mediaCount === 0 && noteCount === 0) return null
+
+  const parts: string[] = []
+  if (mediaCount > 0) {
+    parts.push(`${mediaCount} doc${mediaCount === 1 ? "" : "s"}`)
+  }
+  if (noteCount > 0) {
+    parts.push(`${noteCount} note${noteCount === 1 ? "" : "s"}`)
+  }
+  return parts.join(" • ")
+}
+
 const PRESET_LABELS: Record<string, string> = {
   fast: "Fast",
   balanced: "Balanced",
@@ -40,10 +64,14 @@ const PRESET_LABELS: Record<string, string> = {
 
 export function CompactToolbar({
   sources,
+  includeMediaIds = [],
+  includeNoteIds = [],
   preset,
   webEnabled,
+  webFallbackAvailable = true,
   onToggleWeb,
   onOpenSourceSelector,
+  onAddSources,
   onOpenSettings,
   generationProvider,
   generationModel,
@@ -51,18 +79,43 @@ export function CompactToolbar({
   onGenerationModelChange,
   contextChangedSinceLastRun,
   scopeChangeDetails = [],
+  sourceHealth,
+  onRefreshSourceHealth,
+  showAddSources = false,
   className,
 }: CompactToolbarProps) {
+  const sourceSummary = summarizeSources(sources)
+  const specificSourceSummary = summarizeSpecificSources(includeMediaIds, includeNoteIds)
+  const sourceControlLabel = `Open source scope and saved profiles. Sources: ${sourceSummary}${
+    specificSourceSummary ? `. Specific: ${specificSourceSummary}` : ""
+  }`
+
   return (
     <div className={cn("flex flex-wrap items-center gap-2", className)}>
+      {showAddSources ? (
+        <button
+          type="button"
+          onClick={onAddSources ?? onOpenSourceSelector}
+          className="inline-flex h-7 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2.5 text-[11px] font-medium text-primaryStrong hover:bg-primary/15 transition-colors"
+        >
+          <FolderPlus className="h-3.5 w-3.5" />
+          Add sources
+        </button>
+      ) : null}
+
       {/* Sources pill */}
       <button
         type="button"
         onClick={onOpenSourceSelector}
+        aria-label={sourceControlLabel}
+        title="Open source scope and saved profiles"
         className="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text transition-colors"
       >
         <Layers className="h-3.5 w-3.5" />
-        Sources: {summarizeSources(sources)}
+        Sources: {sourceSummary}
+        {specificSourceSummary ? (
+          <span className="hidden sm:inline"> • Specific: {specificSourceSummary}</span>
+        ) : null}
         <ChevronDown className="h-3 w-3" />
       </button>
 
@@ -81,17 +134,27 @@ export function CompactToolbar({
       <button
         type="button"
         onClick={onToggleWeb}
+        disabled={!webFallbackAvailable}
         className={cn(
           "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors",
-          webEnabled
+          webEnabled && webFallbackAvailable
             ? "border-primary/40 bg-primary/10 text-primary"
-            : "border-border bg-surface text-text-muted hover:bg-surface2 hover:text-text"
+            : "border-border bg-surface text-text-muted hover:bg-surface2 hover:text-text",
+          !webFallbackAvailable && "opacity-60 cursor-not-allowed hover:bg-surface hover:text-text-muted"
         )}
-        aria-pressed={webEnabled}
-        aria-label={`Web fallback is currently ${webEnabled ? "enabled" : "disabled"}. Click to toggle.`}
-        title="Falls back to web search when local source relevance is below threshold."
+        aria-pressed={webEnabled && webFallbackAvailable}
+        aria-label={
+          webFallbackAvailable
+            ? `Web fallback is currently ${webEnabled ? "enabled" : "disabled"}. Click to toggle.`
+            : "Web fallback is not available on this server."
+        }
+        title={
+          webFallbackAvailable
+            ? "Falls back to web search when local source relevance is below threshold."
+            : "Web fallback is not available on this server."
+        }
       >
-        <Globe className={cn("h-3.5 w-3.5", webEnabled ? "fill-current" : "")} />
+        <Globe className={cn("h-3.5 w-3.5", webEnabled && webFallbackAvailable ? "fill-current" : "")} />
         Web
       </button>
 
@@ -102,13 +165,29 @@ export function CompactToolbar({
         onGenerationModelChange={onGenerationModelChange}
       />
 
+      {sourceHealth && onRefreshSourceHealth ? (
+        <button
+          type="button"
+          onClick={onRefreshSourceHealth}
+          className="inline-flex h-7 items-center rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text transition-colors"
+          aria-label="Refresh source health"
+          title="Refresh source health"
+        >
+          {buildSourceHealthSummary(sourceHealth)}
+        </button>
+      ) : sourceHealth ? (
+        <span className="inline-flex h-7 items-center rounded-full border border-border bg-surface px-2.5 text-[11px] font-medium text-text-muted">
+          {buildSourceHealthSummary(sourceHealth)}
+        </span>
+      ) : null}
+
       {/* Settings gear */}
       <button
         type="button"
         onClick={onOpenSettings}
         className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border text-text-muted hover:bg-surface2 hover:text-text transition-colors"
-        aria-label="Open settings"
-        title="Open search settings"
+        aria-label="Open Knowledge QA settings"
+        title="Open Knowledge QA settings"
       >
         <Settings className="h-3.5 w-3.5" />
       </button>

@@ -16,11 +16,18 @@ import {
   test,
   expect,
   seedAuth,
+  SMOKE_HARD_GATE_ALLOWLIST,
   getCriticalIssues,
   classifySmokeIssues,
+  validateSmokeHardGateAllowlist,
 } from './smoke.setup';
 import { waitForAppShell } from '../utils/helpers';
 import { PAGES, PageEntry, getActivePages, PAGE_COUNT, ACTIVE_PAGE_COUNT } from './page-inventory';
+import {
+  hasRuntimeOverlayBodySignal,
+  hasRuntimeOverlayConsoleSignal,
+  hasTransientRuntimeOverlaySignal,
+} from './runtime-overlay';
 
 // Test configuration
 const LOAD_TIMEOUT = 30_000; // 30s max for page load
@@ -85,10 +92,16 @@ const NON_CORE_ROUTE_BOUNDARY_TARGETS = [
     routeLabel: 'Chunking Playground',
   },
   {
-    name: 'Moderation Playground',
-    path: '/moderation-playground',
-    routeId: 'moderation-playground',
-    routeLabel: 'Moderation Playground',
+    name: 'Moderation Review',
+    path: '/moderation',
+    routeId: 'moderation-review',
+    routeLabel: 'Moderation Review',
+  },
+  {
+    name: 'Content Rules',
+    path: '/moderation/rules',
+    routeId: 'moderation-rules',
+    routeLabel: 'Content Rules',
   },
   { name: 'Collections', path: '/collections', routeId: 'collections', routeLabel: 'Collections' },
   {
@@ -118,22 +131,17 @@ const NON_CORE_ROUTE_BOUNDARY_TARGETS = [
     routeLabel: 'Speech Playground',
   },
 ] as const;
-const RUNTIME_OVERLAY_PATTERNS = [
-  /Runtime(?:\s+\w+)?\s+Error/i,
-  /Runtime SyntaxError/i,
-  /Invalid or unexpected token/i,
-  /Objects are not valid as a React child/i,
-  /message\.error is not a function/i,
-];
-const TRANSIENT_RUNTIME_OVERLAY_PATTERNS = [
-  /Runtime SyntaxError/i,
-  /Invalid or unexpected token/i,
-  /Unexpected end of input/i,
-];
-
 const keyNavEntries: PageEntry[] = KEY_NAV_TARGETS.map((targetPath) =>
   PAGES.find((entry) => entry.path === targetPath)
 ).filter((entry): entry is PageEntry => Boolean(entry));
+
+function expectSmokeHardGateAllowlistMetadata(): void {
+  const allowlistProblems = validateSmokeHardGateAllowlist();
+  expect(
+    allowlistProblems,
+    `Smoke hard-gate allowlist metadata problems:\n${allowlistProblems.join('\n')}`
+  ).toEqual([]);
+}
 
 /**
  * Format diagnostics for console output
@@ -228,14 +236,6 @@ function assertWarningHardGate(
       .map((entry) => `${entry.url} (${entry.errorText})`)
       .join(' | ')}`
   ).toHaveLength(0);
-}
-
-function hasRuntimeOverlaySignal(input: string): boolean {
-  return RUNTIME_OVERLAY_PATTERNS.some((pattern) => pattern.test(input));
-}
-
-function hasTransientRuntimeOverlaySignal(input: string): boolean {
-  return TRANSIENT_RUNTIME_OVERLAY_PATTERNS.some((pattern) => pattern.test(input));
 }
 
 function resetDiagnostics(diagnostics: DiagnosticsData): void {
@@ -357,13 +357,13 @@ async function assertNoRuntimeOverlay(
 ): Promise<void> {
   const runtimeConsoleErrors = issues.consoleErrors
     .map((entry) => entry.text)
-    .filter(hasRuntimeOverlaySignal);
+    .filter(hasRuntimeOverlayConsoleSignal);
 
   const overlaySnapshot = await page.evaluate(() => ({
     bodyText: document.body?.innerText ?? '',
   }));
 
-  const bodyHasRuntimeSignal = hasRuntimeOverlaySignal(overlaySnapshot.bodyText);
+  const bodyHasRuntimeSignal = hasRuntimeOverlayBodySignal(overlaySnapshot.bodyText);
   const bodySnippet = bodyHasRuntimeSignal
     ? overlaySnapshot.bodyText.replace(/\s+/g, ' ').trim().slice(0, 220)
     : '';
@@ -390,8 +390,31 @@ test.describe('Smoke Tests - All Pages', () => {
 
   // Log test suite info
   test.beforeAll(() => {
+    expectSmokeHardGateAllowlistMetadata();
+
     console.log(
       `\nSmoke test suite: ${ACTIVE_PAGE_COUNT} pages (${PAGE_COUNT - ACTIVE_PAGE_COUNT} skipped)\n`
+    );
+  });
+
+  test('hard-gate allowlist entries have current ownership metadata', () => {
+    expectSmokeHardGateAllowlistMetadata();
+  });
+
+  test('hard-gate allowlist rejects invalid calendar expiry metadata', () => {
+    const baseRule = SMOKE_HARD_GATE_ALLOWLIST[0];
+    expect(baseRule).toBeDefined();
+
+    const allowlistProblems = validateSmokeHardGateAllowlist([
+      {
+        ...baseRule!,
+        id: 'invalid-calendar-expiry',
+        expiresOn: '2026-99-99',
+      },
+    ]);
+
+    expect(allowlistProblems).toContain(
+      'invalid-calendar-expiry: expiresOn must be a valid YYYY-MM-DD date'
     );
   });
 
@@ -695,16 +718,16 @@ test.describe('Smoke Tests - Wayfinding', () => {
       .evaluateAll((elements) => elements.map((element) => element.getAttribute('data-testid')));
 
     expect(controlOrder).toEqual([
-      'not-found-go-chat',
+      'not-found-open-home',
       'not-found-open-research',
       'not-found-open-media',
       'not-found-open-settings',
       'not-found-go-back',
     ]);
 
-    const goChatButton = page.getByTestId('not-found-go-chat');
-    await goChatButton.focus();
-    await expect(goChatButton).toBeFocused();
+    const openHomeButton = page.getByTestId('not-found-open-home');
+    await openHomeButton.focus();
+    await expect(openHomeButton).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(page.getByTestId('not-found-open-research')).toBeFocused();
 

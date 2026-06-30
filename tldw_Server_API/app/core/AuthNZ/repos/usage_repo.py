@@ -453,6 +453,17 @@ class AuthnzUsageRepo:
         user_agent: str | None = None,
         token_name: str | None = None,
         conversation_id: str | None = None,
+        cached_input_tokens: int | None = None,
+        cache_write_input_tokens: int | None = None,
+        cache_read_input_tokens: int | None = None,
+        billable_input_tokens: int | None = None,
+        reasoning_tokens: int | None = None,
+        choice_count: int | None = None,
+        estimate_source: str | None = None,
+        prompt_fingerprint: str | None = None,
+        prompt_fingerprint_version: str | None = None,
+        world_book_fingerprint: str | None = None,
+        raw_usage_metadata_json: str | None = None,
     ) -> None:
         """
         Insert a single row into ``llm_usage_log``.
@@ -468,11 +479,18 @@ class AuthnzUsageRepo:
                         ts, user_id, key_id, endpoint, operation, provider, model, status, latency_ms,
                         prompt_tokens, completion_tokens, total_tokens,
                         prompt_cost_usd, completion_cost_usd, total_cost_usd, currency, estimated, request_id,
-                        remote_ip, user_agent, token_name, conversation_id
+                        remote_ip, user_agent, token_name, conversation_id,
+                        cached_input_tokens, cache_write_input_tokens, cache_read_input_tokens,
+                        billable_input_tokens, reasoning_tokens, choice_count, estimate_source,
+                        prompt_fingerprint, prompt_fingerprint_version, world_book_fingerprint,
+                        raw_usage_metadata_json
                     ) VALUES (
                         CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?,
                         ?, ?, ?,
                         ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?,
+                        ?, ?, ?,
+                        ?, ?, ?, ?,
                         ?, ?, ?, ?
                     )
                     """,
@@ -497,39 +515,89 @@ class AuthnzUsageRepo:
                     user_agent,
                     token_name,
                     conversation_id,
+                    int(cached_input_tokens) if cached_input_tokens is not None else None,
+                    int(cache_write_input_tokens) if cache_write_input_tokens is not None else None,
+                    int(cache_read_input_tokens) if cache_read_input_tokens is not None else None,
+                    int(billable_input_tokens) if billable_input_tokens is not None else None,
+                    int(reasoning_tokens) if reasoning_tokens is not None else None,
+                    int(choice_count) if choice_count is not None else None,
+                    estimate_source,
+                    prompt_fingerprint,
+                    prompt_fingerprint_version,
+                    world_book_fingerprint,
+                    raw_usage_metadata_json,
                 )
             except Exception:
-                # Backward-compatible fallback for pre-054 schemas.
-                await self.db_pool.execute(
-                    """
-                    INSERT INTO llm_usage_log (
-                        ts, user_id, key_id, endpoint, operation, provider, model, status, latency_ms,
-                        prompt_tokens, completion_tokens, total_tokens,
-                        prompt_cost_usd, completion_cost_usd, total_cost_usd, currency, estimated, request_id
-                    ) VALUES (
-                        CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?
+                try:
+                    # Backward-compatible fallback for pre-088 schemas.
+                    await self.db_pool.execute(
+                        """
+                        INSERT INTO llm_usage_log (
+                            ts, user_id, key_id, endpoint, operation, provider, model, status, latency_ms,
+                            prompt_tokens, completion_tokens, total_tokens,
+                            prompt_cost_usd, completion_cost_usd, total_cost_usd, currency, estimated, request_id,
+                            remote_ip, user_agent, token_name, conversation_id
+                        ) VALUES (
+                            CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?,
+                            ?, ?, ?,
+                            ?, ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?
+                        )
+                        """,
+                        user_id,
+                        key_id,
+                        endpoint,
+                        operation,
+                        provider,
+                        model,
+                        int(status),
+                        int(latency_ms),
+                        int(prompt_tokens),
+                        int(completion_tokens),
+                        int(total_tokens),
+                        float(prompt_cost_usd),
+                        float(completion_cost_usd),
+                        float(total_cost_usd),
+                        currency,
+                        bool(estimated),
+                        request_id,
+                        remote_ip,
+                        user_agent,
+                        token_name,
+                        conversation_id,
                     )
-                    """,
-                    user_id,
-                    key_id,
-                    endpoint,
-                    operation,
-                    provider,
-                    model,
-                    int(status),
-                    int(latency_ms),
-                    int(prompt_tokens),
-                    int(completion_tokens),
-                    int(total_tokens),
-                    float(prompt_cost_usd),
-                    float(completion_cost_usd),
-                    float(total_cost_usd),
-                    currency,
-                    bool(estimated),
-                    request_id,
-                )
+                except Exception:
+                    # Backward-compatible fallback for pre-054 schemas.
+                    await self.db_pool.execute(
+                        """
+                        INSERT INTO llm_usage_log (
+                            ts, user_id, key_id, endpoint, operation, provider, model, status, latency_ms,
+                            prompt_tokens, completion_tokens, total_tokens,
+                            prompt_cost_usd, completion_cost_usd, total_cost_usd, currency, estimated, request_id
+                        ) VALUES (
+                            CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?,
+                            ?, ?, ?,
+                            ?, ?, ?, ?, ?, ?
+                        )
+                        """,
+                        user_id,
+                        key_id,
+                        endpoint,
+                        operation,
+                        provider,
+                        model,
+                        int(status),
+                        int(latency_ms),
+                        int(prompt_tokens),
+                        int(completion_tokens),
+                        int(total_tokens),
+                        float(prompt_cost_usd),
+                        float(completion_cost_usd),
+                        float(total_cost_usd),
+                        currency,
+                        bool(estimated),
+                        request_id,
+                    )
         except Exception as exc:  # pragma: no cover - surfaced via callers
             logger.error(f"AuthnzUsageRepo.insert_llm_usage_log failed: {exc}")
             raise

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunDetailDrawer } from "../RunDetailDrawer"
 
@@ -245,7 +245,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
 
@@ -255,6 +255,7 @@ describe("RunDetailDrawer source column", () => {
       expect(screen.getByText("TechCrunch")).toBeInTheDocument()
       expect(screen.getByText("Included in briefing")).toBeInTheDocument()
       expect(screen.getByText("Monitor #1 produced 1 report for this run.")).toBeInTheDocument()
+      expect(screen.getByText("Run linkage").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
     })
   })
 
@@ -266,7 +267,7 @@ describe("RunDetailDrawer source column", () => {
       items: [],
       total: 0,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
 
@@ -288,12 +289,36 @@ describe("RunDetailDrawer source column", () => {
     })
   })
 
+  it("renders warning-level load failures as degraded recovery states", async () => {
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      size: 200,
+      has_more: false
+    })
+    mocks.getRunDetailsMock.mockRejectedValue({
+      status: 400,
+      message: "invalid input"
+    })
+
+    render(<RunDetailDrawer open runId={10} onClose={vi.fn()} />)
+
+    await waitFor(() => {
+      const callout = screen
+        .getByText("Could not load run details.")
+        .closest('[data-ds-component="RecoveryCallout"]')
+      expect(callout).toBeInTheDocument()
+      expect(within(callout as HTMLElement).getByText("Degraded")).toBeInTheDocument()
+    })
+  })
+
   it("falls back to source id when source lookup data is unavailable", async () => {
     mocks.fetchWatchlistSourcesMock.mockResolvedValue({
       items: [],
       total: 0,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
 
@@ -310,7 +335,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
 
@@ -346,7 +371,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.getRunDetailsMock.mockResolvedValue({
@@ -367,7 +392,7 @@ describe("RunDetailDrawer source column", () => {
       items: [],
       total: 0,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.getRunDetailsMock.mockRejectedValue({ message: "" })
@@ -388,7 +413,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.getRunDetailsMock.mockResolvedValue({
@@ -401,6 +426,15 @@ describe("RunDetailDrawer source column", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Suggested recovery steps")).toBeInTheDocument()
+      expect(
+        screen.getByText("Suggested recovery steps").closest('[data-ds-component="RecoveryCallout"]')
+      ).toBeInTheDocument()
+      expect(
+        within(
+          screen.getByText("Suggested recovery steps").closest('[data-ds-component="RecoveryCallout"]') as HTMLElement
+        ).getByText("Degraded")
+      ).toBeInTheDocument()
+      expect(screen.getByText("Common causes").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
       expect(screen.getByText("Edit monitor schedule")).toBeInTheDocument()
       expect(screen.getByText("Review source settings")).toBeInTheDocument()
     })
@@ -416,12 +450,13 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.getRunDetailsMock.mockResolvedValue({
       ...baseRunDetails,
       filter_tallies: { "kw:earnings": 2 },
+      truncated: true,
       filtered_sample: [
         {
           id: 7001,
@@ -439,6 +474,12 @@ describe("RunDetailDrawer source column", () => {
       expect(
         screen.getByText("Showing 1 recently filtered item for quick diagnosis.")
       ).toBeInTheDocument()
+      expect(
+        screen
+          .getByText("Showing 1 recently filtered item for quick diagnosis.")
+          .closest('[data-ds-component="Alert"]')
+      ).toBeInTheDocument()
+      expect(screen.getByText("Logs truncated").closest('[data-ds-component="Alert"]')).toBeInTheDocument()
     })
   })
 
@@ -448,7 +489,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.getRunDetailsMock.mockResolvedValue({
@@ -478,7 +519,7 @@ describe("RunDetailDrawer source column", () => {
       items: [{ id: 5, name: "TechCrunch" }],
       total: 1,
       page: 1,
-      size: 1000,
+      size: 200,
       has_more: false
     })
     mocks.fetchWatchlistOutputsMock.mockResolvedValue({

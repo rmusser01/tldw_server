@@ -22,7 +22,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
     WebhookTestRequest,
     WebhookTestResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     get_unified_evaluation_service_for_user,
 )
@@ -53,20 +53,37 @@ _WEBHOOK_ENDPOINT_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+_WEBHOOK_PROXY_METHOD_NAMES = {
+    "register_webhook",
+    "get_webhook_status",
+    "unregister_webhook",
+    "test_webhook",
+}
+
+
+def _webhook_proxy_has_local_override() -> bool:
+    """Return whether tests patched the legacy lazy webhook proxy directly."""
+    try:
+        proxy_attrs = vars(webhook_manager)
+    except _WEBHOOK_TESTMODE_EXCEPTIONS:
+        return False
+    return any(name in proxy_attrs for name in _WEBHOOK_PROXY_METHOD_NAMES)
 
 
 def _get_webhook_manager_for_user(user_id: int | str) -> WebhookManager:
-    # In tests, always route through the lazy proxy so patched methods
-    # are honored and no real DB access is attempted.
+    service = None
     try:
+        service = get_unified_evaluation_service_for_user(user_id)
         from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
         if _is_test_mode():
-            svc = get_unified_evaluation_service_for_user(user_id)
-            svc.webhook_manager = webhook_manager
+            manager = getattr(service, "webhook_manager", None)
+            if manager is not None and not _webhook_proxy_has_local_override():
+                return manager
             return webhook_manager
-    except _WEBHOOK_TESTMODE_EXCEPTIONS as e:
-        logger.debug(f"Test mode detection skipped: {e}")
-    service = get_unified_evaluation_service_for_user(user_id)
+    except _WEBHOOK_TESTMODE_EXCEPTIONS:
+        logger.debug("Webhook test mode detection skipped")
+    if service is None:
+        service = get_unified_evaluation_service_for_user(user_id)
     manager = getattr(service, "webhook_manager", None)
     if manager is None:
         service.webhook_manager = webhook_manager
@@ -125,7 +142,7 @@ async def register_webhook(
             result = _res
         return WebhookRegistrationResponse(**result)
     except _WEBHOOK_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to register webhook: {e}")
+        logger.error("Failed to register webhook")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to register webhook: {sanitize_error_message(e, 'webhook registration')}"
@@ -149,7 +166,7 @@ async def list_webhooks(
         normalized = [_normalize_webhook_status_record(w) for w in records]
         return [WebhookStatusResponse(**w) for w in normalized]
     except _WEBHOOK_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to list webhooks: {e}")
+        logger.error("Failed to list webhooks")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list webhooks: {sanitize_error_message(e, 'listing webhooks')}"
@@ -174,7 +191,7 @@ async def unregister_webhook(
             pass
         return {"status": "unregistered", "url": url}
     except _WEBHOOK_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to unregister webhook: {e}")
+        logger.error("Failed to unregister webhook")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to unregister webhook: {sanitize_error_message(e, 'webhook removal')}"
@@ -202,7 +219,7 @@ async def test_webhook(
             return WebhookTestResponse(**result)
         return WebhookTestResponse(success=bool(result))
     except _WEBHOOK_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to test webhook: {e}")
+        logger.error("Failed to test webhook")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to test webhook: {sanitize_error_message(e, 'webhook testing')}"

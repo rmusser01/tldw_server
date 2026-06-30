@@ -13,7 +13,6 @@ import {
   Empty,
   Modal,
   Input,
-  Alert,
   Spin,
   Tag
 } from "antd"
@@ -31,6 +30,7 @@ import {
   ChevronRight
 } from "lucide-react"
 import { WorkflowRunInspector } from "@/components/Common/Workflow"
+import { Alert } from "@/components/ui/primitives"
 import type { StepExecutionStatus } from "@/types/workflow-editor"
 import { useWorkflowEditorStore } from "@/store/workflow-editor"
 
@@ -331,12 +331,12 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
         {/* Error display */}
         {error && (
           <Alert
-            type="error"
+            variant="error"
             title="Execution Error"
-            description={error}
-            showIcon
             className="mb-3"
-          />
+          >
+            {error}
+          </Alert>
         )}
 
         {status === "failed" && runId && (
@@ -350,16 +350,15 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
               </div>
             ) : runInvestigationError ? (
               <Alert
-                type="warning"
+                variant="warning"
                 title="Diagnostics unavailable"
-                description={runInvestigationError}
-                showIcon
-                action={(
-                  <Button size="small" onClick={() => void loadRunInvestigation(runId)}>
-                    Retry diagnostics
-                  </Button>
-                )}
-              />
+                action={{
+                  label: "Retry diagnostics",
+                  onClick: () => void loadRunInvestigation(runId)
+                }}
+              >
+                {runInvestigationError}
+              </Alert>
             ) : runInvestigation ? (
               <WorkflowRunInspector investigation={runInvestigation} />
             ) : null}

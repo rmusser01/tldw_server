@@ -8,6 +8,7 @@ import pytest
 from tldw_Server_API.app.core.AuthNZ.migrations import (
     migration_001_create_users_table,
     migration_077_create_sharing_tables,
+    migration_087_expand_share_tokens_resource_type_for_prototypes,
 )
 
 
@@ -52,6 +53,7 @@ def sharing_db():
     )
     conn.commit()
     migration_077_create_sharing_tables(conn)
+    migration_087_expand_share_tokens_resource_type_for_prototypes(conn)
     yield conn
     conn.close()
 

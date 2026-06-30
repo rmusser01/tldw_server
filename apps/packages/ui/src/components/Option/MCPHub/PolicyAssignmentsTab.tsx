@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Alert, Button, Card, Checkbox, Empty, List, Modal, Space, Tag, Typography } from "antd"
+import { Button, Card, Checkbox, Empty, List, Modal, Space, Tag, Typography } from "antd"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 
 import {
   createPolicyAssignment,

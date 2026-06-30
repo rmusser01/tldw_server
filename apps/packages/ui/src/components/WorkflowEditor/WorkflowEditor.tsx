@@ -75,6 +75,7 @@ export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
   const issues = useWorkflowEditorStore((s) => s.issues)
   const status = useWorkflowEditorStore((s) => s.status)
   const stepTypesStatus = useWorkflowEditorStore((s) => s.stepTypesStatus)
+  const stepTypesError = useWorkflowEditorStore((s) => s.stepTypesError)
 
   // Store actions
   const setWorkflowMeta = useWorkflowEditorStore((s) => s.setWorkflowMeta)
@@ -165,6 +166,13 @@ export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
     input.click()
   }, [])
 
+  const handleOpenRunPanel = useCallback(() => {
+    setSidebarPanel("execution")
+    if (!isDesktop) {
+      setIsMobilePanelsOpen(true)
+    }
+  }, [isDesktop, setSidebarPanel])
+
   const handleNameEdit = useCallback(() => {
     if (isEditing) {
       setWorkflowMeta(editName, useWorkflowEditorStore.getState().workflowDescription)
@@ -221,6 +229,24 @@ export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
 
   const errorCount = issues.filter((i) => i.severity === "error").length
   const warningCount = issues.filter((i) => i.severity === "warning").length
+  const stepTypesStatusLabel =
+    stepTypesStatus === "loading"
+      ? "Step types loading"
+      : stepTypesStatus === "error"
+        ? "Step types unavailable"
+        : stepTypesStatus === "ready"
+          ? "Step types ready"
+          : "Step types pending"
+  const validationSummaryLabel =
+    errorCount > 0 && warningCount > 0
+      ? `${errorCount} error${errorCount === 1 ? "" : "s"}, ${warningCount} warning${
+          warningCount === 1 ? "" : "s"
+        }`
+      : errorCount > 0
+        ? `${errorCount} error${errorCount === 1 ? "" : "s"}`
+        : warningCount > 0
+          ? `${warningCount} warning${warningCount === 1 ? "" : "s"}`
+          : "Validation clear"
   const validationIssuesAriaLabel =
     errorCount > 0 && warningCount > 0
       ? `Validation issues: ${errorCount} errors, ${warningCount} warnings`
@@ -437,6 +463,54 @@ export const WorkflowEditor = ({ className = "" }: WorkflowEditorProps) => {
           </Tooltip>
         </Dropdown>
       </div>
+
+      <section
+        aria-label="Workflow editor status summary"
+        className="flex flex-wrap items-center gap-2 border-b border-border bg-surface2 px-3 py-2 text-xs text-text-muted"
+        data-testid="workflow-editor-status-summary"
+      >
+        <span className="inline-flex items-center rounded-full border border-border bg-surface px-2 py-0.5 font-medium text-text">
+          {stepTypesStatusLabel}
+        </span>
+        {stepTypesError ? (
+          <span className="max-w-full truncate text-state-error">{stepTypesError}</span>
+        ) : null}
+        <span className="inline-flex items-center rounded-full border border-border bg-surface px-2 py-0.5 font-medium text-text">
+          {validationSummaryLabel}
+        </span>
+        <span className="inline-flex items-center rounded-full border border-border bg-surface px-2 py-0.5 font-medium text-text">
+          {isDirty ? "Unsaved changes" : "Saved"}
+        </span>
+        <span className="inline-flex items-center rounded-full border border-border bg-surface px-2 py-0.5 font-medium text-text">
+          Run {status}
+        </span>
+        <div className="ml-auto flex flex-wrap items-center gap-1">
+          <Button
+            size="small"
+            aria-label="Import workflow"
+            icon={<FileUp className="w-4 h-4" />}
+            onClick={handleImport}
+          >
+            Import
+          </Button>
+          <Button
+            size="small"
+            aria-label="Export workflow"
+            icon={<FileDown className="w-4 h-4" />}
+            onClick={handleExport}
+          >
+            Export
+          </Button>
+          <Button
+            size="small"
+            aria-label="Open run panel"
+            icon={<Play className="w-4 h-4" />}
+            onClick={handleOpenRunPanel}
+          >
+            Run
+          </Button>
+        </div>
+      </section>
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">

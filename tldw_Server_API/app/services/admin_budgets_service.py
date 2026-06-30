@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import HTTPException
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     OrgBudgetItem,
     OrgBudgetListResponse,
@@ -376,9 +377,15 @@ async def list_budgets(
             total=total,
             page=page,
             limit=limit,
+            pagination=build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=(page - 1) * limit,
+                count=len(items),
+            ),
         )
     except Exception as exc:
-        logger.error(f"Failed to list org budgets: {exc}")
+        logger.error("Failed to list org budgets")
         raise HTTPException(status_code=500, detail="Failed to list org budgets") from exc
 
 
@@ -410,7 +417,7 @@ async def upsert_budget(
             raise HTTPException(status_code=500, detail="subscription_not_found") from exc
         raise HTTPException(status_code=400, detail="invalid_budget_update") from exc
     except Exception as exc:
-        logger.error(f"Failed to upsert org budget: {exc}")
+        logger.error("Failed to upsert org budget")
         raise HTTPException(status_code=500, detail="Failed to upsert org budget") from exc
 
     actor_role = None
@@ -433,7 +440,7 @@ async def upsert_budget(
             actor_role=actor_role,
         )
     except Exception as exc:
-        logger.error(f"Budget audit failed: {exc}")
+        logger.error("Budget audit failed")
         raise HTTPException(status_code=500, detail="audit_failed") from exc
 
     return OrgBudgetItem(**item)

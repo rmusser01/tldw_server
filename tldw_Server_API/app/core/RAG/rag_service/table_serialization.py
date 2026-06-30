@@ -142,8 +142,8 @@ class TableParser:
             data = json.loads(text)
             if isinstance(data, list) and all(isinstance(item, dict) for item in data):
                 return TableFormat.JSON
-        except (json.JSONDecodeError, TypeError, ValueError) as e:
-            logger.debug(f"Table JSON detection failed: error={e}")
+        except (json.JSONDecodeError, TypeError, ValueError):
+            logger.debug("Table JSON detection failed")
             try:
                 get_metrics_registry().increment(
                     "app_warning_events_total",
@@ -532,7 +532,7 @@ class TableProcessor:
             TypeError,
             ValueError,
         ) as e:
-            logger.warning(f"Failed to process table: {e}")
+            logger.warning("Failed to process table")
             try:
                 get_metrics_registry().increment(
                     "app_warning_events_total",
@@ -631,8 +631,8 @@ class TableProcessor:
                 json.JSONDecodeError,
                 TypeError,
                 ValueError,
-            ) as e:
-                logger.warning(f"Failed to process table: {e}")
+            ):
+                logger.warning("Failed to process table")
                 try:
                     get_metrics_registry().increment(
                         "app_warning_events_total",

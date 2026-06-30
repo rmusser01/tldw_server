@@ -47,8 +47,10 @@ describe("SettingsPanel behavior and copy guardrails", () => {
       screen.getByText("Recommended - combines text and meaning")
     ).toBeInTheDocument()
     expect(
-      screen.getByText("Most thorough - includes fact-checking")
+      screen.getByText("Deep search - more sources and verification")
     ).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: /Deep/i })).toBeInTheDocument()
+    expect(screen.queryByRole("radio", { name: /Thorough/i })).not.toBeInTheDocument()
 
     const fastRadio = screen.getByRole("radio", { name: /Fast/i })
     fastRadio.focus()
@@ -69,8 +71,8 @@ describe("SettingsPanel behavior and copy guardrails", () => {
     })
 
     expect(screen.getByText("Documents & Media")).toBeInTheDocument()
-    expect(screen.getByText("Story Characters")).toBeInTheDocument()
-    expect(screen.getByText("Conversations")).toBeInTheDocument()
+    expect(screen.getByText("Characters")).toBeInTheDocument()
+    expect(screen.getByText("Chats")).toBeInTheDocument()
     expect(screen.getByText("Task Boards")).toBeInTheDocument()
   })
 
@@ -120,6 +122,45 @@ describe("SettingsPanel behavior and copy guardrails", () => {
     ).toBeInTheDocument()
   })
 
+  it("resets settings, closes on Escape, and restores focus to the opener", () => {
+    const onClose = vi.fn()
+
+    function Harness() {
+      const [open, setOpen] = React.useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open settings
+          </button>
+          <SettingsPanel
+            open={open}
+            onClose={() => {
+              onClose()
+              setOpen(false)
+            }}
+          />
+        </>
+      )
+    }
+
+    render(<Harness />)
+
+    const opener = screen.getByRole("button", { name: "Open settings" })
+    opener.focus()
+    fireEvent.click(opener)
+
+    expect(screen.getByRole("dialog", { name: "RAG Settings" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Close settings panel" })).toHaveFocus()
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset to Balanced Defaults" }))
+    expect(state.resetSettings).toHaveBeenCalledTimes(1)
+
+    fireEvent.keyDown(document, { key: "Escape" })
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("dialog", { name: "RAG Settings" })).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
+  })
+
   it("does not crash when expert-mode onboarding storage is blocked", () => {
     const getItemSpy = vi
       .spyOn(Storage.prototype, "getItem")
@@ -142,6 +183,17 @@ describe("SettingsPanel behavior and copy guardrails", () => {
 
     getItemSpy.mockRestore()
     setItemSpy.mockRestore()
+  })
+
+  it("closes on Escape before nested controls can trap the event", () => {
+    const onClose = vi.fn()
+    render(<SettingsPanel open onClose={onClose} />)
+
+    const dialog = screen.getByRole("dialog", { name: "RAG Settings" })
+    dialog.addEventListener("keydown", (event) => event.stopPropagation())
+    fireEvent.keyDown(dialog, { key: "Escape" })
+
+    expect(onClose).toHaveBeenCalledOnce()
   })
 
   it("hides the expert-mode onboarding hint when toggling back to basic mode", () => {

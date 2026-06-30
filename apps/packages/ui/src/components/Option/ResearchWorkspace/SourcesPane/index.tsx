@@ -12,6 +12,7 @@ import {
   PanelLeftClose,
   Loader2,
   AlertTriangle,
+  RefreshCw,
   Info,
   Eye,
   ChevronUp,
@@ -27,9 +28,20 @@ import {
   Popconfirm,
   Modal
 } from "antd"
+import { READY_STATE_LABEL, getDesignSystemState } from "@/design-system"
+import {
+  isWorkspaceSourcePartiallyQueryable,
+  isWorkspaceSourceSelectable
+} from "@/store/workspace-source-status"
 import { useWorkspaceStore } from "@/store/workspace"
-import type { WorkspaceSourceType } from "@/types/workspace"
+import type {
+  WorkspaceSource,
+  WorkspaceSourceReadiness,
+  WorkspaceSourceStatusDetails,
+  WorkspaceSourceType
+} from "@/types/workspace"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import type { WorkspaceSourcePreviewResponse } from "@/services/tldw/domains/workspace-api"
 import {
   WORKSPACE_SOURCE_DRAG_TYPE,
   serializeWorkspaceSourceDragPayload
@@ -39,6 +51,7 @@ import {
   scheduleWorkspaceUndoAction,
   undoWorkspaceAction
 } from "../undo-manager"
+import { renderWorkspaceMessageActionContent } from "../workspace-message-content"
 import {
   collectDescendantSourceIds,
   createWorkspaceOrganizationIndex,
@@ -79,6 +92,17 @@ const SOURCE_TYPE_ICONS: Record<WorkspaceSourceType, React.ElementType> = {
 const SOURCE_VIRTUALIZATION_THRESHOLD = 60
 const SOURCE_VIRTUAL_ROW_HEIGHT = 80
 const SOURCE_VIRTUAL_OVERSCAN = 5
+const SOURCE_PREVIEW_MAX_CHARS = 3000
+const SOURCE_PREVIEW_CHUNK_LIMIT = 3
+const SOURCE_ANNOTATIONS_STORAGE_KEY =
+  "tldw:research-workspace:source-annotations:v1"
+
+type SourcePreviewLoadState = {
+  sourceId: string | null
+  loading: boolean
+  error: string | null
+  data: WorkspaceSourcePreviewResponse | null
+}
 
 const formatFileSize = (bytes?: number): string | null => {
   if (!Number.isFinite(bytes) || (bytes as number) <= 0) return null
@@ -104,12 +128,235 @@ const formatDuration = (seconds?: number): string | null => {
   return `${secs}s`
 }
 
+const READINESS_LABELS: Array<{
+  key: keyof WorkspaceSourceReadiness
+  label: string
+}> = [
+  { key: "metadata_ready", label: "Metadata" },
+  { key: "text_extracted", label: "Text" },
+  { key: "fts_ready", label: "Search" },
+  { key: "vector_ready", label: "Vector" },
+  { key: "citation_ready", label: "Citations" },
+  { key: "summary_ready", label: "Summary" },
+  { key: "tool_accessible", label: "Tools" }
+]
+
+const humanizeStatusToken = (value?: string | null): string | null => {
+  if (!value) return null
+  const normalized = value.replace(/[_-]+/g, " ").trim()
+  if (!normalized) return null
+  return normalized.replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
+const describeSourceOfTruth = (sourceOfTruth?: string): string =>
+  sourceOfTruth === "workspace-status-projection"
+    ? "Server workspace status projection"
+    : sourceOfTruth === "local-cache" || !sourceOfTruth
+      ? "Local workspace cache"
+      : humanizeStatusToken(sourceOfTruth) || sourceOfTruth
+
+const formatStatusDateTime = (date?: Date): string =>
+  date instanceof Date && !Number.isNaN(date.getTime())
+    ? date.toLocaleString()
+    : "Not reported"
+
+const getProgressPercent = (
+  details: WorkspaceSourceStatusDetails | undefined
+): number | null => {
+  const progressPercent =
+    details?.progressPercent ?? details?.job?.progressPercent ?? null
+  return typeof progressPercent === "number" && Number.isFinite(progressPercent)
+    ? Math.max(0, Math.min(100, Math.round(progressPercent)))
+    : null
+}
+
+const getProgressMessage = (
+  details: WorkspaceSourceStatusDetails | undefined
+): string | null =>
+  details?.progressMessage?.trim() ||
+  details?.job?.progressMessage?.trim() ||
+  details?.job?.errorMessage?.trim() ||
+  null
+
+const hasIncompleteReadiness = (
+  readiness: WorkspaceSourceReadiness | undefined
+): boolean =>
+  Boolean(readiness && READINESS_LABELS.some(({ key }) => readiness[key] === false))
+
+const hasSourceStatusDrilldown = (
+  source: WorkspaceSource,
+  sourceStatus: string
+): boolean =>
+  sourceStatus !== "ready" ||
+  Boolean(source.statusMessage?.trim()) ||
+  Boolean(source.statusDetails) ||
+  hasIncompleteReadiness(source.readiness)
+
+const describeRetryEligibility = (
+  sourceStatus: string,
+  details: WorkspaceSourceStatusDetails | undefined
+): string => {
+  if (details?.retryEligible === true) {
+    return "Retry eligible after reviewing the failure."
+  }
+  if (sourceStatus === "processing" || details?.lifecycleState === "retrying") {
+    return "Retry not available while processing."
+  }
+  if (sourceStatus === "error") {
+    return "Retry state not reported. Re-add or refresh the source if the error persists."
+  }
+  return "Retry not needed."
+}
+
+const describeStaleState = (
+  details: WorkspaceSourceStatusDetails | undefined
+): string => {
+  if (details?.stale === true) return "Stale status. Refresh workspace status."
+  if (details?.stale === false) return "Fresh status"
+  return "No stale flag reported"
+}
+
+const describeNextStatusAction = (
+  sourceStatus: string,
+  details: WorkspaceSourceStatusDetails | undefined
+): string => {
+  if (details?.stale) {
+    return "Refresh workspace status before relying on this source."
+  }
+
+  switch (details?.lifecycleState) {
+    case "queued":
+      return "Wait for ingestion to start."
+    case "ingesting":
+      return "Wait for ingestion to finish."
+    case "extracting":
+      return "Wait for text extraction to finish."
+    case "chunking":
+      return "Wait for chunking to finish."
+    case "indexing":
+      return "Wait for indexing to finish before asking grounded questions."
+    case "retrying":
+      return "Wait for the retry attempt to finish."
+    case "partially_queryable":
+      return "You can inspect extracted text, but wait for full indexing before relying on citations."
+    case "failed":
+      return "Review the failure message, then retry ingestion or re-add the source."
+    case "missing_media":
+      return "Restore or re-add the missing media item."
+    case "blocked_by_permissions":
+      return "Check workspace permissions or source access, then refresh status."
+    case "queryable":
+      return "Source is ready for grounded questions and citations."
+    default:
+      if (sourceStatus === "processing") {
+        return "Wait for processing to finish, then refresh status if it appears stuck."
+      }
+      if (sourceStatus === "error") {
+        return "Review the status message, then re-add or retry the source."
+      }
+      return "No action needed."
+  }
+}
+
+const StatusDetailRow: React.FC<{
+  label: string
+  children: React.ReactNode
+}> = ({ label, children }) => (
+  <>
+    <dt className="rounded-t border border-border bg-surface/60 px-2 pt-2 text-[11px] font-semibold uppercase tracking-[0.04em] text-text-subtle sm:rounded-l sm:rounded-tr-none sm:border-r-0 sm:py-2">
+      {label}
+    </dt>
+    <dd className="min-w-0 rounded-b border border-t-0 border-border bg-surface/60 px-2 pb-2 text-sm text-text sm:rounded-r sm:rounded-bl-none sm:border-l-0 sm:border-t sm:py-2">
+      {children}
+    </dd>
+  </>
+)
+
 type SourceAnnotation = {
   id: string
   quote: string
   note: string
   createdAt: number
   updatedAt: number
+}
+
+const buildSourceAnnotationsStorageKey = (workspaceId: string | null | undefined): string =>
+  `${SOURCE_ANNOTATIONS_STORAGE_KEY}:${workspaceId || "local"}`
+
+const isSourceAnnotation = (value: unknown): value is SourceAnnotation => {
+  const candidate = value as Partial<SourceAnnotation>
+  return (
+    typeof candidate?.id === "string" &&
+    typeof candidate.quote === "string" &&
+    typeof candidate.note === "string" &&
+    typeof candidate.createdAt === "number" &&
+    typeof candidate.updatedAt === "number"
+  )
+}
+
+const readPersistedSourceAnnotations = (
+  workspaceId: string | null | undefined
+): Record<string, SourceAnnotation[]> => {
+  if (typeof window === "undefined") return {}
+  try {
+    const raw = window.localStorage.getItem(
+      buildSourceAnnotationsStorageKey(workspaceId)
+    )
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const next: Record<string, SourceAnnotation[]> = {}
+    for (const [sourceId, annotations] of Object.entries(parsed || {})) {
+      if (!Array.isArray(annotations)) continue
+      next[sourceId] = annotations.filter(isSourceAnnotation)
+    }
+    return next
+  } catch {
+    return {}
+  }
+}
+
+const persistSourceAnnotations = (
+  workspaceId: string | null | undefined,
+  annotations: Record<string, SourceAnnotation[]>
+): void => {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(
+      buildSourceAnnotationsStorageKey(workspaceId),
+      JSON.stringify(annotations)
+    )
+  } catch {
+    // Annotation persistence is best-effort local UI state.
+  }
+}
+
+const describePreviewUnavailable = (
+  preview: WorkspaceSourcePreviewResponse | null,
+  t: (key: string, fallback: string) => string
+): string => {
+  const reason = preview?.unavailable_reason || preview?.status_reason || ""
+  if (reason === "extraction_pending" || preview?.preview_mode === "pending") {
+    return t(
+      "playground:sources.previewExtractionPending",
+      "Text extraction has not completed yet."
+    )
+  }
+  if (reason === "media_not_found" || preview?.preview_mode === "missing_media") {
+    return t(
+      "playground:sources.previewMediaMissing",
+      "Media item is missing or unavailable."
+    )
+  }
+  if (preview?.preview_mode === "failed" || reason.includes("failed")) {
+    return t(
+      "playground:sources.previewExtractionFailed",
+      "Source extraction or indexing failed. Preview content is unavailable."
+    )
+  }
+  return t(
+    "playground:sources.previewNoTextAvailable",
+    "No captured text is available for this source."
+  )
 }
 
 interface SourcesPaneProps {
@@ -127,6 +374,8 @@ interface SourcesPaneProps {
   onPatchSourceListViewState?: (patch: Partial<SourceListViewState>) => void
   /** Reset advanced controls without clearing search/folder state. */
   onResetAdvancedSourceFilters?: () => void
+  /** Non-blocking server-side context/status warning for this workspace. */
+  statusProjectionError?: string | null
 }
 
 /**
@@ -138,9 +387,11 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   statusGuardrailsEnabled = true,
   sourceListViewState = DEFAULT_SOURCE_LIST_VIEW_STATE,
   onPatchSourceListViewState,
-  onResetAdvancedSourceFilters
+  onResetAdvancedSourceFilters,
+  statusProjectionError = null
 }) => {
   const { t } = useTranslation(["playground", "common"])
+  const readyStateLabel = getDesignSystemState("ready")?.label ?? READY_STATE_LABEL
   const [messageApi, messageContextHolder] = message.useMessage()
   const patchSourceListViewState = React.useCallback(
     (patch: Partial<SourceListViewState>) => {
@@ -153,6 +404,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   }, [onResetAdvancedSourceFilters])
 
   // Store state
+  const workspaceId = useWorkspaceStore((s) => s.workspaceId) || "local"
   const sources = useWorkspaceStore((s) => s.sources)
   const selectedSourceIds = useWorkspaceStore((s) => s.selectedSourceIds)
   const sourceFolders = useWorkspaceStore((s) => s.sourceFolders) || []
@@ -188,6 +440,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   const restoreSource = useWorkspaceStore((s) => s.restoreSource)
   const reorderSource = useWorkspaceStore((s) => s.reorderSource)
   const createSourceFolder = useWorkspaceStore((s) => s.createSourceFolder) || null
+  const renameSourceFolder =
+    useWorkspaceStore((s) => s.renameSourceFolder) || (() => undefined)
   const assignSourceToFolders =
     useWorkspaceStore((s) => s.assignSourceToFolders) || (() => undefined)
   const getEffectiveSelectedSources =
@@ -202,11 +456,25 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     React.useState(420)
   const [confirmingRemovalSourceId, setConfirmingRemovalSourceId] =
     React.useState<string | null>(null)
+  const [editingFolderId, setEditingFolderId] = React.useState<string | null>(null)
+  const [editingFolderName, setEditingFolderName] = React.useState("")
   const [draggedSourceId, setDraggedSourceId] = React.useState<string | null>(null)
   const [previewSourceId, setPreviewSourceId] = React.useState<string | null>(null)
+  const [statusDetailsSourceId, setStatusDetailsSourceId] = React.useState<
+    string | null
+  >(null)
+  const [previewReloadNonce, setPreviewReloadNonce] = React.useState(0)
   const [sourceAnnotations, setSourceAnnotations] = React.useState<
     Record<string, SourceAnnotation[]>
-  >({})
+  >(() => readPersistedSourceAnnotations(workspaceId))
+  const [sourcePreviewState, setSourcePreviewState] =
+    React.useState<SourcePreviewLoadState>({
+      sourceId: null,
+      loading: false,
+      error: null,
+      data: null
+    })
+  const annotationsWorkspaceIdRef = React.useRef(workspaceId)
   const [annotationQuoteDraft, setAnnotationQuoteDraft] = React.useState("")
   const [annotationNoteDraft, setAnnotationNoteDraft] = React.useState("")
   const [editingAnnotationId, setEditingAnnotationId] = React.useState<
@@ -626,9 +894,114 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   const previewSource = previewSourceId
     ? sources.find((source) => source.id === previewSourceId) || null
     : null
+  const statusDetailsSource = statusDetailsSourceId
+    ? sources.find((source) => source.id === statusDetailsSourceId) || null
+    : null
   const previewAnnotations = previewSourceId
     ? sourceAnnotations[previewSourceId] || []
     : []
+
+  React.useEffect(() => {
+    if (annotationsWorkspaceIdRef.current === workspaceId) return
+    annotationsWorkspaceIdRef.current = workspaceId
+    setSourceAnnotations(readPersistedSourceAnnotations(workspaceId))
+  }, [workspaceId])
+
+  const commitSourceAnnotations = React.useCallback(
+    (
+      updater: (
+        previous: Record<string, SourceAnnotation[]>
+      ) => Record<string, SourceAnnotation[]>
+    ) => {
+      setSourceAnnotations((previous) => {
+        const next = updater(previous)
+        persistSourceAnnotations(workspaceId, next)
+        return next
+      })
+    },
+    [workspaceId]
+  )
+
+  React.useEffect(() => {
+    if (!previewSourceId) {
+      setSourcePreviewState((previous) => {
+        if (
+          previous.sourceId === null &&
+          !previous.loading &&
+          previous.error === null &&
+          previous.data === null
+        ) {
+          return previous
+        }
+        return {
+          sourceId: null,
+          loading: false,
+          error: null,
+          data: null
+        }
+      })
+      return
+    }
+
+    let cancelled = false
+    const activeSourceId = previewSourceId
+    setSourcePreviewState({
+      sourceId: activeSourceId,
+      loading: true,
+      error: null,
+      data: null
+    })
+
+    const loadPreview = async () => {
+      if (typeof tldwClient.getWorkspaceSourcePreview !== "function") {
+        if (!cancelled) {
+          setSourcePreviewState({
+            sourceId: activeSourceId,
+            loading: false,
+            error: "Source preview API is unavailable.",
+            data: null
+          })
+        }
+        return
+      }
+
+      try {
+        const data = await tldwClient.getWorkspaceSourcePreview(
+          workspaceId,
+          activeSourceId,
+          {
+            max_chars: SOURCE_PREVIEW_MAX_CHARS,
+            chunk_limit: SOURCE_PREVIEW_CHUNK_LIMIT
+          }
+        )
+        if (!cancelled) {
+          setSourcePreviewState({
+            sourceId: activeSourceId,
+            loading: false,
+            error: null,
+            data
+          })
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSourcePreviewState({
+            sourceId: activeSourceId,
+            loading: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Source preview could not load.",
+            data: null
+          })
+        }
+      }
+    }
+
+    void loadPreview()
+    return () => {
+      cancelled = true
+    }
+  }, [previewReloadNonce, previewSourceId, workspaceId])
 
   const handleSelectAllToggle = React.useCallback((event: {
     target: { checked: boolean }
@@ -668,8 +1041,34 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       return
     }
 
-    createSourceFolder("New folder", activeFolderId)
-  }, [activeFolderId, createSourceFolder])
+    const folder = createSourceFolder("New folder", activeFolderId)
+    if (folder?.id) {
+      setActiveFolder(folder.id)
+      setEditingFolderId(folder.id)
+      setEditingFolderName(folder.name || "New folder")
+    }
+  }, [
+    activeFolderId,
+    createSourceFolder,
+    setActiveFolder,
+    setEditingFolderId,
+    setEditingFolderName
+  ])
+
+  const handleCommitFolderRename = React.useCallback(
+    (folderId: string) => {
+      const trimmedName = editingFolderName.trim()
+      renameSourceFolder(folderId, trimmedName || "Untitled folder")
+      setEditingFolderId(null)
+      setEditingFolderName("")
+    },
+    [editingFolderName, renameSourceFolder]
+  )
+
+  const handleCancelFolderRename = React.useCallback(() => {
+    setEditingFolderId(null)
+    setEditingFolderName("")
+  }, [])
 
   const resetAnnotationEditor = React.useCallback(() => {
     setAnnotationQuoteDraft("")
@@ -690,6 +1089,14 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     resetAnnotationEditor()
   }, [resetAnnotationEditor])
 
+  const handleOpenStatusDetails = React.useCallback((sourceId: string) => {
+    setStatusDetailsSourceId(sourceId)
+  }, [])
+
+  const handleCloseStatusDetails = React.useCallback(() => {
+    setStatusDetailsSourceId(null)
+  }, [])
+
   const handleSaveAnnotation = React.useCallback(() => {
     if (!previewSourceId) return
     const quote = annotationQuoteDraft.trim()
@@ -704,7 +1111,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       return
     }
 
-    setSourceAnnotations((previous) => {
+    commitSourceAnnotations((previous) => {
       const existing = previous[previewSourceId] || []
       const now = Date.now()
       if (editingAnnotationId) {
@@ -739,6 +1146,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   }, [
     annotationNoteDraft,
     annotationQuoteDraft,
+    commitSourceAnnotations,
     editingAnnotationId,
     messageApi,
     previewSourceId,
@@ -766,7 +1174,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
 
       const undoHandle = scheduleWorkspaceUndoAction({
         apply: () => {
-          setSourceAnnotations((previous) => {
+          commitSourceAnnotations((previous) => {
             const current = previous[sourceId] || []
             return {
               ...previous,
@@ -780,7 +1188,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           }
         },
         undo: () => {
-          setSourceAnnotations((previous) => {
+          commitSourceAnnotations((previous) => {
             const current = previous[sourceId] || []
             if (current.some((annotation) => annotation.id === annotationId)) {
               return previous
@@ -808,15 +1216,16 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       const maybeOpen = (
         messageApi as { open?: (config: unknown) => void }
       ).open
+      const removeContent = t(
+        "playground:sources.annotationRemoved",
+        "Annotation removed."
+      )
       const messageConfig = {
         key: undoMessageKey,
         type: "warning",
         duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-        content: t(
-          "playground:sources.annotationRemoved",
-          "Annotation removed."
-        ),
-        btn: (
+        content: renderWorkspaceMessageActionContent(
+          removeContent,
           <Button
             size="small"
             type="link"
@@ -844,11 +1253,12 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           messageApi as { warning?: (content: string) => void }
         ).warning
         if (typeof maybeWarning === "function") {
-          maybeWarning(t("playground:sources.annotationRemoved", "Annotation removed."))
+          maybeWarning(removeContent)
         }
       }
     },
     [
+      commitSourceAnnotations,
       editingAnnotationId,
       messageApi,
       previewSourceId,
@@ -882,15 +1292,17 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       const maybeOpen = (
         messageApi as { open?: (config: unknown) => void }
       ).open
+      const removeContent = t(
+        "playground:sources.undoRemoveNamed",
+        "{{title}} removed. You can undo this for a few seconds.",
+        { title: source.title }
+      )
       const messageConfig = {
         key: undoMessageKey,
         type: "warning",
         duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-        content: t(
-          "playground:sources.undoRemove",
-          "Source removed."
-        ),
-        btn: (
+        content: renderWorkspaceMessageActionContent(
+          removeContent,
           <Button
             size="small"
             type="link"
@@ -914,7 +1326,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           messageApi as { warning?: (content: string) => void }
         ).warning
         if (typeof maybeWarning === "function") {
-          maybeWarning(t("playground:sources.undoRemove", "Source removed."))
+          maybeWarning(removeContent)
         }
       }
     },
@@ -1024,9 +1436,13 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     const sourceStatus = statusGuardrailsEnabled
       ? source.status || "ready"
       : "ready"
+    const showStatusDrilldown =
+      statusGuardrailsEnabled && hasSourceStatusDrilldown(source, sourceStatus)
     const isReady = sourceStatus === "ready"
     const isProcessing = sourceStatus === "processing"
     const isError = sourceStatus === "error"
+    const isPartiallyQueryable = isWorkspaceSourcePartiallyQueryable(source)
+    const isSelectable = isWorkspaceSourceSelectable(source)
     const canReorder = !isTemporarySortActive && isReady
     const processingStatusText =
       typeof source.statusMessage === "string" && source.statusMessage.trim().length > 0
@@ -1061,13 +1477,17 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
     const isDropTarget = draggedSourceId != null && draggedSourceId !== source.id
     const assignedFolderIds = organizationIndex.folderIdsBySourceId.get(source.id) || []
     const sourceTypeLabel = t(`playground:sources.type.${source.type}`, source.type)
-    const sourceStatusLabel = isProcessing
-      ? t("playground:sources.statusProcessing", "Processing")
+    const sourceStatusLabel = isPartiallyQueryable
+      ? t("playground:sources.statusTextSearchable", "Text searchable")
+      : isProcessing
+        ? t("playground:sources.statusProcessing", "Processing")
       : isError
         ? t("playground:sources.statusErrorShort", "Error")
-        : t("playground:sources.statusReady", "Ready")
-    const sourceStatusClass = isProcessing
-      ? "border-primary/30 bg-primary/10 text-primary"
+        : readyStateLabel
+    const sourceStatusClass = isPartiallyQueryable
+      ? "border-warning/30 bg-warning/10 text-warning"
+      : isProcessing
+        ? "border-primary/30 bg-primary/10 text-primary"
       : isError
         ? "border-error/30 bg-error/10 text-error"
         : "border-success/30 bg-success/10 text-success"
@@ -1132,8 +1552,11 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
           className="mt-0.5 flex items-center justify-center [@media(hover:none)]:min-h-11 [@media(hover:none)]:min-w-11"
         >
           <Checkbox
+            aria-label={t("playground:sources.selectSource", "Select {{title}}", {
+              title: source.title
+            })}
             checked={isSelected}
-            disabled={!isReady}
+            disabled={!isSelectable}
             onChange={() => {
               if (selectionOrigin === "folder") {
                 return
@@ -1267,6 +1690,28 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               <Eye className="h-3.5 w-3.5" />
             </button>
           </Tooltip>
+          {showStatusDrilldown && (
+            <Tooltip
+              title={t(
+                "playground:sources.viewStatusDetails",
+                "View source status details"
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => handleOpenStatusDetails(source.id)}
+                data-testid={`source-status-details-${source.id}`}
+                className="rounded p-1 text-text-muted transition hover:bg-surface hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                aria-label={t(
+                  "playground:sources.viewStatusDetailsForSource",
+                  "View source status details for {{title}}",
+                  { title: source.title }
+                )}
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </Tooltip>
+          )}
           <div className="flex flex-col">
             <button
               type="button"
@@ -1349,19 +1794,44 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      data-testid="workspace-sources-pane-root"
+      className="flex h-full min-h-0 flex-col overflow-hidden"
+    >
       {messageContextHolder}
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold text-text">
-          {t("playground:sources.title", "Sources")}
-        </h2>
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="text-sm font-semibold text-text">
+            {t("playground:sources.title", "Sources")}
+          </h2>
+          {statusProjectionError && (
+            <Tooltip
+              title={t(
+                "playground:sources.statusProjectionWarningTooltip",
+                "Some source status details may be incomplete: {{message}}",
+                { message: statusProjectionError }
+              )}
+            >
+              <button
+                type="button"
+                aria-label={t(
+                  "playground:sources.statusProjectionWarningLabel",
+                  "Source status warning"
+                )}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-warning transition hover:bg-warning/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warning"
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+              </button>
+            </Tooltip>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <Button
             type="primary"
             size="small"
             icon={<Plus className="h-3.5 w-3.5" />}
-            onClick={() => openAddSourceModal("existing")}
+            onClick={() => openAddSourceModal("upload")}
           >
             {t("playground:sources.addSources", "Add Sources")}
           </Button>
@@ -1381,9 +1851,10 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       </div>
 
       {/* Quick URL paste */}
-      <div className="border-b border-border px-4 py-1.5">
+      <div className="shrink-0 border-b border-border px-4 py-1.5">
         <Input
           data-testid="quick-url-input"
+          aria-label={t("playground:sources.quickUrlLabel", "Quick add URL")}
           placeholder={t(
             "playground:sources.quickUrlPlaceholder",
             "Paste a URL to add..."
@@ -1416,138 +1887,151 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
         />
       </div>
 
-      {/* Search and select controls */}
-      {sources.length > 0 && (
-        <div className="border-b border-border px-4 py-2">
-          <Input
-            prefix={<Search className="h-4 w-4 text-text-muted" />}
-            placeholder={t("playground:sources.searchPlaceholder", "Search sources...")}
-            value={sourceSearchQuery}
-            onChange={(e) => setSourceSearchQuery(e.target.value)}
-            size="small"
-            allowClear
-          />
-          <SourceAdvancedControls
-            viewState={sourceListViewState}
-            summary={sourceFilterSummary}
-            hasFileSizeSources={hasFileSizeSources}
-            hasDurationSources={hasDurationSources}
-            hasPageCountSources={hasPageCountSources}
-            onPatchViewState={patchSourceListViewState}
-            onResetAdvancedFilters={resetAdvancedSourceFilters}
-          />
-          {isTemporarySortActive && (
-            <p className="mt-2 text-[11px] text-text-subtle">
-              {t(
-                "playground:sources.reorderDisabledHint",
-                "Temporary sort is active. Switch back to manual order to reorder sources."
-              )}
-            </p>
-          )}
-          <div className="mt-2 flex items-center justify-between text-xs">
-            <Checkbox
-              aria-label={selectionCheckboxLabel}
-              checked={selectionCheckboxChecked}
-              indeterminate={selectionCheckboxIndeterminate}
-              onChange={handleSelectAllToggle}
-              className="[@media(hover:none)]:min-h-11 [@media(hover:none)]:min-w-11"
-            >
-              <span className="text-text-muted">
-                {effectiveSelectedCount > 0
-                  ? t("playground:sources.selectedCount", "{{count}} selected", {
-                      count: effectiveSelectedCount
-                    })
-                  : selectionCheckboxLabel}
-              </span>
-            </Checkbox>
-            {effectiveSelectedCount > 0 && (
-              <button
-                type="button"
-                onClick={clearEffectiveSelection}
-                className="text-primary hover:underline"
+      <div
+        data-testid="sources-management-controls"
+        className="custom-scrollbar shrink-0 overflow-y-auto border-b border-border"
+        style={sources.length > 0 ? { maxHeight: "min(55%, 30rem)" } : undefined}
+      >
+        {/* Search and select controls */}
+        {sources.length > 0 && (
+          <div className="px-4 py-2">
+            <Input
+              prefix={<Search className="h-4 w-4 text-text-muted" />}
+              aria-label={t("playground:sources.searchSourcesLabel", "Search sources")}
+              placeholder={t("playground:sources.searchPlaceholder", "Search sources...")}
+              value={sourceSearchQuery}
+              onChange={(e) => setSourceSearchQuery(e.target.value)}
+              size="small"
+              allowClear
+            />
+            <SourceAdvancedControls
+              viewState={sourceListViewState}
+              summary={sourceFilterSummary}
+              hasFileSizeSources={hasFileSizeSources}
+              hasDurationSources={hasDurationSources}
+              hasPageCountSources={hasPageCountSources}
+              onPatchViewState={patchSourceListViewState}
+              onResetAdvancedFilters={resetAdvancedSourceFilters}
+            />
+            {isTemporarySortActive && (
+              <p className="mt-2 text-[11px] text-text-subtle">
+                {t(
+                  "playground:sources.reorderDisabledHint",
+                  "Temporary sort is active. Switch back to manual order to reorder sources."
+                )}
+              </p>
+            )}
+            <div className="mt-2 flex items-center justify-between text-xs">
+              <Checkbox
+                aria-label={selectionCheckboxLabel}
+                checked={selectionCheckboxChecked}
+                indeterminate={selectionCheckboxIndeterminate}
+                onChange={handleSelectAllToggle}
+                className="[@media(hover:none)]:min-h-11 [@media(hover:none)]:min-w-11"
               >
-                {t("common:clear", "Clear")}
-              </button>
+                <span className="text-text-muted">
+                  {effectiveSelectedCount > 0
+                    ? t("playground:sources.selectedCount", "{{count}} selected", {
+                        count: effectiveSelectedCount
+                      })
+                    : selectionCheckboxLabel}
+                </span>
+              </Checkbox>
+              {effectiveSelectedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={clearEffectiveSelection}
+                  className="text-primary hover:underline"
+                >
+                  {t("common:clear", "Clear")}
+                </button>
+              )}
+            </div>
+            {effectiveSelectedCount > 0 && (
+              <div
+                data-testid="sources-selected-actions"
+                className="mt-2 flex flex-wrap items-center gap-2"
+              >
+                <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                  {t(
+                    "playground:sources.selectedForChat",
+                    "{{count}} selected for grounded chat",
+                    { count: effectiveSelectedCount }
+                  )}
+                </span>
+                {eligibleSelectedSourceIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleOpenTransferSources}
+                    className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text-muted transition hover:bg-surface2 hover:text-text"
+                  >
+                    {t("playground:sources.transferSelected", "Move / Copy")}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!singleSelectedSource) return
+                    handleOpenPreview(singleSelectedSource.id)
+                  }}
+                  disabled={!singleSelectedSource}
+                  className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text-muted transition hover:bg-surface2 hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t("playground:sources.previewSelected", "Preview selected")}
+                </button>
+                <Popconfirm
+                  title={t(
+                    "playground:sources.batchRemoveConfirm",
+                    "Remove {{count}} selected sources?",
+                    { count: effectiveSelectedCount }
+                  )}
+                  description={batchRemoveDescription}
+                  onConfirm={handleBatchRemoveSelected}
+                  okText={t("common:remove", "Remove")}
+                  cancelText={t("common:cancel", "Cancel")}
+                  okButtonProps={{ danger: true }}
+                >
+                  <button
+                    type="button"
+                    data-testid="batch-remove-sources"
+                    className="rounded border border-error/30 bg-error/10 px-2 py-0.5 text-[11px] font-medium text-error transition hover:bg-error/20"
+                  >
+                    {t("playground:sources.removeCount", "Remove ({{count}})", {
+                      count: effectiveSelectedCount
+                    })}
+                  </button>
+                </Popconfirm>
+              </div>
             )}
           </div>
-          {effectiveSelectedCount > 0 && (
-            <div
-              data-testid="sources-selected-actions"
-              className="mt-2 flex flex-wrap items-center gap-2"
-            >
-              <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
-                {t(
-                  "playground:sources.selectedForChat",
-                  "{{count}} selected for grounded chat",
-                  { count: effectiveSelectedCount }
-                )}
-              </span>
-              {eligibleSelectedSourceIds.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleOpenTransferSources}
-                  className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text-muted transition hover:bg-surface2 hover:text-text"
-                >
-                  {t("playground:sources.transferSelected", "Move / Copy")}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  if (!singleSelectedSource) return
-                  handleOpenPreview(singleSelectedSource.id)
-                }}
-                disabled={!singleSelectedSource}
-                className="rounded border border-border bg-surface px-2 py-0.5 text-[11px] text-text-muted transition hover:bg-surface2 hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {t("playground:sources.previewSelected", "Preview selected")}
-              </button>
-              <Popconfirm
-                title={t(
-                  "playground:sources.batchRemoveConfirm",
-                  "Remove {{count}} selected sources?",
-                  { count: effectiveSelectedCount }
-                )}
-                description={batchRemoveDescription}
-                onConfirm={handleBatchRemoveSelected}
-                okText={t("common:remove", "Remove")}
-                cancelText={t("common:cancel", "Cancel")}
-                okButtonProps={{ danger: true }}
-              >
-                <button
-                  type="button"
-                  data-testid="batch-remove-sources"
-                  className="rounded border border-error/30 bg-error/10 px-2 py-0.5 text-[11px] font-medium text-error transition hover:bg-error/20"
-                >
-                  {t("playground:sources.removeCount", "Remove ({{count}})", {
-                    count: effectiveSelectedCount
-                  })}
-                </button>
-              </Popconfirm>
-            </div>
-          )}
-        </div>
-      )}
+        )}
 
-      <div className="border-b border-border px-4 py-2">
+        <div className="px-4 py-2">
         <SourceFolderTree
           nodes={folderTreeNodes}
           activeFolderId={activeFolderId}
           selectionStateByFolderId={selectionStateByFolderId}
           onClearFocus={() => setActiveFolder(null)}
           onCreateFolder={handleCreateSourceFolder}
+          editingFolderId={editingFolderId}
+          editingFolderName={editingFolderName}
+          onEditingFolderNameChange={setEditingFolderName}
+          onCommitFolderRename={handleCommitFolderRename}
+          onCancelFolderRename={handleCancelFolderRename}
           onFocusFolder={setActiveFolder}
           onToggleFolderSelection={toggleSourceFolderSelection}
         />
+        </div>
       </div>
 
       {/* Source list */}
       <div
+        data-testid="sources-list-region"
         ref={sourceListContainerRef}
         onScroll={(event) =>
           setSourceListScrollTop(event.currentTarget.scrollTop)
         }
-        className="custom-scrollbar flex-1 overflow-y-auto"
+        className="custom-scrollbar min-h-0 flex-1 overflow-y-auto"
       >
         {filteredSources.length === 0 ? (
           <div className="flex h-full items-center justify-center p-4">
@@ -1562,14 +2046,42 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                     <p className="mt-1 text-xs text-text-subtle">
                       {t(
                         "playground:sources.emptyHint",
-                        "Add PDFs, videos, or websites to start researching"
+                        "Add PDFs, web pages, videos, audio, or notes. tldw stores them in your configured local or self-hosted server and shows processing status here."
                       )}
                     </p>
                   </div>
                 ) : (
-                  <span className="text-text-muted">
-                    {t("playground:sources.noResults", "No matching sources")}
-                  </span>
+                  <div className="space-y-2 text-center">
+                    <p className="text-text-muted">
+                      {t(
+                        "playground:sources.noResultsFiltered",
+                        "No sources match the current filters."
+                      )}
+                    </p>
+                    <p className="text-xs text-text-subtle">
+                      {t(
+                        "playground:sources.filteredCountSummary",
+                        "Showing {{filtered}} of {{total}} sources.",
+                        {
+                          filtered: filteredSources.length,
+                          total: sources.length
+                        }
+                      )}
+                    </p>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        setSourceSearchQuery("")
+                        setActiveFolder(null)
+                        resetAdvancedSourceFilters()
+                      }}
+                    >
+                      {t(
+                        "playground:sources.clearSearchAndFilters",
+                        "Clear search and filters"
+                      )}
+                    </Button>
+                  </div>
                 )
               }
             >
@@ -1578,7 +2090,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                   type="primary"
                   size="small"
                   icon={<Plus className="h-3.5 w-3.5" />}
-                  onClick={() => openAddSourceModal("existing")}
+                  onClick={() => openAddSourceModal("upload")}
                 >
                   {t("playground:sources.addFirst", "Add your first source")}
                 </Button>
@@ -1611,14 +2123,216 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
 
       {/* Footer with source count */}
       {sources.length > 0 && (
-        <div className="border-t border-border px-4 py-2 text-xs text-text-muted">
+        <div className="shrink-0 border-t border-border px-4 py-2 text-xs text-text-muted">
           {t("playground:sources.totalCount", "{{count}} source(s)", {
             count: sources.length
           })}
         </div>
       )}
 
-      {/* Add Source Modal */}
+      {/* Source status details modal */}
+      <Modal
+        open={Boolean(statusDetailsSource)}
+        title={t(
+          "playground:sources.statusDetailsModalTitle",
+          "Source status details"
+        )}
+        onCancel={handleCloseStatusDetails}
+        footer={null}
+        width={560}
+      >
+        {statusDetailsSource &&
+          (() => {
+            const details = statusDetailsSource.statusDetails
+            const sourceStatus = statusGuardrailsEnabled
+              ? statusDetailsSource.status || "ready"
+              : "ready"
+            const lifecycleLabel =
+              humanizeStatusToken(details?.lifecycleState) ||
+              (sourceStatus === "processing"
+                ? t("playground:sources.statusProcessing", "Processing")
+                : sourceStatus === "error"
+                  ? t("playground:sources.statusErrorShort", "Error")
+                  : t("playground:sources.statusReady", readyStateLabel))
+            const statusReason =
+              details?.statusReason ||
+              details?.progressMessage ||
+              statusDetailsSource.statusMessage ||
+              t("playground:sources.notReported", "Not reported")
+            const readiness = statusDetailsSource.readiness
+            const readinessReadyCount = readiness
+              ? READINESS_LABELS.filter(({ key }) => readiness[key]).length
+              : null
+            const progressPercent = getProgressPercent(details)
+            const progressMessage = getProgressMessage(details)
+            const progressSummary =
+              progressPercent !== null && progressMessage
+                ? `${progressPercent}% - ${progressMessage}`
+                : progressPercent !== null
+                  ? `${progressPercent}%`
+                  : progressMessage ||
+                    t("playground:sources.noProgressReported", "No progress reported")
+            const jobLabel =
+              details?.job?.uuid ||
+              (typeof details?.job?.id === "number"
+                ? String(details.job.id)
+                : null)
+
+            return (
+              <div
+                data-testid="source-status-details-dialog"
+                className="space-y-3"
+              >
+                <div className="rounded border border-border bg-surface2/50 p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-text">
+                        {statusDetailsSource.title}
+                      </p>
+                      <p className="mt-1 text-xs text-text-muted">
+                        {t(
+                          "playground:sources.statusDetailsSummary",
+                          "{{type}} source currently marked {{status}}.",
+                          {
+                            type: statusDetailsSource.type,
+                            status: lifecycleLabel
+                          }
+                        )}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                        sourceStatus === "error"
+                          ? "border-error/30 bg-error/10 text-error"
+                          : sourceStatus === "processing"
+                            ? "border-primary/30 bg-primary/10 text-primary"
+                            : "border-success/30 bg-success/10 text-success"
+                      }`}
+                    >
+                      {lifecycleLabel}
+                    </span>
+                  </div>
+                </div>
+
+                <dl className="grid gap-2 sm:grid-cols-[8rem_1fr]">
+                  <StatusDetailRow
+                    label={t("playground:sources.lifecycleLabel", "Lifecycle")}
+                  >
+                    {lifecycleLabel}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t(
+                      "playground:sources.statusReasonLabel",
+                      "Status reason"
+                    )}
+                  >
+                    <span className="font-mono text-xs">{statusReason}</span>
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t(
+                      "playground:sources.sourceOfTruthLabel",
+                      "Source of truth"
+                    )}
+                  >
+                    {describeSourceOfTruth(details?.sourceOfTruth)}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.lastRefreshLabel", "Last refresh")}
+                  >
+                    {formatStatusDateTime(details?.updatedAt)}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.progressLabel", "Progress")}
+                  >
+                    {progressSummary}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t(
+                      "playground:sources.retryEligibilityLabel",
+                      "Retry eligibility"
+                    )}
+                  >
+                    {describeRetryEligibility(sourceStatus, details)}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.staleStateLabel", "Stale state")}
+                  >
+                    {describeStaleState(details)}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.readinessLabel", "Readiness")}
+                  >
+                    {readinessReadyCount === null ? (
+                      t(
+                        "playground:sources.readinessNotReported",
+                        "No readiness checklist reported"
+                      )
+                    ) : (
+                      <div className="space-y-2">
+                        <p>
+                          {t(
+                            "playground:sources.readinessSummary",
+                            "{{ready}} of {{total}} checks ready",
+                            {
+                              ready: readinessReadyCount,
+                              total: READINESS_LABELS.length
+                            }
+                          )}
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                          {READINESS_LABELS.map(({ key, label }) => (
+                            <span
+                              key={key}
+                              className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                                readiness[key]
+                                  ? "border-success/30 bg-success/10 text-success"
+                                  : "border-warning/30 bg-warning/10 text-warning"
+                              }`}
+                            >
+                              {label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.identifiersLabel", "Identifiers")}
+                  >
+                    <div className="space-y-1 font-mono text-xs">
+                      <p>
+                        {t("playground:sources.mediaIdLabel", "Media ID")}:{" "}
+                        {statusDetailsSource.mediaId}
+                      </p>
+                      <p>
+                        {t("playground:sources.sourceIdLabel", "Source ID")}:{" "}
+                        {statusDetailsSource.id}
+                      </p>
+                      {jobLabel && (
+                        <p>
+                          {t("playground:sources.jobIdLabel", "Job")}: {jobLabel}
+                        </p>
+                      )}
+                      {details?.job?.jobType && (
+                        <p>
+                          {t("playground:sources.jobTypeLabel", "Job type")}:{" "}
+                          {details.job.jobType}
+                        </p>
+                      )}
+                    </div>
+                  </StatusDetailRow>
+                  <StatusDetailRow
+                    label={t("playground:sources.nextActionLabel", "Next action")}
+                  >
+                    {describeNextStatusAction(sourceStatus, details)}
+                  </StatusDetailRow>
+                </dl>
+              </div>
+            )
+          })()}
+      </Modal>
+
+      {/* Source preview modal */}
       <Modal
         open={Boolean(previewSource)}
         title={t(
@@ -1629,22 +2343,75 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
         footer={null}
         width={680}
       >
-        {previewSource && (
+        {previewSource &&
+          (() => {
+            const previewStatus = statusGuardrailsEnabled
+              ? previewSource.status || "ready"
+              : "ready"
+            const previewStatusLabel =
+              previewStatus === "processing"
+                ? t("playground:sources.statusProcessing", "Processing")
+                : previewStatus === "error"
+                  ? t("playground:sources.statusErrorShort", "Error")
+                  : t("playground:sources.statusReady", readyStateLabel)
+            const previewData =
+              sourcePreviewState.sourceId === previewSource.id
+                ? sourcePreviewState.data
+                : null
+            const previewLoading =
+              sourcePreviewState.sourceId === previewSource.id &&
+              sourcePreviewState.loading
+            const previewError =
+              sourcePreviewState.sourceId === previewSource.id
+                ? sourcePreviewState.error
+                : null
+            const sourcePreviewSnippets =
+              previewData?.snippets?.filter(
+                (snippet) => snippet.kind === "chunk" && snippet.text?.trim()
+              ) ||
+              []
+            const previewTotalChars = previewData?.text_total_chars
+            const previewTruncated = Boolean(previewData?.text_truncated)
+            const formattedPreviewTotalChars =
+              typeof previewTotalChars === "number"
+                ? previewTotalChars.toLocaleString()
+                : null
+            const formattedPreviewShownChars = previewData?.text_preview
+              ? previewData.text_preview.length.toLocaleString()
+              : null
+            const previewCharacterSummary =
+              formattedPreviewTotalChars && previewTruncated
+                ? t(
+                    "playground:sources.previewTruncatedSummary",
+                    "Showing first {{shown}} of {{total}} characters.",
+                    {
+                      shown: formattedPreviewShownChars,
+                      total: formattedPreviewTotalChars
+                    }
+                  )
+                : formattedPreviewTotalChars
+                  ? t(
+                      "playground:sources.previewFullSummary",
+                      "Showing {{total}} characters.",
+                      {
+                        total: formattedPreviewTotalChars
+                      }
+                    )
+                  : null
+
+            return (
           <div className="space-y-4">
             <div className="rounded border border-border bg-surface2/40 p-3">
               <p className="text-sm font-semibold text-text">{previewSource.title}</p>
               <p className="text-xs capitalize text-text-muted">
-                {previewSource.type} •{" "}
-                {statusGuardrailsEnabled
-                  ? previewSource.status || "ready"
-                  : "ready"}
+                {previewSource.type} / {previewStatusLabel}
               </p>
               {previewSource.url && (
                 <a
                   href={previewSource.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-1 inline-block text-xs text-primary hover:underline"
+                  className="mt-1 inline-block break-all text-xs text-primary hover:underline"
                 >
                   {previewSource.url}
                 </a>
@@ -1652,10 +2419,128 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             </div>
 
             <div className="rounded border border-border bg-surface/50 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase text-text-muted">
+                  {t("playground:sources.capturedContent", "Captured content")}
+                </p>
+                {previewData?.readiness?.citation_ready && (
+                  <span className="rounded bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success">
+                    {t("playground:sources.citationReady", "Citation ready")}
+                  </span>
+                )}
+              </div>
+              {previewLoading ? (
+                <div className="flex items-center gap-2 text-sm text-text-muted">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t(
+                    "playground:sources.previewLoading",
+                    "Loading captured content..."
+                  )}
+                </div>
+              ) : previewError ? (
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2 text-sm text-warning">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>
+                      {t(
+                        "playground:sources.previewLoadError",
+                        "Source preview could not load."
+                      )}
+                    </span>
+                  </div>
+                  <p className="break-words rounded border border-border bg-surface2/40 p-2 font-mono text-xs text-warning">
+                    {previewError}
+                  </p>
+                  <Button
+                    size="small"
+                    icon={<RefreshCw className="h-3.5 w-3.5" />}
+                    onClick={() => setPreviewReloadNonce((value) => value + 1)}
+                  >
+                    {t("playground:sources.retryPreview", "Retry preview")}
+                  </Button>
+                </div>
+              ) : previewData?.content_available && previewData.text_preview ? (
+                <div className="space-y-2">
+                  <p className="max-h-52 overflow-y-auto whitespace-pre-wrap rounded border border-border bg-surface2/40 p-2 text-sm leading-6 text-text">
+                    {previewData.text_preview}
+                  </p>
+                  {previewCharacterSummary && (
+                    <p className="text-xs text-text-muted">
+                      {previewCharacterSummary}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="rounded border border-border bg-surface2/40 p-2 text-sm text-text-muted">
+                  {describePreviewUnavailable(previewData, t)}
+                </p>
+              )}
+            </div>
+
+            <div className="rounded border border-border bg-surface/50 p-3">
               <p className="mb-2 text-xs font-semibold uppercase text-text-muted">
-                {t("playground:sources.highlights", "Highlights & annotations")}
+                {t("playground:sources.evidenceSnippets", "Evidence snippets")}
+              </p>
+              {sourcePreviewSnippets.length === 0 ? (
+                <p className="text-xs text-text-muted">
+                  {t(
+                    "playground:sources.noEvidenceSnippets",
+                    "No chunk evidence is available yet."
+                  )}
+                </p>
+              ) : (
+                <div className="max-h-48 space-y-2 overflow-y-auto pr-1">
+                  {sourcePreviewSnippets.map((snippet) => (
+                    <div
+                      key={snippet.id}
+                      className="rounded border border-border bg-surface2/40 p-2"
+                    >
+                      <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
+                        <span>
+                          {snippet.kind === "chunk"
+                            ? t("playground:sources.chunkLabel", "Chunk")
+                            : t(
+                                "playground:sources.contentExcerptLabel",
+                                "Content excerpt"
+                              )}
+                          {typeof snippet.chunk_index === "number"
+                            ? ` ${snippet.chunk_index}`
+                            : ""}
+                        </span>
+                        {typeof snippet.start_char === "number" &&
+                          typeof snippet.end_char === "number" && (
+                            <span>
+                              {snippet.start_char}-{snippet.end_char}
+                            </span>
+                          )}
+                      </div>
+                      <p className="whitespace-pre-wrap text-sm text-text">
+                        {snippet.text}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded border border-border bg-surface/50 p-3">
+              <p className="text-xs font-semibold uppercase text-text-muted">
+                {t(
+                  "playground:sources.localHighlights",
+                  "Local highlights & annotations"
+                )}
+              </p>
+              <p className="mb-2 text-xs text-text-muted">
+                {t(
+                  "playground:sources.localAnnotationsScope",
+                  "Saved in this browser for this workspace."
+                )}
               </p>
               <Input
+                aria-label={t(
+                  "playground:sources.annotationQuoteLabel",
+                  "Highlighted excerpt"
+                )}
                 placeholder={t(
                   "playground:sources.annotationQuotePlaceholder",
                   "Highlighted excerpt (optional)"
@@ -1665,6 +2550,10 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                 className="mb-2"
               />
               <Input.TextArea
+                aria-label={t(
+                  "playground:sources.annotationNoteLabel",
+                  "Annotation note"
+                )}
                 placeholder={t(
                   "playground:sources.annotationNotePlaceholder",
                   "Annotation note"
@@ -1694,7 +2583,10 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
               {previewAnnotations.length === 0 ? (
                 <p className="text-xs text-text-muted">
-                  {t("playground:sources.noAnnotations", "No annotations yet.")}
+                  {t(
+                    "playground:sources.noLocalAnnotations",
+                    "No local annotations yet."
+                  )}
                 </p>
               ) : (
                 previewAnnotations.map((annotation) => (
@@ -1738,7 +2630,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               )}
             </div>
           </div>
-        )}
+            )
+          })()}
       </Modal>
 
       <AddSourceModal />

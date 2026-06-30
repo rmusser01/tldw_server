@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import fnmatch
 import os
 import shutil
 import signal
@@ -22,6 +21,7 @@ from ..policy import SandboxPolicy
 from ..runtime_capabilities import RuntimePreflightResult
 from ..snapshots import SnapshotManager
 from ..streams import get_hub
+from .resource_limits import collect_runner_artifacts, log_limit_counters
 from .seatbelt_policy import build_seatbelt_env, render_seatbelt_profile, resolve_command_argv
 from .vz_common import vz_host_facts
 
@@ -209,32 +209,7 @@ class SeatbeltRunner:
 
     @staticmethod
     def _collect_artifacts(workspace: str, capture_patterns: list[str] | None) -> dict[str, bytes]:
-        if not capture_patterns:
-            return {}
-
-        artifacts_map: dict[str, bytes] = {}
-        workspace_root = Path(workspace)
-        if workspace_root.is_symlink():
-            return {}
-        try:
-            for root, _dirs, files in os.walk(workspace):
-                root_path = Path(root)
-                if not SeatbeltRunner._path_within_root(workspace_root, root_path):
-                    continue
-                for file_name in files:
-                    full_path = root_path / file_name
-                    if full_path.is_symlink():
-                        continue
-                    if not SeatbeltRunner._path_within_root(workspace_root, full_path):
-                        continue
-                    full = os.path.join(root, file_name)
-                    rel = os.path.relpath(full, workspace)
-                    rel_posix = rel.replace(os.sep, "/")
-                    if any(fnmatch.fnmatchcase(rel_posix, pattern) for pattern in capture_patterns):
-                        artifacts_map[rel_posix] = full_path.read_bytes()
-        except _SEATBELT_NONCRITICAL_EXCEPTIONS:
-            return {}
-        return artifacts_map
+        return collect_runner_artifacts(workspace, capture_patterns).artifacts
 
     @staticmethod
     def _read_capped_output(path: Path, max_bytes: int) -> bytes:
@@ -248,6 +223,15 @@ class SeatbeltRunner:
                 return handle.read(max_bytes)
         except _SEATBELT_NONCRITICAL_EXCEPTIONS:
             return b""
+
+    @staticmethod
+    def _output_file_exceeds_cap(path: Path, max_bytes: int) -> bool:
+        if max_bytes <= 0 or not path.is_file():
+            return False
+        try:
+            return int(path.stat().st_size) > int(max_bytes)
+        except _SEATBELT_NONCRITICAL_EXCEPTIONS:
+            return False
 
     @classmethod
     def _terminate_process_group(cls, proc: subprocess.Popen[bytes]) -> None:
@@ -302,11 +286,13 @@ class SeatbeltRunner:
         hub = get_hub()
         max_log_bytes = self._max_log_bytes()
         artifacts_map: dict[str, bytes] = {}
+        artifact_counters: dict[str, int] = {}
         message = "seatbelt execution failed"
         exit_code: int | None = None
         phase = RunPhase.failed
         stdout_data = b""
         stderr_data = b""
+        log_truncated = False
         proc: subprocess.Popen[bytes] | None = None
         run_dir: str | None = None
 
@@ -384,25 +370,35 @@ class SeatbeltRunner:
 
             stdout_data = self._read_capped_output(stdout_path, max_log_bytes)
             stderr_data = self._read_capped_output(stderr_path, max_log_bytes)
+            log_truncated = self._output_file_exceeds_cap(
+                stdout_path,
+                max_log_bytes,
+            ) or self._output_file_exceeds_cap(stderr_path, max_log_bytes)
 
             if stdout_data:
                 hub.publish_stdout(run_id, stdout_data, max_log_bytes=max_log_bytes)
             if stderr_data:
                 hub.publish_stderr(run_id, stderr_data, max_log_bytes=max_log_bytes)
+            if log_truncated:
+                hub.mark_log_truncated(run_id)
 
             if phase != RunPhase.timed_out:
-                artifacts_map = self._collect_artifacts(workspace, spec.capture_patterns)
+                artifact_result = collect_runner_artifacts(workspace, spec.capture_patterns)
+                artifacts_map = artifact_result.artifacts
+                artifact_counters = artifact_result.counters
 
             if self._consume_cancelled(run_id):
                 phase = RunPhase.killed
                 exit_code = None
                 artifacts_map = {}
+                artifact_counters = {}
                 message = "canceled_by_user"
         except _SEATBELT_NONCRITICAL_EXCEPTIONS as exc:
             logger.error("Seatbelt execution error for run {}: {}", run_id, exc)
             message = f"seatbelt execution error: {exc}"
             if self._consume_cancelled(run_id):
                 phase = RunPhase.killed
+                artifact_counters = {}
                 message = "canceled_by_user"
         finally:
             finished = datetime.utcnow()
@@ -431,6 +427,8 @@ class SeatbeltRunner:
             "log_bytes": int(total_log_bytes),
             "artifact_bytes": int(artifact_bytes),
         }
+        usage.update(log_limit_counters(hub, run_id, max_log_bytes))
+        usage.update(artifact_counters)
 
         return RunStatus(
             id="",

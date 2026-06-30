@@ -35,7 +35,7 @@ def set_app_main(module: ModuleType) -> ModuleType:
     try:
         setattr(_get_app_package(), "main", module)
     except Exception:
-        pass
+        return module
     return module
 
 
@@ -63,12 +63,13 @@ def import_app_main() -> ModuleType:
         try:
             setattr(package, "main", current)
         except Exception:
-            pass
+            return current
 
     return current
 
 
 def reload_app_main() -> ModuleType:
-    module = import_app_main()
-    reloaded = importlib.reload(module)
-    return set_app_main(reloaded)
+    clear_app_main()
+    importlib.invalidate_caches()
+    imported = importlib.import_module(APP_MAIN_MODULE_NAME)
+    return set_app_main(imported)

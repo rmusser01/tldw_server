@@ -155,7 +155,18 @@ async def get_audit_log(
     )
 
 
-@router.get("/audit-log/export")
+@router.get(
+    "/audit-log/export",
+    responses={
+        200: {
+            "description": "Audit log export as JSON or CSV.",
+            "content": {
+                "application/json": {},
+                "text/csv": {},
+            },
+        },
+    },
+)
 async def export_audit_log(
     user_id: int | None = None,
     action: str | None = None,

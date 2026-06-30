@@ -4,6 +4,28 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-Medium.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono-SemiBold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
 .arimo {
   font-family: "Arimo", sans-serif;
   font-weight: 500;
@@ -66,6 +88,17 @@
   --color-text-muted: 91 100 114;
   --color-text-subtle: 110 120 135;
   --color-focus: 13 134 119;
+  --state-ready: var(--color-success);
+  --state-unavailable: var(--color-danger);
+  --state-setup-required: var(--color-warn);
+  --state-auth-required: var(--color-warn);
+  --state-permission-denied: var(--color-danger);
+  --state-degraded: var(--color-warn);
+  --state-retrying: var(--color-primary);
+  --state-blocked: var(--color-danger);
+  --state-empty: var(--color-muted);
+  --state-loading: var(--color-muted);
+  --state-error: var(--color-danger);
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.12);
   --shadow-md: 0 6px 18px rgba(0,0,0,0.08);
   --font-family: "Inter", system-ui, sans-serif;
@@ -92,6 +125,14 @@
   --moderation-hero-grid-1: rgba(73, 55, 36, 0.08);
   --moderation-hero-grid-2: rgba(73, 55, 36, 0.06);
   --moderation-hero-grid-opacity: 0.35;
+
+  /* Phosphor glows — theme-agnostic; derive from current primary/accent/success.
+     Used by composer variants (V1/V3/V5) and other Primer-aesthetic surfaces.
+     Any registered theme contributes its own color automatically — names stay
+     semantic (primary/accent/success) rather than hardcoding Primer's cyan. */
+  --glow-primary: 0 0 0 1px rgb(var(--color-primary) / 0.35), 0 0 24px -6px rgb(var(--color-primary) / 0.55);
+  --glow-accent: 0 0 0 1px rgb(var(--color-accent) / 0.35), 0 0 24px -6px rgb(var(--color-accent) / 0.50);
+  --glow-success: 0 0 0 1px rgb(var(--color-success) / 0.30), 0 0 24px -6px rgb(var(--color-success) / 0.45);
 }
 
 .dark {
@@ -113,6 +154,17 @@
   --color-text-muted: 179 186 198;
   --color-text-subtle: 144 152 166;
   --color-focus: 79 209 176;
+  --state-ready: var(--color-success);
+  --state-unavailable: var(--color-danger);
+  --state-setup-required: var(--color-warn);
+  --state-auth-required: var(--color-warn);
+  --state-permission-denied: var(--color-danger);
+  --state-degraded: var(--color-warn);
+  --state-retrying: var(--color-primary);
+  --state-blocked: var(--color-danger);
+  --state-empty: var(--color-muted);
+  --state-loading: var(--color-muted);
+  --state-error: var(--color-danger);
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
   --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
   --moderation-hero-start: #141a22;

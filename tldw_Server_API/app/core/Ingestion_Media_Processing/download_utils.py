@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import (
     EXT_TO_MEDIA_TYPE_KEY,
     _extension_candidates,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
 from tldw_Server_API.app.core.testing import is_test_mode
 
 _DOWNLOAD_UTILS_NONCRITICAL_EXCEPTIONS = (
@@ -265,6 +266,7 @@ async def download_url_async(
       streaming to prevent oversized downloads.
     """
     allowed_extensions = set() if allowed_extensions is None else {ext.lower() for ext in allowed_extensions}
+    safe_url = redact_url_for_log(url)
 
     # Enforce outbound policy early to avoid bypassing central egress controls.
     _validate_egress_or_raise(url)
@@ -403,7 +405,7 @@ async def download_url_async(
                     with contextlib.suppress(_DOWNLOAD_UTILS_NONCRITICAL_EXCEPTIONS):
                         target_path.unlink(missing_ok=True)
                     raise
-                logger.info("Downloaded {} to {}", url, target_path)
+                logger.info("Downloaded {} to {}", safe_url, target_path)
                 return target_path
 
         if client_for_afetch is None:
@@ -531,7 +533,7 @@ async def download_url_async(
                 target_path.unlink(missing_ok=True)
             raise
 
-        logger.info("Downloaded {} to {}", url, target_path)
+        logger.info("Downloaded {} to {}", safe_url, target_path)
         return target_path
     except _DOWNLOAD_UTILS_DOWNLOAD_EXCEPTIONS as exc:
         # In test mode, allow a graceful fallback to a tiny stub file so that
@@ -583,7 +585,7 @@ async def download_url_async(
                 payload = b"TEST"
             async with aiofiles.open(target_path, "wb") as f:
                 await f.write(payload)
-            logger.warning("Test-mode fallback download for {} -> {} due to {}", url, target_path, exc)
+            logger.warning("Test-mode fallback download for {} -> {} due to {}", safe_url, target_path, exc)
             return target_path
         raise
     finally:

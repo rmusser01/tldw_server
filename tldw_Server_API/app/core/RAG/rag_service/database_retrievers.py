@@ -8,6 +8,7 @@ including media database, notes, prompts, and character cards.
 
 import asyncio
 import contextlib
+import copy
 from difflib import SequenceMatcher
 import json
 import os
@@ -16,7 +17,7 @@ import sqlite3
 import time
 import urllib.parse as _urlparse
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Optional
@@ -35,6 +36,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 )
 
 from .types import DataSource, Document
+from .retrieval_plan import RetrievalPlan
 from .utils import get_float_env as _get_float_env
 from .utils import normalize_scores as _normalize_scores
 from .vector_stores import (
@@ -118,6 +120,10 @@ class RawSqlFallbackDisabledError(RuntimeError):
         )
 
 
+_RESIDUAL_ENCODED_PATH_CONTROL_RE = re.compile(r"%(?:2e|2f|5c)", re.IGNORECASE)
+_SQLITE_FTS_UNSAFE_PUNCTUATION_RE = re.compile(r"[^\w\s\"*]", re.UNICODE)
+
+
 def _normalize_sqlite_memory_path(path: str) -> Optional[str]:
     """Return a canonical SQLite in-memory spec, or None when path is file-backed."""
     raw = str(path).strip()
@@ -149,7 +155,25 @@ def _normalize_sqlite_memory_path(path: str) -> Optional[str]:
     return None
 
 
+def _extract_file_uri_path(raw: str) -> str:
+    """Extract the filesystem path from a file URI without query parameters."""
+    parsed = _urlparse.urlparse(raw)
+    extracted_path = _urlparse.unquote(parsed.path or "")
+    netloc = _urlparse.unquote(parsed.netloc or "")
+    if netloc:
+        if re.match(r"^[A-Za-z]:", netloc):
+            extracted_path = f"{netloc}{extracted_path}"
+        elif extracted_path:
+            extracted_path = f"//{netloc}{extracted_path}"
+        else:
+            extracted_path = netloc
+    if re.match(r"^/[A-Za-z]:[/\\]", extracted_path):
+        extracted_path = extracted_path[1:]
+    return extracted_path
+
+
 def _sanitize_media_fts_query(query: Optional[str]) -> Optional[str]:
+    """Normalize FTS syntax without changing the initial query's retrieval intent."""
     if query is None:
         return None
     try:
@@ -162,6 +186,9 @@ def _sanitize_media_fts_query(query: Optional[str]) -> Optional[str]:
         return text
     if "-" in text and " " not in text:
         return f"\"{text}\""
+    if _SQLITE_FTS_UNSAFE_PUNCTUATION_RE.search(text):
+        text = _SQLITE_FTS_UNSAFE_PUNCTUATION_RE.sub(" ", text)
+        text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
@@ -444,6 +471,90 @@ class RetrievalConfig:
     chunk_language: Optional[str] = None
 
 
+_RETRIEVAL_PLAN_SEARCH_MODES = frozenset({"fts", "vector", "hybrid"})
+_RETRIEVAL_PLAN_SOURCE_ALIASES = {
+    "character": DataSource.CHARACTER_CARDS,
+    "characters": DataSource.CHARACTER_CARDS,
+    "character_cards": DataSource.CHARACTER_CARDS,
+    "character_cards_db": DataSource.CHARACTER_CARDS,
+    "chats": DataSource.CHAT_HISTORY,
+    "chat": DataSource.CHAT_HISTORY,
+    "chat_history": DataSource.CHAT_HISTORY,
+    "chat_history_db": DataSource.CHAT_HISTORY,
+    "conversation": DataSource.CHAT_HISTORY,
+    "conversations": DataSource.CHAT_HISTORY,
+    "notes_db": DataSource.NOTES,
+    "media": DataSource.MEDIA_DB,
+    "media_db_path": DataSource.MEDIA_DB,
+    "kanban_db": DataSource.KANBAN,
+    "task_board": DataSource.KANBAN,
+    "task_boards": DataSource.KANBAN,
+    "tasks": DataSource.KANBAN,
+    "prompt": DataSource.PROMPTS,
+    "prompts_db": DataSource.PROMPTS,
+    "worldbook": DataSource.WORLD_BOOKS,
+    "worldbooks": DataSource.WORLD_BOOKS,
+    "world_book": DataSource.WORLD_BOOKS,
+    "world_books_db": DataSource.WORLD_BOOKS,
+    "dictionary": DataSource.DICTIONARIES,
+    "chat_dictionary": DataSource.DICTIONARIES,
+    "chat_dictionaries": DataSource.DICTIONARIES,
+    "chat_dictionaries_db": DataSource.DICTIONARIES,
+}
+
+
+def _normalize_plan_sources(plan: RetrievalPlan) -> list[DataSource]:
+    normalized: list[DataSource] = []
+    for raw_source in plan.sources:
+        try:
+            if isinstance(raw_source, DataSource):
+                source = raw_source
+            else:
+                source_text = str(raw_source).strip().lower()
+                source = _RETRIEVAL_PLAN_SOURCE_ALIASES.get(source_text) or DataSource(source_text)
+        except (TypeError, ValueError):
+            continue
+        if source not in normalized:
+            normalized.append(source)
+    return normalized
+
+
+def _config_from_retrieval_plan(
+    config: Optional[RetrievalConfig],
+    plan: RetrievalPlan,
+) -> RetrievalConfig:
+    effective = replace(config or RetrievalConfig())
+
+    try:
+        plan_top_k = int(plan.top_k)
+    except (TypeError, ValueError):
+        plan_top_k = int(effective.max_results or 10)
+    effective.max_results = max(1, plan_top_k)
+
+    try:
+        effective.min_score = float(plan.min_score)
+    except (TypeError, ValueError):
+        pass
+
+    search_mode = str(plan.search_mode or "").strip().lower()
+    if search_mode in _RETRIEVAL_PLAN_SEARCH_MODES:
+        effective.use_fts = search_mode in {"fts", "hybrid"}
+        effective.use_vector = search_mode in {"vector", "hybrid"}
+
+    return effective
+
+
+def _index_namespace_from_retrieval_plan(
+    plan: RetrievalPlan,
+    sources: list[DataSource],
+) -> Optional[str]:
+    if plan.index_namespace is not None:
+        return plan.index_namespace
+    if DataSource.MEDIA_DB in sources:
+        return plan.collection_names.get(DataSource.MEDIA_DB.value)
+    return None
+
+
 class BaseRetriever(ABC):
     """Base class for database-specific retrievers."""
 
@@ -495,9 +606,15 @@ class BaseRetriever(ABC):
         # Handle URI schemes - only allow file:// and validate the path component
         if '://' in path:
             if path.startswith('file://'):
-                parsed = _urlparse.urlparse(path)
                 # Extract and decode the path component
-                extracted_path = _urlparse.unquote(parsed.path)
+                extracted_path = _extract_file_uri_path(path)
+                extracted_parts = [part.lower() for part in extracted_path.split("/") if part]
+                if (
+                    extracted_path.startswith("/")
+                    and extracted_parts
+                    and extracted_parts[0] in {"etc", "proc", "sys", "dev", "boot", "root"}
+                ):
+                    raise RestrictedDatabasePathError()
                 # Recursively validate the extracted path (this will catch traversal, etc.)
                 validated = self._validate_path(extracted_path)
                 if validated is None:
@@ -513,6 +630,14 @@ class BaseRetriever(ABC):
 
         # Check for path traversal sequences BEFORE resolving
         # This catches attempts like "../../../etc/passwd" before they get normalized
+        if _RESIDUAL_ENCODED_PATH_CONTROL_RE.search(path):
+            logger.warning(f"Residual encoded path-control sequence detected in: {path}")
+            raise SuspiciousDatabasePathError()
+        normalized_input_path = path.replace("\\", "/")
+        if normalized_input_path.startswith("/"):
+            first_component = normalized_input_path.split("/", 2)[1].lower()
+            if first_component in {"etc", "proc", "sys", "dev", "boot", "root"}:
+                raise RestrictedDatabasePathError()
         if '..' in path:
             logger.warning(f"Path traversal attempt detected in: {path}")
             raise PathTraversalError()
@@ -550,7 +675,7 @@ class BaseRetriever(ABC):
     async def retrieve(
         self,
         query: str,
-        **kwargs
+        **kwargs: Any,
     ) -> list[Document]:
         """Retrieve documents from database."""
         raise NotImplementedError
@@ -563,7 +688,7 @@ class BaseRetriever(ABC):
     def _execute_query(
         self,
         query: str,
-        params: tuple = ()
+        params: tuple[Any, ...] = ()
     ) -> list[dict[str, Any]]:
         """Execute SQL query and return results as dictionaries."""
         if self._db_adapter is not None:
@@ -607,6 +732,14 @@ class BaseRetriever(ABC):
                 logger.error(f"Database path: {self.db_path}")
             return []
 
+    async def _execute_query_async(
+        self,
+        query: str,
+        params: tuple[Any, ...] = (),
+    ) -> list[dict[str, Any]]:
+        """Execute a synchronous backend query without blocking the event loop."""
+        return await asyncio.to_thread(self._execute_query, query, params)
+
 
 class MediaDBRetriever(BaseRetriever):
     """Retriever for Media_DB (main content database)."""
@@ -646,6 +779,12 @@ class MediaDBRetriever(BaseRetriever):
             if not validated_path:
                 return None
             return create_media_database("rag_service", db_path=validated_path)
+        except MediaDatabaseError as exc:
+            message = str(exc).lower()
+            if "no such column" in message or "schema" in message:
+                logger.debug("Skipping Media DB adapter attach for incompatible schema: {}", exc)
+                return None
+            raise
         except (
             AttributeError,
             OSError,
@@ -2040,13 +2179,22 @@ class NotesDBRetriever(BaseRetriever):
         **kwargs
     ) -> list[Document]:
         """Retrieve from notes database."""
+        allowed_note_ids = self._normalize_allowed_note_ids(kwargs.get("allowed_note_ids"))
+        if allowed_note_ids:
+            if self.chacha_db is not None:
+                return await asyncio.to_thread(
+                    self._retrieve_allowed_notes_via_chacha,
+                    allowed_note_ids,
+                    notebook_id,
+                )
+            return await asyncio.to_thread(
+                self._retrieve_allowed_notes_via_sql,
+                allowed_note_ids,
+                notebook_id,
+            )
+
         if self.chacha_db is not None and not self.config.tags_filter:
             docs = self._retrieve_via_chacha(query, notebook_id)
-            # Optional restriction to specific note IDs
-            allowed_note_ids = kwargs.get("allowed_note_ids")
-            if allowed_note_ids and isinstance(allowed_note_ids, (list, tuple)):
-                allowed_set = {str(x) for x in allowed_note_ids}
-                docs = [d for d in docs if str(d.id).replace("note_", "") in allowed_set]
             return docs
 
         documents = []
@@ -2064,13 +2212,6 @@ class NotesDBRetriever(BaseRetriever):
         """
         params: list[Any] = [f"%{query}%", f"%{query}%"]
 
-        # Optional restriction to specific note IDs (e.g., from access control)
-        allowed_note_ids = kwargs.get("allowed_note_ids")
-        if allowed_note_ids and isinstance(allowed_note_ids, (list, tuple)):
-            placeholders = ",".join(["?"] * len(allowed_note_ids))
-            sql += f" AND n.id IN ({placeholders})"
-            params.extend(list(allowed_note_ids))
-
         # Order and limit
         sql += " ORDER BY n.last_modified DESC LIMIT ?"
         params.append(self.config.max_results)
@@ -2085,21 +2226,7 @@ class NotesDBRetriever(BaseRetriever):
             content_match = query.lower() in row["content"].lower()
             score = (1.0 if title_match else 0.0) + (0.5 if content_match else 0.0)
 
-            doc = Document(
-                id=f"note_{row['id']}",
-                content=f"# {row['title']}\n\n{row['content']}",
-                source=DataSource.NOTES,  # Add required source parameter
-                metadata={
-                    "title": row["title"],
-                    "notebook": None,
-                    "notebook_id": None,
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
-                    "source": "notes_db"
-                },
-                score=score
-            )
-            documents.append(doc)
+            documents.append(self._row_to_document(row, score=score))
 
         # Sort by score
         documents.sort(key=lambda x: x.score, reverse=True)
@@ -2107,6 +2234,92 @@ class NotesDBRetriever(BaseRetriever):
         logger.debug(f"Retrieved {len(documents)} documents from Notes_DB")
 
         return documents
+
+    @staticmethod
+    def _normalize_allowed_note_ids(value: Any) -> list[str]:
+        """Normalize an explicit note ID restriction into a stable string list."""
+        if not isinstance(value, (list, tuple)):
+            return []
+        normalized: list[str] = []
+        for item in value:
+            text = str(item or "").strip()
+            if text and text not in normalized:
+                normalized.append(text)
+        return normalized
+
+    def _retrieve_allowed_notes_via_chacha(
+        self,
+        allowed_note_ids: list[str],
+        notebook_id: Optional[int],
+    ) -> list[Document]:
+        """Retrieve selected notes by ID without requiring a text-search match."""
+        documents: list[Document] = []
+        for note_id in allowed_note_ids[: int(self.config.max_results)]:
+            try:
+                row = self.chacha_db.get_note_by_id(note_id) if self.chacha_db else None
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
+                logger.debug(f"Selected note lookup failed for {note_id}: {exc}")
+                continue
+            if not row:
+                continue
+            if notebook_id and row.get("notebook_id") != notebook_id:
+                continue
+            documents.append(self._row_to_document(row, score=1.0))
+        return documents
+
+    def _retrieve_allowed_notes_via_sql(
+        self,
+        allowed_note_ids: list[str],
+        notebook_id: Optional[int],
+    ) -> list[Document]:
+        """Retrieve selected notes by ID through the raw SQL fallback."""
+        bounded_note_ids = allowed_note_ids[: int(self.config.max_results)]
+        if not bounded_note_ids:
+            return []
+        placeholders = ",".join(["?"] * len(bounded_note_ids))
+        sql = f"""
+            SELECT
+                n.id,
+                n.title,
+                n.content,
+                n.created_at,
+                n.last_modified AS updated_at
+            FROM notes n
+            WHERE n.deleted = 0 AND n.id IN ({placeholders})
+        """  # nosec B608 - placeholders are generated from the validated ID count.
+        params: list[Any] = list(bounded_note_ids)
+        if notebook_id is not None:
+            sql += " AND n.notebook_id = ?"
+            params.append(notebook_id)
+        sql += " ORDER BY n.last_modified DESC LIMIT ?"
+        params.append(self.config.max_results)
+        return [
+            self._row_to_document(row, score=1.0)
+            for row in self._execute_query(sql, tuple(params))
+        ]
+
+    def _row_to_document(self, row: dict[str, Any], *, score: float) -> Document:
+        """Convert a note row into the RAG document shape."""
+        updated_at = row.get("updated_at", row.get("last_modified"))
+        note_id = str(row["id"])
+        return Document(
+            id=f"note_{note_id}",
+            content=f"# {row.get('title')}\n\n{row.get('content', '')}",
+            source=DataSource.NOTES,
+            metadata={
+                "note_id": note_id,
+                "source_id": note_id,
+                "source_type": "notes",
+                "title": row.get("title"),
+                "notebook": row.get("notebook_name"),
+                "notebook_id": row.get("notebook_id"),
+                "created_at": row.get("created_at"),
+                "updated_at": updated_at,
+                "source": "notes_db",
+                "chunk_type": "text",
+            },
+            score=score,
+        )
 
     def _retrieve_via_chacha(self, query: str, notebook_id: Optional[int]) -> list[Document]:
         if self.chacha_db is None:
@@ -2155,15 +2368,10 @@ class NotesDBRetriever(BaseRetriever):
                     'updated_at': row.get('updated_at'),
                     'source': 'notes_db',
                 }
-            documents.append(
-                Document(
-                    id=f"note_{row.get('id')}",
-                    content=f"# {row.get('title')}\n\n{row.get('content', '')}",
-                    source=DataSource.NOTES,
-                    metadata=metadata,
-                    score=float(score_val),
-                )
-            )
+            document = self._row_to_document(row, score=float(score_val))
+            if metadata:
+                document.metadata = {**document.metadata, **metadata}
+            documents.append(document)
         documents.sort(key=lambda x: getattr(x, 'score', 0.0), reverse=True)
         return documents
 
@@ -2518,16 +2726,62 @@ class PromptsDBRetriever(BaseRetriever):
         db_path: Optional[str],
         config: Optional[RetrievalConfig] = None,
         *,
-        chacha_db: Optional['CharactersRAGDB'] = None
+        chacha_db: Optional['CharactersRAGDB'] = None,
+        prompts_db: Optional[Any] = None,
     ) -> None:
-        super().__init__(db_path, config, db_adapter=chacha_db)
-        self.chacha_db = chacha_db
+        super().__init__(db_path, config, db_adapter=prompts_db or chacha_db)
+        self.prompts_db = prompts_db or chacha_db
+
+    def _document_from_prompt_row(
+        self,
+        row: dict[str, Any],
+        query_terms: list[str],
+    ) -> Document:
+        name = str(row.get("name") or "(Untitled prompt)")
+        details = str(row.get("details") or "")
+        system_prompt = str(row.get("system_prompt") or "")
+        user_prompt = str(row.get("user_prompt") or "")
+        searchable_parts = [name, details, system_prompt, user_prompt]
+        matched_terms = sum(
+            1
+            for term in query_terms
+            if any(term in part.lower() for part in searchable_parts if part)
+        )
+        usage_count = _coerce_int(row.get("usage_count")) or 0
+        score = min(
+            1.0,
+            (matched_terms / max(len(query_terms), 1)) + min(usage_count / 100.0, 0.2),
+        )
+
+        prompt_id = row.get("id")
+        content = (
+            f"**{name}**\n\n"
+            f"{details}\n\n"
+            f"System:\n{system_prompt}\n\n"
+            f"User:\n{user_prompt}"
+        ).strip()
+        return Document(
+            id=f"prompt_{prompt_id}",
+            content=content,
+            source=DataSource.PROMPTS,
+            metadata={
+                "prompt_id": prompt_id,
+                "name": name,
+                "author": row.get("author"),
+                "uuid": row.get("uuid"),
+                "version": row.get("version"),
+                "usage_count": usage_count,
+                "last_modified": row.get("last_modified"),
+                "source": "prompts",
+            },
+            score=float(score),
+        )
 
     async def retrieve(
         self,
         query: str,
         category: Optional[str] = None,
-        **kwargs
+        **kwargs: Any,
     ) -> list[Document]:
         """
         Retrieve from prompts database.
@@ -2539,64 +2793,61 @@ class PromptsDBRetriever(BaseRetriever):
         Returns:
             List of retrieved documents
         """
-        documents = []
+        search_prompts = getattr(self.prompts_db, "search_prompts", None)
+        max_results = int(self.config.max_results)
+        query_terms = [term for term in re.findall(r"[A-Za-z0-9']+", query.lower()) if term]
+        if callable(search_prompts):
+            try:
+                results, _total = await asyncio.to_thread(
+                    search_prompts,
+                    search_query=query,
+                    search_fields=["name", "details", "system_prompt", "user_prompt"],
+                    page=1,
+                    results_per_page=max_results,
+                    include_deleted=False,
+                )
+                documents = [
+                    self._document_from_prompt_row(dict(row), query_terms)
+                    for row in results
+                ]
+                documents.sort(key=lambda doc: doc.score, reverse=True)
+                return documents
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
+                logger.debug(f"PromptsDatabase search_prompts failed; falling back to SQL search: {exc}")
 
         # Build SQL query
         sql = """
             SELECT
                 p.id,
                 p.name,
-                p.prompt,
-                p.category,
-                p.rating,
-                p.times_used,
-                p.created_at
-            FROM prompts p
-            WHERE (p.name LIKE ? OR p.prompt LIKE ?)
+                p.author,
+                p.details,
+                p.system_prompt,
+                p.user_prompt,
+                p.uuid,
+                p.last_modified,
+                p.version,
+                p.usage_count
+            FROM Prompts p
+            WHERE p.deleted = 0
+              AND (
+                p.name LIKE ?
+                OR p.details LIKE ?
+                OR p.system_prompt LIKE ?
+                OR p.user_prompt LIKE ?
+              )
         """
 
-        params: list[Any] = [f"%{query}%", f"%{query}%"]
+        params: list[Any] = [f"%{query}%"] * 4
 
-        # Add category filter
-        if category:
-            sql += " AND p.category = ?"
-            params.append(category)
-
-        # Order by relevance and usage
-        sql += " ORDER BY p.rating DESC, p.times_used DESC LIMIT ?"
-        params.append(self.config.max_results)
+        sql += " ORDER BY p.usage_count DESC, p.last_modified DESC LIMIT ?"
+        params.append(max_results)
 
         # Execute query
-        results = self._execute_query(sql, tuple(params))
+        results = await self._execute_query_async(sql, tuple(params))
 
         # Convert to documents
-        for row in results:
-            # Calculate relevance score
-            name_match = query.lower() in row["name"].lower()
-            prompt_match = query.lower() in row["prompt"].lower()
-            base_score = (1.0 if name_match else 0.0) + (0.5 if prompt_match else 0.0)
-
-            # Boost by rating and usage
-            rating_boost = (row["rating"] or 0) / 5.0 * 0.3
-            usage_boost = min(row["times_used"] / 100.0, 1.0) * 0.2
-
-            score = base_score + rating_boost + usage_boost
-
-            doc = Document(
-                id=f"prompt_{row['id']}",
-                content=f"**{row['name']}**\n\n{row['prompt']}",
-                source=DataSource.PROMPTS,  # Add required source parameter
-                metadata={
-                    "name": row["name"],
-                    "category": row["category"],
-                    "rating": row["rating"],
-                    "times_used": row["times_used"],
-                    "created_at": row["created_at"],
-                    "source": "prompts_db"
-                },
-                score=score
-            )
-            documents.append(doc)
+        documents = [self._document_from_prompt_row(row, query_terms) for row in results]
 
         # Sort by score
         documents.sort(key=lambda x: x.score, reverse=True)
@@ -2609,7 +2860,7 @@ class PromptsDBRetriever(BaseRetriever):
         """Get metadata for a prompt."""
         prompt_id = doc_id.replace("prompt_", "")
 
-        sql = "SELECT * FROM prompts WHERE id = ?"
+        sql = "SELECT * FROM Prompts WHERE id = ?"
         results = self._execute_query(sql, (prompt_id,))
 
         if results:
@@ -2617,6 +2868,317 @@ class PromptsDBRetriever(BaseRetriever):
             return dict(row)
 
         return {}
+
+
+class ChatHistoryRetriever(BaseRetriever):
+    """Retriever for chat conversation messages."""
+
+    _EXCLUDED_CONVERSATION_SOURCES = {"knowledge_qa"}
+
+    def __init__(
+        self,
+        db_path: Optional[str],
+        config: Optional[RetrievalConfig] = None,
+        *,
+        chacha_db: Optional['CharactersRAGDB'] = None,
+    ) -> None:
+        super().__init__(db_path, config, db_adapter=chacha_db)
+        self.chacha_db = chacha_db
+        self._excluded_source_cache: dict[str, bool] = {}
+
+    def _is_excluded_conversation_source(self, conversation_id: Any) -> bool:
+        """Return whether a conversation should be hidden from chat evidence."""
+        if not conversation_id:
+            return False
+        cache_key = str(conversation_id)
+        cached = self._excluded_source_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        try:
+            rows = self._execute_query(
+                "SELECT source FROM conversations WHERE id = ? LIMIT 1",
+                (cache_key,),
+            )
+        except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
+            logger.debug(f"Could not resolve conversation source for chat retrieval: {exc}")
+            return False
+        for row in rows:
+            source = str(row.get("source") or "").strip().lower()
+            excluded = source in self._EXCLUDED_CONVERSATION_SOURCES
+            self._excluded_source_cache[cache_key] = excluded
+            return excluded
+        self._excluded_source_cache[cache_key] = False
+        return False
+
+    async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
+        documents: list[Document] = []
+        max_results = int(self.config.max_results)
+
+        sql = """
+            SELECT
+                m.id,
+                m.conversation_id,
+                m.content,
+                m.sender,
+                m.timestamp,
+                conv.character_id,
+                conv.source AS conversation_source,
+                cc.name AS character_name
+            FROM messages m
+            JOIN conversations conv ON m.conversation_id = conv.id
+            LEFT JOIN character_cards cc ON conv.character_id = cc.id
+            WHERE m.deleted = 0
+              AND m.content LIKE ?
+              AND COALESCE(conv.source, '') != ?
+            ORDER BY m.timestamp DESC
+            LIMIT ?
+        """
+        rows = await self._execute_query_async(sql, (f"%{query}%", "knowledge_qa", max_results))
+        for row in rows:
+            documents.append(
+                Document(
+                    id=f"chat_{row['id']}",
+                    content=f"[{row.get('sender')}]: {row.get('content', '')}",
+                    source=DataSource.CHAT_HISTORY,
+                    metadata={
+                        "message_id": row.get("id"),
+                        "conversation_id": row.get("conversation_id"),
+                        "sender": row.get("sender"),
+                        "timestamp": row.get("timestamp"),
+                        "character_id": row.get("character_id"),
+                        "character_name": row.get("character_name"),
+                        "conversation_source": row.get("conversation_source"),
+                        "type": "chat_message",
+                        "source": "chats",
+                    },
+                    score=0.5,
+                )
+            )
+        if documents:
+            return documents
+
+        if self.chacha_db is not None:
+            try:
+                msg_rows = await asyncio.to_thread(
+                    self.chacha_db.search_messages_by_content,
+                    query,
+                    limit=max_results,
+                )
+                for row in msg_rows:
+                    conv_id = row.get("conversation_id")
+                    if self._is_excluded_conversation_source(conv_id):
+                        continue
+
+                    documents.append(
+                        Document(
+                            id=f"chat_{row['id']}",
+                            content=f"{row.get('sender')}: {row.get('content', '')}",
+                            source=DataSource.CHAT_HISTORY,
+                            metadata={
+                                "message_id": row.get("id"),
+                                "conversation_id": conv_id,
+                                "sender": row.get("sender"),
+                                "timestamp": row.get("timestamp"),
+                                "character_id": row.get("character_id"),
+                                "character_name": row.get("character_name"),
+                                "type": "chat_message",
+                                "source": "chats",
+                            },
+                            score=0.5,
+                        )
+                    )
+                return documents
+            except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as exc:
+                logger.debug(f"ChaCha chat search failed: {exc}")
+        return documents
+
+    async def get_metadata(self, doc_id: str) -> dict[str, Any]:
+        chat_id = doc_id.replace("chat_", "")
+        results = self._execute_query(
+            """
+            SELECT m.*, conv.character_id
+            FROM messages m
+            JOIN conversations conv ON m.conversation_id = conv.id
+            WHERE m.id = ?
+            """,
+            (chat_id,),
+        )
+        return dict(results[0]) if results else {}
+
+
+class WorldBooksRetriever(BaseRetriever):
+    """Retriever for world books and lorebook entries."""
+
+    async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
+        max_results = int(self.config.max_results)
+        sql = """
+            SELECT
+                wb.id AS world_book_id,
+                wb.name AS world_book_name,
+                wb.description AS world_book_description,
+                e.id AS entry_id,
+                e.keywords,
+                e.content,
+                e.priority,
+                e.metadata,
+                e.enabled
+            FROM world_book_entries e
+            JOIN world_books wb ON e.world_book_id = wb.id
+            WHERE wb.deleted = 0
+              AND wb.enabled = 1
+              AND e.enabled = 1
+              AND (
+                wb.name LIKE ?
+                OR wb.description LIKE ?
+                OR e.keywords LIKE ?
+                OR e.content LIKE ?
+                OR e.metadata LIKE ?
+              )
+            ORDER BY e.priority DESC, e.id DESC
+            LIMIT ?
+        """
+        rows = await self._execute_query_async(sql, (*([f"%{query}%"] * 5), max_results))
+        documents: list[Document] = []
+        query_lower = query.lower()
+        for row in rows:
+            keywords = row.get("keywords") or ""
+            content = row.get("content") or ""
+            name = row.get("world_book_name") or "(Untitled world book)"
+            description = row.get("world_book_description") or ""
+            matched_fields = sum(
+                1
+                for value in (name, description, keywords, content, row.get("metadata") or "")
+                if query_lower in str(value).lower()
+            )
+            priority = _coerce_int(row.get("priority")) or 0
+            documents.append(
+                Document(
+                    id=f"world_book_entry_{row['entry_id']}",
+                    content=(
+                        f"# {name}\n\n"
+                        f"{description}\n\n"
+                        f"Keywords: {keywords}\n\n"
+                        f"{content}"
+                    ).strip(),
+                    source=DataSource.WORLD_BOOKS,
+                    metadata={
+                        "world_book_id": row.get("world_book_id"),
+                        "world_book_name": name,
+                        "entry_id": row.get("entry_id"),
+                        "keywords": keywords,
+                        "priority": priority,
+                        "source": "world_books",
+                    },
+                    score=min(1.0, (matched_fields / 5.0) + min(priority / 100.0, 0.2)),
+                )
+            )
+        documents.sort(key=lambda doc: doc.score, reverse=True)
+        return documents
+
+    async def get_metadata(self, doc_id: str) -> dict[str, Any]:
+        entry_id = doc_id.replace("world_book_entry_", "")
+        rows = self._execute_query(
+            """
+            SELECT e.*, wb.name AS world_book_name
+            FROM world_book_entries e
+            JOIN world_books wb ON e.world_book_id = wb.id
+            WHERE e.id = ?
+            """,
+            (entry_id,),
+        )
+        return dict(rows[0]) if rows else {}
+
+
+class ChatDictionariesRetriever(BaseRetriever):
+    """Retriever for chat dictionaries and dictionary entries."""
+
+    def __init__(
+        self,
+        db_path: Optional[str],
+        config: Optional[RetrievalConfig] = None,
+        *,
+        chacha_db: Optional['CharactersRAGDB'] = None,
+        db_adapter: Optional[Any] = None,
+    ) -> None:
+        super().__init__(db_path, config, db_adapter=db_adapter or chacha_db)
+        self.chacha_db = chacha_db or db_adapter
+
+    async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
+        max_results = int(self.config.max_results)
+        sql = """
+            SELECT
+                d.id AS dictionary_id,
+                d.name AS dictionary_name,
+                d.description,
+                e.id AS entry_id,
+                e.key,
+                e.content,
+                e.group_name
+            FROM dictionary_entries e
+            JOIN chat_dictionaries d ON e.dictionary_id = d.id
+            WHERE d.deleted = 0
+              AND d.is_active = 1
+              AND e.enabled = 1
+              AND (
+                d.name LIKE ?
+                OR d.description LIKE ?
+                OR e.key LIKE ?
+                OR e.content LIKE ?
+                OR e.group_name LIKE ?
+              )
+            ORDER BY e.id ASC
+            LIMIT ?
+        """
+        rows = await self._execute_query_async(sql, (*([f"%{query}%"] * 5), max_results))
+        documents: list[Document] = []
+        query_lower = query.lower()
+        for row in rows:
+            dictionary_name = row.get("dictionary_name") or "(Untitled dictionary)"
+            key = row.get("key") or ""
+            content = row.get("content") or ""
+            fields = (
+                dictionary_name,
+                row.get("description") or "",
+                key,
+                content,
+                row.get("group_name") or "",
+            )
+            matched_fields = sum(1 for value in fields if query_lower in str(value).lower())
+            documents.append(
+                Document(
+                    id=f"dictionary_entry_{row['entry_id']}",
+                    content=(
+                        f"# {dictionary_name}\n\n"
+                        f"Key: {key}\n\n"
+                        f"{content}"
+                    ).strip(),
+                    source=DataSource.DICTIONARIES,
+                    metadata={
+                        "dictionary_id": row.get("dictionary_id"),
+                        "dictionary_name": dictionary_name,
+                        "entry_id": row.get("entry_id"),
+                        "key": key,
+                        "group_name": row.get("group_name"),
+                        "source": "dictionaries",
+                    },
+                    score=matched_fields / 5.0,
+                )
+            )
+        documents.sort(key=lambda doc: doc.score, reverse=True)
+        return documents
+
+    async def get_metadata(self, doc_id: str) -> dict[str, Any]:
+        entry_id = doc_id.replace("dictionary_entry_", "")
+        rows = self._execute_query(
+            """
+            SELECT e.*, d.name AS dictionary_name
+            FROM dictionary_entries e
+            JOIN chat_dictionaries d ON e.dictionary_id = d.id
+            WHERE e.id = ?
+            """,
+            (entry_id,),
+        )
+        return dict(rows[0]) if rows else {}
 
 
 class CharacterCardsRetriever(BaseRetriever):
@@ -3055,6 +3617,7 @@ class MultiDatabaseRetriever:
         *,
         media_db: Optional[Any] = None,
         chacha_db: Optional[Any] = None,
+        prompts_db: Optional[Any] = None,
         sql_retriever: Optional[BaseRetriever] = None,
     ):
         """
@@ -3081,16 +3644,33 @@ class MultiDatabaseRetriever:
                 chacha_db=chacha_db,
             )
 
-        if "prompts_db" in db_paths:
+        if "prompts_db" in db_paths or prompts_db is not None:
             self.retrievers[DataSource.PROMPTS] = PromptsDBRetriever(
-                db_paths["prompts_db"],
-                chacha_db=chacha_db,
+                db_paths.get("prompts_db"),
+                prompts_db=prompts_db,
             )
 
-        if "character_cards_db" in db_paths:
+        character_db_path = db_paths.get("character_cards_db") or db_paths.get("notes_db")
+        if character_db_path:
             self.retrievers[DataSource.CHARACTER_CARDS] = CharacterCardsRetriever(
-                db_paths["character_cards_db"],
+                character_db_path,
                 chacha_db=chacha_db,
+            )
+            self.retrievers[DataSource.CHAT_HISTORY] = ChatHistoryRetriever(
+                character_db_path,
+                chacha_db=chacha_db,
+            )
+        world_books_db_path = db_paths.get("world_books_db") or character_db_path
+        if world_books_db_path:
+            self.retrievers[DataSource.WORLD_BOOKS] = WorldBooksRetriever(
+                world_books_db_path,
+                db_adapter=chacha_db,
+            )
+        dictionaries_db_path = db_paths.get("chat_dictionaries_db") or character_db_path
+        if dictionaries_db_path:
+            self.retrievers[DataSource.DICTIONARIES] = ChatDictionariesRetriever(
+                dictionaries_db_path,
+                db_adapter=chacha_db,
             )
         if "kanban_db" in db_paths:
             self.retrievers[DataSource.KANBAN] = KanbanDBRetriever(
@@ -3137,6 +3717,7 @@ class MultiDatabaseRetriever:
         sources: Optional[list[DataSource]] = None,
         config: Optional[RetrievalConfig] = None,
         index_namespace: Optional[str] = None,
+        retrieval_plan: Optional[RetrievalPlan] = None,
         # Optional per-source restrictions
         allowed_media_ids: Optional[list[int]] = None,
         allowed_note_ids: Optional[list[str]] = None,
@@ -3153,6 +3734,17 @@ class MultiDatabaseRetriever:
         Returns:
             A list of `Document` objects sorted by score (desc), capped by config.max_results if provided.
         """
+        plan_sources: list[DataSource] = []
+        if retrieval_plan is not None:
+            plan_sources = _normalize_plan_sources(retrieval_plan)
+            if plan_sources:
+                sources = plan_sources
+            config = _config_from_retrieval_plan(config, retrieval_plan)
+            index_namespace = _index_namespace_from_retrieval_plan(
+                retrieval_plan,
+                plan_sources,
+            )
+
         # Normalize the sources list
         ds_list: list[DataSource]
         if sources is None:
@@ -3172,14 +3764,31 @@ class MultiDatabaseRetriever:
         documents: list[Document] = []
         tasks: list[Any] = []
 
+        async def _run_with_config(
+            retriever: BaseRetriever,
+            operation: Any,
+            *args: Any,
+            **kwargs: Any,
+        ) -> Any:
+            if config is None:
+                return await operation(*args, **kwargs)
+            operation_name = getattr(operation, "__name__", None)
+            if isinstance(operation_name, str) and hasattr(retriever, operation_name):
+                call_retriever = copy.copy(retriever)
+                call_retriever.config = config
+                return await getattr(call_retriever, operation_name)(*args, **kwargs)
+            previous_config = getattr(retriever, "config", None)
+            retriever.config = config
+            try:
+                return await operation(*args, **kwargs)
+            finally:
+                retriever.config = previous_config
+
         # Prepare async tasks for each source
         for src in ds_list:
             retr = self.retrievers.get(src)
             if retr is None:
                 continue
-            # Apply per-call config if provided
-            if config is not None:
-                retr.config = config
 
             # Prefer hybrid/vector when requested and available for Media DB
             if (
@@ -3189,7 +3798,9 @@ class MultiDatabaseRetriever:
                 and getattr(config, "use_fts", False)
                 and hasattr(retr, "retrieve_hybrid")
             ):
-                tasks.append(retr.retrieve_hybrid(
+                tasks.append(_run_with_config(
+                    retr,
+                    retr.retrieve_hybrid,
                     query=query,
                     index_namespace=index_namespace,
                     allowed_media_ids=allowed_media_ids,
@@ -3200,7 +3811,9 @@ class MultiDatabaseRetriever:
                 and getattr(config, "use_vector", False)
                 and hasattr(retr, "_retrieve_vector")
             ):
-                tasks.append(retr._retrieve_vector(
+                tasks.append(_run_with_config(
+                    retr,
+                    retr._retrieve_vector,
                     query,
                     index_namespace=index_namespace,
                     allowed_media_ids=allowed_media_ids,
@@ -3211,15 +3824,37 @@ class MultiDatabaseRetriever:
                 and getattr(config, "use_fts", True)
                 and hasattr(retr, "_retrieve_fts")
             ):
-                tasks.append(retr._retrieve_fts(query, allowed_media_ids=allowed_media_ids))
+                tasks.append(_run_with_config(
+                    retr,
+                    retr._retrieve_fts,
+                    query,
+                    allowed_media_ids=allowed_media_ids,
+                ))
             else:
                 # Generic retrieve; pass through allowed IDs where applicable
                 if isinstance(retr, NotesDBRetriever):
-                    tasks.append(retr.retrieve(query, allowed_note_ids=allowed_note_ids))
+                    tasks.append(_run_with_config(
+                        retr,
+                        retr.retrieve,
+                        query,
+                        allowed_note_ids=allowed_note_ids,
+                    ))
                 elif isinstance(retr, MediaDBRetriever):
-                    tasks.append(retr.retrieve(query, allowed_media_ids=allowed_media_ids))
+                    tasks.append(_run_with_config(
+                        retr,
+                        retr.retrieve,
+                        query,
+                        allowed_media_ids=allowed_media_ids,
+                    ))
+                elif isinstance(retr, CharacterCardsRetriever):
+                    tasks.append(_run_with_config(
+                        retr,
+                        retr.retrieve,
+                        query,
+                        include_chats=False,
+                    ))
                 else:
-                    tasks.append(retr.retrieve(query))
+                    tasks.append(_run_with_config(retr, retr.retrieve, query))
 
         # Execute all retrievals concurrently
         if tasks:
@@ -3245,6 +3880,19 @@ class MultiDatabaseRetriever:
             documents = documents[: int(config.max_results)]
 
         return documents
+
+    async def retrieve_from_plan(
+        self,
+        plan: RetrievalPlan,
+        **kwargs: Any,
+    ) -> list[Document]:
+        """Retrieve documents using a normalized retrieval plan."""
+
+        return await self.retrieve(
+            plan.query,
+            retrieval_plan=plan,
+            **kwargs,
+        )
 
     async def retrieve_with_fusion(
         self,

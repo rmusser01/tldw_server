@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 import pytest
 
@@ -45,6 +47,19 @@ def _fixture_pack_path() -> Path:
         / "governance_packs"
         / "minimal_researcher_pack"
     )
+
+
+def _path_from_file_url(file_url: str) -> Path:
+    parsed = urlparse(file_url)
+    if parsed.scheme != "file":
+        return Path(file_url)
+
+    path = unquote(parsed.path)
+    if parsed.netloc:
+        path = f"//{parsed.netloc}{path}"
+    elif os.name == "nt" and len(path) >= 3 and path[0] == "/" and path[2] == ":":
+        path = path[1:]
+    return Path(path)
 
 
 def _init_git_pack_repo(tmp_path: Path, *, subpath: str = "packs/researcher") -> tuple[str, str]:
@@ -237,12 +252,13 @@ async def test_governance_pack_trust_policy_persists_as_deployment_wide_config(
         actor_id=11,
     )
 
-    assert updated["allowed_local_roots"] == ["/srv/packs"]
+    expected_local_roots = [str(Path("/srv/packs").resolve())]
+    assert updated["allowed_local_roots"] == expected_local_roots
     assert updated["allowed_git_ref_kinds"] == ["commit", "tag"]
     assert updated["require_git_signature_verification"] is True
 
     stored = await repo.get_governance_pack_trust_policy()
-    assert stored["policy_document"]["allowed_local_roots"] == ["/srv/packs"]
+    assert stored["policy_document"]["allowed_local_roots"] == expected_local_roots
     assert stored["updated_by"] == 11
 
 
@@ -1367,7 +1383,7 @@ async def test_distribution_service_rejects_git_symlink_subpath_escape(
     )
 
     repo_url, _commit = _init_git_pack_repo(tmp_path)
-    repo_root = Path(repo_url.removeprefix("file://"))
+    repo_root = _path_from_file_url(repo_url)
     link_parent = repo_root / "packs"
     link_parent.mkdir(exist_ok=True)
     (link_parent / "escape").symlink_to("../../outside-pack")

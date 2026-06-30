@@ -5,7 +5,18 @@ import type { MessageInstance } from 'antd/es/message/interface'
 import type { QueryClient } from '@tanstack/react-query'
 import { useQuery } from '@tanstack/react-query'
 import { bgRequest } from '@/services/background-proxy'
+import {
+  listNoteTasks,
+  listTaskActivity,
+  markTaskActivityRead,
+  setNoteTaskStatus,
+  type NoteTask,
+  type NoteTaskActivityEvent,
+  type NoteTaskReconciliationSummary,
+} from '@/services/notes-tasks'
 import { getSetting, setSetting, clearSetting } from '@/services/settings/registry'
+import type { TaskChecklistTogglePayload } from '@/components/Notes/TaskChecklistPreview'
+import { toggleChecklistItemMarker } from '@/components/Notes/task-markdown'
 import {
   LAST_NOTE_ID_SETTING,
   NOTES_RECENT_OPENED_SETTING,
@@ -30,6 +41,7 @@ import type {
   MarkdownToolbarAction,
   NotesTitleSettingsResponse,
   KeywordSyncWarning,
+  SaveRecoveryNotice,
 } from '../notes-manager-types'
 import {
   extractBacklink,
@@ -85,6 +97,9 @@ export interface UseNotesEditorStateDeps {
   editorDisabled: boolean
 }
 
+const noteResourcePath = (id: string | number) =>
+  `/api/v1/notes/${encodeURIComponent(String(id))}`
+
 export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const {
     isOnline,
@@ -117,6 +132,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [loadingDetail, setLoadingDetail] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const [saveIndicator, setSaveIndicator] = React.useState<SaveIndicatorState>('idle')
+  const [saveRecoveryNotice, setSaveRecoveryNotice] =
+    React.useState<SaveRecoveryNotice | null>(null)
   const [originalMetadata, setOriginalMetadata] = React.useState<Record<string, any> | null>(null)
   const [selectedStudioSummary, setSelectedStudioSummary] =
     React.useState<NoteStudioDocumentSummary | null>(null)
@@ -135,7 +152,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [assistLoadingAction, setAssistLoadingAction] = React.useState<NotesAssistAction | null>(null)
   const [editProvenance, setEditProvenance] = React.useState<EditProvenanceState>({ mode: 'manual' })
   const [monitoringNotice, setMonitoringNotice] = React.useState<MonitoringNoticeState | null>(null)
+  const [noteTasks, setNoteTasks] = React.useState<NoteTask[]>([])
+  const [taskReconciliation, setTaskReconciliation] =
+    React.useState<NoteTaskReconciliationSummary | null>(null)
+  const [taskActivityEvents, setTaskActivityEvents] = React.useState<NoteTaskActivityEvent[]>([])
+  const [taskConflictNotice, setTaskConflictNotice] = React.useState<string | null>(null)
   const [recentNotes, setRecentNotes] = React.useState<NotesRecentOpenedEntry[]>([])
+  const recentNotesRef = React.useRef<NotesRecentOpenedEntry[]>([])
   const [pinnedNoteIds, setPinnedNoteIds] = React.useState<string[]>([])
   const [titleSuggestStrategy, setTitleSuggestStrategy] =
     React.useState<NotesTitleSuggestStrategy>('heuristic')
@@ -156,13 +179,16 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   // ---- refs ----
   const autosaveTimeoutRef = React.useRef<number | null>(null)
-  const saveNoteRef = React.useRef<((opts?: { showSuccessMessage?: boolean }) => Promise<void>) | null>(null)
+  const saveNoteRef = React.useRef<((opts?: { showSuccessMessage?: boolean }) => Promise<boolean>) | null>(null)
+  const savingInFlightRef = React.useRef(false)
   const titleInputRef = React.useRef<InputRef | null>(null)
   const contentTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const contentRef = React.useRef('')
   const richEditorRef = React.useRef<HTMLDivElement | null>(null)
   const attachmentInputRef = React.useRef<HTMLInputElement | null>(null)
   const markdownBeforeWysiwygRef = React.useRef<string | null>(null)
   const graphModalReturnFocusRef = React.useRef<HTMLElement | null>(null)
+  contentRef.current = content
 
   // ---- AI assist undo ----
   const contentBeforeAssistRef = React.useRef<string | null>(null)
@@ -188,10 +214,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   }, [])
 
   const markManualEdit = React.useCallback(() => {
+    setSaveRecoveryNotice(null)
     setEditProvenance((current) => (current.mode === 'manual' ? current : { mode: 'manual' }))
   }, [])
 
   const markGeneratedEdit = React.useCallback((action: NotesAssistAction) => {
+    setSaveRecoveryNotice(null)
     setEditProvenance({
       mode: 'generated',
       action,
@@ -338,10 +366,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         provenance?: 'manual' | NotesAssistAction
       }
     ) => {
+      contentRef.current = nextContent
       setContent(nextContent)
       setIsDirty(true)
       setSaveIndicator('dirty')
+      setSaveRecoveryNotice(null)
       setMonitoringNotice(null)
+      setTaskConflictNotice(null)
       if (options?.provenance && options.provenance !== 'manual') {
         markGeneratedEdit(options.provenance)
       } else {
@@ -351,26 +382,98 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     [markGeneratedEdit, markManualEdit]
   )
 
+  const clearTaskState = React.useCallback(() => {
+    setNoteTasks([])
+    setTaskReconciliation(null)
+    setTaskActivityEvents([])
+    setTaskConflictNotice(null)
+  }, [])
+
+  const loadTaskActivityForNote = React.useCallback(async (noteId: string | number) => {
+    try {
+      const response = await listTaskActivity({ note_id: noteId, limit: 50 })
+      const noteIdText = String(noteId)
+      const events = Array.isArray(response.events)
+        ? response.events.filter((event) => String(event.note_id || '') === noteIdText)
+        : []
+      setTaskActivityEvents(events)
+    } catch {
+      setTaskActivityEvents([])
+    }
+  }, [])
+
+  const refreshTaskStateForNote = React.useCallback(async (noteId: string | number) => {
+    try {
+      const response = await listNoteTasks(noteId, { limit: 500 })
+      setNoteTasks(Array.isArray(response.tasks) ? response.tasks : [])
+      setTaskReconciliation(response.reconciliation ?? null)
+    } catch {
+      setNoteTasks([])
+      setTaskReconciliation(null)
+    }
+    await loadTaskActivityForNote(noteId)
+  }, [loadTaskActivityForNote])
+
+  const toggleTaskCheckboxLocal = React.useCallback(
+    (payload: TaskChecklistTogglePayload) => {
+      const currentContent = contentRef.current
+      const nextContent = toggleChecklistItemMarker(
+        currentContent,
+        payload.lineNumber,
+        payload.nextStatus === 'done'
+      )
+      if (nextContent === currentContent) return
+      setContentDirty(nextContent, { provenance: 'manual' })
+    },
+    [setContentDirty]
+  )
+
   // ---- load/reset ----
+  const updateRecentNotes = React.useCallback(
+    (getNext: (current: NotesRecentOpenedEntry[]) => NotesRecentOpenedEntry[]) => {
+      const current = recentNotesRef.current
+      const next = getNext(current)
+      if (next === current) return
+      recentNotesRef.current = next
+      setRecentNotes(next)
+      void setSetting(NOTES_RECENT_OPENED_SETTING, next).catch(() => {
+        // Keep the in-memory recent list even if settings persistence fails.
+      })
+    },
+    []
+  )
+
   const rememberRecentNote = React.useCallback((noteId: string | number, noteTitle: string) => {
     const normalizedId = String(noteId || '').trim()
     const normalizedTitle = String(noteTitle || '').trim()
     if (!normalizedId || !normalizedTitle) return
-    setRecentNotes((current) => {
-      const next = [
+    updateRecentNotes((current) =>
+      [
         { id: normalizedId, title: normalizedTitle },
         ...current.filter((entry) => entry.id !== normalizedId)
       ].slice(0, 5)
-      void setSetting(NOTES_RECENT_OPENED_SETTING, next)
+    )
+  }, [updateRecentNotes])
+
+  const removeRecentNotes = React.useCallback((noteIds: Array<string | number>) => {
+    const removedIds = new Set(
+      noteIds
+        .map((noteId) => String(noteId || '').trim())
+        .filter(Boolean)
+    )
+    if (removedIds.size === 0) return
+    updateRecentNotes((current) => {
+      const next = current.filter((entry) => !removedIds.has(String(entry.id)))
+      if (next.length === current.length) return current
       return next
     })
-  }, [])
+  }, [updateRecentNotes])
 
   const loadDetail = React.useCallback(async (id: string | number): Promise<boolean> => {
     clearAssistUndoState()
     setLoadingDetail(true)
     try {
-      const d = await bgRequest<any>({ path: `/api/v1/notes/${id}` as any, method: 'GET' as any })
+      const d = await bgRequest<any>({ path: noteResourcePath(id) as any, method: 'GET' as any })
       const loadedTitle = String(d?.title || `Note ${id}`)
       setSelectedId(id)
       setTitle(String(d?.title || ''))
@@ -393,8 +496,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setBacklinkMessageId(links.message_id)
       setIsDirty(false)
       setSaveIndicator('idle')
+      setSaveRecoveryNotice(null)
       setEditProvenance({ mode: 'manual' })
       setMonitoringNotice(null)
+      clearTaskState()
       setRemoteVersionInfo(null)
       setEditorCursorIndex(0)
       setWysiwygHtml(markdownToWysiwygHtml(String(d?.content || '')))
@@ -405,12 +510,31 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (queuedDraft) {
         applyOfflineDraftToEditor(queuedDraft)
       }
+      await refreshTaskStateForNote(id)
       return true
     } catch {
       message.error('Failed to load note')
       return false
     } finally { setLoadingDetail(false) }
-  }, [applyOfflineDraftToEditor, clearAssistUndoState, message, rememberRecentNote, setEditorKeywords])
+  }, [applyOfflineDraftToEditor, clearAssistUndoState, clearTaskState, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords])
+
+  const dismissTaskActivity = React.useCallback(async (eventId: string) => {
+    const normalizedEventId = String(eventId || '').trim()
+    if (!normalizedEventId) return
+    try {
+      await markTaskActivityRead(normalizedEventId, { dismissed: true })
+    } catch {
+      // Non-critical notice state. Keep the UI moving if the server already marked it.
+    }
+    setTaskActivityEvents((current) =>
+      current.filter((event) => String(event.id) !== normalizedEventId)
+    )
+  }, [])
+
+  const inspectTaskActivity = React.useCallback(() => {
+    if (selectedId == null) return
+    void refreshTaskStateForNote(selectedId)
+  }, [refreshTaskStateForNote, selectedId])
 
   const resetEditor = React.useCallback(() => {
     clearAssistUndoState()
@@ -426,63 +550,70 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setBacklinkMessageId(null)
     setIsDirty(false)
     setSaveIndicator('idle')
+    setSaveRecoveryNotice(null)
     setEditProvenance({ mode: 'manual' })
     setMonitoringNotice(null)
+    clearTaskState()
     setRemoteVersionInfo(null)
     setEditorCursorIndex(null)
     setWysiwygHtml('<p><br/></p>')
     setWysiwygSessionDirty(false)
     markdownBeforeWysiwygRef.current = null
-  }, [clearAssistUndoState, setEditorKeywords])
+  }, [clearAssistUndoState, clearTaskState, setEditorKeywords])
 
   const confirmDiscardIfDirty = React.useCallback(async () => {
     if (!isDirty) return true
     if (!saving && (content.trim() || title.trim()) && saveNoteRef.current) {
       try {
-        await saveNoteRef.current({ showSuccessMessage: false })
-        return true
+        const saved = await saveNoteRef.current({ showSuccessMessage: false })
+        if (saved) return true
       } catch {
-        // Save failed — show 3-button dialog: retry / discard / cancel
-        const retryResult = await new Promise<'saved' | 'discard' | 'cancel'>((resolve) => {
-          const modalRef = Modal.confirm({
-            title: t('option:notesSearch.unsavedChangesTitle', { defaultValue: 'Save changes?' }),
-            content: t('option:notesSearch.unsavedChangesContent', {
-              defaultValue: 'Auto-save could not reach the server. You can try saving again or discard your changes.'
-            }),
-            okText: t('option:notesSearch.retrySave', { defaultValue: 'Try saving again' }),
-            cancelText: t('common:cancel', { defaultValue: 'Cancel' }),
-            okButtonProps: { type: 'primary' },
-            onOk: async () => {
-              try {
-                if (saveNoteRef.current) {
-                  await saveNoteRef.current({ showSuccessMessage: true })
-                }
-                resolve('saved')
-              } catch {
-                // Save still failed — stay on current note
-                resolve('cancel')
-              }
-            },
-            onCancel: () => resolve('cancel'),
-            footer: (_, { OkBtn, CancelBtn }) => (
-              <>
-                <CancelBtn />
-                <Button
-                  danger
-                  onClick={() => {
-                    modalRef.destroy()
-                    resolve('discard')
-                  }}
-                >
-                  {t('option:notesSearch.discardChanges', { defaultValue: 'Discard changes' })}
-                </Button>
-                <OkBtn />
-              </>
-            ),
-          })
-        })
-        return retryResult === 'saved' || retryResult === 'discard'
+        // Fall through to the retry/discard/cancel dialog below.
       }
+      // Save failed — show 3-button dialog: retry / discard / cancel
+      const retryResult = await new Promise<'saved' | 'discard' | 'cancel'>((resolve) => {
+        const modalRef = Modal.confirm({
+          title: t('option:notesSearch.unsavedChangesTitle', { defaultValue: 'Save changes?' }),
+          content: t('option:notesSearch.unsavedChangesContent', {
+            defaultValue: 'Auto-save could not reach the server. You can try saving again or discard your changes.'
+          }),
+          okText: t('option:notesSearch.retrySave', { defaultValue: 'Try saving again' }),
+          cancelText: t('common:cancel', { defaultValue: 'Cancel' }),
+          okButtonProps: { type: 'primary' },
+          onOk: async () => {
+            try {
+              if (saveNoteRef.current) {
+                const saved = await saveNoteRef.current({ showSuccessMessage: true })
+                if (!saved) {
+                  resolve('cancel')
+                  return
+                }
+              }
+              resolve('saved')
+            } catch {
+              // Save still failed — stay on current note
+              resolve('cancel')
+            }
+          },
+          onCancel: () => resolve('cancel'),
+          footer: (_, { OkBtn, CancelBtn }) => (
+            <>
+              <CancelBtn />
+              <Button
+                danger
+                onClick={() => {
+                  modalRef.destroy()
+                  resolve('discard')
+                }}
+              >
+                {t('option:notesSearch.discardChanges', { defaultValue: 'Discard changes' })}
+              </Button>
+              <OkBtn />
+            </>
+          ),
+        })
+      })
+      return retryResult === 'saved' || retryResult === 'discard'
     }
     // Fallback for edge cases (empty content or save in progress)
     const ok = await confirmDanger({
@@ -546,7 +677,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     const target = noteId ?? selectedId
     if (target == null) return
     try {
-      const detail = await bgRequest<any>({ path: `/api/v1/notes/${target}` as any, method: 'GET' as any })
+      const detail = await bgRequest<any>({ path: noteResourcePath(target) as any, method: 'GET' as any })
       const version = toNoteVersion(detail)
       if (version != null) setSelectedVersion(version)
       setSelectedLastSavedAt(toNoteLastModified(detail))
@@ -555,6 +686,30 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       // Ignore refresh errors for reload action
     }
   }, [refetch, selectedId])
+
+  const reloadSelectedNoteAfterConflict = React.useCallback(async () => {
+    if (selectedId == null) return
+    const ok = await confirmDanger({
+      title: t('option:notesSearch.reloadConflictTitle', {
+        defaultValue: 'Reload server version?'
+      }),
+      content: t('option:notesSearch.reloadConflictContent', {
+        defaultValue:
+          'Reloading replaces the current editor contents with the server version. Your unsaved local edits will be discarded.'
+      }),
+      okText: t('option:notesSearch.reloadConflictAction', {
+        defaultValue: 'Reload server version'
+      }),
+      cancelText: t('option:notesSearch.keepEditingAction', {
+        defaultValue: 'Keep editing'
+      })
+    })
+    if (!ok) return
+    const loaded = await loadDetail(selectedId)
+    if (loaded) {
+      setSaveRecoveryNotice(null)
+    }
+  }, [confirmDanger, loadDetail, selectedId, t])
 
   const handleVersionConflict = React.useCallback((noteId?: string | number | null) => {
     message.error({
@@ -586,6 +741,59 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       duration: 6
     })
   }, [message, reloadNotes])
+
+  const toggleTaskCheckboxStatus = React.useCallback(
+    async (payload: TaskChecklistTogglePayload) => {
+      const task = payload.task
+      if (!task || selectedId == null) {
+        toggleTaskCheckboxLocal(payload)
+        return
+      }
+      const expectedNoteVersion = selectedVersion ?? task.projection?.note_version ?? null
+      if (expectedNoteVersion == null) {
+        setTaskConflictNotice(
+          t('option:notesSearch_taskConflictNotice', {
+            defaultValue: 'Task changed on the server. Reload the note and try again.'
+          })
+        )
+        return
+      }
+
+      try {
+        await setNoteTaskStatus([
+          {
+            task_id: task.id,
+            status: payload.nextStatus,
+            expected_task_version: task.version,
+            expected_note_version: expectedNoteVersion
+          }
+        ])
+        setTaskConflictNotice(null)
+        await loadDetail(selectedId)
+      } catch (error: any) {
+        setTaskConflictNotice(
+          t('option:notesSearch_taskConflictNotice', {
+            defaultValue: 'Task changed on the server. Reload the note and try again.'
+          })
+        )
+        if (isVersionConflictError(error)) {
+          handleVersionConflict(selectedId)
+        } else {
+          message.error(String(error?.message || '') || 'Task update failed')
+        }
+      }
+    },
+    [
+      handleVersionConflict,
+      isVersionConflictError,
+      loadDetail,
+      message,
+      selectedId,
+      selectedVersion,
+      t,
+      toggleTaskCheckboxLocal
+    ]
+  )
 
   // ---- monitoring ----
   const loadMonitoringNoticeForSavedNote = React.useCallback(
@@ -669,13 +877,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   // ---- save note ----
   const saveNote = React.useCallback(
     async ({ showSuccessMessage = true }: SaveNoteOptions = {}) => {
-      if (saving) return
+      if (saving || savingInFlightRef.current) return false
       if (!content.trim() && !title.trim()) {
         if (showSuccessMessage) {
           message.warning('Nothing to save')
         }
         setSaveIndicator('idle')
-        return
+        return false
       }
       if (!isOnline) {
         const queuedAt = new Date().toISOString()
@@ -685,8 +893,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           updatedAt: queuedAt
         })
         setIsDirty(false)
-        setSaveIndicator('saved')
-        setSelectedLastSavedAt(queuedAt)
+        setSaveIndicator('idle')
+        setSaveRecoveryNotice(null)
         if (showSuccessMessage) {
           message.info(
             t('option:notesSearch.offlineSavedLocally', {
@@ -694,7 +902,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             })
           )
         }
-        return
+        return true
       }
       if (
         selectedId != null &&
@@ -711,11 +919,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           cancelText: 'Cancel'
         })
         if (!proceed) {
-          return
+          return false
         }
       }
+      savingInFlightRef.current = true
       setSaving(true)
       setSaveIndicator('saving')
+      setSaveRecoveryNotice(null)
       setMonitoringNotice(null)
       const saveStartedAtMs = Date.now()
       try {
@@ -751,45 +961,64 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           }
           setIsDirty(false)
           setSaveIndicator('saved')
+          setSaveRecoveryNotice(null)
           setRemoteVersionInfo(null)
           removeOfflineDraftByKey(currentOfflineDraftKey)
           if (createdVersion != null) setSelectedVersion(createdVersion)
           if (createdLastSaved) setSelectedLastSavedAt(createdLastSaved)
           await refetch()
           if (created?.id != null) {
-            await loadDetail(created.id)
+            const loaded = await loadDetail(created.id)
+            if (loaded) {
+              setSaveIndicator('saved')
+              if (createdLastSaved) setSelectedLastSavedAt(createdLastSaved)
+            }
             void loadMonitoringNoticeForSavedNote(created.id, 'notes.create', saveStartedAtMs)
           }
+          return true
         } else {
           let expectedVersion = selectedVersion
           if (expectedVersion == null) {
             try {
               const latest = await bgRequest<any>({
-                path: `/api/v1/notes/${selectedId}` as any,
+                path: noteResourcePath(selectedId) as any,
                 method: 'GET' as any
               })
               expectedVersion = toNoteVersion(latest)
             } catch (e: any) {
               setSaveIndicator('error')
+              setSaveRecoveryNotice({
+                kind: 'error',
+                message: t('option:notesSearch.saveErrorRecovery', {
+                  defaultValue: 'Save failed. Your edits are still in the editor.'
+                })
+              })
               if (showSuccessMessage) {
                 message.error(e?.message || 'Save failed')
               }
-              return
+              return false
             }
           }
           if (expectedVersion == null) {
             setSaveIndicator('error')
+            setSaveRecoveryNotice({
+              kind: 'error',
+              message: t('option:notesSearch.saveErrorRecovery', {
+                defaultValue: 'Save failed. Your edits are still in the editor.'
+              })
+            })
             if (showSuccessMessage) {
               message.error('Missing version; reload and try again')
             }
-            return
+            return false
           }
           const updated = await bgRequest<any>({
-            path: `/api/v1/notes/${selectedId}?expected_version=${encodeURIComponent(
-              String(expectedVersion)
-            )}` as any,
+            path: noteResourcePath(selectedId) as any,
             method: 'PUT' as any,
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'expected-version': String(expectedVersion)
+            },
             body: payload
           })
           const updatedKeywordWarning = toKeywordSyncWarning(updated)
@@ -803,6 +1032,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           }
           setIsDirty(false)
           setSaveIndicator('saved')
+          setSaveRecoveryNotice(null)
           setRemoteVersionInfo(null)
           removeOfflineDraftByKey(currentOfflineDraftKey)
           await refetch()
@@ -811,7 +1041,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           } else if (selectedId != null) {
             try {
               const latest = await bgRequest<any>({
-                path: `/api/v1/notes/${selectedId}` as any,
+                path: noteResourcePath(selectedId) as any,
                 method: 'GET' as any
               })
               setSelectedVersion(toNoteVersion(latest))
@@ -825,19 +1055,43 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             setSelectedLastSavedAt(new Date().toISOString())
           }
           if (selectedId != null) {
+            await refreshTaskStateForNote(selectedId)
             void loadMonitoringNoticeForSavedNote(selectedId, 'notes.update', saveStartedAtMs)
           }
+          return true
         }
       } catch (e: any) {
         setSaveIndicator('error')
         if (isVersionConflictError(e)) {
+          setSaveRecoveryNotice({
+            kind: 'conflict',
+            message: t('option:notesSearch.saveConflictRecovery', {
+              defaultValue:
+                'Save conflict: this note changed on the server. Your local edits are still in the editor.'
+            })
+          })
           if (showSuccessMessage) {
             handleVersionConflict(selectedId)
           }
         } else if (showSuccessMessage) {
+          setSaveRecoveryNotice({
+            kind: 'error',
+            message: t('option:notesSearch.saveErrorRecovery', {
+              defaultValue: 'Save failed. Your edits are still in the editor.'
+            })
+          })
           message.error(String(e?.message || '') || 'Operation failed')
+        } else {
+          setSaveRecoveryNotice({
+            kind: 'error',
+            message: t('option:notesSearch.saveErrorRecovery', {
+              defaultValue: 'Save failed. Your edits are still in the editor.'
+            })
+          })
         }
+        return false
       } finally {
+        savingInFlightRef.current = false
         setSaving(false)
       }
     },
@@ -857,6 +1111,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       currentOfflineDraftKey,
       refetch,
       removeOfflineDraftByKey,
+      refreshTaskStateForNote,
       remoteVersionInfo,
       saving,
       selectedId,
@@ -914,9 +1169,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           }
         }
 
-        const encodedId = encodeURIComponent(String(draft.noteId))
+        const draftNotePath = noteResourcePath(draft.noteId)
         const remote = await bgRequest<any>({
-          path: `/api/v1/notes/${encodedId}` as any,
+          path: draftNotePath as any,
           method: 'GET' as any
         })
         const remoteVersion = toNoteVersion(remote)
@@ -941,11 +1196,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
 
         const updated = await bgRequest<any>({
-          path: `/api/v1/notes/${encodedId}?expected_version=${encodeURIComponent(
-            String(expectedVersion)
-          )}` as any,
+          path: draftNotePath as any,
           method: 'PUT' as any,
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'expected-version': String(expectedVersion)
+          },
           body: payload
         })
 
@@ -1197,6 +1453,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setTitle(suggested)
       setIsDirty(true)
       setSaveIndicator('dirty')
+      setSaveRecoveryNotice(null)
       setMonitoringNotice(null)
     } catch (error: any) {
       message.error(String(error?.message || 'Could not generate title'))
@@ -1455,7 +1712,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (saving) return
     try {
       const detail = await bgRequest<any>({
-        path: `/api/v1/notes/${selectedId}` as any,
+        path: noteResourcePath(selectedId) as any,
         method: 'GET' as any
       })
       const remoteVersion = toNoteVersion(detail)
@@ -1599,6 +1856,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const savedRecent = await getSetting(NOTES_RECENT_OPENED_SETTING)
       if (cancelled) return
       if (!Array.isArray(savedRecent)) return
+      recentNotesRef.current = savedRecent
       setRecentNotes(savedRecent)
     })()
     return () => {
@@ -1652,7 +1910,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     }
     if (currentOfflineDraft?.syncState === 'conflict') {
       return t('option:notesSearch.offlineConflictStatus', {
-        defaultValue: 'Offline sync conflict: server has a newer version.'
+        defaultValue:
+          'Offline sync conflict: server has a newer version. Your local draft is still saved; copy it before reloading.'
       })
     }
     if (currentOfflineDraft?.syncState === 'error') {
@@ -1677,6 +1936,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       return t('option:notesSearch.autosaveFailed', {
         defaultValue: 'Could not save — check your connection and try again.'
       })
+    }
+    if (isDirty || saveIndicator === 'dirty') {
+      return t('option:notesSearch.saveStatusDirty', { defaultValue: 'Unsaved changes' })
     }
     if (saveIndicator === 'saved' && !isDirty) {
       return t('option:notesSearch.saved', { defaultValue: 'All changes saved' })
@@ -1757,6 +2019,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     loadingDetail,
     saving,
     saveIndicator, setSaveIndicator,
+    saveRecoveryNotice,
     originalMetadata,
     selectedStudioSummary,
     selectedVersion,
@@ -1775,6 +2038,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     canUndoAssist,
     editProvenance,
     monitoringNotice, setMonitoringNotice,
+    noteTasks,
+    taskReconciliation,
+    taskActivityEvents,
+    taskConflictNotice,
     recentNotes,
     pinnedNoteIds, pinnedNoteIdSet,
     titleSuggestStrategy, setTitleSuggestStrategy,
@@ -1815,12 +2082,19 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setContentDirty,
     resizeEditorTextarea,
     loadDetail,
+    refreshTaskStateForNote,
+    toggleTaskCheckboxLocal,
+    toggleTaskCheckboxStatus,
+    dismissTaskActivity,
+    inspectTaskActivity,
     resetEditor,
+    removeRecentNotes,
     confirmDiscardIfDirty,
     switchListMode,
     handleSelectNote,
     saveNote,
     reloadNotes,
+    reloadSelectedNoteAfterConflict,
     suggestTitle,
     runAssistAction,
     undoAssist,
@@ -1840,7 +2114,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
         try {
           const detail = await bgRequest<any>({
-            path: `/api/v1/notes/${encodeURIComponent(noteId)}` as any,
+            path: noteResourcePath(noteId) as any,
             method: 'GET' as any
           })
           return toNoteVersion(detail)

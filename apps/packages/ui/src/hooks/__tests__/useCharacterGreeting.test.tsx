@@ -114,6 +114,7 @@ describe("useCharacterGreeting", () => {
       useCharacterGreeting({
         playgroundReady: true,
         selectedCharacter,
+        selectedCharacterMode: null,
         serverChatId: null,
         historyId: "history-1",
         messagesLength: messageState.length,
@@ -179,6 +180,7 @@ describe("useCharacterGreeting", () => {
       useCharacterGreeting({
         playgroundReady: true,
         selectedCharacter: initialCharacter,
+        selectedCharacterMode: null,
         serverChatId: null,
         historyId: "history-1",
         messagesLength: messageState.length,
@@ -238,6 +240,7 @@ describe("useCharacterGreeting", () => {
       useCharacterGreeting({
         playgroundReady: true,
         selectedCharacter,
+        selectedCharacterMode: null,
         serverChatId: null,
         historyId: "history-legacy-selection",
         messagesLength: messageState.length,
@@ -276,6 +279,7 @@ describe("useCharacterGreeting", () => {
       useCharacterGreeting({
         playgroundReady: true,
         selectedCharacter,
+        selectedCharacterMode: null,
         serverChatId: "srv-chat-1",
         historyId: "history-server",
         messagesLength: messageState.length,
@@ -292,6 +296,84 @@ describe("useCharacterGreeting", () => {
     expect(historyState).toHaveLength(0)
   })
 
+  it("does not inject tracked greetings for overlay character selections", async () => {
+    const selectedCharacter = {
+      id: "char-overlay",
+      name: "Overlay Guide",
+      greeting: "Overlay greeting"
+    } as Character
+    let messageState: Message[] = []
+    let historyState: ChatHistory = []
+    const setMessages = vi.fn(
+      (next: Message[] | ((prev: Message[]) => Message[])) => {
+        messageState = applyMessageUpdate(messageState, next)
+      }
+    )
+    const setHistory = vi.fn(
+      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
+        historyState = applyHistoryUpdate(historyState, next)
+      }
+    )
+    const setSelectedCharacter = vi.fn()
+
+    renderHook(() =>
+      useCharacterGreeting({
+        playgroundReady: true,
+        selectedCharacter,
+        selectedCharacterMode: "overlay",
+        serverChatId: null,
+        historyId: "history-overlay",
+        messagesLength: messageState.length,
+        setMessages,
+        setHistory,
+        setSelectedCharacter
+      })
+    )
+
+    await waitFor(() => {
+      expect(setMessages).not.toHaveBeenCalled()
+      expect(setHistory).not.toHaveBeenCalled()
+    })
+    expect(messageState).toHaveLength(0)
+    expect(historyState).toHaveLength(0)
+    expect(mocks.getCharacter).not.toHaveBeenCalled()
+  })
+
+  it("does not hydrate selected character from legacy storage while overlay mode is active", async () => {
+    mocks.selectedCharacterStorageGet.mockResolvedValue({
+      id: "char-stale",
+      name: "Stale Guide",
+      greeting: "Old greeting"
+    })
+    const selectedCharacter = {
+      id: "char-overlay",
+      name: "Overlay Guide",
+      greeting: "Overlay greeting"
+    } as Character
+    const setMessages = vi.fn()
+    const setHistory = vi.fn()
+    const setSelectedCharacter = vi.fn()
+
+    renderHook(() =>
+      useCharacterGreeting({
+        playgroundReady: true,
+        selectedCharacter,
+        selectedCharacterMode: "overlay",
+        serverChatId: null,
+        historyId: "history-overlay-storage",
+        messagesLength: 0,
+        setMessages,
+        setHistory,
+        setSelectedCharacter
+      })
+    )
+
+    await waitFor(() => {
+      expect(setSelectedCharacter).not.toHaveBeenCalled()
+    })
+    expect(mocks.selectedCharacterStorageGet).not.toHaveBeenCalled()
+  })
+
   it("does not sync selected character from storage during server chat load", async () => {
     mocks.selectedCharacterStorageGet.mockResolvedValue({
       id: "char-stale",
@@ -306,6 +388,7 @@ describe("useCharacterGreeting", () => {
       useCharacterGreeting({
         playgroundReady: true,
         selectedCharacter: null,
+        selectedCharacterMode: null,
         serverChatId: "srv-chat-2",
         historyId: "history-server",
         messagesLength: 0,
@@ -359,6 +442,7 @@ describe("useCharacterGreeting", () => {
         useCharacterGreeting({
           playgroundReady: true,
           selectedCharacter: currentCharacter,
+          selectedCharacterMode: null,
           serverChatId: null,
           historyId: "history-loop",
           messagesLength: messageState.length,
@@ -383,8 +467,161 @@ describe("useCharacterGreeting", () => {
     await Promise.resolve()
     await Promise.resolve()
 
+    rerender({ currentCharacter: { ...selectedCharacter } })
+    await Promise.resolve()
+    await Promise.resolve()
+
     expect(mocks.getCharacter).toHaveBeenCalledTimes(1)
     expect(messageState[0]?.message).toBeTruthy()
     expect(historyState[0]?.content).toBeTruthy()
+  })
+
+  it("does not rewrite an already injected greeting when the same character is rehydrated", async () => {
+    const selectedCharacter = {
+      id: "char-stable",
+      name: "Stable Guide",
+      greeting: "Hello again",
+      alternateGreetings: ["Welcome back"]
+    } as Character
+    const greetingOptions = buildGreetingOptionsFromEntries(
+      collectGreetingEntries(selectedCharacter)
+    )
+    const selectedGreeting = greetingOptions[0]
+    if (!selectedGreeting) {
+      throw new Error("Test setup failed: missing greeting option")
+    }
+    mocks.settings = {
+      greetingEnabled: true,
+      greetingSelectionId: selectedGreeting.id,
+      greetingsChecksum: buildGreetingsChecksumFromOptions(greetingOptions),
+      useCharacterDefault: false
+    }
+
+    let messageState: Message[] = []
+    let historyState: ChatHistory = []
+    const setMessages = vi.fn(
+      (next: Message[] | ((prev: Message[]) => Message[])) => {
+        messageState = applyMessageUpdate(messageState, next)
+      }
+    )
+    const setHistory = vi.fn(
+      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
+        historyState = applyHistoryUpdate(historyState, next)
+      }
+    )
+    const setSelectedCharacter = vi.fn()
+
+    const { rerender } = renderHook(
+      ({ currentCharacter }: { currentCharacter: Character | null }) =>
+        useCharacterGreeting({
+          playgroundReady: true,
+          selectedCharacter: currentCharacter,
+          selectedCharacterMode: null,
+          serverChatId: null,
+          historyId: "history-stable",
+          messagesLength: messageState.length,
+          setMessages,
+          setHistory,
+          setSelectedCharacter
+        }),
+      {
+        initialProps: {
+          currentCharacter: selectedCharacter
+        }
+      }
+    )
+
+    await waitFor(() => {
+      expect(messageState[0]?.message).toBe(selectedGreeting.text)
+    })
+    const messageWrites = setMessages.mock.calls.length
+    const historyWrites = setHistory.mock.calls.length
+
+    rerender({ currentCharacter: { ...selectedCharacter } })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(setMessages).toHaveBeenCalledTimes(messageWrites)
+    expect(setHistory).toHaveBeenCalledTimes(historyWrites)
+  })
+
+  it("refreshes an injected greeting when the same character gains a new name or avatar", async () => {
+    const selectedCharacter = {
+      id: "char-hydrated-greeting",
+      name: "Draft Guide",
+      greeting: "Hello there"
+    } as Character
+    const hydratedCharacter = {
+      ...selectedCharacter,
+      name: "Hydrated Guide",
+      avatar_url: "https://example.com/hydrated.png"
+    } as Character
+
+    mocks.settings = {
+      greetingEnabled: true,
+      greetingSelectionId: null,
+      greetingsChecksum: null,
+      useCharacterDefault: true
+    }
+
+    let messageState: Message[] = []
+    let historyState: ChatHistory = []
+    const setMessages = vi.fn(
+      (next: Message[] | ((prev: Message[]) => Message[])) => {
+        messageState = applyMessageUpdate(messageState, next)
+      }
+    )
+    const setHistory = vi.fn(
+      (next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
+        historyState = applyHistoryUpdate(historyState, next)
+      }
+    )
+    const setSelectedCharacter = vi.fn()
+
+    const { rerender } = renderHook(
+      ({
+        character,
+        messagesLength
+      }: {
+        character: Character
+        messagesLength: number
+      }) =>
+        useCharacterGreeting({
+          playgroundReady: true,
+          selectedCharacter: character,
+          selectedCharacterMode: null,
+          serverChatId: null,
+          historyId: "history-hydrated-greeting",
+          messagesLength,
+          setMessages,
+          setHistory,
+          setSelectedCharacter
+        }),
+      {
+        initialProps: {
+          character: selectedCharacter,
+          messagesLength: 0
+        }
+      }
+    )
+
+    await waitFor(() => {
+      expect(messageState[0]?.name).toBe("Draft Guide")
+      expect(messageState[0]?.message).toBe("Hello there")
+    })
+
+    rerender({
+      character: hydratedCharacter,
+      messagesLength: messageState.length
+    })
+
+    await waitFor(() => {
+      expect(messageState[0]?.name).toBe("Hydrated Guide")
+      expect(messageState[0]?.modelName).toBe("Hydrated Guide")
+      expect(messageState[0]?.modelImage).toBe(
+        "https://example.com/hydrated.png"
+      )
+    })
+    expect(historyState[0]?.content).toBe("Hello there")
   })
 })

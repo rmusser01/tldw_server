@@ -84,6 +84,10 @@ async def test_unified_pipeline_two_tier_gates_generation(monkeypatch):
             gate = res.metadata.get("generation_gate")
             assert isinstance(gate, dict)
             assert gate.get("reason") == "low_relevance_probability"
+            plan = res.metadata.get("retrieval_plan")
+            assert isinstance(plan, dict)
+            assert plan.get("query") == "What is RAG?"
+            assert plan.get("top_k") == 2
 
 
 @pytest.mark.asyncio
@@ -126,6 +130,10 @@ async def test_unified_pipeline_two_tier_request_overrides_gate(monkeypatch):
             gate = res.metadata.get("generation_gate")
             assert isinstance(gate, dict)
             assert gate.get("reason") == "low_relevance_probability"
+            plan = res.metadata.get("retrieval_plan")
+            assert isinstance(plan, dict)
+            assert plan.get("query") == "What is RAG?"
+            assert plan.get("top_k") == 2
 
 
         def _fake_create(strategy, cfg, llm_client=None):

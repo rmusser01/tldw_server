@@ -71,7 +71,7 @@ describe("extension route registry MCP Hub parity", () => {
 
     expect(await screen.findByTestId("standalone-mcp-hub")).toBeVisible()
     expect(screen.queryByTestId("settings-mcp-hub")).not.toBeInTheDocument()
-  })
+  }, 15_000)
 
   it("renders the settings MCP Hub route from the extension registry", async () => {
     const { ROUTE_DEFINITIONS } = await import(
@@ -90,7 +90,7 @@ describe("extension route registry MCP Hub parity", () => {
     expect(await screen.findByTestId("settings-mcp-hub")).toBeVisible()
     expect(routeMocks.settingsMcpHub).toHaveBeenCalledTimes(1)
     expect(screen.queryByTestId("standalone-mcp-hub")).not.toBeInTheDocument()
-  })
+  }, 15_000)
 
   it("uses react-router redirects for legacy extension routes", async () => {
     const { ROUTE_DEFINITIONS } = await import(

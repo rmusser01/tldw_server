@@ -14,7 +14,8 @@ import {
   test,
   expect,
   skipIfServerUnavailable,
-  assertNoCriticalErrors
+  assertNoCriticalErrors,
+  type ServerInfo
 } from "../utils/fixtures"
 import {
   seedAuth,
@@ -22,13 +23,65 @@ import {
   TEST_CONFIG,
   generateTestId
 } from "../utils/helpers"
-import { ResearchWorkspacePage } from "../utils/page-objects/ResearchWorkspacePage"
+import {
+  ResearchWorkspacePage,
+  startResearchWorkspaceUatDiagnostics
+} from "../utils/page-objects/ResearchWorkspacePage"
 import { QuizPage } from "../utils/page-objects/QuizPage"
 import { FlashcardsPage } from "../utils/page-objects/FlashcardsPage"
 
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 }
 const CHAT_BOOTSTRAP_ENDPOINT =
   /\/api\/v1\/(?:chats(?:\/|\?|$)|chat\/conversations(?:\/|\?|$))/i
+const REQUIRE_SANDBOX_WORKSPACE_RUN =
+  process.env.TLDW_E2E_REQUIRE_SANDBOX_WORKSPACE_RUN === "1"
+const EXPECTED_SANDBOX_RUN_PHASE =
+  process.env.TLDW_E2E_EXPECT_SANDBOX_RUN_PHASE?.trim() || ""
+
+const requireRealBackendChatModel = (
+  serverInfo: ServerInfo
+): string => {
+  const modelId = serverInfo.models?.[0]?.trim() || ""
+  test.skip(
+    modelId.length === 0,
+    "Skipping live generation workflow: server did not advertise a runnable chat model"
+  )
+  return modelId
+}
+
+const selectRealBackendChatModel = async (
+  page: Page,
+  modelId: string
+): Promise<void> => {
+  const separatorIndex = modelId.indexOf(":")
+  const provider = separatorIndex > 0 ? modelId.slice(0, separatorIndex) : ""
+  const selectedModel =
+    provider === "llama.cpp" ? modelId.slice(separatorIndex + 1) : modelId
+
+  await page.evaluate(({ selectedModel, provider }) => {
+    const store = (window as { __tldw_useStoreMessageOption?: unknown })
+      .__tldw_useStoreMessageOption as
+      | {
+          setState?: (nextState: Record<string, unknown>) => void
+        }
+      | undefined
+    if (!store?.setState) {
+      throw new Error("Message option store is unavailable on window")
+    }
+    store.setState({ selectedModel })
+
+    if (provider) {
+      const modelSettingsStore = (window as {
+        __tldw_useStoreChatModelSettings?: unknown
+      }).__tldw_useStoreChatModelSettings as
+        | {
+            setState?: (nextState: Record<string, unknown>) => void
+          }
+        | undefined
+      modelSettingsStore?.setState?.({ apiProvider: provider })
+    }
+  }, { selectedModel, provider })
+}
 
 type BootstrapResponse = {
   url: string
@@ -111,6 +164,72 @@ const canReachChatBootstrapEndpoint = async (): Promise<{
       reachable: false,
       reason:
         error instanceof Error ? error.message : "GET /api/v1/chats preflight failed"
+    }
+  }
+}
+
+const tryCreateWorkspaceSandboxRun = async (
+  workspaceId: string
+): Promise<{
+  created: boolean
+  reason?: string
+  run?: {
+    id: string
+    phase?: string | null
+    workspace_id?: string | null
+  }
+}> => {
+  const idempotencyKey = generateTestId("research-workspace-sandbox-run")
+  const response = await fetchWithApiKey(
+    `${TEST_CONFIG.serverUrl.replace(/\/$/, "")}/api/v1/sandbox/runs`,
+    TEST_CONFIG.apiKey,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey
+      },
+      body: JSON.stringify({
+        spec_version: "1.0",
+        runtime: "docker",
+        base_image: "python:3.11-slim",
+        command: ["python", "-c", "print('research workspace sandbox run')"],
+        timeout_sec: 5,
+        workspace_id: workspaceId,
+        workspace_group_id: "research-workspace",
+        scope_snapshot_id: idempotencyKey
+      })
+    }
+  )
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "")
+    return {
+      created: false,
+      reason: `POST /api/v1/sandbox/runs returned HTTP ${response.status}${
+        text ? `: ${text.slice(0, 240)}` : ""
+      }`
+    }
+  }
+
+  const run = (await response.json()) as {
+    id?: string
+    phase?: string | null
+    workspace_id?: string | null
+  }
+  if (!run.id) {
+    return {
+      created: false,
+      reason: "POST /api/v1/sandbox/runs succeeded without returning a run id"
+    }
+  }
+
+  return {
+    created: true,
+    run: {
+      id: run.id,
+      phase: run.phase ?? null,
+      workspace_id: run.workspace_id ?? null
     }
   }
 }
@@ -232,7 +351,7 @@ const seedLiveWorkspaceDocument = async (
   body.append("media_type", "document")
   body.append("title", title)
   body.append("perform_analysis", "false")
-  body.append("perform_chunking", "false")
+  body.append("perform_chunking", "true")
   body.append("files", new Blob([content], { type: "text/plain" }), fileName)
 
   const response = await fetchWithApiKey(
@@ -425,23 +544,6 @@ const listFlashcardRecords = async (
   return await fetchJsonWithApiKey<FlashcardListResponse>(`/api/v1/flashcards${suffix}`)
 }
 
-const waitForGeneratedArtifactRecord = async (
-  workspacePage: ResearchWorkspacePage,
-  artifactType: "quiz" | "flashcards"
-) => {
-  await expect
-    .poll(async () => workspacePage.getGeneratedArtifactRecord(artifactType), {
-      timeout: 120_000,
-      message: `Workspace ${artifactType} artifact never exposed a persisted record`
-    })
-    .not.toBeNull()
-  const artifact = await workspacePage.getGeneratedArtifactRecord(artifactType)
-  if (!artifact) {
-    throw new Error(`Workspace ${artifactType} artifact record missing after completion`)
-  }
-  return artifact
-}
-
 const waitForPersistedWorkspaceArtifact = async (
   workspacePage: ResearchWorkspacePage,
   artifactType: "quiz" | "flashcards"
@@ -507,6 +609,318 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
   test.beforeEach(async ({ page }) => {
     await seedAuth(page)
     await page.setViewportSize(DESKTOP_VIEWPORT)
+  })
+
+  test("captures separate beginner and power-user UAT entry evidence", async ({
+    browser,
+    serverInfo
+  }, testInfo) => {
+    skipIfServerUnavailable(serverInfo)
+
+    const beginnerContext = await browser.newContext({
+      viewport: DESKTOP_VIEWPORT
+    })
+    const powerContext = await browser.newContext({
+      viewport: DESKTOP_VIEWPORT
+    })
+
+    try {
+      const beginnerPage = await beginnerContext.newPage()
+      const beginnerDiagnostics = startResearchWorkspaceUatDiagnostics(beginnerPage)
+      try {
+        const beginnerWorkspace = new ResearchWorkspacePage(beginnerPage)
+        const beginnerTiming = await beginnerWorkspace.gotoWithTiming()
+        const beginnerEvidence = await beginnerWorkspace.captureUatEvidence(
+          "beginner-no-key-entry",
+          testInfo,
+          {
+            diagnostics: beginnerDiagnostics.snapshot(),
+            routeTiming: beginnerTiming,
+            persona: "beginner-no-key"
+          }
+        )
+
+        expect(beginnerEvidence.persona).toBe("beginner-no-key")
+        expect(beginnerEvidence.routeTiming.durationMs).toBeGreaterThanOrEqual(0)
+        expect(beginnerEvidence.url).toContain("/research-workspace")
+        const beginnerStoredConfig = await beginnerPage.evaluate(() => {
+          const raw = localStorage.getItem("tldwConfig")
+          if (!raw) {
+            return { raw: null, apiKey: null }
+          }
+          try {
+            const parsed = JSON.parse(raw)
+            return {
+              raw,
+              apiKey:
+                typeof parsed?.apiKey === "string" ? parsed.apiKey : null
+            }
+          } catch {
+            return { raw, apiKey: null }
+          }
+        })
+        expect(beginnerStoredConfig.apiKey).toBeNull()
+        expect(beginnerStoredConfig.raw || "").not.toContain(TEST_CONFIG.apiKey)
+      } finally {
+        beginnerDiagnostics.dispose()
+      }
+
+      const powerPage = await powerContext.newPage()
+      await seedAuth(powerPage)
+      const powerDiagnostics = startResearchWorkspaceUatDiagnostics(powerPage)
+      try {
+        const powerWorkspace = new ResearchWorkspacePage(powerPage)
+        const powerColdTiming = await powerWorkspace.gotoWithTiming()
+        await powerWorkspace.waitForReady()
+        const powerWarmTiming = await powerWorkspace.gotoWithTiming()
+        await powerWorkspace.waitForReady()
+        const powerEvidence = await powerWorkspace.captureUatEvidence(
+          "power-api-key-entry",
+          testInfo,
+          {
+            diagnostics: powerDiagnostics.snapshot(),
+            routeTiming: powerColdTiming,
+            warmRouteTiming: powerWarmTiming,
+            persona: "power-api-key"
+          }
+        )
+
+        expect(powerEvidence.persona).toBe("power-api-key")
+        expect(powerEvidence.routeTiming.durationMs).toBeGreaterThanOrEqual(0)
+        expect(powerEvidence.warmRouteTiming?.durationMs).toBeGreaterThanOrEqual(0)
+        expect(powerEvidence.url).toContain("/research-workspace")
+        expect(
+          await powerPage.evaluate(() => {
+            const raw = localStorage.getItem("tldwConfig")
+            if (!raw) return false
+            try {
+              const parsed = JSON.parse(raw)
+              return Boolean(parsed?.apiKey)
+            } catch {
+              return false
+            }
+          })
+        ).toBe(true)
+      } finally {
+        powerDiagnostics.dispose()
+      }
+    } finally {
+      await beginnerContext.close()
+      await powerContext.close()
+    }
+  })
+
+  test("keeps research-workspace canonical and workspace-playground removed", async ({
+    page,
+    serverInfo,
+    diagnostics
+  }) => {
+    skipIfServerUnavailable(serverInfo)
+
+    const legacyResponse = await page.goto("/workspace-playground", {
+      waitUntil: "domcontentloaded"
+    })
+    expect(legacyResponse?.status()).toBe(404)
+    expect(new URL(page.url()).pathname).toBe("/workspace-playground")
+    expect(page.url()).not.toContain("/research-workspace")
+
+    const workspacePage = new ResearchWorkspacePage(page)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+    await ensureNoServerReachabilityDialog(page)
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("passes active workspace ID into ACP run history requests", async ({
+    authedPage,
+    serverInfo,
+    diagnostics
+  }) => {
+    skipIfServerUnavailable(serverInfo)
+
+    const workspacePage = new ResearchWorkspacePage(authedPage)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+    await ensureNoServerReachabilityDialog(authedPage)
+
+    const workspaceId = await workspacePage.getWorkspaceId()
+    expect(workspaceId, "Expected Research Workspace to expose an active ID").toBeTruthy()
+
+    const projectsRequestPromise = authedPage.waitForRequest((request) => {
+      if (request.method().toUpperCase() !== "GET") return false
+      const url = new URL(request.url())
+      return (
+        url.pathname.endsWith("/api/v1/agent-orchestration/projects") &&
+        url.searchParams.get("canonical_workspace_id") === workspaceId &&
+        url.searchParams.get("canonical_workspace_source") === "research_workspace"
+      )
+    })
+
+    await authedPage.getByRole("button", { name: /workspace settings/i }).click()
+    await authedPage.getByText("ACP run history").click()
+
+    const projectsRequest = await projectsRequestPromise
+    const projectsUrl = new URL(projectsRequest.url())
+    expect(projectsUrl.searchParams.get("canonical_workspace_id")).toBe(workspaceId)
+    expect(projectsUrl.searchParams.get("canonical_workspace_source")).toBe(
+      "research_workspace"
+    )
+
+    const modal = authedPage.getByRole("dialog", { name: /ACP run history/i })
+    await expect(modal).toBeVisible({ timeout: 10_000 })
+    const terminalState = modal
+      .getByText(
+        /No ACP runs linked to this workspace yet|Agent orchestration is not available on this server\.|Could not load ACP run history/i
+      )
+      .first()
+    await expect(terminalState).toBeVisible({ timeout: 10_000 })
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("passes active workspace ID into sandbox diagnostics requests", async ({
+    authedPage,
+    serverInfo,
+    diagnostics
+  }) => {
+    skipIfServerUnavailable(serverInfo)
+
+    const workspacePage = new ResearchWorkspacePage(authedPage)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+    await ensureNoServerReachabilityDialog(authedPage)
+
+    const workspaceId = await workspacePage.getWorkspaceId()
+    expect(workspaceId, "Expected Research Workspace to expose an active ID").toBeTruthy()
+
+    const diagnosticsRequestPromise = authedPage.waitForRequest((request) => {
+      if (request.method().toUpperCase() !== "GET") return false
+      const url = new URL(request.url())
+      return (
+        url.pathname.endsWith(
+          `/api/v1/sandbox/workspaces/${encodeURIComponent(
+            workspaceId || ""
+          )}/diagnostics`
+        ) &&
+        url.searchParams.get("source_label") === "research_workspace" &&
+        url.searchParams.get("limit") === "10"
+      )
+    })
+    const diagnosticsResponsePromise = authedPage.waitForResponse((response) => {
+      if (response.request().method().toUpperCase() !== "GET") return false
+      const url = new URL(response.url())
+      return (
+        url.pathname.endsWith(
+          `/api/v1/sandbox/workspaces/${encodeURIComponent(
+            workspaceId || ""
+          )}/diagnostics`
+        ) &&
+        url.searchParams.get("source_label") === "research_workspace" &&
+        url.searchParams.get("limit") === "10"
+      )
+    })
+
+    await clickActionable(
+      authedPage.getByRole("button", { name: /workspace settings/i })
+    )
+    await authedPage.getByText("Sandbox diagnostics").click()
+
+    const diagnosticsRequest = await diagnosticsRequestPromise
+    const diagnosticsUrl = new URL(diagnosticsRequest.url())
+    expect(diagnosticsUrl.searchParams.get("source_label")).toBe(
+      "research_workspace"
+    )
+    expect(diagnosticsUrl.searchParams.get("limit")).toBe("10")
+    const diagnosticsResponse = await diagnosticsResponsePromise
+    expect(diagnosticsResponse.status()).toBeLessThan(400)
+
+    const modal = authedPage.getByRole("dialog", { name: /Sandbox diagnostics/i })
+    await expect(modal).toBeVisible({ timeout: 10_000 })
+    const terminalState = modal
+      .getByText(
+        /No sandbox runs are linked to this workspace yet|Sandbox diagnostics are unavailable right now|You do not have permission to view sandbox diagnostics|No sandbox runtimes are available for workspace actions|Sandbox runtime discovery failed|A sandbox runtime is available for workspace actions|Sandboxed workspace actions are blocked because the sandbox API route is disabled by route policy|Sandboxed workspace actions are blocked because sandbox execution is disabled|Sandbox readiness could not be determined/i
+      )
+      .first()
+    await expect(terminalState).toBeVisible({ timeout: 10_000 })
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("shows workspace-linked sandbox run in diagnostics when sandbox run API is available", async ({
+    authedPage,
+    serverInfo,
+    diagnostics
+  }) => {
+    skipIfServerUnavailable(serverInfo)
+
+    const workspacePage = new ResearchWorkspacePage(authedPage)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+    await ensureNoServerReachabilityDialog(authedPage)
+
+    const workspaceId = await workspacePage.getWorkspaceId()
+    expect(workspaceId, "Expected Research Workspace to expose an active ID").toBeTruthy()
+
+    const createResult = await tryCreateWorkspaceSandboxRun(workspaceId || "")
+    if (!createResult.created && REQUIRE_SANDBOX_WORKSPACE_RUN) {
+      expect(
+        createResult.created,
+        createResult.reason ||
+          "Required workspace sandbox run was not created"
+      ).toBe(true)
+    }
+    test.skip(
+      !createResult.created,
+      createResult.reason ||
+        "Skipping workspace sandbox run diagnostics proof: sandbox run API unavailable"
+    )
+
+    const runId = createResult.run?.id
+    expect(runId, "Expected sandbox run creation to return a run ID").toBeTruthy()
+    expect(createResult.run?.workspace_id).toBe(workspaceId)
+    if (EXPECTED_SANDBOX_RUN_PHASE) {
+      expect(createResult.run?.phase).toBe(EXPECTED_SANDBOX_RUN_PHASE)
+    }
+
+    const diagnosticsResponsePromise = authedPage.waitForResponse((response) => {
+      if (response.request().method().toUpperCase() !== "GET") return false
+      const url = new URL(response.url())
+      return (
+        url.pathname.endsWith(
+          `/api/v1/sandbox/workspaces/${encodeURIComponent(
+            workspaceId || ""
+          )}/diagnostics`
+        ) &&
+        url.searchParams.get("source_label") === "research_workspace" &&
+        url.searchParams.get("limit") === "10"
+      )
+    })
+
+    await clickActionable(
+      authedPage.getByRole("button", { name: /workspace settings/i })
+    )
+    await authedPage.getByText("Sandbox diagnostics").click()
+
+    const diagnosticsResponse = await diagnosticsResponsePromise
+    expect(diagnosticsResponse.status()).toBeLessThan(400)
+    const diagnosticsBody = (await diagnosticsResponse.json()) as {
+      runs?: { items?: Array<{ id?: string; workspace_id?: string | null }> }
+    }
+    expect(diagnosticsBody.runs?.items || []).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: runId,
+          workspace_id: workspaceId
+        })
+      ])
+    )
+
+    const modal = authedPage.getByRole("dialog", { name: /Sandbox diagnostics/i })
+    await expect(modal).toBeVisible({ timeout: 10_000 })
+    await expect(modal.getByText(runId || "")).toBeVisible({ timeout: 10_000 })
+
+    await assertNoCriticalErrors(diagnostics)
   })
 
   test("boots cleanly and keeps chat bootstrap endpoints healthy", async ({
@@ -597,6 +1011,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       chatBootstrapPreflight.reason ||
         "Skipping real-backend workspace test: chat bootstrap endpoint unavailable"
     )
+    const chatModelId = requireRealBackendChatModel(serverInfo)
 
     const fixtureId = generateTestId("workspace-chat-grounding")
     const probeToken = `${fixtureId}-beacon-fox`
@@ -616,6 +1031,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     try {
       await workspacePage.goto()
       await workspacePage.waitForReady()
+      await selectRealBackendChatModel(authedPage, chatModelId)
       await assertChatBootstrapHealthy(tracker.responses, tracker.failures)
 
       await workspacePage.seedSources([selectedSource, unselectedSource])
@@ -669,8 +1085,9 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       chatBootstrapPreflight.reason ||
         "Skipping real-backend workspace test: chat bootstrap endpoint unavailable"
     )
+    const chatModelId = requireRealBackendChatModel(serverInfo)
 
-    const fixtureId = generateTestId("workspace-studio-scope")
+    const fixtureId = generateTestId("research-workspace-scope")
     const leftSource = await seedLiveWorkspaceDocument(
       `WS ${fixtureId} Left`,
       `Left comparison source. Token ${fixtureId}-left. Claim: alpha baseline improved by 11 percent.`
@@ -686,6 +1103,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     try {
       await workspacePage.goto()
       await workspacePage.waitForReady()
+      await selectRealBackendChatModel(authedPage, chatModelId)
       await assertChatBootstrapHealthy(tracker.responses, tracker.failures)
 
       await workspacePage.seedSources([leftSource, rightSource])
@@ -757,6 +1175,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       chatBootstrapPreflight.reason ||
         "Skipping real-backend workspace test: chat bootstrap endpoint unavailable"
     )
+    const chatModelId = requireRealBackendChatModel(serverInfo)
 
     const fixtureId = generateTestId("workspace-global-search")
     const probeToken = `${fixtureId}-search-token`
@@ -772,6 +1191,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     try {
       await workspacePage.goto()
       await workspacePage.waitForReady()
+      await selectRealBackendChatModel(authedPage, chatModelId)
       await assertChatBootstrapHealthy(tracker.responses, tracker.failures)
 
       await workspacePage.seedSources([selectedSource])
@@ -820,6 +1240,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       chatBootstrapPreflight.reason ||
         "Skipping real-backend workspace test: chat bootstrap endpoint unavailable"
     )
+    const chatModelId = requireRealBackendChatModel(serverInfo)
 
     const fixtureId = generateTestId("workspace-study-quiz")
     const probeToken = `${fixtureId}-quiz-token`
@@ -839,6 +1260,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     try {
       await workspacePage.goto()
       await workspacePage.waitForReady()
+      await selectRealBackendChatModel(authedPage, chatModelId)
       await assertChatBootstrapHealthy(tracker.responses, tracker.failures)
 
       await workspacePage.resetWorkspace(`Workspace ${fixtureId}`)
@@ -983,6 +1405,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       chatBootstrapPreflight.reason ||
         "Skipping real-backend workspace test: chat bootstrap endpoint unavailable"
     )
+    const chatModelId = requireRealBackendChatModel(serverInfo)
 
     const fixtureId = generateTestId("workspace-study-flashcards")
     const probeToken = `${fixtureId}-flashcards-token`
@@ -1002,6 +1425,7 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     try {
       await workspacePage.goto()
       await workspacePage.waitForReady()
+      await selectRealBackendChatModel(authedPage, chatModelId)
       await assertChatBootstrapHealthy(tracker.responses, tracker.failures)
 
       await workspacePage.resetWorkspace(`Workspace ${fixtureId}`)

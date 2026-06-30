@@ -1,3 +1,7 @@
+import ast
+import inspect
+from pathlib import Path
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -5,6 +9,51 @@ from tldw_Server_API.app.core.DB_Management.chacha.message_store import MessageS
 
 
 pytestmark = pytest.mark.unit
+
+
+_DELEGATED_MESSAGE_METHODS = {
+    "add_message",
+    "append_message_from_sync",
+    "tombstone_message_from_sync",
+    "get_messages_by_sync_stable_id",
+    "_insert_message_images",
+    "get_message_images",
+    "get_message_conversation_id",
+    "get_message_by_id",
+    "get_messages_for_conversation",
+    "count_root_messages_for_conversation",
+    "get_root_messages_for_conversation",
+    "get_messages_for_conversation_by_parent_ids",
+    "has_system_message_for_conversation",
+    "update_message",
+    "soft_delete_message",
+    "search_messages_by_content",
+    "add_message_metadata",
+    "get_message_metadata",
+    "get_message_metadata_map",
+    "set_message_metadata_extra",
+    "set_message_rag_context",
+    "get_message_rag_context",
+    "get_messages_with_rag_context",
+    "count_messages_for_conversation",
+    "count_messages_for_conversations",
+    "get_latest_message_for_conversation",
+    "count_messages_since",
+}
+
+
+def _class_method_names(class_obj: type[object]) -> set[str]:
+    source_path = Path(inspect.getsourcefile(class_obj) or "")
+    assert source_path.exists()
+    tree = ast.parse(source_path.read_text())
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_obj.__name__:
+            return {
+                item.name
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+    raise AssertionError(f"Class {class_obj.__name__} not found in {source_path}")
 
 
 @pytest.fixture()
@@ -25,6 +74,100 @@ def db(tmp_path):
         "store": MessageStore(instance),
         "conversation_id": conversation_id,
     }
+
+
+def test_message_store_owns_delegated_methods_without_monolith_duplicates(db, monkeypatch):
+    class_method_names = _class_method_names(CharactersRAGDB)
+    assert _DELEGATED_MESSAGE_METHODS.isdisjoint(class_method_names)
+
+    captured: dict[str, object] = {}
+
+    def _fake_add_message(msg_data):
+        captured["msg_data"] = msg_data
+        return "message-from-store"
+
+    monkeypatch.setattr(db["db"].message_store, "add_message", _fake_add_message)
+
+    assert db["db"].add_message({"conversation_id": db["conversation_id"], "sender": "user", "content": "hi"}) == "message-from-store"
+    assert captured["msg_data"] == {
+        "conversation_id": db["conversation_id"],
+        "sender": "user",
+        "content": "hi",
+    }
+
+
+def test_message_store_sync_append_dedupe_divergent_versions_and_tombstone(db):
+    store = db["db"]
+    conversation_id = db["conversation_id"]
+
+    first = store.append_message_from_sync(
+        stable_message_id="sync-msg-1",
+        conversation_id=conversation_id,
+        sender="user",
+        content="First synced message",
+        timestamp="2026-05-23T18:13:00+00:00",
+        sync_client_id="sync-device",
+        object_revision=1,
+        payload_hash="sha256:msg-v1",
+    )
+
+    assert first["message_id"] == "sync-msg-1"
+    assert first["created"] is True
+    assert first["idempotent"] is False
+    assert first["conflict"] is False
+    assert store.get_message_by_id("sync-msg-1")["content"] == "First synced message"
+
+    duplicate = store.append_message_from_sync(
+        stable_message_id="sync-msg-1",
+        conversation_id=conversation_id,
+        sender="user",
+        content="First synced message",
+        timestamp="2026-05-23T18:13:00+00:00",
+        sync_client_id="sync-device",
+        object_revision=1,
+        payload_hash="sha256:msg-v1",
+    )
+
+    assert duplicate["message_id"] == "sync-msg-1"
+    assert duplicate["created"] is False
+    assert duplicate["idempotent"] is True
+    assert duplicate["conflict"] is False
+    assert store.count_messages_for_conversation(conversation_id, include_deleted=True) == 1
+
+    divergent = store.append_message_from_sync(
+        stable_message_id="sync-msg-1",
+        conversation_id=conversation_id,
+        sender="assistant",
+        content="Conflicting synced message",
+        timestamp="2026-05-23T18:14:00+00:00",
+        sync_client_id="sync-device",
+        object_revision=2,
+        payload_hash="sha256:msg-v2",
+        projection_message_id="sync-msg-1-conflict",
+    )
+
+    assert divergent["message_id"] == "sync-msg-1-conflict"
+    assert divergent["created"] is True
+    assert divergent["idempotent"] is False
+    assert divergent["conflict"] is True
+    versions = store.get_messages_by_sync_stable_id("sync-msg-1", include_deleted=True)
+    assert [item["id"] for item in versions] == ["sync-msg-1", "sync-msg-1-conflict"]
+
+    assert store.tombstone_message_from_sync(
+        stable_message_id="sync-msg-1",
+        sync_client_id="sync-device",
+        object_revision=3,
+        object_hash="sha256:msg-v1",
+    )
+    assert store.get_messages_by_sync_stable_id("sync-msg-1") == []
+    assert store.get_message_by_id("sync-msg-1") is None
+    deleted = store.get_message_by_id("sync-msg-1", include_deleted=True)
+    assert deleted is not None
+    assert bool(deleted["deleted"]) is True
+    conflict = store.get_message_by_id("sync-msg-1-conflict", include_deleted=True)
+    assert conflict is not None
+    assert bool(conflict["deleted"]) is True
+    assert store.get_conversation_by_id(conversation_id) is not None
 
 
 def test_message_store_add_and_fetch_roundtrip(db):
@@ -58,6 +201,25 @@ def test_message_store_add_and_fetch_roundtrip(db):
         b"second-image",
     ]
     assert store.get_message_conversation_id(message_id) == conversation_id
+
+
+def test_message_store_adds_image_only_message(db):
+    store = db["store"]
+    conversation_id = db["conversation_id"]
+
+    message_id = store.add_message(
+        {
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "image_data": b"image-only",
+            "image_mime_type": "image/png",
+        }
+    )
+
+    stored = store.get_message_by_id(message_id)
+    assert stored is not None
+    assert stored["content"] == ""
+    assert stored["image_data"] == b"image-only"
 
 
 def test_message_store_metadata_and_citations_roundtrip(db):
@@ -110,10 +272,173 @@ def test_message_store_metadata_and_citations_roundtrip(db):
     metadata_map = store.get_message_metadata_map([first_message_id, second_message_id, "missing-id"])
     assert sorted(metadata_map.keys()) == sorted([first_message_id, second_message_id])
 
-    citations = store.get_conversation_citations(conversation_id)
-    citations_by_id = {citation["id"] if "id" in citation else citation["chunk_id"]: citation for citation in citations}
-    assert sorted(citations_by_id.keys()) == ["chunk-2", "doc-1"]
-    assert citations_by_id["doc-1"]["message_ids"] == [first_message_id, second_message_id]
+    # get_conversation_citations not yet extracted to MessageStore — tested via CharactersRAGDB directly
+
+
+def test_message_store_rag_context_helpers_latest_and_since(db):
+    store = db["store"]
+    conversation_id = db["conversation_id"]
+
+    first_message_id = store.add_message(
+        {
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "First message",
+            "timestamp": "2024-01-01T00:00:00Z",
+        }
+    )
+    second_message_id = store.add_message(
+        {
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "Second message",
+            "timestamp": "2024-01-01T00:00:01Z",
+        }
+    )
+    third_message_id = store.add_message(
+        {
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "Third message",
+            "timestamp": "2024-01-01T00:00:02Z",
+        }
+    )
+
+    assert store.set_message_metadata_extra(
+        first_message_id,
+        {"tool_results": {"call-1": {"status": "ok"}}, "trace_id": "trace-1"},
+    )
+    assert store.set_message_metadata_extra(
+        first_message_id,
+        {"tool_results": {"call-2": {"status": "later"}}, "note": "merged"},
+    )
+
+    merged_metadata = store.get_message_metadata(first_message_id)
+    assert merged_metadata is not None
+    assert merged_metadata["extra"]["tool_results"]["call-1"]["status"] == "ok"
+    assert merged_metadata["extra"]["tool_results"]["call-2"]["status"] == "later"
+    assert merged_metadata["extra"]["trace_id"] == "trace-1"
+    assert merged_metadata["extra"]["note"] == "merged"
+
+    rag_context = {
+        "search_query": "galaxy",
+        "retrieved_documents": [{"id": "doc-1", "title": "Galaxy Notes"}],
+    }
+    assert store.set_message_rag_context(second_message_id, rag_context)
+    assert store.get_message_rag_context(second_message_id) == rag_context
+
+    with_rag_context = store.get_messages_with_rag_context(conversation_id, limit=10, offset=0)
+    second_message = next(item for item in with_rag_context if item["id"] == second_message_id)
+    assert second_message["rag_context"]["retrieved_documents"][0]["id"] == "doc-1"
+
+    latest_message = store.get_latest_message_for_conversation(conversation_id)
+    assert latest_message is not None
+    assert latest_message["id"] == third_message_id
+    assert store.count_messages_since(conversation_id, first_message_id) == 2
+
+
+def test_message_store_orders_equal_timestamps_by_last_modified(db):
+    store = db["store"]
+    raw_db = db["db"]
+    conversation_id = db["conversation_id"]
+    same_timestamp = "2026-01-01T00:00:00Z"
+
+    assistant_id = store.add_message(
+        {
+            "id": "tie-assistant",
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "Assistant response",
+            "timestamp": same_timestamp,
+        }
+    )
+    user_id = store.add_message(
+        {
+            "id": "tie-user",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "User request",
+            "timestamp": same_timestamp,
+        }
+    )
+    system_id = store.add_message(
+        {
+            "id": "tie-system",
+            "conversation_id": conversation_id,
+            "sender": "system",
+            "content": "System prompt",
+            "timestamp": same_timestamp,
+        }
+    )
+
+    for message_id, last_modified in [
+        (system_id, "2026-01-01T00:00:00.000Z"),
+        (user_id, "2026-01-01T00:00:00.100Z"),
+        (assistant_id, "2026-01-01T00:00:00.200Z"),
+    ]:
+        raw_db.execute_query(
+            "UPDATE messages SET last_modified = ? WHERE id = ?",
+            (last_modified, message_id),
+            commit=True,
+        )
+
+    ascending = store.get_messages_for_conversation(
+        conversation_id,
+        limit=10,
+        offset=0,
+        order_by_timestamp="ASC",
+    )
+    assert [row["id"] for row in ascending] == [system_id, user_id, assistant_id]
+
+    descending = store.get_messages_for_conversation(
+        conversation_id,
+        limit=10,
+        offset=0,
+        order_by_timestamp="DESC",
+    )
+    assert [row["id"] for row in descending] == [assistant_id, user_id, system_id]
+
+
+def test_message_store_preserves_append_order_when_insert_clock_ties(db, monkeypatch):
+    store = db["store"]
+    raw_db = db["db"]
+    conversation_id = db["conversation_id"]
+    same_timestamp = "2026-01-01T00:00:00.000Z"
+
+    monkeypatch.setattr(raw_db, "_get_current_utc_timestamp_iso", lambda: same_timestamp)
+
+    first_id = store.add_message(
+        {
+            "id": "order-b",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "First",
+        }
+    )
+    second_id = store.add_message(
+        {
+            "id": "order-a",
+            "conversation_id": conversation_id,
+            "sender": "assistant",
+            "content": "Second",
+        }
+    )
+    third_id = store.add_message(
+        {
+            "id": "order-c",
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "Third",
+        }
+    )
+
+    messages = store.get_messages_for_conversation(conversation_id, limit=10, offset=0)
+    assert [row["id"] for row in messages] == [first_id, second_id, third_id]
+    assert [row["last_modified"] for row in messages] == [
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.001Z",
+        "2026-01-01T00:00:00.002Z",
+    ]
 
 
 def test_message_store_counts_and_soft_delete_roundtrip(db):

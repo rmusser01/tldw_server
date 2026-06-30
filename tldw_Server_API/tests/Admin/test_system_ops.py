@@ -47,6 +47,11 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
         if logs_resp.status_code == 200:
             payload = logs_resp.json()
             assert "items" in payload
+            assert payload["pagination"]["limit"] == 100
+            assert payload["pagination"]["offset"] == 0
+            assert payload["pagination"]["total"] >= 1
+            assert payload["has_more"] == payload["pagination"]["has_more"]
+            assert payload["next_offset"] == payload["pagination"]["next_offset"]
             assert any("System ops log test entry" in (item.get("message") or "") for item in payload["items"])
         else:
             # Some deployments do not mount system logs endpoints.
@@ -69,6 +74,17 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
         maint_get = client.get("/api/v1/admin/maintenance")
         assert maint_get.status_code == 200, maint_get.text
         assert maint_get.json()["enabled"] is True
+
+        audit_log_resp = client.get("/api/v1/admin/audit-log")
+        if audit_log_resp.status_code == 200:
+            audit_payload = audit_log_resp.json()
+            assert audit_payload["pagination"]["limit"] == 100
+            assert audit_payload["pagination"]["offset"] == 0
+            assert audit_payload["pagination"]["total"] == audit_payload["total"]
+            assert audit_payload["has_more"] == audit_payload["pagination"]["has_more"]
+            assert audit_payload["next_offset"] == audit_payload["pagination"]["next_offset"]
+        else:
+            assert audit_log_resp.status_code == 404, audit_log_resp.text
 
         flag_resp = client.put(
             "/api/v1/admin/feature-flags/ops-test",
@@ -166,10 +182,37 @@ async def test_admin_system_ops_endpoints(monkeypatch, tmp_path):
 
         list_resp = client.get("/api/v1/admin/incidents")
         assert list_resp.status_code == 200, list_resp.text
-        assert list_resp.json()["total"] >= 1
+        payload = list_resp.json()
+        assert payload["total"] >= 1
+        assert payload["pagination"]["total"] >= 1
+        assert payload["pagination"]["limit"] == 50
+        assert payload["pagination"]["offset"] == 0
+        assert payload["has_more"] == payload["pagination"]["has_more"]
+        assert payload["next_offset"] == payload["pagination"]["next_offset"]
 
         delete_resp = client.delete(f"/api/v1/admin/incidents/{incident_id}")
         assert delete_resp.status_code == 200, delete_resp.text
+
+        webhook_create_resp = client.post(
+            "/api/v1/admin/webhooks",
+            json={
+                "url": "https://example.com/webhook",
+                "events": ["incident.created"],
+                "enabled": True,
+            },
+        )
+        assert webhook_create_resp.status_code == 200, webhook_create_resp.text
+
+        webhooks_resp = client.get("/api/v1/admin/webhooks")
+        assert webhooks_resp.status_code == 200, webhooks_resp.text
+        webhook_payload = webhooks_resp.json()
+        assert webhook_payload["total"] >= 1
+        assert webhook_payload["pagination"]["total"] >= 1
+        assert webhook_payload["pagination"]["offset"] == 0
+        assert webhook_payload["pagination"]["limit"] >= 1
+        assert webhook_payload["has_more"] == webhook_payload["pagination"]["has_more"]
+        assert webhook_payload["next_offset"] == webhook_payload["pagination"]["next_offset"]
+        assert any(item["url"] == "https://example.com/webhook" for item in webhook_payload["items"])
 
         # Reset maintenance state for subsequent tests
         client.put(

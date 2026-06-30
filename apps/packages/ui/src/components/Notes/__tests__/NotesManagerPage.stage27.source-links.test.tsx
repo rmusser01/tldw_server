@@ -236,9 +236,9 @@ describe("NotesManagerPage stage 27 source link surfacing", () => {
     fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
     const sourceChipNodes = await screen.findAllByTestId(/notes-source-link-/)
     const sourceLabels = sourceChipNodes.map((node) => node.textContent?.trim())
-    expect(sourceLabels).toEqual(["web: media-77", "yt: media-21"])
+    expect(sourceLabels).toEqual(["Web source: media-77", "YouTube source: media-21"])
 
-    fireEvent.click(screen.getByText("web: media-77"))
+    fireEvent.click(screen.getByText("Web source: media-77"))
     expect(mockNavigate).toHaveBeenCalledWith("/media?id=media-77")
   })
 
@@ -267,7 +267,7 @@ describe("NotesManagerPage stage 27 source link surfacing", () => {
     renderPage()
 
     fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
-    fireEvent.click(await screen.findByText("web: https://example.com/article"))
+    fireEvent.click(await screen.findByText("Web source: https://example.com/article"))
 
     expect(openSpy).toHaveBeenCalledWith(
       "https://example.com/article",
@@ -276,5 +276,32 @@ describe("NotesManagerPage stage 27 source link surfacing", () => {
     )
     expect(mockNavigate).not.toHaveBeenCalledWith("/media?id=https%3A%2F%2Fexample.com%2Farticle")
     openSpy.mockRestore()
+  })
+
+  it("preserves human-readable source labels when the graph provides them", async () => {
+    configureCommonRequests({
+      nodes: [
+        { id: "note-source-1", type: "note", label: "Source note" },
+        {
+          id: "source:web:media-77",
+          type: "source",
+          label: "Captured article title"
+        }
+      ],
+      edges: [
+        {
+          id: "sm-1",
+          source: "note-source-1",
+          target: "source:web:media-77",
+          type: "source_membership",
+          directed: false
+        }
+      ]
+    })
+
+    renderPage()
+
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
+    expect(await screen.findByText("Captured article title")).toBeInTheDocument()
   })
 })

@@ -6,7 +6,97 @@ from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module import (
     RunCommandModule,
 )
-from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
+
+
+class _RunAliasRegistryStub:
+    def __init__(self, module: RunCommandModule) -> None:
+        self.module = module
+
+    async def find_module_for_tool(self, tool_name: str) -> RunCommandModule | None:
+        return self.module if tool_name in {"run", "bash", "shell"} else None
+
+    def get_module_id_for_tool(self, tool_name: str) -> str | None:
+        return "run_command" if tool_name in {"run", "bash", "shell"} else None
+
+    async def get_all_modules(self) -> dict[str, RunCommandModule]:
+        return {"run_command": self.module}
+
+
+def _build_run_alias_protocol(*, rbac_tool_names: set[str] | None = None) -> MCPProtocol:
+    proto = MCPProtocol()
+    module = RunCommandModule(ModuleConfig(name="run", settings={"protocol": proto}))
+    proto.module_registry = _RunAliasRegistryStub(module)
+    allowed_tool_names = rbac_tool_names or {"run"}
+
+    async def _rbac_check(user_id, resource, action, identifier):  # noqa: ANN001
+        del user_id, action
+        if resource.value == "module":
+            return True
+        if resource.value == "tool":
+            return str(identifier) in allowed_tool_names
+        return True
+
+    proto._rbac_check = _rbac_check  # type: ignore[method-assign]
+    return proto
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_protocol_allows_run_alias_when_context_allows_canonical_run() -> None:
+    proto = _build_run_alias_protocol(rbac_tool_names={"run"})
+    context = RequestContext(
+        request_id="run-alias-context-allow",
+        user_id="1",
+        client_id="unit",
+        session_id=None,
+        metadata={"allowed_tools": ["run"]},
+    )
+
+    result = await proto._handle_tools_call(
+        {"name": "shell", "arguments": {"command": "echo unsafe"}},
+        context,
+    )
+
+    assert result["tool"] == "shell"
+    assert "Unknown command: echo" in str(result["content"])
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_protocol_maps_run_aliases_for_effective_policy_and_listing() -> None:
+    proto = _build_run_alias_protocol(rbac_tool_names={"run"})
+
+    async def _resolve_policy(_context):  # noqa: ANN001
+        return {
+            "enabled": True,
+            "allowed_tools": ["run(help)"],
+            "denied_tools": [],
+            "capabilities": [],
+            "sources": [],
+        }
+
+    proto._resolve_effective_tool_policy = _resolve_policy  # type: ignore[method-assign]
+    context = RequestContext(
+        request_id="run-alias-policy-allow",
+        user_id="1",
+        client_id="unit",
+        session_id=None,
+        metadata={"mcp_policy_context_enabled": True},
+    )
+
+    result = await proto._handle_tools_call(
+        {"name": "bash", "arguments": {"command": "help"}},
+        context,
+    )
+    tools = await proto._handle_tools_list({}, context)
+    by_name = {tool["name"]: tool for tool in tools["tools"]}
+
+    assert result["tool"] == "bash"
+    assert "Virtual CLI commands available" in str(result["content"])
+    assert by_name["run"]["canExecute"] is True
+    assert by_name["bash"]["canExecute"] is True
+    assert by_name["shell"]["canExecute"] is True
 
 
 @pytest.mark.unit
@@ -331,8 +421,10 @@ async def test_protocol_tools_call_allows_tool_matching_effective_policy_pattern
 async def test_protocol_tools_call_blocks_when_policy_resolution_fails(monkeypatch):
     os.environ["TEST_MODE"] = "true"
 
+    from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
+        build_default_runtime_dependencies,
+    )
     from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
-    from tldw_Server_API.app.services import mcp_hub_policy_resolver as resolver_module
 
     class _ModuleStub:
         name = "Shell"
@@ -368,13 +460,14 @@ async def test_protocol_tools_call_blocks_when_policy_resolution_fails(monkeypat
     async def _allow_tool(ctx, name, **_kwargs):
         return True
 
-    async def _fail_resolver():
-        raise RuntimeError("resolver unavailable")
+    class _FailingPolicyResolver:
+        async def resolve_for_context(self, *, user_id, metadata):
+            raise RuntimeError("resolver unavailable")
 
-    monkeypatch.setattr(resolver_module, "get_mcp_hub_policy_resolver", _fail_resolver)
-
-    proto = MCPProtocol()
-    proto.module_registry = _RegistryStub()
+    deps = build_default_runtime_dependencies()
+    deps.module_registry = _RegistryStub()
+    deps.effective_policy_resolver = _FailingPolicyResolver()
+    proto = MCPProtocol(dependencies=deps)
     proto._has_module_permission = _allow_mod  # type: ignore
     proto._has_tool_permission = _allow_tool  # type: ignore
 
@@ -388,6 +481,124 @@ async def test_protocol_tools_call_blocks_when_policy_resolution_fails(monkeypat
 
     with pytest.raises(PermissionError, match="MCP Hub policy"):
         await proto._handle_tools_call({"name": "Bash", "arguments": {"command": "git status"}}, ctx)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_policy_enabled_discovery_tool_call_uses_tldw_resolver_without_import_cycle(monkeypatch):
+    monkeypatch.setenv("TEST_MODE", "true")
+
+    import sys
+
+    from tldw_Server_API.app.core.MCP_unified.adapters import tldw_policy
+    from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
+        build_default_runtime_dependencies,
+    )
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
+
+    for module_name in list(sys.modules):
+        if (
+            module_name
+            in {
+                "tldw_Server_API.app.services.mcp_hub_policy_resolver",
+                "tldw_Server_API.app.core.Agent_Client_Protocol",
+            }
+            or module_name.startswith("tldw_Server_API.app.core.Agent_Client_Protocol.")
+        ):
+            monkeypatch.delitem(sys.modules, module_name, raising=False)
+
+    class _DiscoveryModuleStub:
+        name = "mcp"
+
+        async def get_tools(self):
+            return [
+                {
+                    "name": "mcp.tools.list",
+                    "description": "",
+                    "inputSchema": {"type": "object"},
+                    "metadata": {"category": "discovery"},
+                }
+            ]
+
+        async def execute_tool(self, tool_name, arguments, context=None):
+            return {"ok": True, "tool": tool_name, "arguments": arguments}
+
+        async def execute_with_circuit_breaker(self, func, *args, **kwargs):
+            return await func(*args, **kwargs)
+
+        def sanitize_input(self, args):
+            return args
+
+        def validate_tool_arguments(self, tool_name, tool_args):
+            return None
+
+        def is_write_tool_def(self, tool_def):
+            return False
+
+        async def get_tool_def(self, tool_name):
+            return {"name": tool_name, "metadata": {"category": "discovery"}}
+
+    class _RegistryStub:
+        async def find_module_for_tool(self, tool_name):
+            return _DiscoveryModuleStub() if tool_name == "mcp.tools.list" else None
+
+        def get_module_id_for_tool(self, tool_name):
+            return "mcp" if tool_name == "mcp.tools.list" else None
+
+        async def get_all_modules(self):
+            return {"mcp": _DiscoveryModuleStub()}
+
+    class _AllowingHubResolver:
+        async def resolve_for_context(self, *, user_id, metadata):
+            return {
+                "enabled": True,
+                "allowed_tools": ["mcp.tools.list"],
+                "denied_tools": [],
+                "capabilities": [],
+                "sources": [],
+            }
+
+    class _AllowAllRBAC:
+        async def check_permission(self, *_args, **_kwargs):
+            return True
+
+    async def _fake_get_mcp_hub_policy_resolver():
+        return _AllowingHubResolver()
+
+    service_module = tldw_policy._load_mcp_hub_policy_resolver_module()
+    monkeypatch.setattr(
+        service_module,
+        "get_mcp_hub_policy_resolver",
+        _fake_get_mcp_hub_policy_resolver,
+    )
+
+    deps = build_default_runtime_dependencies()
+    deps.module_registry = _RegistryStub()
+    deps.effective_policy_resolver = tldw_policy.TldwEffectivePolicyResolver()
+    proto = MCPProtocol(dependencies=deps)
+    proto.rbac_policy = _AllowAllRBAC()
+
+    ctx = RequestContext(
+        request_id="policy-discovery-import-cycle",
+        user_id="1",
+        client_id="unit",
+        session_id=None,
+        metadata={
+            "mcp_policy_context_enabled": True,
+            "governance_rollout_mode": "off",
+        },
+    )
+    request = MCPRequest(
+        method="tools/call",
+        params={"name": "mcp.tools.list", "arguments": {}},
+        id="policy-discovery-import-cycle",
+    )
+
+    response = await proto.process_request(request, ctx)
+
+    assert response.error is None
+    assert response.result is not None
+    assert response.result["tool"] == "mcp.tools.list"
 
 
 @pytest.mark.unit

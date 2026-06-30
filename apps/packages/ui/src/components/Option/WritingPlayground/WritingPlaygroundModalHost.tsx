@@ -1,6 +1,5 @@
 import React from "react"
 import {
-  Alert,
   Button,
   Checkbox,
   Empty,
@@ -11,6 +10,7 @@ import {
   Tag,
 } from "antd"
 import type { TFunction } from "i18next"
+import { Alert } from "@/components/ui/primitives"
 import type { WritingTemplateResponse, WritingThemeResponse } from "@/services/writing-playground"
 
 type WritingPlaygroundModalHostProps = {
@@ -225,7 +225,9 @@ export const WritingPlaygroundModalHost = ({
               "Provide a JSON object to merge advanced provider-specific parameters."
             )}
           </span>
-          {extraBodyJsonError ? <Alert type="error" showIcon message={extraBodyJsonError} /> : null}
+          {extraBodyJsonError ? (
+            <Alert variant="error" title={extraBodyJsonError} />
+          ) : null}
           <Input.TextArea
             value={extraBodyJsonDraft}
             rows={14}
@@ -316,8 +318,7 @@ export const WritingPlaygroundModalHost = ({
                 <Skeleton active />
               ) : templatesError ? (
                 <Alert
-                  type="error"
-                  showIcon
+                  variant="error"
                   title={t("option:writingPlayground.templateError", "Unable to load templates.")}
                 />
               ) : templates.length === 0 ? (
@@ -552,8 +553,7 @@ export const WritingPlaygroundModalHost = ({
                 <Skeleton active />
               ) : themesError ? (
                 <Alert
-                  type="error"
-                  showIcon
+                  variant="error"
                   title={t("option:writingPlayground.themeError", "Unable to load themes.")}
                 />
               ) : themes.length === 0 ? (

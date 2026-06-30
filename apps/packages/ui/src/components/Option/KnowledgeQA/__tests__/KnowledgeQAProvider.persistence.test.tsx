@@ -160,6 +160,204 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
     expect(warningCalls).toHaveLength(1)
   })
 
+  it("keeps successful search results visible when backend message sync fails", async () => {
+    searchCharactersMock.mockResolvedValue([
+      { id: 7, name: "Helpful AI Assistant" },
+    ])
+    addChatMessageMock.mockRejectedValue(new Error("message sync failed"))
+    ragSearchMock.mockResolvedValue({
+      results: [
+        {
+          id: "doc-unsynced-1",
+          content: "Unsynced evidence",
+          metadata: {
+            title: "Unsynced source",
+            source_id: "doc-unsynced-1",
+            source_type: "media_db",
+            evidence_origin: "local_library",
+            source_status: "searched",
+          },
+          score: 0.9,
+        },
+      ],
+      generated_answer: "Unsynced answer [1]",
+      metadata: {},
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+
+    act(() => {
+      latestContext!.setQuery("question with sync failure")
+    })
+    act(() => {
+      void latestContext!.search()
+    })
+
+    await waitFor(() => {
+      expect(latestContext!.isSearching).toBe(false)
+      expect(latestContext!.answer).toBe("Unsynced answer [1]")
+      expect(latestContext!.results).toHaveLength(1)
+      expect(latestContext!.isLocalOnlyThread).toBe(true)
+      expect(latestContext!.answerTrustState).toBe("unsynced_local_result")
+      expect(latestContext!.extensionFailureState).toBe(
+        "search_succeeded_sync_failed"
+      )
+      expect(latestContext!.retrySync).toBeTypeOf("function")
+    })
+
+    addChatMessageMock.mockReset()
+    addChatMessageMock
+      .mockResolvedValueOnce({ id: "msg-user-synced" })
+      .mockResolvedValueOnce({ id: "msg-assistant-synced" })
+    let retryPersistedRagContextBody: Record<string, any> | null = null
+    fetchWithAuthMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.includes("/rag-context")) {
+        retryPersistedRagContextBody = JSON.parse(String(init?.body || "{}"))
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true }),
+          text: async () => "",
+        }
+      }
+      if (path.includes("/messages-with-context")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+          text: async () => "",
+        }
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => [],
+        text: async () => "",
+      }
+    })
+
+    await act(async () => {
+      await expect(latestContext!.retrySync()).resolves.toBe(true)
+    })
+
+    await waitFor(() => {
+      expect(ragSearchMock).toHaveBeenCalledTimes(1)
+      expect(latestContext!.extensionFailureState).toBeNull()
+      expect(latestContext!.isLocalOnlyThread).toBe(false)
+      expect(latestContext!.answerTrustState).toBe("cited_answer")
+    })
+    expect(retryPersistedRagContextBody).not.toBeNull()
+    expect(retryPersistedRagContextBody!.rag_context).toMatchObject({
+      trust_state: "cited_answer",
+      trust_reason_codes: [],
+      trust_evidence_origin: "local_library",
+    })
+  })
+
+  it("persists materialized evidence identifiers in RAG context", async () => {
+    let persistedRagContextBody: Record<string, any> | null = null
+    searchCharactersMock.mockResolvedValue([
+      { id: 7, name: "Helpful AI Assistant" },
+    ])
+    addChatMessageMock
+      .mockResolvedValueOnce({ id: "msg-user-1" })
+      .mockResolvedValueOnce({ id: "msg-assistant-1" })
+    ragSearchMock.mockResolvedValue({
+      results: [
+        {
+          id: "media:42:chunk:7",
+          excerpt: "Visible matched excerpt.",
+          sourceId: "42",
+          sourceType: "media_db",
+          chunkId: "7",
+          evidenceOrigin: "local_library",
+          sourceStatus: "searched",
+          unavailableReason: null,
+          metadata: {
+            title: "Grounded source",
+            source_type: "media_db",
+            source_id: "42",
+            chunk_id: "7",
+            evidence_origin: "local_library",
+            source_status: "searched",
+            unavailable_reason: null,
+          },
+          score: 0.91,
+        },
+      ],
+      generated_answer: "Grounded answer [1]",
+      metadata: {
+        knowledge_trust: {
+          state: "no_answer_insufficient_evidence",
+          reason_codes: ["missing_inspectable_evidence"],
+          evidence_origin: "local_library",
+        },
+      },
+    })
+    fetchWithAuthMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.includes("/rag-context")) {
+        persistedRagContextBody = JSON.parse(String(init?.body || "{}"))
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: true }),
+          text: async () => "",
+        }
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => [],
+        text: async () => "",
+      }
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+
+    act(() => {
+      latestContext!.setQuery("materialized evidence")
+    })
+    act(() => {
+      void latestContext!.search()
+    })
+
+    await waitFor(() => expect(persistedRagContextBody).not.toBeNull())
+    expect(latestContext!.answerTrustState).toBe("no_answer_insufficient_evidence")
+    expect(latestContext!.answerTrustReasonCodes).toEqual([
+      "missing_inspectable_evidence",
+    ])
+    expect(latestContext!.answerEvidenceOrigin).toBe("local_library")
+    expect(persistedRagContextBody!.rag_context).toMatchObject({
+      trust_state: "no_answer_insufficient_evidence",
+      trust_reason_codes: ["missing_inspectable_evidence"],
+      trust_evidence_origin: "local_library",
+    })
+    const [document] = persistedRagContextBody!.rag_context.retrieved_documents
+    expect(document).toMatchObject({
+      id: "media:42:chunk:7",
+      source_id: "42",
+      source_type: "media_db",
+      chunk_id: "7",
+      excerpt: "Visible matched excerpt.",
+      evidence_origin: "local_library",
+      source_status: "searched",
+      score: 0.91,
+    })
+    expect(document).not.toHaveProperty("unavailable_reason")
+  })
+
   it("starts a fresh topic with cleared visible state", async () => {
     fetchWithAuthMock.mockImplementation(async (path: string) => {
       if (path.includes("/remote-thread/")) {

@@ -155,6 +155,36 @@ class TestPathTraversalSecurity:
             assert valid is False, f"Expected {filename} to be rejected (ends with dangerous extension)"
             assert "Invalid file type" in error
 
+    def test_validate_sqlite_filename_accepts_safe_db_extensions(self):
+        """OpenWebUI database imports accept safe SQLite filenames only."""
+        test_cases = [
+            ("webui.db", "webui.db"),
+            ("webui.sqlite", "webui.sqlite"),
+            ("my OpenWebUI backup.db", "my_OpenWebUI_backup.db"),
+            ("archive.backup.sqlite", "archive_backup.sqlite"),
+        ]
+
+        for input_name, expected_output in test_cases:
+            valid, error, safe_name = ChatbookValidator.validate_sqlite_filename(input_name)
+            assert valid is True
+            assert error is None
+            assert safe_name == expected_output
+
+    def test_validate_sqlite_filename_rejects_unsupported_and_dangerous_extensions(self):
+        """OpenWebUI database filename validation rejects extension bypass attempts."""
+        test_cases = [
+            "webui.db.exe",
+            "webui.sqlite.bat",
+            "webui.json",
+            "webui.chatbook",
+            "webui.zip",
+        ]
+
+        for filename in test_cases:
+            valid, error, safe_name = ChatbookValidator.validate_sqlite_filename(filename)
+            assert valid is False, f"Expected {filename} to be rejected"
+            assert "Invalid file type" in error
+
     def test_validate_zip_with_path_traversal(self):
         """Test ZIP validation catches path traversal in archive."""
         # Create a malicious ZIP in memory

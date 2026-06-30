@@ -21,10 +21,11 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import PlainTextResponse
 from loguru import logger
 from starlette import status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.audiobook_schemas import (
     AlignmentPayload,
     ArtifactInfo,
@@ -52,7 +53,6 @@ from tldw_Server_API.app.core.Audiobooks.tag_parser import (
     build_chapters_from_markers,
     parse_tagged_text,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Chunking.strategies.ebook_chapters import EbookChapterChunkingStrategy
 from tldw_Server_API.app.core.config import get_config_value
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
@@ -529,7 +529,11 @@ async def parse_audiobook_source(
 
     chapters: list[ChapterPreview] = []
     if tag_result.chapter_markers:
-        chapters = build_chapters_from_markers(normalized_text, tag_result.chapter_markers)
+        chapters = build_chapters_from_markers(
+            normalized_text,
+            tag_result.chapter_markers,
+            warnings=tag_result.warnings,
+        )
     elif request.detect_chapters:
         try:
             chapters = _detect_chapters(
@@ -538,7 +542,7 @@ async def parse_audiobook_source(
                 custom_pattern=request.custom_chapter_pattern,
             )
         except Exception as exc:
-            logger.warning("Chapter detection failed: {}", exc)
+            logger.warning("Chapter detection failed")
             raise HTTPException(status_code=400, detail="chapter_detection_failed") from exc
 
     if tag_result.chapter_markers or tag_result.voice_markers or tag_result.speed_markers or tag_result.ts_markers:
@@ -585,8 +589,8 @@ async def create_audiobook_job(
                 try:
                     if isinstance(payload.get("items"), list):
                         payload["items"][idx].pop("subtitles", None)
-                except _AUDIOBOOKS_COERCE_EXCEPTIONS as exc:
-                    logger.debug("Failed to remove subtitle override at index {}: {}", idx, exc)
+                except _AUDIOBOOKS_COERCE_EXCEPTIONS:
+                    logger.debug("Failed to remove subtitle override")
 
     job_manager = _get_job_manager()
     batch_group = request.queue.batch_group if request.queue is not None else None
@@ -686,7 +690,9 @@ async def get_audiobook_job_artifacts(
     if not owner_user_id or str(owner_user_id) != str(current_user_id):
         raise HTTPException(status_code=404, detail="job_not_found")
 
-    rows, _total = collections_db.list_output_artifacts(job_id=int(job_id), limit=200, offset=0)
+    limit = 200
+    offset = 0
+    rows, total = collections_db.list_output_artifacts(job_id=int(job_id), limit=limit, offset=offset)
     artifacts: list[ArtifactInfo] = []
     type_map = {
         "audiobook_audio": "audio",
@@ -718,7 +724,18 @@ async def get_audiobook_job_artifacts(
                 download_url=download_url,
             )
         )
-    return AudiobookArtifactsResponse(project_id=project_id, artifacts=artifacts)
+    return AudiobookArtifactsResponse(
+        project_id=project_id,
+        artifacts=artifacts,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(artifacts),
+        ),
+    )
 
 
 @router.get(
@@ -735,11 +752,23 @@ async def list_audiobook_projects(
 ) -> AudiobookProjectListResponse:
     try:
         rows = collections_db.list_audiobook_projects(limit=limit, offset=offset)
+        total = collections_db.count_audiobook_projects()
     except Exception as exc:
         logger.exception("Failed to list audiobook projects")
         raise HTTPException(status_code=500, detail="audiobook_project_list_failed") from exc
     projects = [_project_row_to_info(row) for row in rows]
-    return AudiobookProjectListResponse(projects=projects)
+    return AudiobookProjectListResponse(
+        projects=projects,
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(projects),
+        ),
+    )
 
 
 @router.get(
@@ -779,7 +808,7 @@ async def list_audiobook_project_chapters(
         project_row = _resolve_project_row(collections_db, project_ref)
         chapter_rows = collections_db.list_audiobook_chapters(
             project_id=int(project_row.id),
-            limit=limit,
+            limit=limit + 1,
             offset=offset,
         )
     except KeyError as exc:
@@ -788,7 +817,8 @@ async def list_audiobook_project_chapters(
         logger.exception("Failed to list audiobook chapters")
         raise HTTPException(status_code=500, detail="audiobook_chapters_list_failed") from exc
     chapters: list[AudiobookChapterInfo] = []
-    for row in chapter_rows:
+    has_more = len(chapter_rows) > limit
+    for row in chapter_rows[:limit]:
         metadata = _safe_json_loads(row.metadata_json)
         chapters.append(
             AudiobookChapterInfo(
@@ -803,7 +833,19 @@ async def list_audiobook_project_chapters(
             )
         )
     project_id = _project_row_project_id(project_row, project_ref)
-    return AudiobookChapterListResponse(project_id=project_id, chapters=chapters)
+    return AudiobookChapterListResponse(
+        project_id=project_id,
+        chapters=chapters,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=None,
+            limit=limit,
+            offset=offset,
+            count=len(chapters),
+            has_more=has_more,
+        ),
+    )
 
 
 @router.get(
@@ -823,7 +865,7 @@ async def list_audiobook_project_artifacts(
         project_row = _resolve_project_row(collections_db, project_ref)
         artifact_rows = collections_db.list_audiobook_artifacts(
             project_id=int(project_row.id),
-            limit=limit,
+            limit=limit + 1,
             offset=offset,
         )
     except KeyError as exc:
@@ -832,7 +874,8 @@ async def list_audiobook_project_artifacts(
         logger.exception("Failed to list audiobook artifacts")
         raise HTTPException(status_code=500, detail="audiobook_artifacts_list_failed") from exc
     artifacts: list[ArtifactInfo] = []
-    for row in artifact_rows:
+    has_more = len(artifact_rows) > limit
+    for row in artifact_rows[:limit]:
         metadata = _safe_json_loads(row.metadata_json)
         artifacts.append(
             ArtifactInfo(
@@ -845,7 +888,19 @@ async def list_audiobook_project_artifacts(
             )
         )
     project_id = _project_row_project_id(project_row, project_ref)
-    return AudiobookArtifactsResponse(project_id=project_id, artifacts=artifacts)
+    return AudiobookArtifactsResponse(
+        project_id=project_id,
+        artifacts=artifacts,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=None,
+            limit=limit,
+            offset=offset,
+            count=len(artifacts),
+            has_more=has_more,
+        ),
+    )
 
 
 @router.post(
@@ -889,11 +944,14 @@ async def create_voice_profile(
     dependencies=[Depends(check_rate_limit)],
 )
 async def list_voice_profiles(
+    limit: int = Query(100, ge=1, le=200, description="Maximum number of voice profiles to return"),
+    offset: int = Query(0, ge=0, description="Number of voice profiles to skip"),
     _current_user: User = Depends(get_request_user),
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ) -> VoiceProfileListResponse:
     try:
-        rows = collections_db.list_voice_profiles()
+        rows = collections_db.list_voice_profiles(limit=limit, offset=offset)
+        total = collections_db.count_voice_profiles()
     except Exception as exc:
         logger.exception("Failed to list audiobook voice profiles")
         raise HTTPException(status_code=500, detail="voice_profile_list_failed") from exc
@@ -914,7 +972,18 @@ async def list_voice_profiles(
                 chapter_overrides=overrides,
             )
         )
-    return VoiceProfileListResponse(profiles=profiles)
+    return VoiceProfileListResponse(
+        profiles=profiles,
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(profiles),
+        ),
+    )
 
 
 @router.delete(
@@ -1008,8 +1077,8 @@ async def export_subtitles(
                 return response
             try:
                 collections_db.delete_output_artifact(cached_row.id, hard=True)
-            except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS as exc:
-                logger.warning("audiobook subtitles: failed to prune missing cache output: {}", exc)
+            except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS:
+                logger.warning("audiobook subtitles: failed to prune missing cache output")
 
     try:
         content = generate_subtitles(
@@ -1070,8 +1139,8 @@ async def export_subtitles(
     )
     try:
         collections_db.update_audiobook_output_usage(size_bytes)
-    except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS as exc:
-        logger.warning("audiobook_quota: failed to increment subtitle usage: {}", exc)
+    except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS:
+        logger.warning("audiobook_quota: failed to increment subtitle usage")
 
     project_id = metadata.get("project_id")
     if project_id:
@@ -1086,8 +1155,8 @@ async def export_subtitles(
             )
         except KeyError:
             pass
-        except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS as exc:
-            logger.warning("audiobook subtitles: failed to link artifact: {}", exc)
+        except _AUDIOBOOKS_DB_OPERATION_EXCEPTIONS:
+            logger.warning("audiobook subtitles: failed to link artifact")
 
     response = PlainTextResponse(content)
     response.headers["X-Subtitle-Output-Id"] = str(row.id)

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ManageTab } from "../ManageTab"
 import { clearSetting } from "@/services/settings/registry"
@@ -8,8 +8,10 @@ import {
   useUpdateFlashcardsBulkMutation,
   useDecksQuery,
   useFlashcardDocumentQuery,
+  useGlobalFlashcardTagSuggestionsQuery,
   useManageQuery,
   useTagSuggestionsQuery,
+  useUpdateDeckMutation,
   useUpdateFlashcardMutation,
   useResetFlashcardSchedulingMutation,
   useDeleteFlashcardMutation,
@@ -19,7 +21,7 @@ import {
 } from "../../hooks"
 import { FLASHCARDS_DRAWER_WIDTH_PX } from "../../constants"
 import { FLASHCARDS_LAYOUT_GUARDRAILS } from "../../constants/layout-guardrails"
-import { getFlashcard, updateFlashcard } from "@/services/flashcards"
+import { getFlashcard, listFlashcards, updateFlashcard } from "@/services/flashcards"
 
 const showUndoNotificationMock = vi.fn()
 const updateMutationMock = vi.fn()
@@ -92,8 +94,10 @@ vi.mock("../../hooks", () => ({
   getFlashcardDocumentQueryKey: vi.fn(() => ["flashcards:document", 1]),
   useDecksQuery: vi.fn(),
   useFlashcardDocumentQuery: vi.fn(),
+  useGlobalFlashcardTagSuggestionsQuery: vi.fn(),
   useManageQuery: vi.fn(),
   useTagSuggestionsQuery: vi.fn(),
+  useUpdateDeckMutation: vi.fn(),
   useUpdateFlashcardMutation: vi.fn(),
   useUpdateFlashcardsBulkMutation: vi.fn(),
   useResetFlashcardSchedulingMutation: vi.fn(),
@@ -183,10 +187,22 @@ const sampleCard: Flashcard = {
   reverse: false
 }
 
+const buildSampleCards = (count: number): Flashcard[] =>
+  Array.from({ length: count }, (_item, index) => ({
+    ...sampleCard,
+    uuid: `card-undo-${index + 1}`,
+    front: `Front prompt ${index + 1}`,
+    back: `Back answer ${index + 1}`
+  }))
+
 describe("ManageTab stage3 undo controls", () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     trackErrorRecoveryTelemetryMock.mockClear()
+    updateMutationMock.mockReset()
+    vi.mocked(getFlashcard).mockReset()
+    vi.mocked(listFlashcards).mockReset()
+    vi.mocked(updateFlashcard).mockReset()
     Object.values(messageSpies).forEach((spy) => spy.mockReset())
     await clearSetting(FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING)
 
@@ -242,8 +258,18 @@ describe("ManageTab stage3 undo controls", () => {
       data: ["biology", "chemistry"],
       isLoading: false
     } as any)
+    vi.mocked(useGlobalFlashcardTagSuggestionsQuery).mockReturnValue({
+      data: { items: [] },
+      isLoading: false,
+      isFetching: false,
+      isError: false
+    } as any)
     vi.mocked(useUpdateFlashcardMutation).mockReturnValue({
       mutateAsync: updateMutationMock,
+      isPending: false
+    } as any)
+    vi.mocked(useUpdateDeckMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
       isPending: false
     } as any)
     vi.mocked(useUpdateFlashcardsBulkMutation).mockReturnValue({
@@ -429,7 +455,8 @@ describe("ManageTab stage3 undo controls", () => {
     )
 
     fireEvent.click(screen.getByTestId(`flashcard-item-${sampleCard.uuid}-select`))
-    fireEvent.click(screen.getByRole("button", { name: "Add tag" }))
+    const bulkActionBar = document.querySelector(".fixed.bottom-4") as HTMLElement
+    fireEvent.click(within(bulkActionBar).getByRole("button", { name: "Add tag" }))
     fireEvent.change(screen.getByTestId("flashcards-bulk-tag-input"), {
       target: { value: "chemistry chapter-1" }
     })
@@ -444,6 +471,288 @@ describe("ManageTab stage3 undo controls", () => {
       tags: ["biology", "chemistry", "chapter-1"],
       expected_version: 11
     })
+  }, 15000)
+
+  it("keeps failed cards selected and warns when bulk tag updates partially fail", async () => {
+    const cards = buildSampleCards(2)
+    vi.mocked(useManageQuery).mockReturnValue({
+      data: {
+        items: cards,
+        count: cards.length,
+        total: cards.length
+      },
+      isFetching: false
+    } as any)
+    vi.mocked(getFlashcard)
+      .mockResolvedValueOnce({
+        ...cards[0],
+        version: 11,
+        tags: ["biology"]
+      })
+      .mockResolvedValueOnce({
+        ...cards[1],
+        version: 12,
+        tags: ["biology"]
+      })
+    vi.mocked(updateFlashcard)
+      .mockResolvedValueOnce(undefined as any)
+      .mockRejectedValueOnce(new Error("save failed"))
+
+    render(
+      <ManageTab
+        onNavigateToImport={() => {}}
+        onReviewCard={() => {}}
+        isActive={false}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("flashcard-item-card-undo-1-select"))
+    fireEvent.click(screen.getByTestId("flashcard-item-card-undo-2-select"))
+    const retryBulkActionBar = document.querySelector(".fixed.bottom-4") as HTMLElement
+    fireEvent.click(within(retryBulkActionBar).getByRole("button", { name: "Add tag" }))
+    fireEvent.change(screen.getByTestId("flashcards-bulk-tag-input"), {
+      target: { value: "chemistry" }
+    })
+    const addTagButtons = screen.getAllByRole("button", { name: "Add tag" })
+    fireEvent.click(addTagButtons[addTagButtons.length - 1])
+
+    await waitFor(() => {
+      expect(messageSpies.warning).toHaveBeenCalledWith(
+        "Updated 1 card; 1 failed. Failed cards remain selected so you can retry."
+      )
+    })
+    expect(messageSpies.success).not.toHaveBeenCalled()
+    expect(screen.getByTestId("flashcard-item-card-undo-1-select")).not.toBeChecked()
+    expect(screen.getByTestId("flashcard-item-card-undo-2-select")).toBeChecked()
+  }, 15000)
+
+  it("retries failed off-page cards after select-all-across bulk tag partial failure", async () => {
+    const cards = buildSampleCards(2)
+    vi.mocked(useManageQuery).mockReturnValue({
+      data: {
+        items: [cards[0]],
+        count: 1,
+        total: cards.length
+      },
+      isFetching: false
+    } as any)
+    vi.mocked(listFlashcards).mockResolvedValue({
+      items: cards,
+      total: cards.length,
+      page: 1,
+      page_size: cards.length
+    } as any)
+    vi.mocked(getFlashcard).mockImplementation(async (uuid) => {
+      const card = cards.find((item) => item.uuid === uuid)
+      if (!card) throw new Error("card not found")
+      return {
+        ...card,
+        version: card.uuid === cards[0].uuid ? 11 : 12,
+        tags: ["biology"]
+      }
+    })
+    let offPageAttempts = 0
+    vi.mocked(updateFlashcard).mockImplementation(async (uuid) => {
+      if (uuid === cards[1].uuid) {
+        offPageAttempts += 1
+        if (offPageAttempts === 1) {
+          throw new Error("save failed")
+        }
+      }
+      return undefined as any
+    })
+
+    render(
+      <ManageTab
+        onNavigateToImport={() => {}}
+        onReviewCard={() => {}}
+        isActive={false}
+      />
+    )
+
+    fireEvent.click(screen.getByLabelText("Select all cards on this page"))
+    fireEvent.click(screen.getByTestId("flashcards-select-all-across"))
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }))
+    let bulkTagInputs = screen.getAllByTestId("flashcards-bulk-tag-input")
+    let activeBulkTagInput = bulkTagInputs[bulkTagInputs.length - 1]
+    fireEvent.change(activeBulkTagInput, {
+      target: { value: "chemistry" }
+    })
+    const retryAddTagButtons = screen.getAllByRole("button", { name: "Add tag" })
+    fireEvent.click(retryAddTagButtons[retryAddTagButtons.length - 1])
+
+    await waitFor(() => {
+      expect(messageSpies.warning).toHaveBeenCalledWith(
+        "Updated 1 card; 1 failed. Failed cards remain selected so you can retry."
+      )
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId("flashcard-item-card-undo-1-select")).not.toBeChecked()
+    })
+    await waitFor(() => {
+      expect(screen.getAllByText("failed cards selected for retry").length).toBeGreaterThan(0)
+    })
+
+    const retryBulkActionBar = document.querySelector(".fixed.bottom-4") as HTMLElement
+    fireEvent.click(within(retryBulkActionBar).getByRole("button", { name: "Add tag" }))
+    bulkTagInputs = screen.getAllByTestId("flashcards-bulk-tag-input")
+    activeBulkTagInput = bulkTagInputs[bulkTagInputs.length - 1]
+    fireEvent.change(activeBulkTagInput, {
+      target: { value: "chemistry" }
+    })
+    fireEvent.keyDown(activeBulkTagInput, { key: "Enter", code: "Enter" })
+
+    await waitFor(() => {
+      expect(updateFlashcard).toHaveBeenCalledTimes(3)
+    })
+    expect(vi.mocked(updateFlashcard).mock.calls[2][0]).toBe(cards[1].uuid)
+    expect(listFlashcards).toHaveBeenCalledTimes(1)
+    expect(messageSpies.info).not.toHaveBeenCalledWith("No cards selected.")
+  }, 15000)
+
+  it("keeps off-page retry selections when a visible card is toggled", async () => {
+    const cards = buildSampleCards(2)
+    vi.mocked(useManageQuery).mockReturnValue({
+      data: {
+        items: [cards[0]],
+        count: 1,
+        total: cards.length
+      },
+      isFetching: false
+    } as any)
+    vi.mocked(listFlashcards).mockResolvedValue({
+      items: cards,
+      total: cards.length,
+      page: 1,
+      page_size: cards.length
+    } as any)
+    vi.mocked(getFlashcard).mockImplementation(async (uuid) => {
+      const card = cards.find((item) => item.uuid === uuid)
+      if (!card) throw new Error("card not found")
+      return {
+        ...card,
+        version: card.uuid === cards[0].uuid ? 11 : 12,
+        tags: ["biology"]
+      }
+    })
+    let offPageAttempts = 0
+    vi.mocked(updateFlashcard).mockImplementation(async (uuid) => {
+      if (uuid === cards[1].uuid) {
+        offPageAttempts += 1
+        if (offPageAttempts === 1) {
+          throw new Error("save failed")
+        }
+      }
+      return undefined as any
+    })
+
+    render(
+      <ManageTab
+        onNavigateToImport={() => {}}
+        onReviewCard={() => {}}
+        isActive={false}
+      />
+    )
+
+    fireEvent.click(screen.getByLabelText("Select all cards on this page"))
+    fireEvent.click(screen.getByTestId("flashcards-select-all-across"))
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }))
+    let bulkTagInputs = screen.getAllByTestId("flashcards-bulk-tag-input")
+    let activeBulkTagInput = bulkTagInputs[bulkTagInputs.length - 1]
+    fireEvent.change(activeBulkTagInput, {
+      target: { value: "chemistry" }
+    })
+    let addTagButtons = screen.getAllByRole("button", { name: "Add tag" })
+    fireEvent.click(addTagButtons[addTagButtons.length - 1])
+
+    await waitFor(() => {
+      expect(screen.getAllByText("failed cards selected for retry").length).toBeGreaterThan(0)
+    })
+
+    fireEvent.click(screen.getByTestId("flashcard-item-card-undo-1-select"))
+
+    const retryBulkActionBar = document.querySelector(".fixed.bottom-4") as HTMLElement
+    fireEvent.click(within(retryBulkActionBar).getByRole("button", { name: "Add tag" }))
+    bulkTagInputs = screen.getAllByTestId("flashcards-bulk-tag-input")
+    activeBulkTagInput = bulkTagInputs[bulkTagInputs.length - 1]
+    fireEvent.change(activeBulkTagInput, {
+      target: { value: "chemistry" }
+    })
+    addTagButtons = screen.getAllByRole("button", { name: "Add tag" })
+    fireEvent.click(addTagButtons[addTagButtons.length - 1])
+
+    await waitFor(() => {
+      expect(updateFlashcard).toHaveBeenCalledTimes(4)
+    })
+    expect(vi.mocked(updateFlashcard).mock.calls.slice(2).map(([uuid]) => uuid)).toEqual([
+      cards[0].uuid,
+      cards[1].uuid
+    ])
+    expect(listFlashcards).toHaveBeenCalledTimes(1)
+  }, 15000)
+
+  it("clears failed retry selection when workspace scope changes", async () => {
+    const cards = buildSampleCards(2)
+    vi.mocked(useManageQuery).mockReturnValue({
+      data: {
+        items: [cards[0]],
+        count: 1,
+        total: cards.length
+      },
+      isFetching: false
+    } as any)
+    vi.mocked(listFlashcards).mockResolvedValue({
+      items: cards,
+      total: cards.length,
+      page: 1,
+      page_size: cards.length
+    } as any)
+    vi.mocked(getFlashcard)
+      .mockResolvedValueOnce({
+        ...cards[0],
+        version: 11,
+        tags: ["biology"]
+      })
+      .mockResolvedValueOnce({
+        ...cards[1],
+        version: 12,
+        tags: ["biology"]
+      })
+    vi.mocked(updateFlashcard).mockImplementation(async (uuid) => {
+      if (uuid === cards[1].uuid) {
+        throw new Error("save failed")
+      }
+      return undefined as any
+    })
+
+    render(
+      <ManageTab
+        onNavigateToImport={() => {}}
+        onReviewCard={() => {}}
+        isActive={false}
+      />
+    )
+
+    fireEvent.click(screen.getByLabelText("Select all cards on this page"))
+    fireEvent.click(screen.getByTestId("flashcards-select-all-across"))
+    fireEvent.click(screen.getByRole("button", { name: "Add tag" }))
+    const bulkTagInput = screen.getByTestId("flashcards-bulk-tag-input")
+    fireEvent.change(bulkTagInput, {
+      target: { value: "chemistry" }
+    })
+    const addTagButtons = screen.getAllByRole("button", { name: "Add tag" })
+    fireEvent.click(addTagButtons[addTagButtons.length - 1])
+
+    await waitFor(() => {
+      expect(screen.getAllByText("failed cards selected for retry").length).toBeGreaterThan(0)
+    })
+
+    fireEvent.click(screen.getByTestId("flashcards-manage-show-workspace-decks"))
+
+    await waitFor(() => {
+      expect(screen.queryAllByText("failed cards selected for retry")).toHaveLength(0)
+    })
+    expect(document.querySelector(".fixed.bottom-4")).toBeNull()
   }, 15000)
 
   it("applies bulk remove tag to selected cards case-insensitively", async () => {
@@ -478,5 +787,96 @@ describe("ManageTab stage3 undo controls", () => {
       tags: ["biology"],
       expected_version: 14
     })
+  }, 15000)
+
+  it("keeps failed cards selected and warns when bulk move partially fails", async () => {
+    const cards = buildSampleCards(2)
+    vi.mocked(useManageQuery).mockReturnValue({
+      data: {
+        items: cards,
+        count: cards.length,
+        total: cards.length
+      },
+      isFetching: false
+    } as any)
+    vi.mocked(getFlashcard)
+      .mockResolvedValueOnce({
+        ...cards[0],
+        version: 21,
+        deck_id: 1
+      })
+      .mockResolvedValueOnce({
+        ...cards[1],
+        version: 22,
+        deck_id: 1
+      })
+    vi.mocked(updateFlashcard)
+      .mockResolvedValueOnce(undefined as any)
+      .mockRejectedValueOnce(new Error("move failed"))
+
+    render(
+      <ManageTab
+        onNavigateToImport={() => {}}
+        onReviewCard={() => {}}
+        isActive={false}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("flashcard-item-card-undo-1-select"))
+    fireEvent.click(screen.getByTestId("flashcard-item-card-undo-2-select"))
+    fireEvent.click(screen.getByRole("button", { name: "Move" }))
+    const comboboxes = screen.getAllByRole("combobox")
+    fireEvent.mouseDown(comboboxes[comboboxes.length - 1])
+    fireEvent.click(screen.getByText("Deck 2"))
+    const moveButtons = screen.getAllByRole("button", { name: "Move" })
+    fireEvent.click(moveButtons[moveButtons.length - 1])
+
+    await waitFor(() => {
+      expect(messageSpies.warning).toHaveBeenCalledWith(
+        "Moved 1 card; 1 failed. Failed cards remain selected so you can retry."
+      )
+    })
+    expect(messageSpies.success).not.toHaveBeenCalled()
+    expect(showUndoNotificationMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId("flashcard-item-card-undo-1-select")).not.toBeChecked()
+    expect(screen.getByTestId("flashcard-item-card-undo-2-select")).toBeChecked()
+  }, 15000)
+
+  it("renders large bulk delete warning with the design-system Alert", async () => {
+    const cards = buildSampleCards(101)
+    vi.mocked(listFlashcards).mockResolvedValue({
+      items: cards,
+      total: cards.length,
+      page: 1,
+      page_size: cards.length
+    } as any)
+    vi.mocked(useManageQuery).mockReturnValue({
+      data: {
+        items: [sampleCard],
+        count: cards.length,
+        total: cards.length
+      },
+      isFetching: false
+    } as any)
+
+    render(
+      <ManageTab
+        onNavigateToImport={() => {}}
+        onReviewCard={() => {}}
+        isActive={false}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByLabelText("Select all cards on this page")
+    )
+    fireEvent.click(screen.getByTestId("flashcards-select-all-across"))
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+
+    const warning = await screen.findByText(
+      "These cards will move to Trash for 30 seconds."
+    )
+    expect(listFlashcards).toHaveBeenCalled()
+    expect(warning.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
   }, 15000)
 })

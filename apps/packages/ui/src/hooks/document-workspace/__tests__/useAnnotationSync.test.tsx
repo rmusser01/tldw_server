@@ -47,10 +47,13 @@ describe("useAnnotationSyncOnClose", () => {
       pendingAnnotations: [
         {
           id: "ann-1",
+          documentId: 1,
           location: "1",
           text: "Important",
           color: "yellow",
           annotationType: "highlight",
+          createdAt: new Date("2026-05-25T00:00:00Z"),
+          updatedAt: new Date("2026-05-25T00:00:00Z"),
         },
       ],
     })

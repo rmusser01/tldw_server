@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from starlette.datastructures import URL
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_auth_rate_limit,
@@ -18,6 +20,27 @@ from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
 
 
 pytestmark = pytest.mark.integration
+
+
+def test_build_federation_redirect_uri_uses_public_base_without_request_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
+    monkeypatch.setenv("PUBLIC_WEB_BASE_URL", "https://app.example.com")
+    reset_settings()
+
+    from tldw_Server_API.app.api.v1.endpoints.auth import _build_federation_redirect_uri
+
+    def _url_for(name: str, *, provider_slug: str) -> URL:
+        assert name == "federation_callback"
+        return URL(f"http://attacker.example/api/v1/auth/federation/{provider_slug}/callback")
+
+    request = SimpleNamespace(url_for=_url_for)
+
+    assert _build_federation_redirect_uri(request, "corp") == (
+        "https://app.example.com/api/v1/auth/federation/corp/callback"
+    )
 
 
 @pytest.fixture
@@ -123,6 +146,52 @@ def test_federation_login_redirects_to_provider_authorization_url(
     assert len(query["code_challenge"][0]) >= 32
     assert len(query["state"][0]) >= 20
     assert query["redirect_uri"] == ["http://testserver/api/v1/auth/federation/corp/callback"]
+
+
+def test_federation_login_uses_public_web_base_url_for_redirect_uri(
+    federation_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PUBLIC_WEB_BASE_URL", "https://app.example.com")
+    reset_settings()
+
+    create_response = federation_client.post(
+        "/api/v1/admin/identity/providers",
+        json={
+            "slug": "corp-public-base",
+            "provider_type": "oidc",
+            "owner_scope_type": "global",
+            "enabled": True,
+            "display_name": "Corp SSO",
+            "issuer": "https://issuer.example.com",
+            "authorization_url": "https://issuer.example.com/oauth2/authorize",
+            "token_url": "https://issuer.example.com/oauth2/token",
+            "jwks_url": "https://issuer.example.com/.well-known/jwks.json",
+            "client_id": "client-123",
+            "claim_mapping": {
+                "subject": "sub",
+                "email": "email",
+                "username": "preferred_username",
+            },
+            "provisioning_policy": {
+                "jit_create": True,
+                "allow_email_account_linking": True,
+            },
+        },
+    )
+    assert create_response.status_code == 200, create_response.text
+
+    response = federation_client.get(
+        "/api/v1/auth/federation/corp-public-base/login",
+        headers={"host": "attacker.example"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 307, response.text
+
+    query = parse_qs(urlparse(response.headers["location"]).query)
+    assert query["redirect_uri"] == [
+        "https://app.example.com/api/v1/auth/federation/corp-public-base/callback"
+    ]
 
 
 def test_federation_callback_supports_org_scoped_provider_resolution(

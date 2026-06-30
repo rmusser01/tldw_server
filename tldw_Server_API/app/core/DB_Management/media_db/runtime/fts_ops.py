@@ -22,6 +22,9 @@ def _update_fts_media(
     media_id: int,
     title: str,
     content: str | None,
+    *,
+    old_title: str | None = None,
+    old_content: str | None = None,
 ):
     if self.backend_type == BackendType.SQLITE:
         content = content or ""
@@ -35,27 +38,57 @@ def _update_fts_media(
         except _MEDIA_NONCRITICAL_EXCEPTIONS:
             syn_map = {}
 
-        expanded_terms: list[str] = []
-        if syn_map:
-            try:
-                import re as _re
+        def _build_fts_content(fts_title: str, fts_content: str) -> str:
+            expanded_terms: list[str] = []
+            if syn_map:
+                try:
+                    import re as _re
 
-                tokens = {t for t in _re.split(r"\W+", f"{title} {content}".lower()) if t}
-                for token in tokens:
-                    aliases = syn_map.get(token)
-                    if aliases:
-                        expanded_terms.extend(alias for alias in aliases if alias)
-                max_terms = int(os.getenv("FTS_SYNONYM_EXPANSION_LIMIT", "200") or 200)
-                if len(expanded_terms) > max_terms:
-                    expanded_terms = expanded_terms[:max_terms]
-            except _MEDIA_NONCRITICAL_EXCEPTIONS:
-                expanded_terms = []
+                    tokens = {
+                        t for t in _re.split(r"\W+", f"{fts_title} {fts_content}".lower()) if t
+                    }
+                    for token in tokens:
+                        aliases = syn_map.get(token)
+                        if aliases:
+                            expanded_terms.extend(alias for alias in aliases if alias)
+                    max_terms = int(os.getenv("FTS_SYNONYM_EXPANSION_LIMIT", "200") or 200)
+                    if len(expanded_terms) > max_terms:
+                        expanded_terms = expanded_terms[:max_terms]
+                except _MEDIA_NONCRITICAL_EXCEPTIONS:
+                    expanded_terms = []
 
-        expansion_suffix = (" " + " ".join(expanded_terms)) if expanded_terms else ""
+            expansion_suffix = (" " + " ".join(expanded_terms)) if expanded_terms else ""
+            return f"{fts_content}{expansion_suffix}"
+
+        fts_content = _build_fts_content(title, content)
         try:
+            if old_title is not None or old_content is not None:
+                delete_title = old_title
+                delete_content = old_content
+                has_delete_payload = delete_title is not None and delete_content is not None
+                if delete_title is None or delete_content is None:
+                    existing_fts = conn.execute(
+                        "SELECT title, content FROM media_fts WHERE rowid = ?",
+                        (media_id,),
+                    ).fetchone()
+                    if existing_fts:
+                        has_delete_payload = True
+                        if delete_title is None:
+                            delete_title = existing_fts[0] or ""
+                        if delete_content is None:
+                            delete_content = existing_fts[1] or ""
+                if has_delete_payload:
+                    conn.execute(
+                        "INSERT INTO media_fts (media_fts, rowid, title, content) VALUES ('delete', ?, ?, ?)",
+                        (
+                            media_id,
+                            delete_title or "",
+                            _build_fts_content(delete_title or "", delete_content or ""),
+                        ),
+                    )
             conn.execute(
                 "INSERT OR REPLACE INTO media_fts (rowid, title, content) VALUES (?, ?, ?)",
-                (media_id, title, f"{content}{expansion_suffix}"),
+                (media_id, title, fts_content),
             )
             logging.debug("Updated SQLite FTS entry for Media ID {}", media_id)
         except sqlite3.Error as exc:
@@ -302,10 +335,32 @@ def sync_refresh_fts_for_entity(
         return
 
 
+def sync_get_media_fts_values(
+    self: Any,
+    conn,
+    *,
+    entity_uuid: str,
+) -> dict[str, str]:
+    """Return current Media values needed for legacy sync FTS refreshes."""
+
+    row = self._fetchone_with_connection(
+        conn,
+        "SELECT title, content FROM Media WHERE uuid = ?",
+        (entity_uuid,),
+    )
+    if row is None:
+        return {}
+    return {
+        "title": str(row.get("title") or ""),
+        "content": str(row.get("content") or ""),
+    }
+
+
 __all__ = [
     "_delete_fts_keyword",
     "_delete_fts_media",
     "_update_fts_keyword",
     "_update_fts_media",
+    "sync_get_media_fts_values",
     "sync_refresh_fts_for_entity",
 ]

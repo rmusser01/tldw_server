@@ -25,6 +25,16 @@ import {
   shouldSurfaceWorkspaceConflictNotice,
   type WorkspaceStorageQuotaEventDetail
 } from "@/store/workspace-events"
+import {
+  runResearchWorkspaceMigration,
+  type ResearchWorkspaceIndexedDbStoreRef,
+  type ResearchWorkspaceMigrationRunResult
+} from "@/store/workspace-migration"
+import {
+  RESEARCH_WORKSPACE_INDEXEDDB_ARTIFACT_STORE,
+  RESEARCH_WORKSPACE_INDEXEDDB_CHAT_STORE,
+  RESEARCH_WORKSPACE_INDEXEDDB_NAME
+} from "@/store/research-workspace-legacy-storage-inventory"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
@@ -35,7 +45,11 @@ import type {
   WorkspaceSourceStatusApiResponse,
   WorkspaceSourceStatusListResponse
 } from "@/services/tldw/domains/workspace-api"
-import type { WorkspaceSourceStatus } from "@/types/workspace"
+import type {
+  GeneratedArtifact,
+  WorkspaceSourceStatus,
+  WorkspaceSourceStatusDetails
+} from "@/types/workspace"
 import {
   buildKnowledgeQaSeedNote,
   consumeResearchWorkspacePrefill
@@ -47,7 +61,6 @@ import { WorkspaceBanner } from "./WorkspaceBanner"
 import { SharedWorkspaceBanner } from "./SharedWorkspaceBanner"
 import { SharedWorkspaceProvider } from "./SharedWorkspaceContext"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
-import { WorkspaceTrustPanel } from "./WorkspaceTrustPanel"
 import { ChatPane } from "./ChatPane"
 import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
 import {
@@ -70,11 +83,30 @@ import {
   undoWorkspaceAction,
   undoLatestWorkspaceAction
 } from "./undo-manager"
+import { renderWorkspaceMessageActionContent } from "./workspace-message-content"
 import {
   buildWorkspaceGlobalSearchResults,
   type WorkspaceGlobalSearchNoteDocument,
   type WorkspaceGlobalSearchResult
 } from "./workspace-global-search"
+import {
+  getResearchWorkspaceDeepResearchReturnContext,
+  getResearchWorkspaceSearchFromLocation,
+  getResearchWorkspaceTabFromSearch,
+  isResearchWorkspaceDeepResearchReturnForWorkspace,
+  parseResearchWorkspaceTab,
+  RESEARCH_WORKSPACE_DEFAULT_TAB,
+  readResearchWorkspaceLastMobileTab,
+  writeResearchWorkspaceLastMobileTab,
+  type ResearchWorkspaceDeepResearchReturnContext,
+  type ResearchWorkspaceTab
+} from "./research-workspace-route-state"
+import {
+  buildUnknownResearchWorkspaceCapabilities,
+  isResearchWorkspaceCapabilitiesStale,
+  normalizeResearchWorkspaceCapabilities,
+  type ResearchWorkspaceCapabilitiesResponse
+} from "./research-workspace-capabilities"
 import {
   collectDescendantSourceIds,
   createWorkspaceOrganizationIndex
@@ -83,6 +115,10 @@ import {
   buildResearchWorkspaceServerSourceSignature,
   reconcileResearchWorkspaceServerState
 } from "./workspace-server-reconcile"
+import {
+  DeepResearchBundleImportError,
+  buildDeepResearchBundleArtifactPayload
+} from "./deep-research-bundle-import"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))
@@ -131,6 +167,120 @@ const WORKSPACE_CONFLICT_FIELD_LABELS: Record<string, string> = {
   workspaceChatSessions: "chat history",
   audioSettings: "audio settings"
 }
+const WORKSPACE_CHAT_OFFLOAD_POINTER_KIND = "workspace_chat_session_v1"
+const WORKSPACE_ARTIFACT_OFFLOAD_POINTER_KIND = "workspace_artifact_payload_v1"
+
+type DeepResearchBundleImportState = {
+  contextKey: string
+  status: "importing" | "imported" | "failed"
+  message?: string
+}
+
+const buildDeepResearchBundleImportContextKey = (
+  context: ResearchWorkspaceDeepResearchReturnContext
+): string =>
+  [
+    context.sourceWorkspaceId,
+    context.sourceArtifactId ?? "",
+    context.researchRunId
+  ].join(":")
+
+const collectResearchWorkspaceLegacyLocalStorageKeys = (): string[] => {
+  if (typeof window === "undefined") return []
+  const keys: string[] = []
+  try {
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index)
+      if (!key) continue
+      if (
+        key === WORKSPACE_STORAGE_KEY ||
+        key.startsWith(WORKSPACE_STORAGE_SPLIT_KEY_PREFIX) ||
+        key.startsWith("tldw:research-workspace:") ||
+        key.startsWith("tldw:workspace:playground:")
+      ) {
+        keys.push(key)
+      }
+    }
+  } catch {
+    return []
+  }
+  return keys.sort()
+}
+
+const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName.toLowerCase()
+  return (
+    tag === "input" ||
+    tag === "textarea" ||
+    tag === "select" ||
+    target.isContentEditable ||
+    Boolean(target.closest("[contenteditable='true']"))
+  )
+}
+
+const jsonValueContainsOffloadPointer = (
+  value: unknown,
+  offloadType: string
+): boolean => {
+  if (Array.isArray(value)) {
+    return value.some((item) => jsonValueContainsOffloadPointer(item, offloadType))
+  }
+  if (typeof value !== "object" || value === null) return false
+
+  const record = value as Record<string, unknown>
+  if (record.offloadType === offloadType) return true
+  return Object.values(record).some((item) =>
+    jsonValueContainsOffloadPointer(item, offloadType)
+  )
+}
+
+const collectResearchWorkspaceLegacyIndexedDbStores = (
+  localStorageKeys: string[]
+): ResearchWorkspaceIndexedDbStoreRef[] => {
+  if (typeof window === "undefined") return []
+  let hasChatStorePointer = false
+  let hasArtifactStorePointer = false
+
+  for (const key of localStorageKeys) {
+    let parsedPayload: unknown
+    try {
+      const payload = window.localStorage.getItem(key)
+      if (!payload) continue
+      parsedPayload = JSON.parse(payload)
+    } catch {
+      continue
+    }
+
+    hasChatStorePointer =
+      hasChatStorePointer ||
+      jsonValueContainsOffloadPointer(
+        parsedPayload,
+        WORKSPACE_CHAT_OFFLOAD_POINTER_KIND
+      )
+    hasArtifactStorePointer =
+      hasArtifactStorePointer ||
+      jsonValueContainsOffloadPointer(
+        parsedPayload,
+        WORKSPACE_ARTIFACT_OFFLOAD_POINTER_KIND
+      )
+  }
+
+  const stores: ResearchWorkspaceIndexedDbStoreRef[] = []
+  if (hasChatStorePointer) {
+    stores.push({
+      databaseName: RESEARCH_WORKSPACE_INDEXEDDB_NAME,
+      storeName: RESEARCH_WORKSPACE_INDEXEDDB_CHAT_STORE
+    })
+  }
+  if (hasArtifactStorePointer) {
+    stores.push({
+      databaseName: RESEARCH_WORKSPACE_INDEXEDDB_NAME,
+      storeName: RESEARCH_WORKSPACE_INDEXEDDB_ARTIFACT_STORE
+    })
+  }
+  return stores
+}
 
 const normalizeVectorProcessingStatus = (
   value: unknown
@@ -157,7 +307,7 @@ const normalizeVectorProcessingStatus = (
   return null
 }
 
-type WorkspaceTabKey = "sources" | "chat" | "studio"
+type WorkspaceTabKey = ResearchWorkspaceTab
 
 type WorkspaceNoteKeywordLike =
   | string
@@ -649,7 +799,44 @@ const getWorkspaceSourceStatusMessage = (
 ): string | undefined =>
   source.progress_message || source.status_reason || undefined
 
-const describeWorkspaceTrustError = (error: unknown): string => {
+const parseWorkspaceSourceStatusUpdatedAt = (
+  updatedAt: string | null
+): Date | undefined => {
+  if (!updatedAt) return undefined
+  const parsed = new Date(updatedAt)
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed
+}
+
+const buildWorkspaceSourceStatusDetails = (
+  source: WorkspaceSourceStatusApiResponse
+): WorkspaceSourceStatusDetails => ({
+  lifecycleState: source.state,
+  statusReason: source.status_reason || undefined,
+  sourceOfTruth: "workspace-status-projection",
+  updatedAt: parseWorkspaceSourceStatusUpdatedAt(source.updated_at),
+  stale: source.stale ?? false,
+  retryEligible:
+    source.retry_eligible ??
+    (source.state === "failed" ||
+      source.state === "missing_media" ||
+      source.state === "blocked_by_permissions"),
+  nextAction: source.next_action || undefined,
+  progressPercent: source.progress_percent,
+  progressMessage: source.progress_message,
+  job: source.job
+    ? {
+        id: source.job.id,
+        uuid: source.job.uuid,
+        status: source.job.status,
+        jobType: source.job.job_type,
+        progressPercent: source.job.progress_percent,
+        progressMessage: source.job.progress_message,
+        errorMessage: source.job.error_message
+      }
+    : null
+})
+
+const describeWorkspaceStatusProjectionError = (error: unknown): string => {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message
   }
@@ -881,13 +1068,51 @@ const ResearchWorkspaceBody: React.FC = () => {
   )
   const provenanceEnabled = provenanceFlagEnabled !== false
   const statusGuardrailsEnabled = statusGuardrailsFlagEnabled !== false
+  const [researchWorkspaceCapabilities, setResearchWorkspaceCapabilities] =
+    React.useState<ResearchWorkspaceCapabilitiesResponse>(() =>
+      buildUnknownResearchWorkspaceCapabilities("capabilities_not_loaded")
+    )
+  const [
+    researchWorkspaceCapabilitiesFetchedAt,
+    setResearchWorkspaceCapabilitiesFetchedAt
+  ] = React.useState<number | null>(null)
 
   // Mobile drawer state
   const [leftDrawerOpen, setLeftDrawerOpen] = React.useState(false)
   const [rightDrawerOpen, setRightDrawerOpen] = React.useState(false)
 
+  const initialRouteSearchRef = React.useRef(
+    getResearchWorkspaceSearchFromLocation(
+      typeof window === "undefined" ? null : window.location
+    )
+  )
+  const initialRouteTabRef = React.useRef<WorkspaceTabKey | null>(
+    getResearchWorkspaceTabFromSearch(initialRouteSearchRef.current)
+  )
+  const initialStoredMobileTabRef = React.useRef<WorkspaceTabKey | null>(
+    initialRouteTabRef.current ? null : readResearchWorkspaceLastMobileTab()
+  )
+  const initialRouteTabAppliedRef = React.useRef(false)
+  const initialDeepResearchReturnContextRef =
+    React.useRef(
+      getResearchWorkspaceDeepResearchReturnContext(initialRouteSearchRef.current)
+    )
+  const deepResearchReturnAppliedRef = React.useRef(false)
+
   // Mobile tab state
-  const [activeTab, setActiveTab] = React.useState<WorkspaceTabKey>("chat")
+  const [activeTab, setActiveTab] = React.useState<WorkspaceTabKey>(
+    () =>
+      initialRouteTabRef.current ??
+      initialStoredMobileTabRef.current ??
+      RESEARCH_WORKSPACE_DEFAULT_TAB
+  )
+  const setActiveMobileTab = React.useCallback(
+    (tab: WorkspaceTabKey) => {
+      setActiveTab(tab)
+      writeResearchWorkspaceLastMobileTab(tab)
+    },
+    []
+  )
 
   // Global search state
   const [globalSearchOpen, setGlobalSearchOpen] = React.useState(false)
@@ -923,13 +1148,25 @@ const ResearchWorkspaceBody: React.FC = () => {
     accountUsedBytes: null,
     accountQuotaBytes: null
   })
-  const [workspaceSourceStatus, setWorkspaceSourceStatus] =
+  const [, setWorkspaceSourceStatus] =
     React.useState<WorkspaceSourceStatusListResponse | null>(null)
   const [workspaceCapabilities, setWorkspaceCapabilities] =
     React.useState<WorkspaceCapabilitiesResponse | null>(null)
-  const [workspaceTrustLoading, setWorkspaceTrustLoading] = React.useState(false)
-  const [workspaceTrustError, setWorkspaceTrustError] =
+  const [, setWorkspaceStatusProjectionLoading] = React.useState(false)
+  const [workspaceStatusProjectionError, setWorkspaceStatusProjectionError] =
     React.useState<string | null>(null)
+  const [workspaceMigrationResult, setWorkspaceMigrationResult] =
+    React.useState<ResearchWorkspaceMigrationRunResult | null>(null)
+  const [workspaceMigrationLoading, setWorkspaceMigrationLoading] =
+    React.useState(false)
+  const [workspaceMigrationDetailsOpen, setWorkspaceMigrationDetailsOpen] =
+    React.useState(false)
+  const [workspaceMigrationRetryNonce, setWorkspaceMigrationRetryNonce] =
+    React.useState(0)
+  const [
+    workspaceStatusProjectionReadyVersion,
+    setWorkspaceStatusProjectionReadyVersion
+  ] = React.useState(0)
   const storageUsagePercent = React.useMemo(() => {
     if (
       workspaceStorageUsage.quotaBytes <= 0 ||
@@ -950,8 +1187,22 @@ const ResearchWorkspaceBody: React.FC = () => {
     storageUsagePercent >= 80
 
   const lastCrossTabSyncWarningRef = React.useRef(0)
+  const workspaceMigrationSignatureRef = React.useRef<string | null>(null)
+  const workspaceMigrationInFlightRef = React.useRef<{
+    signature: string
+    promise: Promise<ResearchWorkspaceMigrationRunResult>
+  } | null>(null)
+  const retryWorkspaceMigration = React.useCallback(() => {
+    workspaceMigrationSignatureRef.current = null
+    workspaceMigrationInFlightRef.current = null
+    setWorkspaceMigrationResult(null)
+    setWorkspaceMigrationLoading(false)
+    setWorkspaceMigrationRetryNonce((value) => value + 1)
+  }, [])
   const onboardingInitializedRef = React.useRef(false)
   const [showTutorialPrompt, setShowTutorialPrompt] = React.useState(false)
+  const [tourLaunchNoticeVisible, setTourLaunchNoticeVisible] =
+    React.useState(false)
   const [showShortcutsModal, setShowShortcutsModal] = React.useState(false)
   const startTutorial = useTutorialStore((s) => s.startTutorial)
 
@@ -965,7 +1216,9 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   React.useEffect(() => {
     try {
-      const params = new URLSearchParams(window.location.search)
+      const params = new URLSearchParams(
+        getResearchWorkspaceSearchFromLocation(window.location)
+      )
       const shareIdStr = params.get("shared")
       if (shareIdStr) {
         const sid = parseInt(shareIdStr, 10)
@@ -997,6 +1250,13 @@ const ResearchWorkspaceBody: React.FC = () => {
   // Workspace store
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
   const workspaceName = useWorkspaceStore((s) => s.workspaceName) || ""
+  const activeDeepResearchReturnContext =
+    isResearchWorkspaceDeepResearchReturnForWorkspace(
+      initialDeepResearchReturnContextRef.current,
+      workspaceId
+    )
+      ? initialDeepResearchReturnContextRef.current
+      : null
   const workspaceBanner = useWorkspaceStore((s) => s.workspaceBanner) || {
     title: "",
     subtitle: "",
@@ -1017,6 +1277,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     (s) => s.selectedSourceFolderIds
   )
   const generatedArtifacts = useWorkspaceStore((s) => s.generatedArtifacts)
+  const addArtifact = useWorkspaceStore((s) => s.addArtifact)
   const leftPaneCollapsed = useWorkspaceStore((s) => s.leftPaneCollapsed)
   const rightPaneCollapsed = useWorkspaceStore((s) => s.rightPaneCollapsed)
   const setLeftPaneCollapsed = useWorkspaceStore((s) => s.setLeftPaneCollapsed)
@@ -1041,9 +1302,29 @@ const ResearchWorkspaceBody: React.FC = () => {
   const storeHydrated = useWorkspaceStore((s) => s.storeHydrated)
   const isStoreHydrated = storeHydrated !== false
   const sourceStatusFailureRef = React.useRef<Record<number, number>>({})
-  const workspaceTrustRequestSeqRef = React.useRef(0)
-  const workspaceTrustInFlightRef = React.useRef(false)
+  const workspaceStatusRequestSeqRef = React.useRef(0)
+  const workspaceStatusInFlightRef = React.useRef(false)
   const workspaceServerReconcileSignatureRef = React.useRef<string | null>(null)
+  const isMountedRef = React.useRef(false)
+  const deepResearchBundleImportRequestSeqRef = React.useRef(0)
+  const [deepResearchBundleImportState, setDeepResearchBundleImportState] =
+    React.useState<DeepResearchBundleImportState | null>(null)
+  const activeDeepResearchReturnKey = activeDeepResearchReturnContext
+    ? buildDeepResearchBundleImportContextKey(activeDeepResearchReturnContext)
+    : null
+  const activeDeepResearchBundleImportState =
+    deepResearchBundleImportState?.contextKey === activeDeepResearchReturnKey
+      ? deepResearchBundleImportState
+      : null
+  const workspaceProjectedSourceStatusByMediaIdRef = React.useRef<{
+    workspaceId: string | null
+    fallbackReady: boolean
+    statuses: Record<number, WorkspaceSourceStatus>
+  }>({
+    workspaceId: null,
+    fallbackReady: false,
+    statuses: {}
+  })
   const lastStatusViewSignatureRef = React.useRef<string | null>(null)
   const {
     sourceListViewState,
@@ -1063,7 +1344,19 @@ const ResearchWorkspaceBody: React.FC = () => {
     () => buildResearchWorkspaceServerSourceSignature(sources),
     [sources]
   )
+  const workspaceServerSelectedSourceSignature = React.useMemo(
+    () => (selectedSourceIds || []).join("|"),
+    [selectedSourceIds]
+  )
   const workspaceServerSourcesRef = React.useRef(sources)
+  React.useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+      deepResearchBundleImportRequestSeqRef.current += 1
+    }
+  }, [])
+
   React.useEffect(() => {
     workspaceServerSourcesRef.current = sources
   }, [sources])
@@ -1214,6 +1507,81 @@ const ResearchWorkspaceBody: React.FC = () => {
     return operations
   }, [generatingOutputType, isGeneratingOutput, processingMediaIds.length, t])
 
+  const workspaceContextStatus = React.useMemo(() => {
+    if (!workspaceStatusProjectionError) return null
+    return {
+      label: t("playground:workspace.workspaceDegraded", "Workspace degraded"),
+      detail: workspaceStatusProjectionError,
+      severity: "warning" as const
+    }
+  }, [t, workspaceStatusProjectionError])
+
+  const workspaceMigrationStatusMessages = React.useMemo(() => {
+    if (!statusGuardrailsEnabled) return []
+    if (workspaceMigrationLoading) {
+      return ["Checking local workspace data"]
+    }
+    if (!workspaceMigrationResult) return []
+
+    if (workspaceMigrationResult.status === "finalized_not_delete_eligible") {
+      return [
+        "Legacy workspace data found",
+        "Server receipt saved",
+        "Local data retained until server deletion eligibility is available"
+      ]
+    }
+
+    if (workspaceMigrationResult.status === "blocked") {
+      return [
+        "Legacy workspace data found",
+        ...(workspaceMigrationResult.serverMigration
+          ? ["Server receipt saved"]
+          : []),
+        "Local data retained"
+      ]
+    }
+
+    if (workspaceMigrationResult.status === "failed") {
+      return [
+        "Legacy workspace data found",
+        "Migration failed before local deletion"
+      ]
+    }
+
+    if (workspaceMigrationResult.status === "deleted") {
+      return ["Legacy workspace data moved"]
+    }
+
+    return []
+  }, [
+    statusGuardrailsEnabled,
+    workspaceMigrationLoading,
+    workspaceMigrationResult
+  ])
+
+  const workspaceMigrationStatusAction = React.useMemo(() => {
+    if (
+      !statusGuardrailsEnabled ||
+      !workspaceMigrationResult ||
+      workspaceMigrationStatusMessages.length === 0
+    ) {
+      return undefined
+    }
+    return {
+      label: t("playground:workspace.details", "Details"),
+      ariaLabel: t(
+        "playground:workspace.reviewMigrationRecoveryDetails",
+        "Review migration recovery details"
+      ),
+      onClick: () => setWorkspaceMigrationDetailsOpen(true)
+    }
+  }, [
+    statusGuardrailsEnabled,
+    t,
+    workspaceMigrationResult,
+    workspaceMigrationStatusMessages.length
+  ])
+
   useEffect(() => {
     if (!statusGuardrailsEnabled) {
       lastStatusViewSignatureRef.current = null
@@ -1240,55 +1608,242 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   useEffect(() => {
     if (!statusGuardrailsEnabled) {
-      workspaceTrustRequestSeqRef.current += 1
-      workspaceTrustInFlightRef.current = false
+      workspaceMigrationSignatureRef.current = null
+      workspaceMigrationInFlightRef.current = null
+      setWorkspaceMigrationLoading(false)
+      setWorkspaceMigrationResult(null)
+      return
+    }
+    if (!isStoreHydrated || !workspaceId) return
+    if (typeof window === "undefined") return
+
+    const discoveredLocalStorageKeys =
+      collectResearchWorkspaceLegacyLocalStorageKeys()
+    const discoveredIndexedDbStores =
+      collectResearchWorkspaceLegacyIndexedDbStores(discoveredLocalStorageKeys)
+    const hasLegacyContent = discoveredLocalStorageKeys.some(
+      (key) =>
+        key === WORKSPACE_STORAGE_KEY ||
+        key.startsWith(WORKSPACE_STORAGE_SPLIT_KEY_PREFIX)
+    )
+
+    if (!hasLegacyContent) {
+      workspaceMigrationSignatureRef.current = null
+      workspaceMigrationInFlightRef.current = null
+      setWorkspaceMigrationLoading(false)
+      setWorkspaceMigrationResult(null)
+      return
+    }
+
+    const indexedDbSignature = discoveredIndexedDbStores
+      .map((store) => `${store.databaseName}:${store.storeName}`)
+      .sort()
+      .join("|")
+    const signature = [
+      workspaceId,
+      discoveredLocalStorageKeys.join("|"),
+      indexedDbSignature,
+      workspaceMigrationRetryNonce.toString()
+    ].join("::")
+    const inFlightMigration = workspaceMigrationInFlightRef.current
+    const canReuseInFlightMigration =
+      inFlightMigration?.signature === signature
+    if (
+      workspaceMigrationSignatureRef.current === signature &&
+      !canReuseInFlightMigration
+    ) {
+      return
+    }
+    workspaceMigrationSignatureRef.current = signature
+
+    let cancelled = false
+    setWorkspaceMigrationLoading(true)
+
+    const migrationPromise =
+      canReuseInFlightMigration && inFlightMigration
+        ? inFlightMigration.promise
+        : runResearchWorkspaceMigration({
+            targetWorkspaceId: workspaceId,
+            targetWorkspaceName: workspaceName || "Research Workspace",
+            discoveredLocalStorageKeys,
+            discoveredIndexedDbStores,
+            readLocalStorageValue: async (key) => window.localStorage.getItem(key),
+            api: {
+              createWorkspaceMigration: tldwClient.createWorkspaceMigration,
+              putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
+              finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
+              getWorkspaceMigration: tldwClient.getWorkspaceMigration,
+              ackWorkspaceMigrationClientDelete:
+                tldwClient.ackWorkspaceMigrationClientDelete
+            },
+            deleteLocalStorageValue: (key) => window.localStorage.removeItem(key),
+            writeLocalStorageValue: (key, value) =>
+              window.localStorage.setItem(key, value),
+            now: () => new Date().toISOString()
+          })
+
+    if (!canReuseInFlightMigration) {
+      workspaceMigrationInFlightRef.current = {
+        signature,
+        promise: migrationPromise
+      }
+    }
+
+    void migrationPromise
+      .then((result) => {
+        if (cancelled) return
+        setWorkspaceMigrationResult(result)
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setWorkspaceMigrationResult({
+          status: "failed",
+          migrationId: null,
+          manifestHash: null,
+          serverMigration: null,
+          localDeletionEligibility: null,
+          deletedSurfaceIds: [],
+          message: "Research Workspace migration failed before local deletion.",
+          error
+        })
+      })
+      .finally(() => {
+        if (workspaceMigrationInFlightRef.current?.signature === signature) {
+          workspaceMigrationInFlightRef.current = null
+        }
+        if (!cancelled) {
+          setWorkspaceMigrationLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    isStoreHydrated,
+    statusGuardrailsEnabled,
+    workspaceId,
+    workspaceMigrationRetryNonce,
+    workspaceName
+  ])
+
+  useEffect(() => {
+    if (!statusGuardrailsEnabled) {
+      workspaceStatusRequestSeqRef.current += 1
+      workspaceStatusInFlightRef.current = false
       workspaceServerReconcileSignatureRef.current = null
+      workspaceProjectedSourceStatusByMediaIdRef.current = {
+        workspaceId: null,
+        fallbackReady: false,
+        statuses: {}
+      }
       setWorkspaceSourceStatus(null)
       setWorkspaceCapabilities(null)
-      setWorkspaceTrustError(null)
-      setWorkspaceTrustLoading(false)
+      setWorkspaceStatusProjectionError(null)
+      setWorkspaceStatusProjectionLoading(false)
       return
     }
     if (!isStoreHydrated || !workspaceId) {
-      workspaceTrustRequestSeqRef.current += 1
-      workspaceTrustInFlightRef.current = false
+      workspaceStatusRequestSeqRef.current += 1
+      workspaceStatusInFlightRef.current = false
       workspaceServerReconcileSignatureRef.current = null
+      workspaceProjectedSourceStatusByMediaIdRef.current = {
+        workspaceId: null,
+        fallbackReady: false,
+        statuses: {}
+      }
       setWorkspaceSourceStatus(null)
       setWorkspaceCapabilities(null)
-      setWorkspaceTrustError(null)
-      setWorkspaceTrustLoading(false)
+      setWorkspaceStatusProjectionError(null)
+      setWorkspaceStatusProjectionLoading(false)
       return
     }
-    if (
-      typeof tldwClient.getWorkspaceSourcesStatus !== "function" ||
-      typeof tldwClient.getWorkspaceCapabilities !== "function"
-    ) {
-      workspaceTrustRequestSeqRef.current += 1
-      workspaceTrustInFlightRef.current = false
+    const hasWorkspaceContextApi =
+      typeof tldwClient.getWorkspaceContext === "function"
+    const hasLegacyWorkspaceStatusApis =
+      typeof tldwClient.getWorkspaceSourcesStatus === "function" &&
+      typeof tldwClient.getWorkspaceCapabilities === "function"
+    if (!hasWorkspaceContextApi && !hasLegacyWorkspaceStatusApis) {
+      workspaceStatusRequestSeqRef.current += 1
+      workspaceStatusInFlightRef.current = false
       workspaceServerReconcileSignatureRef.current = null
+      workspaceProjectedSourceStatusByMediaIdRef.current = {
+        workspaceId,
+        fallbackReady: true,
+        statuses: {}
+      }
+      setWorkspaceStatusProjectionReadyVersion((version) => version + 1)
       setWorkspaceSourceStatus(null)
       setWorkspaceCapabilities(null)
-      setWorkspaceTrustError("Status API unavailable")
-      setWorkspaceTrustLoading(false)
+      setWorkspaceStatusProjectionError("Status API unavailable")
+      setWorkspaceStatusProjectionLoading(false)
       return
     }
 
     let cancelled = false
     const activeWorkspaceId = workspaceId
-    workspaceTrustRequestSeqRef.current += 1
-    workspaceTrustInFlightRef.current = false
+    if (
+      workspaceProjectedSourceStatusByMediaIdRef.current.workspaceId !==
+      activeWorkspaceId
+    ) {
+      workspaceProjectedSourceStatusByMediaIdRef.current = {
+        workspaceId: activeWorkspaceId,
+        fallbackReady: false,
+        statuses: {}
+      }
+    }
+    workspaceStatusRequestSeqRef.current += 1
+    workspaceStatusInFlightRef.current = false
     setWorkspaceSourceStatus(null)
     setWorkspaceCapabilities(null)
-    setWorkspaceTrustError(null)
-    setWorkspaceTrustLoading(true)
+    setWorkspaceStatusProjectionError(null)
+    setWorkspaceStatusProjectionLoading(true)
 
-    const refreshWorkspaceTrust = async () => {
-      if (workspaceTrustInFlightRef.current) return
-      workspaceTrustInFlightRef.current = true
-      const requestSeq = ++workspaceTrustRequestSeqRef.current
-      setWorkspaceTrustLoading(true)
+    const applySourceStatusProjection = (
+      sourceStatus: WorkspaceSourceStatusListResponse,
+      statusProjectionErrors: string[]
+    ) => {
+      if (sourceStatus.workspace_id === activeWorkspaceId) {
+        setWorkspaceSourceStatus(sourceStatus)
+        const projectedStatusesByMediaId: Record<number, WorkspaceSourceStatus> = {}
+
+        for (const source of sourceStatus.sources || []) {
+          if (
+            typeof source.media_id !== "number" ||
+            !Number.isFinite(source.media_id)
+          ) {
+            continue
+          }
+          const mappedStatus = mapWorkspaceLifecycleToLocalSourceStatus(
+            source.state
+          )
+          projectedStatusesByMediaId[source.media_id] = mappedStatus
+          setSourceStatusByMediaId(
+            source.media_id,
+            mappedStatus,
+            getWorkspaceSourceStatusMessage(source),
+            source.readiness,
+            buildWorkspaceSourceStatusDetails(source)
+          )
+        }
+        workspaceProjectedSourceStatusByMediaIdRef.current = {
+          workspaceId: activeWorkspaceId,
+          fallbackReady: true,
+          statuses: projectedStatusesByMediaId
+        }
+        setWorkspaceStatusProjectionReadyVersion((version) => version + 1)
+        return
+      }
+      statusProjectionErrors.push("Source status response did not match active workspace")
+    }
+
+    const refreshWorkspaceStatusProjection = async () => {
+      if (workspaceStatusInFlightRef.current) return
+      workspaceStatusInFlightRef.current = true
+      const requestSeq = ++workspaceStatusRequestSeqRef.current
+      setWorkspaceStatusProjectionLoading(true)
       try {
-        const trustErrors: string[] = []
+        const statusProjectionErrors: string[] = []
         const canReconcileWorkspaceServer =
           typeof tldwClient.upsertWorkspace === "function" &&
           typeof tldwClient.getWorkspaceSources === "function" &&
@@ -1296,7 +1851,8 @@ const ResearchWorkspaceBody: React.FC = () => {
         const reconcileSignature = [
           activeWorkspaceId,
           workspaceName,
-          workspaceServerSourceSignature
+          workspaceServerSourceSignature,
+          workspaceServerSelectedSourceSignature
         ].join("::")
 
         if (
@@ -1307,49 +1863,88 @@ const ResearchWorkspaceBody: React.FC = () => {
             client: tldwClient,
             workspaceId: activeWorkspaceId,
             workspaceName,
-            sources: workspaceServerSourcesRef.current
+            sources: workspaceServerSourcesRef.current,
+            selectedSourceIds
           })
-          if (cancelled || requestSeq !== workspaceTrustRequestSeqRef.current) {
+          if (cancelled || requestSeq !== workspaceStatusRequestSeqRef.current) {
             return
           }
           if (reconcileResult.errors.length === 0 && reconcileResult.workspaceReady) {
             workspaceServerReconcileSignatureRef.current = reconcileSignature
           } else if (reconcileResult.errors.length > 0) {
-            trustErrors.push("Workspace server sync unavailable")
+            statusProjectionErrors.push("Workspace server sync unavailable")
           }
+        }
+
+        if (hasWorkspaceContextApi) {
+          const workspaceContext = await tldwClient.getWorkspaceContext(
+            activeWorkspaceId
+          )
+          if (cancelled || requestSeq !== workspaceStatusRequestSeqRef.current) {
+            return
+          }
+          if (workspaceContext.workspace_id === activeWorkspaceId) {
+            applySourceStatusProjection(
+              {
+                workspace_id: workspaceContext.workspace_id,
+                sources: workspaceContext.sources?.items || [],
+                summary:
+                  workspaceContext.sources?.summary || {
+                    total: 0,
+                    selected: 0,
+                    queryable: 0,
+                    partially_queryable: 0,
+                    processing: 0,
+                    failed: 0,
+                    missing: 0
+                  }
+              },
+              statusProjectionErrors
+            )
+            if (workspaceContext.capabilities?.workspace_id === activeWorkspaceId) {
+              setWorkspaceCapabilities(workspaceContext.capabilities)
+            } else {
+              statusProjectionErrors.push(
+                "Capabilities response did not match active workspace"
+              )
+            }
+            for (const partialError of workspaceContext.partial_errors || []) {
+              if (partialError?.message) {
+                statusProjectionErrors.push(partialError.message)
+              }
+            }
+          } else {
+            statusProjectionErrors.push("Workspace context response did not match active workspace")
+          }
+          setWorkspaceStatusProjectionError(
+            statusProjectionErrors.length > 0 ? statusProjectionErrors.join("; ") : null
+          )
+          return
         }
 
         const [sourceStatusResult, capabilitiesResult] = await Promise.allSettled([
           tldwClient.getWorkspaceSourcesStatus(activeWorkspaceId),
           tldwClient.getWorkspaceCapabilities(activeWorkspaceId)
         ])
-        if (cancelled || requestSeq !== workspaceTrustRequestSeqRef.current) {
+        if (cancelled || requestSeq !== workspaceStatusRequestSeqRef.current) {
           return
         }
 
         if (sourceStatusResult.status === "fulfilled") {
           const sourceStatus = sourceStatusResult.value
-          if (sourceStatus.workspace_id === activeWorkspaceId) {
-            setWorkspaceSourceStatus(sourceStatus)
-
-            for (const source of sourceStatus.sources || []) {
-              if (
-                typeof source.media_id !== "number" ||
-                !Number.isFinite(source.media_id)
-              ) {
-                continue
-              }
-              setSourceStatusByMediaId(
-                source.media_id,
-                mapWorkspaceLifecycleToLocalSourceStatus(source.state),
-                getWorkspaceSourceStatusMessage(source)
-              )
-            }
-          } else {
-            trustErrors.push("Source status response did not match active workspace")
-          }
+          applySourceStatusProjection(sourceStatus, statusProjectionErrors)
         } else {
-          trustErrors.push(describeWorkspaceTrustError(sourceStatusResult.reason))
+          if (
+            workspaceProjectedSourceStatusByMediaIdRef.current.workspaceId ===
+            activeWorkspaceId
+          ) {
+            workspaceProjectedSourceStatusByMediaIdRef.current = {
+              ...workspaceProjectedSourceStatusByMediaIdRef.current,
+              fallbackReady: true
+            }
+            setWorkspaceStatusProjectionReadyVersion((version) => version + 1)
+          }
+          statusProjectionErrors.push(describeWorkspaceStatusProjectionError(sourceStatusResult.reason))
         }
 
         if (capabilitiesResult.status === "fulfilled") {
@@ -1357,43 +1952,47 @@ const ResearchWorkspaceBody: React.FC = () => {
           if (capabilities.workspace_id === activeWorkspaceId) {
             setWorkspaceCapabilities(capabilities)
           } else {
-            trustErrors.push("Capabilities response did not match active workspace")
+            statusProjectionErrors.push("Capabilities response did not match active workspace")
           }
         } else {
-          trustErrors.push(describeWorkspaceTrustError(capabilitiesResult.reason))
+          statusProjectionErrors.push(describeWorkspaceStatusProjectionError(capabilitiesResult.reason))
         }
 
-        setWorkspaceTrustError(trustErrors.length > 0 ? trustErrors.join("; ") : null)
+        setWorkspaceStatusProjectionError(
+          statusProjectionErrors.length > 0 ? statusProjectionErrors.join("; ") : null
+        )
       } catch (error) {
-        if (cancelled || requestSeq !== workspaceTrustRequestSeqRef.current) {
+        if (cancelled || requestSeq !== workspaceStatusRequestSeqRef.current) {
           return
         }
-        setWorkspaceTrustError(describeWorkspaceTrustError(error))
+        setWorkspaceStatusProjectionError(describeWorkspaceStatusProjectionError(error))
       } finally {
-        if (!cancelled && requestSeq === workspaceTrustRequestSeqRef.current) {
-          setWorkspaceTrustLoading(false)
-          workspaceTrustInFlightRef.current = false
+        if (!cancelled && requestSeq === workspaceStatusRequestSeqRef.current) {
+          setWorkspaceStatusProjectionLoading(false)
+          workspaceStatusInFlightRef.current = false
         }
       }
     }
 
-    void refreshWorkspaceTrust()
+    void refreshWorkspaceStatusProjection()
     const timer = window.setInterval(
-      () => void refreshWorkspaceTrust(),
+      () => void refreshWorkspaceStatusProjection(),
       WORKSPACE_SOURCE_STATUS_POLL_INTERVAL_MS
     )
     return () => {
       cancelled = true
-      workspaceTrustRequestSeqRef.current += 1
-      workspaceTrustInFlightRef.current = false
+      workspaceStatusRequestSeqRef.current += 1
+      workspaceStatusInFlightRef.current = false
       window.clearInterval(timer)
     }
   }, [
     isStoreHydrated,
     setSourceStatusByMediaId,
     statusGuardrailsEnabled,
+    selectedSourceIds,
     workspaceId,
     workspaceName,
+    workspaceServerSelectedSourceSignature,
     workspaceServerSourceSignature
   ])
 
@@ -1473,10 +2072,47 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
   }, [])
 
+  const refreshResearchWorkspaceCapabilities = React.useCallback(async () => {
+    try {
+      const raw = await tldwClient.getResearchWorkspaceCapabilities()
+      const normalized = normalizeResearchWorkspaceCapabilities(raw)
+      setResearchWorkspaceCapabilities(normalized)
+      setResearchWorkspaceCapabilitiesFetchedAt(Date.now())
+      return normalized
+    } catch {
+      const fallback = buildUnknownResearchWorkspaceCapabilities(
+        "capability_fetch_failed"
+      )
+      setResearchWorkspaceCapabilities(fallback)
+      setResearchWorkspaceCapabilitiesFetchedAt(Date.now())
+      return fallback
+    }
+  }, [])
+
+  const refreshResearchWorkspaceCapabilitiesIfStale = React.useCallback(async () => {
+    if (
+      !isResearchWorkspaceCapabilitiesStale(
+        researchWorkspaceCapabilities,
+        researchWorkspaceCapabilitiesFetchedAt
+      )
+    ) {
+      return researchWorkspaceCapabilities
+    }
+    return refreshResearchWorkspaceCapabilities()
+  }, [
+    refreshResearchWorkspaceCapabilities,
+    researchWorkspaceCapabilities,
+    researchWorkspaceCapabilitiesFetchedAt
+  ])
+
   const closeGlobalSearch = React.useCallback(() => {
     setGlobalSearchOpen(false)
     setGlobalSearchQuery("")
     setActiveSearchResultIndex(0)
+  }, [])
+
+  const openGlobalSearch = React.useCallback(() => {
+    setGlobalSearchOpen(true)
   }, [])
 
   const openTransferSourcesModal = React.useCallback(
@@ -1502,6 +2138,13 @@ const ResearchWorkspaceBody: React.FC = () => {
       // Ignore storage errors.
     })
   }, [])
+
+  const handleStartWorkspaceTour = React.useCallback(() => {
+    startTutorial("research-workspace-basics")
+    dismissOnboardingOverlay()
+    setShowTutorialPrompt(false)
+    setTourLaunchNoticeVisible(true)
+  }, [dismissOnboardingOverlay, startTutorial])
 
   useEffect(() => {
     const normalizedWorkspaceTag =
@@ -1587,7 +2230,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     (pane: WorkspaceTabKey) => {
       if (pane === "sources") {
         if (isMobile) {
-          setActiveTab("sources")
+          setActiveMobileTab("sources")
         } else if (isDesktopLayout()) {
           setLeftPaneCollapsed(false)
         } else {
@@ -1606,7 +2249,7 @@ const ResearchWorkspaceBody: React.FC = () => {
 
       if (pane === "studio") {
         if (isMobile) {
-          setActiveTab("studio")
+          setActiveMobileTab("studio")
         } else if (isDesktopLayout()) {
           setRightPaneCollapsed(false)
         } else {
@@ -1624,7 +2267,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       }
 
       if (isMobile) {
-        setActiveTab("chat")
+        setActiveMobileTab("chat")
       }
       window.setTimeout(() => {
         const chatInput = document.querySelector<HTMLElement>(
@@ -1641,8 +2284,98 @@ const ResearchWorkspaceBody: React.FC = () => {
         firstFocusable?.focus()
       }, 0)
     },
-    [isMobile, setLeftPaneCollapsed, setRightPaneCollapsed]
+    [isMobile, setActiveMobileTab, setLeftPaneCollapsed, setRightPaneCollapsed]
   )
+
+  React.useEffect(() => {
+    if (initialRouteTabAppliedRef.current) return
+    initialRouteTabAppliedRef.current = true
+
+    const initialRouteTab = initialRouteTabRef.current
+    if (!initialRouteTab || initialRouteTab === "chat") return
+
+    focusWorkspacePane(initialRouteTab)
+  }, [focusWorkspacePane])
+
+  React.useEffect(() => {
+    if (deepResearchReturnAppliedRef.current) return
+    if (!activeDeepResearchReturnContext) return
+
+    deepResearchReturnAppliedRef.current = true
+    focusWorkspacePane("studio")
+  }, [activeDeepResearchReturnContext, focusWorkspacePane])
+
+  const handleImportDeepResearchBundle = React.useCallback(async () => {
+    if (!activeDeepResearchReturnContext || !activeDeepResearchReturnKey) return
+
+    const importRequestId = deepResearchBundleImportRequestSeqRef.current + 1
+    deepResearchBundleImportRequestSeqRef.current = importRequestId
+    const returnContext = activeDeepResearchReturnContext
+    const returnContextKey = activeDeepResearchReturnKey
+    const originWorkspaceId = returnContext.sourceWorkspaceId
+    const canContinueImport = () =>
+      isMountedRef.current &&
+      deepResearchBundleImportRequestSeqRef.current === importRequestId &&
+      useWorkspaceStore.getState().workspaceId === originWorkspaceId
+
+    setDeepResearchBundleImportState({
+      contextKey: returnContextKey,
+      status: "importing"
+    })
+
+    try {
+      const bundle = await tldwClient.getResearchBundle(
+        returnContext.researchRunId
+      )
+      if (!canContinueImport()) return
+
+      const currentArtifacts = useWorkspaceStore.getState().generatedArtifacts
+      const sourceArtifact = returnContext.sourceArtifactId
+        ? (currentArtifacts.find(
+            (artifact: GeneratedArtifact) =>
+              artifact.id === returnContext.sourceArtifactId
+          ) ?? null)
+        : null
+      const artifactPayload = buildDeepResearchBundleArtifactPayload({
+        bundle,
+        returnContext,
+        sourceArtifact
+      })
+
+      if (!canContinueImport()) return
+      addArtifact(artifactPayload)
+      if (!canContinueImport()) return
+      setDeepResearchBundleImportState({
+        contextKey: returnContextKey,
+        status: "imported",
+        message: t(
+          "playground:studio.deepResearchBundleImported",
+          "Bundle imported"
+        )
+      })
+      focusWorkspacePane("studio")
+    } catch (error) {
+      if (!canContinueImport()) return
+      const message =
+        error instanceof DeepResearchBundleImportError || error instanceof Error
+          ? error.message
+          : t(
+              "playground:studio.deepResearchBundleImportFailed",
+              "Deep Research bundle could not be imported."
+            )
+      setDeepResearchBundleImportState({
+        contextKey: returnContextKey,
+        status: "failed",
+        message
+      })
+    }
+  }, [
+    activeDeepResearchReturnContext,
+    activeDeepResearchReturnKey,
+    addArtifact,
+    focusWorkspacePane,
+    t
+  ])
 
   const handleOpenSplitWorkspace = React.useCallback(() => {
     if (readyEffectiveSelectedSourceEntries.length === 0) {
@@ -1702,12 +2435,13 @@ const ResearchWorkspaceBody: React.FC = () => {
 
     const undoMessageKey = `workspace-note-shortcut-undo-${undoHandle.id}`
     const maybeOpen = (messageApi as { open?: (config: unknown) => void }).open
+    const clearContent = t("playground:studio.noteCleared", "Note cleared.")
     const messageConfig = {
       key: undoMessageKey,
       type: "warning",
       duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-      content: t("playground:studio.noteCleared", "Note cleared."),
-      btn: (
+      content: renderWorkspaceMessageActionContent(
+        clearContent,
         <Button
           size="small"
           type="link"
@@ -1732,7 +2466,7 @@ const ResearchWorkspaceBody: React.FC = () => {
         messageApi as { warning?: (content: string) => void }
       ).warning
       if (typeof maybeWarning === "function") {
-        maybeWarning(t("playground:studio.noteCleared", "Note cleared."))
+        maybeWarning(clearContent)
       }
     }
   }, [clearCurrentNote, currentNote, focusNewNoteTitle, messageApi, setCurrentNote, t])
@@ -1743,7 +2477,7 @@ const ResearchWorkspaceBody: React.FC = () => {
 
       if (result.domain === "source" && result.sourceId) {
         if (isMobile) {
-          setActiveTab("sources")
+          setActiveMobileTab("sources")
         } else if (isDesktopLayout()) {
           setLeftPaneCollapsed(false)
         } else {
@@ -1758,7 +2492,7 @@ const ResearchWorkspaceBody: React.FC = () => {
 
       if (result.domain === "chat" && result.chatMessageId) {
         if (isMobile) {
-          setActiveTab("chat")
+          setActiveMobileTab("chat")
         }
         window.setTimeout(() => {
           focusChatMessageById(result.chatMessageId!)
@@ -1768,7 +2502,7 @@ const ResearchWorkspaceBody: React.FC = () => {
 
       if (result.domain === "note") {
         if (isMobile) {
-          setActiveTab("studio")
+          setActiveMobileTab("studio")
         } else if (isDesktopLayout()) {
           setRightPaneCollapsed(false)
         } else {
@@ -1786,6 +2520,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       focusSourceById,
       hydrateAndFocusNote,
       isMobile,
+      setActiveMobileTab,
       setLeftPaneCollapsed,
       setRightPaneCollapsed
     ]
@@ -1858,6 +2593,11 @@ const ResearchWorkspaceBody: React.FC = () => {
   useEffect(() => {
     void refreshAccountStorageUsage()
   }, [refreshAccountStorageUsage])
+
+  useEffect(() => {
+    if (!isStoreHydrated) return
+    void refreshResearchWorkspaceCapabilities()
+  }, [isStoreHydrated, refreshResearchWorkspaceCapabilities])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -1984,10 +2724,21 @@ const ResearchWorkspaceBody: React.FC = () => {
     const handleKeyboardShortcut = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
       const hasPrimaryModifier = event.metaKey || event.ctrlKey
+      const editableTarget = isEditableKeyboardTarget(event.target)
+
+      if (editableTarget) {
+        return
+      }
+
+      if (!event.altKey && hasPrimaryModifier && !event.shiftKey && key === "k") {
+        event.preventDefault()
+        openGlobalSearch()
+        return
+      }
 
       if (event.altKey && !hasPrimaryModifier && !event.shiftKey && key === "k") {
         event.preventDefault()
-        setGlobalSearchOpen(true)
+        openGlobalSearch()
         return
       }
 
@@ -2066,16 +2817,6 @@ const ResearchWorkspaceBody: React.FC = () => {
         !hasPrimaryModifier &&
         !event.altKey
       ) {
-        const target = event.target as HTMLElement | null
-        const tag = target?.tagName?.toLowerCase()
-        if (
-          tag === "input" ||
-          tag === "textarea" ||
-          tag === "select" ||
-          target?.isContentEditable
-        ) {
-          return
-        }
         event.preventDefault()
         setShowShortcutsModal(true)
       }
@@ -2096,6 +2837,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     focusNewNoteTitle,
     focusWorkspaceNote,
     focusWorkspacePane,
+    openGlobalSearch,
     startNewNoteWithUndo,
     t
   ])
@@ -2241,15 +2983,40 @@ const ResearchWorkspaceBody: React.FC = () => {
       })
       await Promise.all(
         processingMediaIds.map(async (mediaId) => {
+          const initialProjectedSourceSnapshot =
+            workspaceProjectedSourceStatusByMediaIdRef.current
+          if (
+            initialProjectedSourceSnapshot.workspaceId === workspaceId &&
+            !initialProjectedSourceSnapshot.fallbackReady
+          ) {
+            return
+          }
+
           try {
             const detail = await tldwClient.getMediaDetails(mediaId, {
               include_content: true,
               include_versions: false,
-              include_version_content: false
+              include_version_content: false,
+              suppressBackendUnavailableEvent: true
             })
             if (cancelled) return
 
             if (isMediaLikelyReadyForRag(detail)) {
+              const projectedSourceSnapshot =
+                workspaceProjectedSourceStatusByMediaIdRef.current
+              if (
+                projectedSourceSnapshot.workspaceId === workspaceId &&
+                !projectedSourceSnapshot.fallbackReady
+              ) {
+                return
+              }
+              const projectedSourceStatus =
+                projectedSourceSnapshot.workspaceId === workspaceId
+                  ? projectedSourceSnapshot.statuses[mediaId]
+                  : undefined
+              if (projectedSourceStatus && projectedSourceStatus !== "ready") {
+                return
+              }
               setSourceStatusByMediaId(mediaId, "ready")
               delete sourceStatusFailureRef.current[mediaId]
               void trackResearchWorkspaceTelemetry({
@@ -2289,6 +3056,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     processingMediaIds,
     setSourceStatusByMediaId,
     statusGuardrailsEnabled,
+    workspaceStatusProjectionReadyVersion,
     workspaceId
   ])
 
@@ -2409,6 +3177,15 @@ const ResearchWorkspaceBody: React.FC = () => {
           provenanceEnabled={provenanceEnabled}
           statusGuardrailsEnabled={statusGuardrailsEnabled}
           contentWidthMode="full"
+          researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+          workspaceCapabilities={workspaceCapabilities}
+          researchWorkspaceCapabilitiesStale={isResearchWorkspaceCapabilitiesStale(
+            researchWorkspaceCapabilities,
+            researchWorkspaceCapabilitiesFetchedAt
+          )}
+          onRefreshResearchWorkspaceCapabilities={
+            refreshResearchWorkspaceCapabilitiesIfStale
+          }
         />
       )
     },
@@ -2441,6 +3218,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           onPatchSourceListViewState={patchSourceListViewState}
           onResetAdvancedSourceFilters={resetAdvancedSourceFilters}
           statusGuardrailsEnabled={statusGuardrailsEnabled}
+          statusProjectionError={workspaceStatusProjectionError}
         />
       </Suspense>
     )
@@ -2451,7 +3229,14 @@ const ResearchWorkspaceBody: React.FC = () => {
       <Suspense
         fallback={<WorkspacePaneFallback testId="workspace-studio-pane" />}
       >
-        <StudioPane onHide={options?.onHide} />
+        <StudioPane
+          onHide={options?.onHide}
+          onRequestSources={() => focusWorkspacePane("sources")}
+          researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+          onRefreshResearchWorkspaceCapabilities={
+            refreshResearchWorkspaceCapabilitiesIfStale
+          }
+        />
       </Suspense>
     )
   }
@@ -2474,19 +3259,32 @@ const ResearchWorkspaceBody: React.FC = () => {
   }
 
   const tutorialPromptBanner = showTutorialPrompt ? (
-    <div className="mx-4 mt-2 flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">
-      <span><strong>New here?</strong> Take a quick tour of the workspace.</span>
-      <div className="flex gap-2">
+    <div className="mx-4 mt-2 flex flex-col gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm md:flex-row md:items-center md:justify-between">
+      <div className="min-w-0">
+        <p className="font-semibold text-text">
+          {t("playground:workspace.firstUseTitle", "Research Workspace")}
+        </p>
+        <p className="text-xs text-text-muted">
+          {t(
+            "playground:workspace.firstUseDescription",
+            "Collect sources, ask questions, and turn findings into reusable outputs."
+          )}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => {
-            startTutorial("research-workspace-basics")
-            dismissOnboardingOverlay()
-            setShowTutorialPrompt(false)
-          }}
+          onClick={() => focusWorkspacePane("sources")}
+          className="rounded-md border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+        >
+          {t("playground:workspace.firstUseAddSources", "Add sources")}
+        </button>
+        <button
+          type="button"
+          onClick={handleStartWorkspaceTour}
           className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-white hover:bg-primaryStrong transition-colors"
         >
-          Start tour
+          {t("playground:workspace.startTour", "Start tour")}
         </button>
         <button
           type="button"
@@ -2496,11 +3294,155 @@ const ResearchWorkspaceBody: React.FC = () => {
           }}
           className="rounded-md border border-border px-3 py-1 text-xs text-text-muted hover:bg-surface2 transition-colors"
         >
-          Dismiss
+          {t("common:dismiss", "Dismiss")}
         </button>
       </div>
     </div>
   ) : null
+  const tourLaunchNotice = tourLaunchNoticeVisible ? (
+    <div
+      className="mx-4 mt-2 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-xs text-success"
+      role="status"
+      aria-live="polite"
+    >
+      {t(
+        "playground:workspace.tourStartedStatus",
+        "Tour started. Follow the highlighted steps."
+      )}
+    </div>
+  ) : null
+  const deepResearchReturnSourceLabel =
+    activeDeepResearchReturnContext?.sourceArtifactTitle ||
+    activeDeepResearchReturnContext?.sourceArtifactId ||
+    activeDeepResearchReturnContext?.sourceArtifactTemplate ||
+    t("playground:studio.deepResearchReturnFallbackSource", "source artifact")
+  const deepResearchReturnBanner = activeDeepResearchReturnContext ? (
+    <div
+      data-testid="workspace-deep-research-return-handoff"
+      className="mx-3 mt-2 flex flex-wrap items-center justify-between gap-2 rounded border border-primary/30 bg-primary/10 px-3 py-2.5 text-sm text-text"
+      role="status"
+      aria-live="polite"
+    >
+      <span className="min-w-0">
+        <span className="font-medium">
+          {t(
+            "playground:studio.deepResearchReturnReady",
+            "Deep Research return ready"
+          )}
+        </span>
+        <span className="mx-1 text-text-subtle">|</span>
+        <span className="text-text-muted">
+          {t("playground:studio.sourceArtifactLabel", "Source artifact")}:
+        </span>{" "}
+        <span className="font-medium">{deepResearchReturnSourceLabel}</span>
+        <span className="mx-1 text-text-subtle">|</span>
+        <span className="text-text-muted">
+          {t("playground:studio.deepResearchRunLabel", "Run")}:
+        </span>{" "}
+        <span className="font-mono text-xs">
+          {activeDeepResearchReturnContext.researchRunId}
+        </span>
+        {activeDeepResearchBundleImportState ? (
+          <>
+            <span className="mx-1 text-text-subtle">|</span>
+            <span
+              className={
+                activeDeepResearchBundleImportState.status === "failed"
+                  ? "text-danger"
+                  : "text-text-muted"
+              }
+            >
+              {activeDeepResearchBundleImportState.status === "failed"
+                ? t(
+                    "playground:studio.deepResearchBundleImportFailedInline",
+                    "Bundle could not be imported"
+                  )
+                : activeDeepResearchBundleImportState.message ||
+                  t(
+                    "playground:studio.deepResearchBundleImporting",
+                    "Importing bundle"
+                  )}
+              {activeDeepResearchBundleImportState.status === "failed" &&
+              activeDeepResearchBundleImportState.message
+                ? `: ${activeDeepResearchBundleImportState.message}`
+                : ""}
+            </span>
+          </>
+        ) : null}
+      </span>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={
+            activeDeepResearchBundleImportState?.status === "importing" ||
+            activeDeepResearchBundleImportState?.status === "imported"
+          }
+          onClick={handleImportDeepResearchBundle}
+        >
+          {activeDeepResearchBundleImportState?.status === "importing"
+            ? t("playground:studio.importingBundle", "Importing")
+            : activeDeepResearchBundleImportState?.status === "imported"
+              ? t("playground:studio.bundleImported", "Imported")
+              : t("playground:studio.importBundle", "Import bundle")}
+        </button>
+        <button
+          type="button"
+          className="rounded border border-border px-2 py-1 text-xs font-medium hover:bg-surface2"
+          onClick={() => focusWorkspacePane("studio")}
+        >
+          {t("playground:studio.openStudio", "Open Studio")}
+        </button>
+      </div>
+    </div>
+  ) : null
+
+  const focusSkipTarget = (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    pane: WorkspaceTabKey
+  ) => {
+    event.preventDefault()
+    focusWorkspacePane(pane)
+  }
+
+  const migrationUnknownSurfaces =
+    workspaceMigrationResult?.localDeletionEligibility?.unknownSurfaces ?? []
+  const migrationRetainedSurfaces =
+    workspaceMigrationResult?.localDeletionEligibility?.retainedLocalSurfaces ?? []
+  const migrationDeletedSurfaces = workspaceMigrationResult?.deletedSurfaceIds ?? []
+  const migrationCanRetry =
+    Boolean(workspaceMigrationResult) &&
+    workspaceMigrationResult?.status !== "deleted"
+  const renderMigrationSurfaceList = (
+    items: unknown[],
+    emptyLabel: string
+  ) => {
+    if (items.length === 0) {
+      return <span className="text-text-subtle">{emptyLabel}</span>
+    }
+    return (
+      <ul className="space-y-1">
+        {items.map((item, index) => {
+          const label =
+            typeof item === "string"
+              ? item
+              : item && typeof item === "object"
+                ? String(
+                    (item as { key?: unknown; id?: unknown; storeName?: unknown }).key ??
+                      (item as { id?: unknown }).id ??
+                      (item as { storeName?: unknown }).storeName ??
+                      `surface-${index + 1}`
+                  )
+                : `surface-${index + 1}`
+          return (
+            <li key={`${label}-${index}`} className="truncate">
+              {label}
+            </li>
+          )
+        })}
+      </ul>
+    )
+  }
 
   return (
     <SharedWorkspaceProvider
@@ -2513,18 +3455,21 @@ const ResearchWorkspaceBody: React.FC = () => {
       {messageContextHolder}
       <a
         href="#workspace-main-content"
+        onClick={(event) => focusSkipTarget(event, "chat")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-2 focus:z-[60] focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-card"
       >
         {t("playground:workspace.skipToMain", "Skip to chat content")}
       </a>
       <a
         href="#workspace-sources-panel"
+        onClick={(event) => focusSkipTarget(event, "sources")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-12 focus:z-[60] focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-card"
       >
         {t("playground:workspace.skipToSources", "Skip to sources panel")}
       </a>
       <a
         href="#workspace-studio-panel"
+        onClick={(event) => focusSkipTarget(event, "studio")}
         className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-[5.5rem] focus:z-[60] focus:rounded focus:bg-surface focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-card"
       >
         {t("playground:workspace.skipToStudio", "Skip to studio panel")}
@@ -2661,6 +3606,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             rightPaneOpen={false}
             onToggleLeftPane={handleToggleLeftPane}
             onToggleRightPane={handleToggleRightPane}
+            onOpenSearch={openGlobalSearch}
             onOpenSplitWorkspace={handleOpenSplitWorkspace}
             hideToggles
             storageUsedBytes={workspaceStorageUsage.usedBytes}
@@ -2671,6 +3617,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             storageAccountQuotaBytes={workspaceStorageUsage.accountQuotaBytes ?? undefined}
             provenanceEnabled={provenanceEnabled}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
+            serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
           />
 
           <WorkspaceBanner
@@ -2679,27 +3626,30 @@ const ResearchWorkspaceBody: React.FC = () => {
             isMobile
           />
           <SharedWorkspaceBanner />
-
-          <WorkspaceTrustPanel
-            sourceStatus={workspaceSourceStatus}
-            capabilities={workspaceCapabilities}
-            loading={workspaceTrustLoading}
-            errorMessage={workspaceTrustError}
-            statusGuardrailsEnabled={statusGuardrailsEnabled}
-          />
+          {deepResearchReturnBanner}
 
           {tutorialPromptBanner}
+          {tourLaunchNotice}
 
           <WorkspaceStatusBar
             storageUsedBytes={workspaceStorageUsage.usedBytes}
             storageQuotaBytes={workspaceStorageUsage.quotaBytes}
             activeOperations={activeWorkspaceOperations}
+            statusMessages={workspaceMigrationStatusMessages}
+            statusAction={workspaceMigrationStatusAction}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
+            workspaceContextStatus={workspaceContextStatus}
+            compact
           />
 
           <Tabs
             activeKey={activeTab}
-            onChange={(key) => setActiveTab(key as WorkspaceTabKey)}
+            onChange={(key) => {
+              const nextTab = parseResearchWorkspaceTab(key)
+              if (nextTab) {
+                setActiveMobileTab(nextTab)
+              }
+            }}
             items={mobileTabItems}
             centered
             destroyOnHidden
@@ -2714,6 +3664,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             rightPaneOpen={!!rightPaneOpen}
             onToggleLeftPane={handleToggleLeftPane}
             onToggleRightPane={handleToggleRightPane}
+            onOpenSearch={openGlobalSearch}
             onOpenSplitWorkspace={handleOpenSplitWorkspace}
             storageUsedBytes={workspaceStorageUsage.usedBytes}
             storageQuotaBytes={workspaceStorageUsage.quotaBytes}
@@ -2723,6 +3674,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             storageAccountQuotaBytes={workspaceStorageUsage.accountQuotaBytes ?? undefined}
             provenanceEnabled={provenanceEnabled}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
+            serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
           />
 
           <WorkspaceBanner
@@ -2731,24 +3683,29 @@ const ResearchWorkspaceBody: React.FC = () => {
             isMobile={false}
           />
           <SharedWorkspaceBanner />
-
-          <WorkspaceTrustPanel
-            sourceStatus={workspaceSourceStatus}
-            capabilities={workspaceCapabilities}
-            loading={workspaceTrustLoading}
-            errorMessage={workspaceTrustError}
-            statusGuardrailsEnabled={statusGuardrailsEnabled}
-          />
+          {deepResearchReturnBanner}
 
           {tutorialPromptBanner}
+          {tourLaunchNotice}
 
           <div className="flex min-h-0 flex-1 gap-2 px-2 py-2">
+            {!leftPaneOpen && (
+              <WorkspaceRestoreRailButton
+                side="left"
+                label={t("playground:workspace.showSources", "Show sources")}
+                panelId="workspace-sources-panel"
+                testId="workspace-restore-sources"
+                onClick={handleRestoreLeftPane}
+              />
+            )}
+
             {leftPaneOpen && (
               <>
                 <aside
                   id="workspace-sources-panel"
                   role="complementary"
                   aria-label={t("playground:workspace.sourcesPanel", "Sources panel")}
+                  tabIndex={-1}
                   className="hidden shrink-0 overflow-hidden rounded-xl border border-border/80 bg-surface/90 shadow-card lg:flex lg:flex-col"
                   style={{ width: leftPaneWidth }}
                 >
@@ -2764,16 +3721,6 @@ const ResearchWorkspaceBody: React.FC = () => {
                 />
               </>
             )}
-            {!leftPaneOpen && (
-              <WorkspaceRestoreRailButton
-                side="left"
-                label={t("playground:workspace.showSources", "Show sources")}
-                panelId="workspace-sources-panel"
-                testId="workspace-restore-sources"
-                onClick={handleRestoreLeftPane}
-              />
-            )}
-
             <Drawer
               title={
                 <span className="flex items-center gap-2">
@@ -2793,14 +3740,34 @@ const ResearchWorkspaceBody: React.FC = () => {
 
             <main
               id="workspace-main-content"
+              tabIndex={-1}
               className="flex min-w-0 flex-1 overflow-hidden rounded-xl border border-border/80 bg-surface/90 shadow-card"
             >
               <ChatPane
                 provenanceEnabled={provenanceEnabled}
                 statusGuardrailsEnabled={statusGuardrailsEnabled}
                 contentWidthMode={desktopChatContentWidthMode}
+                researchWorkspaceCapabilities={researchWorkspaceCapabilities}
+                workspaceCapabilities={workspaceCapabilities}
+                researchWorkspaceCapabilitiesStale={isResearchWorkspaceCapabilitiesStale(
+                  researchWorkspaceCapabilities,
+                  researchWorkspaceCapabilitiesFetchedAt
+                )}
+                onRefreshResearchWorkspaceCapabilities={
+                  refreshResearchWorkspaceCapabilitiesIfStale
+                }
               />
             </main>
+
+            {!rightPaneOpen && (
+              <WorkspaceRestoreRailButton
+                side="right"
+                label={t("playground:workspace.showStudio", "Show studio")}
+                panelId="workspace-studio-panel"
+                testId="workspace-restore-studio"
+                onClick={handleRestoreRightPane}
+              />
+            )}
 
             {rightPaneOpen && (
               <>
@@ -2814,6 +3781,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                   id="workspace-studio-panel"
                   role="complementary"
                   aria-label={t("playground:workspace.studioPanel", "Studio panel")}
+                  tabIndex={-1}
                   className="hidden min-h-0 shrink-0 overflow-hidden rounded-xl border border-border/80 bg-surface/90 shadow-card lg:flex lg:flex-col"
                   style={{ width: rightPaneWidth }}
                 >
@@ -2823,16 +3791,6 @@ const ResearchWorkspaceBody: React.FC = () => {
                 </aside>
               </>
             )}
-            {!rightPaneOpen && (
-              <WorkspaceRestoreRailButton
-                side="right"
-                label={t("playground:workspace.showStudio", "Show studio")}
-                panelId="workspace-studio-panel"
-                testId="workspace-restore-studio"
-                onClick={handleRestoreRightPane}
-              />
-            )}
-
             <Drawer
               title={
                 <span className="flex items-center gap-2">
@@ -2855,7 +3813,10 @@ const ResearchWorkspaceBody: React.FC = () => {
             storageUsedBytes={workspaceStorageUsage.usedBytes}
             storageQuotaBytes={workspaceStorageUsage.quotaBytes}
             activeOperations={activeWorkspaceOperations}
+            statusMessages={workspaceMigrationStatusMessages}
+            statusAction={workspaceMigrationStatusAction}
             statusGuardrailsEnabled={statusGuardrailsEnabled}
+            workspaceContextStatus={workspaceContextStatus}
           />
         </>
       )}
@@ -2882,6 +3843,7 @@ const ResearchWorkspaceBody: React.FC = () => {
         <div className="space-y-3">
           <Input
             ref={globalSearchInputRef}
+            aria-label={t("playground:search.workspaceLabel", "Search workspace")}
             value={globalSearchQuery}
             onChange={(event) => setGlobalSearchQuery(event.target.value)}
             onKeyDown={handleSearchInputKeyDown}
@@ -3011,6 +3973,145 @@ const ResearchWorkspaceBody: React.FC = () => {
             )}
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        title={t(
+          "playground:workspace.migrationRecoveryDetails",
+          "Migration recovery details"
+        )}
+        open={workspaceMigrationDetailsOpen}
+        onCancel={() => setWorkspaceMigrationDetailsOpen(false)}
+        destroyOnHidden
+        footer={[
+          <Button key="close" onClick={() => setWorkspaceMigrationDetailsOpen(false)}>
+            {t("common:close", "Close")}
+          </Button>,
+          ...(migrationCanRetry
+            ? [
+                <Button
+                  key="retry"
+                  type="primary"
+                  onClick={() => {
+                    setWorkspaceMigrationDetailsOpen(false)
+                    retryWorkspaceMigration()
+                  }}
+                >
+                  {t(
+                    "playground:workspace.retryMigrationCheck",
+                    "Retry migration check"
+                  )}
+                </Button>
+              ]
+            : [])
+        ]}
+      >
+        {workspaceMigrationResult ? (
+          <div
+            data-testid="workspace-migration-recovery-details"
+            className="space-y-4 text-sm text-text"
+          >
+            <p className="text-text-muted">{workspaceMigrationResult.message}</p>
+            <dl className="grid grid-cols-[minmax(120px,0.42fr)_1fr] gap-x-3 gap-y-2">
+              <dt className="text-text-muted">
+                {t("playground:workspace.migrationResult", "Result")}
+              </dt>
+              <dd>{workspaceMigrationResult.status}</dd>
+              <dt className="text-text-muted">
+                {t("playground:workspace.migrationId", "Migration ID")}
+              </dt>
+              <dd className="break-all">
+                {workspaceMigrationResult.migrationId ||
+                  t("playground:workspace.notAvailable", "Not available")}
+              </dd>
+              <dt className="text-text-muted">
+                {t("playground:workspace.manifestHash", "Manifest hash")}
+              </dt>
+              <dd className="break-all">
+                {workspaceMigrationResult.manifestHash ||
+                  t("playground:workspace.notAvailable", "Not available")}
+              </dd>
+              <dt className="text-text-muted">
+                {t("playground:workspace.serverReceipt", "Server receipt")}
+              </dt>
+              <dd>
+                {workspaceMigrationResult.serverMigration
+                  ? t(
+                      "playground:workspace.serverReceiptSaved",
+                      "Server receipt saved"
+                    )
+                  : t("playground:workspace.noServerReceipt", "No server receipt")}
+              </dd>
+              <dt className="text-text-muted">
+                {t("playground:workspace.serverStatus", "Server status")}
+              </dt>
+              <dd>
+                {workspaceMigrationResult.serverMigration?.status ||
+                  t("playground:workspace.noServerReceipt", "No server receipt")}
+              </dd>
+              <dt className="text-text-muted">
+                {t(
+                  "playground:workspace.clientDeletionEligible",
+                  "Client deletion eligible"
+                )}
+              </dt>
+              <dd>
+                {workspaceMigrationResult.serverMigration?.client_delete_eligible
+                  ? t("common:yes", "Yes")
+                  : t("common:no", "No")}
+              </dd>
+            </dl>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <section className="rounded-md border border-border p-3">
+                <h3 className="mb-2 text-xs font-semibold uppercase text-text-muted">
+                  {t("playground:workspace.deletedSurfaces", "Deleted surfaces")}
+                </h3>
+                {renderMigrationSurfaceList(
+                  migrationDeletedSurfaces,
+                  t(
+                    "playground:workspace.noLocalContentDeleted",
+                    "No local content deleted"
+                  )
+                )}
+              </section>
+              <section className="rounded-md border border-border p-3">
+                <h3 className="mb-2 text-xs font-semibold uppercase text-text-muted">
+                  {t(
+                    "playground:workspace.retainedLocalSurfaces",
+                    "Retained local surfaces"
+                  )}
+                </h3>
+                {renderMigrationSurfaceList(
+                  migrationRetainedSurfaces,
+                  t(
+                    "playground:workspace.noRetainedKnownSurfaces",
+                    "No retained known surfaces"
+                  )
+                )}
+              </section>
+              <section className="rounded-md border border-border p-3">
+                <h3 className="mb-2 text-xs font-semibold uppercase text-text-muted">
+                  {t(
+                    "playground:workspace.unknownLocalSurfaces",
+                    "Unknown local surfaces"
+                  )}
+                </h3>
+                {renderMigrationSurfaceList(
+                  migrationUnknownSurfaces,
+                  t("playground:workspace.noUnknownSurfaces", "No unknown surfaces")
+                )}
+              </section>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-text-muted">
+            {t(
+              "playground:workspace.noMigrationDetails",
+              "No migration recovery details are available for this workspace."
+            )}
+          </p>
+        )}
       </Modal>
 
       <TransferSourcesModal

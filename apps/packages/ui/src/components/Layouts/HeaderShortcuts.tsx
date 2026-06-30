@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
-import { NavLink, useLocation, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { useShortcut } from "@/hooks/useKeyboardShortcuts"
 import { isMac } from "@/hooks/useKeyboardShortcuts"
 import { useSetting } from "@/hooks/useSetting"
@@ -25,6 +25,9 @@ import { useConnectionActions } from "@/hooks/useConnectionState"
 
 const ALL_CATEGORY = "__all__"
 const META_LABEL = isMac ? "\u2318" : "Ctrl+"
+
+const isCurrentShortcutRoute = (pathname: string, item: HeaderShortcutItem) =>
+  pathname === item.to
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -477,12 +480,13 @@ export function HeaderShortcuts({
                       const globalIdx = flatItems.indexOf(ri)
                       const isSelected = globalIdx === selectedIndex
                       const Icon = ri.item.icon
-                      const isCurrentRoute =
-                        location.pathname === ri.item.to ||
-                        (ri.item.to === "/" && location.pathname === "/chat")
+                      const isCurrentRoute = isCurrentShortcutRoute(
+                        location.pathname,
+                        ri.item
+                      )
 
                       return (
-                        <NavLink
+                        <Link
                           key={ri.item.id}
                           to={ri.item.to}
                           onClick={(e) => {
@@ -493,6 +497,7 @@ export function HeaderShortcuts({
                           data-selected={isSelected}
                           role="option"
                           aria-selected={isSelected}
+                          aria-current={isCurrentRoute ? "page" : undefined}
                           className={cn(
                             "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors",
                             isCurrentRoute && "border-l-2 border-primary bg-primary/5",
@@ -524,7 +529,7 @@ export function HeaderShortcuts({
                               {META_LABEL}{ri.item.shortcutIndex}
                             </kbd>
                           )}
-                        </NavLink>
+                        </Link>
                       )
                     })}
                   </div>
@@ -559,12 +564,13 @@ export function HeaderShortcuts({
                         const globalIdx = flatItems.indexOf(ri)
                         const isSelected = globalIdx === selectedIndex
                         const Icon = ri.item.icon
-                        const isCurrentRoute =
-                          location.pathname === ri.item.to ||
-                          (ri.item.to === "/" && location.pathname === "/chat")
+                        const isCurrentRoute = isCurrentShortcutRoute(
+                          location.pathname,
+                          ri.item
+                        )
 
                         return (
-                          <NavLink
+                          <Link
                             key={ri.item.id}
                             to={ri.item.to}
                             onClick={(e) => {
@@ -575,12 +581,14 @@ export function HeaderShortcuts({
                             data-selected={isSelected}
                             role="option"
                             aria-selected={isSelected}
+                            aria-current={isCurrentRoute ? "page" : undefined}
                             className={cn(
                               "flex w-full items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs transition-colors sm:w-auto sm:text-sm",
-                              isCurrentRoute && "border-border bg-surface text-text",
-                              isSelected
+                              isCurrentRoute
                                 ? "border-border bg-surface text-text"
-                                : "border-transparent text-text-muted hover:border-border hover:bg-surface"
+                                : isSelected
+                                  ? "border-focus/60 bg-surface2 text-text"
+                                  : "border-transparent text-text-muted hover:border-border hover:bg-surface"
                             )}
                           >
                             <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -598,7 +606,7 @@ export function HeaderShortcuts({
                                 {ri.item.shortcutIndex}
                               </kbd>
                             )}
-                          </NavLink>
+                          </Link>
                         )
                       })}
                     </div>

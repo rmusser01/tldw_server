@@ -176,10 +176,19 @@ describe("ResearchWorkspace stage 1 onboarding walkthrough", () => {
     await waitFor(() => {
       expect(screen.getByText("Start tour")).toBeInTheDocument()
     })
+    expect(screen.getByText("Research Workspace")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Collect sources, ask questions, and turn findings into reusable outputs."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Add sources" })
+    ).toBeInTheDocument()
     expect(mockStartTutorial).not.toHaveBeenCalled()
   })
 
-  it("starts the tour and persists dismissal when user clicks Start tour", async () => {
+  it("starts the tour, shows visible feedback, and persists dismissal when user clicks Start tour", async () => {
     const user = userEvent.setup()
     render(<ResearchWorkspace />)
 
@@ -192,6 +201,9 @@ describe("ResearchWorkspace stage 1 onboarding walkthrough", () => {
     })
     expect(onboardingStorageState.value).toBe("1")
     expect(screen.queryByText("Start tour")).not.toBeInTheDocument()
+    expect(
+      screen.getByText("Tour started. Follow the highlighted steps.")
+    ).toBeInTheDocument()
   })
 
   it("persists dismissal without starting tour when user clicks Dismiss", async () => {

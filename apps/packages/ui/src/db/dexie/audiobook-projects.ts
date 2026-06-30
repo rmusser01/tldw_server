@@ -7,6 +7,68 @@ import type {
 
 // Storage cap for audiobook assets (200MB)
 export const AUDIOBOOK_STORAGE_CAP_BYTES = 200 * 1024 * 1024
+export const AUDIOBOOK_MIGRATION_SCHEMA_VERSION = 1
+
+export type LegacyAudiobookMigrationChapter = {
+  legacy_chapter_id: string
+  title: string
+  body_text: string
+  order: number
+  voice_config: Record<string, unknown>
+  status: SerializedAudioChapter["status"]
+  audio_duration?: number
+  error_message?: string
+}
+
+export type LegacyAudiobookMigrationAudioAsset = {
+  legacy_asset_id: string
+  legacy_chapter_id: string
+  mime_type: string
+  size_bytes: number
+  created_at: number
+  has_blob: boolean
+}
+
+export type LegacyAudiobookProjectMigrationPayload = {
+  migration_schema_version: typeof AUDIOBOOK_MIGRATION_SCHEMA_VERSION
+  legacy_project_id: string
+  workflow: "narration"
+  title: string
+  author: string
+  description?: string
+  cover_image_asset_id?: string
+  cover_image_url?: string
+  raw_content: string
+  status: AudiobookProject["status"]
+  total_duration?: number
+  created_at: number
+  updated_at: number
+  default_voice_config: Record<string, unknown>
+  chapter_audio_asset_ids: Record<string, string>
+  chapters: LegacyAudiobookMigrationChapter[]
+  audio_assets: LegacyAudiobookMigrationAudioAsset[]
+}
+
+export type LegacyAudiobookMigrationMarker = {
+  schemaVersion: typeof AUDIOBOOK_MIGRATION_SCHEMA_VERSION
+  status: "migrated"
+  projectId: string
+  migrationId?: string
+  completedAt: number
+}
+
+type AudiobookProjectWithMigration = AudiobookProject & {
+  audioStudioMigration?: LegacyAudiobookMigrationMarker
+}
+
+const isMigratedToAudioStudio = (project: AudiobookProject): boolean => {
+  const marker = (project as AudiobookProjectWithMigration).audioStudioMigration
+  return (
+    marker?.status === "migrated" &&
+    typeof marker.projectId === "string" &&
+    marker.projectId.length > 0
+  )
+}
 
 /**
  * Get all audiobook projects
@@ -19,12 +81,75 @@ export async function getAudiobookProjects(): Promise<AudiobookProject[]> {
 }
 
 /**
+ * List local Audiobook Studio projects that have not been marked migrated.
+ */
+export async function listLegacyAudiobookProjectsForMigration(): Promise<
+  AudiobookProject[]
+> {
+  const projects = await getAudiobookProjects()
+  return projects.filter((project) => !isMigratedToAudioStudio(project))
+}
+
+/**
  * Get a single audiobook project by ID
  */
 export async function getAudiobookProjectById(
   id: string
 ): Promise<AudiobookProject | undefined> {
   return await db.audiobookProjects.get(id)
+}
+
+/**
+ * Serialize local Audiobook Studio project structure for server migration.
+ *
+ * Audio blobs are intentionally not included here; artifact upload is a later,
+ * explicit migration step. The returned asset rows are metadata only.
+ */
+export async function serializeLegacyAudiobookProjectForMigration(
+  id: string
+): Promise<LegacyAudiobookProjectMigrationPayload> {
+  const project = await getAudiobookProjectById(id)
+  if (!project) {
+    throw new Error(`Legacy audiobook project not found: ${id}`)
+  }
+
+  const assets = await getChapterAssetsByProject(id)
+
+  return {
+    migration_schema_version: AUDIOBOOK_MIGRATION_SCHEMA_VERSION,
+    legacy_project_id: project.id,
+    workflow: "narration",
+    title: project.title,
+    author: project.author,
+    description: project.description,
+    cover_image_asset_id: project.coverImageAssetId,
+    cover_image_url: project.coverImageUrl,
+    raw_content: project.rawContent,
+    status: project.status,
+    total_duration: project.totalDuration,
+    created_at: project.createdAt,
+    updated_at: project.updatedAt,
+    default_voice_config: project.defaultVoiceConfig,
+    chapter_audio_asset_ids: { ...project.chapterAudioAssetIds },
+    chapters: project.chapters.map((chapter) => ({
+      legacy_chapter_id: chapter.id,
+      title: chapter.title,
+      body_text: chapter.content,
+      order: chapter.order,
+      voice_config: chapter.voiceConfig,
+      status: chapter.status,
+      audio_duration: chapter.audioDuration,
+      error_message: chapter.errorMessage
+    })),
+    audio_assets: assets.map((asset) => ({
+      legacy_asset_id: asset.id,
+      legacy_chapter_id: asset.chapterId,
+      mime_type: asset.mimeType,
+      size_bytes: asset.sizeBytes,
+      created_at: asset.createdAt,
+      has_blob: Boolean(asset.blob)
+    }))
+  }
 }
 
 /**
@@ -49,6 +174,29 @@ export async function updateAudiobookProject(
   await db.audiobookProjects.update(id, {
     ...updates,
     updatedAt: Date.now()
+  })
+}
+
+/**
+ * Mark a legacy local project as migrated without deleting the Dexie row.
+ */
+export async function markLegacyAudiobookProjectMigrated(
+  id: string,
+  migration: { projectId: string; migrationId?: string }
+): Promise<void> {
+  const marker: LegacyAudiobookMigrationMarker = {
+    schemaVersion: AUDIOBOOK_MIGRATION_SCHEMA_VERSION,
+    status: "migrated",
+    projectId: migration.projectId,
+    migrationId: migration.migrationId,
+    completedAt: Date.now()
+  }
+
+  await db.audiobookProjects.update(id, {
+    audioStudioMigration: marker,
+    updatedAt: Date.now()
+  } as Partial<AudiobookProject> & {
+    audioStudioMigration: LegacyAudiobookMigrationMarker
   })
 }
 
@@ -247,7 +395,7 @@ export function serializeChapters(
     title: string
     content: string
     order: number
-    voiceConfig: Record<string, any>
+    voiceConfig: Record<string, unknown>
     status: string
     audioDuration?: number
     errorMessage?: string

@@ -1,8 +1,9 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { Drawer, Form, Input, Select, Skeleton, notification, Alert, Spin } from "antd"
+import { Drawer, Form, Input, Select, Skeleton, notification, Spin } from "antd"
 import { Play, Clock, Zap } from "lucide-react"
 import React, { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import {
   getPrompt,
   executePrompt,
@@ -218,27 +219,25 @@ export const ExecutePlayground: React.FC<ExecutePlaygroundProps> = ({
           {/* Variables hint */}
           {variables.length > 0 && (
             <Alert
-              type="info"
-              showIcon
+              variant="info"
               title={t("managePrompts.studio.prompts.variablesDetected", {
                 defaultValue: "Variables detected in prompt"
               })}
-              description={
-                <div className="mt-1">
-                  <p className="text-sm mb-2">
-                    {t("managePrompts.studio.prompts.variablesList", {
-                      defaultValue: "Found variables: {{variables}}",
-                      variables: variables.join(", ")
-                    })}
-                  </p>
-                  <Button type="ghost" size="sm" onClick={generateInputTemplate}>
-                    {t("managePrompts.studio.prompts.generateTemplate", {
-                      defaultValue: "Generate input template"
-                    })}
-                  </Button>
-                </div>
-              }
-            />
+            >
+              <div className="mt-1">
+                <p className="text-sm mb-2">
+                  {t("managePrompts.studio.prompts.variablesList", {
+                    defaultValue: "Found variables: {{variables}}",
+                    variables: variables.join(", ")
+                  })}
+                </p>
+                <Button type="ghost" size="sm" onClick={generateInputTemplate}>
+                  {t("managePrompts.studio.prompts.generateTemplate", {
+                    defaultValue: "Generate input template"
+                  })}
+                </Button>
+              </div>
+            </Alert>
           )}
 
           <Form form={form} layout="vertical" onFinish={handleExecute}>

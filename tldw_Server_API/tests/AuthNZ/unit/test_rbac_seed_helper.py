@@ -5,7 +5,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
-async def test_ensure_baseline_rbac_seed_sqlite_idempotent():
+async def test_ensure_baseline_rbac_seed_sqlite_idempotent() -> None:
     import aiosqlite
 
     from tldw_Server_API.app.core.AuthNZ.rbac_seed import ensure_baseline_rbac_seed
@@ -59,6 +59,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent():
             "system.configure",
             "users.manage_roles",
             "modules.read",
+            "prompts.read",
             "tools.execute:*",
         }
         cur = await conn.execute("SELECT name FROM permissions")
@@ -74,7 +75,8 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent():
             FROM permissions
             WHERE name IN (
                 'media.read','media.create','media.delete','system.configure',
-                'users.manage_roles','sql.read','sql.target:media_db','modules.read','tools.execute:*'
+                'users.manage_roles','sql.read','sql.target:media_db','modules.read',
+                'prompts.read','tools.execute:*'
             )
             """
         )
@@ -90,6 +92,7 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent():
         assert perm_id["sql.read"] in user_perm_ids
         assert perm_id["sql.target:media_db"] in user_perm_ids
         assert perm_id["modules.read"] in user_perm_ids
+        assert perm_id["prompts.read"] in user_perm_ids
 
         cur = await conn.execute(
             "SELECT permission_id FROM role_permissions WHERE role_id = ?",
@@ -107,8 +110,71 @@ async def test_ensure_baseline_rbac_seed_sqlite_idempotent():
             assert perm_id[name] in admin_perm_ids
 
 
+def test_migration_089_seeds_prompts_read_for_existing_admin_and_user_roles() -> None:
+    import sqlite3
+
+    from tldw_Server_API.app.core.AuthNZ.migrations import (
+        get_authnz_migrations,
+        migration_089_seed_mcp_prompts_read_permission,
+    )
+
+    assert get_authnz_migrations()[-1].version == 89
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                description TEXT,
+                is_system INTEGER DEFAULT 0
+            );
+            CREATE TABLE permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                description TEXT,
+                category TEXT
+            );
+            CREATE TABLE role_permissions (
+                role_id INTEGER NOT NULL,
+                permission_id INTEGER NOT NULL,
+                PRIMARY KEY (role_id, permission_id)
+            );
+            INSERT INTO roles (name, description, is_system)
+            VALUES
+                ('admin', 'Administrator', 1),
+                ('user', 'Standard User', 1);
+            """
+        )
+
+        migration_089_seed_mcp_prompts_read_permission(conn)
+        migration_089_seed_mcp_prompts_read_permission(conn)
+
+        permission_rows = conn.execute(
+            "SELECT name, description, category FROM permissions WHERE name = ?",
+            ("prompts.read",),
+        ).fetchall()
+        assert permission_rows == [("prompts.read", "Read MCP prompts", "prompts")]
+
+        grant_rows = conn.execute(
+            """
+            SELECT r.name, p.name
+            FROM role_permissions rp
+            JOIN roles r ON r.id = rp.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+            WHERE p.name = ?
+            ORDER BY r.name
+            """,
+            ("prompts.read",),
+        ).fetchall()
+        assert grant_rows == [("admin", "prompts.read"), ("user", "prompts.read")]
+    finally:
+        conn.close()
+
+
 @pytest.mark.asyncio
-async def test_ensure_sqlite_rbac_tables_creates_minimal_schema():
+async def test_ensure_sqlite_rbac_tables_creates_minimal_schema() -> None:
     import aiosqlite
 
     from tldw_Server_API.app.core.AuthNZ.rbac_seed import ensure_sqlite_rbac_tables
@@ -128,7 +194,7 @@ async def test_ensure_sqlite_rbac_tables_creates_minimal_schema():
 @pytest.mark.asyncio
 async def test_ensure_baseline_rbac_seed_explicit_backend_hint_skips_detection(
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     import aiosqlite
 
     from tldw_Server_API.app.core.AuthNZ import rbac_seed

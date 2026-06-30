@@ -1,5 +1,7 @@
 # MCP Unified Module - Production Ready
 
+> **Current state:** Unified MCP is embedded in TLDW Server today. The standalone package/gateway is planned but not shipped in this tree yet. Use the TLDW Server launch path unless a future release explicitly says the standalone gateway is available.
+
 ## 1. Descriptive of Current Feature Set
 
 - Purpose: Secure, production-ready Model Context Protocol (MCP) server with HTTP + WebSocket transport, JWT/RBAC, rate limiting, idempotency, module system, and Prometheus metrics.
@@ -92,6 +94,8 @@ Current enterprise support matrix for this path:
 - **Graceful Degradation** - Circuit breaker pattern for resilience
 
 ## 🚀 Quick Start
+
+For an end-to-end first success, use the Golden Path Quickstart in `Docs/MCP/Unified/User_Guide.md`. The commands below are contributor-oriented runtime checks, not a standalone gateway install flow.
 
 ### 1. Set Required Environment Variables
 
@@ -350,6 +354,67 @@ Tool results include the serving module:
 
 See `Docs/MCP/Unified/Modules.md` for a complete guide.
 
+## Tool Observability And Evaluation Metadata
+
+MCP Unified attaches a shared, non-sensitive evaluation contract across the tool
+surface so operators can compare tool prompt variants, profile grants, model
+tool-use quality, and external-server behavior without scraping raw tool output.
+
+Tool definitions include `metadata.eval` with:
+
+- `tool_prompt_id`: stable identifier, defaulting to `mcp.<tool-name>.v1`
+- `tool_prompt_version`: version of the built-in or operator-supplied tool prompt
+- `task_families`: coarse evaluation category derived from explicit metadata or tool name
+- `expected_result_kind`: expected structured result family
+- `success_signals`: safe rubric hints such as `avoided_mutation`
+- `prompt_variant`: `builtin`, `alias`, `external_federated`, or an operator variant
+
+Execution responses include top-level `eval` metadata. Structured JSON tool
+results that do not already provide their own `eval` block also receive an
+embedded copy. These fields are intentionally limited to scalar values such as
+tool name, prompt id/version, action family, result kind, optional profile id,
+truncation/path-filter flags, reason code, and duration. They must not contain
+raw arguments, raw file contents, diffs, secrets, absolute local paths, or user
+email addresses. Profile IDs are accepted only as short safe labels using
+letters, numbers, `_`, `.`, or `-`; unsafe values are omitted.
+
+Module authors should use `create_tool_definition()` for new tools. It merges
+safe explicit `metadata.eval` fields over inferred defaults and drops unknown or
+non-string scalar fields.
+Manual descriptors and federated external tools are normalized at catalog and
+protocol boundaries so standalone gateway and hosted MCP callers see the same
+contract.
+
+## Git Read-Only Inspection Module
+
+The optional native Git inspection module is enabled only when explicitly
+configured by the operator:
+
+```bash
+export MCP_ENABLE_GIT_MODULE=true
+```
+
+When enabled, the module exposes these read-only tools:
+
+- `git.status`
+- `git.diff`
+- `git.log`
+- `git.blame`
+- `git.branches`
+- `git.conflicts.list`
+- `git.conflicts.read`
+
+The module is bound to the active workspace repository root. Callers cannot
+supply an alternate repository path. The tools do not expose checkout, add,
+commit, merge, rebase, stash, reset, clean, push, pull, arbitrary Git argv, or
+host shell execution.
+
+Git responses are intentionally privacy- and safety-bounded. Ignored files are
+excluded from status output; author emails are omitted from log and blame
+output; and external diff/textconv processing is disabled for diff reads.
+Responses are bounded by tool limits and include non-sensitive evaluation
+metadata through the shared MCP tool observability contract.
+
 ## 🧭 Phase-1 Virtual CLI Runtime
 
 Phase-1 adds a governed virtual CLI foundation to MCP Unified.
@@ -360,6 +425,22 @@ Phase-1 adds a governed virtual CLI foundation to MCP Unified.
 
 `run` is not a raw host shell. It compiles command steps into policy-checked MCP tool calls (`prepare_tool_call` / `execute_prepared_tool_call`) so approvals, RBAC, path scope, validation, and idempotency all still apply.
 
+`bash`, `shell`, `powershell`, and `pwsh` may also appear as compatibility aliases for `run`. They use the same `command` argument and the same governed runtime; they are not host shell execution surfaces. Unsupported raw-shell features such as redirection, command substitution, environment expansion, environment assignment prefixes, and background execution fail before any backend MCP tool call is prepared.
+
+`shellName` / `shell_name` may be set to `bash`, `shell`, `powershell`, or `pwsh` to label the intended virtual shell dialect for a `run` invocation. The selector is validated, included in nested idempotency scope, and never enables raw host shell execution. The `bash`, `powershell`, and `pwsh` aliases are pinned to their matching `shellName` values; conflicting selectors fail before backend MCP calls are prepared.
+
+PowerShell-facing invocations also fail closed on raw PowerShell syntax that the virtual CLI does not emulate, including the invocation operator (`&`) and unquoted script blocks (`{ ... }`). Use curated virtual CLI commands such as `ls`, `cat`, `rg`, and `sandbox` instead of shell scripts.
+
+`run` and its shell-facing aliases also accept optional `timeoutSeconds` / `timeout_seconds` values. The timeout covers the governed command chain, including policy preflight and nested MCP tool execution, and returns exit code `124` when exceeded.
+
+`cwd` / `workingDirectory` may be set to a workspace-relative directory for a single governed command chain. Relative file paths and search base paths are evaluated beneath that cwd, while absolute paths and final read/write decisions still flow through the backing MCP tools and profile policy. The cwd value rejects absolute paths, Windows drive roots, home-relative paths, and `..` traversal.
+
+`retainOutputArtifacts` / `retain_output_artifacts` may be set to keep oversized output spill files after rendering. Retained outputs are shown with redacted `mcp-run-output://...` handles rather than absolute filesystem paths; by default, spill files are deleted after the preview is rendered.
+
+`sandboxSessionId` / `sandbox_session_id` may be set when a command chain uses the governed `sandbox` command. Sandbox steps then call `sandbox.run` with that session id instead of the default base image, so session ownership and sandbox policy still remain enforced by the backing sandbox module.
+
+`envFile` / `env_file` may be set when a command chain uses the governed `sandbox` command. The file must be UTF-8, workspace-relative, bounded in size, and remain inside the resolved workspace root after symlink resolution. Values are parsed as simple `.env` `KEY=value` entries without shell expansion and are forwarded only to `sandbox.run`; they are not injected into the host process environment or rendered back in command output.
+
 Phase-1 command families:
 
 - Pure transforms (no MCP backend call): `grep`, `head`, `tail`, `json`
@@ -367,10 +448,15 @@ Phase-1 command families:
   - `ls` -> `fs.list`
   - `cat` -> `fs.read_text`
   - `write` -> `fs.write_text`
+  - `stat` -> `fs.stat`
+  - `glob`, `find` -> `fs.glob`
+  - `rg`, `grep-files` -> `fs.grep`
   - `knowledge` -> `knowledge.search`, `knowledge.get`
   - `media` -> `media.search`, `media.get`
   - `mcp` -> `mcp.modules.list`, `mcp.tools.list`
   - `sandbox` -> `sandbox.run`
+
+Command aliases are policy-filtered by their backing MCP tools. For example, `rg` and `grep-files` are visible only when `fs.grep` is executable in the active profile. Plain `grep` remains a pure stdin filter for pipelines such as `cat app.log | grep ERROR`.
 
 Default `run_command` runtime settings in module inventory:
 
@@ -526,6 +612,9 @@ Notes
 See also: Ops tuning guide at Docs/Deployment/Operations/MCP_Rate_Limits_Tuning.md
 
 ### Docker Deployment
+
+> **Experimental:** This MCP-specific Dockerfile is not the supported standalone gateway. Unified MCP is embedded in TLDW Server today; use the repository-level TLDW Server Docker or local server launch path for supported MCP usage.
+
 ```bash
 docker build -f docker/Dockerfile -t mcp-unified .
 docker run -d \
@@ -552,7 +641,7 @@ Scrape MCP metrics at `GET /api/v1/mcp/metrics/prometheus` (text exposition form
    - `mcp_idempotency_hits_total{module,tool}` - protocol-level idempotency cache hits
    - `mcp_idempotency_misses_total{module,tool}` - protocol-level idempotency cache misses
 
-Security: The Prometheus endpoint is gated by `require_permissions(SYSTEM_LOGS)` on `AuthPrincipal` (admin-style principals also pass). Unauthenticated scraping is not supported; use credentials or an auth proxy for Prometheus.
+Security: The Prometheus endpoint is gated by `RequirePermission(SYSTEM_LOGS)` on `AuthPrincipal` (admin-style principals also pass). Unauthenticated scraping is not supported; use credentials or an auth proxy for Prometheus.
 
 ### Health Checks
 - `/api/v1/mcp/health` - Overall health

@@ -185,14 +185,14 @@ async def web_search_fallback(
         )
 
     except Exception as e:  # noqa: BLE001 - fallback should be resilient to unexpected failures
-        logger.warning(f"Web search fallback failed: {e}")
+        logger.warning("Web search fallback failed: search execution error")
         return WebFallbackResult(
             documents=[],
             search_time_ms=int((time.time() - start_time) * 1000),
             result_count=0,
             engine_used=config.engine,
             query_used=query,
-            metadata={"error": str(e)},
+            metadata={"error": "search_failed"},
         )
 
 
@@ -263,8 +263,8 @@ def _convert_web_results_to_documents(
             )
             documents.append(doc)
 
-        except Exception as e:  # noqa: BLE001 - best-effort conversion of results
-            logger.warning(f"Failed to convert web result {idx}: {e}")
+        except Exception:  # noqa: BLE001 - best-effort conversion of results
+            logger.warning("Failed to convert web result {}: conversion error", idx)
             continue
 
     return documents

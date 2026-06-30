@@ -1,5 +1,6 @@
-import type { ChatHistory } from "~/store/option"
+import type { ChatHistory, MessageMetadataExtra } from "~/store/option"
 import type { ChatDocuments } from "@/models/ChatTypes"
+import type { DynamicUIRequest } from "@/types/dynamic-ui"
 import type { ImageGenerationEventSyncPolicy } from "@/utils/image-generation-chat"
 
 export interface SaveMessageBase {
@@ -20,6 +21,9 @@ export interface SaveMessageBase {
   saveToDb?: boolean
   conversationId?: string
   imageEventSyncPolicy?: ImageGenerationEventSyncPolicy
+  dynamicUIRequest?: DynamicUIRequest
+  userMetadataExtra?: MessageMetadataExtra
+  assistantMetadataExtra?: MessageMetadataExtra
 }
 
 export interface SaveMessageData extends SaveMessageBase {

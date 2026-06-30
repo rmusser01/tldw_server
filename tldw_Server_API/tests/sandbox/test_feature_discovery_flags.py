@@ -34,19 +34,14 @@ def test_runtimes_include_capability_flags_and_store_mode(monkeypatch) -> None:
 def test_egress_allowlist_supported_when_enforced(monkeypatch) -> None:
 
 
-     # Ensure app is in test mode and config cache is fresh
+    # Ensure app is in test mode and config cache is fresh
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
+    monkeypatch.setenv("SANDBOX_EGRESS_ENFORCEMENT", "true")
+    monkeypatch.setenv("SANDBOX_EGRESS_GRANULAR_ENFORCEMENT", "true")
     clear_config_cache()
-    # Flip enforcement on the live service instance to avoid re-importing app
-    import tldw_Server_API.app.api.v1.endpoints.sandbox as sandbox_ep
-    # Temporarily enforce egress via monkeypatch so state is restored after test
-    monkeypatch.setattr(
-        sandbox_ep._service.policy.cfg,  # type: ignore[attr-defined]
-        "egress_enforcement",
-        True,
-        raising=False,
-    )
+
     with TestClient(app) as client:
         r = client.get("/api/v1/sandbox/runtimes")
         assert r.status_code == 200
@@ -62,6 +57,7 @@ def test_runtimes_notes_reflect_granular_allowlist(monkeypatch) -> None:
 
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+    monkeypatch.setenv("TLDW_SANDBOX_DOCKER_AVAILABLE", "1")
     monkeypatch.setenv("SANDBOX_EGRESS_ENFORCEMENT", "true")
     monkeypatch.setenv("SANDBOX_EGRESS_GRANULAR_ENFORCEMENT", "true")
     clear_config_cache()
@@ -74,29 +70,25 @@ def test_runtimes_notes_reflect_granular_allowlist(monkeypatch) -> None:
         assert isinstance(docker.get("notes"), str) and "Granular egress allowlist" in docker["notes"]
 
 
-def test_firecracker_egress_supported_only_when_enforced(monkeypatch) -> None:
+def test_firecracker_egress_allowlist_not_advertised_while_scaffolded(monkeypatch) -> None:
 
 
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
-    # Ensure enforcement not set: expect False
-    monkeypatch.delenv("SANDBOX_FIRECRACKER_EGRESS_ENFORCEMENT", raising=False)
+    monkeypatch.setenv("TLDW_SANDBOX_FIRECRACKER_AVAILABLE", "1")
+    monkeypatch.setenv("SANDBOX_FIRECRACKER_EGRESS_ENFORCEMENT", "true")
+    monkeypatch.setenv("SANDBOX_FIRECRACKER_EGRESS_GRANULAR_ENFORCEMENT", "true")
     clear_config_cache()
+
     with TestClient(app) as client:
         r = client.get("/api/v1/sandbox/runtimes")
+        assert r.status_code == 200
         data = r.json()
         fc = next((rt for rt in data.get("runtimes", []) if rt.get("name") == "firecracker"), None)
         assert fc is not None
         assert fc.get("egress_allowlist_supported") is False
-    # Now flip enforcement on
-    monkeypatch.setenv("SANDBOX_FIRECRACKER_EGRESS_ENFORCEMENT", "true")
-    clear_config_cache()
-    with TestClient(app) as client:
-        r2 = client.get("/api/v1/sandbox/runtimes")
-        d2 = r2.json()
-        fc2 = next((rt for rt in d2.get("runtimes", []) if rt.get("name") == "firecracker"), None)
-        assert fc2 is not None
-        assert fc2.get("egress_allowlist_supported") is True
+        assert fc.get("strict_allowlist_supported") is False
+        assert "scaffold/planned" in str(fc.get("notes"))
 
 
 def test_firecracker_not_available_when_real_disabled(monkeypatch) -> None:
@@ -144,6 +136,26 @@ def test_runtimes_discovery_includes_macos_runtime_capabilities(monkeypatch) -> 
         assert isinstance(runtimes["vz_macos"].get("host"), dict)
 
 
+def test_runtimes_discovery_includes_implementation_state_labels(monkeypatch) -> None:
+    """Verify discovery exposes roadmap maturity labels for every sandbox runtime."""
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
+    clear_config_cache()
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/sandbox/runtimes")
+
+    assert response.status_code == 200
+    runtimes = {item["name"]: item for item in response.json()["runtimes"]}
+    assert runtimes["docker"]["implementation_state"] == "supported"
+    assert runtimes["firecracker"]["implementation_state"] == "host_gated"
+    assert runtimes["lima"]["implementation_state"] == "host_gated"
+    assert runtimes["vz_linux"]["implementation_state"] == "host_gated"
+    assert runtimes["vz_macos"]["implementation_state"] == "scaffold"
+    assert runtimes["seatbelt"]["implementation_state"] == "host_gated"
+    assert runtimes["worktree"]["implementation_state"] == "supported"
+
+
 def test_runtimes_discovery_keeps_macos_diagnostics_summarized(monkeypatch) -> None:
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("SANDBOX_STORE_BACKEND", "memory")
@@ -161,6 +173,7 @@ def test_runtimes_discovery_keeps_macos_diagnostics_summarized(monkeypatch) -> N
     assert "helper" not in vz_linux
     assert "templates" not in vz_linux
     assert "remediation" not in vz_linux
+    assert "reconciliation" not in vz_linux
     assert "supported_trust_levels" in vz_linux
     assert isinstance(vz_linux.get("host"), dict)
 
@@ -180,6 +193,7 @@ def test_macos_diagnostics_runtime_reasons_align_with_feature_discovery(monkeypa
     assert diagnostics["runtimes"]["vz_linux"]["reasons"] == discovery["vz_linux"]["reasons"]
     assert diagnostics["runtimes"]["vz_macos"]["reasons"] == discovery["vz_macos"]["reasons"]
     assert diagnostics["runtimes"]["seatbelt"]["supported_trust_levels"] == discovery["seatbelt"]["supported_trust_levels"]
+    assert "reconciliation" in diagnostics
 
 
 def test_runtimes_discovery_keeps_seatbelt_network_claims_best_effort(monkeypatch) -> None:

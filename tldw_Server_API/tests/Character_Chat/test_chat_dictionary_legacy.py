@@ -165,6 +165,20 @@ class TestChatDictionaryService:
         assert "test" in insert_call[0][1]
         assert "replaced" in insert_call[0][1]
 
+    def test_bulk_add_entries_rejects_invalid_explicit_regex(self, service):
+        """Explicit regex entries added in bulk should be validated before insert."""
+        with pytest.raises(re.error):
+            service.bulk_add_entries(
+                1,
+                [
+                    {
+                        "pattern": "(",
+                        "replacement": "broken",
+                        "type": "regex",
+                    }
+                ],
+            )
+
     def test_process_text_literal_replacement(self, service, mock_db):
         """Test processing text with literal string replacement."""
         # Setup mock connection to return entries

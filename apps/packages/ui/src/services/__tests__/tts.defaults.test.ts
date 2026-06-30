@@ -23,14 +23,15 @@ vi.mock("@/services/settings/registry", async () => {
 })
 
 vi.mock("@/services/tts-providers", () => ({
-  TTS_PROVIDER_VALUES: ["browser", "elevenlabs", "tldw"]
+  TTS_PROVIDER_VALUES: ["browser", "elevenlabs", "openai", "tldw"]
 }))
 
 import {
   DEFAULT_TLDW_TTS_MODEL,
   DEFAULT_TLDW_TTS_VOICE,
   DEFAULT_TTS_PROVIDER,
-  getTTSSettings
+  getTTSSettings,
+  setTTSSettings
 } from "@/services/tts"
 
 describe("tts defaults service", () => {
@@ -56,5 +57,24 @@ describe("tts defaults service", () => {
     expect(settings.ttsProvider).toBe("browser")
     expect(settings.tldwTtsModel).toBe("kokoro")
     expect(settings.tldwTtsVoice).toBe("af_heart")
+  })
+
+  it("round-trips provider validation status metadata", async () => {
+    const baseSettings = await getTTSSettings()
+
+    await setTTSSettings({
+      ...baseSettings,
+      elevenLabsKeyValid: false,
+      elevenLabsKeyTestedAt: "2026-04-30T12:00:00.000Z",
+      openAITTSKeyValid: true,
+      openAITTSKeyTestedAt: "2026-04-30T13:00:00.000Z"
+    })
+
+    const settings = await getTTSSettings()
+
+    expect(settings.elevenLabsKeyValid).toBe(false)
+    expect(settings.elevenLabsKeyTestedAt).toBe("2026-04-30T12:00:00.000Z")
+    expect(settings.openAITTSKeyValid).toBe(true)
+    expect(settings.openAITTSKeyTestedAt).toBe("2026-04-30T13:00:00.000Z")
   })
 })

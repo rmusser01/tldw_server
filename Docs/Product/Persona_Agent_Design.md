@@ -1,247 +1,487 @@
-# Persona Interaction/Collaborator (Agent with Voice & Tools)
+# Persona Interaction / Persona Garden PRD
 
-Status: Active (MVP scaffold implemented)
+Status: Current Persona Garden/live-session completion scope implemented
 
-Owner: Core (LLM, Audio, MCP, AuthNZ, WebUI)
+Owner: Core (Persona, LLM, Audio, MCP, AuthNZ, WebUI)
 
-Target Version: v0.2.x (Stage 1), v0.3.x (Stage 2-3)
+Current scope: Persona Garden and live Persona sessions
 
-https://github.com/VectorSpaceLab/general-agentic-memory
+Future scope tracker: https://github.com/rmusser01/tldw_server/issues/1902
 
+Last reconciled: 2026-05-21
+
+Implementation closeout: 2026-05-21
 
 ## Summary
 
-Introduce a first-class Persona agent (text + optional voice + avatar) that chats naturally, remembers context, and uses server tools (via MCP Unified) to help with ingestion, search, analysis, and exports. Actions are transparent, previewed, and require confirmation for impactful operations.
+Persona is the advanced assistant profile system for tldw_server. A Persona is derived from a Character, keeps provenance, and then evolves independently with its own live sessions, state, memory, scopes, policies, tools, voice settings, and static visual/media context.
 
-## Current Status (v0.2.x dev, verified 2026-02-09)
+The current Persona module completion target is the Persona Garden and live-session foundation. It is not the whole assistant platform. Ordinary chat startup, Workspace-level assistant defaults, scheduled autonomous work, expressive avatars, global personalization, full tool administration, and multi-agent collaboration are valid future directions, but they are not blockers for declaring the current Persona module complete.
 
-- Implemented (backend scaffold):
-  - Feature-flag plumbing (`PERSONA_ENABLED`, persona RBAC config) and docs-info capability exposure.
-  - Persona endpoints scaffolded: `GET /api/v1/persona/catalog`, `POST /api/v1/persona/session`, `WS /api/v1/persona/stream`.
-  - Basic WS flow: `user_message -> tool_plan`, `confirm_plan -> tool_call/tool_result`.
-  - Basic tests exist for catalog, WS smoke flow, and WS metrics.
-- Partially implemented:
-  - MCP tool execution integration exists with server-stored plan validation keyed by `plan_id`.
-  - RBAC-style export/delete string checks exist in persona WS, but full policy/scoping behavior depends on MCP user identity.
-  - WebUI/extension persona surface is wired (`/persona`), capability-gated, and supports basic stream flow (connect/session/message/plan confirm-cancel) with route parity checks, component stream-flow tests, and Playwright route/workflow checks (including a live backend WS workflow test that runs when persona capability is enabled); deep backend tool-execution scenarios remain limited.
-- Not yet implemented:
-  - Full voice protocol (`audio_chunk`, `partial_transcript`, `tts_audio` binary stream).
-  - Persistent session/persona memory integration with personalization store.
-  - Per-tool policy scopes and explicit policy objects beyond string-based export/delete checks.
-- Important caveat:
-  - Persona endpoints now require authentication; anonymous interaction is not allowed.
+## Current Completion Status
 
-## Changelog
+The original scaffold-era status from 2026-02-09 is stale. Current code evidence shows the module has moved beyond the initial catalog/session/websocket scaffold.
 
-- v0.2.x dev
-  - Added feature flag and capability exposure via `/api/v1/config/docs-info`.
-  - Added scaffold persona endpoints (catalog, session) and WS stream with a naive plan → confirm → act loop.
-  - Integrated scaffold MCP Unified tool execution path and basic RBAC-style export/delete checks.
-  - Added minimal WS smoke and metrics tests for the scaffold flow.
-  - Hardened auth contract: persona HTTP endpoints require auth; WS stream rejects unauthenticated clients.
-  - Normalized disabled behavior: persona catalog/session return `404` when persona is disabled.
-  - Standardized WS tool result payload on `output` (with temporary `result` compatibility alias).
-- v0.1.0
-  - Initial draft design with goals, architecture, and API outline.
+Implemented:
 
-## `tool_result.result` Deprecation Plan (set 2026-02-09)
+- Authenticated Persona endpoints and websocket interactions.
+- Persona Garden route framing, shared WebUI/extension route behavior, and tabs for `Live Session`, `Profiles`, `State Docs`, `Scopes`, and `Policies`.
+- `My Chat Identity`, `Characters`, and `Persona Garden` separation in the chat/persona UI.
+- Character-to-Persona creation with provenance fields and independence after source Character deletion.
+- Live websocket text flow with `user_message`, `tool_plan`, `confirm_plan`, `tool_call`, `tool_result`, notices, and session turn persistence.
+- Live voice protocol paths including `audio_chunk`, `partial_transcript`, `voice_commit`, wake activation, and `tts_audio` events.
+- Persona session preference persistence, memory retrieval toggles, memory top-k handling, and Persona memory storage.
+- Persona scope and policy tables, API endpoints, runtime policy loading, and policy-denial behavior for Persona tool execution.
+- Static/state Persona visual-pack support as a Persona-owned media context.
+- Selected live-session transcript export for Persona Garden, including authenticated selected-session export, privacy/redaction constraints, UI download, and export confirmation.
+- Scopes and Policies editing surfaces in Persona Garden, including load/save flows, validation/error recovery, MCP tool picker support, and catalog/default-tool context.
+- Persona-local MCP/tool discovery through already-authorized catalog/tool-picker surfaces, without adding marketplace or global administration behavior.
+- Persona live memory status and Persona state-history archive controls where backend support already exists.
+- Acceptance tests and Backlog evidence for the reconciled completion boundary.
 
-- Canonical contract now: `tool_result.output`.
-- Compatibility window: through `2026-06-30`, server continues emitting both `output` and legacy `result`.
-- Client behavior during window:
-  - Read `output` first.
-  - Fall back to `result` only for older server compatibility.
-- Planned removal window: starting `2026-07-01` (or next compatible minor/major release after that date), stop emitting `result` once WebUI/extension compatibility checks are green in CI for output-only payloads.
+Closeout evidence:
+
+- `TASK-442` and `TASK-443` reconciled and patched this PRD's current/future scope split.
+- `TASK-444` and `TASK-445` implemented selected-session transcript export backend and UI.
+- `TASK-449` added selected-session export confirmation.
+- `TASK-446` implemented Scope and Policy rule editors.
+- `TASK-447` exposed Persona-local MCP/tool discovery in the policy editor.
+- `TASK-448` exposed live memory mode, retrieval state, top-k, and state-context applicability.
+- `TASK-450` added state-history archive control for active state-doc history entries.
+- `TASK-451` closes the PRD evidence snapshot after these implementation slices.
+
+Not current completion blockers:
+
+- Ordinary `/chat` startup with Persona profiles.
+- Workspace-scoped Persona defaults. The original `project_id` language maps to the old name for Workspaces and is moved to a future PRD.
+- Persona scheduled work and daily briefs.
+- Rich avatar animation, visemes, lip-sync, 3D rendering, and high-frequency visual runtimes.
+- Cross-app personalization and automatic semantic memory curation.
+- Marketplace-style MCP/tool installation, configuration, administration, and global permission lifecycle.
+- Multi-agent or multi-Persona collaboration.
+
+## Design References
+
+- Reconciliation spec: `Docs/superpowers/specs/2026-05-21-persona-prd-reconciliation-design.md`
+- Persona Garden design: `Docs/Plans/2026-03-08-persona-garden-design.md`
+- Future PRD tracker: https://github.com/rmusser01/tldw_server/issues/1902
+
+## Product Model
+
+### My Chat Identity
+
+Represents the user in standard chat.
+
+Owns:
+
+- user display name
+- user avatar/image
+- user-side prompt templates
+
+Does not own:
+
+- Character definitions
+- Persona profiles
+- Persona memory, state, scope, policy, or tool settings
+
+### Character
+
+Represents the base assistant definition used in standard Character chat.
+
+Owns:
+
+- reusable assistant identity
+- greeting, personality, scenario, and system prompt
+- base images and related Character metadata
+
+### Persona
+
+Represents an advanced assistant artifact derived from a Character snapshot and then evolved independently.
+
+Owns:
+
+- Persona profile fields
+- Character provenance metadata
+- Persona-specific system and state overlays
+- Persona state docs
+- Persona policy rules
+- Persona scope rules
+- Persona-owned long-term and session memory
+- Persona-specific voice settings
+- Persona-specific static visual/media context
+- Persona live sessions
+
+### Persona Lifecycle
+
+1. User creates or selects a Character.
+2. User creates a Persona from that Character.
+3. Source Character fields are copied or snapshotted into the Persona seed.
+4. Persona Garden opens the newly created Persona.
+5. The Persona evolves independently afterward.
+
+Implications:
+
+- Editing the source Character does not automatically mutate existing Personas.
+- Editing a Persona does not mutate the source Character.
+- Persona memory belongs to the Persona.
+- If a source Character is deleted, the derived Persona remains valid.
+- Any future `Refresh from source Character` behavior must be explicit, manual, diff-based, and confirmed.
 
 ## Goals
 
-- Provide a persistent chat persona with configurable style, voice, and capabilities.
-- Enable tool use via MCP with a visible plan/confirm/act loop.
-- Support live voice input/output using existing STT/TTS APIs.
-- Integrate session and persona memory with personalization store (opt-in).
-- Ensure RBAC and confirmations for any write/delete/export actions.
+- Provide a persistent Persona profile with configurable behavior, voice defaults, memory preferences, scopes, policies, tools, and static visual/media context.
+- Preserve Persona Garden as the advanced workspace for Persona setup, configuration, and live testing.
+- Support live text and voice Persona sessions using the existing websocket, STT, and TTS stack.
+- Enable tool use via MCP with a visible plan, confirmation, execution, and result-review loop.
+- Make session history, transcript events, and tool outcomes auditable.
+- Keep Persona memory opt-in and bounded by visible controls.
+- Ensure RBAC, ownership, policy checks, rate limits, and explicit confirmations for write/delete/export actions.
 
-## Non-Goals (Initial)
+## Non-Goals For Current Completion
 
-- Desktop automation outside the browser (future via MCP OS tools).
-- Multi-agent collaboration (future); start with a single persona.
-- Rich 3D avatars/visemes (future); begin with static avatar states.
+- Ordinary `/chat` Persona startup.
+- Workspace-scoped Persona defaults.
+- Autonomous scheduled Persona jobs.
+- Desktop automation outside browser/server tools.
+- Multi-agent collaboration.
+- Rich 3D avatars, visemes, lip-sync, or high-frequency animation.
+- Marketplace-style MCP/tool administration.
+- Cross-app automatic memory curation.
 
-## User Stories
+Each of these is tracked as a future PRD bucket in #1902 and is not a current completion blocker.
 
-- As a user, I open the Persona dock, speak or type, and get streaming responses.
-- As a user, the persona proposes a plan to ingest a URL and summarize; I confirm steps.
-- As a user, I see transcripts and tool call results in the chat timeline for auditability.
-- As a user, I choose a different persona style/voice per project.
+## Current Completion Scope
 
-## Architecture Overview
+### Persona Garden IA And Lifecycle
 
-- Persona config stored per persona; session-scoped chat with tool execution over MCP.
-- WebSocket stream multiplexes chat text, interim transcripts, tool call previews, and TTS audio.
-- Memory integration pulls in top-k user memories (if personalization is enabled) and saves persona-specific notes.
+The current module must clearly distinguish `My Chat Identity`, `Characters`, and `Persona Garden`.
 
-## Key Components
+Persona Garden remains the advanced workspace for Persona profiles and live Persona sessions. It should preserve:
 
-- Persona Catalog & Config
-  - Location: `tldw_Server_API/app/core/Persona/`
-  - Model: name, description, system_prompt, voice, avatar_url, capabilities, default_tools.
+- Persona selection
+- profile creation and editing
+- character-derived provenance display
+- live session connect and disconnect
+- session resume
+- state-doc editing and history restore
+- memory and state-context controls
+- tool-plan review and confirmation
 
-- Session Manager
-  - Location: `tldw_Server_API/app/core/Persona/session_manager.py`
-  - Tracks `session_id`, user_id, persona_id, last N turns, tool outcomes, and scopes.
+### Live Persona Session Runtime
 
-- Tool Adapter (MCP)
-  - Use existing MCP Unified endpoints under `tldw_Server_API/app/core/MCP_unified/`.
-  - Provide a thin wrapper to list tools, propose plans, execute with confirmation, and stream results.
+The current module includes live text and voice sessions.
 
-- Voice I/O
-  - STT: reuse `/api/v1/audio/stream/transcribe` for live captions.
-  - TTS: reuse `/api/v1/audio/speech` to stream audio chunks with timing hints.
+The live session runtime should support:
 
-## API Design
+- websocket connection lifecycle
+- `user_message`
+- `audio_chunk`
+- `voice_commit`
+- `wake_activation`
+- `partial_transcript`
+- `tool_plan`
+- `confirm_plan`
+- `tool_call`
+- `tool_result`
+- `tts_audio`
+- `notice`
+- safe text-only degradation when voice/TTS paths fail
+- persisted session turns and tool outcomes
+
+### Transcript And Audit Timeline
+
+Persona Garden should expose an auditable live-session timeline containing:
+
+- user messages
+- assistant messages
+- voice transcript events where relevant
+- tool plans
+- tool calls
+- tool results
+- recovery notices and degraded-mode notices
+
+Current completion requires minimal export for the selected live Persona session in deterministic JSON, readable Markdown, or both.
+
+Export hardening requirements:
+
+- Export only sessions owned by the authenticated user.
+- Export only the selected session, not all Persona history.
+- Omit or redact secrets, auth material, raw binary audio, and large tool payloads.
+- Omit or redact hidden system/developer prompts, hidden policy metadata, hidden tool configuration, and tool metadata that was not visible in the live session UI.
+- Omit non-selected-session memory records and retrieved source payloads that were not shown to the user during the session.
+- Include enough audit metadata to understand the export, such as Persona id, session id, timestamps, event types, and redaction markers.
+
+This export is not a scheduled report system and does not imply daily brief or workflow delivery support.
+
+### Persona Memory Controls
+
+Current completion keeps memory controls bounded to Persona-owned and session-owned behavior.
+
+The module should expose:
+
+- active memory mode
+- retrieval enabled/disabled state
+- memory top-k
+- whether memory was requested and applied for a live turn
+- session/persona memory visibility where backend support already exists
+- archive or clear controls only where Persona backend support already exists
+
+Missing archive or clear controls are non-blocking follow-up unless they are already supported by the Persona backend.
+
+Move cross-app personalization, semantic memory tuning, automatic memory merge/prune, and broad long-term curation to the future Personalization Memory Layer PRD.
+
+### Scopes And Policies Editing
+
+Current completion keeps Scopes and Policies editing in scope because Persona Garden already exposes these tabs and the backend already has Persona scope/policy storage and runtime enforcement.
+
+Persona Garden should allow users to:
+
+- view scope rules
+- edit and save scope rules
+- recover from scope validation errors
+- view policy rules
+- edit and save policy rules
+- recover from policy validation errors
+- understand when a live tool plan is blocked by policy
+
+Hardening requirements:
+
+- Editing Persona rules must not grant capabilities the authenticated user, server config, or deployment policy does not already allow.
+- Destructive changes should use confirmation or a clear review step.
+- Validation errors should identify the invalid rule, field, and reason without leaking hidden tool details.
+- Saves should preserve rule ownership and avoid cross-Persona writes.
+- Concurrent edits should fail predictably or use the existing versioning pattern where available.
+
+### Minimal MCP And Tool Capability Discovery
+
+Current completion includes minimal Persona-local tool discovery and default selection, not full tool administration.
+
+Persona Garden should show:
+
+- available tools or tool categories visible to the authenticated user and deployment
+- Persona-local default or allowed tools selected only from already-authorized tools
+- blocked or unavailable reason text
+- confirmation requirements for impactful tools
+
+Hardening requirements:
+
+- Show only tools visible to the authenticated user and current deployment.
+- Avoid exposing hidden/admin-only tool names through blocked reason text.
+- Distinguish `not installed`, `disabled by server`, `not allowed for this Persona`, and `requires confirmation` where the backend can truthfully report that distinction.
+- Constrain any default-tool save path by Persona policy, server capability checks, and already-authorized user permissions.
+
+Do not expand current completion into marketplace-style tool installation, global tool configuration, admin-level tool lifecycle management, or global permission changes.
+
+### Static Visual And Persona Media Context
+
+Current completion acknowledges already-integrated static/state visual pack support as Persona-owned media context.
+
+The current module may document visual packs, state mappings, and static Persona visual feedback where they already exist. It creates no new animation, viseme, lip-sync, renderer, 3D, or high-frequency visual-runtime requirements.
+
+Rich avatar work belongs to the future Persona Expressive Avatar Runtime PRD.
+
+### Security And Reliability
+
+Current completion requires:
+
+- authenticated Persona HTTP endpoints
+- authenticated websocket interaction
+- no anonymous Persona sessions
+- capability gating when Persona is disabled or unsupported
+- session ownership checks
+- rate limits and payload bounds
+- confirmation for destructive, write, delete, and export actions
+- policy enforcement for MCP/tool execution
+- useful validation and recovery errors
+- tests covering the current completion surface
+
+## API Contract
 
 Base path: `/api/v1/persona`
 
+### Existing Core Endpoints
+
 - `GET /catalog`
-  - Auth: required (Bearer token or `X-API-KEY`)
-  - Disabled behavior: `404 { "detail": "Persona disabled" }`
-  - Res: `[ { id, name, description, voice, avatar_url, capabilities, default_tools } ]`
-
 - `POST /session`
-  - Auth: required (Bearer token or `X-API-KEY`)
-  - Disabled behavior: `404 { "detail": "Persona disabled" }`
-  - Req: `{ persona_id, project_id?, resume_session_id? }`
-  - Res: `{ session_id, persona: {...}, scopes: [...] }`
-
 - `GET /sessions`
-  - Auth: required
-  - Disabled behavior: `404 { "detail": "Persona disabled" }`
-  - Query: `persona_id?`, `limit?`
-  - Res: `[ { session_id, persona_id, created_at, updated_at, turn_count, pending_plan_count, preferences } ]`
-
 - `GET /sessions/{session_id}`
-  - Auth: required
-  - Disabled behavior: `404 { "detail": "Persona disabled" }`
-  - Query: `limit_turns?`
-  - Res: `{ session_id, persona_id, created_at, updated_at, turn_count, pending_plan_count, preferences, turns: [...] }`
+- `WS /stream`
 
-- `WS /stream` (bi-directional)
-  - Auth: required before interaction (`Authorization: Bearer ...`, `X-API-KEY`, or `token`/`api_key` query params)
-  - Missing/invalid auth: connection is closed (`1008` policy violation)
-  - Client → Server messages (JSON):
-    - `user_message`: `{ session_id, text, use_memory_context?, memory_top_k? }`
-    - `audio_chunk`: `{ session_id, audio_format, bytes_base64 }`
-    - `confirm_plan`: `{ session_id, plan_id, approved_steps: [idx...] }`
-    - `cancel`: `{ session_id, reason? }`
-  - Server → Client events (JSON frames; audio in separate binary frames if supported):
-    - `assistant_delta`: `{ session_id, text_delta }`
-    - `partial_transcript`: `{ session_id, text_delta }`
-    - `tool_plan`: `{ session_id, plan_id, steps: [ { idx, tool, args, description, policy } ], memory?: { enabled, requested_top_k, applied_count } }`
-    - `tool_call`: `{ session_id, step_idx, tool, args }`
-    - `tool_result`: `{ session_id, step_idx, ok, output, error? }`
-      - Compatibility: `result` may also be present temporarily as an alias for `output`.
-    - `tts_audio`: `{ session_id, audio_format, chunk_id }` (binary follows)
-    - `notice`: `{ session_id, level, message }`
+### Session Creation
 
-- Optional: `POST /tools/execute` for non-WS flows; prefer WS for streaming.
+`POST /session` remains Persona/session scoped.
 
-Schemas live under: `tldw_Server_API/app/api/v1/schemas/persona.py`
+Any legacy `project_id` field should not be treated as current Workspace-level Persona defaults. Workspace-scoped Persona defaults are moved to a future PRD.
 
-Implementation notes:
-- WS accepts auth via headers and query params, and requires successful auth before stream interaction.
-- For compatibility with HTTP auth behavior, single-user/non-JWT bearer values are treated as API keys.
-- Tool name → module mapping is minimal; error messages returned for unknown/forbidden tools.
-- Client is responsible for rendering plan steps and sending back approvals.
+### Websocket Messages
 
-## Tool Use Loop (Plan → Confirm → Act → Review)
+Client to server:
 
-1. Persona drafts a short plan (1-3 steps max by default) with tools and inputs.
-2. UI shows the plan for user confirmation (per step approvals allowed).
-3. On confirmation, server calls MCP tools with scoped tokens; streams results.
-4. Persona summarizes outcomes and proposes next steps.
+- `user_message`: `{ session_id, text, use_memory_context?, memory_top_k? }`
+- `audio_chunk`: `{ session_id, audio_format, bytes_base64 }`
+- `voice_commit`: `{ session_id, transcript? }`
+- `wake_activation`: `{ session_id, phrase?, source? }`
+- `confirm_plan`: `{ session_id, plan_id, approved_steps: [idx...] }`
+- `cancel`: `{ session_id, reason? }`
 
-Guardrails:
+Server to client:
 
-- Never call write/delete/export tools without explicit confirmation.
-- Enforce `max_tool_steps` per session/persona from config.
-- Attach `why`/audit metadata to each tool invocation.
+- `assistant_delta`: `{ session_id, text_delta }`
+- `partial_transcript`: `{ session_id, text_delta }`
+- `tool_plan`: `{ session_id, plan_id, steps: [...] }`
+- `tool_call`: `{ session_id, step_idx, tool, args }`
+- `tool_result`: `{ session_id, step_idx, ok, output, error? }`
+- `tts_audio`: `{ session_id, audio_format, chunk_id }`
+- `notice`: `{ session_id, level, message, reason_code? }`
 
-## Memory & Personalization Integration
+### `tool_result.result` Deprecation Plan
 
-- Session Memory: last N turns + tool outcomes (persisted with `session_id`).
-- Persona Memory (per user/persona): saved as semantic memories via personalization store.
-- Retrieval: before responding, fetch top-k relevant user memories for grounding if enabled.
+Canonical contract: `tool_result.output`.
 
-## WebUI Additions
+Compatibility window: through 2026-06-30, the server may continue emitting both `output` and legacy `result`.
 
-- Persona Dock: mic button (push-to-talk), live captions, avatar with speaking/listening states.
-- Action Preview: shows tool plan steps with toggles; confirm/cancel buttons.
-- Transcript Panel: interleaves messages with tool calls/results; downloadable.
-- Persona Selector: choose persona/voice within session.
-- Visibility controlled by capability map from `GET /api/v1/config/docs-info` (`capabilities.persona`).
+Client behavior during the window:
 
-## Configuration
+- Read `output` first.
+- Fall back to `result` only for older server compatibility.
 
-`tldw_Server_API/Config_Files/config.txt`
+Planned removal window: starting 2026-07-01, or the next compatible minor/major release after that date, stop emitting `result` once WebUI/extension compatibility checks are green for output-only payloads.
 
-```
-[persona]
-enabled = true
-default_persona = "Research Assistant"
-voice = "default"
-stt = "faster_whisper"
-max_tool_steps = 3
+This is a dated maintenance item, not a current feature gap before the planned removal window.
 
-[persona.rbac]
-allow_export = false
-allow_delete = false
-```
+## Future PRDs
 
-Runtime capability surface:
-- `GET /api/v1/config/docs-info` → includes `capabilities` and `supported_features` maps (for backward compatibility).
+The following product directions are moved out of current completion scope. Each item should get its own PRD before implementation. Each item is not a current completion blocker.
 
-## Security & Permissions
+Tracker: https://github.com/rmusser01/tldw_server/issues/1902
 
-- AuthNZ: Sessions tied to `user_id`; RBAC governs tool access and scope.
-- WS persona interactions require authentication; anonymous sessions are not permitted.
-- Confirmations required for destructive actions; audit log entries for all tool calls.
-- Rate limiting on WS messages and tool executions; backpressure handling on TTS.
+### Persona-backed Chat Startup
 
-## Testing Strategy
+Not a current completion blocker.
 
-- Unit
-  - Session manager state transitions; plan merging/approvals; step caps.
-  - Tool adapter request/response normalization.
+Future scope:
 
-- Integration
-  - WS flow: connect → chat → plan → confirm → execute → stream TTS.
-  - Permissions: attempts to call restricted tools are denied/logged.
-  - Voice pipeline: STT partials drive interim captions; TTS emits playable chunks.
-  - WS smoke tests for plan/confirm path.
+- Make ordinary `/chat` use Persona profiles as first-class assistants.
+- Preserve current Character chat behavior.
+- Resolve migration from deprecated `persona_id` alias semantics.
+- Define chat startup state, persistence, and UI selection.
 
-- Mocks/Fixtures
-  - Mock MCP tools with deterministic outputs.
-  - Fake TTS generator for byte chunks; STT stub emitting partials.
+### Workspace Persona Defaults
 
-## Milestones
+Not a current completion blocker.
 
-- Stage 1 (MVP)
-  - Persona catalog + session; WS chat; tool plan/confirm loop (text only).
+Future scope:
 
-- Stage 2
-  - Voice I/O (STT/TTS) and avatar states; transcript timeline with tool logs.
+- Replace old `project_id` terminology with Workspace terminology.
+- Define Workspace-level Persona defaults.
+- Define Workspace-level style, voice, tool, and memory defaults.
+- Handle conflicts between local session choice and Workspace default.
+- Integrate with chat, Prompt Studio, writing, and workspace surfaces.
 
-- Stage 3
-  - Multi-persona selection per project; scheduled jobs (e.g., daily brief); per-tool RBAC policies.
+### Persona Scheduled Work
 
-## Open Questions
+Not a current completion blocker.
 
-- Default toolset priority for MVP (ingest_url, rag_search, summarize, notes)?
-- Policy: any hard “never-do” actions beyond delete/export without confirmation?
-- Do we require visemes/lip-sync at v1, or ship later?
+Future scope:
 
-## Risks & Mitigations
+- recurring Persona jobs
+- daily briefs
+- review and approval gates
+- delivery channels
+- Jobs versus Scheduler integration
+- failure, retry, and notification behavior
 
-- Tool misuse → strict confirmations, RBAC scopes, and audit logs.
-- Latency in voice mode → stream partials early; bound TTS chunk sizes.
-- Context bloat → limit session turns and injected memories; prune aggressively.
+### Persona Expressive Avatar Runtime
+
+Not a current completion blocker.
+
+Future scope:
+
+- high-frequency animation
+- visemes and lip-sync
+- expressive 2D or 3D rendering
+- advanced runtime synchronization with voice and text
+
+### Personalization Memory Layer
+
+Not a current completion blocker.
+
+Future scope:
+
+- cross-app semantic memory
+- memory creation and curation
+- merge and prune behavior
+- personalization tuning
+- user controls for global personalization
+
+### Persona Tool Administration
+
+Not a current completion blocker.
+
+Future scope:
+
+- marketplace-style tool install and configuration
+- admin-level tool lifecycle
+- broad permissions management
+- integration-level setup and health checks
+
+Current completion keeps only minimal discovery, Persona-local defaults from already-authorized tools, and blocked reason text.
+
+### Persona Collaboration And Multi-agent Workflows
+
+Not a current completion blocker.
+
+Future scope:
+
+- multiple Personas acting concurrently
+- Persona-to-Persona coordination
+- shared plans and arbitration
+- concurrent tool use and conflict resolution
+
+## Acceptance Criteria For Current Completion
+
+Closeout status: the reconciled current Persona Garden/live-session completion scope is implemented. The checklist below remains the durable acceptance contract for regression and future maintenance.
+
+- Persona Garden clearly separates `My Chat Identity`, `Characters`, and `Persona`.
+- Personas can be created from Characters and remain independent afterward.
+- Live text/voice sessions can connect, resume, degrade safely, and expose understandable recovery states.
+- Transcript timeline includes user/assistant messages, voice transcript events where relevant, tool plans, tool calls/results, and notices.
+- Selected-session transcript export is available and follows the privacy/redaction constraints in this PRD.
+- Persona memory controls expose mode, retrieval toggle, top-k, and existing backend-supported visibility/archive/clear operations.
+- Scopes and Policies tabs are not placeholders; users can view, edit, save, and recover from validation errors for Persona scope and policy rules.
+- Scopes and Policies editing cannot grant capabilities the authenticated user/server/deployment does not already allow.
+- Persona Garden shows available MCP/tool capabilities, Persona-local defaults from already-authorized tools, and blocked/unavailable reasons without leaking hidden/admin-only tools.
+- Static/state visual pack support is documented as current context only, with expressive avatar runtime clearly future scoped.
+- Auth, ownership, capability gating, rate limits, destructive-action confirmations, and useful error states are covered by tests.
+- Future PRD buckets are linked to #1902 and explicitly labeled as not current completion blockers.
+
+## Verification Plan
+
+Completed closeout checks:
+
+- Reviewed this PRD against `Docs/superpowers/specs/2026-05-21-persona-prd-reconciliation-design.md`.
+- Confirmed moved-out feature buckets are tracked by #1902.
+- Confirmed this PRD does not describe future PRDs as current completion blockers.
+- Confirmed no design-system backlog tasks or files are modified by the closeout.
+- Recorded implementation evidence in `TASK-442` through `TASK-451`.
+
+Maintenance checks for future changes:
+
+- Keep ordinary `/chat` Persona startup, Workspace Persona defaults, scheduled work, expressive avatar runtime, broad personalization memory, Persona tool administration, and multi-agent workflows out of the current completion contract unless their future PRDs are explicitly accepted back into scope.
+- Keep destructive/write/export actions confirmed and owner-scoped.
+- Keep MCP/tool discovery bounded to already-authorized tools and avoid leaking hidden/admin-only capabilities.
+
+## Evidence Snapshot
+
+Evidence used for this reconciliation included current code and tests for:
+
+- Persona websocket voice and tool events in `tldw_Server_API/app/api/v1/endpoints/persona.py`.
+- Persona websocket coverage in `tldw_Server_API/tests/Persona/test_persona_ws.py`.
+- Persona session and memory persistence in `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py` and `tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py`.
+- Persona profile provenance tests in `tldw_Server_API/tests/Persona/test_persona_profiles_api.py` and `tldw_Server_API/tests/ChaChaNotesDB/test_persona_persistence_db.py`.
+- Persona Garden route tabs and shared route tests in `apps/packages/ui/src/routes/sidepanel-persona.tsx` and `apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx`.
+- Character-to-Persona actions in `apps/packages/ui/src/components/Option/Characters/`.
+- Selected-session transcript export and confirmation coverage in `tldw_Server_API/tests/Persona/test_persona_profiles_api.py` and `apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx`.
+- Scope and policy editor coverage in `apps/packages/ui/src/components/PersonaGarden/__tests__/ScopePolicyEditors.test.tsx`.
+- MCP tool picker and Persona-local capability context coverage in `apps/packages/ui/src/components/PersonaGarden/__tests__/ScopePolicyEditors.test.tsx` and `apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx`.
+- Live memory status and state-history archive coverage in `apps/packages/ui/src/routes/__tests__/sidepanel-persona.test.tsx` and `tldw_Server_API/tests/Persona/test_persona_profiles_api.py`.

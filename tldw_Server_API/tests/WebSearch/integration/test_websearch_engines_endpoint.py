@@ -351,7 +351,7 @@ def test_websearch_4chan_engine_omitted_max_archived_threads_is_backward_compati
     assert search_params.get("max_archived_threads_per_board") is None
 
 
-def test_websearch_4chan_engine_surfaces_all_board_failure_diagnostics(monkeypatch):
+def test_websearch_4chan_engine_returns_sanitized_all_board_failure(monkeypatch):
     from tldw_Server_API.app.core.Web_Scraping import WebSearch_APIs as ws
 
     def fake_perform_websearch(search_engine, search_query, *args, **kwargs):
@@ -384,7 +384,7 @@ def test_websearch_4chan_engine_surfaces_all_board_failure_diagnostics(monkeypat
             },
         )
         assert resp.status_code == 502
-        assert "4chan search failed for all requested boards." in resp.json()["detail"]
+        assert resp.json()["detail"] == "Websearch failed"
 
 
 def test_websearch_4chan_engine_surfaces_partial_failure_warnings(monkeypatch):

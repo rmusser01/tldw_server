@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react"
 import {
-  Alert,
   Button,
   Descriptions,
   Drawer,
@@ -13,6 +12,7 @@ import {
 } from "antd"
 import { RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import { clearSourceSeen, getSourceSeenStats } from "@/services/watchlists"
 import type { SourceSeenStats } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
@@ -123,7 +123,12 @@ export const SourceSeenDrawer: React.FC<SourceSeenDrawerProps> = ({
           <Spin size="large" />
         </div>
       ) : error ? (
-        <Alert type="error" showIcon title={error} className="mb-4" />
+        <Alert
+          variant="error"
+          title={error}
+          className="mb-4"
+          data-testid="alert-error"
+        />
       ) : stats ? (
         <div className="space-y-6">
           {/* Stats section */}

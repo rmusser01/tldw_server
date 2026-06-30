@@ -167,6 +167,7 @@
     "providerChangeHelper": "Öppna leverantörsväljaren nedan för att växla mellan Webbläsare, tldw, OpenAI eller Supersonic.",
     "changeProvider": "Byt leverantör",
     "title": "TTS-lekplats",
+    "routeTitle": "Text till tal",
     "subtitle": "Prova text-till-tal och justera leverantörer, modeller och röster.",
     "currentProvider": "Aktuell leverantör",
     "settingsIntro": "Justera din TTS-leverantör, modell och röst. Dessa inställningar återanvänds när du spelar upp ljud från chatt eller media.",

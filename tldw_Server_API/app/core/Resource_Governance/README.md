@@ -4,11 +4,12 @@ Centralized rate limiting and concurrency control with policy-based configuratio
 
 ## Overview & PRD
 - Design PRD: `Docs/Product/Completed/AuthNZ-Refactor/Resource_Governor_PRD.md`
+- Architecture decision: `Docs/ADR/018-resource-governance-endpoint-policy-and-route-map.md`
 - Example policies YAML: `tldw_Server_API/Config_Files/resource_governor_policies.yaml`
 
 ## New endpoints checklist (RG-aware design)
 
-- When adding new API endpoints, first wire authentication/authorization via `get_auth_principal` together with `require_permissions(...)` / `require_roles(...)` (and `require_service_principal()` for service-only routes). Authorization should be claim-first; do not gate new behavior on `AUTH_MODE` or `is_single_user_mode()` / `is_multi_user_mode()` checks.
+- When adding new API endpoints, first wire authentication/authorization via `get_auth_principal` together with `RequirePermission(...)` / `RequireRole(...)` (and `require_service_principal()` for service-only routes). Authorization should be claim-first; do not gate new behavior on `AUTH_MODE` or `is_single_user_mode()` / `is_multi_user_mode()` checks.
 - For endpoints that are latency/cost-sensitive or user-facing (chat, audio, embeddings, evaluations, MCP, workflows, tools, media ingestion, etc.), decide whether they should be governed by Resource Governor:
   - If yes, add or reuse a policy in the RG policy store (`resource_governor_policies.yaml` or DB-backed `rg_policies`) and ensure there is a corresponding `route_map` entry keyed by path/tag (for example `/api/v1/chat/* → chat.default`).
   - Where feasible, add or extend tests so RG-enforced behavior is covered at the HTTP level (200/429 behavior, `Retry-After` and `X-RateLimit-*` headers, and token/stream caps).

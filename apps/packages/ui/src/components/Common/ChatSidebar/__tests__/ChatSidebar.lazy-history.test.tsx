@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { act, render, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -117,24 +117,41 @@ describe("ChatSidebar lazy history loading", () => {
     })
   })
 
-  it("keeps server history overview disabled until the panel is explicitly engaged", async () => {
+  it("keeps server history overview disabled while recent conversations are collapsed", async () => {
+    useChatSurfaceCoordinatorStore.setState({
+      engagedPanels: {
+        "server-history": true,
+        "mcp-tools": false,
+        "audio-health": false,
+        "model-catalog": false
+      }
+    })
+
     render(
       <MemoryRouter initialEntries={["/chat"]}>
         <ChatSidebar collapsed={false} />
       </MemoryRouter>
     )
 
-    expect(useServerChatHistoryMock).toHaveBeenCalledWith(
-      "",
-      expect.objectContaining({
-        enabled: false,
-        mode: "overview"
-      })
+    await waitFor(() => {
+      expect(useServerChatHistoryMock).toHaveBeenLastCalledWith(
+        "",
+        expect.objectContaining({
+          enabled: false,
+          mode: "overview"
+        })
+      )
+    })
+  })
+
+  it("enables server history overview after the user expands recent conversations", async () => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <ChatSidebar collapsed={false} />
+      </MemoryRouter>
     )
 
-    act(() => {
-      useChatSurfaceCoordinatorStore.getState().markPanelEngaged("server-history")
-    })
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
 
     await waitFor(() => {
       expect(useServerChatHistoryMock).toHaveBeenLastCalledWith(
@@ -145,5 +162,57 @@ describe("ChatSidebar lazy history loading", () => {
         })
       )
     })
+  })
+
+  it("keeps server history overview enabled when an active search survives reset", async () => {
+    const { rerender } = render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <ChatSidebar collapsed={false} openResetKey={1} />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+    fireEvent.change(screen.getByTestId("chat-sidebar-search"), {
+      target: { value: "alpha" }
+    })
+
+    rerender(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <ChatSidebar collapsed={false} openResetKey={2} />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(useServerChatHistoryMock).toHaveBeenLastCalledWith(
+        "",
+        expect.objectContaining({
+          enabled: true,
+          mode: "overview"
+        })
+      )
+    })
+  })
+
+  it("does not fetch a server count badge on first expanded mount", () => {
+    useChatSurfaceCoordinatorStore.setState({
+      engagedPanels: {
+        "server-history": true,
+        "mcp-tools": false,
+        "audio-health": false,
+        "model-catalog": false
+      }
+    })
+
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <ChatSidebar collapsed={false} />
+      </MemoryRouter>
+    )
+
+    expect(useServerChatHistoryMock).toHaveBeenCalledTimes(1)
+    expect(useServerChatHistoryMock).toHaveBeenLastCalledWith(
+      "",
+      expect.objectContaining({ enabled: false })
+    )
   })
 })

@@ -107,9 +107,25 @@ if (typeof window !== 'undefined') {
             isLoading: false,
             isFetching: false,
             isError: false,
+            isPending: false,
+            isSuccess: false,
+            isFetched: false,
+            isFetchedAfterMount: false,
+            isLoadingError: false,
+            isPaused: false,
+            isPlaceholderData: false,
+            isRefetchError: false,
+            isRefetching: false,
+            isStale: true,
+            fetchStatus: 'idle',
+            status: 'pending',
             error: null,
+            dataUpdatedAt: 0,
+            errorUpdatedAt: 0,
+            failureCount: 0,
+            failureReason: null,
             refetch: vi.fn(),
-          } as ReturnType<typeof actualHooks.useQuery>;
+          } as unknown as ReturnType<typeof actualHooks.useQuery>;
         }
       }) as typeof actualHooks.useQuery,
       useMutation: ((...args: Parameters<typeof actualHooks.useMutation>) => {
@@ -118,12 +134,15 @@ if (typeof window !== 'undefined') {
         } catch (error) {
           if (!hasMissingQueryClientError(error)) throw error;
           return {
+            data: undefined,
             mutate: vi.fn(),
             mutateAsync: vi.fn().mockResolvedValue(undefined),
             isPending: false,
             isLoading: false,
+            isIdle: true,
             isSuccess: false,
             isError: false,
+            isPaused: false,
             error: null,
             reset: vi.fn(),
             status: 'idle',
@@ -132,7 +151,7 @@ if (typeof window !== 'undefined') {
             submittedAt: 0,
             variables: undefined,
             context: undefined,
-          } as ReturnType<typeof actualHooks.useMutation>;
+          } as unknown as ReturnType<typeof actualHooks.useMutation>;
         }
       }) as typeof actualHooks.useMutation,
       useQueryClient: (() => {
@@ -144,8 +163,17 @@ if (typeof window !== 'undefined') {
             invalidateQueries: vi.fn(),
             setQueryData: vi.fn(),
             getQueryData: vi.fn(),
+            getQueriesData: vi.fn().mockReturnValue([]),
+            setQueriesData: vi.fn(),
             removeQueries: vi.fn(),
             cancelQueries: vi.fn(),
+            resetQueries: vi.fn(),
+            refetchQueries: vi.fn(),
+            fetchQuery: vi.fn().mockResolvedValue(undefined),
+            prefetchQuery: vi.fn().mockResolvedValue(undefined),
+            ensureQueryData: vi.fn().mockResolvedValue(undefined),
+            isFetching: vi.fn().mockReturnValue(0),
+            isMutating: vi.fn().mockReturnValue(0),
             clear: vi.fn(),
           } as unknown as ReturnType<typeof actualHooks.useQueryClient>;
         }

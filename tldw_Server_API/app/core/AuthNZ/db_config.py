@@ -214,20 +214,7 @@ class AuthDatabaseConfig:
         # Close any existing UserDatabase backend connections so tests do not
         # reuse pools pointing at dropped per-test databases.
         if self._user_db is not None:
-            backend = getattr(self._user_db, "backend", None)
-            if backend is not None:
-                pool_factory = getattr(backend, "get_pool", None)
-                if callable(pool_factory):
-                    try:
-                        pool = pool_factory()
-                        close_all = getattr(pool, "close_all", None)
-                        if callable(close_all):
-                            close_all()
-                    except Exception as pool_exc:  # noqa: BLE001 - best-effort cleanup only
-                        logger.debug(
-                            "AuthDatabaseConfig.reset: backend pool close skipped",
-                            exc_info=pool_exc,
-                        )
+            self._release_user_db_backend(context="reset")
         self._user_db = None
         # Ensure backend detection reflects updated environment/settings.
         # Note: This will instantiate AuthNZ Settings if it is currently unset.
@@ -245,23 +232,46 @@ class AuthDatabaseConfig:
         (e.g., AUTH_MODE=single_user) and make tests order-dependent.
         """
         if self._user_db is not None:
-            backend = getattr(self._user_db, "backend", None)
-            if backend is not None:
-                pool_factory = getattr(backend, "get_pool", None)
-                if callable(pool_factory):
-                    try:
-                        pool = pool_factory()
-                        close_all = getattr(pool, "close_all", None)
-                        if callable(close_all):
-                            close_all()
-                    except Exception as pool_exc:  # noqa: BLE001 - best-effort cleanup only
-                        logger.debug(
-                            "AuthDatabaseConfig.reset_lazy: backend pool close skipped",
-                            exc_info=pool_exc,
-                        )
+            self._release_user_db_backend(context="reset_lazy")
         self._user_db = None
         with contextlib.suppress(Exception):
             delattr(self, "_initialized")
+
+    def _release_user_db_backend(self, *, context: str) -> None:
+        """Close or evict the cached UserDatabase backend during test resets."""
+        backend = getattr(self._user_db, "backend", None)
+        if backend is None:
+            return
+
+        try:
+            from tldw_Server_API.app.core.DB_Management.backends.factory import (
+                is_factory_managed_backend,
+                reset_managed_sqlite_backends,
+            )
+
+            if is_factory_managed_backend(backend):
+                reset_managed_sqlite_backends(backends=[backend])
+                return
+        except Exception as registry_exc:  # noqa: BLE001 - best-effort cleanup only
+            logger.debug(
+                "AuthDatabaseConfig.{}: managed backend eviction skipped",
+                context,
+                exc_info=registry_exc,
+            )
+
+        pool_factory = getattr(backend, "get_pool", None)
+        if callable(pool_factory):
+            try:
+                pool = pool_factory()
+                close_all = getattr(pool, "close_all", None)
+                if callable(close_all):
+                    close_all()
+            except Exception as pool_exc:  # noqa: BLE001 - best-effort cleanup only
+                logger.debug(
+                    "AuthDatabaseConfig.{}: backend pool close skipped",
+                    context,
+                    exc_info=pool_exc,
+                )
 
     @staticmethod
     def _get_bool_env(key: str, default: bool) -> bool:

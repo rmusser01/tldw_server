@@ -33,16 +33,76 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
         description="Compare retrieval-focused embedding candidates with shared recommendation slots.",
         supported_modes=["labeled", "unlabeled"],
         tags=["embeddings", "retrieval", "recipe-v1"],
+        capabilities={
+            "guided_ui": True,
+            "rag_embedding_selection": True,
+            "media_scoped_execution": True,
+            "source_labeling": {
+                "supported": True,
+                "source_id_contract": {"kind": "media_id", "type": "integer"},
+                "advanced_manual_ids": True,
+            },
+            "candidate_discovery": {
+                "supported": True,
+                "endpoint": "/api/v1/evaluations/recipes/embeddings_model_selection/candidates",
+                "runnable_statuses": [
+                    "ready",
+                    "missing_key",
+                    "disallowed_provider",
+                    "disallowed_model",
+                    "quota_risk",
+                    "unknown",
+                ],
+            },
+            "apply_target": {
+                "preview_supported": True,
+                "live_apply_supported": False,
+                "config_section": "Embeddings",
+                "config_keys": ["embedding_provider", "embedding_model"],
+            },
+        },
+        default_run_config={
+            "comparison_mode": "embedding_only",
+            "top_k": 10,
+            "hybrid_alpha": 0.7,
+            "guided_source_labeling": True,
+            "source_id_contract": "media_id",
+            "candidates": [],
+        },
     )
 
-    def validate_dataset(self, dataset: list[dict[str, Any]]) -> dict[str, Any]:
+    def validate_dataset(
+        self,
+        dataset: list[dict[str, Any]],
+        *,
+        run_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         errors: list[str] = []
+        warnings: list[str] = []
+        normalized_run_config = run_config if isinstance(run_config, dict) else {}
+        if run_config is not None and not isinstance(run_config, dict):
+            errors.append("run_config must be an object.")
+
+        guided_source_labeling = bool(
+            normalized_run_config.get(
+                "guided_source_labeling",
+                self.manifest.default_run_config["guided_source_labeling"],
+            )
+        )
+        source_id_contract = str(
+            normalized_run_config.get(
+                "source_id_contract",
+                self.manifest.default_run_config["source_id_contract"],
+            )
+            or ""
+        )
         samples = [dict(sample) for sample in (dataset or [])]
         if not samples:
             errors.append("Dataset must contain at least one sample.")
             return {
                 "valid": False,
                 "errors": errors,
+                "warnings": warnings,
                 "dataset_mode": None,
                 "sample_count": 0,
                 "review_sample": {"required": False, "sample_size": 0, "sample_query_ids": []},
@@ -75,9 +135,9 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
                 for value in expected_ids
                 if str(value).strip() and not str(value).strip().isdigit()
             ]
-            if invalid_expected_ids:
+            if source_id_contract == "media_id" and invalid_expected_ids:
                 errors.append(
-                    f"Dataset sample {index} expected_ids must contain integer media ids for runnable retrieval evals."
+                    f"Dataset sample {index} expected_ids must contain integer media id values for the media_id source contract."
                 )
                 labeled_flags.append(False)
                 continue
@@ -93,9 +153,15 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
             "sample_size": 0,
             "sample_query_ids": [],
         }
+        if guided_source_labeling and dataset_mode == "unlabeled":
+            warnings.append(
+                "Guided source labeling is enabled but no expected sources were provided; "
+                "reviewers must add expected sources before labeled retrieval metrics are available."
+            )
         return {
             "valid": not errors,
             "errors": errors,
+            "warnings": warnings,
             "dataset_mode": dataset_mode,
             "sample_count": len(samples),
             "review_sample": review_sample,
@@ -110,8 +176,8 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
                 "run_config.comparison_mode must be one of: embedding_only, retrieval_stack."
             )
         candidates = run_config.get("candidates") or []
-        if not isinstance(candidates, list) or not candidates:
-            raise ValueError("run_config.candidates must contain at least one candidate.")
+        if not isinstance(candidates, list):
+            raise ValueError("run_config.candidates must be a list when provided.")
         normalized_candidates = sorted(
             (dict(candidate) for candidate in candidates),
             key=lambda candidate: (
@@ -133,7 +199,17 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
             normalized["top_k"] = int(run_config["top_k"])
         if run_config.get("hybrid_alpha") is not None:
             normalized["hybrid_alpha"] = float(run_config["hybrid_alpha"])
+        if "guided_source_labeling" in run_config:
+            normalized["guided_source_labeling"] = bool(run_config["guided_source_labeling"])
+        if run_config.get("source_id_contract") is not None:
+            normalized["source_id_contract"] = str(run_config["source_id_contract"]).strip()
         return normalized
+
+    def validate_run_config_for_launch(self, run_config: dict[str, Any]) -> list[str]:
+        candidates = run_config.get("candidates") if isinstance(run_config, dict) else None
+        if not isinstance(candidates, list) or not candidates:
+            return ["run_config.candidates must contain at least one candidate for launch."]
+        return []
 
     def build_report(
         self,
@@ -437,11 +513,13 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
             )
 
         candidate_id = str(candidate_summary.get("candidate_id") or "").strip() or None
+        candidate_run_id = (
+            str(candidate_summary.get("candidate_run_id") or "").strip() or None
+        )
+        provider, model = self._provider_and_model_for_metadata(candidate_summary)
+        apply_warnings = self._apply_warnings(candidate_summary)
         return RecommendationSlot(
-            candidate_run_id=(
-                str(candidate_summary.get("candidate_run_id") or "").strip()
-                or candidate_id
-            ),
+            candidate_run_id=candidate_run_id,
             reason_code=reason_code,
             explanation=(
                 f"{candidate_summary.get('model') or candidate_summary.get('candidate_id')} "
@@ -450,13 +528,41 @@ class EmbeddingsRetrievalRecipe(RecipeDefinition):
             confidence=confidence,
             metadata={
                 "candidate_id": candidate_id,
-                "model": candidate_summary.get("model"),
-                "provider": candidate_summary.get("provider"),
+                "candidate_run_id": candidate_run_id,
+                "provider": provider,
+                "model": model,
+                "is_local": candidate_summary.get("is_local"),
+                "apply_eligible": not apply_warnings,
+                "apply_warnings": apply_warnings,
+                "confidence": confidence,
                 "quality_score": candidate_summary["metrics"]["quality_score"],
                 "cost_usd": candidate_summary.get("cost_usd"),
                 "latency_ms": candidate_summary.get("latency_ms"),
             },
         )
+
+    def _provider_and_model_for_metadata(
+        self,
+        candidate_summary: dict[str, Any],
+    ) -> tuple[str | None, str | None]:
+        provider = str(candidate_summary.get("provider") or "").strip() or None
+        raw_model = str(candidate_summary.get("model") or "").strip()
+        if ":" in raw_model:
+            model_provider, model_name = raw_model.split(":", 1)
+            provider = provider or model_provider.strip() or None
+            raw_model = model_name.strip()
+        return provider, raw_model or None
+
+    def _apply_warnings(self, candidate_summary: dict[str, Any]) -> list[str]:
+        warnings: list[str] = []
+        provider, model = self._provider_and_model_for_metadata(candidate_summary)
+        if not str(candidate_summary.get("candidate_run_id") or "").strip():
+            warnings.append("missing_candidate_run_id")
+        if not provider:
+            warnings.append("missing_provider")
+        if not model:
+            warnings.append("missing_model")
+        return warnings
 
     def _coerce_query_results(self, candidate_result: dict[str, Any]) -> list[dict[str, Any]]:
         raw_query_results = candidate_result.get("query_results")

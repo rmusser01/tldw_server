@@ -11,7 +11,7 @@ describe("watchlists polling utilities", () => {
     expect(hasActiveWatchlistRuns([{ status: "queued" }])).toBe(true)
     expect(hasActiveWatchlistRuns([{ status: "pending" }])).toBe(true)
     expect(
-      hasActiveWatchlistRuns([{ status: "completed" }, { status: "failed" }])
+      hasActiveWatchlistRuns([{ status: "completed" }, { status: "succeeded" }, { status: "failed" }])
     ).toBe(false)
   })
 

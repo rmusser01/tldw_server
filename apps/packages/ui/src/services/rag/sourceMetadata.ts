@@ -9,9 +9,12 @@ type RagSourceMetadata = {
 export const ALL_RAG_SOURCES: RagSource[] = [
   "media_db",
   "notes",
-  "characters",
   "chats",
+  "characters",
   "kanban",
+  "prompts",
+  "world_books",
+  "dictionaries",
 ]
 
 const RAG_SOURCE_METADATA: Record<RagSource, RagSourceMetadata> = {
@@ -25,20 +28,35 @@ const RAG_SOURCE_METADATA: Record<RagSource, RagSourceMetadata> = {
     description: "Your personal notes and clips",
     translationKey: "sidepanel:rag.sources.notes",
   },
+  chats: {
+    label: "Chats",
+    description: "Previous chat conversations and message history",
+    translationKey: "sidepanel:rag.sources.chats",
+  },
   characters: {
-    label: "Story Characters",
+    label: "Characters",
     description: "Character cards and persona definitions",
     translationKey: "sidepanel:rag.sources.characters",
-  },
-  chats: {
-    label: "Conversations",
-    description: "Previous chat conversations",
-    translationKey: "sidepanel:rag.sources.chats",
   },
   kanban: {
     label: "Task Boards",
     description: "Kanban board items and tasks",
     translationKey: "sidepanel:rag.sources.kanban",
+  },
+  prompts: {
+    label: "Prompts",
+    description: "Saved prompts and reusable prompt templates",
+    translationKey: "sidepanel:rag.sources.prompts",
+  },
+  world_books: {
+    label: "World Books",
+    description: "World book entries, lore, keys, and comments",
+    translationKey: "sidepanel:rag.sources.worldBooks",
+  },
+  dictionaries: {
+    label: "Dictionaries",
+    description: "Chat dictionaries, entries, replacements, and notes",
+    translationKey: "sidepanel:rag.sources.dictionaries",
   },
 }
 

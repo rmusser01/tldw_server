@@ -5,6 +5,14 @@ This document covers two practical distribution concerns:
 1. Slimmer container runtime for the API.
 2. Distribution models for the Next.js WebUI.
 
+The default release boundary is:
+
+- **PyPI:** `tldw-server` backend/API/CLI only.
+- **WebUI:** separate Docker image or release artifact.
+
+Do not bundle `apps/tldw-frontend` into the root Python wheel unless the project
+explicitly chooses a new single-artifact distribution model.
+
 ## 1) Slimmer Docker Runtime (API)
 
 `Dockerfiles/Dockerfile.prod` now uses a multi-stage build:
@@ -65,6 +73,9 @@ Use this only if your distribution model requires a single downloadable artifact
 
 ## Suggested Default
 
-- Publish API to PyPI (`tldw-server`) as Python-first distribution.
+- Publish the backend/API/CLI to PyPI (`tldw-server`) as the Python-first distribution.
 - Publish WebUI as a separate deployable artifact (container or tarball).
 - Document a "paired release" process so API/UI version compatibility is explicit.
+
+The root PyPI package check validates that frontend and Node build artifacts do
+not enter the `tldw-server` wheel or source distribution.

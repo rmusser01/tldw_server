@@ -34,3 +34,33 @@ def test_idempotency_scoped_to_domain_queue_type_sqlite(jobs_db):
     # Different domain -> new row allowed
     j5 = jm.create_job(domain="other", queue="default", job_type="export", payload={}, owner_user_id="2", idempotency_key=key)
     assert int(j5["id"]) != int(j1["id"])  # distinct
+
+
+def test_idempotent_create_preserves_original_request_id_sqlite(jobs_db):
+    jm = JobManager(jobs_db)
+    key = "idem-request-id-key"
+
+    first = jm.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="export",
+        payload={},
+        owner_user_id="1",
+        idempotency_key=key,
+        request_id="request-first",
+        trace_id="trace-first",
+    )
+    replay = jm.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="export",
+        payload={},
+        owner_user_id="1",
+        idempotency_key=key,
+        request_id="request-second",
+        trace_id="trace-second",
+    )
+
+    assert int(first["id"]) == int(replay["id"])
+    assert first["request_id"] == replay["request_id"] == "request-first"
+    assert first["trace_id"] == replay["trace_id"] == "trace-first"

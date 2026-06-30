@@ -89,7 +89,12 @@ function EvidenceRailContent({
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {tab === "sources" ? (
           resultsCount > 0 ? (
-            <SourceList layout="rail" />
+            <>
+              <p className="mb-2 text-xs text-text-muted">
+                Use each source card to inspect excerpts, unavailable reasons, citations, and supported source links.
+              </p>
+              <SourceList layout="rail" />
+            </>
           ) : (
             <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-text-muted">
               No sources yet. Run a query to inspect retrieval evidence.

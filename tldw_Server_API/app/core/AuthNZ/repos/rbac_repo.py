@@ -7,6 +7,7 @@ from typing import TypedDict
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.db_config import get_configured_user_database
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.UserDatabase_v2 import UserDatabase
 from tldw_Server_API.app.core.exceptions import ResourceNotFoundError
 
@@ -84,8 +85,21 @@ class AuthnzRbacRepo:
         """
         db = self._db
         try:
-            result = db.backend.execute(
+            if getattr(db.backend, "backend_type", None) == BackendType.POSTGRESQL:
+                query = """
+                SELECT
+                    r.id,
+                    r.name,
+                    r.description,
+                    COALESCE(r.is_system, FALSE) AS is_system
+                FROM roles r
+                JOIN user_roles ur ON r.id = ur.role_id
+                WHERE ur.user_id = ?
+                  AND (ur.expires_at IS NULL OR ur.expires_at > CURRENT_TIMESTAMP)
+                ORDER BY r.name
                 """
+            else:
+                query = """
                 SELECT
                     r.id,
                     r.name,
@@ -96,7 +110,9 @@ class AuthnzRbacRepo:
                 WHERE ur.user_id = ?
                   AND (ur.expires_at IS NULL OR ur.expires_at > CURRENT_TIMESTAMP)
                 ORDER BY r.name
-                """,
+                """
+            result = db.backend.execute(
+                query,
                 (int(user_id),),
             )
             return [dict(row) for row in result.rows]

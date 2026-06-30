@@ -1,18 +1,62 @@
 # Getting Started (Self-Hosting Profiles)
 
-Choose exactly one base setup profile and follow it end-to-end.
+Choose exactly one base setup profile and follow it end-to-end. The solo
+journey is: prepare, start, verify, open the WebUI, complete a first successful
+chat, then add your first source.
+
+## Solo setup chooser
 
 Recommended default:
-- Run `make quickstart` from the repo root for the Docker single-user + WebUI path.
-- Use `make quickstart-docker` if you want the API-only Docker path.
-- Use `Docker multi-user + Postgres` when you need a team or public deployment.
-- Use `Local single-user` for development, debugging, or contributor workflows.
+- Run `make quickstart` from the repo root for the Docker single-user + WebUI path. That is the one obvious start command for most first-time solo users and the shortest alias for `make setup-docker-single`, `make start-docker-single`, and `make verify-docker-single`.
+- Use `Docker single-user` when you want the shortest self-hosted path with the bundled WebUI and API-key auth.
+- Use `Local single-user` as a peer solo choice for development, debugging, or contributor workflows; once the WebUI is reachable, it uses the same first-time setup flow.
+- Use `Docker multi-user + Postgres` as the shared server/operator path when you need JWT auth, a first admin account, and bundled Postgres.
+
+Deployment mode chooser:
+
+| Goal | Start here | Use when | Follow-up docs |
+| --- | --- | --- | --- |
+| Local single-user | [Local single-user](./Profile_Local_Single_User.md) | You are developing, debugging, or running a local contributor setup. | Start the local WebUI after the API verifies, then complete first-time setup in the WebUI. |
+| Docker single-user + WebUI | [Docker single-user + WebUI](./Profile_Docker_Single_User.md) | You want the shortest self-hosted path with the bundled WebUI and API key auth. | [Minimal deployment](../Deployment/minimal-deploy.md), [reverse proxy examples](../Deployment/Reverse_Proxy_Examples.md), and [CDN/static assets](../Deployment/cdn-static-assets.md). |
+| Docker multi-user + Postgres | [Docker multi-user + Postgres](./Profile_Docker_Multi_User_Postgres.md) | You need JWT auth, a first admin account, and bundled Postgres. | Shared server/operator path: use the multi-user setup guide and operator checklist rather than the solo wizard. |
+| Production or horizontal scaling | [Docker multi-user + Postgres](./Profile_Docker_Multi_User_Postgres.md) first, then [horizontal scaling](../Deployment/horizontal-scaling.md) | You are preparing a shared or multi-node deployment. | [Resource requirements](../Deployment/resource-requirements.md), [sidecar workers](../Deployment/Sidecar_Workers.md), and monitoring/operations docs. |
+| Offline or air-gapped | [Offline and air-gapped deployment](../Deployment/offline-air-gapped.md) | You need controlled egress, preloaded models, or disconnected operation. | Validate provider, model, and package assumptions before first production use. |
+| Sidecar workers | [Sidecar workers](../Deployment/Sidecar_Workers.md) | You want background workers split from the API/WebUI process. | Use the profile guide first, then add worker compose or service units after the base stack verifies. |
+| Audio or GPU setup | [CPU audio setup](./First_Time_Audio_Setup_CPU.md) or [GPU/accelerated audio setup](./First_Time_Audio_Setup_GPU_Accelerated.md) | Speech, transcription, TTS, or diarization is part of day-one setup. | Start from a healthy base profile, then add CPU or GPU audio prerequisites. |
+| Monitoring and operations | `make monitoring-up` plus `Docs/Deployment/Monitoring/README.md` | You need Prometheus, Grafana, Alertmanager, or operator runbooks. | Monitoring published output is generated as top-level `Docs/Published/Monitoring`; do not move it by hand. |
 
 Canonical base profiles:
 
-1. [Local single-user](./Profile_Local_Single_User.md)
-2. [Docker single-user](./Profile_Docker_Single_User.md)
-3. [Docker multi-user + Postgres](./Profile_Docker_Multi_User_Postgres.md)
+1. [Docker single-user + WebUI](./Profile_Docker_Single_User.md)
+   - Prepare: `make setup-docker-single`
+   - Start: `make start-docker-single`
+   - Verify: `make verify-docker-single`
+2. [Docker multi-user + Postgres](./Profile_Docker_Multi_User_Postgres.md)
+   - Prepare: export generated `ADMIN_USERNAME` / `ADMIN_PASSWORD`, then `make setup-docker-multi`
+   - Start: `make start-docker-multi`
+   - Verify: `make verify-docker-multi`
+3. [Local single-user](./Profile_Local_Single_User.md)
+   - Install: `make install-local`
+   - Prepare: `make setup-local-single`
+   - Start: `make start-local-single`
+   - Verify: `make verify-local-single`
+   - No-`make` shortcuts: `./quick-launch.sh`, `quick-launch.command`, or `.\quick-launch.ps1`
+
+Solo completion gate:
+
+1. Verify the runtime and WebUI are reachable.
+2. Open the WebUI.
+3. Use the first-time setup wizard to configure chat/provider, ingest defaults, audio defaults, privacy/security, and optional advanced settings.
+4. Complete the first successful chat. This is the setup completion gate.
+5. Add your first source as the next guided milestone.
+
+Generated multi-user admin bootstrap:
+
+```bash
+export ADMIN_USERNAME=tldw-admin
+export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+make setup-docker-multi
+```
 
 Optional add-ons:
 
@@ -24,7 +68,9 @@ Optional add-ons:
 
 - Pick the profile that matches your target environment.
 - For most users, start with the `quickstart-docker-webui` path via `make quickstart`.
-- Complete the guide sections in order: prerequisites, install, run, verify, troubleshoot.
+- Treat LAN/custom-host browser access as advanced configuration and stay on the default same-origin browser API requests through the WebUI proxy unless you specifically need another device or origin to reach the API.
+- Complete the guide sections in order: prepare, start, verify, first value, audio path, troubleshoot, and optional add-ons.
+- Treat first value as the WebUI first-chat gate plus the immediate add-your-first-source milestone; the CLI ingest/search check is a runtime verification aid, not the product completion gate.
 - Do not mix setup commands from other docs unless the guide explicitly links to them.
 - Apply add-ons only after your chosen base profile is healthy.
 - If speech is part of day-one setup, switch to the CPU or GPU/accelerated audio guide after the base profile is healthy instead of starting with the older STT/TTS reference pages.

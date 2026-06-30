@@ -16,6 +16,23 @@ import json
 pytestmark = pytest.mark.performance
 
 
+def _memory_efficiency_within_tolerance(
+    small_chunks_mb: float,
+    large_chunks_mb: float,
+    *,
+    ratio: float = 1.5,
+    noise_floor_mb: float = 1.0,
+) -> bool:
+    """Compare measured RSS deltas while ignoring allocator/page-size noise."""
+    small = max(0.0, float(small_chunks_mb))
+    large = max(0.0, float(large_chunks_mb))
+    if max(small, large) <= noise_floor_mb:
+        return True
+    if large <= noise_floor_mb:
+        return False
+    return small <= large * ratio
+
+
 class TranscriptionBenchmark:
     """Base class for transcription benchmarks."""
 
@@ -343,7 +360,10 @@ class TestBufferedTranscriptionPerformance(TranscriptionBenchmark):
         print(f"Large chunks: {metrics_large['memory_used']:.1f}MB")
 
         # Small chunks should be more memory efficient
-        assert metrics_small['memory_used'] <= metrics_large['memory_used'] * 1.5
+        assert _memory_efficiency_within_tolerance(
+            metrics_small['memory_used'],
+            metrics_large['memory_used'],
+        )
 
 
 class TestComparativePerformance(TranscriptionBenchmark):

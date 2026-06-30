@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.Evaluations.persona_telemetry_metrics import (
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import UnifiedEvaluationService
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
+from tldw_Server_API.tests.Persona.persona_chat_quality_cases import case_by_id
 
 
 pytestmark = pytest.mark.unit
@@ -81,6 +82,25 @@ def test_persona_telemetry_metrics_summary_aggregates_histograms_and_counters():
     assert summary["alerts"]["safety_flag_total"] == 3
     assert summary["ior_out_of_band_by_band"] == {"high": 3, "low": 1}
     assert summary["safety_flags"] == {"ioo_high": 2, "refusal_detected": 1}
+
+
+def test_persona_telemetry_metrics_summary_groups_persona_backed_labels():
+    fixture_case = case_by_id("PC-CASE-019")
+    assert "PC-TEL-001" in fixture_case["labels"]  # nosec B101
+
+    labels = {
+        **_base_labels(),
+        "character_id": "none",
+        "assistant_kind": fixture_case["assistant_kind"],
+        "assistant_id": fixture_case["assistant_id"],
+    }
+    log_histogram("chat_persona_ioo_ratio", 0.18, labels=labels)
+
+    summary = get_persona_telemetry_metrics_summary()
+
+    assert summary["samples"] == 1
+    assert summary["samples_by_assistant_kind"] == {"persona": 1}
+    assert summary["samples_by_assistant_id"] == {fixture_case["assistant_id"]: 1}
 
 
 @pytest.mark.asyncio

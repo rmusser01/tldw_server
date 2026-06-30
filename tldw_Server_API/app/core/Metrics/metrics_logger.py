@@ -59,8 +59,17 @@ def _bridge_to_registry(
     try:
         registry = get_metrics_registry()
         normalized_name = registry.normalize_metric_name(metric_name)
-        if normalized_name not in registry.metrics:
-            registry.register_metric(
+        existing = registry.metrics.get(normalized_name)
+        if existing is not None and existing.type != metric_type:
+            logger.warning(
+                "metrics_logger: skipping {} bridge for {} registered as {}",
+                metric_type.value,
+                normalized_name,
+                existing.type.value,
+            )
+            return
+        if existing is None:
+            registered = registry.register_metric(
                 MetricDefinition(
                     name=normalized_name,
                     type=metric_type,
@@ -69,6 +78,8 @@ def _bridge_to_registry(
                 ),
                 persistent=False,
             )
+            if not registered:
+                return
         registry.record(metric_name, value, normalized_labels, _normalized=True)
     except Exception as exc:
         logger.debug("metrics_logger: registry bridge failed: {err}", err=exc)

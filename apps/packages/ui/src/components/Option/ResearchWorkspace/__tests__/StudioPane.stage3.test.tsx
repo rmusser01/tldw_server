@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fetchTldwVoiceCatalog } from "@/services/tldw/audio-voices"
 import { inferTldwProviderFromModel } from "@/services/tts-provider"
 import { StudioPane, estimateGenerationSeconds } from "../StudioPane"
+import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
 
 const {
   mockRagSearch,
@@ -39,6 +40,7 @@ const {
   mockMessageSuccess,
   mockMessageError,
   mockMessageInfo,
+  mockMessageWarning,
   workspaceStoreState
 } = vi.hoisted(() => {
   const ragSearch = vi.fn()
@@ -62,6 +64,7 @@ const {
   const messageSuccess = vi.fn()
   const messageError = vi.fn()
   const messageInfo = vi.fn()
+  const messageWarning = vi.fn()
   const setSelectedModel = vi.fn()
   const setRagSearchMode = vi.fn()
   const setRagTopK = vi.fn()
@@ -73,13 +76,32 @@ const {
   const setTopP = vi.fn()
   const setNumPredict = vi.fn()
   const updateModelSetting = vi.fn()
+  const defaultSources = [
+    {
+      id: "source-1",
+      mediaId: 101,
+      title: "DSPy Prompting Talk",
+      type: "video",
+      status: "ready",
+      addedAt: new Date("2026-02-18T00:00:00.000Z")
+    }
+  ]
 
   const state = {
     selectedSourceIds: ["source-1"],
-    sources: [] as Array<any>,
+    selectedSourceFolderIds: [] as string[],
+    sources: defaultSources as Array<any>,
     workspaceId: "workspace-a",
     workspaceName: "Workspace A",
     getSelectedMediaIds: () => [101],
+    getEffectiveSelectedSources: () =>
+      state.sources.filter((source: { id: string }) =>
+        state.selectedSourceIds.includes(source.id)
+      ),
+    getEffectiveSelectedMediaIds: () =>
+      state
+        .getEffectiveSelectedSources()
+        .map((source: { mediaId: number }) => source.mediaId),
     generatedArtifacts: [] as Array<any>,
     isGeneratingOutput: false,
     generatingOutputType: null as any,
@@ -201,6 +223,7 @@ const {
     mockMessageSuccess: messageSuccess,
     mockMessageError: messageError,
     mockMessageInfo: messageInfo,
+    mockMessageWarning: messageWarning,
     workspaceStoreState: state
   }
 })
@@ -320,7 +343,7 @@ vi.mock("antd", async () => {
           success: mockMessageSuccess,
           error: mockMessageError,
           info: mockMessageInfo,
-          warning: vi.fn()
+          warning: mockMessageWarning
         },
         <></>
       ]
@@ -357,8 +380,8 @@ const expandGeneratedOutputsSection = () => {
   }
 }
 
-const renderExpandedStudioPane = () => {
-  const renderResult = render(<StudioPane />)
+const renderExpandedStudioPane = (props: Record<string, unknown> = {}) => {
+  const renderResult = render(<StudioPane {...props} />)
   expandStudioOptionsSection()
   expandOutputTypesSection()
   expandGeneratedOutputsSection()
@@ -371,6 +394,17 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     localStorage.removeItem("tldw:research-workspace:recent-output-types:v1")
     isMobile = false
     workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.selectedSourceFolderIds = []
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 101,
+        title: "DSPy Prompting Talk",
+        type: "video",
+        status: "ready",
+        addedAt: new Date("2026-02-18T00:00:00.000Z")
+      }
+    ]
     workspaceStoreState.getSelectedMediaIds = () => [101]
     workspaceStoreState.generatedArtifacts = []
     workspaceStoreState.isGeneratingOutput = false
@@ -551,6 +585,58 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     })
   })
 
+  it("disables blocked artifact outputs from capability health", () => {
+    const capabilities = buildUnknownResearchWorkspaceCapabilities()
+    capabilities.capabilities.slides_generation = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["slides"],
+      reason_code: "slides_unavailable"
+    }
+
+    renderExpandedStudioPane({ researchWorkspaceCapabilities: capabilities })
+    fireEvent.click(screen.getByRole("button", { name: /More outputs/i }))
+
+    expect(
+      screen.getByText("Slides is unavailable while required services are offline.")
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Slides" })).toBeDisabled()
+    expect(mockGenerateSlidesFromMedia).not.toHaveBeenCalled()
+  })
+
+  it("refresh-checks capability health before generation and blocks stale actions", async () => {
+    const initialCapabilities = buildUnknownResearchWorkspaceCapabilities()
+    initialCapabilities.capabilities.artifact_text_generation = {
+      status: "ready",
+      mode: "allow",
+      dependencies: ["llm"],
+      reason_code: null
+    }
+    const refreshedCapabilities = buildUnknownResearchWorkspaceCapabilities()
+    refreshedCapabilities.capabilities.artifact_text_generation = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "llm_unavailable"
+    }
+    const refreshCapabilities = vi.fn(async () => refreshedCapabilities)
+
+    renderExpandedStudioPane({
+      researchWorkspaceCapabilities: initialCapabilities,
+      onRefreshResearchWorkspaceCapabilities: refreshCapabilities
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+
+    await waitFor(() => {
+      expect(refreshCapabilities).toHaveBeenCalledTimes(1)
+    })
+    expect(mockRagSearch).not.toHaveBeenCalled()
+    expect(mockMessageWarning).toHaveBeenCalledWith(
+      "Summary is unavailable while required services are offline."
+    )
+  })
+
   it("creates one workspace-owned deck and bulk saves flashcards for a run", async () => {
     workspaceStoreState.selectedSourceIds = ["source-1"]
     workspaceStoreState.getSelectedMediaIds = () => [101]
@@ -725,7 +811,7 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     }
 
     const builtSnapshot = workspaceModule.buildWorkspaceSnapshot(
-      snapshotState as Parameters<typeof workspaceModule.buildWorkspaceSnapshot>[0]
+      snapshotState as unknown as Parameters<typeof workspaceModule.buildWorkspaceSnapshot>[0]
     )
     expect(builtSnapshot.studyMaterialsPolicy).toBe("workspace")
 

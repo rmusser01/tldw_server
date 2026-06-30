@@ -45,7 +45,9 @@ class TestUnifiedPipelineCore:
                 # This is the actual function users call
                 result = await unified_rag_pipeline(
                     query="What is RAG?",
-                    top_k=5
+                    top_k=5,
+                    enable_cache=False,
+                    enable_reranking=False,
                 )
 
                 assert result is not None
@@ -148,8 +150,10 @@ class TestUnifiedPipelineCore:
                 )
 
                 assert result is not None
-                assert result.generated_answer is not None
+                assert result.generated_answer is None
+                assert result.metadata.get("answer_generation_skipped") == "no_documents"
                 assert len(result.documents) == 0
+                mock_gen_instance.generate.assert_not_awaited()
 
 
 @pytest.mark.unit

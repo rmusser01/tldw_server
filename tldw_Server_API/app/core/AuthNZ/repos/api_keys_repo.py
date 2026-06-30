@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -28,6 +29,57 @@ def _affected_row_count(result: Any) -> int:
     return 0
 
 
+_SQLITE_API_KEY_LOOKUP_COLUMNS = (
+    ("id", "id", None),
+    ("user_id", "user_id", None),
+    ("name", "name", "NULL"),
+    ("scope", "scope", "'read'"),
+    ("status", "status", None),
+    ("expires_at", "expires_at", "NULL"),
+    ("rate_limit", "rate_limit", "NULL"),
+    ("allowed_ips", "allowed_ips", "NULL"),
+    ("usage_count", "usage_count", "0"),
+    ("key_hash", "key_hash", None),
+    ("is_virtual", "COALESCE(is_virtual, 0)", "0"),
+    ("parent_key_id", "parent_key_id", "NULL"),
+    ("org_id", "org_id", "NULL"),
+    ("team_id", "team_id", "NULL"),
+    ("llm_budget_day_tokens", "llm_budget_day_tokens", "NULL"),
+    ("llm_budget_month_tokens", "llm_budget_month_tokens", "NULL"),
+    ("llm_budget_day_usd", "llm_budget_day_usd", "NULL"),
+    ("llm_budget_month_usd", "llm_budget_month_usd", "NULL"),
+    ("llm_allowed_endpoints", "llm_allowed_endpoints", "NULL"),
+    ("llm_allowed_providers", "llm_allowed_providers", "NULL"),
+    ("llm_allowed_models", "llm_allowed_models", "NULL"),
+    ("metadata", "metadata", "NULL"),
+)
+
+_SQLITE_API_KEY_LIMIT_COLUMNS = (
+    ("id", "id", None),
+    ("is_virtual", "COALESCE(is_virtual, 0)", "0"),
+    ("org_id", "org_id", "NULL"),
+    ("team_id", "team_id", "NULL"),
+    ("llm_budget_day_tokens", "llm_budget_day_tokens", "NULL"),
+    ("llm_budget_month_tokens", "llm_budget_month_tokens", "NULL"),
+    ("llm_budget_day_usd", "llm_budget_day_usd", "NULL"),
+    ("llm_budget_month_usd", "llm_budget_month_usd", "NULL"),
+    ("llm_allowed_endpoints", "llm_allowed_endpoints", "NULL"),
+    ("llm_allowed_providers", "llm_allowed_providers", "NULL"),
+    ("llm_allowed_models", "llm_allowed_models", "NULL"),
+)
+
+
+def _row_value(row: Any, key: str, fallback_index: int) -> Any:
+    """Read a value from dict-like or tuple-like DB driver rows."""
+    if isinstance(row, dict):
+        return row.get(key)
+    with suppress(Exception):
+        return row[key]
+    with suppress(Exception):
+        return row[fallback_index]
+    return None
+
+
 @dataclass
 class AuthnzApiKeysRepo:
     """
@@ -49,6 +101,31 @@ class AuthnzApiKeysRepo:
         connection method presence at runtime.
         """
         return bool(getattr(self.db_pool, "pool", None))
+
+    async def _sqlite_api_key_columns(self) -> set[str]:
+        """Return the current SQLite api_keys columns for legacy-safe selects."""
+        fetchall = getattr(self.db_pool, "fetchall", None)
+        if not callable(fetchall):
+            return {alias for alias, _present_expr, _fallback_expr in _SQLITE_API_KEY_LOOKUP_COLUMNS}
+        rows = await fetchall("PRAGMA table_info(api_keys)")
+        columns: set[str] = set()
+        for row in rows:
+            name = _row_value(row, "name", 1)
+            if name:
+                columns.add(str(name))
+        return columns
+
+    async def _sqlite_api_key_select_list(
+        self,
+        column_specs: tuple[tuple[str, str, str | None], ...],
+    ) -> str:
+        """Build a static-column SQLite SELECT projection with legacy defaults."""
+        existing_columns = await self._sqlite_api_key_columns()
+        parts: list[str] = []
+        for alias, present_expr, fallback_expr in column_specs:
+            expression = present_expr if alias in existing_columns else (fallback_expr or present_expr)
+            parts.append(f"{expression} AS {alias}")
+        return ",\n                           ".join(parts)
 
     async def ensure_tables(self) -> None:
         """
@@ -131,15 +208,9 @@ class AuthnzApiKeysRepo:
                 # parameterized placeholders - see database.py for implementation details
                 placeholders, hash_params = build_sqlite_in_clause(hash_candidates)
                 hash_candidates_clause = f"({placeholders})"
+                select_list = await self._sqlite_api_key_select_list(_SQLITE_API_KEY_LOOKUP_COLUMNS)
                 query_template = """
-                    SELECT id, user_id, name, scope, status, expires_at,
-                           rate_limit, allowed_ips, usage_count, key_hash,
-                           COALESCE(is_virtual, 0) AS is_virtual,
-                           parent_key_id, org_id, team_id,
-                           llm_budget_day_tokens, llm_budget_month_tokens,
-                           llm_budget_day_usd, llm_budget_month_usd,
-                           llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
-                           metadata
+                    SELECT {select_list}
                     FROM api_keys
                     WHERE key_hash IN {hash_candidates_clause} AND status = ?
                     ORDER BY created_at DESC
@@ -186,23 +257,16 @@ class AuthnzApiKeysRepo:
                     "active",
                 )
             else:
-                row = await self.db_pool.fetchone(
-                    """
-                    SELECT id, user_id, name, scope, status, expires_at,
-                           rate_limit, allowed_ips, usage_count, key_hash,
-                           COALESCE(is_virtual, 0) AS is_virtual,
-                           parent_key_id, org_id, team_id,
-                           llm_budget_day_tokens, llm_budget_month_tokens,
-                           llm_budget_day_usd, llm_budget_month_usd,
-                           llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
-                           metadata
+                select_list = await self._sqlite_api_key_select_list(_SQLITE_API_KEY_LOOKUP_COLUMNS)
+                query_template = """
+                    SELECT {select_list}
                     FROM api_keys
                     WHERE key_id = ? AND status = ?
                     ORDER BY created_at DESC
                     LIMIT 1
-                    """,
-                    (key_id, "active"),
-                )
+                    """
+                query = query_template.format(select_list=select_list)  # nosec B608
+                row = await self.db_pool.fetchone(query, (key_id, "active"))
 
             if not row:
                 return None
@@ -298,19 +362,14 @@ class AuthnzApiKeysRepo:
                 )
             else:
                 # SQLite: fall back to INTEGER-based COALESCE
-                row = await self.db_pool.fetchone(
-                    """
-                    SELECT id,
-                           COALESCE(is_virtual,0) AS is_virtual,
-                           org_id, team_id,
-                           llm_budget_day_tokens, llm_budget_month_tokens,
-                           llm_budget_day_usd, llm_budget_month_usd,
-                           llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models
+                select_list = await self._sqlite_api_key_select_list(_SQLITE_API_KEY_LIMIT_COLUMNS)
+                query_template = """
+                    SELECT {select_list}
                     FROM api_keys
                     WHERE id = ?
-                    """,
-                    key_id,
-                )
+                    """
+                query = query_template.format(select_list=select_list)  # nosec B608
+                row = await self.db_pool.fetchone(query, key_id)
 
             if not row:
                 return None
@@ -340,35 +399,91 @@ class AuthnzApiKeysRepo:
         async with self.db_pool.transaction() as conn:
             try:
                 if self._is_postgres_backend():
-                    # PostgreSQL: upsert on key_hash
-                    await conn.execute(
-                        """
-                        INSERT INTO api_keys (
-                            user_id, key_hash, key_id, key_prefix, name, description,
+                    # New-format keys have salted hashes; use their stable key_id
+                    # for idempotency when available.
+                    if key_identifier:
+                        result = await conn.execute(
+                            """
+                            UPDATE api_keys
+                            SET user_id = $1,
+                                key_hash = $2,
+                                key_prefix = $3,
+                                name = $4,
+                                description = $5,
+                                scope = $6,
+                                status = 'active',
+                                is_virtual = $7
+                            WHERE key_id = $8
+                            """,
+                            user_id,
+                            key_hash,
+                            key_prefix,
+                            name,
+                            description,
+                            scope,
+                            bool(is_virtual),
+                            key_identifier,
+                        )
+                    else:
+                        result = await conn.execute(
+                            """
+                            UPDATE api_keys
+                            SET user_id = $1,
+                                key_id = $2,
+                                key_prefix = $3,
+                                name = $4,
+                                description = $5,
+                                scope = $6,
+                                status = 'active',
+                                is_virtual = $7
+                            WHERE key_hash = $8
+                            """,
+                            user_id,
+                            key_identifier,
+                            key_prefix,
+                            name,
+                            description,
+                            scope,
+                            bool(is_virtual),
+                            key_hash,
+                        )
+                    if _affected_row_count(result) == 0:
+                        await conn.execute(
+                            """
+                            INSERT INTO api_keys (
+                                user_id, key_hash, key_id, key_prefix, name, description,
+                                scope, status, is_virtual
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8)
+                            """,
+                            user_id,
+                            key_hash,
+                            key_identifier,
+                            key_prefix,
+                            name,
+                            description,
+                            scope,
+                            bool(is_virtual),
+                        )
+                else:
+                    # SQLite: emulate upsert by stable key_id when present.
+                    if key_identifier:
+                        query = """
+                        INSERT OR REPLACE INTO api_keys (
+                            id, user_id, key_hash, key_id, key_prefix, name, description,
                             scope, status, is_virtual
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8)
-                        ON CONFLICT (key_hash) DO UPDATE SET
-                            user_id = EXCLUDED.user_id,
-                            key_id = EXCLUDED.key_id,
-                            key_prefix = EXCLUDED.key_prefix,
-                            scope = EXCLUDED.scope,
-                            status = EXCLUDED.status,
-                            is_virtual = EXCLUDED.is_virtual
-                        """,
-                        user_id,
-                        key_hash,
-                        key_identifier,
-                        key_prefix,
-                        name,
-                        description,
-                        scope,
-                        bool(is_virtual),
-                    )
-                else:
-                    # SQLite: emulate upsert by key_hash
-                    await conn.execute(
+                        VALUES (
+                            COALESCE(
+                                (SELECT id FROM api_keys WHERE key_id = ?),
+                                COALESCE((SELECT MAX(id) FROM api_keys), 0) + 1
+                            ),
+                            ?, ?, ?, ?, ?, ?, ?, 'active', ?
+                        )
                         """
+                        lookup_param = key_identifier
+                    else:
+                        query = """
                         INSERT OR REPLACE INTO api_keys (
                             id, user_id, key_hash, key_id, key_prefix, name, description,
                             scope, status, is_virtual
@@ -380,9 +495,12 @@ class AuthnzApiKeysRepo:
                             ),
                             ?, ?, ?, ?, ?, ?, ?, 'active', ?
                         )
-                        """,
+                        """
+                        lookup_param = key_hash
+                    await conn.execute(
+                        query,
                         (
-                            key_hash,
+                            lookup_param,
                             user_id,
                             key_hash,
                             key_identifier,

@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { EvaluationsPage } from "../EvaluationsPage"
+
+const { mockSearchParams, mockSetSearchParams } = vi.hoisted(() => ({
+  mockSearchParams: {
+    value: new URLSearchParams()
+  },
+  mockSetSearchParams: vi.fn()
+}))
 
 const storeState = {
   activeTab: "recipes" as any,
@@ -31,7 +38,7 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("react-router-dom", () => ({
   useNavigate: () => vi.fn(),
-  useSearchParams: () => [new URLSearchParams()]
+  useSearchParams: () => [mockSearchParams.value, mockSetSearchParams]
 }))
 
 vi.mock("@/store/evaluations", () => ({
@@ -52,31 +59,20 @@ vi.mock("@/components/Common/DismissibleBetaAlert", () => ({
   DismissibleBetaAlert: () => null
 }))
 
-vi.mock("antd", async () => {
-  const actual = await vi.importActual<any>("antd")
-
-  return {
-    ...actual,
-    Alert: ({ title, description }: any) => (
+vi.mock("antd", () => ({
+  Tabs: ({ items = [], activeKey }: any) => (
+    <div data-testid="mock-tabs">
       <div>
-        <div>{title}</div>
-        <div>{description}</div>
+        {items.map((item: any) => (
+          <div key={item.key}>{item.label}</div>
+        ))}
       </div>
-    ),
-    Tabs: ({ items = [], activeKey }: any) => (
-      <div data-testid="mock-tabs">
-        <div>
-          {items.map((item: any) => (
-            <div key={item.key}>{item.label}</div>
-          ))}
-        </div>
-        <div data-testid="active-tab-content">
-          {items.find((item: any) => item.key === activeKey)?.children}
-        </div>
+      <div data-testid="active-tab-content">
+        {items.find((item: any) => item.key === activeKey)?.children}
       </div>
-    )
-  }
-})
+    </div>
+  )
+}))
 
 vi.mock("../tabs/RecipesTab", () => ({
   RecipesTab: () => <div data-testid="recipes-tab-panel">Recipes panel</div>
@@ -107,11 +103,28 @@ vi.mock("../tabs/HistoryTab", () => ({
 }))
 
 describe("EvaluationsPage recipe-first entry", () => {
+  beforeEach(() => {
+    mockSearchParams.value = new URLSearchParams()
+    vi.clearAllMocks()
+  })
+
   it("exposes a Recipes tab as the primary entry point", () => {
     render(<EvaluationsPage />)
 
     expect(screen.getByText("Recipes")).toBeInTheDocument()
     expect(screen.getByText("Review")).toBeInTheDocument()
     expect(screen.getByTestId("recipes-tab-panel")).toBeInTheDocument()
+  })
+
+  it("renders the tour notice with the design-system Alert primitive", () => {
+    mockSearchParams.value = new URLSearchParams("tour=1")
+
+    const { container } = render(<EvaluationsPage />)
+
+    expect(screen.getByText("Evaluations tour")).toBeInTheDocument()
+    expect(
+      screen.getByText("Evaluations tour").closest('[data-ds-component="Alert"]')
+    ).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(1)
   })
 })

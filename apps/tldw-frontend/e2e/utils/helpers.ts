@@ -1,23 +1,37 @@
 /**
  * Common test helpers for E2E tests
  */
-import { type Locator, type Page, type Route } from '@playwright/test';
+import { expect, type Locator, type Page, type Route } from '@playwright/test';
+import { resolveE2eApiKey } from './e2e-auth';
+
+const RAW_E2E_SERVER_URL =
+  process.env.TLDW_SERVER_URL ||
+  process.env.TLDW_E2E_SERVER_URL ||
+  process.env.E2E_TEST_BASE_URL ||
+  'http://127.0.0.1:8000';
+
+const normalizeOrigin = (value: string): string => value.replace(/\/$/, '');
+
+const normalizeHttpOrigin = (value: string): string => {
+  const origin = normalizeOrigin(value.trim());
+  return /^https?:\/\//i.test(origin) ? origin : `http://${origin}`;
+};
+
+const E2E_SERVER_URL = normalizeHttpOrigin(RAW_E2E_SERVER_URL);
 
 /**
  * Environment configuration for tests
  */
 export const TEST_CONFIG = {
-  serverUrl: process.env.TLDW_SERVER_URL || 'http://127.0.0.1:8000',
-  apiKey: process.env.TLDW_API_KEY || 'THIS-IS-A-SECURE-KEY-123-FAKE-KEY',
+  serverUrl: E2E_SERVER_URL,
+  apiKey: resolveE2eApiKey({ serverUrl: E2E_SERVER_URL }),
   webUrl: process.env.TLDW_WEB_URL || 'http://localhost:8080',
   allowOffline: process.env.TLDW_E2E_ALLOW_OFFLINE !== '0',
 };
 
-const normalizeOrigin = (value: string): string => value.replace(/\/$/, '');
-
 const resolveSeedServerUrl = (cfg: Partial<typeof TEST_CONFIG>): string => {
   if (typeof cfg.serverUrl === 'string' && cfg.serverUrl.trim().length > 0) {
-    return normalizeOrigin(cfg.serverUrl.trim());
+    return normalizeHttpOrigin(cfg.serverUrl);
   }
   if (typeof cfg.webUrl === 'string' && cfg.webUrl.trim().length > 0) {
     return normalizeOrigin(cfg.webUrl.trim());
@@ -246,7 +260,7 @@ export async function seedAuth(
       localStorage.setItem('__tldw_first_run_complete', 'true');
     } catch {}
     try {
-      localStorage.setItem("assistant_setup_dismissed", "true");
+      localStorage.setItem('assistant_setup_dismissed', 'true');
     } catch {}
     try {
       if (cfg.allowOffline) {
@@ -577,6 +591,46 @@ export async function waitForElement(
 }
 
 /**
+ * Assert that the document and visible elements fit within the current viewport.
+ */
+export async function expectNoHorizontalOverflow(page: Page, label: string): Promise<void> {
+  const overflow = await page.evaluate(() => {
+    const viewportWidth = document.documentElement.clientWidth;
+    const scrollWidth = Math.max(
+      document.documentElement.scrollWidth,
+      document.body?.scrollWidth ?? 0
+    );
+    const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*'))
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          tag: element.tagName.toLowerCase(),
+          testId: element.getAttribute('data-testid'),
+          role: element.getAttribute('role'),
+          ariaLabel: element.getAttribute('aria-label'),
+          left: rect.left,
+          right: rect.right,
+          width: rect.width,
+        };
+      })
+      .filter((entry) => entry.width > 0 && (entry.left < -1 || entry.right > viewportWidth + 1))
+      .slice(0, 5);
+
+    return {
+      viewportWidth,
+      scrollWidth,
+      offenders,
+    };
+  });
+
+  expect(
+    overflow.scrollWidth,
+    `${label} overflowed viewport: ${JSON.stringify(overflow)}`
+  ).toBeLessThanOrEqual(overflow.viewportWidth + 1);
+  expect(overflow.offenders, `${label} overflow offenders`).toEqual([]);
+}
+
+/**
  * Dismiss any visible modals or dialogs
  */
 export async function dismissModals(page: Page): Promise<void> {
@@ -654,6 +708,7 @@ export const BENIGN_PATTERNS = [
   /Hydration failed/,
   /There was an error while hydrating/,
   /cannot connect to an AudioNode belonging to a different audio context/i,
+  /Failed to execute 'removeChild' on 'Node': The node to be removed is not a child of this node\./,
 ];
 
 /**

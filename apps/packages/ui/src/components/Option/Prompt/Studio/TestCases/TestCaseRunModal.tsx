@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { Modal, Select, notification, Alert, Spin, Table, Tag } from "antd"
+import { Modal, Select, notification, Spin, Table } from "antd"
 import { Play, CheckCircle2, XCircle, Clock } from "lucide-react"
 import React, { useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -10,6 +10,7 @@ import {
   type TestRunResult
 } from "@/services/prompt-studio"
 import { Button } from "@/components/Common/Button"
+import { Alert, Badge } from "@/components/ui/primitives"
 
 type TestCaseRunModalProps = {
   open: boolean
@@ -83,6 +84,49 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
   const passCount = results?.filter((r) => r.passed).length ?? 0
   const failCount = results?.filter((r) => r.passed === false).length ?? 0
 
+  const renderResultStatusBadge = (record: TestRunResult) => {
+    if (record.error) {
+      return (
+        <Badge variant="danger" size="sm">
+          <XCircle className="size-3" aria-hidden="true" />
+          {t("managePrompts.studio.testCases.results.error", {
+            defaultValue: "Error"
+          })}
+        </Badge>
+      )
+    }
+
+    if (record.passed) {
+      return (
+        <Badge variant="success" size="sm">
+          <CheckCircle2 className="size-3" aria-hidden="true" />
+          {t("managePrompts.studio.testCases.results.pass", {
+            defaultValue: "Pass"
+          })}
+        </Badge>
+      )
+    }
+
+    if (record.passed === false) {
+      return (
+        <Badge variant="warning" size="sm">
+          <XCircle className="size-3" aria-hidden="true" />
+          {t("managePrompts.studio.testCases.results.fail", {
+            defaultValue: "Fail"
+          })}
+        </Badge>
+      )
+    }
+
+    return (
+      <Badge size="sm">
+        {t("managePrompts.studio.testCases.results.run", {
+          defaultValue: "Run"
+        })}
+      </Badge>
+    )
+  }
+
   return (
     <Modal
       open={open}
@@ -103,8 +147,7 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
         {!results && (
           <>
             <Alert
-              type="info"
-              showIcon
+              variant="info"
               title={t("managePrompts.studio.testCases.runInfo", {
                 defaultValue:
                   "Run {{count}} test cases against a prompt to see the outputs.",
@@ -157,13 +200,21 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
                   defaultValue: "Results"
                 })}
               </span>
-              <Tag color="green" icon={<CheckCircle2 className="size-3" />}>
-                {passCount} passed
-              </Tag>
+              <Badge variant="success" size="sm">
+                <CheckCircle2 className="size-3" aria-hidden="true" />
+                {t("managePrompts.studio.testCases.results.passedCount", {
+                  defaultValue: "{{count}} passed",
+                  count: passCount
+                })}
+              </Badge>
               {failCount > 0 && (
-                <Tag color="red" icon={<XCircle className="size-3" />}>
-                  {failCount} failed
-                </Tag>
+                <Badge variant="danger" size="sm">
+                  <XCircle className="size-3" aria-hidden="true" />
+                  {t("managePrompts.studio.testCases.results.failedCount", {
+                    defaultValue: "{{count}} failed",
+                    count: failCount
+                  })}
+                </Badge>
               )}
             </div>
 
@@ -189,22 +240,7 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
                   }),
                   key: "status",
                   width: 80,
-                  render: (_, record) =>
-                    record.error ? (
-                      <Tag color="red" icon={<XCircle className="size-3" />}>
-                        Error
-                      </Tag>
-                    ) : record.passed ? (
-                      <Tag color="green" icon={<CheckCircle2 className="size-3" />}>
-                        Pass
-                      </Tag>
-                    ) : record.passed === false ? (
-                      <Tag color="orange" icon={<XCircle className="size-3" />}>
-                        Fail
-                      </Tag>
-                    ) : (
-                      <Tag>Run</Tag>
-                    )
+                  render: (_, record) => renderResultStatusBadge(record)
                 },
                 {
                   title: t("managePrompts.studio.testCases.columns.output", {

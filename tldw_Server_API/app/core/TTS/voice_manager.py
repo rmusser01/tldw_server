@@ -66,7 +66,7 @@ PROVIDER_REQUIREMENTS = {
         "formats": [".wav", ".mp3"],
         "max_size_mb": 20,
         "duration": {"min": 5, "max": 20},
-        "sample_rate": 22050,
+        "sample_rate": 24000,
         "convert_to": "wav"
     },
     "elevenlabs": {
@@ -102,6 +102,20 @@ PROVIDER_REQUIREMENTS = {
         "max_size_mb": 50,
         # Qwen3-TTS highlights rapid voice cloning from ~3s references in the README.
         "duration": {"min": 3, "max": 30},
+        "sample_rate": 24000,
+        "convert_to": "wav"
+    },
+    "omnivoice": {
+        "formats": [".wav", ".mp3", ".flac", ".ogg", ".m4a", ".opus"],
+        "max_size_mb": 50,
+        "duration": {"min": 3, "max": 30},
+        "sample_rate": 24000,
+        "convert_to": "wav",
+    },
+    "fish_s2": {
+        "formats": [".wav", ".mp3", ".flac", ".ogg", ".m4a", ".opus"],
+        "max_size_mb": 50,
+        "duration": {"min": 3, "max": 60},
         "sample_rate": 24000,
         "convert_to": "wav"
     }
@@ -1201,6 +1215,22 @@ class VoiceManager:
                 reference_text=ref_text,
             )
 
+        if provider_key == "omnivoice":
+            ref_text = metadata.reference_text
+            if not ref_text:
+                raise VoiceProcessingError("reference_text is required to encode OmniVoice references")
+            metadata.provider_artifacts[provider_key] = {
+                "reference_text": ref_text,
+            }
+            await self.save_reference_metadata(user_id, metadata)
+            return VoiceEncodeResult(
+                voice_id=voice_id,
+                provider=provider_key,
+                cached=False,
+                ref_codes_len=None,
+                reference_text=ref_text,
+            )
+
         raise VoiceProcessingError(f"Provider not supported for encoding: {provider_key}")
 
     async def _encode_neutts_reference(self, audio_path: Path) -> list[int]:
@@ -1267,16 +1297,66 @@ class VoiceManager:
             logger.error(f"Error getting audio duration for {file_path}: {e}")
             return 0.0
 
+    async def _get_audio_sample_rate(self, file_path: Path) -> Optional[int]:
+        """Get audio sample rate using ffprobe (non-blocking)."""
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'a:0',
+            '-show_entries', 'stream=sample_rate',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            str(file_path)
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+            except asyncio.TimeoutError:
+                proc.kill()
+                with contextlib.suppress(_VOICE_NONCRITICAL_EXCEPTIONS):
+                    await proc.communicate()
+                logger.error(f"ffprobe timed out while getting audio sample rate for {file_path}")
+                return None
+
+            if proc.returncode == 0 and stdout:
+                try:
+                    return int(stdout.decode().strip())
+                except (UnicodeDecodeError, ValueError) as e:
+                    logger.error(f"Error parsing ffprobe sample rate output for {file_path}: {e}")
+                    return None
+
+            err_msg = (stderr or b"").decode(errors="ignore") if stderr is not None else ""
+            logger.warning(f"Could not determine audio sample rate for {file_path}: {err_msg}")
+            return None
+
+        except FileNotFoundError as e:
+            logger.error(f"ffprobe not found while getting audio sample rate: {e}")
+            return None
+        except _VOICE_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"Error getting audio sample rate for {file_path}: {e}")
+            return None
+
     async def _process_for_provider(self, input_path: Path, output_path: Path, provider: str) -> Path:
         """Process audio file for specific provider requirements"""
         provider_reqs = PROVIDER_REQUIREMENTS.get(provider, {})
         target_format = provider_reqs.get("convert_to", "wav")
-        target_sr = provider_reqs.get("sample_rate", 22050)
+        target_sr = provider_reqs.get("sample_rate") or 22050
 
-        # If already in correct format and sample rate, just copy
-        if input_path.suffix[1:] == target_format:
-            shutil.copy2(input_path, output_path)
-            return output_path
+        # If already in correct format and sample rate, just copy.
+        if input_path.suffix[1:].lower() == str(target_format).lower():
+            current_sr = await self._get_audio_sample_rate(input_path)
+            if current_sr is not None and int(current_sr) != int(target_sr):
+                logger.info(
+                    f"Resampling {input_path} for {provider}: {current_sr}Hz -> {target_sr}Hz"
+                )
+            elif current_sr is not None:
+                shutil.copy2(input_path, output_path)
+                return output_path
+            else:
+                logger.info(f"Sample rate unknown for {input_path}; normalizing with ffmpeg")
 
         # Convert using ffmpeg
         try:

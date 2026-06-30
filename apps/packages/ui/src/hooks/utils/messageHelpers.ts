@@ -40,14 +40,27 @@ export const validateBeforeSubmit = (
 
 export const createSaveMessageOnSuccess = (
   temporaryChat: boolean,
-  setHistoryId: (id: string, options?: { preserveServerChatId?: boolean }) => void
+  setHistoryId: (id: string, options?: { preserveServerChatId?: boolean }) => void,
+  options?: {
+    onServerConversationLinked?: (conversationId: string) => void
+  }
 ) => {
   return async (e: any): Promise<string | null> => {
     if (!temporaryChat) {
-      return await saveSuccess({
+      const historyId = await saveSuccess({
         ...e,
         setHistoryId: e?.setHistoryId ?? setHistoryId
       })
+      const conversationId =
+        typeof e?.conversationId === "string"
+          ? e.conversationId.trim()
+          : e?.conversationId != null
+            ? String(e.conversationId).trim()
+            : ""
+      if (conversationId.length > 0) {
+        options?.onServerConversationLinked?.(conversationId)
+      }
+      return historyId
     } else {
       setHistoryId("temp")
       return null

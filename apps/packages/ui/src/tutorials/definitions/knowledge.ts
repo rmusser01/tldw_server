@@ -15,6 +15,12 @@ const knowledgeBasics: TutorialDefinition = {
     "Search your indexed sources and review grounded answers with citations",
   icon: BrainCircuit,
   priority: 1,
+  sequence: {
+    nextTutorialId: "document-workspace-basics",
+    nextRoute: "/document-workspace",
+    nextLabelKey: "tutorials:gettingStarted.sequence.documentWorkspaceLabel",
+    nextLabelFallback: "Continue in Document Workspace"
+  },
   steps: [
     {
       target: "#knowledge-search-input",

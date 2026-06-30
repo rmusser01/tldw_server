@@ -1026,6 +1026,25 @@ class UserDatabase:
                 FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE SET NULL
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS audio_studio_media_tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_hash TEXT UNIQUE NOT NULL,
+                user_id INTEGER NOT NULL,
+                project_id TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                purpose TEXT NOT NULL CHECK (purpose IN ('playback', 'download')),
+                expires_at TEXT NOT NULL,
+                consumed_at TEXT,
+                revoked_at TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_by_auth_mode TEXT,
+                last_redeemed_at TEXT
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_hash ON audio_studio_media_tickets(token_hash)",
+            "CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_expiry ON audio_studio_media_tickets(expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_artifact ON audio_studio_media_tickets(user_id, project_id, artifact_id)",
         ]
 
     @staticmethod
@@ -1129,6 +1148,25 @@ class UserDatabase:
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS audio_studio_media_tickets (
+                id BIGSERIAL PRIMARY KEY,
+                token_hash TEXT UNIQUE NOT NULL,
+                user_id BIGINT NOT NULL,
+                project_id TEXT NOT NULL,
+                artifact_id TEXT NOT NULL,
+                purpose TEXT NOT NULL CHECK (purpose IN ('playback', 'download')),
+                expires_at TIMESTAMPTZ NOT NULL,
+                consumed_at TIMESTAMPTZ,
+                revoked_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                created_by_auth_mode TEXT,
+                last_redeemed_at TIMESTAMPTZ
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_hash ON audio_studio_media_tickets(token_hash)",
+            "CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_expiry ON audio_studio_media_tickets(expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_artifact ON audio_studio_media_tickets(user_id, project_id, artifact_id)",
         ]
 
     def _seed_default_data(self) -> None:

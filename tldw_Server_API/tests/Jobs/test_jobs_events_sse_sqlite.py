@@ -41,6 +41,13 @@ def test_jobs_events_sse_sqlite_smoke(monkeypatch):
 
         from tldw_Server_API.app.core.Jobs.manager import JobManager
         jm = JobManager(db_path=db_path)
+        jm.create_job(
+            domain="chatbooks",
+            queue="default",
+            job_type="export",
+            payload={},
+            owner_user_id="u1",
+        )
 
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
         reset_settings()
@@ -49,6 +56,7 @@ def test_jobs_events_sse_sqlite_smoke(monkeypatch):
         headers = {"X-API-KEY": get_settings().SINGLE_USER_API_KEY}
         with TestClient(app, headers=headers) as client:
             hb = False
+            observed_job_event = None
             deadline = time.time() + 3.0
             with client.stream("GET", "/api/v1/jobs/events/stream", params={"after_id": 0, "domain": "chatbooks"}) as s:
                 if s.status_code != 200:
@@ -71,12 +79,17 @@ def test_jobs_events_sse_sqlite_smoke(monkeypatch):
                         # Accept both ping {} and explicit heartbeat payloads
                         if payload == "{}":
                             hb = True
-                            break
+                            continue
                         try:
                             obj = json.loads(payload)
+                            if isinstance(obj, dict) and obj.get("event") == "job.created":
+                                observed_job_event = obj
+                                break
                             if obj == {} or (isinstance(obj, dict) and obj.get("heartbeat") is True):
                                 hb = True
-                                break
                         except Exception:
                             _ = None
-            assert hb, "did not observe SSE heartbeat frame"
+            assert hb, "did not observe initial SSE ping frame"
+            assert observed_job_event is not None, "did not observe seeded job.created SSE frame"
+            assert isinstance(observed_job_event.get("attrs"), dict)
+            assert "attrs_json" not in observed_job_event

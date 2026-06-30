@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, waitFor } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 
 import { Playground } from "../Playground"
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator"
@@ -138,7 +138,7 @@ vi.mock("@/hooks/useSetting", () => ({
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (_key: string, defaultValue: unknown) => [defaultValue]
+  useStorage: (_key: string, defaultValue: unknown) => [defaultValue, vi.fn()]
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
@@ -147,6 +147,17 @@ vi.mock("@/hooks/useMediaQuery", () => ({
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
   useLoadLocalConversation: () => vi.fn(async () => {})
+}))
+
+vi.mock("@/hooks/useServerChatHistory", () => ({
+  useServerChatHistory: () => ({
+    data: [],
+    total: 0,
+    isLoading: false,
+    sidebarRefreshState: "ready",
+    hasUsableData: true,
+    isShowingStaleData: false
+  })
 }))
 
 vi.mock("../playground-shortcuts", () => ({
@@ -163,12 +174,27 @@ vi.mock("react-router-dom", async () => {
   )
   return {
     ...actual,
-    useNavigate: () => vi.fn()
+    useNavigate: () => vi.fn(),
+    useLocation: () => ({
+      pathname: window.location.pathname || "/chat",
+      search: window.location.search || "",
+      hash: window.location.hash || "",
+      state: null,
+      key: "test-location"
+    })
   }
 })
 
 describe("Playground coordinator integration", () => {
   beforeEach(() => {
+    window.history.pushState({}, "", "/chat")
+    messageOptionState.value.messages = []
+    messageOptionState.value.history = []
+    messageOptionState.value.historyId = null
+    messageOptionState.value.serverChatId = null
+    messageOptionState.value.selectedCharacter = null
+    messageOptionState.value.setServerChatId.mockClear()
+    messageOptionState.value.setSelectedCharacter.mockClear()
     sessionPersistenceState.value.restoreSession = vi.fn(async () => false)
     sessionPersistenceState.value.sessionScopeReady = true
     sessionPersistenceState.value.hasPersistedSession = false
@@ -221,5 +247,64 @@ describe("Playground coordinator integration", () => {
     await waitFor(() => {
       expect(restoreSession).toHaveBeenCalledTimes(1)
     })
+  })
+
+  it("applies explicit character chat route ids before persisted session restore", async () => {
+    const restoreSession = vi.fn(async () => true)
+    sessionPersistenceState.value.restoreSession = restoreSession
+    sessionPersistenceState.value.hasPersistedSession = true
+    sessionPersistenceState.value.persistedServerChatId = "persisted-chat"
+    restoreDecisionState.value = true
+    window.history.pushState(
+      {},
+      "",
+      "/chat?mode=character&chatId=route-chat&characterId=stale-character"
+    )
+
+    render(<Playground />)
+
+    await waitFor(() => {
+      expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(
+        "route-chat"
+      )
+    })
+    expect(restoreSession).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
+  })
+
+  it("restores persisted sessions before applying a character route id", async () => {
+    const restoreSession = vi.fn(async () => true)
+    sessionPersistenceState.value.restoreSession = restoreSession
+    sessionPersistenceState.value.hasPersistedSession = true
+    sessionPersistenceState.value.persistedServerChatId = "persisted-chat"
+    restoreDecisionState.value = true
+    window.history.pushState(
+      {},
+      "",
+      "/chat?mode=character&characterId=route-character"
+    )
+
+    render(<Playground />)
+
+    await waitFor(() => {
+      expect(restoreSession).toHaveBeenCalledTimes(1)
+    })
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
+  })
+
+  it("does not apply explicit character ids over an active server chat", async () => {
+    messageOptionState.value.serverChatId = "active-chat"
+    window.history.pushState(
+      {},
+      "",
+      "/chat?mode=character&characterId=route-character"
+    )
+
+    render(<Playground />)
+
+    await waitFor(() => {
+      expect(useChatSurfaceCoordinatorStore.getState().routeId).toBe("chat")
+    })
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
   })
 })

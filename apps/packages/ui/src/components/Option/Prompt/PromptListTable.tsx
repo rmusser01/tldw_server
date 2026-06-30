@@ -30,6 +30,8 @@ type PromptListTableV1Props = {
   onEdit?: (id: string) => void
   onToggleFavorite?: (id: string, nextFavorite: boolean) => void
   onOpenConflictResolution?: (id: string) => void
+  canRetrySync?: (row: PromptRowVM) => boolean
+  onRetrySync?: (id: string) => void
   renderActions?: (row: PromptRowVM) => React.ReactNode
   renderTitleMeta?: (row: PromptRowVM) => React.ReactNode
   favoriteButtonTestId?: (row: PromptRowVM) => string
@@ -110,6 +112,8 @@ export const PromptListTable: React.FC<PromptListTableProps> = (props) => {
     onEdit,
     onToggleFavorite,
     onOpenConflictResolution,
+    canRetrySync,
+    onRetrySync,
     renderActions,
     renderTitleMeta,
     favoriteButtonTestId,
@@ -139,6 +143,8 @@ export const PromptListTable: React.FC<PromptListTableProps> = (props) => {
         onEdit: (row) => onEdit?.(row.id),
         onOpenConflictResolution: (row) =>
           onOpenConflictResolution?.(row.id),
+        canRetrySync,
+        onRetrySync: (row) => onRetrySync?.(row.id),
         renderActions,
         renderTitleMeta,
         favoriteButtonTestId,
@@ -151,8 +157,10 @@ export const PromptListTable: React.FC<PromptListTableProps> = (props) => {
       formatRelativeTime,
       isOnline,
       isCompactViewport,
+      canRetrySync,
       onEdit,
       onOpenConflictResolution,
+      onRetrySync,
       onToggleFavorite,
       query.sort.key,
       query.sort.order,

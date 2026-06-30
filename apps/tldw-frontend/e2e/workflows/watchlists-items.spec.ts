@@ -400,6 +400,10 @@ test.describe("Watchlists Items Reader", () => {
     await authedPage.goto("/watchlists")
     await waitForConnection(authedPage)
 
+    await expect(authedPage.getByTestId("watchlists-health-bar")).toBeVisible()
+    await expect(authedPage.getByTestId("watchlists-repeat-open-items")).toBeVisible()
+    await expect(authedPage.getByTestId("watchlists-repeat-open-outputs")).toBeVisible()
+
     await authedPage.getByRole("tab", { name: /^(Items|Articles)$/ }).click()
     const layout = authedPage.getByTestId("watchlists-items-layout")
     await expect(layout).toBeVisible()

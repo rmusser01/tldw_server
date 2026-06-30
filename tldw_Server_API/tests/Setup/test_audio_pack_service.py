@@ -7,6 +7,7 @@ import pytest
 from tldw_Server_API.app.core.Setup.audio_pack_service import (
     build_audio_pack_manifest,
     register_imported_audio_pack,
+    resolve_audio_pack_path,
     validate_audio_pack_manifest,
 )
 
@@ -65,13 +66,14 @@ def test_audio_pack_manifest_rejects_invalid_tts_choice():
         )
 
 
-def test_validate_audio_pack_manifest_reports_platform_mismatch(tmp_path):
+def test_validate_audio_pack_manifest_reports_platform_mismatch(tmp_path, monkeypatch):
     manifest = build_audio_pack_manifest(
         bundle_id="cpu_local",
         resource_profile="balanced",
         catalog_version="v2",
         compatibility={"platform": "linux", "arch": "x86_64", "python_version": "3.11"},
     )
+    monkeypatch_root = tmp_path / "config"
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Setup.audio_pack_service.CONFIG_ROOT",
         monkeypatch_root,

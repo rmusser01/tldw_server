@@ -1,7 +1,9 @@
 import React, { useCallback, useState, useRef, useEffect, useLayoutEffect } from "react"
 import { Document, pdfjs } from "react-pdf"
 import type { DocumentProps } from "react-pdf"
-import { Spin, Alert } from "antd"
+import { Spin } from "antd"
+import { useTranslation } from "react-i18next"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { PdfPage } from "./PdfPage"
 import { TextSelectionPopover } from "../TextSelectionPopover"
 import { useTextSelection } from "@/hooks/document-workspace/useTextSelection"
@@ -64,6 +66,7 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
   onPageChange,
   pdfDocumentRef
 }) => {
+  const { t } = useTranslation(["option"])
   const [numPages, setNumPages] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -407,12 +410,12 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
   if (!url) {
     return (
       <div className="flex h-full items-center justify-center p-4">
-        <Alert
-          type="warning"
+        <DesignSystemAlert
+          variant="warning"
           title="No document URL"
-          description="Please select a document to view"
-          showIcon
-        />
+        >
+          {t("option:documentWorkspace.selectDocument", "Please select a document to view")}
+        </DesignSystemAlert>
       </div>
     )
   }
@@ -446,12 +449,12 @@ export const PdfDocument: React.FC<PdfDocumentProps> = ({
           </div>
         }
         error={
-          <Alert
-            type="error"
+          <DesignSystemAlert
+            variant="error"
             title="Failed to load PDF"
-            description={error || "An error occurred while loading the document"}
-            showIcon
-          />
+          >
+            {error || t("option:documentWorkspace.genericLoadError", "An error occurred while loading the document")}
+          </DesignSystemAlert>
         }
       >
         {loading ? null : viewMode === "single" ? (

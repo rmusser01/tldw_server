@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { useEvaluationsStore } from "@/store/evaluations"
+import type { ApiSendResponse } from "@/services/api-send"
 import {
   generateSyntheticEvalDrafts,
   listSyntheticEvalQueue,
@@ -14,13 +15,13 @@ import {
   reviewSyntheticEvalSample
 } from "@/services/evaluations"
 
-const ensureOk = <T,>(resp: any): T => {
+const ensureOk = <T,>(resp: ApiSendResponse<T>): ApiSendResponse<T> => {
   if (!resp?.ok) {
     const err = new Error(resp?.error || `HTTP ${resp?.status}`)
     ;(err as any).resp = resp
     throw err
   }
-  return resp as T
+  return resp
 }
 
 export function useSyntheticEvalQueue(params: {

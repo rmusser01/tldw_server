@@ -6,7 +6,6 @@ import {
   Tag,
   Tooltip,
   Select,
-  Alert,
   Checkbox,
   Skeleton,
   Pagination,
@@ -50,6 +49,7 @@ import {
   sanitizeServerErrorMessage,
   buildServerLogHint
 } from "@/utils/server-error-message"
+import { Alert } from "@/components/ui/primitives/Alert"
 import type { TFunction } from "i18next"
 
 const LazyCharacterGalleryCard = React.lazy(() =>
@@ -63,6 +63,21 @@ const LazyCharacterPreviewPopup = React.lazy(() =>
     default: module.CharacterPreviewPopup,
   })),
 )
+
+const normalizeWorldBookId = (value: string | number | undefined): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value !== "string") {
+    return null
+  }
+  const trimmed = value.trim()
+  if (!/^\d+$/.test(trimmed)) {
+    return null
+  }
+  const parsed = Number(trimmed)
+  return Number.isFinite(parsed) ? parsed : null
+}
 
 export type CharacterListContentProps = {
   t: TFunction
@@ -381,42 +396,37 @@ export const CharacterListContent: React.FC<CharacterListContentProps> = (props)
           })}
       </div>
       {status === "error" && (
-        <div className="rounded-lg border border-danger/30 bg-danger/10 p-4">
-          <Alert
-            type="error"
-            title={t("settings:manageCharacters.loadError.title", {
-              defaultValue: "Couldn't load characters"
-            })}
-            description={
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-sm text-danger">
-                  <p>
-                    {sanitizeServerErrorMessage(
-                      error,
-                      t("settings:manageCharacters.loadError.description", {
-                        defaultValue: "Check your connection and try again."
-                      })
-                    )}
-                  </p>
-                  <p className="mt-1 text-xs text-text-muted">
-                    {buildServerLogHint(
-                      error,
-                      t("settings:manageCharacters.loadError.logHint", {
-                        defaultValue:
-                          "If the issue persists, check server logs for more details."
-                      })
-                    )}
-                  </p>
-                </div>
-                <Button size="small" onClick={() => refetch()}>
-                  {t("common:retry", { defaultValue: "Retry" })}
-                </Button>
-              </div>
-            }
-            showIcon
-            className="border-0 bg-transparent p-0"
-          />
-        </div>
+        <Alert
+          variant="error"
+          title={t("settings:manageCharacters.loadError.title", {
+            defaultValue: "Couldn't load characters"
+          })}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-sm">
+              <p>
+                {sanitizeServerErrorMessage(
+                  error,
+                  t("settings:manageCharacters.loadError.description", {
+                    defaultValue: "Check your connection and try again."
+                  })
+                )}
+              </p>
+              <p className="mt-1 text-xs text-text-muted">
+                {buildServerLogHint(
+                  error,
+                  t("settings:manageCharacters.loadError.logHint", {
+                    defaultValue:
+                      "If the issue persists, check server logs for more details."
+                  })
+                )}
+              </p>
+            </div>
+            <Button size="small" onClick={() => refetch()}>
+              {t("common:retry", { defaultValue: "Retry" })}
+            </Button>
+          </div>
+        </Alert>
       )}
       {status === "pending" && <Skeleton active paragraph={{ rows: 6 }} />}
       {status === "success" &&
@@ -1486,14 +1496,14 @@ export const CharacterListContent: React.FC<CharacterListContentProps> = (props)
                             key: 'export-json',
                             icon: <Download className="w-4 h-4" />,
                             label: t("settings:manageCharacters.export.json", { defaultValue: "Export as JSON" }),
-                            disabled: exporting === (record.id || record.slug || record.name),
+                            disabled: exporting === String(record.id || record.slug || record.name),
                             onClick: () => handleExport(record, 'json')
                           },
                           {
                             key: 'export-png',
                             icon: <Download className="w-4 h-4" />,
                             label: t("settings:manageCharacters.export.png", { defaultValue: "Export as PNG (with metadata)" }),
-                            disabled: exporting === (record.id || record.slug || record.name),
+                            disabled: exporting === String(record.id || record.slug || record.name),
                             onClick: () => handleExport(record, 'png')
                           }
                         ]
@@ -1636,11 +1646,13 @@ export const CharacterListContent: React.FC<CharacterListContentProps> = (props)
             attachedWorldBooks={previewCharacterWorldBooks}
             attachedWorldBooksLoading={previewCharacterWorldBooksLoading}
             launchedFromWorldBooks={crossNavigationContext.launchedFromWorldBooks}
-            launchedFromWorldBookId={crossNavigationContext.focusWorldBookId}
+            launchedFromWorldBookId={normalizeWorldBookId(
+              crossNavigationContext.focusWorldBookId
+            )}
             deleting={deleting}
             exporting={
               !!exporting &&
-              exporting === (previewCharacter.id || previewCharacter.slug || previewCharacter.name)
+              exporting === String(previewCharacter.id || previewCharacter.slug || previewCharacter.name)
             }
           />
         </React.Suspense>

@@ -1,5 +1,6 @@
 import React from "react"
-import { Alert, Button, Checkbox, Input, Modal, Radio, message } from "antd"
+import { Button, Checkbox, Input, Modal, Radio, message } from "antd"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 import { useTranslation } from "react-i18next"
 import { useWorkspaceStore } from "@/store/workspace"
 import type {
@@ -11,6 +12,7 @@ import {
   scheduleWorkspaceUndoAction,
   undoWorkspaceAction
 } from "./undo-manager"
+import { renderWorkspaceMessageActionContent } from "./workspace-message-content"
 
 export type TransferSourcesModalEntryPoint = "sources" | "header"
 
@@ -274,15 +276,16 @@ export const TransferSourcesModal: React.FC<TransferSourcesModalProps> = ({
       setSubmitError(null)
 
       const undoMessageKey = `workspace-transfer-undo-${undoHandle.id}`
+      const transferContent = t(
+        "playground:sources.transferUndoAvailable",
+        "Sources transferred. You can undo for a few seconds."
+      )
       const messageConfig = {
         key: undoMessageKey,
         type: "warning",
         duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-        content: t(
-          "playground:sources.transferUndoAvailable",
-          "Sources transferred. You can undo for a few seconds."
-        ),
-        btn: (
+        content: renderWorkspaceMessageActionContent(
+          transferContent,
           <Button
             size="small"
             type="link"
@@ -314,12 +317,7 @@ export const TransferSourcesModal: React.FC<TransferSourcesModalProps> = ({
           messageApi as { warning?: (content: string) => void }
         ).warning
         if (typeof maybeWarning === "function") {
-          maybeWarning(
-            t(
-              "playground:sources.transferUndoAvailable",
-              "Sources transferred. You can undo for a few seconds."
-            )
-          )
+          maybeWarning(transferContent)
         }
       }
     } catch (error) {

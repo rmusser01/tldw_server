@@ -5,7 +5,6 @@
 
 import React, { useEffect, useMemo, useState } from "react"
 import {
-  Alert,
   Button,
   Card,
   Collapse,
@@ -36,6 +35,7 @@ import {
 } from "../hooks/useRuns"
 import { useEvaluationsList } from "../hooks/useEvaluations"
 import { useEvaluationsStore } from "@/store/evaluations"
+import { EvaluationRecoveryCallout } from "../components/EvaluationRecoveryCallout"
 import {
   CopyButton,
   JsonEditor,
@@ -107,9 +107,19 @@ export const RunsTab: React.FC = () => {
   const { data: evalListResp } = useEvaluationsList({ limit: 20 })
   const { data: rateLimitsResp, isLoading: rateLimitsLoading, isError: rateLimitsError } =
     useRateLimits()
-  const { data: runsListResp, isLoading: runsLoading, isError: runsError } =
+  const {
+    data: runsListResp,
+    isLoading: runsLoading,
+    isError: runsError,
+    error: runsErrorValue
+  } =
     useRunsList(selectedEvalId)
-  const { data: runDetailResp, isLoading: runDetailLoading, isError: runDetailError } =
+  const {
+    data: runDetailResp,
+    isLoading: runDetailLoading,
+    isError: runDetailError,
+    error: runDetailErrorValue
+  } =
     useRunDetail(selectedRunId)
   const { data: compareRunAResp } = useRunDetail(compareRunAId, {
     enablePolling: false,
@@ -289,15 +299,19 @@ export const RunsTab: React.FC = () => {
             </Text>
           ) : (
             <>
-              <Alert
-                type="info"
-                showIcon
-                className="mb-2 text-xs"
-                title={t("evaluations:runPollingHint", {
-                  defaultValue:
-                    "Runs execute asynchronously. The UI polls every ~3s until status leaves running/pending."
-                })}
-              />
+              <div className="mb-2 rounded-md border border-border bg-bg-muted/40 p-3 text-xs text-text-muted">
+                <Text strong className="block text-text">
+                  {t("evaluations:runPollingTitle", {
+                    defaultValue: "Run status updates"
+                  })}
+                </Text>
+                <p className="mb-0 mt-1">
+                  {t("evaluations:runPollingHint", {
+                    defaultValue:
+                      "Runs execute asynchronously. The UI polls every ~3s until status leaves running/pending."
+                  })}
+                </p>
+              </div>
               <Form form={runForm} layout="vertical" size="small">
                 <Form.Item
                   label={t("evaluations:runModelLabelShort", {
@@ -445,12 +459,13 @@ export const RunsTab: React.FC = () => {
                   <Spin />
                 </div>
               ) : runsError || runsListResp?.ok === false ? (
-                <Alert
-                  type="warning"
-                  showIcon
+                <EvaluationRecoveryCallout
                   title={t("evaluations:runsErrorTitle", {
                     defaultValue: "Unable to load runs"
                   })}
+                  endpoint={`/api/v1/evaluations/${selectedEvalId}/runs`}
+                  error={runsErrorValue}
+                  response={runsListResp}
                 />
               ) : runs.length === 0 ? (
                 <Empty
@@ -651,12 +666,13 @@ export const RunsTab: React.FC = () => {
               <Spin />
             </div>
           ) : runDetailError || runDetailResp?.ok === false ? (
-            <Alert
-              type="warning"
-              showIcon
+            <EvaluationRecoveryCallout
               title={t("evaluations:runDetailErrorTitle", {
                 defaultValue: "Unable to load run details"
               })}
+              endpoint={`/api/v1/evaluations/runs/${selectedRunId}`}
+              error={runDetailErrorValue}
+              response={runDetailResp}
             />
           ) : runDetail ? (
             <div className="space-y-2 text-xs">

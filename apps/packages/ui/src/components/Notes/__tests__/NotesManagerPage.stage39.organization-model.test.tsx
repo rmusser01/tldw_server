@@ -167,6 +167,19 @@ const renderPage = () => {
   )
 }
 
+const selectKeywordPickerOption = async (pickerDialog: HTMLElement, keywordSegment: string) => {
+  const option = within(pickerDialog).getByTestId(`notes-keyword-picker-option-${keywordSegment}`)
+  const checkbox =
+    option instanceof HTMLInputElement && option.type === "checkbox"
+      ? option
+      : option.querySelector<HTMLInputElement>('input[type="checkbox"]')
+  expect(checkbox).toBeTruthy()
+  fireEvent.click(checkbox as HTMLInputElement)
+  await waitFor(() => {
+    expect(checkbox).toBeChecked()
+  })
+}
+
 let seededNotebookSettings: Array<{ id: number; name: string; keywords: string[] }> = []
 let seededServerNotebooks: Array<{ id: number; name: string; keywords: string[] }> = []
 
@@ -345,7 +358,7 @@ describe("NotesManagerPage stage 39 organization model", () => {
       (modalBody.closest(".ant-modal") as HTMLElement | null) ??
       (modalBody.closest(".ant-modal-root") as HTMLElement | null) ??
       document.body
-    fireEvent.click(within(pickerDialog).getByText(/^research\b/i))
+    await selectKeywordPickerOption(pickerDialog, "research")
     fireEvent.click(within(pickerDialog).getByRole("button", { name: "Apply filters" }))
     await waitFor(() => {
       expect(screen.getByTestId("notes-save-notebook")).not.toBeDisabled()
@@ -400,10 +413,65 @@ describe("NotesManagerPage stage 39 organization model", () => {
     })
   })
 
+  it("shows retryable list errors in timeline view", async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+      if (path.startsWith("/api/v1/notes/?")) {
+        throw new Error("List unavailable")
+      }
+      if (path === "/api/v1/admin/notes/title-settings" && method === "GET") {
+        return {
+          llm_enabled: false,
+          default_strategy: "heuristic",
+          effective_strategy: "heuristic",
+          strategies: ["heuristic"]
+        }
+      }
+      if (path.startsWith("/api/v1/notes/collections?") && method === "GET") {
+        return { collections: [] }
+      }
+      return {}
+    })
+
+    renderPage()
+    fireEvent.click(screen.getByTestId("notes-view-mode-timeline"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-list-error-state")).toHaveTextContent("List unavailable")
+    })
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+  })
+
   it("renders keyboard-focusable help buttons for organize and tags guidance", async () => {
     renderPage()
 
     expect(await screen.findByRole("button", { name: "Organize help" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Tags help" })).toBeInTheDocument()
+  })
+
+  it("offers a captured view backed by the reserved captured tag", async () => {
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-list-panel-mock")).toHaveTextContent("2")
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Captured" }))
+
+    await waitFor(() => {
+      const searchPaths = mockBgRequest.mock.calls
+        .map((args) => String((args[0] as { path?: string }).path || ""))
+        .filter((path) => path.startsWith("/api/v1/notes/search/?"))
+
+      expect(searchPaths.some((path) => path.includes("tokens=captured"))).toBe(true)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-list-panel-mock")).toHaveTextContent("1")
+      expect(screen.getByTestId("notes-active-filter-summary-details")).toHaveTextContent(
+        "Tags: captured"
+      )
+    })
   })
 })

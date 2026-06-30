@@ -29,8 +29,27 @@ import {
   ACCESS_LEVEL_LABELS,
   ACCESS_LEVEL_COLORS,
   type AccessLevel,
+  type ShareResponse,
   type ShareScopeType,
+  type TokenResponse,
 } from "@/types/sharing"
+
+const formatShareScopeLabel = (
+  record: Pick<ShareResponse, "share_scope_type" | "share_scope_id">
+) =>
+  `${record.share_scope_type === "team" ? "Team" : "Org"} #${record.share_scope_id}`
+
+const formatShareExpiry = (value?: string | null) => {
+  if (!value) return "No expiry"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "Invalid expiry"
+  return `Expires ${new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC"
+  }).format(date)}`
+}
 
 interface ShareDialogProps {
   workspaceId: string
@@ -136,7 +155,12 @@ const TeamShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
       <Form.Item
         name="scope_id"
         label="Team / Org ID"
-        rules={[{ required: true, message: "Enter the team or org ID" }]}
+        rules={[
+          {
+            required: true,
+            message: "Enter a team or organization ID before sharing."
+          }
+        ]}
       >
         <InputNumber style={{ width: "100%" }} min={1} placeholder="Enter ID" />
       </Form.Item>
@@ -201,10 +225,20 @@ const LinkShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
     }
   }
 
-  const copyLink = () => {
+  const copyLink = async () => {
     if (generatedLink) {
-      navigator.clipboard.writeText(generatedLink)
-      message.success("Link copied to clipboard")
+      if (!navigator.clipboard?.writeText) {
+        message.error("Clipboard access is not supported in this browser context")
+        return
+      }
+      try {
+        await navigator.clipboard.writeText(generatedLink)
+        message.success("Share link copied to clipboard")
+      } catch (err) {
+        message.error(
+          err instanceof Error ? err.message : "Failed to copy share link"
+        )
+      }
     }
   }
 
@@ -265,11 +299,19 @@ const LinkShareTab: React.FC<{ workspaceId: string }> = ({ workspaceId }) => {
 
       {generatedLink && (
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-border bg-surface p-3">
-          <Input value={generatedLink} readOnly className="flex-1" />
+          <Input
+            aria-label="Generated share link"
+            value={generatedLink}
+            readOnly
+            className="flex-1"
+          />
           <Tooltip title="Copy link">
             <Button
+              aria-label="Copy generated share link"
               icon={<Copy className="h-4 w-4" />}
-              onClick={copyLink}
+              onClick={() => {
+                void copyLink()
+              }}
             />
           </Tooltip>
         </div>
@@ -288,15 +330,58 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
   const { data: tokensData } = useShareTokens()
   const revokeTokenMutation = useRevokeToken()
 
+  const confirmRevokeShare = (record: ShareResponse) => {
+    const scopeLabel = formatShareScopeLabel(record)
+    Modal.confirm({
+      title: `Revoke ${scopeLabel}?`,
+      content: "People in this scope will lose access to this workspace.",
+      okText: "Revoke",
+      okButtonProps: { danger: true },
+      cancelText: "Cancel",
+      onOk: async (close) => {
+        try {
+          await revokeMutation.mutateAsync(record.id)
+          message.success("Share revoked")
+          close?.()
+        } catch (err) {
+          message.error(
+            err instanceof Error ? err.message : "Failed to revoke share"
+          )
+          throw err
+        }
+      }
+    })
+  }
+
+  const confirmRevokeToken = (record: TokenResponse) => {
+    Modal.confirm({
+      title: `Revoke share link ${record.token_prefix}?`,
+      content: "Anyone using this link will lose access immediately.",
+      okText: "Revoke",
+      okButtonProps: { danger: true },
+      cancelText: "Cancel",
+      onOk: async (close) => {
+        try {
+          await revokeTokenMutation.mutateAsync(record.id)
+          message.success("Share link revoked")
+          close?.()
+        } catch (err) {
+          message.error(
+            err instanceof Error ? err.message : "Failed to revoke share link"
+          )
+          throw err
+        }
+      }
+    })
+  }
+
   const shareColumns = [
     {
       title: "Scope",
       dataIndex: "share_scope_type",
       key: "scope",
-      render: (type: string, record: any) => (
-        <span>
-          {type === "team" ? "Team" : "Org"} #{record.share_scope_id}
-        </span>
+      render: (_type: string, record: ShareResponse) => (
+        <span>{formatShareScopeLabel(record)}</span>
       ),
     },
     {
@@ -313,25 +398,27 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
       title: "Clone",
       dataIndex: "allow_clone",
       key: "clone",
-      render: (v: boolean) => (v ? "Yes" : "No"),
+      render: (v: boolean) => (v ? "Clone allowed" : "Clone disabled"),
     },
     {
       title: "",
       key: "actions",
-      render: (_: any, record: any) => (
-        <Button
-          type="text"
-          danger
-          size="small"
-          icon={<Trash2 className="h-3.5 w-3.5" />}
-          loading={revokeMutation.isPending}
-          onClick={() => {
-            revokeMutation.mutate(record.id)
-          }}
-        >
-          Revoke
-        </Button>
-      ),
+      render: (_: unknown, record: ShareResponse) => {
+        const scopeLabel = formatShareScopeLabel(record)
+        return (
+          <Button
+            type="text"
+            danger
+            size="small"
+            icon={<Trash2 className="h-3.5 w-3.5" />}
+            loading={revokeMutation.isPending}
+            aria-label={`Revoke team share ${scopeLabel}`}
+            onClick={() => confirmRevokeShare(record)}
+          >
+            Revoke
+          </Button>
+        )
+      },
     },
   ]
 
@@ -343,12 +430,28 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
       render: (p: string) => <code>{p}...</code>,
     },
     {
+      title: "Access",
+      dataIndex: "access_level",
+      key: "access",
+      render: (level: string) => (
+        <Tag color={ACCESS_LEVEL_COLORS[level] || "default"}>
+          {ACCESS_LEVEL_LABELS[level as AccessLevel] || level}
+        </Tag>
+      ),
+    },
+    {
+      title: "Clone",
+      dataIndex: "allow_clone",
+      key: "clone",
+      render: (v: boolean) => (v ? "Clone allowed" : "Clone disabled"),
+    },
+    {
       title: "Uses",
       key: "uses",
-      render: (_: any, record: any) => (
+      render: (_: unknown, record: TokenResponse) => (
         <span>
           {record.use_count}
-          {record.max_uses ? ` / ${record.max_uses}` : ""}
+          {record.max_uses ? ` / ${record.max_uses} uses` : " uses"}
         </span>
       ),
     },
@@ -356,12 +459,18 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
       title: "Password",
       dataIndex: "is_password_protected",
       key: "pw",
-      render: (v: boolean) => (v ? "Yes" : "No"),
+      render: (v: boolean) => (v ? "Password required" : "No password"),
+    },
+    {
+      title: "Expiry",
+      dataIndex: "expires_at",
+      key: "expires",
+      render: (value: string | null | undefined) => formatShareExpiry(value),
     },
     {
       title: "",
       key: "actions",
-      render: (_: any, record: any) =>
+      render: (_: unknown, record: TokenResponse) =>
         !record.is_revoked && (
           <Button
             type="text"
@@ -369,9 +478,8 @@ const ActiveSharesTab: React.FC<{ workspaceId: string }> = ({
             size="small"
             icon={<Trash2 className="h-3.5 w-3.5" />}
             loading={revokeTokenMutation.isPending}
-            onClick={() => {
-              revokeTokenMutation.mutate(record.id)
-            }}
+            aria-label={`Revoke share link ${record.token_prefix}`}
+            onClick={() => confirmRevokeToken(record)}
           >
             Revoke
           </Button>

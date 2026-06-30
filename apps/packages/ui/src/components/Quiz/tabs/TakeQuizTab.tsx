@@ -1,7 +1,6 @@
 import React from "react"
 import { Link } from "react-router-dom"
 import {
-  Alert,
   Button,
   Card,
   Checkbox,
@@ -21,6 +20,7 @@ import {
   message
 } from "antd"
 import { useTranslation } from "react-i18next"
+import { Alert as DesignSystemAlert, Badge as DesignSystemBadge } from "@/components/ui/primitives"
 import {
   PlayCircleOutlined,
   ClockCircleOutlined,
@@ -1098,25 +1098,23 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
           </Button>
         )}
         {hintUsed && (
-          <Alert
-            type="info"
-            showIcon
+          <DesignSystemAlert
+            variant="info"
             title={t("option:quiz.hint", { defaultValue: "Hint" })}
-            description={(
-              <div className="space-y-1">
-                <QuizMarkdown content={hint} className="text-sm text-text-subtle [&>p]:my-1" />
-                {hintPenaltyPoints > 0 && (
-                  <Typography.Text className="block text-xs text-text-muted">
-                    {t("option:quiz.hintPenaltyAppliedOnCorrect", {
-                      defaultValue:
-                        "If your answer is correct, {{points}} point(s) will be deducted for using this hint.",
-                      points: hintPenaltyPoints
-                    })}
-                  </Typography.Text>
-                )}
-              </div>
-            )}
-          />
+          >
+            <div className="space-y-1">
+              <QuizMarkdown content={hint} className="text-sm text-text-subtle [&>p]:my-1" />
+              {hintPenaltyPoints > 0 && (
+                <Typography.Text className="block text-xs text-text-muted">
+                  {t("option:quiz.hintPenaltyAppliedOnCorrect", {
+                    defaultValue:
+                      "If your answer is correct, {{points}} point(s) will be deducted for using this hint.",
+                    points: hintPenaltyPoints
+                  })}
+                </Typography.Text>
+              )}
+            </div>
+          </DesignSystemAlert>
         )}
       </div>
     )
@@ -1291,23 +1289,23 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
 
     return (
       <div className="space-y-4">
-        <Alert
-          type={passed ? "success" : "warning"}
+        <DesignSystemAlert
+          variant={passed ? "success" : "warning"}
           title={t("option:quiz.scoreSummary", {
             defaultValue: "Score: {{score}} / {{total}} ({{percent}}%)",
             score,
             total,
             percent: percentage
           })}
-          description={quizDetails?.passing_score != null
+        >
+          {quizDetails?.passing_score != null
             ? t("option:quiz.passingScoreLabel", { defaultValue: "Pass" }) +
               `: ${quizDetails.passing_score}%`
             : t("option:quiz.noPassingScoreDefault", {
-              defaultValue: "No passing score set. Using default: {{score}}%.",
-              score: DEFAULT_PASSING_SCORE
-            })}
-          showIcon
-        />
+                defaultValue: "No passing score set. Using default: {{score}}%.",
+                score: DEFAULT_PASSING_SCORE
+              })}
+        </DesignSystemAlert>
 
         <List
           dataSource={questions}
@@ -1323,7 +1321,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
             return (
               <List.Item>
                 <div className="w-full space-y-2">
-                    <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start justify-between gap-3">
                     <div className="font-medium">
                       <span className="block text-xs text-text-muted">
                         {t("option:quiz.questionNumberLabel", {
@@ -1333,14 +1331,18 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                       </span>
                       <QuizMarkdown content={question.question_text} className="[&>p]:my-1" />
                     </div>
-                    <Tag
-                      color={isCorrect ? "green" : "red"}
-                      icon={isCorrect ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+                    <DesignSystemBadge
+                      variant={isCorrect ? "success" : "danger"}
+                      size="md"
+                      className="inline-flex shrink-0 items-center gap-1"
                     >
-                      {isCorrect
-                        ? t("option:quiz.correct", { defaultValue: "Correct" })
-                        : t("option:quiz.incorrect", { defaultValue: "Incorrect" })}
-                    </Tag>
+                      {isCorrect ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+                      <span>
+                        {isCorrect
+                          ? t("option:quiz.correct", { defaultValue: "Correct" })
+                          : t("option:quiz.incorrect", { defaultValue: "Incorrect" })}
+                      </span>
+                    </DesignSystemBadge>
                   </div>
                   <div className="text-sm text-text-muted">
                     {t("option:quiz.yourAnswer", { defaultValue: "Your answer" })}:{" "}
@@ -1575,49 +1577,47 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
       })
       : null
     return (
-      <Alert
+      <DesignSystemAlert
         data-testid="quiz-assignment-alert"
-        type={assignmentIsOverdue ? "warning" : "info"}
-        showIcon
-        closable
-        onClose={() => setAssignmentAlertDismissed(true)}
+        variant={assignmentIsOverdue ? "warning" : "info"}
+        dismissible
+        onDismiss={() => setAssignmentAlertDismissed(true)}
         title={t("option:quiz.assignmentActive", {
           defaultValue: "This quiz was opened from a shared assignment link."
         })}
-        description={(
-          <div className="space-y-1 text-sm">
-            {assignmentPastDueMessage && (
-              <Typography.Text className="block">
-                {assignmentPastDueMessage}
-              </Typography.Text>
-            )}
-            {assignmentDueAtLabel && (
-              <Typography.Text className="block">
-                {t("option:quiz.assignmentDueAt", {
-                  defaultValue: "Due: {{date}}",
-                  date: assignmentDueAtLabel
-                })}
-              </Typography.Text>
-            )}
-            {normalizedAssignedByRole && (
-              <Typography.Text className="block">
-                {t("option:quiz.assignmentAssignedByRole", {
-                  defaultValue: "Assigned by role: {{role}}",
-                  role: normalizedAssignedByRole
-                })}
-              </Typography.Text>
-            )}
-            {normalizedAssignmentNote && (
-              <Typography.Text className="block">
-                {t("option:quiz.assignmentNoteLabel", {
-                  defaultValue: "Note: {{note}}",
-                  note: normalizedAssignmentNote
-                })}
-              </Typography.Text>
-            )}
-          </div>
-        )}
-      />
+      >
+        <div className="space-y-1 text-sm">
+          {assignmentPastDueMessage && (
+            <Typography.Text className="block">
+              {assignmentPastDueMessage}
+            </Typography.Text>
+          )}
+          {assignmentDueAtLabel && (
+            <Typography.Text className="block">
+              {t("option:quiz.assignmentDueAt", {
+                defaultValue: "Due: {{date}}",
+                date: assignmentDueAtLabel
+              })}
+            </Typography.Text>
+          )}
+          {normalizedAssignedByRole && (
+            <Typography.Text className="block">
+              {t("option:quiz.assignmentAssignedByRole", {
+                defaultValue: "Assigned by role: {{role}}",
+                role: normalizedAssignedByRole
+              })}
+            </Typography.Text>
+          )}
+          {normalizedAssignmentNote && (
+            <Typography.Text className="block">
+              {t("option:quiz.assignmentNoteLabel", {
+                defaultValue: "Note: {{note}}",
+                note: normalizedAssignmentNote
+              })}
+            </Typography.Text>
+          )}
+        </div>
+      </DesignSystemAlert>
     )
   }
 
@@ -1661,9 +1661,8 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
           </Descriptions.Item>
         </Descriptions>
         {hasAssignmentContext && (
-          <Alert
-            type={assignmentIsOverdue ? "warning" : "info"}
-            showIcon
+          <DesignSystemAlert
+            variant={assignmentIsOverdue ? "warning" : "info"}
             title={assignmentIsOverdue
               ? t("option:quiz.assignmentPastDue", {
                 defaultValue: "This shared assignment is past due."
@@ -1671,31 +1670,29 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
               : t("option:quiz.assignmentPreflight", {
                 defaultValue: "Shared assignment details"
               })}
-            description={(
-              <div className="space-y-1 text-sm">
-                {assignmentDueAtLabel && (
-                  <Typography.Text className="block">
-                    {t("option:quiz.assignmentDueAt", {
-                      defaultValue: "Due: {{date}}",
-                      date: assignmentDueAtLabel
-                    })}
-                  </Typography.Text>
-                )}
-                {normalizedAssignmentNote && (
-                  <Typography.Text className="block">
-                    {t("option:quiz.assignmentNoteLabel", {
-                      defaultValue: "Note: {{note}}",
-                      note: normalizedAssignmentNote
-                    })}
-                  </Typography.Text>
-                )}
-              </div>
-            )}
-          />
+          >
+            <div className="space-y-1 text-sm">
+              {assignmentDueAtLabel && (
+                <Typography.Text className="block">
+                  {t("option:quiz.assignmentDueAt", {
+                    defaultValue: "Due: {{date}}",
+                    date: assignmentDueAtLabel
+                  })}
+                </Typography.Text>
+              )}
+              {normalizedAssignmentNote && (
+                <Typography.Text className="block">
+                  {t("option:quiz.assignmentNoteLabel", {
+                    defaultValue: "Note: {{note}}",
+                    note: normalizedAssignmentNote
+                  })}
+                </Typography.Text>
+              )}
+            </div>
+          </DesignSystemAlert>
         )}
-        <Alert
-          type="info"
-          showIcon
+        <DesignSystemAlert
+          variant="info"
           title={t("option:quiz.retakeBehavior", {
             defaultValue: "Retake uses the same questions. Answer options may be reshuffled."
           })}
@@ -1707,11 +1704,10 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   const renderAutoSaveWarning = () => {
     if (!storageUnavailable || autoSaveWarningDismissed) return null
     return (
-      <Alert
-        type="warning"
-        showIcon
-        closable
-        onClose={() => setAutoSaveWarningDismissed(true)}
+      <DesignSystemAlert
+        variant="warning"
+        dismissible
+        onDismiss={() => setAutoSaveWarningDismissed(true)}
         title={t("option:quiz.autosaveUnavailable", {
           defaultValue:
             "Auto-save unavailable — your progress won't be preserved if you navigate away."
@@ -1724,9 +1720,8 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     if (!queuedSubmission) return null
     const queuedAtLabel = new Date(queuedSubmission.queuedAt).toLocaleTimeString()
     return (
-      <Alert
-        type="error"
-        showIcon
+      <DesignSystemAlert
+        variant="error"
         title={queuedSubmission.allowPartial
           ? t("option:quiz.submitQueueTitleTimer", {
             defaultValue: "Time expired. Submission pending retry."
@@ -1734,60 +1729,54 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
           : t("option:quiz.submitQueueTitle", {
             defaultValue: "Submission failed. Answers queued locally."
           })}
-        description={(
-          <div className="space-y-2">
+        action={{
+          label: t("option:quiz.retrySubmission", { defaultValue: "Retry submission" }),
+          onClick: () => {
+            void retryQueuedSubmission("manual")
+          },
+          loading: submitAttemptMutation.isPending || isRetryingQueuedSubmission,
+          disabled: !isOnline || submitAttemptMutation.isPending || isRetryingQueuedSubmission,
+          variant: "primary"
+        }}
+      >
+        <div className="space-y-2">
+          <Typography.Text className="block text-xs text-text-muted">
+            {t("option:quiz.submitQueueMeta", {
+              defaultValue:
+                "Queued at {{time}}. Retry attempts: {{count}}.",
+              time: queuedAtLabel,
+              count: queuedSubmission.retryCount
+            })}
+          </Typography.Text>
+          {queuedSubmission.lastError && (
             <Typography.Text className="block text-xs text-text-muted">
-              {t("option:quiz.submitQueueMeta", {
-                defaultValue:
-                  "Queued at {{time}}. Retry attempts: {{count}}.",
-                time: queuedAtLabel,
-                count: queuedSubmission.retryCount
+              {t("option:quiz.submitQueueLastError", {
+                defaultValue: "Last error: {{error}}",
+                error: queuedSubmission.lastError
               })}
             </Typography.Text>
-            {queuedSubmission.lastError && (
-              <Typography.Text className="block text-xs text-text-muted">
-                {t("option:quiz.submitQueueLastError", {
-                  defaultValue: "Last error: {{error}}",
-                  error: queuedSubmission.lastError
-                })}
-              </Typography.Text>
-            )}
-            <Typography.Text className="block text-xs text-text-muted">
-              {isOnline
-                ? t("option:quiz.submitQueueOnlineHint", {
-                  defaultValue:
-                    "You're online. Retry now to submit immediately, or we'll retry when connectivity changes."
-                })
-                : t("option:quiz.submitQueueOfflineHint", {
-                  defaultValue:
-                    "You're offline. We'll retry automatically when your connection returns."
-                })}
+          )}
+          <Typography.Text className="block text-xs text-text-muted">
+            {isOnline
+              ? t("option:quiz.submitQueueOnlineHint", {
+                defaultValue:
+                  "You're online. Retry now to submit immediately, or we'll retry when connectivity changes."
+              })
+              : t("option:quiz.submitQueueOfflineHint", {
+                defaultValue:
+                  "You're offline. We'll retry automatically when your connection returns."
+              })}
+          </Typography.Text>
+          {submissionQueueStorageUnavailable && (
+            <Typography.Text className="block text-xs text-text-warning">
+              {t("option:quiz.submitQueueStorageUnavailable", {
+                defaultValue:
+                  "Local queue storage is unavailable in this browser session."
+              })}
             </Typography.Text>
-            {submissionQueueStorageUnavailable && (
-              <Typography.Text className="block text-xs text-text-warning">
-                {t("option:quiz.submitQueueStorageUnavailable", {
-                  defaultValue:
-                    "Local queue storage is unavailable in this browser session."
-                })}
-              </Typography.Text>
-            )}
-          </div>
-        )}
-        action={(
-          <Button
-            size="small"
-            type="primary"
-            className="min-h-11 px-3"
-            onClick={() => {
-              void retryQueuedSubmission("manual")
-            }}
-            loading={submitAttemptMutation.isPending || isRetryingQueuedSubmission}
-            disabled={!isOnline || submitAttemptMutation.isPending || isRetryingQueuedSubmission}
-          >
-            {t("option:quiz.retrySubmission", { defaultValue: "Retry submission" })}
-          </Button>
-        )}
-      />
+          )}
+        </div>
+      </DesignSystemAlert>
     )
   }
 
@@ -1896,23 +1885,27 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
         {renderStartConfirmationModal()}
         <Card
           title={quizDetails?.name || t("option:quiz.reviewMode", { defaultValue: "Review Mode" })}
-          extra={<Tag color="blue">{t("option:quiz.reviewMode", { defaultValue: "Review Mode" })}</Tag>}
+          extra={
+            <DesignSystemBadge variant="info">
+              {t("option:quiz.reviewMode", { defaultValue: "Review Mode" })}
+            </DesignSystemBadge>
+          }
         >
           <div className="space-y-4">
-            <Alert
-              type="info"
-              showIcon
+            <DesignSystemAlert
+              variant="info"
               title={t("option:quiz.reviewModeHint", {
                 defaultValue:
                   "Review mode is read-only. No graded attempt is created and no score is recorded."
               })}
-              description={studyPoolSizePreference !== "all"
+            >
+              {studyPoolSizePreference !== "all"
                 ? t("option:quiz.poolSessionSummary", {
-                  defaultValue: "Showing {{shown}} questions from a randomized pool.",
-                  shown: questions.length
-                })
-                : undefined}
-            />
+                    defaultValue: "Showing {{shown}} questions from a randomized pool.",
+                    shown: questions.length
+                  })
+                : null}
+            </DesignSystemAlert>
             <List
               dataSource={questions}
               renderItem={(question, index) => {
@@ -1978,9 +1971,9 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
           title={quizDetails?.name || t("option:quiz.practiceMode", { defaultValue: "Practice Mode" })}
           extra={
             <Space>
-              <Tag color="processing">
+              <DesignSystemBadge variant="primary">
                 {t("option:quiz.practiceMode", { defaultValue: "Practice Mode" })}
-              </Tag>
+              </DesignSystemBadge>
               <Tag icon={<QuestionCircleOutlined />}>
                 {answeredCount}/{questions.length}
               </Tag>
@@ -2002,35 +1995,33 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
           }
         >
           <div className="space-y-4">
-            <Alert
-              type="info"
-              showIcon
+            <DesignSystemAlert
+              variant="info"
               title={t("option:quiz.practiceModeHint", {
                 defaultValue:
                   "Practice mode gives immediate feedback after each answer and does not create a graded attempt."
               })}
-              description={(
-                <div className="space-y-1">
-                  {studyPoolSizePreference !== "all" && (
-                    <Typography.Text className="block text-sm">
-                      {t("option:quiz.poolSessionSummary", {
-                        defaultValue: "Showing {{shown}} questions from a randomized pool.",
-                        shown: questions.length
-                      })}
-                    </Typography.Text>
-                  )}
-                  {practiceQuestionTimerPreference !== "off" && (
-                    <Typography.Text className="block text-sm">
-                      {t("option:quiz.practiceTimerHint", {
-                        defaultValue:
-                          "Per-question timer is enabled ({{seconds}}s). Focus auto-advances when time expires.",
-                        seconds: practiceQuestionTimerPreference
-                      })}
-                    </Typography.Text>
-                  )}
-                </div>
-              )}
-            />
+            >
+              <div className="space-y-1">
+                {studyPoolSizePreference !== "all" && (
+                  <Typography.Text className="block text-sm">
+                    {t("option:quiz.poolSessionSummary", {
+                      defaultValue: "Showing {{shown}} questions from a randomized pool.",
+                      shown: questions.length
+                    })}
+                  </Typography.Text>
+                )}
+                {practiceQuestionTimerPreference !== "off" && (
+                  <Typography.Text className="block text-sm">
+                    {t("option:quiz.practiceTimerHint", {
+                      defaultValue:
+                        "Per-question timer is enabled ({{seconds}}s). Focus auto-advances when time expires.",
+                      seconds: practiceQuestionTimerPreference
+                    })}
+                  </Typography.Text>
+                )}
+              </div>
+            </DesignSystemAlert>
             <Card size="small">
               <div className="space-y-2">
                 <Typography.Text className="text-xs text-text-muted">
@@ -2096,34 +2087,32 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
                       {renderAnswerInput(question)}
                       {renderHintSupport(question)}
                       {feedback != null && (
-                        <Alert
-                          type={feedback ? "success" : "error"}
-                          showIcon
+                        <DesignSystemAlert
+                          variant={feedback ? "success" : "error"}
                           title={feedback
                             ? t("option:quiz.correct", { defaultValue: "Correct" })
                             : t("option:quiz.incorrect", { defaultValue: "Incorrect" })}
-                          description={!feedback
-                            ? (
-                              <div className="space-y-1">
-                                <Typography.Text className="block text-sm">
-                                  {t("option:quiz.correctAnswerLabel", {
-                                    defaultValue: "Correct answer"
-                                  })}: {formatQuestionAnswer(question, correctAnswer)}
-                                </Typography.Text>
-                                {(question as QuestionPublic & { explanation?: string | null }).explanation && (
-                                  <QuizMarkdown
-                                    content={(question as QuestionPublic & { explanation?: string | null }).explanation || ""}
-                                    className="text-sm text-text-subtle"
-                                  />
-                                )}
-                                <SourceCitations
-                                  citations={getQuestionSourceCitations(question)}
-                                  fallbackMediaId={quizDetails?.media_id ?? null}
+                        >
+                          {!feedback && (
+                            <div className="space-y-1">
+                              <Typography.Text className="block text-sm">
+                                {t("option:quiz.correctAnswerLabel", {
+                                  defaultValue: "Correct answer"
+                                })}: {formatQuestionAnswer(question, correctAnswer)}
+                              </Typography.Text>
+                              {(question as QuestionPublic & { explanation?: string | null }).explanation && (
+                                <QuizMarkdown
+                                  content={(question as QuestionPublic & { explanation?: string | null }).explanation || ""}
+                                  className="text-sm text-text-subtle"
                                 />
-                              </div>
-                            )
-                            : undefined}
-                        />
+                              )}
+                              <SourceCitations
+                                citations={getQuestionSourceCitations(question)}
+                                fallbackMediaId={quizDetails?.media_id ?? null}
+                              />
+                            </div>
+                          )}
+                        </DesignSystemAlert>
                       )}
                     </div>
                   </List.Item>
@@ -2214,9 +2203,8 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
             </Card>
 
             {unansweredQuestionNumbers.length > 0 && (
-              <Alert
-                type="warning"
-                showIcon
+              <DesignSystemAlert
+                variant="warning"
                 title={t("option:quiz.unansweredSummary", {
                   defaultValue: "Unanswered questions: {{numbers}}",
                   numbers: unansweredQuestionNumbers.join(", ")
@@ -2339,12 +2327,11 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
       </div>
 
       {highlightNotice && (
-        <Alert
-          type="info"
-          showIcon
+        <DesignSystemAlert
+          variant="info"
           title={highlightNotice}
-          closable
-          onClose={() => setHighlightedQuizId(null)}
+          dismissible
+          onDismiss={() => setHighlightedQuizId(null)}
         />
       )}
 

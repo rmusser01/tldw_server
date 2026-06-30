@@ -25,14 +25,15 @@ const AUDIO_EXTENSIONS = [".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"]
 const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mkv", ".mov", ".avi"]
 const PDF_EXTENSIONS = [".pdf"]
 const EBOOK_EXTENSIONS = [".epub", ".mobi"]
+const HTML_EXTENSIONS = [".html", ".htm", ".xhtml"]
 const DOCUMENT_EXTENSIONS = [
-  ".doc",
   ".docx",
   ".rtf",
-  ".odt",
   ".txt",
   ".md",
-  ".markdown"
+  ".markdown",
+  ".xml",
+  ".json"
 ]
 
 const isSubdomainOf = (host: string, domain: string): boolean =>
@@ -64,13 +65,17 @@ const endsWithAny = (value: string, exts: string[]): boolean =>
 
 const inferMediaTypeFromPath = (
   raw: string,
-  fallback: "html" | "auto"
+  fallback: "html" | "auto",
+  options: { htmlAsDocument?: boolean } = {}
 ): DetectedMediaType => {
   const path = String(raw || "").toLowerCase()
   if (endsWithAny(path, AUDIO_EXTENSIONS)) return "audio"
   if (endsWithAny(path, VIDEO_EXTENSIONS)) return "video"
   if (endsWithAny(path, PDF_EXTENSIONS)) return "pdf"
   if (endsWithAny(path, EBOOK_EXTENSIONS)) return "ebook"
+  if (endsWithAny(path, HTML_EXTENSIONS)) {
+    return options.htmlAsDocument ? "document" : "html"
+  }
   if (endsWithAny(path, DOCUMENT_EXTENSIONS)) return "document"
   return path ? fallback : "auto"
 }
@@ -86,17 +91,19 @@ export const inferMediaTypeFromUrl = (raw: string): DetectedMediaType => {
 }
 
 export const inferMediaTypeFromFilename = (raw: string): DetectedMediaType =>
-  inferMediaTypeFromPath(raw, "auto")
+  inferMediaTypeFromPath(raw, "auto", { htmlAsDocument: true })
 
 export const inferMediaTypeFromMime = (raw: string): DetectedMediaType => {
   const t = String(raw || "").toLowerCase()
   if (!t) return "auto"
   if (t.startsWith("audio/")) return "audio"
+  if (t === "application/ogg") return "audio"
   if (t.startsWith("video/")) return "video"
   if (t.includes("pdf")) return "pdf"
   if (t.includes("epub") || t.includes("mobi")) return "ebook"
   if (t.includes("markdown")) return "document"
   if (t.includes("html")) return "html"
+  if (t.includes("xml") || t.includes("json")) return "document"
   return "auto"
 }
 

@@ -2,6 +2,7 @@ import { tldwClient } from "./TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
 import { emitSplashAfterLoginSuccess } from "@/services/splash-events"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 
 export interface LoginCredentials {
   username: string
@@ -29,6 +30,17 @@ export interface UserInfo {
   email?: string
   role?: string
   is_active: boolean
+}
+
+const API_KEY_PROFILE_PATH = "/api/v1/users/me/profile"
+const API_KEY_VALIDATION_TIMEOUT_MS = 30000
+
+const buildApiKeyValidationUrl = (serverUrl: string): string => {
+  const trimmed = String(serverUrl || "").trim()
+  if (!trimmed) {
+    throw new Error("tldw server not configured")
+  }
+  return new URL(API_KEY_PROFILE_PATH, `${trimmed.replace(/\/+$/, "")}/`).toString()
 }
 
 export class TldwAuthService {
@@ -304,20 +316,37 @@ export class TldwAuthService {
   /**
    * Test API key for single-user mode
    */
-  async testApiKey(_serverUrl: string, apiKey: string): Promise<boolean> {
-    // Validate against a protected endpoint that requires auth.
-    // Keep this as a relative path so request-core does not apply
-    // absolute URL allowlist policy during onboarding validation.
+  async testApiKey(serverUrl: string, apiKey: string): Promise<boolean> {
+    // Validate against the candidate setup endpoint, not the currently
+    // persisted config. First-run setup may be correcting a bad saved URL.
+    const controller = new AbortController()
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      API_KEY_VALIDATION_TIMEOUT_MS
+    )
     try {
-      // Use /api/v1/users/me/profile which requires valid authentication
-      await bgRequest<any>({
-        path: '/api/v1/users/me/profile' as any,
-        method: 'GET' as any,
+      const validationUrl = buildApiKeyValidationUrl(serverUrl)
+      const response = await fetch(validationUrl, {
+        method: 'GET',
         headers: { 'X-API-KEY': apiKey },
-        noAuth: true,
-        timeoutMs: 30000
+        signal: controller.signal
       })
-      return true
+
+      if (response.ok) {
+        return true
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        return false
+      }
+
+      const message =
+        (await response.text().catch(() => "")) ||
+        response.statusText ||
+        `HTTP ${response.status}`
+      const responseError = new Error(message) as Error & { status?: number }
+      responseError.status = response.status
+      throw responseError
     } catch (error: any) {
       const status = Number(
         error?.status ?? error?.statusCode ?? error?.response?.status ?? 0
@@ -344,6 +373,8 @@ export class TldwAuthService {
       }
 
       throw error
+    } finally {
+      clearTimeout(timeoutId)
     }
   }
 
@@ -397,12 +428,21 @@ export class TldwAuthService {
   async getAuthHeaders(): Promise<HeadersInit> {
     const config = await tldwClient.getConfig()
     const headers: HeadersInit = {}
+    const hostedMode = this.isHostedMode()
+
+    if (!hostedMode) {
+      const runtimeApiKey = getRuntimeSingleUserApiKeyOverride()
+      if (runtimeApiKey) {
+        headers['X-API-KEY'] = runtimeApiKey
+        return headers
+      }
+    }
 
     if (!config) {
       return headers
     }
 
-    if (this.isHostedMode()) {
+    if (hostedMode) {
       if (config.orgId) {
         headers['X-TLDW-Org-Id'] = String(config.orgId)
       }

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
 from tldw_Server_API.app.api.v1.API_Deps.chat_workflows_deps import (
     get_chat_workflows_db,
     get_chat_workflows_user,
@@ -395,7 +395,7 @@ async def _build_run_response(
     "/templates",
     response_model=ChatWorkflowTemplateResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_WRITE))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_WRITE))],
 )
 async def create_template(
     payload: ChatWorkflowTemplateCreate,
@@ -424,7 +424,7 @@ async def create_template(
 @router.get(
     "/templates",
     response_model=list[ChatWorkflowTemplateResponse],
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_READ))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_READ))],
 )
 async def list_templates(
     user_context: dict[str, Any] = Depends(_get_user_context),
@@ -451,7 +451,7 @@ async def list_templates(
 @router.get(
     "/templates/{template_id}",
     response_model=ChatWorkflowTemplateResponse,
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_READ))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_READ))],
 )
 async def get_template(
     template_id: int,
@@ -469,7 +469,7 @@ async def get_template(
 @router.put(
     "/templates/{template_id}",
     response_model=ChatWorkflowTemplateResponse,
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_WRITE))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_WRITE))],
 )
 async def update_template(
     template_id: int,
@@ -513,7 +513,7 @@ async def update_template(
 @router.delete(
     "/templates/{template_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_WRITE))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_WRITE))],
 )
 async def delete_template(
     template_id: int,
@@ -532,7 +532,7 @@ async def delete_template(
 @router.post(
     "/generate-draft",
     response_model=GenerateDraftResponse,
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_WRITE))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_WRITE))],
 )
 async def generate_draft(
     payload: GenerateDraftRequest,
@@ -553,7 +553,7 @@ async def generate_draft(
 @router.post(
     "/runs",
     response_model=ChatWorkflowRunResponse,
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_RUN))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_RUN))],
 )
 async def start_run(
     payload: StartRunRequest,
@@ -597,7 +597,7 @@ async def start_run(
 @router.get(
     "/runs/{run_id}",
     response_model=ChatWorkflowRunResponse,
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_READ))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_READ))],
 )
 async def get_run(
     run_id: str,
@@ -616,7 +616,7 @@ async def get_run(
 @router.get(
     "/runs/{run_id}/transcript",
     response_model=ChatWorkflowTranscriptResponse,
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_READ))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_READ))],
 )
 async def get_run_transcript(
     run_id: str,
@@ -642,7 +642,7 @@ async def get_run_transcript(
 @router.post(
     "/runs/{run_id}/answer",
     response_model=ChatWorkflowRunResponse,
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_RUN))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_RUN))],
 )
 async def answer_run_step(
     run_id: str,
@@ -679,7 +679,7 @@ async def answer_run_step(
 @router.post(
     "/runs/{run_id}/rounds/{round_index}/respond",
     response_model=ChatWorkflowRunResponse,
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_RUN))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_RUN))],
 )
 async def respond_to_run_round(
     run_id: str,
@@ -717,7 +717,7 @@ async def respond_to_run_round(
 @router.post(
     "/runs/{run_id}/cancel",
     response_model=ChatWorkflowRunResponse,
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_RUN))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_RUN))],
 )
 async def cancel_run(
     run_id: str,
@@ -755,7 +755,7 @@ async def cancel_run(
 @router.post(
     "/runs/{run_id}/continue-chat",
     response_model=ContinueChatResponse,
-    dependencies=[Depends(auth_deps.require_permissions(CHAT_WORKFLOWS_RUN))],
+    dependencies=[Depends(RequirePermission(CHAT_WORKFLOWS_RUN))],
 )
 async def continue_chat(
     run_id: str,

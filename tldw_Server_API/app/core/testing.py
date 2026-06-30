@@ -62,6 +62,11 @@ def is_explicit_pytest_runtime() -> bool:
         return False
 
 
+def audio_imports_enabled_for_runtime() -> bool:
+    """Allow heavy audio router imports outside pytest or with explicit opt-in."""
+    return not is_explicit_pytest_runtime() or env_flag_enabled("MINIMAL_TEST_INCLUDE_AUDIO")
+
+
 def is_production_like_env() -> bool:
     """Detect production-like runtime from common deployment environment variables."""
     try:

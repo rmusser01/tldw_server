@@ -5,7 +5,6 @@ from tldw_Server_API.app.core.Governance.store import GovernanceStore
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.asyncio
 async def test_open_gap_upsert_deduplicates_same_fingerprint(tmp_path):
     db_path = tmp_path / "gov_gaps.db"
     store = GovernanceStore(sqlite_path=str(db_path))
@@ -29,7 +28,6 @@ async def test_open_gap_upsert_deduplicates_same_fingerprint(tmp_path):
     assert first.status == "open"
 
 
-@pytest.mark.asyncio
 async def test_open_gap_upsert_distinct_scope_creates_new_gap(tmp_path):
     db_path = tmp_path / "gov_gaps_scope.db"
     store = GovernanceStore(sqlite_path=str(db_path))
@@ -50,3 +48,42 @@ async def test_open_gap_upsert_distinct_scope_creates_new_gap(tmp_path):
 
     assert team_a.id != team_b.id
 
+
+async def test_open_gap_rejects_negative_numeric_scope_ids(tmp_path):
+    db_path = tmp_path / "gov_gaps_negative_scope.db"
+    store = GovernanceStore(sqlite_path=str(db_path))
+    await store.ensure_schema()
+
+    with pytest.raises(ValueError, match="org_id must be non-negative"):
+        await store.upsert_open_gap(
+            question="How should shared policy apply?",
+            category="general",
+            org_id=-1,
+        )
+
+
+async def test_open_gap_rejects_boolean_numeric_scope_ids(tmp_path):
+    db_path = tmp_path / "gov_gaps_boolean_scope.db"
+    store = GovernanceStore(sqlite_path=str(db_path))
+    await store.ensure_schema()
+
+    with pytest.raises(ValueError, match="team_id must be an integer"):
+        await store.upsert_open_gap(
+            question="How should shared policy apply?",
+            category="general",
+            team_id=True,
+        )
+
+
+async def test_open_gap_normalizes_blank_text_scope_to_null(tmp_path):
+    db_path = tmp_path / "gov_gaps_blank_scope.db"
+    store = GovernanceStore(sqlite_path=str(db_path))
+    await store.ensure_schema()
+
+    gap = await store.upsert_open_gap(
+        question="How should workspace policy apply?",
+        category="general",
+        workspace_id="   ",
+    )
+
+    assert gap.workspace_id is None

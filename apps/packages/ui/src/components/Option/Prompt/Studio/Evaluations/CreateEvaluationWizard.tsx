@@ -8,8 +8,7 @@ import {
   InputNumber,
   Table,
   notification,
-  Checkbox,
-  Alert
+  Checkbox
 } from "antd"
 import { BarChart3 } from "lucide-react"
 import React, { useState } from "react"
@@ -25,6 +24,7 @@ import {
   type EvaluationConfig
 } from "@/services/prompt-studio"
 import { Button } from "@/components/Common/Button"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 
 type CreateEvaluationWizardProps = {
   open: boolean
@@ -170,9 +170,8 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
       case "selectPrompt":
         return (
           <div className="space-y-4">
-            <Alert
-              type="info"
-              showIcon
+            <DsAlert
+              variant="info"
               title={t(
                 "managePrompts.studio.evaluations.wizard.selectPromptInfo",
                 {
@@ -218,9 +217,8 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
       case "selectTestCases":
         return (
           <div className="space-y-4">
-            <Alert
-              type="info"
-              showIcon
+            <DsAlert
+              variant="info"
               title={t(
                 "managePrompts.studio.evaluations.wizard.selectTestCasesInfo",
                 {
@@ -293,9 +291,8 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
       case "configureModel":
         return (
           <div className="space-y-4">
-            <Alert
-              type="info"
-              showIcon
+            <DsAlert
+              variant="info"
               title={t(
                 "managePrompts.studio.evaluations.wizard.configureModelInfo",
                 {
@@ -391,9 +388,8 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
       case "review":
         return (
           <div className="space-y-4">
-            <Alert
-              type="success"
-              showIcon
+            <DsAlert
+              variant="success"
               title={t(
                 "managePrompts.studio.evaluations.wizard.reviewInfo",
                 {

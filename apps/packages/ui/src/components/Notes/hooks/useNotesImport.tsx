@@ -87,6 +87,14 @@ export function useNotesImport(deps: UseNotesImportDeps) {
       message.warning('Select at least one import file')
       return
     }
+    if (pendingImportFiles.some((entry) => entry.parseError)) {
+      message.warning(
+        t('option:notesSearch.importParseErrorsBlockSubmit', {
+          defaultValue: 'Fix or reselect files with import errors before importing.'
+        })
+      )
+      return
+    }
     const importItems = pendingImportFiles
       .filter((entry) => entry.content.trim().length > 0)
       .map((entry) => ({
@@ -136,7 +144,8 @@ export function useNotesImport(deps: UseNotesImportDeps) {
     importDuplicateStrategy,
     message,
     pendingImportFiles,
-    refetch
+    refetch,
+    t
   ])
 
   return {

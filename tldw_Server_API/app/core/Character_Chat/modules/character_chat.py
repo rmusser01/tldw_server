@@ -9,9 +9,11 @@ facade.
 import base64
 import random
 import re
+import threading
 import time
 from collections import Counter
 from collections.abc import Iterable
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any, Optional, Union
 
@@ -19,6 +21,7 @@ from loguru import logger
 from PIL import Image
 
 from tldw_Server_API.app.core.Character_Chat.constants import MAX_PERSIST_CONTENT_LENGTH
+from tldw_Server_API.app.core.Character_Chat.character_limits import check_message_limit
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -40,6 +43,16 @@ _CHAR_CHAT_NONCRITICAL_EXCEPTIONS = (
     ConflictError,
     InputError,
 )
+
+_MESSAGE_LIMIT_LOCKS: dict[str, threading.Lock] = {}
+_MESSAGE_LIMIT_LOCKS_GUARD = threading.Lock()
+
+
+def _get_message_limit_lock(conversation_id: str) -> threading.Lock:
+    """Serialize per-conversation message-limit preflight and insert in this process."""
+    with _MESSAGE_LIMIT_LOCKS_GUARD:
+        return _MESSAGE_LIMIT_LOCKS.setdefault(str(conversation_id), threading.Lock())
+
 
 from .character_db import load_character_and_image
 from .character_utils import (
@@ -848,7 +861,8 @@ def start_new_chat_session(
             if greeting_strategy in {"alternate_random", "alternate_index"} and original_alternate_greetings:
                 if greeting_strategy == "alternate_random":
                     if original_alternate_greetings:
-                        selected_alt = random.choice(original_alternate_greetings)
+                        # Non-security greeting selection.
+                        selected_alt = random.choice(original_alternate_greetings)  # nosec B311
                 elif greeting_strategy == "alternate_index":
                     if isinstance(alternate_index, int) and alternate_index >= 0 and alternate_index < len(original_alternate_greetings):
                         selected_alt = original_alternate_greetings[alternate_index]
@@ -1208,8 +1222,34 @@ def post_message_to_conversation(
         "image_mime_type": image_mime_type,
     }
 
+    limit_context = _get_message_limit_lock(conversation_id) if is_user_message else nullcontext()
     try:
-        message_id = db.add_message(msg_payload)
+        with limit_context:
+            if is_user_message:
+                try:
+                    current_message_count = db.count_messages_for_conversation(conversation_id)
+                except _CHAR_CHAT_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.error(
+                        "Failed to count messages for conversation {} before posting: {}",
+                        conversation_id,
+                        exc,
+                    )
+                    raise CharactersRAGDBError(
+                        f"Failed to count messages for conversation {conversation_id}"
+                    ) from exc
+                check_message_limit(conversation_id, current_message_count + 1)
+
+            message_id = db.add_message(msg_payload)
+    except (CharactersRAGDBError, InputError, ConflictError) as exc:
+        logger.error(
+            "Error posting message from '{}' to conversation {}: {}",
+            sender_name,
+            conversation_id,
+            exc,
+        )
+        raise
+
+    try:
         if message_id:
             logger.info(
                 "Posted message ID {} from '{}' to conversation {}.",
@@ -1500,6 +1540,7 @@ def find_messages_in_conversation(
     character_name_for_placeholders: str,
     user_name_for_placeholders: Optional[str],
     limit: int = 10,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     """Search for messages within a specific conversation by content."""
 
@@ -1508,6 +1549,7 @@ def find_messages_in_conversation(
             content_query=search_query,
             conversation_id=conversation_id,
             limit=limit,
+            offset=offset,
         )
 
         processed_results = []

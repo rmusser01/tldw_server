@@ -8,10 +8,10 @@ import {
   Tag,
   Tooltip,
   Select,
-  Alert,
   Segmented
 } from "antd"
 import type { FormInstance } from "antd"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives/Alert"
 import {
   Copy,
   Download,
@@ -48,8 +48,15 @@ import { validateAndCreateImageDataUrl } from "@/utils/image-utils"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { focusComposer } from "@/hooks/useComposerFocus"
+import {
+  buildCharacterChatReadiness,
+  CHARACTER_CHAT_MODEL_SETTINGS_PATH,
+  getCharacterChatReadinessCopy
+} from "@/utils/chat-model-availability"
 import type { TFunction } from "i18next"
 import type { NavigateFunction } from "react-router-dom"
+import type { CharacterChatIntentBlocker } from "./hooks/useCharacterCrud"
+import { buildCharacterChatPath } from "@/routes/route-paths"
 
 // ---------------------------------------------------------------------------
 // Shared props type for the CharacterDialogs component
@@ -107,6 +114,7 @@ export type CharacterDialogsProps = {
   closeQuickChat: () => Promise<void>
   quickChatModelOptions: Array<{ value: string; label: string }>
   activeQuickChatModel: string | null
+  isServerConnected: boolean
   setQuickChatModelOverride: (v: string | null) => void
   quickChatError: string | null
   quickChatMessages: Array<{ id: string; role: string; content: string }>
@@ -115,6 +123,9 @@ export type CharacterDialogsProps = {
   quickChatSending: boolean
   sendQuickChatMessage: () => Promise<void>
   handlePromoteQuickChat: () => Promise<void>
+  chatIntentBlocker: CharacterChatIntentBlocker | null
+  clearChatIntentBlocker: () => Promise<void>
+  retryChatIntentBlocker: () => Promise<void>
 
   // --- conversations ---
   conversationsOpen: boolean
@@ -268,7 +279,7 @@ export type CharacterDialogsProps = {
   handleBulkAddTagsForSelection: () => void
   selectedCount: number
   popularTags: Array<{ tag: string; count: number }>
-  tagOptionsWithCounts: Array<{ value: string; label: string }>
+  tagOptionsWithCounts: Array<{ value: string; label: React.ReactNode }>
 
   // --- confirm ---
   confirmDanger: (opts: {
@@ -310,6 +321,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
     closeQuickChat,
     quickChatModelOptions,
     activeQuickChatModel,
+    isServerConnected,
     setQuickChatModelOverride,
     quickChatError,
     quickChatMessages,
@@ -318,6 +330,9 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
     quickChatSending,
     sendQuickChatMessage,
     handlePromoteQuickChat,
+    chatIntentBlocker,
+    clearChatIntentBlocker,
+    retryChatIntentBlocker,
     // conversations
     conversationsOpen,
     setConversationsOpen,
@@ -466,6 +481,51 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
     data
   } = props
 
+  const quickChatReadiness = React.useMemo(
+    () =>
+      buildCharacterChatReadiness({
+        isServerConnected,
+        selectedCharacter: quickChatCharacter,
+        selectedModel: activeQuickChatModel,
+        availableModels: quickChatModelOptions.map((option) => ({
+          model: option.value
+        })),
+        isSendBlocked: quickChatSending
+      }),
+    [
+      activeQuickChatModel,
+      isServerConnected,
+      quickChatCharacter,
+      quickChatModelOptions,
+      quickChatSending
+    ]
+  )
+  const quickChatReadinessCopy = React.useMemo(
+    () =>
+      getCharacterChatReadinessCopy(quickChatReadiness, t, {
+        characterName:
+          quickChatCharacter?.name ||
+          quickChatCharacter?.title ||
+          quickChatCharacter?.slug ||
+          null
+      }),
+    [quickChatCharacter, quickChatReadiness, t]
+  )
+  const showQuickChatModelBlocker =
+    quickChatReadiness.missingRequirement === "chat-model"
+  const chatIntentReadinessCopy = React.useMemo(() => {
+    if (!chatIntentBlocker) return null
+    const characterSelection = chatIntentBlocker.characterSelection
+    const readiness = chatIntentBlocker.readiness
+    return getCharacterChatReadinessCopy(readiness, t, {
+      characterName:
+        characterSelection?.name ||
+        characterSelection?.title ||
+        characterSelection?.slug ||
+        null
+    })
+  }, [chatIntentBlocker, t])
+
   const characterIdentifierFn = (record: any): string =>
     String(record?.id ?? record?.slug ?? record?.name ?? "")
 
@@ -581,6 +641,57 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
 
   return (
     <>
+      {/* Full character-chat intent blocker */}
+      <Modal
+        title={t("settings:manageCharacters.chatIntent.title", {
+          defaultValue: "Character chat setup"
+        })}
+        open={!!chatIntentBlocker}
+        onCancel={() => {
+          void clearChatIntentBlocker()
+        }}
+        destroyOnHidden
+        width={560}
+        rootClassName="characters-motion-modal"
+        footer={[
+          <Button
+            key="return"
+            onClick={() => {
+              void clearChatIntentBlocker()
+            }}>
+            {t("settings:manageCharacters.chatIntent.return", {
+              defaultValue: "Return to character"
+            })}
+          </Button>,
+          <Button
+            key="retry"
+            onClick={() => {
+              void retryChatIntentBlocker()
+            }}>
+            {t("settings:manageCharacters.chatIntent.retry", {
+              defaultValue: "Retry character chat"
+            })}
+          </Button>,
+          <Button
+            key="settings"
+            type="primary"
+            href={CHARACTER_CHAT_MODEL_SETTINGS_PATH}>
+            {chatIntentReadinessCopy?.actionLabel ||
+              t("settings:manageCharacters.chatIntent.openModelSettings", {
+                defaultValue: "Open model settings"
+              })}
+          </Button>
+        ]}>
+        {chatIntentReadinessCopy && (
+          <DesignSystemAlert
+            variant="warning"
+            title={chatIntentReadinessCopy.title}
+          >
+            {chatIntentReadinessCopy.description}
+          </DesignSystemAlert>
+        )}
+      </Modal>
+
       {/* Import Preview Modal */}
       <Modal
         title={t("settings:manageCharacters.import.previewTitle", {
@@ -722,10 +833,10 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                       </div>
                       {item.parseError && (
                         <div className="text-xs text-danger">
-                          {t(item.parseError.key, {
+                          {String(t(item.parseError.key, {
                             defaultValue: item.parseError.fallback,
                             ...(item.parseError.values || {})
-                          })}
+                          }))}
                         </div>
                       )}
                       {runtimeMessage && !item.parseError && (
@@ -791,11 +902,27 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
             />
           </div>
 
+          {showQuickChatModelBlocker && (
+            <DesignSystemAlert
+              variant="warning"
+              title={quickChatReadinessCopy.title}
+            >
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <span>{quickChatReadinessCopy.description}</span>
+                <a
+                  href={CHARACTER_CHAT_MODEL_SETTINGS_PATH}
+                  className="shrink-0 text-primary hover:underline"
+                >
+                  {quickChatReadinessCopy.actionLabel}
+                </a>
+              </div>
+            </DesignSystemAlert>
+          )}
+
           {quickChatError && (
-            <Alert
-              type="warning"
-              showIcon
-              message={quickChatError}
+            <DesignSystemAlert
+              variant="warning"
+              title={quickChatError}
             />
           )}
 
@@ -852,7 +979,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
               onClick={() => {
                 void sendQuickChatMessage()
               }}
-              disabled={!quickChatDraft.trim() || !activeQuickChatModel}>
+              disabled={!quickChatDraft.trim() || !quickChatReadiness.canStart}>
               {t("settings:manageCharacters.quickChat.send", {
                 defaultValue: "Send"
               })}
@@ -925,19 +1052,15 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
             })}
           </p>
           {chatsError && (
-            <Alert
-              type="error"
-              showIcon
+            <DesignSystemAlert
+              variant="error"
               title={chatsError}
-              action={
-                <Button
-                  size="small"
-                  onClick={() => {
-                    void loadConversationChats()
-                  }}>
-                  {t("common:retry", { defaultValue: "Retry" })}
-                </Button>
-              }
+              action={{
+                label: t("common:retry", { defaultValue: "Retry" }),
+                onClick: () => {
+                  void loadConversationChats()
+                }
+              }}
             />
           )}
           {loadingChats && <Skeleton active title paragraph={{ rows: 4 }} />}
@@ -1096,7 +1219,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                             updatePageTitle(chat.title)
                             setConversationsOpen(false)
                             setConversationCharacter(null)
-                            navigate("/")
+                            navigate(buildCharacterChatPath({ characterId: id }))
                             setTimeout(() => {
                               focusComposer()
                             }, 0)
@@ -1174,9 +1297,8 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
 
         {/* Draft Recovery Banner (H4) */}
         {hasCreateDraft && createDraftData && (
-          <Alert
-            type="info"
-            showIcon
+          <DesignSystemAlert
+            variant="info"
             className="mb-4"
             title={
               <span>
@@ -1191,36 +1313,30 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                 </span>
               </span>
             }
-            action={
-              <div className="flex gap-2">
-                <Button
-                  size="small"
-                  type="primary"
-                  onClick={() => {
-                    const draft = applyCreateDraft()
-                    if (draft) {
-                      createForm.setFieldsValue({
-                        ...draft,
-                        tags: getCharacterVisibleTags(draft.tags),
-                        folder_id:
-                          normalizeCharacterFolderId(draft.folder_id) ??
-                          getCharacterFolderIdFromTags(draft.tags)
-                      })
-                      setCreateFormDirty(true)
-                      if (hasAdvancedData(draft, draft.extensions || '')) {
-                        setShowCreateAdvanced(true)
-                      }
-                    }
-                  }}>
-                  {t("settings:manageCharacters.draft.restore", { defaultValue: "Restore" })}
-                </Button>
-                <Button
-                  size="small"
-                  onClick={dismissCreateDraft}>
-                  {t("settings:manageCharacters.draft.discard", { defaultValue: "Discard" })}
-                </Button>
-              </div>
-            }
+            action={{
+              label: t("settings:manageCharacters.draft.restore", { defaultValue: "Restore" }),
+              variant: "primary",
+              onClick: () => {
+                const draft = applyCreateDraft()
+                if (draft) {
+                  createForm.setFieldsValue({
+                    ...draft,
+                    tags: getCharacterVisibleTags(draft.tags),
+                    folder_id:
+                      normalizeCharacterFolderId(draft.folder_id) ??
+                      getCharacterFolderIdFromTags(draft.tags)
+                  })
+                  setCreateFormDirty(true)
+                  if (hasAdvancedData(draft, draft.extensions || '')) {
+                    setShowCreateAdvanced(true)
+                  }
+                }
+              }
+            }}
+            secondaryAction={{
+              label: t("settings:manageCharacters.draft.discard", { defaultValue: "Discard" }),
+              onClick: dismissCreateDraft
+            }}
           />
         )}
 
@@ -1340,7 +1456,9 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                 setEditFormDirty(false)
                 setShowEditSystemPromptExample(false)
                 setTimeout(() => {
-                  lastEditTriggerRef.current?.focus()
+                  if (lastEditTriggerRef.current instanceof HTMLElement) {
+                    lastEditTriggerRef.current.focus()
+                  }
                 }, 0)
               }
             })
@@ -1352,7 +1470,9 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
             editWorldBooksInitializedRef.current = false
             setShowEditSystemPromptExample(false)
             setTimeout(() => {
-              lastEditTriggerRef.current?.focus()
+              if (lastEditTriggerRef.current instanceof HTMLElement) {
+                lastEditTriggerRef.current.focus()
+              }
             }, 0)
           }
         }}
@@ -1397,9 +1517,8 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
 
         {/* Draft Recovery Banner for Edit Form (H4) */}
         {hasEditDraft && editDraftData && (
-          <Alert
-            type="info"
-            showIcon
+          <DesignSystemAlert
+            variant="info"
             className="mb-4"
             title={
               <span>
@@ -1411,36 +1530,30 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                 </span>
               </span>
             }
-            action={
-              <div className="flex gap-2">
-                <Button
-                  size="small"
-                  type="primary"
-                  onClick={() => {
-                    const draft = applyEditDraft()
-                    if (draft) {
-                      editForm.setFieldsValue({
-                        ...draft,
-                        tags: getCharacterVisibleTags(draft.tags),
-                        folder_id:
-                          normalizeCharacterFolderId(draft.folder_id) ??
-                          getCharacterFolderIdFromTags(draft.tags)
-                      })
-                      setEditFormDirty(true)
-                      if (hasAdvancedData(draft, draft.extensions || '')) {
-                        setShowEditAdvanced(true)
-                      }
-                    }
-                  }}>
-                  {t("settings:manageCharacters.draft.restore", { defaultValue: "Restore" })}
-                </Button>
-                <Button
-                  size="small"
-                  onClick={dismissEditDraft}>
-                  {t("settings:manageCharacters.draft.discard", { defaultValue: "Discard" })}
-                </Button>
-              </div>
-            }
+            action={{
+              label: t("settings:manageCharacters.draft.restore", { defaultValue: "Restore" }),
+              variant: "primary",
+              onClick: () => {
+                const draft = applyEditDraft()
+                if (draft) {
+                  editForm.setFieldsValue({
+                    ...draft,
+                    tags: getCharacterVisibleTags(draft.tags),
+                    folder_id:
+                      normalizeCharacterFolderId(draft.folder_id) ??
+                      getCharacterFolderIdFromTags(draft.tags)
+                  })
+                  setEditFormDirty(true)
+                  if (hasAdvancedData(draft, draft.extensions || '')) {
+                    setShowEditAdvanced(true)
+                  }
+                }
+              }
+            }}
+            secondaryAction={{
+              label: t("settings:manageCharacters.draft.discard", { defaultValue: "Discard" }),
+              onClick: dismissEditDraft
+            }}
           />
         )}
 
@@ -1520,10 +1633,9 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
           {!versionHistoryLoading &&
             !versionHistoryFetching &&
             versionHistoryItems.length === 0 && (
-              <Alert
-                type="info"
-                showIcon
-                message={t("settings:manageCharacters.versionHistory.empty", {
+              <DesignSystemAlert
+                variant="info"
+                title={t("settings:manageCharacters.versionHistory.empty", {
                   defaultValue: "No version snapshots available yet."
                 })}
               />
@@ -1649,10 +1761,9 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                   </div>
 
                   {versionFrom === versionTo && (
-                    <Alert
-                      type="info"
-                      showIcon
-                      message={t("settings:manageCharacters.versionHistory.sameVersion", {
+                    <DesignSystemAlert
+                      variant="info"
+                      title={t("settings:manageCharacters.versionHistory.sameVersion", {
                         defaultValue: "Select two different versions to view a diff."
                       })}
                     />
@@ -1667,10 +1778,9 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                     !versionDiffLoading &&
                     !versionDiffFetching &&
                     !versionDiffResponse && (
-                      <Alert
-                        type="warning"
-                        showIcon
-                        message={t(
+                      <DesignSystemAlert
+                        variant="warning"
+                        title={t(
                           "settings:manageCharacters.versionHistory.diffUnavailable",
                           {
                             defaultValue:
@@ -1901,9 +2011,8 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
               ))}
             </div>
 
-            <Alert
-              type="info"
-              showIcon
+            <DesignSystemAlert
+              variant="info"
               title={t("settings:manageCharacters.compare.changedCount", {
                 defaultValue: "{{changed}} of {{total}} tracked fields differ",
                 changed: changedComparisonRows.length,

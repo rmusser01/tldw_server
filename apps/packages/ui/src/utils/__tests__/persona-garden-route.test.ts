@@ -58,4 +58,14 @@ describe("persona-garden-route", () => {
       tab: "connections"
     })
   })
+
+  it("accepts the visuals tab in persona garden routes", () => {
+    expect(buildPersonaGardenRoute({ tab: "visuals" })).toBe("/persona?tab=visuals")
+    expect(
+      readPersonaGardenSearch("?persona_id=garden-helper&tab=visuals")
+    ).toEqual({
+      personaId: "garden-helper",
+      tab: "visuals"
+    })
+  })
 })

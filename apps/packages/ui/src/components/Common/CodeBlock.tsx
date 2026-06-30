@@ -17,7 +17,6 @@ import DOMPurify from "dompurify"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useArtifactsStore } from "@/store/artifacts"
 import { normalizeLanguage, resolveTheme, safeLanguage } from "@/utils/code-theme"
-// import Mermaid from "./Mermaid"
 
 interface Props {
   language: string
@@ -70,13 +69,11 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
   const { openArtifact, isPinned } = useArtifactsStore()
   const { t } = useTranslation("common")
 
-  const isDiagramLanguage = ["mermaid", "diagram", "graphviz", "dot"].includes(
-    normalizedLanguage
-  )
+  const isMermaidLanguage = normalizedLanguage === "mermaid"
   const artifactId = computeKey()
-  const artifactKind = isDiagramLanguage ? "diagram" : "code"
+  const artifactKind = isMermaidLanguage ? "diagram" : "code"
   const artifactOriginId = `artifact-origin-${artifactId}`
-  const viewLabel = isDiagramLanguage
+  const viewLabel = isMermaidLanguage
     ? t("view", "View")
     : t("artifactsView", "View code")
   const downloadLabel = t("downloadCode", "Download code")
@@ -317,7 +314,7 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
     if (!isProMode) {
       return
     }
-    if (!isDiagramLanguage && totalLines <= artifactAutoThreshold) {
+    if (!isMermaidLanguage && totalLines <= artifactAutoThreshold) {
       return
     }
     if (autoOpenStateMap.get(artifactId)) {
@@ -345,7 +342,7 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
     artifactId,
     artifactAutoThreshold,
     autoOpenStateMap,
-    isDiagramLanguage,
+    isMermaidLanguage,
     isPinned,
     isProMode,
     normalizedLanguage,

@@ -133,7 +133,7 @@ async def _resolve_org_id(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to resolve org_id for user {principal.user_id}: {exc}")
+        logger.error("Failed to resolve org_id for billing enforcement")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to resolve organization for billing enforcement",
@@ -180,8 +180,8 @@ async def resolve_org_id_for_principal(principal: AuthPrincipal) -> int | None:
         if _allow_orgless_billing_access():
             return None
         raise
-    except Exception as exc:
-        logger.debug(f"resolve_org_id_for_principal failed: {exc}")
+    except Exception:
+        logger.debug("resolve_org_id_for_principal failed")
         return None
 
 
@@ -391,8 +391,8 @@ async def add_billing_headers(
         response.headers["X-Billing-Plan-Api-Limit"] = str(limits.get("api_calls_day", "unlimited"))
         response.headers["X-Billing-Api-Usage-Today"] = str(usage.api_calls_today)
 
-    except Exception as exc:
-        logger.debug(f"Failed to add billing headers: {exc}")
+    except Exception:
+        logger.debug("Failed to add billing headers")
 
 
 class LimitEnforcer:
@@ -458,8 +458,8 @@ class LimitEnforcer:
                 # Best-effort in-memory cache delta for billing checks
                 try:
                     cache_updated = self._enforcer.apply_usage_delta(self.org_id, self.category, units)
-                except Exception as exc:
-                    logger.debug(f"LimitEnforcer: apply_usage_delta failed for org_id={self.org_id}: {exc}")
+                except Exception:
+                    logger.debug("LimitEnforcer usage delta recording failed")
 
                 # Mirror usage into the generic cost-units ledger so that
                 # cross-category budgets can reason about org-level usage.
@@ -483,8 +483,8 @@ class LimitEnforcer:
                             minutes=minutes,
                             requests=requests,
                         )
-                except Exception as exc:
-                    logger.debug(f"LimitEnforcer: cost-units ledger write failed for org_id={self.org_id}: {exc}")
+                except Exception:
+                    logger.debug("LimitEnforcer cost-units ledger write failed")
 
         # Invalidate cache so next request gets fresh data
         if self.actual_units is not None and not cache_updated:

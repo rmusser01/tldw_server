@@ -39,6 +39,11 @@ vi.mock("../option-settings-route-registry", () => ({
       kind: "options",
       path: "/settings/chat",
       element: <div data-testid="deferred-settings-route">Settings Chat</div>
+    },
+    {
+      kind: "options",
+      path: "/settings/provider-keys",
+      element: <div data-testid="deferred-provider-keys-route">Provider Keys</div>
     }
   ]
 }))
@@ -144,6 +149,24 @@ describe("DeferredOptionsRoute", () => {
 
     expect(
       await screen.findByTestId("deferred-settings-route")
+    ).toBeInTheDocument()
+  })
+
+  it("resolves provider key settings deep links through the smaller settings registry", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings/provider-keys"]}>
+        <DeferredOptionsRoute
+          attemptedRoute="/settings/provider-keys"
+          capabilities={null}
+          capabilitiesLoading={false}
+          label="Loading options..."
+          description="Preparing routes"
+        />
+      </MemoryRouter>
+    )
+
+    expect(
+      await screen.findByTestId("deferred-provider-keys-route")
     ).toBeInTheDocument()
   })
 })

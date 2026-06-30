@@ -4,7 +4,8 @@
  */
 
 import React from "react"
-import { Tag } from "antd"
+import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
+import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 import { Loader2 } from "lucide-react"
 
 export type RunStatus =
@@ -20,18 +21,46 @@ interface StatusBadgeProps {
   className?: string
 }
 
-const statusConfig: Record<
-  string,
-  { color: string; icon?: React.ReactNode }
-> = {
-  pending: { color: "default" },
+interface StatusConfig {
+  stateKey: DesignSystemStateKey
+  icon?: React.ReactNode
+}
+
+const STATUS_CONFIG: Record<string, StatusConfig> = {
+  pending: { stateKey: "loading" },
   running: {
-    color: "processing",
-    icon: <Loader2 className="inline h-3 w-3 animate-spin mr-1" />
+    stateKey: "retrying",
+    icon: (
+      <Loader2
+        className="inline h-3 w-3 animate-spin"
+        aria-hidden
+        data-testid="evaluations-status-running-spinner"
+      />
+    )
   },
-  completed: { color: "success" },
-  failed: { color: "error" },
-  cancelled: { color: "warning" }
+  completed: { stateKey: "ready" },
+  failed: { stateKey: "error" },
+  cancelled: { stateKey: "degraded" }
+}
+
+const SEVERITY_BADGE_VARIANTS = {
+  success: "success",
+  error: "danger",
+  warning: "warning",
+  info: "info",
+  neutral: "secondary",
+} satisfies Record<ReturnType<typeof getDesignSystemState>["severity"], BadgeVariant>
+
+const UNKNOWN_STATUS_CONFIG = {
+  stateKey: "empty",
+} satisfies StatusConfig
+
+function getStatusConfig(status: string): StatusConfig {
+  if (Object.prototype.hasOwnProperty.call(STATUS_CONFIG, status)) {
+    return STATUS_CONFIG[status]
+  }
+
+  return UNKNOWN_STATUS_CONFIG
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({
@@ -39,13 +68,17 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   className
 }) => {
   const normalizedStatus = String(status || "").toLowerCase()
-  const config = statusConfig[normalizedStatus] || { color: "default" }
+  const config = getStatusConfig(normalizedStatus)
+  const state = getDesignSystemState(config.stateKey)
 
   return (
-    <Tag color={config.color} className={className}>
+    <Badge
+      variant={SEVERITY_BADGE_VARIANTS[state.severity]}
+      className={className}
+    >
       {config.icon}
       {status}
-    </Tag>
+    </Badge>
   )
 }
 

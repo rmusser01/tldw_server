@@ -1,0 +1,279 @@
+"""Tests for metadata-only MCP tool-use reporting models."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from mcp_unified.tool_use_reporting.builders import (
+    classify_tool_use_exception,
+    extract_safe_context_dimensions,
+)
+from mcp_unified.tool_use_reporting.models import MAX_TOOL_HOOK_RESULTS, ToolUseEvent
+from mcp_unified.tool_use_reporting.recorder import NoopToolUseRecorder
+from mcp_unified.tool_use_reporting.sanitization import sanitize_safe_id
+
+
+def test_tool_use_event_normalizes_created_at_to_utc_epoch_ordering() -> None:
+    event = ToolUseEvent(
+        created_at=datetime(2026, 6, 6, 12, 0, tzinfo=timezone(timedelta(hours=-7))),
+        runtime_surface="protocol",
+        requested_tool_name="git.status",
+        status="success",
+    )
+
+    assert event.created_at_utc.tzinfo == timezone.utc
+    assert event.created_at_utc.isoformat() == "2026-06-06T19:00:00+00:00"
+    assert event.created_at_epoch_us == 1_780_772_400_000_000
+
+
+def test_tool_use_event_rejects_or_omits_sensitive_payload_fields() -> None:
+    event = ToolUseEvent(
+        runtime_surface="gateway",
+        requested_tool_name="fs.read",
+        status="error",
+        reason_code="/Users/example/private.txt",
+        raw_arguments={"path": "/Users/example/private.txt"},
+    )
+
+    dumped = event.model_dump(mode="json")
+    assert "raw_arguments" not in dumped
+    assert "/Users/example" not in str(dumped)
+    assert event.reason_code == "unknown"
+
+
+def test_tool_use_event_sanitizes_file_policy_decisions() -> None:
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="fs.patch",
+        status="denied",
+        file_policy_decisions=[
+            {
+                "requested_action": "edit",
+                "normalized_path": "docs/private/story.md",
+                "grant_outcome": "denied",
+                "grant_source": "path_grants",
+                "matched_grant_prefix": "docs/private",
+                "matched_grant_effect": "deny",
+                "reason_code": "path_action_denied",
+                "redacted": True,
+            },
+            {
+                "requested_action": "write",
+                "normalized_path": "/Users/example/private.txt",
+                "grant_outcome": "allowed",
+                "grant_source": "path_grants",
+                "matched_grant_prefix": "/Users/example",
+                "matched_grant_effect": "allow",
+                "reason_code": "/Users/example/private.txt",
+                "redacted": False,
+            },
+        ],
+        file_policy_sha256_before_present=True,
+        file_policy_sha256_after_present=True,
+        file_policy_lock_lease_present=True,
+    )
+
+    assert len(event.file_policy_decisions) == 2
+    first = event.file_policy_decisions[0]
+    assert first.requested_action == "edit"
+    assert first.normalized_path == "docs/private/story.md"
+    assert first.grant_outcome == "denied"
+    assert first.grant_source == "path_grants"
+    assert first.matched_grant_prefix == "docs/private"
+    assert first.matched_grant_effect == "deny"
+    assert first.reason_code == "path_action_denied"
+    assert first.redacted is True
+
+    second = event.file_policy_decisions[1]
+    assert second.normalized_path is None
+    assert second.matched_grant_prefix is None
+    assert second.reason_code == "unknown"
+    assert second.redacted is True
+
+    dumped = event.model_dump_json()
+    assert "/Users/example" not in dumped
+    assert event.file_policy_sha256_before_present is True
+    assert event.file_policy_sha256_after_present is True
+    assert event.file_policy_lock_lease_present is True
+
+
+def test_tool_use_event_sanitizes_tool_hook_results() -> None:
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="fs.patch",
+        status="denied",
+        tool_hook_results=[
+            {
+                "phase": "pre",
+                "hook_id": "profile-policy",
+                "hook_order": 10,
+                "action": "deny",
+                "status": "deny",
+                "reason_code": "blocked_by_policy",
+                "message": "do not persist /Users/example/private.txt",
+                "metadata": {"path": "/Users/example/private.txt"},
+                "redacted": False,
+            },
+            {
+                "phase": "post",
+                "hook_id": "person@example.com",
+                "hook_order": "20",
+                "action": "allow",
+                "status": "error",
+                "error_type": "RuntimeError",
+                "reason_code": "/Users/example/private.txt",
+            },
+        ],
+    )
+
+    assert len(event.tool_hook_results) == 2
+    first = event.tool_hook_results[0]
+    assert first.phase == "pre"
+    assert first.hook_id == "profile-policy"
+    assert first.hook_order == 10
+    assert first.action == "deny"
+    assert first.status == "deny"
+    assert first.reason_code == "blocked_by_policy"
+    assert first.error_type is None
+    assert first.redacted is True
+
+    second = event.tool_hook_results[1]
+    assert second.phase == "post"
+    assert second.hook_id is None
+    assert second.hook_order == 20
+    assert second.action == "allow"
+    assert second.status == "error"
+    assert second.reason_code == "unknown"
+    assert second.error_type == "RuntimeError"
+
+    dumped = event.model_dump_json()
+    assert "/Users/example" not in dumped
+    assert "do not persist" not in dumped
+    assert "metadata" not in dumped
+
+
+def test_tool_use_event_bounds_tool_hook_results() -> None:
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="fs.patch",
+        status="success",
+        tool_hook_results=[
+            {"phase": "pre", "hook_id": f"hook-{index}", "action": "allow"}
+            for index in range(MAX_TOOL_HOOK_RESULTS + 3)
+        ],
+    )
+
+    assert len(event.tool_hook_results) == MAX_TOOL_HOOK_RESULTS
+    assert event.tool_hook_results[-1].hook_id == f"hook-{MAX_TOOL_HOOK_RESULTS - 1}"
+
+
+def test_tool_use_event_rejects_uri_like_file_policy_paths_before_normalization() -> None:
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="fs.patch",
+        status="denied",
+        file_policy_decisions=[
+            {
+                "requested_action": "edit",
+                "normalized_path": "https://host/private/story.txt",
+                "grant_outcome": "denied",
+                "matched_grant_prefix": "file:/tmp/private",
+                "redacted": True,
+            },
+        ],
+    )
+
+    decision = event.file_policy_decisions[0]
+    assert decision.normalized_path is None
+    assert decision.matched_grant_prefix is None
+    assert "https:" not in event.model_dump_json()
+    assert "file:" not in event.model_dump_json()
+
+
+def test_tool_use_event_is_immutable() -> None:
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="git.status",
+        status="success",
+    )
+
+    with pytest.raises((TypeError, ValueError)):
+        event.status = "error"  # type: ignore[misc]
+
+
+def test_sanitize_safe_id_allows_bounded_profile_model_mode_ids() -> None:
+    assert sanitize_safe_id("Architect-01", field="profile_id") == "Architect-01"
+    assert sanitize_safe_id("gpt-4.1-mini", field="model_id") == "gpt-4.1-mini"
+    assert sanitize_safe_id("qa_mode.default", field="mode_id") == "qa_mode.default"
+
+
+def test_sanitize_safe_id_drops_paths_emails_and_long_values() -> None:
+    assert sanitize_safe_id("/Users/me/project", field="profile_id") is None
+    assert sanitize_safe_id("person@example.com", field="profile_id") is None
+    assert sanitize_safe_id("x" * 512, field="profile_id") is None
+
+
+def test_sanitize_safe_id_drops_values_with_unsafe_characters() -> None:
+    assert sanitize_safe_id("profile id with spaces", field="profile_id") is None
+    assert sanitize_safe_id("../escape", field="tool_prompt_id") is None
+
+
+def test_exception_classifier_maps_structured_governance_denials_safely() -> None:
+    class _FakeGovernanceDenied(PermissionError):
+        def __init__(self) -> None:
+            super().__init__("workspace denied for /Users/example/private.txt")
+            self.governance = {
+                "reason_code": "workspace_out_of_scope",
+                "path": "/Users/example/private.txt",
+            }
+
+    status, reason_code = classify_tool_use_exception(_FakeGovernanceDenied())
+
+    assert status == "denied"
+    assert reason_code == "workspace_out_of_scope"
+    assert "/Users/example" not in reason_code
+
+
+@pytest.mark.asyncio
+async def test_noop_tool_use_recorder_accepts_events_without_persistence() -> None:
+    event = ToolUseEvent(
+        runtime_surface="protocol",
+        requested_tool_name="git.status",
+        status="success",
+    )
+
+    await NoopToolUseRecorder().record_tool_use(event)
+
+
+def test_context_dimension_extraction_uses_only_safe_metadata_keys() -> None:
+    dimensions = extract_safe_context_dimensions(
+        {
+            "profile_id": "Architect-01",
+            "mcp_mode_id": "review.default",
+            "mcp_model_id": "gpt-4.1-mini",
+            "user_id": "person@example.com",
+            "raw_arguments": {"path": "/Users/example/private.txt"},
+            "request_id": "/Users/example/private.txt",
+            "correlation_id": "corr-123",
+        }
+    )
+
+    assert dimensions == {
+        "profile_id": "Architect-01",
+        "mode_id": "review.default",
+        "model_id": "gpt-4.1-mini",
+    }
+
+
+def test_context_dimension_extraction_requires_correlation_side_channel() -> None:
+    dimensions = extract_safe_context_dimensions(
+        {
+            "mcp_tool_use_safe_correlation_id": True,
+            "request_id": "req-123",
+            "correlation_id": "corr-456",
+        }
+    )
+
+    assert dimensions["correlation_id"] == "corr-456"

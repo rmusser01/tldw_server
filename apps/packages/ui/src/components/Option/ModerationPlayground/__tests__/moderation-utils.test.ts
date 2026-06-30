@@ -12,6 +12,7 @@ import {
   formatRulePhase,
   getErrorStatus,
   isEqualJson,
+  normalizeManagedBlocklistRows,
   normalizeCategories,
   normalizeOverrideForCompare,
   normalizeOverrideRules,
@@ -391,6 +392,78 @@ describe("getErrorStatus", () => {
 
   it("returns null for object without status", () => {
     expect(getErrorStatus({ message: "oops" })).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// normalizeManagedBlocklistRows
+// ---------------------------------------------------------------------------
+describe("normalizeManagedBlocklistRows", () => {
+  it("uses lint metadata to classify active and non-active rows", () => {
+    const rows = normalizeManagedBlocklistRows([
+      {
+        id: 0,
+        line: "bad -> block #profanity",
+        pattern_type: "literal",
+        action: "block",
+        categories: ["profanity"],
+        sample: "bad",
+        ok: true
+      },
+      {
+        id: 1,
+        line: "# internal note",
+        pattern_type: "comment",
+        ok: true,
+        warning: "comment (ignored)"
+      },
+      {
+        id: 2,
+        line: "   ",
+        pattern_type: "empty",
+        ok: true,
+        warning: "blank line (ignored)"
+      },
+      {
+        id: 3,
+        line: "/[bad/ -> block",
+        pattern_type: "regex",
+        ok: false,
+        error: "invalid regex"
+      }
+    ])
+
+    expect(rows.map((row) => row.rowKind)).toEqual(["literal", "comment", "empty", "regex"])
+    expect(rows.filter((row) => row.isActive).map((row) => row.id)).toEqual([0])
+    expect(rows[0]).toMatchObject({
+      pattern: "bad",
+      action: "block",
+      categories: ["profanity"],
+      statusLabel: "Active"
+    })
+    expect(rows[1].statusLabel).toBe("Comment")
+    expect(rows[2].statusLabel).toBe("Blank")
+    expect(rows[3].statusLabel).toBe("Invalid")
+  })
+
+  it("falls back to parsing legacy id and line rows", () => {
+    const rows = normalizeManagedBlocklistRows([
+      { id: 5, line: "/secret/i -> redact:[MASK] #confidential,pii" },
+      { id: 6, line: "# note" },
+      { id: 7, line: "" }
+    ])
+
+    expect(rows[0]).toMatchObject({
+      id: 5,
+      pattern: "/secret/i",
+      rowKind: "regex",
+      action: "redact",
+      replacement: "[MASK]",
+      categories: ["confidential", "pii"],
+      isActive: true
+    })
+    expect(rows[1]).toMatchObject({ rowKind: "comment", isActive: false })
+    expect(rows[2]).toMatchObject({ rowKind: "empty", isActive: false })
   })
 })
 

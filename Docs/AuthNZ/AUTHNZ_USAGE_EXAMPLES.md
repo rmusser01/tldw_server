@@ -138,9 +138,9 @@ New endpoints should use the unified `AuthPrincipal` / dependency stack. This ke
 ```python
 from fastapi import APIRouter, Depends
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
     get_auth_principal,
-    require_permissions,
-    require_roles,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
@@ -159,7 +159,7 @@ async def get_me(principal: AuthPrincipal = Depends(get_auth_principal)):
 # Require a specific permission
 @router.post(
     "/api/v1/media/{media_id}",
-    dependencies=[Depends(require_permissions("media.update"))],
+    dependencies=[Depends(RequirePermission("media.update"))],
 )
 async def update_media(
     media_id: int,
@@ -170,7 +170,7 @@ async def update_media(
 # Require admin role
 @router.delete(
     "/api/v1/admin/user/{user_id}",
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def delete_user(
     user_id: int,
@@ -183,7 +183,7 @@ async def delete_user(
 
 ### Legacy Permission Decorators (Historical Only)
 
-Earlier versions exposed decorator-style FastAPI helpers (`PermissionChecker`, `RoleChecker`, `AnyPermissionChecker`, `AllPermissionsChecker`) from `permissions.py`. These have been removed in favor of the claim-first dependency pattern shown above; new and existing endpoints should use `get_auth_principal` with `require_permissions` / `require_roles` instead.
+Earlier versions exposed decorator-style FastAPI helpers (`PermissionChecker`, `RoleChecker`, `AnyPermissionChecker`, `AllPermissionsChecker`) from `permissions.py`. These have been removed in favor of the claim-first dependency pattern shown above; new and existing endpoints should use `get_auth_principal` with `RequirePermission` / `RequireRole` instead.
 
 ### Using in Non-FastAPI Code
 

@@ -16,6 +16,7 @@ https://9to5google.com/2025/01/08/google-discover-daily-listen/
 https://gist.github.com/emschwartz/e6d2bf860ccc367fe37ff953ba6de66b
 https://talkback.sh/
 https://github.com/Olshansk/rss-feeds
+https://help.openai.com/en/articles/12293630-chatgpt-pulse
 https://themeisle.com/blog/rss-feeds-list/
 https://github.com/muchdogesec/history4feed?tab=readme-ov-file
 https://www.dogesec.com/blog/full_text_full_history_rss_atom_blog_feeds/

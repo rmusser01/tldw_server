@@ -1,5 +1,13 @@
 type TldwClientLike = {
-  getConfig: () => Promise<Record<string, unknown> | null>
+  getConfig: () => Promise<
+    | {
+        authMode?: unknown
+        accessToken?: unknown
+        apiKey?: unknown
+      }
+    | null
+    | undefined
+  >
 }
 
 type TldwAuthLike = {
@@ -8,7 +16,11 @@ type TldwAuthLike = {
 
 export const loadTldwClient = async (): Promise<TldwClientLike> => {
   const clientModule = await import("@/services/tldw/TldwApiClient")
-  return clientModule.tldwClient as TldwClientLike
+  const candidate = clientModule.tldwClient
+  if (!candidate || typeof candidate.getConfig !== "function") {
+    throw new TypeError("Configured tldw client does not expose getConfig")
+  }
+  return candidate
 }
 
 export const loadTldwAuth = async (): Promise<TldwAuthLike> => {

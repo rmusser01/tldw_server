@@ -11,9 +11,13 @@ def _require(condition: bool, message: str) -> None:
         pytest.fail(message)
 
 
+def _read_text(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
+
+
 def test_readme_start_here_links_to_profile_index() -> None:
     """README should keep linking to the canonical onboarding profiles."""
-    text = Path("README.md").read_text()
+    text = _read_text("README.md")
     _require(
         "Docs/Getting_Started/README.md" in text,
         "README should link to the Getting Started index",
@@ -47,7 +51,7 @@ def test_readme_start_here_links_to_profile_index() -> None:
 
 def test_readme_quickstart_defaults_to_webui_before_local_dev() -> None:
     """README quickstart should lead with the Docker WebUI path."""
-    text = Path("README.md").read_text()
+    text = _read_text("README.md")
     _, separator, quickstart_section = text.partition("## Quickstart")
     _require(separator == "## Quickstart", "README should include a Quickstart section")
     _require(
@@ -70,7 +74,7 @@ def test_readme_quickstart_defaults_to_webui_before_local_dev() -> None:
 
 def test_getting_started_index_lists_profiles_and_audio_guides() -> None:
     """The Getting Started index should enumerate base profiles and audio guides."""
-    text = Path("Docs/Getting_Started/README.md").read_text()
+    text = _read_text("Docs/Getting_Started/README.md")
     _require(
         "Choose exactly one base setup profile" in text,
         "Getting Started index should explain the base-profile model",
@@ -93,7 +97,7 @@ def test_getting_started_index_lists_profiles_and_audio_guides() -> None:
 
 def test_getting_started_index_calls_out_default_webui_path() -> None:
     """The Getting Started index should call out the WebUI Docker default."""
-    text = Path("Docs/Getting_Started/README.md").read_text()
+    text = _read_text("Docs/Getting_Started/README.md")
     _require("make quickstart" in text, "Getting Started index should mention make quickstart")
     _require(
         "quickstart-docker-webui" in text,
@@ -103,3 +107,24 @@ def test_getting_started_index_calls_out_default_webui_path() -> None:
         "Docker multi-user + Postgres" in text,
         "Getting Started index should keep the team/public deployment callout",
     )
+
+
+def test_no_make_local_quick_launch_shortcuts_are_documented() -> None:
+    """No-Make local self-hosters should be able to find the quick-launch scripts."""
+    docs = {
+        "README.md": _read_text("README.md"),
+        "Docs/Getting_Started/README.md": _read_text("Docs/Getting_Started/README.md"),
+        "Docs/Getting_Started/Profile_Local_Single_User.md": _read_text(
+            "Docs/Getting_Started/Profile_Local_Single_User.md"
+        ),
+        "Docs/Published/Getting_Started/README.md": _read_text(
+            "Docs/Published/Getting_Started/README.md"
+        ),
+        "Docs/Published/Getting_Started/Profile_Local_Single_User.md": _read_text(
+            "Docs/Published/Getting_Started/Profile_Local_Single_User.md"
+        ),
+    }
+
+    for path, text in docs.items():
+        for script in ("quick-launch.sh", "quick-launch.command", "quick-launch.ps1"):
+            _require(script in text, f"{path} should document {script}")

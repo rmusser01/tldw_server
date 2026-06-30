@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -727,6 +728,44 @@ class _FakePolicyResolver:
         }
 
 
+class _FakePathPermissionPreviewService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def preview_effective_path_permission(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(dict(kwargs))
+        return {
+            "tool_name": kwargs["tool_name"],
+            "requested_action": kwargs["action"],
+            "requested_path": kwargs["path"],
+            "normalized_path": kwargs["path"],
+            "outcome": "allow",
+            "within_scope": True,
+            "reason_code": None,
+            "selected_assignment_id": 11,
+            "profile_id": 5,
+            "grant_source": "path_grants",
+            "grant_outcome": "allowed",
+            "matched_grant_prefix": "documents",
+            "matched_grant_effect": "allow",
+            "path_scope_mode": "workspace_root",
+            "workspace_id": "workspace-alpha",
+            "redacted": True,
+            "path_decisions": [
+                {
+                    "requested_action": kwargs["action"],
+                    "normalized_path": kwargs["path"],
+                    "grant_outcome": "allowed",
+                    "grant_source": "path_grants",
+                    "matched_grant_prefix": "documents",
+                    "matched_grant_effect": "allow",
+                    "reason_code": None,
+                    "redacted": True,
+                }
+            ],
+        }
+
+
 class _StructuredBadRequestError(BadRequestError):
     def __init__(self, detail: dict[str, object]) -> None:
         super().__init__(str(detail.get("message") or detail.get("code") or "invalid request"))
@@ -811,6 +850,7 @@ def _build_app(
     resolver: _FakePolicyResolver | None = None,
     *,
     tool_registry: _FakeToolRegistryService | None = None,
+    path_permission_preview: _FakePathPermissionPreviewService | None = None,
     rate_limit_calls: list[str] | None = None,
 ) -> FastAPI:
     app = FastAPI()
@@ -827,6 +867,13 @@ def _build_app(
     if hasattr(mcp_hub_management, "get_mcp_hub_tool_registry_dep"):
         app.dependency_overrides[mcp_hub_management.get_mcp_hub_tool_registry_dep] = (
             lambda: tool_registry or _FakeToolRegistryService()
+        )
+    if path_permission_preview is not None and hasattr(
+        mcp_hub_management,
+        "get_mcp_hub_path_enforcement_service_dep",
+    ):
+        app.dependency_overrides[mcp_hub_management.get_mcp_hub_path_enforcement_service_dep] = (
+            lambda: path_permission_preview
         )
     if rate_limit_calls is not None:
         async def _fake_check_rate_limit(_request: Request) -> None:
@@ -1466,6 +1513,78 @@ def test_get_effective_policy_returns_resolved_payload() -> None:
     assert payload["policy_document"]["path_scope_enforcement"] == "approval_required_when_unenforceable"
     assert payload["sources"][0]["target_id"] == "researcher"
     assert payload["provenance"][1]["source_kind"] == "assignment_override"
+
+
+def test_preview_effective_permission_returns_redacted_path_decision() -> None:
+    preview_service = _FakePathPermissionPreviewService()
+    app = _build_app(
+        _make_principal(
+            roles=[],
+            permissions=[],
+        ),
+        path_permission_preview=preview_service,
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/effective-permission-preview",
+            json={
+                "persona_id": "researcher",
+                "group_id": "team-red",
+                "workspace_id": "workspace-alpha",
+                "tool_name": "fs.write",
+                "action": "write",
+                "path": "documents/story.md",
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["tool_name"] == "fs.write"
+    assert payload["requested_action"] == "write"
+    assert payload["normalized_path"] == "documents/story.md"
+    assert payload["outcome"] == "allow"
+    assert payload["grant_source"] == "path_grants"
+    assert payload["matched_grant_prefix"] == "documents"
+    assert payload["redacted"] is True
+    assert "/tmp/" not in repr(payload)
+    assert preview_service.calls[0]["effective_policy"]["policy_document"]["path_scope_mode"] == "workspace_root"
+    assert preview_service.calls[0]["context"].metadata["workspace_id"] == "workspace-alpha"
+
+
+@pytest.mark.parametrize("raw_path", ["/tmp/secrets.txt", "C:secrets.txt", "C:/secrets.txt"])
+def test_preview_effective_permission_redacts_rejected_non_workspace_path(raw_path: str) -> None:
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    app = _build_app(
+        _make_principal(
+            roles=[],
+            permissions=[],
+        ),
+        path_permission_preview=McpHubPathEnforcementService(path_scope_service=object()),
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/mcp/hub/effective-permission-preview",
+            json={
+                "persona_id": "researcher",
+                "group_id": "team-red",
+                "workspace_id": "workspace-alpha",
+                "tool_name": "fs.read",
+                "action": "read",
+                "path": raw_path,
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["outcome"] == "deny"
+    assert payload["reason_code"] == "path_must_be_workspace_relative"
+    assert payload["requested_path"] == "<redacted>"
+    assert raw_path not in repr(payload)
 
 
 def test_list_policy_assignments_includes_override_summary_fields() -> None:

@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     key_hint_for_api_key,
     loads_envelope,
 )
+from tldw_Server_API.app.core.Persona.dialogue_tree_context import redact_sensitive_payload
 from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
 
 
@@ -212,7 +213,7 @@ def render_template_value(value: str, context: dict[str, str]) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Failed to render persona connection template '{}': {}",
-            value,
+            redact_sensitive_payload(value),
             exc,
         )
         return rendered

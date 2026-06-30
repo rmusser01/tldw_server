@@ -75,6 +75,23 @@ describe("FirstRunGate", () => {
     expect(screen.queryByTestId("child-content")).not.toBeInTheDocument()
   })
 
+  it("renders children instead of the generic overlay when first-run setup is bypassed", () => {
+    mockUseFirstRunCheck.mockReturnValue({
+      shouldShowSetup: true,
+      resumeStep: null,
+      loading: false
+    })
+
+    render(
+      <FirstRunGate onStartSetup={onStartSetup} bypass>
+        <div data-testid="child-content">Character route</div>
+      </FirstRunGate>
+    )
+
+    expect(screen.getByTestId("child-content")).toBeInTheDocument()
+    expect(screen.queryByTestId("first-run-gate-overlay")).not.toBeInTheDocument()
+  })
+
   it("calls onStartSetup when Get Started is clicked", () => {
     mockUseFirstRunCheck.mockReturnValue({
       shouldShowSetup: true,

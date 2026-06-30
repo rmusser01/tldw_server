@@ -6,6 +6,7 @@
  */
 
 import React from "react"
+import type { TFunction } from "i18next"
 import {
   buildContextSystemMessages,
   composeContextPrompt,
@@ -39,7 +40,7 @@ export interface UseWritingContextCompositionDeps {
   effectiveTemplate: NormalizedTemplate
   settingsDisabled: boolean
   updateSetting: (partial: Partial<WritingSessionSettings>) => void
-  t: (key: string, fallback?: string, opts?: Record<string, unknown>) => string
+  t: TFunction
 }
 
 export function useWritingContextComposition(deps: UseWritingContextCompositionDeps) {

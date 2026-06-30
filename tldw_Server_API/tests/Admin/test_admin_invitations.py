@@ -139,6 +139,20 @@ class TestListInvitations:
         # The second created should appear first (newest)
         assert result[0]["email"] == "second@example.com"
 
+    def test_list_sorted_newest_first_when_created_at_ties(self, monkeypatch, tmp_path):
+        """Creation order breaks ties when timestamps match."""
+        svc = _configure_store(monkeypatch, tmp_path)
+        monkeypatch.setattr(svc, "_now_iso", lambda: "2026-01-01T00:00:00+00:00")
+
+        svc.create_invitation(email="first@example.com")
+        svc.create_invitation(email="second@example.com")
+
+        result = svc.list_invitations()
+        assert [item["email"] for item in result[:2]] == [
+            "second@example.com",
+            "first@example.com",
+        ]
+
     def test_list_filter_by_status(self, monkeypatch, tmp_path):
         """Filtering by status works."""
         svc = _configure_store(monkeypatch, tmp_path)

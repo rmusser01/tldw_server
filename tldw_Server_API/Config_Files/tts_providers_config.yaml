@@ -17,6 +17,7 @@ provider_priority:
   - higgs       # Advanced multi-lingual
   - index_tts   # IndexTTS2 (local, expressive zero-shot)
   - qwen3_tts   # Qwen3-TTS (local, multilingual; disabled by default)
+  - fish_s2     # Fish Audio S2 hosted API or self-hosted HTTP server (disabled by default)
 
 # Provider-specific configurations
 providers:
@@ -147,12 +148,18 @@ providers:
   # Chatterbox TTS Configuration
   chatterbox:
     enabled: false  # Disabled by default (requires installation)
-    model_path: "resemble-ai/chatterbox"   # (unused in upstream >=0.1.4)
-    device: "cuda"  # Recommended: GPU (also supports mps/cpu)
-    use_multilingual: false  # Set true to enable 23-language model
+    variant: "standard"  # Options: standard, multilingual, turbo
+    model_path: "ResembleAI/chatterbox"
+    multilingual_model_path: "ResembleAI/chatterbox-multilingual"
+    turbo_model_path: "ResembleAI/chatterbox-turbo"
+    vc_model_path: null  # Optional local ChatterboxVC directory; null uses upstream pretrained default
+    device: "auto"  # auto selects cuda, mps, then cpu
+    use_multilingual: false  # Legacy compat: non-English requests use multilingual when true
+    use_bf16: false  # Opt-in: false, true/on, or auto via TTS_BF16
     sample_rate: 24000
     disable_watermark: true  # Ensure no watermark is applied
     target_latency_ms: 200  # Progressive chunk size target
+    conditionals_cache_size: 16  # Max prepared voice-reference conditionals cached per adapter; 0 disables retention
 
   # VibeVoice Configuration
   # Expressive multi-speaker TTS with optional background music and singing.
@@ -294,6 +301,46 @@ providers:
     tokenizer_max_tokens: 20000
     tokenizer_max_payload_mb: 20
     voice_clone_prompt_max_kb: 256
+
+  # OmniVoice Configuration
+  omnivoice:
+    enabled: false
+    runtime: "sidecar"
+    model: "omnivoice"
+    # Native OmniVoice output; public resampling happens in the main adapter.
+    sample_rate: 24000
+    max_concurrent_generations: 1
+    extra_params:
+      repo_path: "../OmniVoice"
+      model_path: "models/omnivoice_sidecar/models/OmniVoice"
+      runtime_path: "models/omnivoice_sidecar/runtime"
+      scratch_dir: "models/omnivoice_sidecar/runtime/scratch"
+      host: "127.0.0.1"
+      port: 8039
+      autoselect_port: true
+      warmup_on_startup: false
+      idle_shutdown_seconds: 900
+      resident_mode: false
+
+  # Fish Audio S2 Configuration
+  # Hosted commercial API: set backend to "commercial_api" and provide
+  # FISH_AUDIO_API_KEY (or FISH_API_KEY) in the environment.
+  # Self-hosted Fish Speech server: set backend to "native_http" and base_url
+  # to your local server, for example "http://127.0.0.1:8080".
+  fish_s2:
+    enabled: false
+    backend: "commercial_api"
+    base_url: "https://api.fish.audio"
+    api_key: ${FISH_AUDIO_API_KEY}
+    timeout: 120
+    verify_api_key_on_init: false
+    model: "s2-pro"
+    sample_rate: 24000
+    max_text_length: 5000
+    extra_params:
+      default_chunk_length: 200
+      default_normalize: true
+      default_use_memory_cache: "off"
 
 # Voice mappings for cross-provider compatibility
 # NOTE: Providers like index_tts rely on uploaded reference audio; the

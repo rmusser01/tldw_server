@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import React from "react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import axe from "axe-core"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { ResearchWorkspace } from "../index"
 
 const {
@@ -8,16 +10,45 @@ const {
   mockUpsertWorkspace,
   mockGetWorkspaceSources,
   mockAddWorkspaceSource,
+  mockUpdateWorkspaceSourceSelection,
+  mockGetWorkspaceContext,
   mockGetWorkspaceSourcesStatus,
   mockGetWorkspaceCapabilities,
+  mockCreateWorkspaceMigration,
+  mockPutWorkspaceMigrationChunk,
+  mockFinalizeWorkspaceMigration,
+  mockGetWorkspaceMigration,
+  mockAckWorkspaceMigrationClientDelete,
+  mockRunResearchWorkspaceMigration,
+  mockChatPaneProps,
+  mockStatusBarProps,
   mockBgRequest
 } = vi.hoisted(() => ({
   mockGetMediaDetails: vi.fn(),
   mockUpsertWorkspace: vi.fn(),
   mockGetWorkspaceSources: vi.fn(),
   mockAddWorkspaceSource: vi.fn(),
+  mockUpdateWorkspaceSourceSelection: vi.fn(),
+  mockGetWorkspaceContext: vi.fn(),
   mockGetWorkspaceSourcesStatus: vi.fn(),
   mockGetWorkspaceCapabilities: vi.fn(),
+  mockCreateWorkspaceMigration: vi.fn(),
+  mockPutWorkspaceMigrationChunk: vi.fn(),
+  mockFinalizeWorkspaceMigration: vi.fn(),
+  mockGetWorkspaceMigration: vi.fn(),
+  mockAckWorkspaceMigrationClientDelete: vi.fn(),
+  mockRunResearchWorkspaceMigration: vi.fn(),
+  mockChatPaneProps: [] as any[],
+  mockStatusBarProps: [] as Array<{
+    activeOperations?: string[]
+    statusMessages?: string[]
+    statusAction?: {
+      label: string
+      ariaLabel?: string
+      onClick: () => void
+    }
+    workspaceContextStatus?: unknown
+  }>,
   mockBgRequest: vi.fn()
 }))
 
@@ -110,13 +141,24 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     upsertWorkspace: mockUpsertWorkspace,
     getWorkspaceSources: mockGetWorkspaceSources,
     addWorkspaceSource: mockAddWorkspaceSource,
+    updateWorkspaceSourceSelection: mockUpdateWorkspaceSourceSelection,
+    getWorkspaceContext: undefined,
     getWorkspaceSourcesStatus: mockGetWorkspaceSourcesStatus,
-    getWorkspaceCapabilities: mockGetWorkspaceCapabilities
+    getWorkspaceCapabilities: mockGetWorkspaceCapabilities,
+    createWorkspaceMigration: mockCreateWorkspaceMigration,
+    putWorkspaceMigrationChunk: mockPutWorkspaceMigrationChunk,
+    finalizeWorkspaceMigration: mockFinalizeWorkspaceMigration,
+    getWorkspaceMigration: mockGetWorkspaceMigration,
+    ackWorkspaceMigrationClientDelete: mockAckWorkspaceMigrationClientDelete
   }
 }))
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: mockBgRequest
+}))
+
+vi.mock("@/store/workspace-migration", () => ({
+  runResearchWorkspaceMigration: mockRunResearchWorkspaceMigration
 }))
 
 vi.mock("@/utils/research-workspace-prefill", () => ({
@@ -139,7 +181,10 @@ vi.mock("../SourcesPane", () => ({
 }))
 
 vi.mock("../ChatPane", () => ({
-  ChatPane: () => <div data-testid="workspace-chat-pane">Chat</div>
+  ChatPane: (props: any) => {
+    mockChatPaneProps.push(props)
+    return <div data-testid="workspace-chat-pane">Chat</div>
+  }
 }))
 
 vi.mock("../StudioPane", () => ({
@@ -147,15 +192,52 @@ vi.mock("../StudioPane", () => ({
 }))
 
 vi.mock("../WorkspaceStatusBar", () => ({
-  WorkspaceStatusBar: ({ activeOperations }: { activeOperations?: string[] }) => (
-    <div data-testid="workspace-status-bar">
-      {activeOperations && activeOperations.length > 0 && (
-        <div data-testid="workspace-statusbar-activity">
-          {activeOperations.join(" \u2022 ")}
-        </div>
-      )}
-    </div>
-  )
+  WorkspaceStatusBar: (props: {
+    activeOperations?: string[]
+    statusMessages?: string[]
+    statusAction?: {
+      label: string
+      ariaLabel?: string
+      onClick: () => void
+    }
+    workspaceContextStatus?: unknown
+  }) => {
+    const {
+      activeOperations,
+      statusMessages,
+      statusAction,
+      workspaceContextStatus
+    } = props
+    mockStatusBarProps.push(props)
+    return (
+      <div data-testid="workspace-status-bar">
+        {workspaceContextStatus ? (
+          <div data-testid="workspace-statusbar-context">
+            {JSON.stringify(workspaceContextStatus)}
+          </div>
+        ) : null}
+        {statusMessages && statusMessages.length > 0 && (
+          <div data-testid="workspace-statusbar-notice">
+            {statusMessages.join(" ")}
+          </div>
+        )}
+        {statusAction && (
+          <button
+            type="button"
+            aria-label={statusAction.ariaLabel || statusAction.label}
+            onClick={statusAction.onClick}
+          >
+            {statusAction.label}
+          </button>
+        )}
+        {activeOperations && activeOperations.length > 0 && (
+          <div data-testid="workspace-statusbar-activity">
+            {activeOperations.join(" \u2022 ")}
+          </div>
+        )}
+      </div>
+    )
+  }
 }))
 
 if (!(globalThis as any).ResizeObserver) {
@@ -164,6 +246,32 @@ if (!(globalThis as any).ResizeObserver) {
     unobserve() {}
     disconnect() {}
   }
+}
+
+const ensureLocalStorage = () => {
+  if (window.localStorage && typeof window.localStorage.clear === "function") {
+    window.localStorage.clear()
+    return
+  }
+
+  const storage = new Map<string, string>()
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      clear: () => storage.clear(),
+      getItem: (key: string) => storage.get(key) ?? null,
+      key: (index: number) => Array.from(storage.keys())[index] ?? null,
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      setItem: (key: string, value: string) => {
+        storage.set(key, String(value))
+      },
+      get length() {
+        return storage.size
+      }
+    }
+  })
 }
 
 const sourceStatusSummary = {
@@ -220,6 +328,40 @@ const makeCapabilitiesPayload = (overrides: Record<string, unknown> = {}) => ({
   ...overrides
 })
 
+const makeContextPayload = (overrides: Record<string, unknown> = {}) => ({
+  workspace_id: "workspace-1",
+  workspace_kind: "research_workspace",
+  schema_version: 1,
+  generated_at: "2026-05-25T00:00:00Z",
+  workspace: {
+    id: "workspace-1",
+    name: "New Research",
+    archived: false,
+    study_materials_policy: "workspace",
+    deleted: false,
+    banner_title: null,
+    banner_subtitle: null,
+    banner_color: null,
+    audio_provider: null,
+    audio_model: null,
+    audio_voice: null,
+    audio_speed: null,
+    created_at: "2026-05-23T12:00:00Z",
+    last_modified: "2026-05-23T12:00:00Z",
+    version: 1
+  },
+  sources: {
+    items: [makeStatusSource()],
+    summary: sourceStatusSummary
+  },
+  capabilities: makeCapabilitiesPayload(),
+  services: {},
+  allowed_actions: {},
+  active_jobs: [],
+  partial_errors: [],
+  ...overrides
+})
+
 const createDeferred = <T,>() => {
   let resolve!: (value: T | PromiseLike<T>) => void
   let reject!: (reason?: unknown) => void
@@ -258,6 +400,18 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    ensureLocalStorage()
+    ;(tldwClient as unknown as { getWorkspaceContext?: unknown }).getWorkspaceContext =
+      undefined
+    mockRunResearchWorkspaceMigration.mockResolvedValue({
+      status: "not_needed",
+      migrationId: null,
+      manifestHash: "a".repeat(64),
+      serverMigration: null,
+      localDeletionEligibility: null,
+      deletedSurfaceIds: [],
+      message: "No legacy Research Workspace content was discovered."
+    })
     mockUndoWorkspaceAction.mockReturnValue(true)
     mockScheduleWorkspaceUndoAction.mockImplementation(
       (config: { apply?: () => void }) => {
@@ -279,6 +433,8 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     testState.sources = []
     testState.setSourceStatusByMediaId = vi.fn()
     testState.workspaceChatSessions = {}
+    mockChatPaneProps.length = 0
+    mockStatusBarProps.length = 0
     testState.currentNote = {
       id: 7,
       title: "",
@@ -314,6 +470,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
         version: 1
       })
     )
+    mockUpdateWorkspaceSourceSelection.mockResolvedValue(undefined)
     mockGetWorkspaceSourcesStatus.mockResolvedValue({
       workspace_id: "workspace-1",
       sources: [],
@@ -352,18 +509,272 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     })
   })
 
+  it("does not show a migration details action when there is no migration notice", async () => {
+    render(<ResearchWorkspace />)
+
+    await screen.findByTestId("workspace-status-bar")
+
+    expect(screen.queryByTestId("workspace-statusbar-notice")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", {
+        name: "Review migration recovery details"
+      })
+    ).not.toBeInTheDocument()
+  })
+
+  it("runs legacy workspace migration once and shows a compact recovery status when local data is retained", async () => {
+    const legacyPayload = JSON.stringify({
+      workspaces: [{ id: "legacy-workspace", name: "Legacy Workspace" }]
+    })
+    window.localStorage.setItem("tldw-workspace", legacyPayload)
+    mockRunResearchWorkspaceMigration.mockResolvedValueOnce({
+      status: "finalized_not_delete_eligible",
+      migrationId: "research-workspace-workspace-1-abcd",
+      manifestHash: "b".repeat(64),
+      serverMigration: {
+        id: "research-workspace-workspace-1-abcd",
+        status: "finalized",
+        client_delete_eligible: false
+      },
+      localDeletionEligibility: {
+        eligible: true,
+        blockingSurfaces: [],
+        unknownSurfaces: [],
+        retainedLocalSurfaces: []
+      },
+      deletedSurfaceIds: [],
+      message:
+        "Server receipt was saved. Local data is retained until server deletion eligibility is available."
+    })
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(mockRunResearchWorkspaceMigration).toHaveBeenCalledTimes(1)
+    })
+
+    const migrationInput = mockRunResearchWorkspaceMigration.mock.calls[0]?.[0]
+    expect(migrationInput).toEqual(
+      expect.objectContaining({
+        targetWorkspaceId: "workspace-1",
+        targetWorkspaceName: "New Research",
+        discoveredLocalStorageKeys: ["tldw-workspace"]
+      })
+    )
+    await expect(
+      migrationInput.readLocalStorageValue("tldw-workspace")
+    ).resolves.toBe(legacyPayload)
+    expect(migrationInput.deleteLocalStorageValue).toEqual(expect.any(Function))
+    expect(migrationInput.writeLocalStorageValue).toEqual(expect.any(Function))
+
+    const notice = await screen.findByTestId("workspace-statusbar-notice")
+    expect(notice).toHaveTextContent("Legacy workspace data found")
+    expect(notice).toHaveTextContent("Server receipt saved")
+    expect(notice).toHaveTextContent(
+      "Local data retained until server deletion eligibility is available"
+    )
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review migration recovery details" })
+    )
+    const dialog = await screen.findByRole("dialog", {
+      name: "Migration recovery details"
+    })
+    expect(dialog).toHaveTextContent("research-workspace-workspace-1-abcd")
+    expect(dialog).toHaveTextContent("Server receipt saved")
+    expect(dialog).toHaveTextContent("Client deletion eligible")
+    expect(screen.queryByText(/workspace-playground/i)).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-trust-panel")).not.toBeInTheDocument()
+  })
+
+  it("includes legacy IndexedDB offload stores when local split storage points to them", async () => {
+    window.localStorage.setItem(
+      "tldw-workspace",
+      JSON.stringify({
+        schema: "workspace_split_v1",
+        state: { workspaceIds: ["workspace-1"] }
+      })
+    )
+    window.localStorage.setItem(
+      "tldw-workspace:workspace:workspace-1:chat",
+      JSON.stringify({
+        offloadType: "workspace_chat_session_v1",
+        key: "workspace:workspace-1:chat",
+        historyId: null,
+        serverChatId: null,
+        updatedAt: 1
+      })
+    )
+    window.localStorage.setItem(
+      "tldw-workspace:workspace:workspace-1:snapshot",
+      JSON.stringify({
+        generatedArtifacts: [
+          {
+            id: "artifact-1",
+            __tldwArtifactPayloadRef: {
+              offloadType: "workspace_artifact_payload_v1",
+              key: "workspace:workspace-1:artifact:artifact-1",
+              fields: ["content"],
+              updatedAt: 1
+            }
+          }
+        ]
+      })
+    )
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(mockRunResearchWorkspaceMigration).toHaveBeenCalledTimes(1)
+    })
+
+    expect(mockRunResearchWorkspaceMigration.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        discoveredIndexedDbStores: expect.arrayContaining([
+          {
+            databaseName: "tldw-workspace-storage",
+            storeName: "workspace-chat-sessions"
+          },
+          {
+            databaseName: "tldw-workspace-storage",
+            storeName: "workspace-artifact-payloads"
+          }
+        ])
+      })
+    )
+  })
+
+  it("explains that local data is retained when the server receipt is saved but local inventory blocks deletion", async () => {
+    window.localStorage.setItem(
+      "tldw-workspace",
+      JSON.stringify({
+        workspaces: [{ id: "legacy-workspace", name: "Legacy Workspace" }]
+      })
+    )
+    mockRunResearchWorkspaceMigration.mockResolvedValueOnce({
+      status: "blocked",
+      migrationId: "research-workspace-workspace-1-blocked",
+      manifestHash: "d".repeat(64),
+      serverMigration: {
+        id: "research-workspace-workspace-1-blocked",
+        status: "finalized",
+        client_delete_eligible: false
+      },
+      localDeletionEligibility: {
+        eligible: false,
+        blockingSurfaces: [],
+        unknownSurfaces: [
+          {
+            id: "unknown:localStorage:tldw:research-workspace:unknown",
+            kind: "local_storage",
+            key: "tldw:research-workspace:unknown",
+            deletionPolicy: "unknown_blocks_deletion"
+          }
+        ],
+        retainedLocalSurfaces: []
+      },
+      deletedSurfaceIds: [],
+      message:
+        "Server receipt was saved, but local deletion is blocked by the legacy inventory gate."
+    })
+
+    render(<ResearchWorkspace />)
+
+    const notice = await screen.findByTestId("workspace-statusbar-notice")
+    expect(notice).toHaveTextContent("Server receipt saved")
+    expect(notice).toHaveTextContent("Local data retained")
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review migration recovery details" })
+    )
+    const dialog = await screen.findByRole("dialog", {
+      name: "Migration recovery details"
+    })
+    expect(dialog).toHaveTextContent("Unknown local surfaces")
+    expect(dialog).toHaveTextContent("tldw:research-workspace:unknown")
+  })
+
+  it("settles migration status when React StrictMode remounts effects", async () => {
+    const migrationDeferred = createDeferred<{
+      status: string
+      migrationId: string
+      manifestHash: string
+      serverMigration: {
+        id: string
+        status: string
+        client_delete_eligible: boolean
+      }
+      localDeletionEligibility: {
+        eligible: boolean
+        blockingSurfaces: unknown[]
+        unknownSurfaces: unknown[]
+        retainedLocalSurfaces: unknown[]
+      }
+      deletedSurfaceIds: string[]
+      message: string
+    }>()
+    window.localStorage.setItem(
+      "tldw-workspace",
+      JSON.stringify({
+        workspaces: [{ id: "legacy-workspace", name: "Legacy Workspace" }]
+      })
+    )
+    mockRunResearchWorkspaceMigration.mockReturnValueOnce(
+      migrationDeferred.promise
+    )
+
+    render(
+      <React.StrictMode>
+        <ResearchWorkspace />
+      </React.StrictMode>
+    )
+
+    await waitFor(() => {
+      expect(mockRunResearchWorkspaceMigration).toHaveBeenCalledTimes(1)
+    })
+    const loadingNotice = await screen.findByTestId("workspace-statusbar-notice")
+    expect(loadingNotice).toHaveTextContent("Checking local workspace data")
+    expect(loadingNotice).not.toHaveTextContent("Legacy workspace data found")
+
+    await act(async () => {
+      migrationDeferred.resolve({
+        status: "finalized_not_delete_eligible",
+        migrationId: "research-workspace-workspace-1-strict",
+        manifestHash: "c".repeat(64),
+        serverMigration: {
+          id: "research-workspace-workspace-1-strict",
+          status: "finalized",
+          client_delete_eligible: false
+        },
+        localDeletionEligibility: {
+          eligible: true,
+          blockingSurfaces: [],
+          unknownSurfaces: [],
+          retainedLocalSurfaces: []
+        },
+        deletedSurfaceIds: [],
+        message:
+          "Server receipt was saved. Local data is retained until server deletion eligibility is available."
+      })
+      await Promise.resolve()
+    })
+
+    const notice = await screen.findByTestId("workspace-statusbar-notice")
+    expect(notice).toHaveTextContent("Server receipt saved")
+    expect(notice).toHaveTextContent(
+      "Local data retained until server deletion eligibility is available"
+    )
+  })
+
   it("opens and closes workspace search with keyboard shortcuts", async () => {
     render(<ResearchWorkspace />)
 
-    fireEvent.keyDown(window, { key: "k", altKey: true })
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true })
 
     const dialog = await screen.findByRole("dialog", { name: "Search workspace" })
     expect(dialog).toBeInTheDocument()
 
-    fireEvent.keyDown(
-      within(dialog).getByPlaceholderText("Search sources, chat, and notes..."),
-      { key: "Escape" }
-    )
+    fireEvent.keyDown(within(dialog).getByLabelText("Search workspace"), {
+      key: "Escape"
+    })
 
     await waitFor(() => {
       const dialog = screen.queryByRole("dialog", { name: "Search workspace" })
@@ -684,6 +1095,94 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       expect(mockGetMediaDetails).toHaveBeenCalledWith(
         808,
         expect.objectContaining({
+          include_content: true,
+          suppressBackendUnavailableEvent: true
+        })
+      )
+    })
+
+    expect(testState.setSourceStatusByMediaId).not.toHaveBeenCalledWith(
+      808,
+      "ready"
+    )
+  })
+
+  it("does not let media-detail fallback override a partial workspace status projection", async () => {
+    const partialReadiness = {
+      metadata_ready: true,
+      text_extracted: true,
+      fts_ready: true,
+      vector_ready: false,
+      citation_ready: true,
+      summary_ready: false,
+      tool_accessible: true
+    }
+    testState.sources = [
+      {
+        id: "source-partial",
+        mediaId: 808,
+        title: "Partially queryable source",
+        type: "pdf",
+        status: "processing",
+        addedAt: new Date("2026-02-18T12:00:00.000Z")
+      }
+    ]
+    mockGetWorkspaceSourcesStatus.mockResolvedValueOnce(
+      makeStatusPayload({
+        sources: [
+          makeStatusSource({
+            id: "source-partial",
+            media_id: 808,
+            title: "Partially queryable source",
+            state: "partially_queryable",
+            status_reason: "vector_index_pending",
+            readiness: partialReadiness,
+            progress_percent: 75,
+            progress_message:
+              "Text search is available while vector indexing continues."
+          })
+        ],
+        summary: {
+          total: 1,
+          selected: 1,
+          queryable: 0,
+          partially_queryable: 1,
+          processing: 1,
+          failed: 0,
+          missing: 0
+        }
+      })
+    )
+    mockGetMediaDetails.mockResolvedValue({
+      content: {
+        text: "Extracted source text exists before vector indexing finishes."
+      }
+    })
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
+        808,
+        "processing",
+        "Text search is available while vector indexing continues.",
+        partialReadiness,
+        expect.objectContaining({
+          lifecycleState: "partially_queryable",
+          statusReason: "vector_index_pending",
+          sourceOfTruth: "workspace-status-projection",
+          progressPercent: 75,
+          progressMessage:
+            "Text search is available while vector indexing continues.",
+          stale: false,
+          retryEligible: false
+        })
+      )
+    })
+    await waitFor(() => {
+      expect(mockGetMediaDetails).toHaveBeenCalledWith(
+        808,
+        expect.objectContaining({
           include_content: true
         })
       )
@@ -695,7 +1194,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     )
   })
 
-  it("renders backend trust projection and reconciles source statuses fail-closed", async () => {
+  it("renders backend status projection and reconciles source statuses fail-closed", async () => {
     testState.sources = [
       {
         id: "source-ready",
@@ -857,29 +1356,83 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     await waitFor(() => {
       expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalledWith("workspace-1")
       expect(mockGetWorkspaceCapabilities).toHaveBeenCalledWith("workspace-1")
+      expect(mockChatPaneProps.at(-1)?.workspaceCapabilities).toMatchObject({
+        workspace_id: "workspace-1",
+        workspace_services: expect.objectContaining({
+          mcp: expect.objectContaining({
+            state: "not_configured",
+            management_surface: "mcp_hub"
+          }),
+          acp: expect.objectContaining({
+            state: "not_configured",
+            management_surface: "acp_workspace"
+          }),
+          sandbox: expect.objectContaining({
+            state: "not_configured",
+            management_surface: "sandbox_settings"
+          }),
+          provider: expect.objectContaining({
+            state: "unknown",
+            management_surface: "model_settings"
+          })
+        })
+      })
     })
-
-    expect(await screen.findByTestId("workspace-trust-panel")).toBeInTheDocument()
-    expect(screen.getByText("1 queryable")).toBeInTheDocument()
-    expect(screen.getByText("1 processing")).toBeInTheDocument()
-    expect(screen.getByText("1 missing")).toBeInTheDocument()
-    expect(screen.getByText("no_workspace_mcp_binding")).toBeInTheDocument()
 
     await waitFor(() => {
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
         101,
         "ready",
-        "Ready for grounded questions."
+        "Ready for grounded questions.",
+        expect.objectContaining({
+          text_extracted: true,
+          vector_ready: true
+        }),
+        expect.objectContaining({
+          lifecycleState: "queryable",
+          statusReason: "source_queryable",
+          sourceOfTruth: "workspace-status-projection",
+          progressPercent: 100,
+          progressMessage: "Ready for grounded questions.",
+          stale: false,
+          retryEligible: false
+        })
       )
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
         102,
         "processing",
-        "Indexing"
+        "Indexing",
+        expect.objectContaining({
+          text_extracted: true,
+          vector_ready: false
+        }),
+        expect.objectContaining({
+          lifecycleState: "indexing",
+          statusReason: "job_indexing",
+          sourceOfTruth: "workspace-status-projection",
+          progressPercent: 82,
+          progressMessage: "Indexing",
+          stale: false,
+          retryEligible: false
+        })
       )
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
         103,
         "error",
-        "Media item is missing."
+        "Media item is missing.",
+        expect.objectContaining({
+          text_extracted: false,
+          tool_accessible: false
+        }),
+        expect.objectContaining({
+          lifecycleState: "missing_media",
+          statusReason: "media_not_found",
+          sourceOfTruth: "workspace-status-projection",
+          progressPercent: 0,
+          progressMessage: "Media item is missing.",
+          stale: false,
+          retryEligible: true
+        })
       )
     })
   })
@@ -896,15 +1449,83 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
         101,
         "ready",
-        "Ready for grounded questions."
+        "Ready for grounded questions.",
+        expect.objectContaining({
+          text_extracted: true,
+          vector_ready: true
+        }),
+        expect.objectContaining({
+          lifecycleState: "queryable",
+          statusReason: "source_queryable",
+          sourceOfTruth: "workspace-status-projection"
+        })
       )
     })
-
-    expect(screen.getByText("1 queryable")).toBeInTheDocument()
-    expect(screen.getByText("Capabilities unavailable")).toBeInTheDocument()
+    await waitFor(() => {
+      expect(
+        mockStatusBarProps.some((props) => {
+          const status = props.workspaceContextStatus as
+            | { label?: string; detail?: string; severity?: string }
+            | null
+            | undefined
+          return (
+            status?.label === "Workspace degraded" &&
+            status.detail === "Capabilities unavailable" &&
+            status.severity === "warning"
+          )
+        })
+      ).toBe(true)
+    })
   })
 
-  it("bootstraps the server workspace and source rows before trust projection calls", async () => {
+  it("uses the canonical workspace context envelope when available", async () => {
+    ;(tldwClient as unknown as { getWorkspaceContext: typeof mockGetWorkspaceContext }).getWorkspaceContext =
+      mockGetWorkspaceContext
+    mockGetWorkspaceContext.mockResolvedValueOnce(
+      makeContextPayload({
+        sources: {
+          items: [
+            makeStatusSource({
+              media_id: 404,
+              progress_message: "Context source ready"
+            })
+          ],
+          summary: sourceStatusSummary
+        },
+        partial_errors: [
+          {
+            scope: "jobs",
+            code: "jobs_unavailable",
+            message: "Jobs status is temporarily unavailable."
+          }
+        ]
+      })
+    )
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(mockGetWorkspaceContext).toHaveBeenCalledWith("workspace-1")
+    })
+    expect(mockGetWorkspaceSourcesStatus).not.toHaveBeenCalled()
+    expect(mockGetWorkspaceCapabilities).not.toHaveBeenCalled()
+    expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
+      404,
+      "ready",
+      "Context source ready",
+      expect.objectContaining({
+        text_extracted: true,
+        vector_ready: true
+      }),
+      expect.objectContaining({
+        lifecycleState: "queryable",
+        sourceOfTruth: "workspace-status-projection",
+        progressMessage: "Context source ready"
+      })
+    )
+  })
+
+  it("bootstraps the server workspace and source rows before status projection calls", async () => {
     testState.sources = [
       {
         id: "source-ready",
@@ -936,8 +1557,12 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       source_type: "pdf",
       url: "https://example.test/ready.pdf",
       position: 0,
-      selected: true
+      selected: false
     })
+    expect(mockUpdateWorkspaceSourceSelection).toHaveBeenCalledWith(
+      "workspace-1",
+      []
+    )
 
     expect(
       mockUpsertWorkspace.mock.invocationCallOrder[0]
@@ -953,7 +1578,61 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     ).toBeLessThan(mockGetWorkspaceCapabilities.mock.invocationCallOrder[0])
   })
 
-  it("continues trust projection and surfaces a bounded warning when server bootstrap fails", async () => {
+  it("persists the canonical local source selection during server bootstrap", async () => {
+    testState.sources = [
+      {
+        id: "source-unselected",
+        mediaId: 111,
+        title: "Unselected Source",
+        type: "pdf",
+        status: "ready",
+        addedAt: new Date("2026-05-23T12:00:00.000Z")
+      },
+      {
+        id: "source-selected",
+        mediaId: 222,
+        title: "Selected Source",
+        type: "website",
+        status: "ready",
+        addedAt: new Date("2026-05-23T12:01:00.000Z")
+      }
+    ]
+    testState.selectedSourceIds = ["source-selected"]
+
+    render(<ResearchWorkspace />)
+
+    await waitFor(() => {
+      expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalledWith("workspace-1")
+    })
+
+    expect(mockAddWorkspaceSource).toHaveBeenNthCalledWith(1, "workspace-1", {
+      id: "source-unselected",
+      media_id: 111,
+      title: "Unselected Source",
+      source_type: "pdf",
+      url: null,
+      position: 0,
+      selected: false
+    })
+    expect(mockAddWorkspaceSource).toHaveBeenNthCalledWith(2, "workspace-1", {
+      id: "source-selected",
+      media_id: 222,
+      title: "Selected Source",
+      source_type: "website",
+      url: null,
+      position: 1,
+      selected: true
+    })
+    expect(mockUpdateWorkspaceSourceSelection).toHaveBeenCalledWith(
+      "workspace-1",
+      ["source-selected"]
+    )
+    expect(
+      mockUpdateWorkspaceSourceSelection.mock.invocationCallOrder[0]
+    ).toBeLessThan(mockGetWorkspaceSourcesStatus.mock.invocationCallOrder[0])
+  })
+
+  it("continues source status projection when server bootstrap fails", async () => {
     mockUpsertWorkspace.mockRejectedValueOnce(new Error("database locked"))
     mockGetWorkspaceSourcesStatus.mockResolvedValueOnce(makeStatusPayload())
     mockGetWorkspaceCapabilities.mockResolvedValueOnce(makeCapabilitiesPayload())
@@ -966,12 +1645,12 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     })
 
     expect(mockGetWorkspaceSources).not.toHaveBeenCalled()
-    expect(await screen.findByTestId("workspace-trust-panel")).toBeInTheDocument()
-    expect(screen.getByText("Workspace server sync unavailable")).toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-trust-panel")).not.toBeInTheDocument()
+    expect(screen.queryByText("Workspace server sync unavailable")).not.toBeInTheDocument()
     expect(screen.queryByText("database locked")).not.toBeInTheDocument()
   })
 
-  it("ignores trust projection responses for a previous workspace", async () => {
+  it("ignores source status projection responses for a previous workspace", async () => {
     mockGetWorkspaceSourcesStatus.mockResolvedValueOnce(
       makeStatusPayload({
         workspace_id: "workspace-other",
@@ -1038,7 +1717,18 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       expect(testState.setSourceStatusByMediaId).toHaveBeenCalledWith(
         302,
         "error",
-        "unrecognized_lifecycle_state"
+        "unrecognized_lifecycle_state",
+        expect.objectContaining({
+          text_extracted: true,
+          vector_ready: true
+        }),
+        expect.objectContaining({
+          lifecycleState: "unknown",
+          statusReason: "unrecognized_lifecycle_state",
+          sourceOfTruth: "workspace-status-projection",
+          stale: false,
+          retryEligible: false
+        })
       )
     })
     expect(testState.setSourceStatusByMediaId).not.toHaveBeenCalledWith(
@@ -1048,7 +1738,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     )
   })
 
-  it("does not start overlapping trust projection polls", async () => {
+  it("does not start overlapping source status projection polls", async () => {
     vi.useFakeTimers()
     try {
       const statusDeferred = createDeferred<ReturnType<typeof makeStatusPayload>>()

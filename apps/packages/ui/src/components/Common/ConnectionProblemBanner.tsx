@@ -1,5 +1,5 @@
 import React from "react"
-import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
+import { RecoveryCallout, type StateAction } from "@/components/ui/state"
 
 type ConnectionProblemBannerProps = {
   badgeLabel?: React.ReactNode
@@ -44,33 +44,56 @@ const ConnectionProblemBanner: React.FC<ConnectionProblemBannerProps> = ({
   ) : (
     title
   )
+  const primaryAction: StateAction | undefined = primaryActionLabel
+    ? {
+        label: primaryActionLabel,
+        onClick: onPrimaryAction,
+        disabled: primaryDisabled,
+        ariaLabel:
+          typeof primaryActionLabel === "string" ? primaryActionLabel : undefined
+      }
+    : undefined
+  const secondaryActions: StateAction[] = []
+
+  if (retryActionLabel && onRetry) {
+    secondaryActions.push({
+      label: retryActionLabel,
+      onClick: onRetry,
+      disabled: retryDisabled,
+      ariaLabel:
+        typeof retryActionLabel === "string" ? retryActionLabel : undefined
+    })
+  }
+
+  if (secondaryActionLabel) {
+    secondaryActions.push({
+      label: secondaryActionLabel,
+      onClick: onSecondaryAction,
+      disabled: secondaryDisabled,
+      ariaLabel:
+        typeof secondaryActionLabel === "string"
+          ? secondaryActionLabel
+          : undefined
+    })
+  }
 
   return (
-    <div className={className}>
-      <FeatureEmptyState
-        title={composedTitle}
-        description={description}
-        examples={examples}
-        primaryActionLabel={primaryActionLabel}
-        onPrimaryAction={onPrimaryAction}
-        secondaryActionLabel={secondaryActionLabel}
-        onSecondaryAction={onSecondaryAction}
-        primaryDisabled={primaryDisabled}
-        secondaryDisabled={secondaryDisabled}
-      />
-      {retryActionLabel && onRetry && (
-        <div className="mt-2 flex justify-start text-xs">
-          <button
-            type="button"
-            onClick={onRetry}
-            disabled={retryDisabled}
-            className="inline-flex items-center gap-1 text-primary hover:text-primary disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:text-primary"
-          >
-            {retryActionLabel}
-          </button>
-        </div>
-      )}
-    </div>
+    <RecoveryCallout
+      state="unavailable"
+      title={composedTitle}
+      message={description}
+      primaryAction={primaryAction}
+      secondaryActions={secondaryActions}
+      className={className}
+    >
+      {examples && examples.length > 0 ? (
+        <ul className="list-disc space-y-1 pl-4 text-sm text-text-muted">
+          {examples.map((example, index) => (
+            <li key={index}>{example}</li>
+          ))}
+        </ul>
+      ) : null}
+    </RecoveryCallout>
   )
 }
 

@@ -7,11 +7,21 @@ from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 
 ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
 ALLOWED_ASSISTANT_KINDS = ("character", "persona")
 ALLOWED_PERSONA_MEMORY_MODES = ("read_only", "read_write")
+MAX_ASSISTANT_OVERLAY_TEXT_CHARS = 20_000
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 # ========================================================================
@@ -29,6 +39,100 @@ def _validate_conversation_state(value: Optional[str]) -> Optional[str]:
     if normalized not in ALLOWED_CONVERSATION_STATES:
         raise ValueError(f"Invalid state '{value}'. Allowed: {', '.join(ALLOWED_CONVERSATION_STATES)}")
     return normalized
+
+
+def _normalize_required_overlay_text(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _normalize_optional_overlay_text(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        trimmed = value.strip()
+        return trimmed or None
+    return value
+
+
+def _normalize_overlay_timestamp(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _validate_iso_timestamp_text(value: str) -> str:
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("Expected ISO timestamp string") from exc
+    return value
+
+
+class AssistantOverlaySettings(BaseModel):
+    """Normalized assistant personality overlay stored in per-chat settings."""
+
+    kind: Literal["character", "persona"] = Field(
+        ...,
+        description="Source identity kind for the overlay",
+    )
+    id: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_ASSISTANT_OVERLAY_TEXT_CHARS,
+        description="Stable character/persona identifier",
+    )
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_ASSISTANT_OVERLAY_TEXT_CHARS,
+        description="Display name snapshot captured when the overlay was applied",
+    )
+    avatar_url: str | None = Field(
+        default=None,
+        max_length=MAX_ASSISTANT_OVERLAY_TEXT_CHARS,
+        description="Optional avatar URL snapshot",
+    )
+    system_prompt_snapshot: str | None = Field(
+        default=None,
+        max_length=MAX_ASSISTANT_OVERLAY_TEXT_CHARS,
+        description="Optional system prompt snapshot captured on apply",
+    )
+    updatedAt: str = Field(
+        ...,
+        min_length=1,
+        description="ISO timestamp for the last overlay update",
+    )
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _normalize_kind(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    @field_validator("id", "name", mode="before")
+    @classmethod
+    def _normalize_required_text(cls, value: Any) -> Any:
+        return _normalize_required_overlay_text(value)
+
+    @field_validator("avatar_url", "system_prompt_snapshot", mode="before")
+    @classmethod
+    def _normalize_optional_text(cls, value: Any) -> Any:
+        return _normalize_optional_overlay_text(value)
+
+    @field_validator("updatedAt", mode="before")
+    @classmethod
+    def _normalize_updated_at(cls, value: Any) -> Any:
+        return _normalize_overlay_timestamp(value)
+
+    @field_validator("updatedAt")
+    @classmethod
+    def _validate_updated_at(cls, value: str) -> str:
+        return _validate_iso_timestamp_text(value)
 
 class ChatSessionCreate(BaseModel):
     """Schema for creating a new chat session."""
@@ -74,6 +178,18 @@ class ChatSessionCreate(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_assistant_identity(self) -> "ChatSessionCreate":
+        has_any_tracked_identity = any(
+            value is not None
+            for value in (
+                self.character_id,
+                self.assistant_kind,
+                self.assistant_id,
+                self.persona_memory_mode,
+            )
+        )
+        if not has_any_tracked_identity:
+            return self
+
         if self.assistant_kind is None:
             self.assistant_kind = "character" if self.character_id is not None else None
         if self.assistant_kind is None:
@@ -147,11 +263,13 @@ class ChatSessionResponse(BaseModel):
         description="Workspace ID when scope_type='workspace'",
     )
     character_id: int | None = Field(None, description="ID of the associated character")
+    character_name: str | None = Field(None, description="Display name of the associated character")
     assistant_kind: Literal["character", "persona"] | None = Field(
         None,
         description="Normalized assistant identity kind for the chat",
     )
     assistant_id: str | None = Field(None, description="Normalized assistant identity ID for the chat")
+    assistant_name: str | None = Field(None, description="Display name for the chat assistant identity")
     persona_memory_mode: Literal["read_only", "read_write"] | None = Field(
         None,
         description="Persona durable memory behavior for this chat",
@@ -184,6 +302,13 @@ class ChatSessionListResponse(BaseModel):
     total: int = Field(..., description="Total number of chats")
     limit: int = Field(..., description="Number of items per page")
     offset: int = Field(..., description="Offset for pagination")
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ChatLinkedResearchRunResponse(BaseModel):
@@ -307,6 +432,13 @@ class MessageListResponse(BaseModel):
     total: int = Field(..., description="Total number of messages")
     limit: int = Field(..., description="Number of items per page")
     offset: int = Field(..., description="Offset for pagination")
+    pagination: OffsetPaginationMeta
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 # ========================================================================
@@ -424,6 +556,93 @@ class CharacterChatCompletionPrepResponse(BaseModel):
     usage_instructions: str = "Use these messages with POST /api/v1/chat/completions"
 
 
+class PromptPreviewSection(BaseModel):
+    """Supplemental prompt section included in prompt-preview diagnostics."""
+
+    name: str = Field(..., description="Stable section identifier")
+    content: str = Field(..., description="Truncated preview content for this section")
+    tokens_estimated: int = Field(..., ge=0, description="Estimated tokens before truncation")
+    tokens_effective: int = Field(..., ge=0, description="Estimated tokens after truncation")
+    budget: int = Field(..., ge=0, description="Section token budget")
+    truncated: bool = Field(..., description="Whether the section was truncated")
+    diagnostics: list[dict[str, Any]] | None = Field(
+        None,
+        description="Optional section-specific diagnostics such as lorebook matches.",
+    )
+
+
+class PromptPreviewConflict(BaseModel):
+    """Conflict diagnostic surfaced by prompt-preview."""
+
+    type: str = Field(..., description="Conflict category")
+    message: str = Field(..., description="Human-readable conflict explanation")
+
+
+class PromptPreviewExemplarDecision(BaseModel):
+    """Bounded persona exemplar selection or rejection decision."""
+
+    id: str = Field(..., description="Bounded exemplar identifier")
+    reason: str = Field(..., description="Bounded selection or rejection reason")
+
+
+class PromptPreviewCurrentTurn(BaseModel):
+    """Current user turn used for persona-context preview decisions."""
+
+    source: str = Field(..., description="Source of the current turn text")
+    has_text: bool = Field(..., description="Whether current turn text is available")
+    preview: str = Field(..., description="Bounded preview of the current turn text")
+
+
+class PromptPreviewPersonaContext(BaseModel):
+    """Persona-specific effective-context diagnostics for prompt-preview."""
+
+    active: bool = Field(..., description="Whether persona context diagnostics apply")
+    reason: str = Field(..., description="Top-level persona context status reason")
+    assistant_kind: Literal["persona"] | None = Field(None, description="Assistant identity kind")
+    assistant_id: str | None = Field(None, description="Bounded assistant identity")
+    persona_memory_mode: str | None = Field(None, description="Bounded persona memory mode")
+    applied: bool | None = Field(None, description="Whether persona guidance sections were applied")
+    section_names: list[str] = Field(default_factory=list, description="Applied persona section names")
+    selected_exemplar_ids: list[str] = Field(
+        default_factory=list,
+        description="Backward-compatible selected exemplar ID list",
+    )
+    selected_exemplars: list[PromptPreviewExemplarDecision] = Field(
+        default_factory=list,
+        description="Selected persona exemplars with bounded reasons",
+    )
+    rejected_exemplars: list[PromptPreviewExemplarDecision] = Field(
+        default_factory=list,
+        description="Rejected persona exemplars with bounded reasons",
+    )
+    current_turn: PromptPreviewCurrentTurn | None = Field(
+        None,
+        description="Current turn used for persona exemplar selection",
+    )
+
+
+class PromptPreviewResponse(BaseModel):
+    """Response schema for chat prompt-preview diagnostics."""
+
+    chat_id: str
+    character_id: int | None = None
+    character_name: str | None = None
+    sections: list[PromptPreviewSection]
+    total_supplemental_tokens: int = Field(..., ge=0)
+    total_supplemental_effective_tokens: int = Field(..., ge=0)
+    supplemental_budget: int = Field(..., ge=0)
+    budget_status: Literal["ok", "caution", "error"]
+    message_tokens_estimated: int = Field(..., ge=0)
+    message_count: int = Field(..., ge=0)
+    warnings: list[str] | None = None
+    conflicts: list[PromptPreviewConflict] | None = None
+    examples: list[str] = Field(
+        default_factory=list,
+        description="Human-readable examples explaining prompt-preview conflict semantics",
+    )
+    persona_context: PromptPreviewPersonaContext | None = None
+
+
 class CharacterChatCompletionV2Request(BaseModel):
     """Character Chat completion (v2) - builds context and calls a provider.
 
@@ -502,6 +721,20 @@ class CharacterChatCompletionV2Request(BaseModel):
     max_tokens: Optional[int] = Field(None, description="Max tokens in the completion")
     tools: Optional[list[dict[str, Any]]] = Field(None, description="Tool definitions")
     tool_choice: Optional[dict[str, Any]] = Field(None, description="Tool choice specification")
+    billing_prompt_cache_intent: Optional[dict[str, Any]] = Field(
+        None,
+        description=(
+            "Explicit billing prompt-cache intent for paid providers. Disabled unless enabled=true; "
+            "cache usage is still proven only by provider usage metadata."
+        ),
+    )
+    inference_prefix_cache_intent: Optional[dict[str, Any]] = Field(
+        None,
+        description=(
+            "Cost-neutral local inference prefix-cache diagnostic intent for local providers such as "
+            "vLLM and llama.cpp. It never marks provider billing cache usage as authoritative."
+        ),
+    )
     stream: Optional[bool] = Field(False, description="If true, stream the assistant response (SSE)")
 
     @model_validator(mode="after")
@@ -749,6 +982,7 @@ class LorebookDiagnosticExportResponse(BaseModel):
     turns: list[DiagnosticTurnEntry] = Field(default_factory=list)
     page: int = 1
     size: int = 50
+    pagination: PagePaginationMeta
 
 
 # ========================================================================

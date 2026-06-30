@@ -69,7 +69,7 @@ vi.mock("@/hooks/chat/useSelectedModel", () => ({
 
 vi.mock("@/hooks/utils/messageHelpers", () => ({
   createSaveMessageOnSuccess: (...args: unknown[]) =>
-    createSaveMessageOnSuccessMock(...args)
+    (createSaveMessageOnSuccessMock as (...args: unknown[]) => unknown)(...args)
 }))
 
 vi.mock("@/db/dexie/helpers", () => ({

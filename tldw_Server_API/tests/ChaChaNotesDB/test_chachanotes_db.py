@@ -121,6 +121,33 @@ class TestDBInitialization:
         ).fetchone() is not None
         db.close_connection()
 
+    def test_current_version_marker_without_core_tables_rebuilds_empty_schema(self, db_path, client_id):
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                "CREATE TABLE db_schema_version (schema_name TEXT PRIMARY KEY NOT NULL, version INTEGER NOT NULL)"
+            )
+            conn.execute(
+                "INSERT INTO db_schema_version (schema_name, version) VALUES (?, ?)",
+                (CharactersRAGDB._SCHEMA_NAME, CharactersRAGDB._CURRENT_SCHEMA_VERSION),
+            )
+            conn.commit()
+
+        db = CharactersRAGDB(db_path, client_id)
+        try:
+            conn = db.get_connection()
+            for table_name in ("character_cards", "conversations", "messages", "notes"):
+                assert conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                    (table_name,),
+                ).fetchone() is not None
+            version = conn.execute(
+                "SELECT version FROM db_schema_version WHERE schema_name = ?",
+                (CharactersRAGDB._SCHEMA_NAME,),
+            ).fetchone()["version"]
+            assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        finally:
+            db.close_connection()
+
     def test_in_memory_db(self, client_id):
 
         db = CharactersRAGDB(":memory:", client_id)
@@ -970,6 +997,22 @@ class TestNotes:
         assert len(results) == 2
         titles = sorted([r['title'] for r in results])  # Sort for predictable assertion
         assert titles == ["Alpha Note", "Beta Note"]
+
+    def test_count_notes_matching_keywords(self, db_instance: CharactersRAGDB):
+        note1 = db_instance.add_note("Topic One", "Shared search body")
+        note2 = db_instance.add_note("Topic Two", "Shared search body")
+        note3 = db_instance.add_note("Other Topic", "Shared search body")
+        kw_topic = db_instance.add_keyword("topic-filter")
+        kw_other = db_instance.add_keyword("other-filter")
+        assert note1 and note2 and note3 and kw_topic and kw_other
+
+        db_instance.link_note_to_keyword(note1, kw_topic)
+        db_instance.link_note_to_keyword(note2, kw_topic)
+        db_instance.link_note_to_keyword(note3, kw_other)
+
+        assert db_instance.count_notes_matching_keywords(None, ["topic-filter"]) == 2
+        assert db_instance.count_notes_matching_keywords("Shared", ["topic-filter"]) == 2
+        assert db_instance.count_notes_matching_keywords("Missing", ["topic-filter"]) == 0
 
     def test_sync_note_source_folders_preserves_manual_and_other_sources(self, db_instance: CharactersRAGDB):
         note_id = db_instance.add_note("Foldered Note", "Body")

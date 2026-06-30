@@ -9,16 +9,21 @@ exposes a simple PDF download helper for PMC articles.
 from __future__ import annotations
 
 import contextlib
+import re
+import tempfile
+from pathlib import Path
 from typing import Any
 from defusedxml import ElementTree as DET
-from xml.etree import ElementTree as ET
 
-from tldw_Server_API.app.core.http_client import fetch
+from tldw_Server_API.app.core.exceptions import DownloadError
+from tldw_Server_API.app.core.http_client import download, fetch
 
 BASE_URL = "https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi"
+PMC_PDF_MAX_BYTES = 50 * 1024 * 1024
+_PMCID_RE = re.compile(r"^(?:PMC)?(?P<num>\d+)$", re.IGNORECASE)
 
 
-def _get_xml(params: dict[str, Any]) -> ET.Element:
+def _get_xml(params: dict[str, Any]) -> Any:
     r = fetch(method="GET", url=BASE_URL, params=params, headers={"Accept": "application/xml"}, timeout=20)
     if r.status_code >= 400:
         raise RuntimeError(f"HTTP {r.status_code}")
@@ -45,11 +50,13 @@ def pmc_oa_identify() -> tuple[dict[str, Any] | None, str | None]:
             "latest": latest.text if latest is not None else None,
         })
         return info, None
-    except Exception as e:
-        return None, f"PMC OA Identify error: {str(e)}"
+    except TimeoutError:
+        return None, "PMC OA Identify request timed out."
+    except Exception:
+        return None, "PMC OA Identify request failed."
 
 
-def _parse_resumption(root: ET.Element) -> str | None:
+def _parse_resumption(root: Any) -> str | None:
     res = root.find("resumption")
     if res is None:
         return None
@@ -106,8 +113,10 @@ def pmc_oa_query(
                 "links": links,
             })
         return records, _parse_resumption(root), None
-    except Exception as e:
-        return None, None, f"PMC OA query error: {str(e)}"
+    except TimeoutError:
+        return None, None, "PMC OA query request timed out."
+    except Exception:
+        return None, None, "PMC OA query request failed."
 
 
 def download_pmc_pdf(pmcid: str) -> tuple[bytes | None, str | None, str | None]:
@@ -116,18 +125,36 @@ def download_pmc_pdf(pmcid: str) -> tuple[bytes | None, str | None, str | None]:
     Returns (content_bytes, filename, error_message)
     """
     try:
-        pmcid_num = str(pmcid).strip().lstrip("PMC")
-        if not pmcid_num:
+        pmcid_text = str(pmcid or "").strip()
+        if not pmcid_text:
             return None, None, "PMCID cannot be empty"
+        match = _PMCID_RE.fullmatch(pmcid_text)
+        if match is None:
+            return None, None, "Invalid PMCID."
+        pmcid_num = match.group("num")
         url = f"https://pmc.ncbi.nlm.nih.gov/PMC{pmcid_num}/pdf"
-        r = fetch(method="GET", url=url, timeout=30)
-        if r.status_code >= 400:
-            return None, None, f"PMC PDF HTTP error: {r.status_code}"
-        # Best-effort filename from headers; default to PMC{pmcid}.pdf
         filename = f"PMC{pmcid_num}.pdf"
-        cd = r.headers.get("Content-Disposition")
-        if cd and "filename=" in cd:
-            filename = cd.split("filename=")[-1].strip('"')
-        return r.content, filename, None
-    except Exception as e:
-        return None, None, f"PMC PDF download error: {str(e)}"
+        with tempfile.TemporaryDirectory(prefix="pmc_oa_pdf_") as tmp_dir:
+            dest = Path(tmp_dir) / filename
+            downloaded_path = download(
+                url=url,
+                dest=dest,
+                timeout=30,
+                max_bytes_total=PMC_PDF_MAX_BYTES,
+                require_content_type="application/pdf",
+            )
+            content = downloaded_path.read_bytes()
+        if not content.startswith(b"%PDF"):
+            return None, None, "PMC PDF download did not return a valid PDF."
+        return content, filename, None
+    except TimeoutError:
+        return None, None, "PMC PDF download timed out."
+    except DownloadError as exc:
+        match = re.search(r"status\s+(\d{3})", str(exc), re.IGNORECASE)
+        if match:
+            return None, None, f"PMC PDF HTTP Error: {match.group(1)}"
+        if "Disk quota exceeded" in str(exc):
+            return None, None, "PMC PDF download exceeded size limit."
+        return None, None, "PMC PDF download failed."
+    except Exception:
+        return None, None, "PMC PDF download failed."

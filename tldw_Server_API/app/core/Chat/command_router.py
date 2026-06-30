@@ -18,22 +18,26 @@ Env flags:
 - CHAT_COMMANDS_MAX_CHARS: max chars in command output (default: 300)
 - CHAT_COMMAND_INJECTION_MODE: 'system', 'preface', or 'replace' (default: 'system')
 - DEFAULT_LOCATION: fallback location for /weather (default: '')
+- CHAT_COMMANDS_REQUIRE_PERMISSIONS: force command RBAC in every auth mode
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import os
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from loguru import logger
 
 from tldw_Server_API.app.core.Chat.rate_limiter import TokenBucket
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
 from tldw_Server_API.app.core.Integrations import weather_providers
 from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
@@ -60,8 +64,10 @@ _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS = (
 try:
     from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission as _user_has_permission
 except ImportError:  # pragma: no cover - fallback if AuthNZ is trimmed in tests
+
     def _user_has_permission(user_id: int, permission: str) -> bool:  # type: ignore
-        return True
+        logger.warning("AuthNZ RBAC unavailable; denying chat command permission check for {}", permission)
+        return False
 
 
 SLASH_RE = re.compile(r"^/(\w+)(?:\s+(.*))?$")
@@ -83,9 +89,9 @@ def _cfg_bool(env_name: str, cfg_key: str, fallback: bool) -> bool:
     if isinstance(v, str) and v.strip():
         return is_truthy(v)
     cp = _cfg()
-    if cp and cp.has_section('Chat-Commands'):
+    if cp and cp.has_section("Chat-Commands"):
         try:
-            raw = cp.get('Chat-Commands', cfg_key, fallback=str(fallback))
+            raw = cp.get("Chat-Commands", cfg_key, fallback=str(fallback))
             return is_truthy(raw)
         except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
             return fallback
@@ -100,9 +106,9 @@ def _cfg_int(env_name: str, cfg_key: str, fallback: int) -> int:
         except (TypeError, ValueError):
             return fallback
     cp = _cfg()
-    if cp and cp.has_section('Chat-Commands'):
+    if cp and cp.has_section("Chat-Commands"):
         try:
-            raw = cp.get('Chat-Commands', cfg_key, fallback=str(fallback))
+            raw = cp.get("Chat-Commands", cfg_key, fallback=str(fallback))
             return max(1, int(str(raw)))
         except (TypeError, ValueError):
             return fallback
@@ -114,9 +120,9 @@ def _cfg_str(env_name: str, cfg_key: str, fallback: str) -> str:
     if isinstance(v, str) and v.strip():
         return v.strip()
     cp = _cfg()
-    if cp and cp.has_section('Chat-Commands'):
+    if cp and cp.has_section("Chat-Commands"):
         try:
-            raw = cp.get('Chat-Commands', cfg_key, fallback=fallback)
+            raw = cp.get("Chat-Commands", cfg_key, fallback=fallback)
             return str(raw).strip()
         except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
             return fallback
@@ -183,9 +189,25 @@ def is_single_user_mode() -> bool:
     code should prefer env/config-driven enforcement.
     """
     try:
-        return str(os.getenv("AUTH_MODE", "")).strip().lower() == "single_user"
+        env_mode = str(os.getenv("AUTH_MODE", "")).strip().lower()
+        if env_mode:
+            return env_mode == "single_user"
+        cp = _cfg()
+        if cp and cp.has_section("AuthNZ"):
+            raw_mode = cp.get("AuthNZ", "auth_mode", fallback="multi_user")
+            return str(raw_mode).strip().lower() == "single_user"
     except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
         return False
+    return False
+
+
+def _should_enforce_command_rbac(spec: "CommandSpec") -> bool:
+    """Return whether a command's permission metadata must be enforced."""
+    if not spec.required_permission:
+        return False
+    if _cfg_bool("CHAT_COMMANDS_REQUIRE_PERMISSIONS", "require_permissions", False):
+        return True
+    return bool(spec.rbac_required and not is_single_user_mode())
 
 
 def get_injection_mode() -> str:
@@ -267,7 +289,7 @@ class CommandResult:
     metadata: dict[str, Any]
 
 
-Handler = Callable[[CommandContext, Optional[str]], CommandResult]
+Handler = Callable[[CommandContext, Optional[str]], CommandResult | Awaitable[CommandResult]]
 
 
 @dataclass
@@ -287,6 +309,7 @@ class CommandSpec:
 _registry: dict[str, CommandSpec] = {}
 _buckets: dict[tuple[str, str], TokenBucket] = {}
 _global_buckets: dict[str, TokenBucket] = {}
+_bucket_registry_lock = threading.RLock()
 
 
 def register_command(
@@ -328,9 +351,7 @@ def list_commands() -> list[dict[str, Any]]:
             "requires_api_key": bool(spec.requires_api_key),
             "rate_limit": spec.rate_limit or default_rate_limit,
             "rbac_required": (
-                bool(spec.required_permission)
-                if spec.rbac_required is None
-                else bool(spec.rbac_required)
+                bool(spec.required_permission) if spec.rbac_required is None else bool(spec.rbac_required)
             ),
         }
         for spec in _registry.values()
@@ -352,18 +373,26 @@ def parse_slash_command(message: str) -> tuple[str, str | None] | None:
 
 def _acquire_bucket(user_id: str, command: str) -> TokenBucket:
     key = (user_id or "anonymous", command)
-    if key not in _buckets:
+    with _bucket_registry_lock:
+        bucket = _buckets.get(key)
+        if bucket is not None:
+            return bucket
         rpm = _per_command_user_rpm()
-        _buckets[key] = TokenBucket(capacity=rpm, refill_rate=rpm / 60.0)
-    return _buckets[key]
+        bucket = TokenBucket(capacity=rpm, refill_rate=rpm / 60.0)
+        _buckets[key] = bucket
+        return bucket
 
 
 def _acquire_global_bucket(command: str) -> TokenBucket:
     key = command
-    if key not in _global_buckets:
+    with _bucket_registry_lock:
+        bucket = _global_buckets.get(key)
+        if bucket is not None:
+            return bucket
         rpm = _per_command_global_rpm()
-        _global_buckets[key] = TokenBucket(capacity=rpm, refill_rate=rpm / 60.0)
-    return _global_buckets[key]
+        bucket = TokenBucket(capacity=rpm, refill_rate=rpm / 60.0)
+        _global_buckets[key] = bucket
+        return bucket
 
 
 def _finalize_result(result: CommandResult) -> CommandResult:
@@ -419,8 +448,9 @@ async def async_dispatch_command(ctx: CommandContext, command: str, args: str | 
             )
         )
 
-    # RBAC: optional enforcement via env flag
-    rbac_enforced = _cfg_bool("CHAT_COMMANDS_REQUIRE_PERMISSIONS", "require_permissions", False)
+    # RBAC: enforced for RBAC-marked commands in multi-user mode, with an
+    # explicit flag available to force the same checks in single-user mode.
+    rbac_enforced = _should_enforce_command_rbac(spec)
     if rbac_enforced and spec.required_permission:
         permitted = False
         details = {"checked": True, "required_permission": spec.required_permission}
@@ -489,7 +519,7 @@ async def async_dispatch_command(ctx: CommandContext, command: str, args: str | 
 
     try:
         res = spec.handler(ctx, args)
-        if asyncio.iscoroutine(res):  # future-proof if handlers become async
+        if inspect.isawaitable(res):  # future-proof if handlers become async
             res = await res  # type: ignore[assignment]
         if not isinstance(res, CommandResult):
             raise TypeError(f"Command handler for /{cmd} returned {type(res)}")
@@ -530,8 +560,10 @@ async def async_dispatch_command(ctx: CommandContext, command: str, args: str | 
 # Built-in command handlers
 # -----------------------------
 
+
 def _time_handler(ctx: CommandContext, args: str | None) -> CommandResult:
     from datetime import datetime
+
     try:
         # Optional timezone support via zoneinfo
         tzlabel = (args or "").strip() if args else None
@@ -540,6 +572,7 @@ def _time_handler(ctx: CommandContext, args: str | None) -> CommandResult:
         if tzlabel:
             try:
                 from zoneinfo import ZoneInfo  # Python 3.9+
+
                 dt = datetime.now(ZoneInfo(tzlabel))
                 tzused = tzlabel
             except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS:
@@ -555,10 +588,12 @@ def _time_handler(ctx: CommandContext, args: str | None) -> CommandResult:
             metadata={"tz": tzused},
         )
     except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS as e:
-        return CommandResult(ok=False, command="time", content=f"Time lookup failed: {e}", metadata={"error": "time_error"})
+        return CommandResult(
+            ok=False, command="time", content=f"Time lookup failed: {e}", metadata={"error": "time_error"}
+        )
 
 
-def _weather_handler(ctx: CommandContext, args: str | None) -> CommandResult:
+async def _weather_handler(ctx: CommandContext, args: str | None) -> CommandResult:
     location = (args or "").strip()
     if not location:
         location = _cfg_str("DEFAULT_LOCATION", "default_location", "").strip()
@@ -569,7 +604,7 @@ def _weather_handler(ctx: CommandContext, args: str | None) -> CommandResult:
         # Backward-compatible: some tests patch a zero-arg seam
         client = get_weather_client()
     try:
-        result = client.get_current(location=location or None)
+        result = await asyncio.to_thread(client.get_current, location=location or None)
         metadata = dict(getattr(result, "metadata", {}) or {})
         if result.ok:
             return CommandResult(ok=True, command="weather", content=result.summary, metadata=metadata)
@@ -577,7 +612,9 @@ def _weather_handler(ctx: CommandContext, args: str | None) -> CommandResult:
         return CommandResult(ok=False, command="weather", content=result.summary, metadata=metadata)
     except _COMMAND_ROUTER_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Weather provider error: {e}", exc_info=True)
-        return CommandResult(ok=False, command="weather", content=f"Weather unavailable: {e}", metadata={"error": "exception"})
+        return CommandResult(
+            ok=False, command="weather", content=f"Weather unavailable: {e}", metadata={"error": "exception"}
+        )
 
 
 def _request_meta(ctx: CommandContext) -> dict[str, Any]:
@@ -640,7 +677,8 @@ def _filter_skills_for_query(skills: list[dict[str, Any]], query: str | None) ->
     if not q:
         return list(skills)
     return [
-        skill for skill in skills
+        skill
+        for skill in skills
         if (
             q in str(skill.get("name") or "").lower()
             or q in str(skill.get("description") or "").lower()
@@ -726,6 +764,8 @@ async def _execute_skill(ctx: CommandContext, skill_name: str, skill_args: str) 
         user_id, base_path, db = await _resolve_skills_runtime(ctx)
         service = SkillsService(user_id=user_id, base_path=base_path, db=db)
         skill_data = await service.get_skill(normalized_name)
+    except ContextIntegrityBlocked:
+        return {"success": False, "error": "context_integrity_blocked"}
     except SkillNotFoundError:
         return {"success": False, "error": "skill_not_found"}
     except SkillsError as e:
@@ -839,6 +879,8 @@ async def _skill_handler(ctx: CommandContext, args: str | None) -> CommandResult
             message = f"Skill '{skill_name}' not found."
         elif error == "skill_not_invocable":
             message = f"Skill '{skill_name}' is not invocable."
+        elif error == "context_integrity_blocked":
+            message = "Skill is quarantined pending admin review."
         else:
             detail = str(result.get("detail") or "Skill execution failed.")
             message = f"Skill execution failed: {detail}"
@@ -906,6 +948,7 @@ register_command(
     requires_api_key=True,
     rbac_required=True,
 )
+
 
 # --- Test seam helpers ---
 def get_weather_client(ctx: CommandContext | None = None):

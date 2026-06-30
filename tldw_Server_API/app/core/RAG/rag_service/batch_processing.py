@@ -188,10 +188,10 @@ class BatchProcessor:
             job.status = BatchStatus.FAILED
             job.metadata["error"] = "Batch processing timeout"
 
-        except Exception as e:
-            logger.error(f"Batch job {job_id} failed: {e}")
+        except Exception:
+            logger.error("Batch job failed")
             job.status = BatchStatus.FAILED
-            job.metadata["error"] = str(e)
+            job.metadata["error"] = "Batch processing failed"
 
         finally:
             job.completed_at = time.time()
@@ -264,9 +264,9 @@ class BatchProcessor:
                     self.stats.record_query_success(query.processing_time)
                     return
 
-                except Exception as e:
+                except Exception:
                     query.retry_count = attempt + 1
-                    query.error = str(e)
+                    query.error = "Query processing failed"
 
                     if attempt < self.max_retries - 1:
                         # Exponential backoff
@@ -277,7 +277,7 @@ class BatchProcessor:
                         query.processing_time = time.time() - start_time
 
                         self.stats.record_query_failure()
-                        logger.error(f"Query {query.id} failed after {query.retry_count} attempts: {e}")
+                        logger.error("Query failed after retry attempts")
 
     async def process_stream(
         self,

@@ -5,6 +5,7 @@
 import os
 import re
 import threading
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import islice
@@ -40,6 +41,13 @@ _CHROMA_NONCRITICAL_EXCEPTIONS = (
     TimeoutError,
     ChromaError,
 )
+_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS = (0.05, 0.1, 0.2, 0.5, 1.0)
+
+
+def _is_transient_chroma_segment_error(error: BaseException) -> bool:
+    """Return True for Chroma's transient HNSW segment-reader race."""
+    message = str(error).lower()
+    return "hnsw segment reader" in message and "nothing found on disk" in message
 
 #
 # Local Imports:
@@ -66,7 +74,7 @@ from tldw_Server_API.app.core.Embeddings.audit_adapter import (
     log_security_violation,
 )
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze  # Assuming this is correct
-from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_truthy
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Utils.Utils import logger  # Assuming this is 'logging' aliased or a custom logger
 
@@ -75,6 +83,14 @@ from tldw_Server_API.app.core.Utils.Utils import logger  # Assuming this is 'log
 #######################################################################################################################
 #
 # Security Functions:
+def _audit_invalid_user_id(user_id: str | None, action: str, metadata: dict[str, Any] | None = None) -> None:
+    """Best-effort audit for rejected user IDs without masking validation errors."""
+    try:
+        log_security_violation(user_id=user_id, action=action, metadata=metadata)
+    except Exception as exc:
+        logger.warning(f"Unable to audit invalid user_id for action {action}: {exc}")
+
+
 def validate_user_id(user_id: str) -> str:
     """
     Validates and sanitizes user_id to prevent path traversal attacks.
@@ -97,7 +113,11 @@ def validate_user_id(user_id: str) -> str:
     if any(pattern in raw_user_id for pattern in ['..', '/', '\\', '\x00', '\n', '\r']):
         logger.error(f"Potential path traversal attempt detected in user_id: {user_id[:50]}")
         # Best-effort unified audit (non-blocking)
-        log_security_violation(user_id=raw_user_id[:50], action="path_traversal_attempt", metadata={"attempted_value": raw_user_id[:100]})
+        _audit_invalid_user_id(
+            user_id=raw_user_id[:50],
+            action="path_traversal_attempt",
+            metadata={"attempted_value": raw_user_id[:100]},
+        )
         raise ValueError("Invalid user_id: contains forbidden characters")
 
     # Now trim safe leading/trailing whitespace
@@ -106,7 +126,11 @@ def validate_user_id(user_id: str) -> str:
     # Only allow alphanumeric, underscore, and hyphen
     if not re.match(r'^[a-zA-Z0-9_-]+$', user_id):
         logger.error(f"Invalid user_id format: {user_id[:50]}")
-        log_security_violation(user_id=user_id[:50], action="invalid_user_id", metadata={"reason": "invalid_characters"})
+        _audit_invalid_user_id(
+            user_id=user_id[:50],
+            action="invalid_user_id",
+            metadata={"reason": "invalid_characters"},
+        )
         raise ValueError("Invalid user_id: must contain only alphanumeric characters, underscores, and hyphens")
 
     # Limit length to prevent DoS
@@ -307,12 +331,14 @@ class ChromaDBManager:
             backend = str(chroma_client_settings_config.get("backend", "persistent")).lower()
             # Honor explicit config, and also support CHROMADB_FORCE_STUB for tests/CI
             _env_force_stub = env_flag_enabled("CHROMADB_FORCE_STUB")
-            use_stub = bool(
-                chroma_client_settings_config.get("use_in_memory_stub", False)
+            use_stub = (
+                is_truthy(str(chroma_client_settings_config.get("use_in_memory_stub", "")).strip())
                 or backend == "stub"
                 or _env_force_stub
             )
-            allow_stub_fallback = bool(chroma_client_settings_config.get("allow_stub_fallback", True))
+            allow_stub_fallback = is_truthy(
+                str(chroma_client_settings_config.get("allow_stub_fallback", "")).strip()
+            )
 
             if use_stub:
                 # Scope the stub client key by user and base dir to avoid cross-config leakage
@@ -1271,25 +1297,48 @@ class ChromaDBManager:
             try:
                 cleaned_metadatas = [self._clean_metadata(metadata) for metadata in metadatas]
 
-                # Dimension Check and Collection Recreation (if needed)
-                # This check is more robust if the collection stores its expected dimension in metadata
+                def raise_dimension_mismatch(reason: str) -> None:
+                    message = (
+                        f"User '{self.user_id}': Embedding dimension mismatch for collection "
+                        f"'{target_collection.name}'. {reason}"
+                    )
+                    logger.warning(message)
+                    raise ValueError(message)
+
+                def recreate_target_collection(reason: str) -> None:
+                    nonlocal target_collection
+                    recreate_metadata: dict[str, Any] = {"embedding_dimension": new_embedding_dim}
+                    if embedding_model_id_for_dim_check:
+                        recreate_metadata["source_embedding_model_id"] = embedding_model_id_for_dim_check
+                    logger.warning(
+                        f"User '{self.user_id}': Recreating ChromaDB collection "
+                        f"'{target_collection.name}' due to embedding dimension mismatch: {reason}"
+                    )
+                    collection_name_to_recreate = target_collection.name
+                    self.client.delete_collection(name=collection_name_to_recreate)
+                    target_collection = self.client.create_collection(
+                        name=collection_name_to_recreate,
+                        metadata=self._clean_metadata(recreate_metadata),
+                    )
+
+                # Only empty collections can be recreated safely; populated or unknown-size
+                # collections fail closed so callers do not accidentally discard embeddings.
                 collection_meta = target_collection.metadata
                 existing_dim_from_meta = None
                 if collection_meta and "embedding_dimension" in collection_meta:
                     existing_dim_from_meta = int(collection_meta["embedding_dimension"])
 
                 if existing_dim_from_meta and existing_dim_from_meta != new_embedding_dim:
-                    logger.warning(
-                        f"User '{self.user_id}': Embedding dimension mismatch for collection '{target_collection.name}'. "
-                        f"Collection expected dim (from metadata): {existing_dim_from_meta}, New: {new_embedding_dim} "
-                        f"(from model_id '{embedding_model_id_for_dim_check or 'Unknown'}'). Recreating collection."
+                    mismatch_reason = (
+                        f"Collection expected dim (from metadata): {existing_dim_from_meta}, "
+                        f"New: {new_embedding_dim} "
+                        f"(model_id '{embedding_model_id_for_dim_check or 'Unknown'}')"
                     )
-                    self.client.delete_collection(name=target_collection.name)
-                    new_coll_meta = {"embedding_dimension": new_embedding_dim}
-                    if embedding_model_id_for_dim_check:
-                        new_coll_meta["source_model_id"] = embedding_model_id_for_dim_check
-                    target_collection = self.client.create_collection(name=target_collection.name,
-                                                                      metadata=new_coll_meta)
+                    collection_count = target_collection.count()
+                    if type(collection_count) is int and collection_count == 0:
+                        recreate_target_collection(mismatch_reason)
+                    else:
+                        raise_dimension_mismatch(mismatch_reason)
                 elif not existing_dim_from_meta and target_collection.count() > 0:  # Has items but no dim in meta
                     # Fallback: get an existing embedding to check dimension
                     existing_item = target_collection.get(limit=1, include=['embeddings'])
@@ -1297,16 +1346,9 @@ class ChromaDBManager:
                     if embeddings_exist and len(existing_item['embeddings']) > 0:
                         existing_dim_from_sample = len(existing_item['embeddings'][0])
                         if existing_dim_from_sample != new_embedding_dim:
-                            logger.warning(
-                                f"User '{self.user_id}': Dim mismatch (sampled). Existing: {existing_dim_from_sample}, New: {new_embedding_dim}. Recreating '{target_collection.name}'."
+                            raise_dimension_mismatch(
+                                f"Existing: {existing_dim_from_sample}, New: {new_embedding_dim}."
                             )
-                            self.client.delete_collection(name=target_collection.name)
-                            new_coll_meta = {"embedding_dimension": new_embedding_dim}
-                            if embedding_model_id_for_dim_check:
-                                new_coll_meta[
-                                "source_model_id"] = embedding_model_id_for_dim_check
-                            target_collection = self.client.create_collection(name=target_collection.name,
-                                                                              metadata=new_coll_meta)
 
                 # Batch upsert for potentially large number of embeddings
                 # ChromaDB's upsert handles batching internally, but if we had extremely large lists,
@@ -1321,10 +1363,46 @@ class ChromaDBManager:
                     f"User '{self.user_id}': Successfully upserted {len(embeddings_list)} items to '{target_collection.name}'.")
 
             except chromadb.errors.ChromaError as ce:  # Catch specific ChromaDB errors
+                if _is_transient_chroma_segment_error(ce):
+                    for retry_attempt, retry_delay in enumerate(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS, start=1):
+                        logger.warning(
+                            f"User '{self.user_id}': Retrying ChromaDB upsert for collection "
+                            f"'{target_collection.name}' after transient segment-reader error "
+                            f"(attempt {retry_attempt}/{len(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS)}): {ce}"
+                        )
+                        time.sleep(retry_delay)
+                        try:
+                            target_collection = self.client.get_or_create_collection(name=target_collection.name)
+                            target_collection.upsert(
+                                documents=texts,
+                                embeddings=embeddings_list,
+                                ids=ids,
+                                metadatas=cleaned_metadatas
+                            )
+                            logger.info(
+                                f"User '{self.user_id}': Successfully upserted {len(embeddings_list)} "
+                                f"items to '{target_collection.name}' after retry attempt {retry_attempt}.")
+                            return target_collection
+                        except chromadb.errors.ChromaError as retry_error:
+                            if (
+                                    retry_attempt < len(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS)
+                                    and _is_transient_chroma_segment_error(retry_error)
+                            ):
+                                ce = retry_error
+                                continue
+                            logger.error(
+                                f"User '{self.user_id}': ChromaDB retry in store_in_chroma for collection "
+                                f"'{target_collection.name}' failed after {retry_attempt} attempt(s): {retry_error}",
+                                exc_info=True)
+                            raise RuntimeError(
+                                f"ChromaDB operation failed after retry: {retry_error}"
+                            ) from retry_error
                 logger.error(
                     f"User '{self.user_id}': ChromaDB error in store_in_chroma for collection '{target_collection.name}': {ce}",
                     exc_info=True)
                 raise RuntimeError(f"ChromaDB operation failed: {ce}") from ce
+            except ValueError:
+                raise
             except _CHROMA_NONCRITICAL_EXCEPTIONS as e:
                 import traceback
                 tb = traceback.format_exc()
@@ -1358,7 +1436,7 @@ class ChromaDBManager:
         with self._lock:
             try:
                 logger.info(
-                    f"User '{self.user_id}': Vector search in '{target_collection.name}' for query: '{query[:50]}...' "
+                    f"User '{self.user_id}': Vector search in '{target_collection.name}' "
                     f"using model_id '{query_embedding_model_id}'. k={k}, Filter: {where_filter is not None}."
                 )
 
@@ -1679,14 +1757,46 @@ class ChromaDBManager:
                         f"User '{self.user_id}': One or more embedding vectors in query_embeddings is empty.")
                     raise ValueError("All embedding vectors in query_embeddings must be non-empty.")
 
+                cleaned_where_clause = self._clean_metadata(where_clause) if where_clause else None
                 return target_collection.query(
                     query_embeddings=query_embeddings,
                     n_results=n_results,
-                    where=self._clean_metadata(where_clause) if where_clause else None,
+                    where=cleaned_where_clause,
                     include=effective_include_fields  # Pass the correctly typed list
                 )
             # Use the more specific ChromaError imports if they work for your version
             except ChromaError as ce:
+                retry_collection_name = target_collection.name
+                if _is_transient_chroma_segment_error(ce):
+                    for retry_attempt, retry_delay in enumerate(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS, start=1):
+                        logger.warning(
+                            f"User '{self.user_id}': Retrying ChromaDB query for collection "
+                            f"'{retry_collection_name}' after transient segment-reader error "
+                            f"(attempt {retry_attempt}/{len(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS)}): {ce}"
+                        )
+                        time.sleep(retry_delay)
+                        try:
+                            target_collection = self.client.get_or_create_collection(name=retry_collection_name)
+                            return target_collection.query(
+                                query_embeddings=query_embeddings,
+                                n_results=n_results,
+                                where=cleaned_where_clause,
+                                include=effective_include_fields
+                            )
+                        except ChromaError as retry_error:
+                            if (
+                                    retry_attempt < len(_CHROMA_SEGMENT_RETRY_DELAYS_SECONDS)
+                                    and _is_transient_chroma_segment_error(retry_error)
+                            ):
+                                ce = retry_error
+                                continue
+                            logger.error(
+                                f"User '{self.user_id}': ChromaDB retry querying collection "
+                                f"'{target_collection.name}' failed after {retry_attempt} attempt(s): {retry_error}",
+                                exc_info=True)
+                            raise RuntimeError(
+                                f"ChromaDB query with precomputed embeddings failed: {retry_error}"
+                            ) from retry_error
                 logger.error(
                     f"User '{self.user_id}': ChromaDB error querying collection '{target_collection.name}': {ce}",
                     exc_info=True)

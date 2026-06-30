@@ -14,7 +14,13 @@ def _mock_provider_stream():
 
 
 @pytest.mark.integration
-def test_dual_emit_preserves_legacy_and_loop_events(test_client, auth_headers) -> None:
+def test_dual_emit_preserves_legacy_and_loop_events(
+    test_client,
+    auth_headers,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STREAMS_UNIFIED", "1")
+
     with patch(
         "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
         return_value=_mock_provider_stream(),

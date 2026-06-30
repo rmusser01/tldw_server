@@ -1,3 +1,8 @@
+import type {
+  PersonaVisualPack,
+  PersonaVisualStateId
+} from "@/types/persona-visuals"
+
 export type PersonaBuddyPositionBucket =
   | "web-desktop"
   | "sidepanel-desktop"
@@ -13,6 +18,40 @@ export interface PersonaBuddySummary {
   persona_name: string
   role_summary: string | null
   visual: PersonaBuddyVisualSummary | null
+  active_visual_pack?: PersonaVisualPack | null
+}
+
+export interface PersonaBuddyLiveSessionSummary {
+  sessionId: string
+  personaId: string
+  personaName: string
+  lifecycle: string
+  pendingApprovalCount: number
+  capabilities?: {
+    text?: boolean
+    voice?: boolean
+    browserMicrophoneRequired?: boolean
+  } | null
+  suggestedVisualState?: string | null
+}
+
+export interface PersonaBuddyLiveControlView {
+  sessions: PersonaBuddyLiveSessionSummary[]
+  focusedSessionId: string | null
+  focusedSession: PersonaBuddyLiveSessionSummary | null
+  streamState: string
+  canSendText: boolean
+  voiceAvailable?: boolean
+  voiceIsListening?: boolean
+  voiceState?: string | null
+  pendingFocusSessionId: string | null
+  startTextSession: (personaId?: string | null) => Promise<unknown>
+  stopSession: (sessionId?: string | null) => Promise<unknown>
+  focusSession: (sessionId: string) => Promise<unknown>
+  sendText: (
+    text: string,
+    options?: { clientMessageId?: string | null }
+  ) => Promise<{ ok: boolean; clientMessageId: string; error?: string }>
 }
 
 export interface PersonaBuddyRenderContext {
@@ -21,6 +60,14 @@ export interface PersonaBuddyRenderContext {
   active_persona_id: string | null
   position_bucket: PersonaBuddyPositionBucket
   buddy_summary?: PersonaBuddySummary | null
+  live_session_id?: string | null
+  live_voice_state?: string | null
+  live_voice_is_listening?: boolean | null
+  active_tool_name?: string | null
+  active_tool_status?: string | null
+  wake_armed?: boolean
+  recovery_mode?: string | null
+  visual_state?: PersonaVisualStateId | null
   persona_source:
     | "route-local"
     | "route-bootstrap"

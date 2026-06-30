@@ -1180,7 +1180,7 @@ aria-label={`More actions for ${record?.name || "world book"}`}
 
 **Step 3: Add focus management to WorldBookDetailPanel**
 
-- Add `const headingRef = React.useRef<HTMLHeadingElement>(null)` 
+- Add `const headingRef = React.useRef<HTMLHeadingElement>(null)`
 - On the `<h2>` element: `ref={headingRef} tabIndex={-1}`
 - Expose an `imperativeRef` or use `useEffect` to focus the heading when `worldBook` changes from null to a value (or when `worldBook.id` changes)
 

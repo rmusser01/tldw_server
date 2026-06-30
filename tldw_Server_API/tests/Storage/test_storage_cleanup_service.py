@@ -5,6 +5,7 @@ Focus on expired-file cleanup:
 - Usage decrement via unregister_generated_file
 - Safe path resolution prevents traversal deletes
 """
+import asyncio
 import contextlib
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -103,6 +104,62 @@ class TestExpiredCleanup:
         storage_service.unregister_generated_file.assert_awaited_once_with(3, hard_delete=True)
         assert file_path.exists()
 
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_sanitizes_per_file_failure_log(self, tmp_path, monkeypatch):
+        """Per-file cleanup failures should not leak raw exception or path details."""
+        file_path = tmp_path / "tts_audio" / "file.txt"
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("data")
+
+        files_repo = AsyncMock()
+        files_repo.get_expired_files = AsyncMock(return_value=[
+            {
+                "id": 4,
+                "user_id": 1,
+                "storage_path": "tts_audio/file.txt",
+            },
+        ])
+
+        storage_service = AsyncMock()
+        storage_service.unregister_generated_file = AsyncMock(
+            side_effect=RuntimeError("token=secret-123 failed at /private/tmp/raw-file.txt")
+        )
+
+        class _LoggerStub:
+            def __init__(self):
+                self.warnings = []
+                self.binds = []
+
+            def bind(self, **kwargs):
+                self.binds.append(kwargs)
+                return self
+
+            def warning(self, message):
+                self.warnings.append(message)
+
+        logger_stub = _LoggerStub()
+
+        monkeypatch.setattr(
+            cleanup.DatabasePaths,
+            "get_user_outputs_dir",
+            lambda user_id: Path(tmp_path),
+        )
+        monkeypatch.setattr(cleanup, "logger", logger_stub)
+
+        deleted = await cleanup.cleanup_expired_files(storage_service, files_repo, batch_size=10)
+
+        assert deleted == 0
+        storage_service.unregister_generated_file.assert_awaited_once_with(4, hard_delete=True)
+        assert file_path.exists()
+        assert logger_stub.warnings == ["Failed to cleanup expired file"]
+        assert logger_stub.binds == [{"error_type": "RuntimeError"}]
+        rendered_logs = repr(logger_stub.warnings)
+        assert "token=secret-123" not in rendered_logs
+        assert "/private/tmp/raw-file.txt" not in rendered_logs
+        assert "raw-file.txt" not in rendered_logs
+        assert " 4" not in rendered_logs
+
 
 def test_mark_tts_history_artifact_deleted_uses_managed_media_database(
     monkeypatch: pytest.MonkeyPatch,
@@ -150,3 +207,27 @@ def test_mark_tts_history_artifact_deleted_uses_managed_media_database(
             },
         ),
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_storage_cleanup_service_names_background_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_cleanup_loop(
+        *,
+        stop_event: asyncio.Event,
+        interval_seconds: int | None,
+        temp_retention_hours: int,
+    ) -> None:
+        await stop_event.wait()
+
+    monkeypatch.setattr(cleanup, "run_storage_cleanup_loop", _fake_cleanup_loop)
+    service = cleanup.StorageCleanupService(interval_seconds=1)
+
+    await service.start()
+    try:
+        assert service._task is not None
+        assert service._task.get_name() == "storage_cleanup_service"
+    finally:
+        await service.stop()

@@ -6,6 +6,7 @@ const SidepanelChat = lazy(() => import("./sidepanel-chat"))
 const SidepanelSettings = lazy(() => import("./sidepanel-settings"))
 const SidepanelAgent = lazy(() => import("./sidepanel-agent"))
 const SidepanelPersona = lazy(() => import("./sidepanel-persona"))
+const SidepanelFlashcards = lazy(() => import("./sidepanel-flashcards"))
 const SidepanelErrorBoundaryTest = lazy(
   () => import("./sidepanel-error-boundary-test")
 )
@@ -27,6 +28,12 @@ export const sidepanelRoutes: RouteDefinition[] = [
   { kind: "sidepanel", path: "/", element: <SidepanelChat /> },
   {
     kind: "sidepanel",
+    path: "/chat",
+    element: <SidepanelChat />,
+    targets: ALL_TARGETS
+  },
+  {
+    kind: "sidepanel",
     path: "/agent",
     element: <SidepanelAgent />,
     targets: ALL_TARGETS
@@ -35,6 +42,12 @@ export const sidepanelRoutes: RouteDefinition[] = [
     kind: "sidepanel",
     path: "/persona",
     element: <SidepanelPersona />,
+    targets: ALL_TARGETS
+  },
+  {
+    kind: "sidepanel",
+    path: "/flashcards",
+    element: <SidepanelFlashcards />,
     targets: ALL_TARGETS
   },
   { kind: "sidepanel", path: "/settings", element: <SidepanelSettings /> },

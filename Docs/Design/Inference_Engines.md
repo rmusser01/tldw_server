@@ -50,7 +50,8 @@ https://docs.vllm.ai/en/latest/examples/offline_inference/save_sharded_state.htm
 https://github.com/LMCache/LMCache
 https://medium.com/@damianvtran/the-anatomy-of-a-modern-llm-0347afd72514
 
-
+https://ngrok.com/blog/quantization
+https://www.baseten.co/inference-engineering/digital-download/
 https://arxiv.org/abs/2508.20893
 https://damek.github.io/random/basic-facts-about-gpus/
 https://bentoml.com/llm/

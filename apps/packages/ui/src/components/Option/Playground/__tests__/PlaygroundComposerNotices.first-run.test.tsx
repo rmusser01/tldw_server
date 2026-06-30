@@ -1,6 +1,7 @@
 import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 
 import type { PlaygroundComposerNoticesProps } from "../PlaygroundComposerNotices"
 
@@ -100,6 +101,10 @@ describe("PlaygroundComposerNotices first-run banner", () => {
     localStorage.clear()
   })
 
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it("shows the resume banner when setup is in progress even if first-run gating is false", () => {
     useFirstRunCheckMock.mockReturnValue({
       shouldShowSetup: false,
@@ -116,13 +121,32 @@ describe("PlaygroundComposerNotices first-run banner", () => {
     expect(navigate).toHaveBeenCalledWith("/persona")
   })
 
+  it("keeps the inline assistant setup nudge available inside chat", () => {
+    useFirstRunCheckMock.mockReturnValue({
+      shouldShowSetup: true,
+      resumeStep: null,
+      loading: false
+    })
+
+    render(<PlaygroundComposerNotices {...buildProps()} />)
+
+    expect(screen.getByTestId("first-run-banner-nudge")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume setup" }))
+
+    expect(navigate).toHaveBeenCalledWith("/persona")
+  })
+
   it("warns when banner dismissal cannot be persisted but still hides the banner", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
-    const setItemSpy = vi
-      .spyOn(Storage.prototype, "setItem")
-      .mockImplementation(() => {
-        throw new Error("storage unavailable")
-      })
+    const setItemSpy = vi.fn(() => {
+      throw new Error("storage unavailable")
+    })
+    vi.stubGlobal("localStorage", {
+      clear: vi.fn(),
+      getItem: vi.fn(() => null),
+      setItem: setItemSpy
+    })
 
     useFirstRunCheckMock.mockReturnValue({
       shouldShowSetup: true,
@@ -143,5 +167,63 @@ describe("PlaygroundComposerNotices first-run banner", () => {
       "true"
     )
     expect(screen.queryByTestId("first-run-banner-nudge")).not.toBeInTheDocument()
+  })
+
+  it("renders disconnected composer recovery through the shared alert primitive", () => {
+    useFirstRunCheckMock.mockReturnValue({
+      shouldShowSetup: false,
+      resumeStep: null,
+      loading: false
+    })
+
+    render(
+      <MemoryRouter>
+        <PlaygroundComposerNotices
+          {...buildProps()}
+          isConnectionReady={false}
+        />
+      </MemoryRouter>
+    )
+
+    const notice = screen.getByTestId("playground-composer-disconnected-notice")
+
+    expect(notice).toHaveAttribute("data-ds-component", "Alert")
+    expect(notice).toHaveAttribute("role", "status")
+    expect(screen.getByRole("link", { name: "Open settings" })).toHaveAttribute(
+      "href",
+      "/settings/tldw"
+    )
+  })
+
+  it("renders degraded composer recovery through the shared alert primitive", () => {
+    const openModelApiSelector = vi.fn()
+
+    useFirstRunCheckMock.mockReturnValue({
+      shouldShowSetup: false,
+      resumeStep: null,
+      loading: false
+    })
+
+    render(
+      <MemoryRouter>
+        <PlaygroundComposerNotices
+          {...buildProps()}
+          isConnectionReady
+          connectionUxState="connected_degraded"
+          openModelApiSelector={openModelApiSelector}
+        />
+      </MemoryRouter>
+    )
+
+    const notice = screen.getByTestId("playground-composer-degraded-notice")
+
+    expect(notice).toHaveAttribute("data-ds-component", "Alert")
+    expect(notice).toHaveAttribute("role", "status")
+    fireEvent.click(screen.getByRole("button", { name: "Switch model" }))
+    expect(openModelApiSelector).toHaveBeenCalled()
+    expect(screen.getByRole("link", { name: "Health & diagnostics" })).toHaveAttribute(
+      "href",
+      "/settings/health"
+    )
   })
 })

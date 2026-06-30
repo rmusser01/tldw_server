@@ -69,6 +69,23 @@ _SYSTEM_PROMPT = (
 )
 
 _SUMMARY_SYSTEM_PROMPT = "Summarize the following content for slide generation."
+DEFAULT_MAX_SOURCE_TOKENS = 50_000
+DEFAULT_MAX_SOURCE_CHARS = 200_000
+MAX_SOURCE_CHUNKS = 20
+MAX_CHUNK_SIZE_TOKENS = 4_000
+
+
+def _positive_int_setting(name: str, default: int) -> int:
+    raw_value = settings.get(name, default)
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        logger.warning("slides generation: invalid integer setting {}; using default {}", name, default)
+        return default
+    if value <= 0:
+        logger.warning("slides generation: non-positive integer setting {}; using default {}", name, default)
+        return default
+    return value
 
 
 def _normalize_provider(provider: str | None) -> str:
@@ -169,18 +186,28 @@ class SlidesGenerator:
         source_text = source_text.strip()
         actual_tokens = count_tokens(source_text)
         actual_chars = len(source_text)
+        effective_max_source_tokens = (
+            max_source_tokens
+            if max_source_tokens is not None
+            else _positive_int_setting("SLIDES_MAX_SOURCE_TOKENS", DEFAULT_MAX_SOURCE_TOKENS)
+        )
+        effective_max_source_chars = (
+            max_source_chars
+            if max_source_chars is not None
+            else _positive_int_setting("SLIDES_MAX_SOURCE_CHARS", DEFAULT_MAX_SOURCE_CHARS)
+        )
 
         limit_exceeded = False
-        if max_source_tokens is not None and actual_tokens > max_source_tokens:
+        if actual_tokens > effective_max_source_tokens:
             limit_exceeded = True
-        if max_source_chars is not None and actual_chars > max_source_chars:
+        if actual_chars > effective_max_source_chars:
             limit_exceeded = True
 
         if limit_exceeded and not enable_chunking:
             raise SlidesSourceTooLargeError(
                 "input_too_large",
-                max_source_tokens=max_source_tokens,
-                max_source_chars=max_source_chars,
+                max_source_tokens=effective_max_source_tokens,
+                max_source_chars=effective_max_source_chars,
                 actual_tokens=actual_tokens,
                 actual_chars=actual_chars,
             )
@@ -201,6 +228,8 @@ class SlidesGenerator:
                 temperature=temperature,
                 chunk_size_tokens=chunk_size_tokens,
                 summary_tokens=summary_tokens,
+                actual_tokens=actual_tokens,
+                actual_chars=actual_chars,
             )
 
         user_prompt = "Source material:\n" + prepared_text
@@ -279,14 +308,31 @@ class SlidesGenerator:
         temperature: float | None,
         chunk_size_tokens: int | None,
         summary_tokens: int | None,
+        actual_tokens: int | None = None,
+        actual_chars: int | None = None,
     ) -> str:
         """Reduce oversized source text into a prompt-sized summary before slide generation."""
-        chunk_size = chunk_size_tokens or 1000
+        if chunk_size_tokens is None:
+            chunk_size = 1000
+        else:
+            try:
+                chunk_size = int(chunk_size_tokens)
+            except (TypeError, ValueError) as exc:
+                raise SlidesGenerationInputError("chunk_size_invalid") from exc
+        if chunk_size < 1:
+            raise SlidesGenerationInputError("chunk_size_invalid")
+        if chunk_size > MAX_CHUNK_SIZE_TOKENS:
+            raise SlidesGenerationInputError("chunk_size_too_large")
         mode = str(settings.get("TOKEN_ESTIMATOR_MODE") or "whitespace").lower()
         if mode == "char_approx":
             try:
                 chars_per_token = max(1, int(settings.get("TOKEN_CHAR_APPROX_DIVISOR", 4)))
-            except Exception:
+            except (TypeError, ValueError):
+                logger.warning(
+                    "slides generation: invalid integer setting {}; using default {}",
+                    "TOKEN_CHAR_APPROX_DIVISOR",
+                    4,
+                )
                 chars_per_token = 4
             size_chars = chunk_size * chars_per_token
             chunks = _chunk_by_chars(source_text, size_chars)
@@ -295,6 +341,13 @@ class SlidesGenerator:
 
         if not chunks:
             return ""
+        max_chunks = _positive_int_setting("SLIDES_MAX_SOURCE_CHUNKS", MAX_SOURCE_CHUNKS)
+        if len(chunks) > max_chunks:
+            raise SlidesSourceTooLargeError(
+                "input_too_large",
+                actual_tokens=actual_tokens,
+                actual_chars=actual_chars,
+            )
 
         summary_target = summary_tokens or 200
         summaries: list[str] = []

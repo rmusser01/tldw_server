@@ -22,10 +22,9 @@ services:
         NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: ${NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE:-quickstart}
         TLDW_INTERNAL_API_ORIGIN: ${TLDW_INTERNAL_API_ORIGIN:-http://app:8000}
     image: tldw-webui:prod
-    container_name: tldw-webui
     restart: unless-stopped
     ports:
-      - "8080:3000"
+      - "127.0.0.1:8080:3000"
     depends_on:
       app:
         condition: service_healthy
@@ -33,6 +32,12 @@ services:
       - NODE_ENV=production
       - HOSTNAME=0.0.0.0
       - PORT=3000
+      - AUTH_MODE=${AUTH_MODE:-single_user}
+      - SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}
+      - TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-0}
       - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-}
+      # Browser-visible credentials must be explicitly supplied with a public
+      # scoped value; never fall back to the server-side SINGLE_USER_API_KEY.
+      - NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY:-}
       - NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=${NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE:-quickstart}
       - TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN:-http://app:8000}

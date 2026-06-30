@@ -169,8 +169,8 @@ class ConnectionPool:
                 self._stats["connections_created"] += 1
 
             logger.debug(f"Created new connection {conn_id} for {self.db_path}")
-        except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error) as e:
-            logger.error(f"Failed to create connection to {self.db_path}: {e}")
+        except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
+            logger.error("Failed to create database connection")
         else:
             return conn
         return None
@@ -187,8 +187,8 @@ class ConnectionPool:
         """
         try:
             conn.execute("SELECT 1")
-        except (sqlite3.Error, RuntimeError, TypeError, ValueError) as e:
-            logger.debug(f"Connection validation failed: error={e}")
+        except (sqlite3.Error, RuntimeError, TypeError, ValueError):
+            logger.debug("Connection validation failed")
         else:
             return True
         return False
@@ -286,8 +286,8 @@ class ConnectionPool:
                     del self._all_connections[conn_id]
                 self._stats["connections_closed"] += 1
 
-        except (sqlite3.Error, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Error closing connection: {e}")
+        except (sqlite3.Error, RuntimeError, TypeError, ValueError):
+            logger.error("Error closing database connection")
 
     def close_idle_connections(self):
         """Close connections that have been idle too long."""
@@ -310,8 +310,8 @@ class ConnectionPool:
                 self._close_connection(conn)
                 logger.debug("Closed idle connection")
 
-            except (sqlite3.Error, RuntimeError, TypeError, ValueError) as e:
-                logger.error(f"Error closing idle connection: {e}")
+            except (sqlite3.Error, RuntimeError, TypeError, ValueError):
+                logger.error("Error closing idle connection")
 
     def get_stats(self) -> dict[str, Any]:
         """
@@ -352,8 +352,8 @@ class ConnectionPool:
             for info in list(self._all_connections.values()):
                 try:
                     info["connection"].close()
-                except (sqlite3.Error, RuntimeError, TypeError, ValueError) as e:
-                    logger.debug(f"Error closing pooled connection during shutdown: error={e}")
+                except (sqlite3.Error, RuntimeError, TypeError, ValueError):
+                    logger.debug("Error closing pooled connection during shutdown")
 
             self._all_connections.clear()
 

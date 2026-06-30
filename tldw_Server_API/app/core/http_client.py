@@ -90,6 +90,18 @@ _HTTPCLIENT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
+_HTTPX_REQUEST_EXCEPTIONS: tuple[type[BaseException], ...] = ()
+if httpx is not None:
+    _HTTPX_REQUEST_EXCEPTIONS = tuple(
+        cls
+        for cls in (
+            getattr(httpx, "HTTPError", None),
+            getattr(httpx, "TransportError", None),
+            getattr(httpx, "TimeoutException", None),
+        )
+        if isinstance(cls, type)
+    )
+_HTTPCLIENT_REQUEST_EXCEPTIONS = _HTTPCLIENT_NONCRITICAL_EXCEPTIONS + _HTTPX_REQUEST_EXCEPTIONS
 
 try:
     # Python 3.8+/backport safe import
@@ -855,6 +867,29 @@ def _sanitize_url_for_logs(u: str | Any) -> str:
         return s
 
 
+def _raise_if_json_response_exceeds_limit(
+    *,
+    headers: Any,
+    content: bytes,
+    max_bytes: int | None,
+) -> None:
+    """Raise when JSON response metadata or actual body exceeds the configured limit."""
+    if max_bytes is None:
+        return
+
+    content_length = headers.get("content-length")
+    if content_length:
+        try:
+            declared_length = int(content_length)
+        except (TypeError, ValueError) as exc:
+            raise JSONDecodeError("Invalid content-length header") from exc
+        if declared_length > max_bytes:
+            raise JSONDecodeError("Response exceeds max_bytes limit")  # noqa: TRY003
+
+    if len(content) > max_bytes:
+        raise JSONDecodeError("Response exceeds max_bytes limit")  # noqa: TRY003
+
+
 def _url_parts(u: str | Any) -> tuple[str, str, str]:
     """Return (scheme, host, path) for logging; redacts query by omission."""
     try:
@@ -987,7 +1022,7 @@ def _validate_egress_or_raise(
         res = evaluate_url_policy(
             url,
             block_private_override=block_override,
-            resolved_ips_override=pinned_ips,
+            pinned_resolved_ips=pinned_ips,
         )
     else:
         res = evaluate_url_policy(url, block_private_override=block_override)
@@ -1008,6 +1043,14 @@ def _validate_egress_or_raise(
                 "http_client_egress_denials_total", 1, labels={"reason": (reason or "denied")}
             )
         raise EgressPolicyError(reason)
+
+
+async def _avalidate_egress_or_raise(
+    url: str,
+    *,
+    dns_pin_cache: dict[str, tuple[str, ...]] | None = None,
+) -> None:
+    await asyncio.to_thread(_validate_egress_or_raise, url, dns_pin_cache=dns_pin_cache)
 
 
 def _is_url_allowed(url: str) -> bool:
@@ -2080,7 +2123,7 @@ async def _afetch_httpx(
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
 
     attempts = max(1, retry.attempts)
@@ -2131,7 +2174,7 @@ async def _afetch_httpx(
                 verify=verify,
             )
             return r, "ok"  # noqa: TRY300
-        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
+        except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
             # Let callers see HTTPStatusError directly so that adapters/tests
             # can distinguish 4xx/5xx responses from transport failures. All
             # other exceptions are normalized into a NetworkError reason.
@@ -2179,7 +2222,7 @@ async def _afetch_httpx(
 
                 # Manual redirect handling inside each attempt
                 while True:
-                    _validate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+                    await _avalidate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
                     resp, reason = await _do_once(ac, cur_url)
                     if resp is None:
                         # Special HEAD fallbacks: disable HTTP/2, then GET with Range 0-0
@@ -2404,7 +2447,7 @@ async def _afetch_aiohttp(
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
 
     attempts = max(1, retry.attempts)
@@ -2480,7 +2523,7 @@ async def _afetch_aiohttp(
             redirects = 0
 
             while True:
-                _validate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+                await _avalidate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
                 resp, reason = await _do_once(session, cur_url)
                 if resp is None:
                     if method_upper == "HEAD" and not _head_get_range_tried:
@@ -2702,7 +2745,7 @@ async def apost(
     """
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
-    _validate_egress_or_raise(url)
+    await _avalidate_egress_or_raise(url)
     _validate_proxies_or_raise(proxies)
 
     need_close = False
@@ -2799,7 +2842,7 @@ def _fetch_httpx_response(
                 follow_redirects=False,
             )
             return r, "ok"  # noqa: TRY300
-        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
+        except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
             # Classify DNS resolution errors explicitly so that retry logic
             # can treat them as permanent failures.
             try:
@@ -3323,10 +3366,15 @@ async def afetch_json(
         await r.aclose()
         raise JSONDecodeError("Response is not application/json")  # noqa: TRY003
     if max_bytes is not None:
-        clen = r.headers.get("content-length")
-        if clen and int(clen) > max_bytes:
+        try:
+            _raise_if_json_response_exceeds_limit(
+                headers=r.headers,
+                content=r.content,
+                max_bytes=max_bytes,
+            )
+        except JSONDecodeError:
             await r.aclose()
-            raise JSONDecodeError("Response exceeds max_bytes limit")  # noqa: TRY003
+            raise
     try:
         data = r.json()
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
@@ -3350,10 +3398,15 @@ def fetch_json(
         r.close()
         raise JSONDecodeError("Response is not application/json")  # noqa: TRY003
     if max_bytes is not None:
-        clen = r.headers.get("content-length")
-        if clen and int(clen) > max_bytes:
+        try:
+            _raise_if_json_response_exceeds_limit(
+                headers=r.headers,
+                content=r.content,
+                max_bytes=max_bytes,
+            )
+        except JSONDecodeError:
             r.close()
-            raise JSONDecodeError("Response exceeds max_bytes limit")  # noqa: TRY003
+            raise
     try:
         data = r.json()
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
@@ -3386,7 +3439,7 @@ async def _astream_bytes_httpx(
         raise RuntimeError("httpx is not available")  # noqa: TRY003
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
-    _validate_egress_or_raise(url)
+    await _avalidate_egress_or_raise(url)
     _validate_proxies_or_raise(proxies)
 
     need_close = False
@@ -3591,7 +3644,7 @@ async def _astream_bytes_aiohttp(
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
-    _validate_egress_or_raise(url)
+    await _avalidate_egress_or_raise(url)
     _validate_proxies_or_raise(proxies)
 
     session = client or _get_aiohttp_session()
@@ -3830,7 +3883,7 @@ async def _astream_sse_httpx(
         hdrs.update(headers)
     retry = retry or RetryPolicy()
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
 
     need_close = False
@@ -3849,7 +3902,7 @@ async def _astream_sse_httpx(
         for attempt in range(1, attempts + 1):
             # manual redirect handling before starting to read body
             while True:
-                _validate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+                await _avalidate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
                 try:
                     # Optional cert pinning
                     try:
@@ -3967,7 +4020,7 @@ async def _astream_sse_aiohttp(
         hdrs.update(headers)
     retry = retry or RetryPolicy()
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
 
     session = client or _get_aiohttp_session()
@@ -3979,7 +4032,7 @@ async def _astream_sse_aiohttp(
 
     for attempt in range(1, attempts + 1):
         while True:
-            _validate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+            await _avalidate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
             try:
                 # Optional cert pinning
                 try:

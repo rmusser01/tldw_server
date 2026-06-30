@@ -18,10 +18,9 @@ class ChatWorkflowQuestionRenderer:
         return {
             "displayed_question": base_question,
             "question_generation_meta": {
+                "mode": "fallback",
+                "reason": "renderer_unavailable",
                 "model": model,
-                "phrasing_instructions": bool(phrasing_instructions),
-                "prior_answer_count": len(prior_answers),
-                "context_item_count": len(context_snapshot),
             },
-            "fallback_used": False,
+            "fallback_used": True,
         }

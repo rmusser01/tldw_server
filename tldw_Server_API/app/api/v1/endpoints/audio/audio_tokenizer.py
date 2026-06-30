@@ -7,8 +7,8 @@ import numpy as np
 import soundfile as sf
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_token_scope
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     AudioTokenizerDecodeRequest,
     AudioTokenizerEncodeRequest,
@@ -28,7 +28,6 @@ from tldw_Server_API.app.core.Audio.tokenizer_service import (
     _serialize_audio_output,
     _serialize_tokens,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 
 router = APIRouter(
@@ -64,7 +63,7 @@ def _audio_shim_attr(name: str):
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "audio.tokenizer",
                 require_if_present=True,
                 endpoint_id="audio.tokenizer.encode",
@@ -80,7 +79,8 @@ async def encode_audio_tokenizer(
     request_id = ensure_request_id(request)
     settings = _audio_shim_attr("_get_qwen3_tokenizer_settings")()
     tokenizer_model = settings["tokenizer_model"]
-    token_format = "list"
+    # Response format label, not a credential.
+    token_format = "list"  # nosec B105
     sample_rate_hint: Optional[int] = None
 
     content_type = (request.headers.get("content-type") or "").lower()
@@ -108,7 +108,7 @@ async def encode_audio_tokenizer(
                 status_code=400,
                 detail=_http_error_detail("Invalid JSON payload", request_id, exc=exc),
             ) from exc
-        audio_bytes = _decode_base64_payload(payload.audio_base64)
+        audio_bytes = _decode_base64_payload(payload.audio_base64, request_id=request_id)
         tokenizer_model = payload.tokenizer_model or tokenizer_model
         token_format = payload.token_format or token_format
         sample_rate_hint = payload.sample_rate
@@ -179,10 +179,20 @@ async def encode_audio_tokenizer(
 @router.post(
     "/tokenizer/decode",
     summary="Decode Qwen3-TTS tokens into audio",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Decoded audio bytes from tokenizer tokens.",
+            "content": {
+                "audio/wav": {},
+                "application/octet-stream": {},
+            },
+        },
+    },
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "audio.tokenizer",
                 require_if_present=True,
                 endpoint_id="audio.tokenizer.decode",
@@ -201,7 +211,7 @@ async def decode_audio_tokenizer(
     tokenizer_model = payload.tokenizer_model or settings["tokenizer_model"]
 
     if isinstance(payload.tokens, str):
-        token_bytes = _decode_base64_payload(payload.tokens)
+        token_bytes = _decode_base64_payload(payload.tokens, request_id=request_id)
         _enforce_payload_limit(token_bytes, settings["tokenizer_max_payload_mb"], request_id)
         tokens = np.frombuffer(token_bytes, dtype=np.int32).tolist()
     elif isinstance(payload.tokens, list):

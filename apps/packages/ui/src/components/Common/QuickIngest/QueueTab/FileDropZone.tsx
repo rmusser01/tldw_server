@@ -4,6 +4,7 @@ import React, { useCallback } from "react"
 import { useTranslation } from "react-i18next"
 import {
   QUICK_INGEST_ACCEPT_STRING,
+  QUICK_INGEST_MAX_FILE_SIZE_LABEL,
   QUICK_INGEST_MAX_FILE_SIZE
 } from "../constants"
 
@@ -16,6 +17,8 @@ interface FileDropZoneProps {
   running?: boolean
   /** Whether server is online for ingest */
   isOnlineForIngest?: boolean
+  /** Focus the drop zone when it is first shown. */
+  autoFocus?: boolean
   /** Additional CSS classes */
   className?: string
 }
@@ -33,17 +36,30 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
   onFilesRejected,
   running = false,
   isOnlineForIngest = true,
+  autoFocus = false,
   className
 }) => {
   const { t } = useTranslation(["option"])
   const [isDragging, setIsDragging] = React.useState(false)
   const [isDragReject, setIsDragReject] = React.useState(false)
   const [dragFileCount, setDragFileCount] = React.useState(0)
+  const dropZoneRef = React.useRef<HTMLDivElement>(null)
   const inputRef = React.useRef<HTMLInputElement>(null)
   // Drag counter prevents flickering when dragging over nested elements
   const dragCounterRef = React.useRef(0)
+  const hasAutoFocusedRef = React.useRef(false)
 
   const disabled = running || !isOnlineForIngest
+
+  React.useEffect(() => {
+    if (!autoFocus) {
+      hasAutoFocusedRef.current = false
+      return
+    }
+    if (disabled || hasAutoFocusedRef.current) return
+    dropZoneRef.current?.focus()
+    hasAutoFocusedRef.current = true
+  }, [autoFocus, disabled])
 
   const qi = useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -81,7 +97,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
     (file: File): string | null => {
       // Size check
       if (file.size > QUICK_INGEST_MAX_FILE_SIZE) {
-        return `${file.name} exceeds 500 MB limit`
+        return `${file.name} exceeds ${QUICK_INGEST_MAX_FILE_SIZE_LABEL} quick-ingest limit`
       }
 
       // Type check - allow if extension matches OR MIME type matches
@@ -267,6 +283,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
 
   return (
     <div
+      ref={dropZoneRef}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -322,7 +339,9 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
               {qi("dropzoneRejectTitle", "Some files not supported")}
             </p>
             <p className="text-xs text-text-subtle">
-              {qi("dropzoneRejectHint", "Check file type and size (max 500 MB)")}
+              {qi("dropzoneRejectHint", "Check file type and size (max {{maxSize}})", {
+                maxSize: QUICK_INGEST_MAX_FILE_SIZE_LABEL
+              })}
             </p>
           </>
         ) : isDragging ? (
@@ -333,7 +352,10 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
               {qi("dragAndDrop", "Drag and drop files")}
             </p>
             <p className="text-xs text-text-subtle">
-              {qi("dragAndDropHint", "Docs, PDFs, audio, and video are all welcome.")}
+              {qi(
+                "dragAndDropHint",
+                "Docs, PDFs, HTML/XML/JSON, audio, and video are all welcome."
+              )}
             </p>
           </>
         )}

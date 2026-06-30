@@ -102,6 +102,14 @@ vi.mock('@/store/option', () => ({
     })
 }))
 
+vi.mock('@/store/tutorials', () => ({
+  useTutorialStore: {
+    getState: () => ({
+      startTutorial: vi.fn()
+    })
+  }
+}))
+
 vi.mock('@/services/settings/registry', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/settings/registry')>()
   return {
@@ -184,7 +192,7 @@ describe('NotesManagerPage stage 4 revision and attachments groundwork', () => {
         }
       }
 
-      if (path.startsWith('/api/v1/notes/22?expected_version=') && method === 'PUT') {
+      if (path === '/api/v1/notes/22' && method === 'PUT') {
         return {
           id: 22,
           version: 2,
@@ -267,6 +275,54 @@ describe('NotesManagerPage stage 4 revision and attachments groundwork', () => {
     })
     expect(uploadCalls.length).toBeGreaterThan(0)
     expect(uploadCalls[0][0]?.body).toBeInstanceOf(FormData)
+  })
+
+  it('saves inserted image attachment markdown with the backend version header', async () => {
+    renderPage()
+
+    fireEvent.change(screen.getByPlaceholderText('Title'), {
+      target: { value: 'Attachment save note' }
+    })
+    fireEvent.change(screen.getByPlaceholderText('Write your note here... (Markdown supported)'), {
+      target: { value: 'Body' }
+    })
+    fireEvent.click(screen.getByTestId('notes-save-button'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('notes-editor-revision-meta')).toHaveTextContent('Version 1')
+    })
+
+    const textarea = screen.getByPlaceholderText(
+      'Write your note here... (Markdown supported)'
+    ) as HTMLTextAreaElement
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+
+    const input = screen.getByTestId('notes-attachment-input')
+    const image = new File(['image-bytes'], 'diagram.png', { type: 'image/png' })
+    fireEvent.change(input, { target: { files: [image] } })
+
+    await waitFor(() => {
+      expect(textarea.value).toContain(
+        '![diagram.png](/api/v1/notes/22/attachments/diagram.png)'
+      )
+    })
+
+    fireEvent.click(screen.getByTestId('notes-save-button'))
+
+    await waitFor(() => {
+      const updateCall = mockBgRequest.mock.calls.find(([request]) => {
+        const path = String(request?.path || '')
+        const method = String(request?.method || 'GET').toUpperCase()
+        return path === '/api/v1/notes/22' && method === 'PUT'
+      })
+      expect(updateCall?.[0]?.headers).toMatchObject({
+        'Content-Type': 'application/json',
+        'expected-version': '1'
+      })
+      expect(updateCall?.[0]?.body?.content).toContain(
+        '![diagram.png](/api/v1/notes/22/attachments/diagram.png)'
+      )
+    })
   })
 
   it('does not intercept native undo shortcuts', () => {

@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_auth_principal, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.schemas.study_suggestions import (
     SuggestionActionRequest,
     SuggestionActionResponse,
@@ -22,16 +22,18 @@ from tldw_Server_API.app.api.v1.schemas.study_suggestions import (
     SuggestionSnapshotResponse,
     SuggestionStatusResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.StudySuggestions import snapshot_service
 from tldw_Server_API.app.core.StudySuggestions.actions import (
     build_flashcard_generation_payload,
     build_follow_up_flashcard_deck_name,
     build_follow_up_flashcard_source_text,
+    build_legacy_selection_fingerprint,
     build_selection_fingerprint,
     canonicalize_follow_up_action,
+    cleanup_generated_action_target,
     finalize_generation_link,
     find_generation_link_by_fingerprint,
     is_pending_generation_target_id,
@@ -45,7 +47,6 @@ from tldw_Server_API.app.core.StudySuggestions.actions import (
     resolve_selected_topic_semantic_keys,
     soft_delete_deck,
 )
-from tldw_Server_API.app.core.StudySuggestions import snapshot_service
 from tldw_Server_API.app.core.StudySuggestions.jobs import (
     STUDY_SUGGESTIONS_DOMAIN,
     STUDY_SUGGESTIONS_REFRESH_JOB_TYPE,
@@ -54,7 +55,6 @@ from tldw_Server_API.app.core.StudySuggestions.jobs import (
 )
 from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
 from tldw_Server_API.app.services.quiz_generator import generate_quiz_from_sources
-
 
 router = APIRouter(prefix="/study-suggestions", tags=["study-suggestions"])
 
@@ -194,7 +194,7 @@ def _build_selection_fingerprint_variants(
     action_kind: str,
     generator_version: str | None,
     normalization_version: str,
-) -> tuple[str, str | None]:
+) -> tuple[str, tuple[str, ...]]:
     """Build current and legacy-compatible selection fingerprints for one action."""
 
     selection_fingerprint = build_selection_fingerprint(
@@ -206,19 +206,44 @@ def _build_selection_fingerprint_variants(
         generator_version=generator_version,
         normalization_version=normalization_version,
     )
-    legacy_selection_fingerprint = build_selection_fingerprint(
-        snapshot_id=snapshot_id,
-        target_service=target_service,
-        target_type=target_type,
-        selected_topics=selected_topics,
-        action_kind=action_kind,
-        generator_version=generator_version,
-        normalization_version=normalization_version,
-        include_normalization_version=False,
+    legacy_candidates = (
+        build_selection_fingerprint(
+            snapshot_id=snapshot_id,
+            target_service=target_service,
+            target_type=target_type,
+            selected_topics=selected_topics,
+            action_kind=action_kind,
+            generator_version=generator_version,
+            normalization_version=normalization_version,
+            include_normalization_version=False,
+        ),
+        build_legacy_selection_fingerprint(
+            snapshot_id=snapshot_id,
+            target_service=target_service,
+            target_type=target_type,
+            selected_topics=selected_topics,
+            action_kind=action_kind,
+            generator_version=generator_version,
+            normalization_version=normalization_version,
+        ),
+        build_legacy_selection_fingerprint(
+            snapshot_id=snapshot_id,
+            target_service=target_service,
+            target_type=target_type,
+            selected_topics=selected_topics,
+            action_kind=action_kind,
+            generator_version=generator_version,
+            normalization_version=normalization_version,
+            include_normalization_version=False,
+        ),
     )
-    return selection_fingerprint, (
-        legacy_selection_fingerprint if legacy_selection_fingerprint != selection_fingerprint else None
-    )
+    seen = {selection_fingerprint}
+    legacy_fingerprints: list[str] = []
+    for fingerprint in legacy_candidates:
+        if fingerprint and fingerprint not in seen:
+            seen.add(fingerprint)
+            legacy_fingerprints.append(fingerprint)
+    return selection_fingerprint, tuple(legacy_fingerprints)
 
 
 def _list_generation_link_candidates(
@@ -228,13 +253,20 @@ def _list_generation_link_candidates(
     target_service: str,
     target_type: str,
     selection_fingerprint: str,
-    legacy_selection_fingerprint: str | None,
+    legacy_selection_fingerprint: str | Iterable[str] | None,
 ) -> list[tuple[dict[str, Any], str]]:
     """Return matching generation links for current and legacy fingerprints."""
 
     candidates: list[tuple[dict[str, Any], str]] = []
     seen_fingerprints: set[str] = set()
-    for fingerprint in (selection_fingerprint, legacy_selection_fingerprint):
+    legacy_fingerprints: Iterable[str]
+    if legacy_selection_fingerprint is None:
+        legacy_fingerprints = ()
+    elif isinstance(legacy_selection_fingerprint, str):
+        legacy_fingerprints = (legacy_selection_fingerprint,)
+    else:
+        legacy_fingerprints = legacy_selection_fingerprint
+    for fingerprint in (selection_fingerprint, *legacy_fingerprints):
         if not fingerprint or fingerprint in seen_fingerprints:
             continue
         seen_fingerprints.add(fingerprint)
@@ -346,10 +378,18 @@ def _persist_flashcard_deck(
     )
     try:
         note_db.add_flashcards_bulk(flashcard_payloads)
-    except Exception as exc:
-        with contextlib.suppress(Exception):
+    except Exception:
+        try:
             soft_delete_deck(note_db, deck_id=int(deck_id))
-        logger.warning("Flashcard follow-up generation cleanup deleted deck {} after insert failure: {}", deck_id, exc)
+        except Exception as cleanup_exc:
+            logger.warning(
+                "Flashcard follow-up generation cleanup failed deck_id={} snapshot_id={} error_type={}",
+                deck_id,
+                snapshot_row["id"],
+                type(cleanup_exc).__name__,
+            )
+        else:
+            logger.warning("Flashcard follow-up generation cleanup deleted deck after insert failure")
         raise
     return str(deck_id)
 
@@ -675,7 +715,7 @@ def _prepare_action(
                 selection_fingerprint=selection_fingerprint,
             )
             pending_reservation_created = True
-        except Exception:
+        except Exception as reservation_exc:
             existing_candidates = _list_generation_link_candidates(
                 db,
                 snapshot_id=snapshot_id,
@@ -702,7 +742,10 @@ def _prepare_action(
                 None,
             )
             if pending_existing:
-                raise HTTPException(status_code=409, detail="Study suggestion action already in progress")
+                raise HTTPException(
+                    status_code=409,
+                    detail="Study suggestion action already in progress",
+                ) from reservation_exc
             if live_existing and not payload.force_regenerate:
                 existing_link, _matched_existing_fingerprint = live_existing
                 raise _EarlyReturn(
@@ -716,7 +759,7 @@ def _prepare_action(
                             "target_id": str(existing_link["target_id"]),
                         }
                     )
-                )
+                ) from reservation_exc
             raise
 
     retired_selection_fingerprint = (
@@ -787,6 +830,90 @@ def _finalize_action(
         )
 
 
+async def _release_generation_link_reservation_best_effort(
+    db: CharactersRAGDB,
+    *,
+    snapshot_id: int,
+    target_service: str,
+    target_type: str,
+    selection_fingerprint: str,
+) -> None:
+    """Release an action reservation without hiding release failures from logs."""
+
+    try:
+        await asyncio.to_thread(
+            release_generation_link_reservation,
+            db,
+            snapshot_id=snapshot_id,
+            target_service=target_service,
+            target_type=target_type,
+            selection_fingerprint=selection_fingerprint,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to release study suggestion generation reservation "
+            "snapshot_id={} target={}/{} selection_fingerprint={} error_type={}",
+            snapshot_id,
+            target_service,
+            target_type,
+            selection_fingerprint,
+            type(exc).__name__,
+        )
+
+
+async def _cleanup_generated_action_target_best_effort(
+    db: CharactersRAGDB,
+    *,
+    generated: dict[str, str] | None,
+    snapshot_id: int,
+    selection_fingerprint: str,
+) -> None:
+    """Clean up an unlinked generated target without replacing the original action failure."""
+
+    if not generated:
+        return
+    try:
+        await asyncio.to_thread(cleanup_generated_action_target, db, generated=generated)
+    except Exception as exc:
+        logger.warning(
+            "Failed to cleanup generated study suggestion target "
+            "snapshot_id={} target={}/{} target_id={} selection_fingerprint={} error_type={}",
+            snapshot_id,
+            generated.get("target_service"),
+            generated.get("target_type"),
+            generated.get("target_id"),
+            selection_fingerprint,
+            type(exc).__name__,
+        )
+
+
+async def _cleanup_failed_action_best_effort(
+    db: CharactersRAGDB,
+    *,
+    generated: dict[str, str] | None,
+    snapshot_id: int,
+    action_contract: dict[str, str],
+    selection_fingerprint: str,
+    pending_reservation_created: bool,
+) -> None:
+    """Best-effort reservation and generated-target cleanup for failed follow-up actions."""
+
+    if pending_reservation_created:
+        await _release_generation_link_reservation_best_effort(
+            db,
+            snapshot_id=snapshot_id,
+            target_service=action_contract["target_service"],
+            target_type=action_contract["target_type"],
+            selection_fingerprint=selection_fingerprint,
+        )
+    await _cleanup_generated_action_target_best_effort(
+        db,
+        generated=generated,
+        snapshot_id=snapshot_id,
+        selection_fingerprint=selection_fingerprint,
+    )
+
+
 class _EarlyReturn(Exception):
     """Internal signal to return an existing-link response from the sync prepare phase."""
 
@@ -818,6 +945,7 @@ async def trigger_suggestion_action(
     action_payload = payload.model_dump(mode="json")
     action_payload.update(action_contract)
     action_payload["selected_topics"] = selected_topics
+    generated: dict[str, str] | None = None
     try:
         generated = await _dispatch_follow_up_action(
             note_db=db,
@@ -836,28 +964,24 @@ async def trigger_suggestion_action(
             retired_selection_fingerprint=retired_selection_fingerprint,
         )
     except HTTPException:
-        if pending_reservation_created:
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(
-                    release_generation_link_reservation,
-                    db,
-                    snapshot_id=snapshot_id,
-                    target_service=action_contract["target_service"],
-                    target_type=action_contract["target_type"],
-                    selection_fingerprint=selection_fingerprint,
-                )
+        await _cleanup_failed_action_best_effort(
+            db,
+            generated=generated,
+            snapshot_id=snapshot_id,
+            action_contract=action_contract,
+            selection_fingerprint=selection_fingerprint,
+            pending_reservation_created=pending_reservation_created,
+        )
         raise
     except Exception:
-        if pending_reservation_created:
-            with contextlib.suppress(Exception):
-                await asyncio.to_thread(
-                    release_generation_link_reservation,
-                    db,
-                    snapshot_id=snapshot_id,
-                    target_service=action_contract["target_service"],
-                    target_type=action_contract["target_type"],
-                    selection_fingerprint=selection_fingerprint,
-                )
+        await _cleanup_failed_action_best_effort(
+            db,
+            generated=generated,
+            snapshot_id=snapshot_id,
+            action_contract=action_contract,
+            selection_fingerprint=selection_fingerprint,
+            pending_reservation_created=pending_reservation_created,
+        )
         raise
     return SuggestionActionResponse.model_validate(
         {

@@ -199,6 +199,29 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     expect(screen.getByText("Showing 1 of 1")).toBeInTheDocument()
   })
 
+  it("renders an empty My Media state for an empty paginated media response", async () => {
+    workspaceStoreState.addSourceModalTab = "existing"
+    mockListMedia.mockResolvedValueOnce({
+      items: [],
+      pagination: {
+        mode: "page",
+        page: 1,
+        per_page: 50,
+        total: 0,
+        total_pages: 0,
+        has_more: false,
+        results_per_page: 50,
+        total_items: 0
+      },
+      keywords_available: true
+    })
+
+    render(<AddSourceModal />)
+
+    expect(await screen.findByText("No available media found")).toBeInTheDocument()
+    expect(screen.queryByText(/unable to load media/i)).not.toBeInTheDocument()
+  })
+
   it("uses backend pagination.total_items so large media libraries can load more", async () => {
     workspaceStoreState.addSourceModalTab = "existing"
     mockListMedia.mockResolvedValueOnce({
@@ -236,6 +259,38 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     expect(
       await screen.findByText(/already in this workspace/i)
     ).toBeInTheDocument()
+  })
+
+  it("explains exact My Media search matches that are already in the workspace", async () => {
+    const user = userEvent.setup()
+    workspaceStoreState.addSourceModalTab = "existing"
+    workspaceStoreState.sources = [{ mediaId: 701 }]
+    mockListMedia.mockResolvedValueOnce({ items: [], total: 0 })
+    mockSearchMedia.mockResolvedValueOnce({
+      items: [{ id: 701, title: "Already Added", type: "pdf" }],
+      total: 1
+    })
+
+    render(<AddSourceModal />)
+
+    await user.type(
+      screen.getByPlaceholderText("Search your media library..."),
+      "Already Added"
+    )
+    await user.click(screen.getByRole("button", { name: "Search" }))
+
+    expect(
+      await screen.findByText(
+        "1 matching media item is already in this workspace"
+      )
+    ).toBeInTheDocument()
+    expect(mockSearchMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: "Already Added",
+        fields: ["title", "content"]
+      }),
+      { page: 1, results_per_page: 50 }
+    )
   })
 
   it("toggles a My Media checkbox once when clicked directly", async () => {
@@ -325,6 +380,67 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     expect(mockCloseAddSourceModal).not.toHaveBeenCalled()
   })
 
+  it("shows inline validation and does not submit an invalid single URL", async () => {
+    workspaceStoreState.addSourceModalTab = "url"
+
+    render(<AddSourceModal />)
+
+    fireEvent.change(
+      screen.getByPlaceholderText("https://example.com/article or YouTube URL"),
+      {
+        target: { value: "not-a-valid-url" }
+      }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Add URL" }))
+
+    expect(
+      screen.getByText("Enter a valid URL starting with http:// or https://.")
+    ).toBeInTheDocument()
+    expect(mockAddMedia).not.toHaveBeenCalled()
+    expect(mockAddSource).not.toHaveBeenCalled()
+  })
+
+  it("keeps invalid batch URLs local while ingesting valid URLs", async () => {
+    workspaceStoreState.addSourceModalTab = "url"
+    mockAddMedia.mockResolvedValueOnce({
+      results: [{ media_id: 8002, title: "Valid URL" }]
+    })
+
+    render(<AddSourceModal />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Batch (one per line)" }))
+    fireEvent.change(screen.getByPlaceholderText(/article-1/), {
+      target: {
+        value: "not-a-valid-url\nhttps://example.com/valid"
+      }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add URLs" }))
+
+    await waitFor(() => {
+      expect(mockAddMedia).toHaveBeenCalledWith(
+        "https://example.com/valid",
+        expect.objectContaining({
+          perform_chunking: "true",
+          generate_embeddings: "true",
+          embedding_dispatch_mode: "background"
+        })
+      )
+    })
+    expect(mockAddMedia).toHaveBeenCalledTimes(1)
+    expect(mockAddSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaId: 8002,
+        status: "processing"
+      })
+    )
+    expect(screen.getByText("not-a-valid-url")).toBeInTheDocument()
+    expect(
+      screen.getAllByText("Enter a valid URL starting with http:// or https://.")
+        .length
+    ).toBeGreaterThan(0)
+    expect(mockCloseAddSourceModal).not.toHaveBeenCalled()
+  })
+
   it("normalizes metadata from URL ingestion responses", async () => {
     workspaceStoreState.addSourceModalTab = "url"
     mockAddMedia.mockResolvedValueOnce({
@@ -371,6 +487,60 @@ describe("AddSourceModal Stage 2 intake and relevance", () => {
     )
     expect(mockAddMedia.mock.calls[0]?.[1]).not.toHaveProperty("embedding_provider")
     expect(mockAddMedia.mock.calls[0]?.[1]).not.toHaveProperty("embedding_model")
+  })
+
+  it("classifies recognized video hosts by parsed hostname", async () => {
+    workspaceStoreState.addSourceModalTab = "url"
+    mockAddMedia.mockResolvedValueOnce({
+      results: [{ media_id: 9002, title: "Video" }]
+    })
+
+    render(<AddSourceModal />)
+
+    fireEvent.change(
+      screen.getByPlaceholderText("https://example.com/article or YouTube URL"),
+      {
+        target: { value: "https://www.youtube.com/watch?v=demo" }
+      }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Add URL" }))
+
+    await waitFor(() => {
+      expect(mockAddSource).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mediaId: 9002,
+          type: "video"
+        })
+      )
+    })
+  })
+
+  it("does not classify spoofed video-domain substrings as video hosts", async () => {
+    workspaceStoreState.addSourceModalTab = "url"
+    mockAddMedia.mockResolvedValueOnce({
+      results: [{ media_id: 9003, title: "Spoofed URL" }]
+    })
+
+    render(<AddSourceModal />)
+
+    fireEvent.change(
+      screen.getByPlaceholderText("https://example.com/article or YouTube URL"),
+      {
+        target: {
+          value: "https://example.com/watch?next=https://youtube.com/watch?v=demo"
+        }
+      }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Add URL" }))
+
+    await waitFor(() => {
+      expect(mockAddSource).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mediaId: 9003,
+          type: "website"
+        })
+      )
+    })
   })
 
   it("renders search snippets and favicon hints in web results", async () => {

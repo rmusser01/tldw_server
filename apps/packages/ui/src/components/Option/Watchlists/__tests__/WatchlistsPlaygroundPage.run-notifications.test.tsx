@@ -2,6 +2,7 @@
 
 import React from "react"
 import { render, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WatchlistsPlaygroundPage } from "../WatchlistsPlaygroundPage"
 
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => {
       | "jobs"
       | "runs"
       | "items"
+      | "alerts"
       | "outputs"
       | "templates"
       | "settings",
@@ -22,7 +24,22 @@ const mocks = vi.hoisted(() => {
     })
   }
   return {
+    watchlistContainer: {
+      id: 42,
+      name: "Healthcare ransomware",
+      description: "Track hospital impact",
+      objective: "Find new ransomware affecting hospitals",
+      domain: "cti_osint",
+      status: "active",
+      priority: "high",
+      tags: ["ransomware", "hospitals"],
+      created_at: "2026-05-15T00:00:00Z",
+      updated_at: "2026-05-15T00:00:00Z"
+    },
+    createWatchlistMock: vi.fn(),
     fetchWatchlistRunsMock: vi.fn(),
+    fetchWatchlistsMock: vi.fn(),
+    updateWatchlistMock: vi.fn(),
     trackWatchlistsOnboardingTelemetryMock: vi.fn(),
     notificationDestroyMock: vi.fn(),
     notificationErrorMock: vi.fn(),
@@ -100,8 +117,31 @@ vi.mock("antd", async () => {
       {...rest}
     />
   )
-  return { ...actual, Alert, Tabs, Modal, Drawer, Empty, Button, Tooltip, Switch }
+  const Select = ({ value, options = [], onChange, "aria-label": ariaLabel, ...rest }: any) => (
+    <select
+      aria-label={ariaLabel}
+      value={value == null ? "" : String(value)}
+      onChange={(event) => {
+        const rawValue = event.currentTarget.value
+        const numeric = Number(rawValue)
+        onChange?.(Number.isFinite(numeric) && rawValue.trim() !== "" ? numeric : rawValue)
+      }}
+      {...rest}
+    >
+      {options.map((option: any) => (
+        <option key={String(option.value)} value={String(option.value)}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  )
+  const Tag = ({ children }: any) => <span>{children}</span>
+  return { ...actual, Alert, Tabs, Modal, Drawer, Empty, Button, Tooltip, Switch, Select, Tag }
 })
+
+vi.mock("@/components/Common/WorkspaceConnectionGate", () => ({
+  default: ({ children }: { children: React.ReactNode }) => <>{children}</>
+}))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => ({
@@ -131,6 +171,9 @@ vi.mock("react-router-dom", async () => {
 })
 
 vi.mock("@/services/watchlists", () => ({
+  createWatchlist: (...args: unknown[]) => mocks.createWatchlistMock(...args),
+  fetchWatchlists: (...args: unknown[]) => mocks.fetchWatchlistsMock(...args),
+  updateWatchlist: (...args: unknown[]) => mocks.updateWatchlistMock(...args),
   fetchWatchlistRuns: (...args: unknown[]) => mocks.fetchWatchlistRunsMock(...args)
 }))
 
@@ -139,7 +182,17 @@ vi.mock("@/store/watchlists", () => ({
     selector({
       activeTab: mocks.state.activeTab,
       pollingActive: mocks.state.pollingActive,
+      watchlists: [mocks.watchlistContainer],
+      watchlistsLoading: false,
+      watchlistsError: null,
+      selectedWatchlistId: 42,
       setActiveTab: mocks.state.setActiveTab,
+      setWatchlists: vi.fn(),
+      setWatchlistsLoading: vi.fn(),
+      setWatchlistsError: vi.fn(),
+      setSelectedWatchlistId: vi.fn(),
+      addWatchlist: vi.fn(),
+      updateWatchlistInList: vi.fn(),
       openRunDetail: mocks.openRunDetailMock,
       resetStore: vi.fn()
     })
@@ -182,12 +235,24 @@ vi.mock("../shared/WatchlistsHealthBar", () => ({
   WatchlistsHealthBar: () => <div data-testid="watchlists-health-bar" />
 }))
 
+const renderWatchlistsPlaygroundPage = () =>
+  render(
+    <MemoryRouter initialEntries={["/watchlists"]}>
+      <WatchlistsPlaygroundPage />
+    </MemoryRouter>
+  )
+
 describe("WatchlistsPlaygroundPage run notifications", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     connectionMocks.useConnectionUxState.mockReturnValue({
       uxState: "connected_ok",
       hasCompletedFirstRun: true
+    })
+    mocks.fetchWatchlistsMock.mockResolvedValue({
+      items: [mocks.watchlistContainer],
+      total: 1,
+      has_more: false
     })
     mocks.state.activeTab = "sources"
     mocks.state.pollingActive = false
@@ -253,7 +318,7 @@ describe("WatchlistsPlaygroundPage run notifications", () => {
   })
 
   it("groups repeat failures into one notification and deep-links to the newest run", async () => {
-    render(<WatchlistsPlaygroundPage />)
+    renderWatchlistsPlaygroundPage()
 
     await waitFor(() => {
       expect(mocks.notificationErrorMock).toHaveBeenCalledTimes(1)
@@ -278,7 +343,7 @@ describe("WatchlistsPlaygroundPage run notifications", () => {
     mocks.state.pollingActive = true
     mocks.fetchWatchlistRunsMock.mockReset()
 
-    render(<WatchlistsPlaygroundPage />)
+    renderWatchlistsPlaygroundPage()
 
     await new Promise((resolve) => {
       setTimeout(resolve, 250)
@@ -303,7 +368,7 @@ describe("WatchlistsPlaygroundPage run notifications", () => {
         has_more: false
       })
 
-    render(<WatchlistsPlaygroundPage />)
+    renderWatchlistsPlaygroundPage()
 
     await new Promise((resolve) => {
       setTimeout(resolve, 250)
@@ -340,7 +405,7 @@ describe("WatchlistsPlaygroundPage run notifications", () => {
       has_more: false
     })
 
-    render(<WatchlistsPlaygroundPage />)
+    renderWatchlistsPlaygroundPage()
 
     await waitFor(() => {
       expect(mocks.trackWatchlistsOnboardingTelemetryMock).toHaveBeenCalledWith({

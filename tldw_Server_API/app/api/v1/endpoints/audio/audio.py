@@ -27,9 +27,11 @@ from tldw_Server_API.app.core.Metrics.metrics_manager import (
 from . import (
     audio_health,
     audio_history,
+    audio_presets,
     audio_tokenizer,
     audio_transcriptions,
     audio_tts,
+    audio_voice_conversion,
     audio_voices,
 )
 
@@ -49,6 +51,8 @@ router.include_router(audio_tokenizer.router)
 router.include_router(audio_transcriptions.router)
 router.include_router(audio_health.router)
 router.include_router(audio_voices.router)
+router.include_router(audio_presets.router)
+router.include_router(audio_voice_conversion.router)
 
 _AUDIO_STREAMING_MODULE = f"{__package__}.audio_streaming"
 
@@ -66,8 +70,8 @@ def _mount_streaming_routes() -> APIRouter:
         streaming_module = _load_audio_streaming()
         router.include_router(streaming_module.router)
         return streaming_module.ws_router
-    except Exception as exc:
-        logger.warning(f"Audio streaming routes unavailable; skipping import: {exc}")
+    except Exception:
+        logger.warning("Audio streaming routes unavailable; skipping import")
         return APIRouter()
 
 
@@ -93,6 +97,9 @@ list_voices = audio_voices.list_voices
 get_voice_details = audio_voices.get_voice_details
 delete_voice = audio_voices.delete_voice
 preview_voice = audio_voices.preview_voice
+create_fish_s2_reference = audio_voices.create_fish_s2_reference
+list_fish_s2_references = audio_voices.list_fish_s2_references
+delete_fish_s2_reference = audio_voices.delete_fish_s2_reference
 
 # Dependency helpers (for FastAPI overrides in tests)
 get_tts_service = audio_tts.get_tts_service
@@ -105,12 +112,63 @@ from tldw_Server_API.app.core.Audio.tts_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
     record_byok_missing_credentials,
-    resolve_byok_credentials,
+    resolve_byok_credentials as _default_resolve_byok_credentials,
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config as _load_comprehensive_config
 
 # Re-export config loader for tests to monkeypatch
 load_comprehensive_config = _load_comprehensive_config
+resolve_byok_credentials = _default_resolve_byok_credentials
+
+_TTS_API_KEY_REQUIRED_PROVIDERS = {"openai", "elevenlabs", "fish_s2"}
+
+
+def _normalize_tts_provider_hint(provider_hint: Optional[str]) -> str:
+    """Normalize TTS provider hints for credential requirement checks."""
+    return str(provider_hint or "").strip().lower().replace("-", "_")
+
+
+def _resolved_api_key(value: object) -> Optional[str]:
+    """Return a non-empty API key string, or None for blank/missing values."""
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _raise_missing_tts_credentials(provider_hint: str) -> None:
+    record_byok_missing_credentials(provider_hint, operation="audio_tts")
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "error_code": "missing_provider_credentials",
+            "message": f"TTS provider '{provider_hint}' requires an API key.",
+        },
+    )
+
+
+def _resolve_tts_byok_resolver():
+    local_resolver = resolve_byok_credentials
+    package_resolver = _default_resolve_byok_credentials
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import audio as _audio_pkg
+
+        package_resolver = getattr(_audio_pkg, "resolve_byok_credentials", _default_resolve_byok_credentials)
+    except (AttributeError, ImportError):
+        logger.debug("Falling back to default BYOK resolver after audio package resolver lookup failed")
+    if local_resolver is not _default_resolve_byok_credentials:
+        return local_resolver
+    if package_resolver is not _default_resolve_byok_credentials:
+        return package_resolver
+    try:
+        from tldw_Server_API.app.core.Audio import tts_service as core_tts_service
+
+        core_resolver = getattr(core_tts_service, "resolve_byok_credentials", _default_resolve_byok_credentials)
+        if core_resolver is not _default_resolve_byok_credentials:
+            return core_resolver
+    except (AttributeError, ImportError):
+        logger.debug("Falling back to default BYOK resolver after core resolver lookup failed")
+    return _default_resolve_byok_credentials
 
 
 async def _resolve_tts_byok(
@@ -121,6 +179,16 @@ async def _resolve_tts_byok(
     force_oauth_refresh: bool = False,
 ):
     """Wrapper to preserve audio.py patch points for BYOK resolution."""
+    if not provider_hint:
+        from tldw_Server_API.app.core.Audio import tts_service as core_tts_service
+
+        return await core_tts_service._resolve_tts_byok(
+            provider_hint=provider_hint,
+            current_user=current_user,
+            request=request,
+            force_oauth_refresh=force_oauth_refresh,
+        )
+
     user_id_int = None
     try:
         user_id_int = getattr(current_user, "id_int", None)
@@ -128,20 +196,14 @@ async def _resolve_tts_byok(
             raw_id = getattr(current_user, "id", None)
             if raw_id is not None:
                 user_id_int = int(raw_id)
-    except (AttributeError, TypeError, ValueError) as exc:
-        logger.debug(f"Failed to extract user_id from current_user: {exc}")
+    except (AttributeError, TypeError, ValueError):
+        logger.debug("Failed to extract user_id from current_user")
         user_id_int = None
 
     tts_overrides = None
     byok_tts_resolution = None
     if provider_hint:
-        resolver = resolve_byok_credentials
-        try:
-            from tldw_Server_API.app.api.v1.endpoints import audio as _audio_pkg
-
-            resolver = getattr(_audio_pkg, "resolve_byok_credentials", resolve_byok_credentials)
-        except Exception:
-            resolver = resolve_byok_credentials
+        resolver = _resolve_tts_byok_resolver()
         byok_tts_resolution = await resolver(
             provider_hint,
             user_id=user_id_int,
@@ -149,21 +211,19 @@ async def _resolve_tts_byok(
             fallback_resolver=_tts_fallback_resolver,
             force_oauth_refresh=force_oauth_refresh,
         )
+        provider_key = _normalize_tts_provider_hint(provider_hint)
+        resolved_api_key = _resolved_api_key(byok_tts_resolution.api_key)
+        requires_api_key = provider_key in _TTS_API_KEY_REQUIRED_PROVIDERS
         if byok_tts_resolution.uses_byok:
-            tts_overrides = {"api_key": byok_tts_resolution.api_key}
+            if not resolved_api_key and requires_api_key:
+                _raise_missing_tts_credentials(provider_hint)
+            if resolved_api_key:
+                tts_overrides = {"api_key": resolved_api_key}
             base_url = byok_tts_resolution.credential_fields.get("base_url")
-            if isinstance(base_url, str) and base_url.strip():
+            if tts_overrides is not None and isinstance(base_url, str) and base_url.strip():
                 tts_overrides["base_url"] = base_url.strip()
-        elif not byok_tts_resolution.api_key:
-            if provider_hint in {"openai", "elevenlabs"}:
-                record_byok_missing_credentials(provider_hint, operation="audio_tts")
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "error_code": "missing_provider_credentials",
-                        "message": f"TTS provider '{provider_hint}' requires an API key.",
-                    },
-                )
+        elif not resolved_api_key and requires_api_key:
+            _raise_missing_tts_credentials(provider_hint)
 
     return user_id_int, tts_overrides, byok_tts_resolution
 
@@ -183,8 +243,8 @@ def _get_failopen_cap_minutes() -> float:
             f = float(v)
             if f > 0:
                 return f
-        except (ValueError, TypeError) as exc:
-            logger.debug(f"AUDIO_FAILOPEN_CAP_MINUTES parse failed: {exc}")
+        except (ValueError, TypeError):
+            logger.debug("AUDIO_FAILOPEN_CAP_MINUTES parse failed")
     try:
         try:
             from tldw_Server_API.app.api.v1.endpoints import audio as _audio_pkg
@@ -199,17 +259,17 @@ def _get_failopen_cap_minutes() -> float:
                     f = float(cfg.get("Audio-Quota", "failopen_cap_minutes", fallback=""))
                     if f > 0:
                         return f
-                except (ValueError, TypeError) as exc:
-                    logger.debug(f"[Audio-Quota].failopen_cap_minutes parse failed: {exc}")
+                except (ValueError, TypeError):
+                    logger.debug("[Audio-Quota].failopen_cap_minutes parse failed")
             if cfg.has_section("Audio"):
                 try:
                     f = float(cfg.get("Audio", "failopen_cap_minutes", fallback=""))
                     if f > 0:
                         return f
-                except (ValueError, TypeError) as exc:
-                    logger.debug(f"[Audio].failopen_cap_minutes parse failed: {exc}")
-    except Exception as exc:
-        logger.debug(f"Config read for failopen cap failed: {exc}")
+                except (ValueError, TypeError):
+                    logger.debug("[Audio].failopen_cap_minutes parse failed")
+    except Exception:
+        logger.debug("Config read for failopen cap failed")
     return 5.0
 
 
@@ -274,6 +334,9 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     check_daily_minutes_allow as check_daily_minutes_allow,
 )
 from tldw_Server_API.app.core.Usage.audio_quota import (
+    consume_daily_minutes as consume_daily_minutes,
+)
+from tldw_Server_API.app.core.Usage.audio_quota import (
     finish_stream as finish_stream,
 )
 
@@ -297,8 +360,8 @@ try:
     from tldw_Server_API.app.core.Usage.audio_quota import (
         heartbeat_stream as heartbeat_stream,
     )
-except ImportError as e:
-    logger.debug(f"audio_quota optional helpers not available: {e}")
+except ImportError:
+    logger.debug("audio_quota optional helpers not available")
 
 # Expose job quota helpers at module scope for tests to monkeypatch
 try:
@@ -314,5 +377,5 @@ try:
     from tldw_Server_API.app.core.Usage.audio_quota import (
         increment_jobs_started as increment_jobs_started,
     )
-except ImportError as e:
-    logger.debug(f"audio_quota job helpers not available: {e}")
+except ImportError:
+    logger.debug("audio_quota job helpers not available")

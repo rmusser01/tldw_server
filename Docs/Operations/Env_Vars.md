@@ -65,28 +65,6 @@ Operational notes:
 - Managed: `CHATLLM_OCR_SERVER_BINARY`, `CHATLLM_OCR_MODEL_PATH`, `CHATLLM_OCR_HOST`, `CHATLLM_OCR_PORT`, `CHATLLM_OCR_STARTUP_TIMEOUT_SEC`, `CHATLLM_OCR_SERVER_ARGS_JSON`, `CHATLLM_OCR_HEALTHCHECK_URL`.
 - CLI: `CHATLLM_OCR_CLI_BINARY`, `CHATLLM_OCR_MODEL_PATH`, `CHATLLM_OCR_CLI_ARGS_JSON`.
 
-### Hunyuan OCR
-- `HUNYUAN_RUNTIME_FAMILY`: `auto|native|llamacpp`. `auto` prefers a configured native Hunyuan runtime before falling back to Hunyuan GGUF through llama.cpp.
-- `HUNYUAN_MODE`: `auto|vllm|transformers`. Native Transformers availability now requires explicit operator intent such as `HUNYUAN_MODE=transformers` or `HUNYUAN_MODEL_PATH`; importable Python packages alone are no longer enough.
-- `HUNYUAN_PROMPT`, `HUNYUAN_PROMPT_PRESET`.
-- Native vLLM: `HUNYUAN_VLLM_URL`, `HUNYUAN_VLLM_MODEL`, `HUNYUAN_VLLM_TIMEOUT`, `HUNYUAN_VLLM_USE_DATA_URL`.
-- Native Transformers: `HUNYUAN_MODEL_PATH`, `HUNYUAN_DEVICE`.
-- Native generation: `HUNYUAN_MAX_NEW_TOKENS`, `HUNYUAN_TEMPERATURE`, `HUNYUAN_DO_SAMPLE`.
-- Post-processing: `HUNYUAN_CLEAN_REPEATS`.
-
-Hunyuan GGUF via llama.cpp
-- `HUNYUAN_LLAMACPP_MODE`: `auto|remote|managed|cli`.
-- `HUNYUAN_LLAMACPP_AUTO_ELIGIBLE`: Enables participation in generic OCR `auto` when the GGUF family is configured and locally available.
-- `HUNYUAN_LLAMACPP_AUTO_HIGH_QUALITY_ELIGIBLE`: Enables participation in `auto_high_quality` when the GGUF family is configured and locally available.
-- `HUNYUAN_LLAMACPP_MAX_PAGE_CONCURRENCY`: Backend-local per-page cap; the PDF pipeline still applies `min(OCR_PAGE_CONCURRENCY, backend_local_cap)`.
-- Remote: `HUNYUAN_LLAMACPP_HOST`, `HUNYUAN_LLAMACPP_PORT`, `HUNYUAN_LLAMACPP_MODEL`, `HUNYUAN_LLAMACPP_USE_DATA_URL`, `HUNYUAN_LLAMACPP_TIMEOUT`, `HUNYUAN_LLAMACPP_TEMPERATURE`, `HUNYUAN_LLAMACPP_MAX_TOKENS`.
-- Managed: `HUNYUAN_LLAMACPP_ALLOW_MANAGED_START`, `HUNYUAN_LLAMACPP_HOST`, `HUNYUAN_LLAMACPP_PORT`, `HUNYUAN_LLAMACPP_MODEL_PATH`, `HUNYUAN_LLAMACPP_SERVER_ARGV`, `HUNYUAN_LLAMACPP_STARTUP_TIMEOUT_SEC`.
-- CLI: `HUNYUAN_LLAMACPP_MODEL_PATH`, `HUNYUAN_LLAMACPP_CLI_ARGV`.
-
-Notes
-- `ocr_backend=hunyuan` is the only public Hunyuan selector for both native and GGUF deployments.
-- `ocr_backend=llamacpp` remains the generic llama.cpp OCR backend and should not be treated as an alias for Hunyuan.
-
 ### MinerU OCR
 - `MINERU_CMD`: Command used to launch MinerU for document-level PDF OCR. Defaults to `mineru`. The command is tokenized safely and executed without a shell.
 - `MINERU_TIMEOUT_SEC`: Whole-document MinerU timeout in seconds (default `120`).
@@ -551,6 +529,21 @@ Quick start (local dev):
 - Additional provider-specific variables as required by their APIs.
 - `OPENROUTER_MODEL_DISCOVERY_TTL_SECONDS`: TTL for cached OpenRouter `/models` discovery results used by `/api/v1/llm/models/metadata` (default `600`, minimum `30`). Use `refresh_openrouter=true` on the metadata endpoint to force an immediate refresh.
 
+### Custom OpenAI-Compatible Endpoints
+- `CUSTOM_OPENAI_API_IP`: Canonical base URL override for `custom-openai-api` (for example `http://127.0.0.1:8000/v1`). Overrides `[API] custom_openai_api_ip`.
+- `CUSTOM_OPENAI_API_BASE`: Alias for `CUSTOM_OPENAI_API_IP`, accepted for OpenAI-compatible naming compatibility.
+- `CUSTOM_OPENAI_API_URL`: Alias for `CUSTOM_OPENAI_API_IP`, accepted for OpenAI-compatible naming compatibility.
+- `CUSTOM_OPENAI_API_IP_1`: Backward-compatible alias for the first custom OpenAI-compatible endpoint.
+- `CUSTOM_OPENAI2_API_IP`: Canonical base URL override for `custom-openai-api-2`. Overrides `[API] custom_openai2_api_ip`.
+- `CUSTOM_OPENAI_API_IP_2`: Backward-compatible alias for the second custom OpenAI-compatible endpoint.
+- Additional accepted aliases: `CUSTOM_OPENAI_API_BASE_URL`, `CUSTOM_OPENAI_BASE_URL`, `CUSTOM_OPENAI2_API_BASE`, `CUSTOM_OPENAI2_API_URL`, `CUSTOM_OPENAI2_API_BASE_URL`, `CUSTOM_OPENAI2_BASE_URL`, `CUSTOM_OPENAI_API_2_IP`, `CUSTOM_OPENAI_API_2_BASE`, `CUSTOM_OPENAI_API_2_URL`, `CUSTOM_OPENAI_API_2_BASE_URL`, `CUSTOM_OPENAI_API_BASE_2`, `CUSTOM_OPENAI_API_URL_2`, `CUSTOM_OPENAI_API_BASE_URL_2`.
+- Provider-specific endpoint env vars only apply to their matching endpoint slot; provider-1 env vars do not override provider-2 `config.txt` settings.
+- Additional named endpoints are supported as `custom-openai-api-3` through `custom-openai-api-99`.
+  - Endpoint env aliases for endpoint `N`: `CUSTOM_OPENAI_API_IP_{N}`, `CUSTOM_OPENAI_API_BASE_{N}`, `CUSTOM_OPENAI_API_URL_{N}`, `CUSTOM_OPENAI_API_BASE_URL_{N}`, `CUSTOM_OPENAI{N}_API_IP`, `CUSTOM_OPENAI{N}_API_BASE`, `CUSTOM_OPENAI{N}_API_URL`, `CUSTOM_OPENAI{N}_API_BASE_URL`, `CUSTOM_OPENAI_API_{N}_IP`, `CUSTOM_OPENAI_API_{N}_BASE`, `CUSTOM_OPENAI_API_{N}_URL`, `CUSTOM_OPENAI_API_{N}_BASE_URL`.
+  - API key env aliases for endpoint `N`: `CUSTOM_OPENAI_API_KEY_{N}`, `CUSTOM_OPENAI{N}_API_KEY`, `CUSTOM_OPENAI_API_{N}_API_KEY`.
+  - Model env aliases for endpoint `N`: `CUSTOM_OPENAI_API_MODEL_{N}`, `CUSTOM_OPENAI{N}_API_MODEL`, `CUSTOM_OPENAI_API_{N}_MODEL`.
+  - Equivalent `config.txt` fields use either `custom_openaiN_api_*` or `custom_openai_api_N_*`; for example `custom_openai37_api_ip`, `custom_openai37_api_key`, `custom_openai37_api_model`.
+
 ### Qwen / Model Studio Routing
 - `QWEN_BASE_URL`: Overrides Qwen chat base URL directly (highest non-request precedence).
 - `QWEN_REGION`: Region preset for Qwen chat when `QWEN_BASE_URL` and `qwen_api.api_base_url` are unset (`sg|cn|us`).
@@ -564,6 +557,14 @@ Quick start (local dev):
 - `MCP_JWT_SECRET`: Secret used by the MCP server for issuing/verifying tokens.
 - `MCP_API_KEY_SALT`: Salt used for API key hashing/derivation.
 - `MCP_LOG_LEVEL`: MCP module log level (`DEBUG|INFO|WARNING|ERROR`).
+- `MCP_ENABLE_DEMO_AUTH`: Enables demo token issuance only for local debug/test workflows. Keep disabled for shared deployments.
+- `MCP_DEMO_AUTH_SECRET`: Required when demo auth is enabled.
+- `MCP_WS_AUTH_REQUIRED`: Requires WebSocket authentication when true. Production deployments should keep this enabled.
+- `MCP_WS_ALLOW_QUERY_AUTH`: Allows token/API-key query parameters for WebSocket auth when true. Disabled by default because URLs are commonly logged.
+- `MCP_CORS_ORIGINS`: Allowed browser origins for MCP HTTP/WebSocket access.
+- `MCP_ALLOWED_IPS`: Optional comma-separated IP/CIDR allowlist for MCP access.
+- `MCP_TOOL_CATEGORY_MAP`: Optional JSON tool-to-rate-limit-category map.
+- `MCP_TOOL_CATEGORY_MAP_FILE`: Optional YAML file containing tool-to-rate-limit-category mappings.
 
 ## OCR - POINTS Reader (optional)
 - `POINTS_MODE`: `sglang` or `transformers` (default: auto).

@@ -79,7 +79,7 @@ const buildJobs = (count: number, sourceCount: number): WatchlistJob[] =>
         ]
       },
       output_prefs: {
-        template_name: "briefing_md",
+        template_name: "briefing_markdown",
         generate_audio: index % 4 === 0
       },
       schedule_expr: "0 8 * * *",

@@ -22,7 +22,23 @@ async def test_llm_usage_log_has_router_analytics_columns_sqlite(tmp_path, monke
     ensure_authnz_tables(Path(pool.db_path))
 
     cols = {row["name"] for row in await pool.fetchall("PRAGMA table_info(llm_usage_log)")}
-    assert {"remote_ip", "user_agent", "token_name", "conversation_id"}.issubset(cols)
+    assert {
+        "remote_ip",
+        "user_agent",
+        "token_name",
+        "conversation_id",
+        "cached_input_tokens",
+        "cache_write_input_tokens",
+        "cache_read_input_tokens",
+        "billable_input_tokens",
+        "reasoning_tokens",
+        "choice_count",
+        "estimate_source",
+        "prompt_fingerprint",
+        "prompt_fingerprint_version",
+        "world_book_fingerprint",
+        "raw_usage_metadata_json",
+    }.issubset(cols)
 
     indexes = {row["name"] for row in await pool.fetchall("PRAGMA index_list(llm_usage_log)")}
     assert "idx_llm_usage_log_remote_ip_ts" in indexes

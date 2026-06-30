@@ -1,51 +1,62 @@
- # PrivilegeMaps
+# PrivilegeMaps
 
-## 1. Descriptive of Current Feature Set
+PrivilegeMaps inspects FastAPI route dependencies and AuthNZ privilege catalog
+data to produce route-to-scope maps, summaries, cached snapshots, and trends.
+It is an operations and admin-observability helper for answering which endpoints
+use which RBAC scopes, roles, and rate-limit resources.
 
-- Purpose: Introspect FastAPI route dependencies to map scopes, RBAC, and rate-limit resources; aggregate into org/team/user summaries.
-- Capabilities:
-  - Route registry extraction and serialization
-  - Role-scope mapping using catalog; admin roles and feature flags
-  - Cached summaries with time-series trend store
-- Inputs/Outputs:
-  - Input: FastAPI app instance + privilege catalog
-  - Output: per-scope route maps, summaries, trends, and cached snapshots
-- Related Usage:
-  - Used by admin/reporting endpoints and docs tooling
+## Start Here
 
-## 2. Technical Details of Features
+- Core service: `service.py`.
+- Route inspection: `introspection.py`.
+- Startup/cache helpers: `startup.py`, `cache.py`, `snapshots.py`, and
+  `trends.py`.
+- API endpoint: `app/api/v1/endpoints/privileges.py`.
+- Schemas: `app/api/v1/schemas/privileges.py`.
+- Tests: `tests/Privileges/`.
 
-- Architecture & Data Flow:
-  - `collect_privilege_route_registry(app, catalog)` extracts dependencies and scope matches; `PrivilegeMapService` builds summaries with cache + trends
-- Key Classes/Functions:
-  - Service: `PrivilegeMaps/service.py:1`; Introspection: `PrivilegeMaps/introspection.py:1`; Startup hooks: `PrivilegeMaps/startup.py:1`; Caching/Trends helpers
-- Dependencies:
-  - Internal: AuthNZ settings, privilege catalog loader, caching store
-- Data Models & DB:
-  - In-memory caches by default; optional stores pluggable
-- Configuration:
-  - Cache TTL: `PRIVILEGE_MAP_CACHE_TTL_SECONDS` (default 120s)
-- Concurrency & Performance:
-  - Deterministic route signature to invalidate caches on changes
-- Error Handling:
-  - Unknown scope refs logged; strict mode raises on collection
-- Security:
-  - Admin roles set maintained; summaries respect RBAC design
+## Responsibilities
 
-## 3. Developer-Related/Relevant Information for Contributors
+- Collect deterministic route registry data from a FastAPI app instance.
+- Join route dependency data with the AuthNZ privilege catalog.
+- Cache expensive summaries and expose snapshots/trends for admin views.
+- Surface unknown or mismatched scopes so endpoint wiring can be corrected.
 
-- Folder Structure:
-  - `PrivilegeMaps/` with `service.py`, `introspection.py`, `startup.py`, `cache.py`, `trends.py`
-- Extension Points:
-  - Add derived views (team/org rollups); plug in persistent caches
-- Coding Patterns:
-  - Keep extraction deterministic; avoid side effects during introspection
-- Tests:
-  - `tldw_Server_API/tests/Privileges/test_privilege_service_sqlite.py:1`
-  - `tldw_Server_API/tests/Privileges/test_privilege_endpoints.py:1`
-- Local Dev Tips:
-  - Run against the app instance after adding endpoints to validate scope wiring
-- Pitfalls & Gotchas:
-  - High-cardinality dependencies inflate summaries; ensure TTLs are sane
-- Roadmap/TODOs:
-  - Persisted trend backends; live dashboards
+## Module Map
+
+- `introspection.py` walks routes and extracts security/rate-limit dependency
+  metadata.
+- `service.py` builds summaries and high-level map responses.
+- `cache.py` stores computed maps with TTL and route-signature invalidation.
+- `snapshots.py` and `trends.py` record point-in-time summaries for comparison.
+- `startup.py` wires collection into app startup when enabled.
+
+## How It Connects
+
+- AuthNZ owns privilege catalog definitions and role/permission data.
+- `privileges.py` exposes admin endpoints and can create Jobs for heavier
+  snapshot/export workflows.
+- Logging helpers add request IDs to privilege operations.
+
+## Extension Points
+
+- Add derived views in `service.py` when an admin UI needs a new rollup.
+- Keep route extraction deterministic; route-order churn makes snapshots noisy.
+- Add persistent cache backends behind the existing cache shape rather than
+  embedding DB calls in introspection.
+
+## Testing
+
+- Introspection and service behavior: `tests/Privileges/test_privilege_introspection.py`
+  and `tests/Privileges/test_privilege_service_sqlite.py`.
+- Endpoint and schema aliases: `tests/Privileges/test_privilege_endpoints.py` and
+  `tests/Privileges/test_privilege_schema_aliases.py`.
+- Cache/snapshot behavior: `tests/Privileges/test_privilege_cache.py` and
+  `tests/Privileges/test_privilege_snapshot_retention.py`.
+
+## Gotchas
+
+- Inspecting dependencies should not execute endpoint logic or require provider
+  configuration.
+- High-cardinality route metadata can make snapshots noisy; normalize labels
+  before adding new fields.

@@ -10,7 +10,8 @@ from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDat
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Personalization.companion_user_ids import (
-    resolve_companion_storage_user_id,
+    resolve_existing_companion_storage_user_id,
+    resolve_legacy_companion_storage_user_ids,
 )
 from tldw_Server_API.app.core.Personalization.companion_reflection_jobs import (
     COMPANION_REBUILD_JOB_TYPE,
@@ -42,7 +43,7 @@ def companion_reflection_env(monkeypatch, tmp_path) -> Iterator[Path]:
 
 
 def _legacy_storage_user_id(user_id: str) -> str:
-    return resolve_companion_storage_user_id(user_id)
+    return resolve_legacy_companion_storage_user_ids(user_id)[0]
 
 
 def _seed_companion_context(user_id: str) -> tuple[PersonalizationDB, CollectionsDatabase]:
@@ -280,6 +281,101 @@ def test_companion_reflection_job_reuses_existing_reflection_outside_recent_wind
     reflections = [row for row in rows if row["event_type"] == "companion_reflection_generated"]
     assert total == 206
     assert len(reflections) == 1
+
+
+def test_companion_reflection_job_normalizes_cadence_before_deduping(
+    companion_reflection_env,
+) -> None:
+    personalization_db, collections_db = _seed_companion_context("1")
+    now = datetime(2026, 3, 10, 16, 0, tzinfo=timezone.utc)
+
+    first = run_companion_reflection_job(
+        user_id="1",
+        cadence=" Weekly ",
+        now=now,
+        personalization_db=personalization_db,
+        collections_db=collections_db,
+    )
+    second = run_companion_reflection_job(
+        user_id="1",
+        cadence="weekly",
+        now=now,
+        personalization_db=personalization_db,
+        collections_db=collections_db,
+    )
+
+    assert first["status"] == "completed"
+    assert second["status"] == "completed"
+    assert second["reflection_id"] == first["reflection_id"]
+    rows, _total = personalization_db.list_companion_activity_events("1", limit=20, offset=0)
+    reflections = [row for row in rows if row["event_type"] == "companion_reflection_generated"]
+    assert len(reflections) == 1
+    assert reflections[0]["metadata"]["cadence"] == "weekly"
+    assert reflections[0]["source_id"] == "2026-W11"
+
+
+def test_companion_reflection_job_rejects_unknown_cadence(
+    companion_reflection_env,
+) -> None:
+    personalization_db, collections_db = _seed_companion_context("1")
+
+    result = run_companion_reflection_job(
+        user_id="1",
+        cadence="monthly",
+        now=datetime(2026, 3, 10, 16, 0, tzinfo=timezone.utc),
+        personalization_db=personalization_db,
+        collections_db=collections_db,
+    )
+
+    assert result == {"status": "skipped", "reason": "invalid_cadence"}
+    rows, _total = personalization_db.list_companion_activity_events("1", limit=20, offset=0)
+    assert not any(row["event_type"] == "companion_reflection_generated" for row in rows)
+
+
+def test_companion_reflection_job_opens_collections_db_with_storage_user_id(
+    companion_reflection_env,
+    monkeypatch,
+) -> None:
+    user_id = "user-alpha"
+    storage_user_id = resolve_existing_companion_storage_user_id(user_id)
+    personalization_db = PersonalizationDB(
+        str(DatabasePaths.get_personalization_db_path(storage_user_id))
+    )
+    personalization_db.update_profile(user_id, enabled=0)
+    opened_collection_user_ids: list[str] = []
+
+    def _fake_for_user(cls, user_id):
+        opened_collection_user_ids.append(str(user_id))
+        return object()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Personalization.companion_reflection_jobs.CollectionsDatabase.for_user",
+        classmethod(_fake_for_user),
+    )
+
+    result = run_companion_reflection_job(user_id=user_id, cadence="daily")
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "disabled"
+    assert opened_collection_user_ids == [storage_user_id]
+
+
+@pytest.mark.asyncio
+async def test_handle_companion_reflection_job_rejects_unknown_job_type(
+    companion_reflection_env,
+) -> None:
+    result = await handle_companion_reflection_job(
+        {
+            "job_type": "companion_archive",
+            "payload": {"user_id": "1", "cadence": "daily"},
+        }
+    )
+
+    assert result == {
+        "status": "skipped",
+        "reason": "unsupported_job_type",
+        "job_type": "companion_archive",
+    }
 
 
 @pytest.mark.asyncio

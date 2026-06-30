@@ -153,7 +153,7 @@ describe('ContentViewer stage 14 annotations baseline', () => {
     )
 
     fireEvent.click(screen.getByTestId('media-intelligence-toggle'))
-    fireEvent.click(screen.getByTestId('media-intelligence-tab-annotations'))
+    fireEvent.click(await screen.findByTestId('media-intelligence-tab-annotations'))
 
     await waitFor(() => {
       expect(screen.getByTestId('media-annotation-manual-text')).toBeInTheDocument()
@@ -252,6 +252,13 @@ describe('ContentViewer stage 14 annotations baseline', () => {
     fireEvent.mouseUp(contentNode)
 
     await waitFor(() => {
+      expect(screen.getByTestId('media-selection-actions-popover')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('media-annotation-selection-preview')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('media-selection-action-annotate'))
+
+    await waitFor(() => {
       expect(screen.getByTestId('media-annotation-selection-preview')).toHaveTextContent(
         'Selected body text'
       )
@@ -271,5 +278,125 @@ describe('ContentViewer stage 14 annotations baseline', () => {
         })
       )
     })
+  })
+
+  it('clears selection actions when the selected media changes', async () => {
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string; body?: any }) => {
+      const path = String(request?.path || '')
+      if (path.endsWith('/outline')) return { media_id: 777, has_outline: true, entries: [] }
+      if (path.endsWith('/insights')) return { media_id: 777, insights: [] }
+      if (path.includes('/references')) return { media_id: 777, references: [] }
+      if (path.includes('/figures')) return { media_id: 777, figures: [] }
+      if (path.endsWith('/annotations') && request?.method === 'GET') {
+        return { media_id: 777, annotations: [] }
+      }
+      return {}
+    })
+
+    const { rerender } = render(
+      <ContentViewer
+        selectedMedia={selectedMedia}
+        content={'Original selected body text'}
+        mediaDetail={{ type: 'document' }}
+      />
+    )
+
+    const contentNode = screen.getByText('Original selected body text')
+    const textNode = contentNode.firstChild
+    expect(textNode).not.toBeNull()
+
+    const selection = window.getSelection()
+    expect(selection).not.toBeNull()
+    const range = document.createRange()
+    range.setStart(textNode as Text, 0)
+    range.setEnd(textNode as Text, 'Original selected'.length)
+    selection!.removeAllRanges()
+    selection!.addRange(range)
+
+    fireEvent.mouseUp(contentNode)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('media-selection-actions-popover')).toBeInTheDocument()
+    })
+
+    rerender(
+      <ContentViewer
+        selectedMedia={{
+          ...selectedMedia,
+          id: 778,
+          title: 'Next annotation target'
+        }}
+        content={'Next media body text'}
+        mediaDetail={{ type: 'document' }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('media-selection-actions-popover')).not.toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('media-annotation-selection-preview')).not.toBeInTheDocument()
+  })
+
+  it('does not apply a stale selection action captured before a media change settles', async () => {
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string; body?: any }) => {
+      const path = String(request?.path || '')
+      if (path.endsWith('/outline')) return { media_id: 777, has_outline: true, entries: [] }
+      if (path.endsWith('/insights')) return { media_id: 777, insights: [] }
+      if (path.includes('/references')) return { media_id: 777, references: [] }
+      if (path.includes('/figures')) return { media_id: 777, figures: [] }
+      if (path.endsWith('/annotations') && request?.method === 'GET') {
+        return { media_id: 777, annotations: [] }
+      }
+      return {}
+    })
+
+    const { rerender } = render(
+      <ContentViewer
+        selectedMedia={selectedMedia}
+        content={'Race selected body text'}
+        mediaDetail={{ type: 'document' }}
+      />
+    )
+
+    const contentNode = screen.getByText('Race selected body text')
+    const textNode = contentNode.firstChild
+    expect(textNode).not.toBeNull()
+
+    const selection = window.getSelection()
+    expect(selection).not.toBeNull()
+    const range = document.createRange()
+    range.setStart(textNode as Text, 0)
+    range.setEnd(textNode as Text, 'Race selected'.length)
+    selection!.removeAllRanges()
+    selection!.addRange(range)
+
+    fireEvent.mouseUp(contentNode)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('media-selection-actions-popover')).toBeInTheDocument()
+    })
+    const staleAnnotateAction = screen.getByTestId('media-selection-action-annotate')
+
+    rerender(
+      <ContentViewer
+        selectedMedia={{
+          ...selectedMedia,
+          id: 779,
+          title: 'Race next annotation target'
+        }}
+        content={'Race next media body text'}
+        mediaDetail={{ type: 'document' }}
+      />
+    )
+
+    fireEvent.click(staleAnnotateAction)
+
+    expect(screen.queryByTestId('media-annotation-selection-preview')).not.toBeInTheDocument()
+    expect(mocks.bgRequest).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: '/api/v1/media/779/annotations',
+        method: 'POST'
+      })
+    )
   })
 })

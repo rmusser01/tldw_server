@@ -4,6 +4,7 @@ import contextlib
 import os
 import shutil
 import tarfile
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +68,12 @@ class SnapshotManager:
         """Get the full path for a specific snapshot archive."""
         return self._snapshot_dir(session_id) / f"{snapshot_id}.tar.gz"
 
+    @staticmethod
+    def _has_symlink_ancestor(path: Path) -> bool:
+        """Return True when any existing parent component is a symlink."""
+        absolute = Path(os.path.abspath(path))
+        return any(parent.is_symlink() for parent in reversed(absolute.parents))
+
     def _metadata_path(self, session_id: str, snapshot_id: str) -> Path:
         """Get the path for a snapshot's metadata file."""
         return self._snapshot_dir(session_id) / f"{snapshot_id}.meta.json"
@@ -106,6 +113,30 @@ class SnapshotManager:
                     rel = entry.relative_to(workspace_root)
                     raise ValueError(f"Refusing symlink workspace entry: {rel}")
 
+    @staticmethod
+    def _is_atomic_temp_entry(path: Path) -> bool:
+        """Return True for common atomic-write scratch entries."""
+        return path.name.endswith(".tmp")
+
+    def _add_workspace_item_to_tar(self, tar: tarfile.TarFile, item_path: Path, arcname: str) -> None:
+        """Add a workspace entry, tolerating transient atomic-write races."""
+        for attempt in range(4):
+            try:
+                tar.add(str(item_path), arcname=arcname)
+                return
+            except FileNotFoundError:
+                # Concurrent atomic writers can remove temporary files between
+                # directory enumeration and archive insertion.
+                return
+            except PermissionError:
+                if self._is_atomic_temp_entry(item_path):
+                    # Windows may expose a scratch file while the writer still
+                    # holds an exclusive handle; scratch entries are non-state.
+                    return
+                if attempt == 3:
+                    raise
+                time.sleep(0.01 * (attempt + 1))
+
     def create_snapshot(self, session_id: str, workspace_path: str) -> dict:
         """Create a snapshot of the session workspace.
 
@@ -143,13 +174,8 @@ class SnapshotManager:
             with tarfile.open(snapshot_path, "w:gz") as tar:
                 # Add workspace contents with relative paths
                 for item in os.listdir(workspace_path):
-                    item_path = os.path.join(workspace_path, item)
-                    try:
-                        tar.add(item_path, arcname=item)
-                    except FileNotFoundError:
-                        # Concurrent atomic writers can remove temporary files
-                        # between directory enumeration and archive insertion.
-                        continue
+                    item_path = Path(workspace_path) / item
+                    self._add_workspace_item_to_tar(tar, item_path, item)
         except _SNAPSHOTS_NONCRITICAL_EXCEPTIONS as e:
             # Clean up on failure
             with contextlib.suppress(_SNAPSHOTS_NONCRITICAL_EXCEPTIONS):
@@ -214,6 +240,14 @@ class SnapshotManager:
             raise ValueError("Invalid workspace path")
 
         workspace_root = Path(workspace_path)
+        if workspace_root.is_symlink():
+            raise ValueError("Refusing symlink workspace root")
+        if self._has_symlink_ancestor(workspace_root):
+            raise ValueError("Refusing symlink workspace ancestor")
+        if workspace_root.exists():
+            if not workspace_root.is_dir():
+                raise ValueError(f"Invalid workspace path: {workspace_path}")
+            self._validate_workspace_tree_for_copy(workspace_root)
         backup_path = workspace_root.parent / f".restore_backup_{uuid.uuid4().hex}"
 
         # Take a backup first so failed restore can roll back atomically.

@@ -18,8 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from fastapi.responses import JSONResponse
 from loguru import logger
 from starlette import status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_token_scope
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import resolve_org_id_for_principal
 from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.Billing.enforcement import (
@@ -47,12 +47,15 @@ from tldw_Server_API.app.core.Audio.error_payloads import _maybe_debug_details
 from tldw_Server_API.app.core.Audio.streaming_exceptions import QuotaExceeded
 from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_audio_model_to_whisper
 from tldw_Server_API.app.core.Audio.quota_helpers import EXPECTED_DB_EXC, EXPECTED_REDIS_EXC, _get_failopen_cap_minutes
+from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable
 from tldw_Server_API.app.core.Usage.audio_quota import (
     active_streams_count,
     add_daily_minutes,
     bytes_to_seconds,
     can_start_stream,
     check_daily_minutes_allow,
+    consume_daily_minutes,
+    consume_daily_minutes_with_compat,
     finish_job,
     finish_stream,
     get_daily_minutes_used,
@@ -68,7 +71,6 @@ from tldw_Server_API.app.core.Audio.streaming_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import resolve_byok_credentials
 from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async as chat_api_call_async
 from tldw_Server_API.app.core.Chat.chat_helpers import (
     get_or_create_character_context,
@@ -215,6 +217,7 @@ _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
     *EXPECTED_DB_EXC,
     *EXPECTED_REDIS_EXC,
 )
+_AUDIO_QUOTA_DB_EXC = (*EXPECTED_DB_EXC, AudioQuotaStoreUnavailable)
 
 router = APIRouter(
     tags=["Audio"],
@@ -242,6 +245,7 @@ def _audio_shim_attr(name: str):
         "finish_stream": finish_stream,
         "check_daily_minutes_allow": check_daily_minutes_allow,
         "add_daily_minutes": add_daily_minutes,
+        "consume_daily_minutes": consume_daily_minutes,
         "bytes_to_seconds": bytes_to_seconds,
         "heartbeat_stream": heartbeat_stream,
         "active_streams_count": active_streams_count,
@@ -496,7 +500,7 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
     Returns:
         tuple[str, str, str]: (model, variant, whisper_model_size)
     """
-    default_model_id = "parakeet-onnx"
+    default_model_id = "parakeet-tdt-0.6b-v3-onnx"
     default_variant = "standard"
     default_whisper_model_size = "distil-large-v3"
 
@@ -539,7 +543,8 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
             model = provider_name
         else:
             logger.warning(
-                "Unsupported streaming default model '{}'; falling back to parakeet-onnx".format(default_model_id)
+                "Unsupported streaming default model '{}'; falling back to parakeet-tdt-0.6b-v3-onnx"
+                .format(default_model_id)
             )
             model = "parakeet"
             resolved_variant = "onnx"
@@ -551,7 +556,7 @@ def _resolve_default_streaming_model() -> tuple[str, str, str]:
             variant = candidate_variant
     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(
-            "Could not resolve configured streaming model '{}'; falling back to parakeet-onnx. Error: {}"
+            "Could not resolve configured streaming model '{}'; falling back to parakeet-tdt-0.6b-v3-onnx. Error: {}"
             .format(default_model_id, exc)
         )
         model = "parakeet"
@@ -720,6 +725,20 @@ async def _add_daily_minutes(user_id: int, minutes: float):
     return await _audio_shim_attr("add_daily_minutes")(user_id, minutes)
 
 
+async def _consume_daily_minutes(
+    user_id: int,
+    minutes: float,
+    *,
+    operation_id: str | None = None,
+) -> tuple[bool, float | None]:
+    return await consume_daily_minutes_with_compat(
+        user_id=user_id,
+        minutes=minutes,
+        operation_id=operation_id,
+        quota_helper_resolver=_audio_shim_attr,
+    )
+
+
 def _bytes_to_seconds(size_bytes: int, sample_rate: int) -> float:
     return _audio_shim_attr("bytes_to_seconds")(size_bytes, sample_rate)
 
@@ -758,7 +777,7 @@ async def _finish_job(user_id: int):
     summary="Non-streaming Speech-to-Speech chat (STT → LLM → TTS)",
     dependencies=[
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id="audio.chat",
@@ -844,21 +863,22 @@ ws_router = APIRouter()
 
 @ws_router.websocket("/stream/transcribe")
 async def websocket_transcribe(
-    websocket: WebSocket, token: Optional[str] = Query(None)  # Get token from query parameter
+    websocket: WebSocket, token: Optional[str] = Query(None)  # Legacy query-token auth; disabled by default.
 ):
     """
     Handle a WebSocket connection to perform real-time streaming audio transcription.
 
-    Accepts a WebSocket and an optional query token. Authentication is supported via:
-    - Multi-user: X-API-KEY header, Authorization: Bearer <JWT>, `token` query parameter (API key or JWT), or an initial auth message.
-    - Single-user: API key via header, `token` query parameter, or an initial auth message; an IP allowlist may be enforced.
+    Accepts a WebSocket. Authentication is supported via:
+    - Multi-user: X-API-KEY header, Authorization: Bearer <JWT>, or an initial auth message.
+    - Single-user: API key via header or an initial auth message; an IP allowlist may be enforced.
+    - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     Supported incoming message types: "auth" (for token-based auth), "config" (streaming configuration), "audio" (base64-encoded audio chunks), and "commit" (finalize current utterance).
     Outgoing message types include partial updates ("partial"), interim/final transcriptions ("transcription"), the final transcript ("full_transcript"), and structured error frames ("error").
     Per-user limits are enforced (concurrent streams and daily minute quotas); when a quota is exceeded the server sends an "error" with `code="quota_exceeded"` and closes the connection with code 4003 (or 1008 when `AUDIO_WS_QUOTA_CLOSE_1008=1`). A compatibility alias `error_type` is included when `AUDIO_WS_COMPAT_ERROR_TYPE=1` (default).
     A server-side default streaming configuration is used if the client does not provide one before audio arrives.
     Parameters:
         websocket (WebSocket): The active WebSocket connection.
-        token (Optional[str]): Optional API key or JWT token supplied via the query string for both multi-user and single-user authentication.
+        token (Optional[str]): Legacy API key or JWT query-string token, ignored unless AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
     # Create a lightweight WebSocketStream for uniform metrics on outer error paths
     _outer_stream = None
@@ -1291,12 +1311,10 @@ async def websocket_transcribe(
                 _QuotaExceeded: If adding this chunk would exceed the user's daily minutes quota.
 
             Notes:
-                - Checks whether the user's remaining daily minutes allow this chunk; if allowed, increments the nonlocal
-                  `used_minutes` counter and records the minutes via `_add_daily_minutes`.
+                - Consumes this chunk from the user's daily minutes in one quota-store operation.
             """
             nonlocal used_minutes, failopen_remaining, remaining_minutes_snapshot
             minutes_chunk = float(seconds) / 60.0
-            deducted = False
             allow = False
             # Fast-path local check: if we have a remaining snapshot and this
             # chunk would exceed it, raise immediately without a DB round-trip.
@@ -1307,13 +1325,13 @@ async def websocket_transcribe(
             # chunk; on success, we treat the returned "remaining_after" value
             # as the new snapshot.
             try:
-                allow, remaining_after = await _check_daily_minutes_allow(user_id_for_usage, minutes_chunk)
+                allow, remaining_after = await _consume_daily_minutes(user_id_for_usage, minutes_chunk)
                 if allow and remaining_after is not None:
                     remaining_minutes_snapshot = float(remaining_after)
-            except EXPECTED_DB_EXC as e:
+            except _AUDIO_QUOTA_DB_EXC as e:
                 # Backing store failed; allow temporarily but deduct from bounded fail-open budget
                 logger.warning(
-                    f"_check_daily_minutes_allow failed during streaming; temporarily allowing (bounded fail-open). user_id={user_id_for_usage}, error={e}"
+                    f"consume_daily_minutes failed during streaming; temporarily allowing (bounded fail-open). user_id={user_id_for_usage}, error={e}"
                 )
                 allow = True
                 failopen_remaining -= minutes_chunk
@@ -1324,7 +1342,6 @@ async def websocket_transcribe(
                     increment_counter("audio_failopen_events_total", labels={"reason": "db_check"})
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
                     logger.debug(f"metrics increment failed (audio_failopen_db_check): error={m_err}")
-                deducted = True
                 if failopen_remaining <= 0:
                     try:
                         increment_counter("audio_failopen_cap_exhausted_total", labels={"reason": "db_check"})
@@ -1335,35 +1352,6 @@ async def websocket_transcribe(
                 # Raise structured signal to outer scope
                 raise _QuotaExceeded("daily_minutes")
             used_minutes += minutes_chunk
-            # Reduce the local snapshot so subsequent chunks can be checked
-            # without hitting the DB until it is exhausted or refreshed on
-            # the next successful check.
-            if remaining_minutes_snapshot is not None:
-                remaining_minutes_snapshot = max(0.0, remaining_minutes_snapshot - minutes_chunk)
-            try:
-                await _add_daily_minutes(user_id_for_usage, minutes_chunk)
-            except EXPECTED_DB_EXC as e:
-                # Could not record; continue streaming under bounded fail-open
-                logger.warning(
-                    f"Failed to record streaming minutes (bounded fail-open). user_id={user_id_for_usage}, error={e}"
-                )
-                if not deducted:
-                    failopen_remaining -= minutes_chunk
-                    try:
-                        increment_counter(
-                            "audio_failopen_minutes_total",
-                            value=float(minutes_chunk),
-                            labels={"reason": "db_record"},
-                        )
-                        increment_counter("audio_failopen_events_total", labels={"reason": "db_record"})
-                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
-                        logger.debug(f"metrics increment failed (audio_failopen_db_record): error={m_err}")
-                    if failopen_remaining <= 0:
-                        try:
-                            increment_counter("audio_failopen_cap_exhausted_total", labels={"reason": "db_record"})
-                        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
-                            logger.debug(f"metrics increment failed (audio_failopen_cap_db_record): error={m_err}")
-                        raise _QuotaExceeded("daily_minutes") from None
             # Billing: accumulate fractional minutes; flush to cache when >= 1
             nonlocal _billing_minutes_accumulator
             if _ws_billing_org_id is not None:
@@ -1567,9 +1555,9 @@ async def websocket_audio_chat_stream(
       - Streaming TTS audio back (binary frames)
 
     Authentication:
-      - Multi-user: `X-API-KEY` header, `Authorization: Bearer <JWT>`, `token` query parameter (API key or JWT),
-        or an initial auth message frame (JWT).
-      - Single-user: API key via header, `token` query parameter, or an initial auth message; optional IP allowlist.
+      - Multi-user: `X-API-KEY` header, `Authorization: Bearer <JWT>`, or an initial auth message frame (JWT).
+      - Single-user: API key via header or an initial auth message; optional IP allowlist.
+      - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
     await websocket.accept()
 
@@ -1698,19 +1686,18 @@ async def websocket_audio_chat_stream(
         async def _on_audio_quota(seconds: float, _sr: int) -> None:
             nonlocal used_minutes, failopen_remaining, remaining_minutes_snapshot
             minutes_chunk = float(seconds) / 60.0
-            deducted = False
             allow = False
 
             if remaining_minutes_snapshot is not None and minutes_chunk > remaining_minutes_snapshot:
                 raise QuotaExceeded("daily_minutes")
 
             try:
-                allow, remaining_after = await _check_daily_minutes_allow(user_id_for_usage, minutes_chunk)
+                allow, remaining_after = await _consume_daily_minutes(user_id_for_usage, minutes_chunk)
                 if allow and remaining_after is not None:
                     remaining_minutes_snapshot = float(remaining_after)
-            except EXPECTED_DB_EXC as e:
+            except _AUDIO_QUOTA_DB_EXC as e:
                 logger.warning(
-                    f"_check_daily_minutes_allow failed during streaming; temporarily allowing "
+                    f"consume_daily_minutes failed during streaming; temporarily allowing "
                     f"(bounded fail-open). user_id={user_id_for_usage}, error={e}"
                 )
                 allow = True
@@ -1722,7 +1709,6 @@ async def websocket_audio_chat_stream(
                     increment_counter("audio_failopen_events_total", labels={"reason": "db_check"})
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:  # noqa: BLE001
                     logger.debug(f"metrics increment failed (audio_chat_failopen_db_check): error={m_err}")
-                deducted = True
                 if failopen_remaining <= 0:
                     try:
                         increment_counter("audio_failopen_cap_exhausted_total", labels={"reason": "db_check"})
@@ -1736,33 +1722,6 @@ async def websocket_audio_chat_stream(
                 raise QuotaExceeded("daily_minutes") from None
 
             used_minutes += minutes_chunk
-            if remaining_minutes_snapshot is not None:
-                remaining_minutes_snapshot = max(0.0, remaining_minutes_snapshot - minutes_chunk)
-            try:
-                await _add_daily_minutes(user_id_for_usage, minutes_chunk)
-            except EXPECTED_DB_EXC as e:
-                logger.warning(
-                    f"Failed to record streaming minutes (bounded fail-open). user_id={user_id_for_usage}, error={e}"
-                )
-                if not deducted:
-                    failopen_remaining -= minutes_chunk
-                    try:
-                        increment_counter(
-                            "audio_failopen_minutes_total",
-                            value=float(minutes_chunk),
-                            labels={"reason": "db_record"},
-                        )
-                        increment_counter("audio_failopen_events_total", labels={"reason": "db_record"})
-                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
-                        logger.debug(f"metrics increment failed (audio_chat_failopen_db_record): error={m_err}")
-                    if failopen_remaining <= 0:
-                        try:
-                            increment_counter("audio_failopen_cap_exhausted_total", labels={"reason": "db_record"})
-                        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
-                            logger.debug(
-                                f"metrics increment failed (audio_chat_failopen_cap_db_record): error={m_err}"
-                            )
-                        raise QuotaExceeded("daily_minutes") from None
 
         async def _on_heartbeat() -> None:
             try:
@@ -2578,7 +2537,7 @@ async def websocket_audio_chat_stream(
                             )
                             if overlap_warning:
                                 await _outer_stream.send_json(
-                                    {"type": "warning", "message": str(overlap_warning)}
+                                    {"type": "warning", "message": "Realtime TTS session warning"}
                                 )
 
                         async def _overlap_audio_sender() -> None:
@@ -3002,8 +2961,9 @@ async def websocket_tts(
     WebSocket TTS streaming endpoint: accepts a prompt frame and streams audio bytes.
 
     Authentication mirrors `_audio_ws_authenticate`:
-    - Multi-user: `X-API-KEY` header, `Authorization: Bearer <JWT>`, or `token` query parameter (API key or JWT).
-    - Single-user: fixed API key via header, `token` query parameter, or initial auth message; optional IP allowlist.
+    - Multi-user: `X-API-KEY` header, `Authorization: Bearer <JWT>`, or initial auth message.
+    - Single-user: fixed API key via header or initial auth message; optional IP allowlist.
+    - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
     await websocket.accept()
 
@@ -3657,7 +3617,7 @@ async def streaming_status():
     Returns:
         StreamingStatusResponse with the following keys:
           - `status` (str): "available" if at least one streaming model is present, "unavailable" otherwise, or "error" on failure.
-          - `available_models` (list[str]): Names of detected streaming model variants (e.g., "parakeet-mlx", "parakeet-standard", "parakeet-onnx").
+          - `available_models` (list[str]): Names of detected streaming model variants (e.g., "parakeet-mlx", "parakeet-standard", "parakeet-tdt-0.6b-v3-onnx").
           - `websocket_endpoint` (str): URL path of the streaming transcription WebSocket.
           - `supported_features` (dict): Feature flags indicating supported streaming capabilities (boolean values).
     """
@@ -3683,7 +3643,7 @@ async def streaming_status():
         if _importlib_util.find_spec("onnxruntime") and _importlib_util.find_spec(
             "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX"
         ):
-            available_models.append("parakeet-onnx")
+            available_models.extend(["parakeet-tdt-0.6b-v3-onnx", "parakeet-onnx"])
 
         return {
             "status": "available" if available_models else "unavailable",

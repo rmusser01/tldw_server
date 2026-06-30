@@ -5,6 +5,7 @@ import {
   type TtsProviderOverrides,
   type TtsSynthesisResult
 } from "@/services/tts-provider"
+import { classifyAudioError } from "@/components/Option/Audio/audio-error-classification"
 import { useAntdNotification } from "./useAntdNotification"
 import { useTranslation } from "react-i18next"
 
@@ -210,15 +211,16 @@ export const useTtsPlayground = () => {
     } catch (error) {
       revokeAll(createdUrls)
       setSegments([])
+      const classified = classifyAudioError(error)
       notification.error({
-        message: t("tts.generateErrorTitle", "Error generating audio"),
+        message:
+          classified.title || t("tts.generateErrorTitle", "Error generating audio"),
         description:
-          error instanceof Error
-            ? error.message
-            : t(
-                "tts.generateErrorDescription",
-                "Something went wrong while generating TTS audio."
-              )
+          classified.recovery ||
+          t(
+            "tts.generateErrorDescription",
+            "Something went wrong while generating TTS audio."
+          )
       })
       return []
     } finally {

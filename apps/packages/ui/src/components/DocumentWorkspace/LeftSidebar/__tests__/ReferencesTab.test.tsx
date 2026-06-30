@@ -69,6 +69,25 @@ describe("ReferencesTab", () => {
     vi.clearAllMocks()
   })
 
+  it("renders the loading branch through the canonical LoadingState primitive", () => {
+    mockUseDocumentReferences.mockImplementation(() => ({
+      data: null,
+      isLoading: true,
+      error: null,
+      isFetching: false,
+    }))
+
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <ReferencesTab />
+      </QueryClientProvider>
+    )
+
+    expect(
+      container.querySelectorAll('[data-ds-component="LoadingState"]')
+    ).toHaveLength(4)
+  })
+
   it("passes search query to backend hook for cross-page filtering", async () => {
     mockReferencesResponse = {
       media_id: 1,

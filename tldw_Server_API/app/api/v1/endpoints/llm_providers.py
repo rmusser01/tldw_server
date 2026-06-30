@@ -7,11 +7,14 @@ from functools import partial
 from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from loguru import logger
 
 import tldw_Server_API.app.core.LLM_Calls.adapter_registry as llm_adapter_registry
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import get_api_keys
+from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
+    ALL_SUPPORTED_PROVIDER_NAMES_LIST,
+    get_api_keys,
+)
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
 )
@@ -25,9 +28,19 @@ from tldw_Server_API.app.core.exceptions import (
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import fetch as _http_fetch
 from tldw_Server_API.app.core.Image_Generation.listing import list_image_models_for_catalog
+from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import LLMInferenceLibError
+from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_capabilities import (
+    managed_profile_model_metadata,
+)
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     PROVIDER_CAPABILITIES,
     provider_requires_api_key,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
+    configured_endpoint_probe_enabled as _configured_endpoint_probe_enabled,
+    normalize_catalog_provider_for_chat as _normalize_catalog_provider_for_chat,
+    provider_readiness as _provider_readiness,
 )
 from tldw_Server_API.app.core.LLM_Calls.openrouter_model_inventory import (
     discover_openrouter_models as _discover_openrouter_models_shared,
@@ -71,6 +84,9 @@ _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS = (
     EgressPolicyError,
     NetworkError,
     RetryExhaustedError,
+)
+_LLAMACPP_METADATA_EXCEPTIONS = _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS + (
+    LLMInferenceLibError,
 )
 
 # ----------------------------------------------------------------------------------
@@ -954,10 +970,10 @@ async def llm_health():
                     "per_user_tokens_per_minute": cfg.per_user_tokens_per_minute
                 }
             }
-    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"LLM health check error: {e}")
+    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+        logger.error("LLM health check failed")
         health["status"] = "unhealthy"
-        health["error"] = str(e)
+        health["error"] = "LLM health check failed"
 
     return health
 
@@ -1133,7 +1149,7 @@ def discover_models_from_endpoint(
             )
             try:
                 if resp.status_code >= 400:
-                    logger.debug(f"[Model discovery] {provider}: {url} responded with {resp.status_code}")
+                    logger.debug("Model discovery endpoint returned an error status")
                     continue
                 discovered = _extract_models_from_response(resp.json())
                 if discovered:
@@ -1143,11 +1159,11 @@ def discover_models_from_endpoint(
                 close = getattr(resp, "close", None)
                 if callable(close):
                     close()
-        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"[Model discovery] {provider}: error querying {url}: {exc}")
+        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Model discovery endpoint query failed")
             continue
-        except Exception as exc:  # noqa: BLE001 - best-effort local discovery must fail open
-            logger.debug(f"[Model discovery] {provider}: unexpected error querying {url}: {exc}")
+        except Exception:  # noqa: BLE001 - best-effort local discovery must fail open
+            logger.debug("Model discovery endpoint query failed unexpectedly")
             continue
 
     _LOCAL_MODEL_CACHE[cache_key] = (now, discovered)
@@ -1556,6 +1572,7 @@ def get_configured_providers(
             'custom_openai_api': {
                 'display_name': 'Custom OpenAI API',
                 'endpoint_field': 'custom_openai_api_ip',
+                'api_key_field': 'custom_openai_api_key',
                 'model_field': 'custom_openai_api_model',
                 'type': 'local',
                 'section': 'API',
@@ -1572,6 +1589,8 @@ def get_configured_providers(
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             health_report = {}
         registry_capability_envelopes = _llm_registry_capability_envelopes()
+        supported_chat_providers = set(ALL_SUPPORTED_PROVIDER_NAMES_LIST)
+        endpoint_probe_enabled = _configured_endpoint_probe_enabled()
 
         # Process each provider
         for provider_name, provider_info in provider_mappings.items():
@@ -1614,6 +1633,11 @@ def get_configured_providers(
                     val = config_parser.get(section_name, api_key_field, fallback='')
                     if val and not val.startswith('<') and not val.endswith('>'):
                         api_key_value = val
+                api_key_value = (
+                    _valid_api_key(api_key_value)
+                    or _valid_api_key(api_keys_by_provider.get(provider_name))
+                    or _valid_api_key(api_keys_by_provider.get(_normalize_catalog_provider_for_chat(provider_name)))
+                )
 
             # Always include the provider, but mark if it's configured
             # Get the models from config
@@ -1632,6 +1656,24 @@ def get_configured_providers(
             if provider_name == "mlx" and models and not is_configured:
                 is_configured = True
             configured_model_names = {str(m).strip() for m in models if str(m).strip()}
+            provider_envelope = registry_capability_envelopes.get(provider_name)
+            provider_readiness = _provider_readiness(
+                provider_name=provider_name,
+                provider_info=provider_info,
+                is_configured=is_configured,
+                endpoint_url=endpoint_url,
+                api_key_value=api_key_value,
+                model_discovery=provider_info.get('model_discovery'),
+                current_availability=(
+                    provider_envelope.get("availability")
+                    if isinstance(provider_envelope, dict)
+                    else None
+                ),
+                health_entry=health_report.get(provider_name),
+                supported_chat_providers=supported_chat_providers,
+                discover_models_from_endpoint=discover_models_from_endpoint,
+                endpoint_probe_enabled=endpoint_probe_enabled,
+            )
 
             # Augment or seed with models from the pricing catalog for commercial providers.
             # This makes model_pricing.json the primary reference for available models,
@@ -1661,7 +1703,12 @@ def get_configured_providers(
                     models = models + extras
             else:
                 # For local endpoints, try to discover models if none were provided
-                if not models and is_configured and endpoint_url:
+                if (
+                    not models
+                    and is_configured
+                    and endpoint_url
+                    and provider_readiness.get("provider_enabled") is not False
+                ):
                     discovered_models = discover_models_from_endpoint(
                         provider_name,
                         endpoint_url,
@@ -1697,6 +1744,12 @@ def get_configured_providers(
                     configured_model_names=configured_model_names,
                     model_index=model_index,
                 )
+                if provider_readiness.get("provider_enabled") is False:
+                    should_probe_tokenizer = False
+                    skip_reason = (
+                        str(provider_readiness.get("readiness_message") or "").strip()
+                        or "Provider readiness check failed"
+                    )
                 if should_probe_tokenizer:
                     tokenizer_support = _resolve_model_tokenizer_support(provider_name, model_name, config_parser)
                 else:
@@ -1741,7 +1794,16 @@ def get_configured_providers(
                 'models_info': models_info,
                 'type': provider_info['type'],
                 'default_model': models[0] if models else None,
-                'is_configured': is_configured,  # Add configuration status
+                'is_configured': (
+                    False
+                    if provider_readiness.get("readiness_reason_code") == "missing_credentials"
+                    else is_configured
+                ),
+                'provider_enabled': provider_readiness.get("provider_enabled"),
+                'availability': provider_readiness.get("availability"),
+                'readiness_reason_code': provider_readiness.get("readiness_reason_code"),
+                'readiness_message': provider_readiness.get("readiness_message"),
+                'chat_provider': provider_readiness.get("chat_provider"),
                 'endpoint_only': endpoint_only,
                 'extra_body_compat': _safe_provider_extra_body_compat(provider_name, runtime_context),
                 'tokenizers': tokenizers_by_model or None,
@@ -1782,7 +1844,6 @@ def get_configured_providers(
                     env_caps = envelope.get("capabilities")
                     if isinstance(env_caps, dict):
                         capabilities.update(env_caps)
-                    provider_data["availability"] = envelope.get("availability", "unknown")
                     provider_data["capability_envelope"] = {
                         "provider": provider_name,
                         "availability": envelope.get("availability", "unknown"),
@@ -1817,8 +1878,8 @@ def get_configured_providers(
             'total_configured': len(providers)
         }
 
-    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting configured providers: {e}", exc_info=True)
+    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+        logger.error("Error getting configured providers")
         return {
             'providers': [],
             'default_provider': 'openai',
@@ -2039,6 +2100,56 @@ def _model_matches_filters(
         return False
     return not (output_filters and not set(output_mods).intersection(output_filters))
 
+
+def _managed_llamacpp_profile_metadata_entries(supervisor: Any | None) -> list[dict[str, Any]]:
+    """Return bounded model metadata entries for managed llama.cpp profiles."""
+    if supervisor is None:
+        return []
+    try:
+        profiles = supervisor.list_profiles()
+    except _LLAMACPP_METADATA_EXCEPTIONS:
+        logger.debug("Failed to list managed llama.cpp profiles for model metadata", exc_info=True)
+        return []
+    if not profiles:
+        return []
+
+    asset_scan_warnings: list[str] = []
+    try:
+        asset_scan = llamacpp_inventory_service.scan_assets()
+        assets = asset_scan.assets
+        if asset_scan.scan_limited:
+            asset_scan_warnings.append(
+                "Managed llama.cpp asset inventory scan was truncated; capability metadata may be incomplete."
+            )
+    except _LLAMACPP_METADATA_EXCEPTIONS:
+        logger.debug("Failed to scan llama.cpp assets for model metadata", exc_info=True)
+        assets = []
+        asset_scan_warnings.append("Managed llama.cpp asset scan failed; capability metadata may be incomplete.")
+
+    entries: list[dict[str, Any]] = []
+    for profile in profiles:
+        try:
+            entry = managed_profile_model_metadata(profile, assets=assets)
+        except _LLAMACPP_METADATA_EXCEPTIONS:
+            logger.debug("Failed to build managed llama.cpp profile metadata", exc_info=True)
+            continue
+        if asset_scan_warnings:
+            warnings = entry.setdefault("capability_warnings", [])
+            if isinstance(warnings, list):
+                warnings.extend(asset_scan_warnings)
+            else:
+                entry["capability_warnings"] = list(asset_scan_warnings)
+        entries.append(entry)
+    return entries
+
+
+def _llamacpp_supervisor_from_request(request: Request | None) -> Any | None:
+    """Return the managed llama.cpp supervisor attached to the app, if present."""
+    if request is None:
+        return None
+    manager = getattr(request.app.state, "llm_manager", None)
+    return getattr(manager, "llamacpp_supervisor", None)
+
 #######################################################################################################################
 #
 # Endpoints:
@@ -2104,10 +2215,10 @@ async def get_llm_providers(include_deprecated: bool = False):
         return result
 
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error in get_llm_providers endpoint: {e}", exc_info=True)
+        logger.error("Error in get_llm_providers endpoint")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve LLM providers: {str(e)}"
+            detail="Failed to retrieve LLM providers"
         ) from e
 
 
@@ -2119,6 +2230,7 @@ async def get_llm_providers(include_deprecated: bool = False):
     ),
     response_model=dict[str, Any])
 async def get_models_metadata(
+    request: Request,
     include_deprecated: bool = False,
     refresh_openrouter: bool = Query(
         False,
@@ -2152,11 +2264,26 @@ async def get_models_metadata(
         result = apply_llm_provider_overrides_to_listing(result)
         flattened: list[dict[str, Any]] = []
         for provider in result.get('providers', []):
+            provider_is_configured = bool(provider.get('is_configured'))
+            provider_enabled = provider.get('provider_enabled')
             for mi in provider.get('models_info', []):
                 entry = {
                     'provider': provider.get('name'),
                     **mi,
                 }
+                entry['provider_is_configured'] = provider_is_configured
+                entry['is_configured'] = provider_is_configured
+                entry['catalog_only'] = not provider_is_configured
+                if isinstance(provider_enabled, bool):
+                    entry['provider_enabled'] = provider_enabled
+                for key in (
+                    'availability',
+                    'readiness_reason_code',
+                    'readiness_message',
+                    'chat_provider',
+                ):
+                    if provider.get(key) is not None:
+                        entry[key] = provider.get(key)
                 if not _model_matches_filters(
                     entry,
                     type_filters=type_filters,
@@ -2165,11 +2292,24 @@ async def get_models_metadata(
                 ):
                     continue
                 flattened.append(entry)
+        managed_entries = await asyncio.to_thread(
+            _managed_llamacpp_profile_metadata_entries,
+            _llamacpp_supervisor_from_request(request),
+        )
+        for entry in managed_entries:
+            if not _model_matches_filters(
+                entry,
+                type_filters=type_filters,
+                input_filters=input_filters,
+                output_filters=output_filters,
+            ):
+                continue
+            flattened.append(entry)
         # Append image generation backends to the catalog
         try:
             image_models = list_image_models_for_catalog()
-        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Failed to list image generation models: {exc}")
+        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to list image generation models")
             image_models = []
         for entry in image_models:
             if not _model_matches_filters(
@@ -2185,10 +2325,10 @@ async def get_models_metadata(
             'total': len(flattened)
         }
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting models metadata: {e}", exc_info=True)
+        logger.error("Error getting models metadata")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve model metadata: {str(e)}"
+            detail="Failed to retrieve model metadata"
         ) from e
 
 @router.get("/llm/providers/{provider_name}",
@@ -2223,10 +2363,10 @@ async def get_provider_details(provider_name: str, include_deprecated: bool = Fa
     except HTTPException:
         raise
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting provider details for {provider_name}: {e}", exc_info=True)
+        logger.error("Error getting provider details")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve provider details: {str(e)}"
+            detail="Failed to retrieve provider details"
         ) from e
 
 @router.get("/llm/models",
@@ -2282,8 +2422,8 @@ async def get_all_models(
         # Append image generation backends to the flat list
         try:
             image_models = list_image_models_for_catalog()
-        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(f"Failed to list image generation models: {exc}")
+        except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Failed to list image generation models")
             image_models = []
         for entry in image_models:
             if not _model_matches_filters(
@@ -2299,10 +2439,10 @@ async def get_all_models(
         logger.info(f"Found {len(models)} total models across all providers")
         return models
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error getting all models: {e}", exc_info=True)
+        logger.error("Error getting all models")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retrieve models: {str(e)}"
+            detail="Failed to retrieve models"
         ) from e
 
 # End of llm_providers.py

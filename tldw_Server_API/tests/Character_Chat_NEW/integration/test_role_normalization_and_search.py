@@ -15,6 +15,14 @@ from PIL import Image
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 
 
+@pytest.fixture(autouse=True)
+def _allow_slow_chacha_test_db_init(monkeypatch):
+    """Give Windows CI enough time for fresh ChaChaNotes schema migrations."""
+    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+
+    monkeypatch.setattr(chacha_deps, "_CHACHA_WATCHDOG_SECS", 10.0)
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_get_chat_context_and_prepare_roles_normalized(monkeypatch):
@@ -144,6 +152,16 @@ async def test_get_messages_format_for_completions_roles_and_search_placeholders
             )
             assert r.status_code == 200
             data = r.json()
+            assert data["pagination"] == {
+                "mode": "offset",
+                "limit": 50,
+                "offset": 0,
+                "total": 3,
+                "has_more": False,
+                "next_offset": None,
+            }
+            assert data["has_more"] is False
+            assert data["next_offset"] is None
             roles = [m["role"] for m in data["messages"]]
             assert "system" in roles
             assert set(roles).issubset({"user", "assistant", "system", "tool"})

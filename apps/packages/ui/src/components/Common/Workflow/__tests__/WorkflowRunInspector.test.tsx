@@ -67,11 +67,29 @@ const investigation: WorkflowRunInvestigation = {
 }
 
 describe("WorkflowRunInspector", () => {
+  it("uses the canonical empty state when diagnostics are unavailable", () => {
+    render(<WorkflowRunInspector investigation={null} />)
+
+    expect(
+      screen
+        .getByText("No run diagnostics available")
+        .closest('[data-ds-component="EmptyState"]')
+    ).toBeInTheDocument()
+  })
+
   it("renders failure summary and attempts", () => {
     render(<WorkflowRunInspector investigation={investigation} />)
 
     expect(screen.getByText("Failure summary")).toBeInTheDocument()
-    expect(screen.getByText("runtime_error")).toBeInTheDocument()
+    expect(
+      screen.getByText("runtime_error").closest('[data-ds-component="Badge"]')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText("Retryable").closest('[data-ds-component="Badge"]')
+    ).toBeInTheDocument()
+    expect(
+      screen.getAllByText("failed")[0]?.closest('[data-ds-component="Badge"]')
+    ).toBeInTheDocument()
     expect(screen.getByText("Attempt 2")).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /evidence/i })).toBeInTheDocument()
     expect(

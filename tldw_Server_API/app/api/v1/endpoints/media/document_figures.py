@@ -14,7 +14,7 @@ from tldw_Server_API.app.api.v1.schemas.document_figures import (
     DocumentFiguresResponse,
     Figure,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.Storage import get_storage_backend
 from tldw_Server_API.app.core.Storage.storage_interface import StorageError
 
@@ -28,6 +28,7 @@ def _check_pymupdf_available() -> bool:
     """Check if PyMuPDF is available for import."""
     try:
         import pymupdf  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -72,12 +73,11 @@ def _extract_pdf_figures(
                 image = None
                 try:
                     image = doc.extract_image(xref)
-                except Exception as exc:
+                except Exception:
                     logger.debug(
-                        "Skipping unreadable extracted image xref {} on page {}: {}",
+                        "Skipping unreadable extracted image xref {} on page {}",
                         xref,
                         page_num + 1,
-                        exc,
                     )
                 if image is None:
                     continue
@@ -113,8 +113,8 @@ def _extract_pdf_figures(
         )
         return figures
 
-    except Exception as e:
-        logger.error("Error extracting PDF figures: {}", e)
+    except Exception:
+        logger.error("Error extracting PDF figures")
         return []
 
 
@@ -124,9 +124,7 @@ def _extract_pdf_figures(
     summary="Get Document Figures/Images",
     response_model=DocumentFiguresResponse,
     responses={
-        200: {
-            "description": "Figures retrieved (may be empty if document has no images or is not a PDF)"
-        },
+        200: {"description": "Figures retrieved (may be empty if document has no images or is not a PDF)"},
         404: {"description": "Media item not found"},
         413: {"description": "File too large for figure extraction (max 500MB)"},
         500: {"description": "Server error (database, storage, or extraction failure)"},
@@ -135,9 +133,7 @@ def _extract_pdf_figures(
 )
 async def get_document_figures(
     media_id: int = Path(..., description="The ID of the media item"),
-    min_size: int = Query(
-        50, ge=10, le=500, description="Minimum image size in pixels to include"
-    ),
+    min_size: int = Query(50, ge=10, le=500, description="Minimum image size in pixels to include"),
     db: Any = Depends(get_media_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> DocumentFiguresResponse:
@@ -187,7 +183,7 @@ async def get_document_figures(
     try:
         media = db.get_media_by_id(media_id, include_deleted=False, include_trash=False)
     except Exception as e:
-        logger.error("Database error fetching media_id={}: {}", media_id, e)
+        logger.error("Database error fetching media item")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error while fetching media item",
@@ -309,11 +305,7 @@ async def get_document_figures(
         pdf_file = await storage.retrieve(storage_path)
 
     except StorageError as e:
-        logger.error(
-            "Storage error retrieving file for figures: {} - {}",
-            storage_path,
-            e,
-        )
+        logger.error("Storage error retrieving file for figures")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error accessing file storage",
@@ -331,12 +323,7 @@ async def get_document_figures(
         )
 
     except Exception as e:
-        logger.error(
-            "Error extracting figures for media_id={}: {}",
-            media_id,
-            e,
-            exc_info=True,
-        )
+        logger.error("Error extracting document figures")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error extracting document figures",

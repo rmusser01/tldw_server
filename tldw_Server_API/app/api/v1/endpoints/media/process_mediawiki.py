@@ -173,7 +173,7 @@ async def _process_mediawiki_dump(
             shutil.rmtree(temp_dir_path, ignore_errors=True)
             raise
         except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to save uploaded MediaWiki dump: {}", exc, exc_info=True)
+            logger.error("Failed to save uploaded MediaWiki dump")
             shutil.rmtree(temp_dir_path, ignore_errors=True)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -227,7 +227,7 @@ async def _process_mediawiki_dump(
                     shutil.rmtree(temp_dir_path, ignore_errors=True)
                     logger.info("Cleaned up temporary directory: {}", temp_dir_path)
                 except Exception:  # noqa: BLE001
-                    logger.warning("Failed to cleanup temporary directory: {}", temp_dir_path)
+                    logger.warning("Failed to cleanup temporary directory")
 
         return StreamingResponse(
             stream_ingestion_results(),
@@ -240,6 +240,13 @@ async def _process_mediawiki_dump(
     summary="Ingest and process a MediaWiki XML dump, storing results to database and vector store.",
     tags=["MediaWiki Processing"],
     dependencies=[Depends(guard_backpressure_and_quota), Depends(guard_storage_quota)],
+    response_class=StreamingResponse,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "NDJSON stream of MediaWiki ingest events",
+            "content": {"application/x-ndjson": {}},
+        },
+    },
 )
 async def ingest_mediawiki_dump_endpoint(
     form_data: MediaWikiDumpOptionsForm = Depends(get_mediawiki_form_data),
@@ -268,6 +275,13 @@ async def ingest_mediawiki_dump_endpoint(
     summary="Process a MediaWiki XML dump and return structured content without database storage.",
     tags=["MediaWiki Processing"],
     dependencies=[Depends(guard_backpressure_and_quota), Depends(guard_storage_quota)],
+    response_class=StreamingResponse,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "NDJSON stream of processed MediaWiki pages",
+            "content": {"application/x-ndjson": {}},
+        },
+    },
 )
 async def process_mediawiki_dump_ephemeral_endpoint(
     form_data: MediaWikiDumpOptionsForm = Depends(get_mediawiki_form_data),

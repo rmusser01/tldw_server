@@ -1,13 +1,38 @@
-export type SchedulePresetKey = "hourly" | "every6hours" | "daily" | "weekly"
+import {
+  analyzeScheduleFrequency,
+  MIN_SCHEDULE_INTERVAL_MINUTES
+} from "./schedule-frequency"
+
+export type SchedulePresetKey = "interval" | "daily" | "weekdays" | "weekly"
+
+export type ScheduleIntervalUnit = "minutes" | "hours"
 
 export type WeekdayToken = "SUN" | "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT"
 
 export interface PresetScheduleState {
   preset: SchedulePresetKey
+  intervalValue: number
+  intervalUnit: ScheduleIntervalUnit
   hour: number
   minute: number
   weekday: WeekdayToken
 }
+
+export const INTERVAL_MINUTES_MIN = MIN_SCHEDULE_INTERVAL_MINUTES
+export const INTERVAL_MINUTES_MAX = 59
+export const INTERVAL_HOURS_MIN = 1
+export const INTERVAL_HOURS_MAX = 23
+const CRON_FIELDS = 5
+export const CRON_TOKEN_PATTERN = /^[A-Z0-9*,/?-]+$/i
+export type CronFormatValidationResult =
+  | "field_count"
+  | "invalid_token"
+  | "invalid_value"
+  | null
+export type CronScheduleValidationResult =
+  | Exclude<CronFormatValidationResult, null>
+  | "too_frequent"
+  | null
 
 const WEEKDAY_MAP: Record<string, WeekdayToken> = {
   "0": "SUN",
@@ -27,8 +52,35 @@ const WEEKDAY_MAP: Record<string, WeekdayToken> = {
   SAT: "SAT"
 }
 
+const WEEKDAY_VALUE_MAP: Record<string, number> = {
+  SUN: 0,
+  MON: 1,
+  TUE: 2,
+  WED: 3,
+  THU: 4,
+  FRI: 5,
+  SAT: 6
+}
+
+const MONTH_NAME_MAP: Record<string, number> = {
+  JAN: 1,
+  FEB: 2,
+  MAR: 3,
+  APR: 4,
+  MAY: 5,
+  JUN: 6,
+  JUL: 7,
+  AUG: 8,
+  SEP: 9,
+  OCT: 10,
+  NOV: 11,
+  DEC: 12
+}
+
 const DEFAULT_PRESET_STATE: PresetScheduleState = {
   preset: "daily",
+  intervalValue: 1,
+  intervalUnit: "hours",
   hour: 9,
   minute: 0,
   weekday: "MON"
@@ -40,21 +92,176 @@ const clampInteger = (value: unknown, min: number, max: number): number => {
   return Math.min(max, Math.max(min, Math.floor(parsed)))
 }
 
+export const parseScheduleTime = (
+  value: string | undefined,
+  fallbackHour = 8,
+  fallbackMinute = 0
+): { hour: number; minute: number } => {
+  const match = String(value || "").trim().match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return { hour: fallbackHour, minute: fallbackMinute }
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  return {
+    hour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : fallbackHour,
+    minute: Number.isInteger(minute) && minute >= 0 && minute <= 59 ? minute : fallbackMinute
+  }
+}
+
+export const formatScheduleTime = (hour: number, minute: number): string => {
+  const normalizedHour = clampInteger(hour, 0, 23)
+  const normalizedMinute = clampInteger(minute, 0, 59)
+  return `${String(normalizedHour).padStart(2, "0")}:${String(normalizedMinute).padStart(2, "0")}`
+}
+
+export const formatScheduleTimeValue = (
+  value: string | undefined,
+  fallbackHour = 8,
+  fallbackMinute = 0
+): string => {
+  const time = parseScheduleTime(value, fallbackHour, fallbackMinute)
+  return formatScheduleTime(time.hour, time.minute)
+}
+
+export const validateCronFormat = (expression: string): CronFormatValidationResult => {
+  const normalized = expression.trim()
+  const tokens = normalized ? normalized.split(/\s+/) : []
+  if (tokens.length !== CRON_FIELDS) return "field_count"
+  if (tokens.some((token) => !CRON_TOKEN_PATTERN.test(token))) return "invalid_token"
+  if (!tokens.every((token, index) => isCronFieldValueValid(token, index))) {
+    return "invalid_value"
+  }
+  return null
+}
+
+const parseCronStepValue = (value: string, max: number): number | null => {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= max ? parsed : null
+}
+
+const parseCronFieldAtom = (
+  value: string,
+  min: number,
+  max: number,
+  namedValues: Record<string, number> = {}
+): number | null => {
+  const upper = value.toUpperCase()
+  if (Object.prototype.hasOwnProperty.call(namedValues, upper)) {
+    return namedValues[upper]
+  }
+  if (!/^\d+$/.test(value)) return null
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return null
+  return parsed
+}
+
+const isCronFieldBaseValid = (
+  value: string,
+  min: number,
+  max: number,
+  namedValues: Record<string, number> = {},
+  allowQuestion = false
+): boolean => {
+  if (value === "*") return true
+  if (value === "?") return allowQuestion
+  const rangeParts = value.split("-")
+  if (rangeParts.length === 2) {
+    const [rangeStart, rangeEnd] = rangeParts
+    const start = parseCronFieldAtom(rangeStart, min, max, namedValues)
+    const end = parseCronFieldAtom(rangeEnd, min, max, namedValues)
+    return start !== null && end !== null && start <= end
+  }
+  if (rangeParts.length > 2) return false
+  return parseCronFieldAtom(value, min, max, namedValues) !== null
+}
+
+const isCronFieldPartValid = (
+  value: string,
+  min: number,
+  max: number,
+  namedValues: Record<string, number> = {},
+  allowQuestion = false
+): boolean => {
+  if (!value) return false
+  const stepParts = value.split("/")
+  if (stepParts.length === 2) {
+    const [base, step] = stepParts
+    return (
+      parseCronStepValue(step, max) !== null &&
+      isCronFieldBaseValid(base, min, max, namedValues, allowQuestion)
+    )
+  }
+  if (stepParts.length > 2) return false
+  return isCronFieldBaseValid(value, min, max, namedValues, allowQuestion)
+}
+
+const isCronFieldValueValid = (value: string, fieldIndex: number): boolean => {
+  const fieldRules = [
+    { min: 0, max: 59 },
+    { min: 0, max: 23 },
+    { min: 1, max: 31, allowQuestion: true },
+    { min: 1, max: 12, names: MONTH_NAME_MAP },
+    { min: 0, max: 7, names: WEEKDAY_VALUE_MAP, allowQuestion: true }
+  ] as const
+  const rules = fieldRules[fieldIndex]
+  const namedValues = "names" in rules ? rules.names : undefined
+  const allowQuestion = "allowQuestion" in rules ? rules.allowQuestion : false
+  return value
+    .split(",")
+    .every((part) => isCronFieldPartValid(part, rules.min, rules.max, namedValues, allowQuestion))
+}
+
+export const validateCronSchedule = (
+  expression: string,
+  minAllowedMinutes = MIN_SCHEDULE_INTERVAL_MINUTES
+): CronScheduleValidationResult => {
+  const formatError = validateCronFormat(expression)
+  if (formatError) return formatError
+  return analyzeScheduleFrequency(expression, minAllowedMinutes).tooFrequent
+    ? "too_frequent"
+    : null
+}
+
 export const normalizeWeekdayToken = (value: unknown): WeekdayToken => {
   if (typeof value !== "string") return DEFAULT_PRESET_STATE.weekday
   return WEEKDAY_MAP[value.toUpperCase()] || DEFAULT_PRESET_STATE.weekday
+}
+
+export const normalizeIntervalUnit = (value: unknown): ScheduleIntervalUnit => {
+  return value === "minutes" ? "minutes" : "hours"
+}
+
+const parseStepToken = (token: string, min: number, max: number): number | null => {
+  if (!token.startsWith("*/")) return null
+  const parsed = Number(token.slice(2))
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) return null
+  return parsed
 }
 
 export const buildCronFromPreset = (state: PresetScheduleState): string => {
   const minute = clampInteger(state.minute, 0, 59)
   const hour = clampInteger(state.hour, 0, 23)
   const weekday = normalizeWeekdayToken(state.weekday)
+  const intervalUnit = normalizeIntervalUnit(state.intervalUnit)
 
   switch (state.preset) {
-    case "hourly":
-      return `${minute} * * * *`
-    case "every6hours":
-      return `${minute} */6 * * *`
+    case "interval": {
+      if (intervalUnit === "minutes") {
+        const intervalMinutes = clampInteger(
+          state.intervalValue,
+          INTERVAL_MINUTES_MIN,
+          INTERVAL_MINUTES_MAX
+        )
+        return `*/${intervalMinutes} * * * *`
+      }
+      const intervalHours = clampInteger(
+        state.intervalValue,
+        INTERVAL_HOURS_MIN,
+        INTERVAL_HOURS_MAX
+      )
+      return `${minute} */${intervalHours} * * *`
+    }
+    case "weekdays":
+      return `${minute} ${hour} * * MON-FRI`
     case "weekly":
       return `${minute} ${hour} * * ${weekday}`
     case "daily":
@@ -73,24 +280,41 @@ export const parsePresetFromCron = (
   const [minuteToken, hourToken, dayOfMonthToken, monthToken, dayOfWeekToken] = parts
   if (dayOfMonthToken !== "*" || monthToken !== "*") return null
 
+  const minuteStep = parseStepToken(
+    minuteToken,
+    INTERVAL_MINUTES_MIN,
+    INTERVAL_MINUTES_MAX
+  )
+  if (minuteStep !== null && hourToken === "*" && dayOfWeekToken === "*") {
+    return {
+      ...DEFAULT_PRESET_STATE,
+      preset: "interval",
+      intervalValue: minuteStep,
+      intervalUnit: "minutes"
+    }
+  }
+
   const minute = Number(minuteToken)
   if (!Number.isInteger(minute) || minute < 0 || minute > 59) return null
 
   if (hourToken === "*" && dayOfWeekToken === "*") {
     return {
-      preset: "hourly",
-      hour: DEFAULT_PRESET_STATE.hour,
-      minute,
-      weekday: DEFAULT_PRESET_STATE.weekday
+      ...DEFAULT_PRESET_STATE,
+      preset: "interval",
+      intervalValue: 1,
+      intervalUnit: "hours",
+      minute
     }
   }
 
-  if (hourToken === "*/6" && dayOfWeekToken === "*") {
+  const hourStep = parseStepToken(hourToken, 1, 23)
+  if (hourStep !== null && dayOfWeekToken === "*") {
     return {
-      preset: "every6hours",
-      hour: DEFAULT_PRESET_STATE.hour,
-      minute,
-      weekday: DEFAULT_PRESET_STATE.weekday
+      ...DEFAULT_PRESET_STATE,
+      preset: "interval",
+      intervalValue: hourStep,
+      intervalUnit: "hours",
+      minute
     }
   }
 
@@ -99,16 +323,26 @@ export const parsePresetFromCron = (
 
   if (dayOfWeekToken === "*") {
     return {
+      ...DEFAULT_PRESET_STATE,
       preset: "daily",
       hour,
-      minute,
-      weekday: DEFAULT_PRESET_STATE.weekday
+      minute
+    }
+  }
+
+  if (dayOfWeekToken.toUpperCase() === "MON-FRI") {
+    return {
+      ...DEFAULT_PRESET_STATE,
+      preset: "weekdays",
+      hour,
+      minute
     }
   }
 
   const weekday = WEEKDAY_MAP[dayOfWeekToken.toUpperCase()]
   if (!weekday) return null
   return {
+    ...DEFAULT_PRESET_STATE,
     preset: "weekly",
     hour,
     minute,
@@ -119,4 +353,3 @@ export const parsePresetFromCron = (
 export const createDefaultPresetState = (): PresetScheduleState => ({
   ...DEFAULT_PRESET_STATE
 })
-

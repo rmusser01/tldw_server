@@ -1,63 +1,112 @@
 import io
+from types import SimpleNamespace
+
 import pytest
-from fastapi.testclient import TestClient
+from fastapi import HTTPException, UploadFile
+from starlette.datastructures import Headers
+from starlette.requests import Request
+
+import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_transcriptions
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
 
-def test_http_file_size_limit_exceeded(monkeypatch, bypass_api_limits):
+def _make_request() -> Request:
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/audio/transcriptions",
+        "headers": [],
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("testclient", 12345),
+    }
+
+    async def _receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return Request(scope, _receive)
 
 
-    """Uploads an oversized file to trigger 413 without invoking ffmpeg."""
-    # Use helper to bypass ingress limits cleanly for this test
-    from tldw_Server_API.app.main import app
-    # Disable Resource Governor middleware entirely for this test
-    # Apply bypass for RG middleware and per-route limiter
-    ctx = bypass_api_limits(app)
-    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-    settings = get_settings()
-
-    # Create a dummy oversized payload (26 MB) to exceed free-tier 25 MB
-    big_bytes = b"0" * (26 * 1024 * 1024)
-
-    with ctx, TestClient(app) as client:
-        headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
-        files = {"file": ("big.wav", io.BytesIO(big_bytes), "audio/wav")}
-        data = {"model": "whisper-1", "response_format": "json"}
-        resp = client.post("/api/v1/audio/transcriptions", headers=headers, files=files, data=data)
-        # Debug aid if rate limiting triggers unexpectedly
-        try:
-            print("DEBUG audio.transcriptions status=", resp.status_code, "body=", resp.text)
-        except Exception:
-            _ = None
-        if resp.status_code == 404:
-            pytest.skip("audio/transcriptions endpoint not mounted in this build")
-        assert resp.status_code == 413
-        assert "exceeds maximum" in resp.json().get("detail", "")
+def _upload(filename: str, content: bytes) -> UploadFile:
+    return UploadFile(
+        io.BytesIO(content),
+        filename=filename,
+        headers=Headers({"content-type": "audio/wav"}),
+    )
 
 
-def test_http_concurrent_jobs_cap(monkeypatch, bypass_api_limits):
+def _patch_audio_quota(monkeypatch, *, can_start: bool, max_file_size_mb: int = 1) -> None:
+    original_shim = audio_transcriptions._audio_shim_attr
 
+    async def _get_limits_for_user(user_id: int):
+        _ = user_id
+        return {
+            "daily_minutes": 30.0,
+            "concurrent_streams": 1,
+            "concurrent_jobs": 1,
+            "max_file_size_mb": max_file_size_mb,
+        }
 
-    """Forces can_start_job to reject to exercise 429 response path."""
-    # Bypass ingress rate limits to let endpoint-level job cap surface
-    from tldw_Server_API.app.main import app
-    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-    import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
-
-    async def _reject(user_id: int):
+    async def _can_start_job(user_id: int):
+        _ = user_id
+        if can_start:
+            return True, ""
         return False, "Concurrent job limit reached (1)"
 
-    monkeypatch.setattr(audio_ep, "can_start_job", _reject)
-    ctx = bypass_api_limits(app)
+    async def _noop_async(*args, **kwargs):
+        _ = args, kwargs
 
-    # Small valid content under size limit
-    content = b"0" * (64 * 1024)
-    settings = get_settings()
-    with ctx, TestClient(app) as client:
-        headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
-        files = {"file": ("ok.wav", io.BytesIO(content), "audio/wav")}
-        data = {"model": "whisper-1", "response_format": "json"}
-        resp = client.post("/api/v1/audio/transcriptions", headers=headers, files=files, data=data)
-        if resp.status_code == 404:
-            pytest.skip("audio/transcriptions endpoint not mounted in this build")
-        assert resp.status_code == 429
-        assert "Concurrent job limit" in resp.json().get("detail", "")
+    def _shim_attr(name: str):
+        if name == "get_limits_for_user":
+            return _get_limits_for_user
+        if name == "can_start_job":
+            return _can_start_job
+        if name in {"increment_jobs_started", "finish_job"}:
+            return _noop_async
+        if name == "get_job_heartbeat_interval_seconds":
+            return lambda: 0
+        return original_shim(name)
+
+    monkeypatch.setattr(audio_transcriptions, "_audio_shim_attr", _shim_attr, raising=True)
+
+
+@pytest.mark.asyncio
+async def test_http_file_size_limit_exceeded(monkeypatch):
+    """Uploads an oversized file to trigger 413 without invoking ffmpeg."""
+    _patch_audio_quota(monkeypatch, can_start=True, max_file_size_mb=1)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await audio_transcriptions.create_transcription(
+            _make_request(),
+            file=_upload("big.wav", b"0" * (2 * 1024 * 1024)),
+            model="whisper-1",
+            response_format="json",
+            current_user=SimpleNamespace(id=1),
+            principal=AuthPrincipal(kind="user", user_id=1),
+            db=None,
+            billing_org_id=None,
+        )
+
+    assert exc_info.value.status_code == 413
+    assert "exceeds maximum" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_http_concurrent_jobs_cap(monkeypatch):
+    """Forces can_start_job to reject to exercise 429 response path."""
+    _patch_audio_quota(monkeypatch, can_start=False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await audio_transcriptions.create_transcription(
+            _make_request(),
+            file=_upload("ok.wav", b"0" * (64 * 1024)),
+            model="whisper-1",
+            response_format="json",
+            current_user=SimpleNamespace(id=1),
+            principal=AuthPrincipal(kind="user", user_id=1),
+            db=None,
+            billing_org_id=None,
+        )
+
+    assert exc_info.value.status_code == 429
+    assert "Concurrent job limit" in str(exc_info.value.detail)

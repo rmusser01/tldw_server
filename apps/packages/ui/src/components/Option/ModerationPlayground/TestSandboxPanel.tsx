@@ -29,6 +29,11 @@ const QUICK_SAMPLES = [
   { label: "Clean text", text: "The weather is nice today and I enjoy reading books" }
 ] as const
 
+const PHASE_OPTIONS = [
+  { value: "input" as const, label: "User message" },
+  { value: "output" as const, label: "AI response" }
+] as const
+
 // ---------------------------------------------------------------------------
 // Status badge mapping
 // ---------------------------------------------------------------------------
@@ -78,6 +83,43 @@ function highlightMatch(original: string, sample: string | null | undefined): Re
 
 function truncate(str: string, max: number): string {
   return str.length > max ? str.slice(0, max) + "..." : str
+}
+
+function hasUserOverride(effective: Record<string, any>): boolean {
+  return Boolean(
+    effective.user_override ||
+    effective.user_overrides ||
+    effective.override_applied ||
+    effective.per_user_override_applied
+  )
+}
+
+function explainModerationResult(
+  result: ModerationTestResponse,
+  phase: string
+): string {
+  const effective = result.effective || {}
+  if (effective.enabled === false) {
+    return "The moderation engine is disabled in the effective policy, so the sample was allowed without rule checks."
+  }
+  if (phase === "input" && effective.input_enabled === false) {
+    return "User message moderation is disabled for the effective policy, so input rules were skipped."
+  }
+  if (phase === "output" && effective.output_enabled === false) {
+    return "AI response moderation is disabled for the effective policy, so output rules were skipped."
+  }
+  if (!result.flagged && result.action === "pass") {
+    return "No active rule matched this sample, so the content passed moderation."
+  }
+  if (hasUserOverride(effective)) {
+    return `A per-user override influenced this ${phase} decision and produced the ${result.action} action.`
+  }
+  if (result.sample || result.category) {
+    const category = result.category ? `${result.category} ` : ""
+    const sample = result.sample ? ` with sample "${result.sample}"` : ""
+    return `The sample matched an active ${category}rule${sample}, so the policy returned ${result.action}.`
+  }
+  return `No specific matched rule was returned; the global policy fallback produced the ${result.action} action.`
 }
 
 // ---------------------------------------------------------------------------
@@ -154,12 +196,47 @@ const ResultDetails: React.FC<{ result: ModerationTestResponse; text: string; ph
   </div>
 )
 
+const ResultExplanation: React.FC<{
+  result: ModerationTestResponse
+  phase: string
+}> = ({ result, phase }) => (
+  <div className="rounded-lg border border-border bg-surface/50 p-3">
+    <h4 className="text-sm font-semibold text-text">Why this result?</h4>
+    <p className="mt-1 text-sm text-text-muted">
+      {explainModerationResult(result, phase)}
+    </p>
+  </div>
+)
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
 const TestSandboxPanel: React.FC<TestSandboxPanelProps> = ({ tester, messageApi }) => {
   const { phase, setPhase, text, setText, userId, setUserId, result, running, runTest, runTestWith, history, clearHistory, loadFromHistory } = tester
+  const phaseLabelId = React.useId()
+  const userIdInputId = React.useId()
+  const sampleTextId = React.useId()
+
+  const handlePhaseKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    currentPhase: "input" | "output"
+  ) => {
+    const currentIndex = PHASE_OPTIONS.findIndex((option) => option.value === currentPhase)
+    let nextIndex: number | null = null
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (currentIndex + 1) % PHASE_OPTIONS.length
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (currentIndex - 1 + PHASE_OPTIONS.length) % PHASE_OPTIONS.length
+    } else if (event.key === "Home") {
+      nextIndex = 0
+    } else if (event.key === "End") {
+      nextIndex = PHASE_OPTIONS.length - 1
+    }
+    if (nextIndex == null) return
+    event.preventDefault()
+    setPhase(PHASE_OPTIONS[nextIndex].value)
+  }
 
   const handleRunTest = async () => {
     try {
@@ -185,37 +262,42 @@ const TestSandboxPanel: React.FC<TestSandboxPanelProps> = ({ tester, messageApi 
 
         {/* Phase selector */}
         <div>
-          <label className="block text-sm font-medium text-text-muted mb-1">Phase</label>
-          <div className="inline-flex rounded-lg border border-border overflow-hidden" role="group">
-            <button
-              type="button"
-              onClick={() => setPhase("input")}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${
-                phase === "input"
-                  ? "bg-blue-500 text-white"
-                  : "bg-surface text-text hover:bg-surface-secondary"
-              }`}
-            >
-              User message
-            </button>
-            <button
-              type="button"
-              onClick={() => setPhase("output")}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-l border-border ${
-                phase === "output"
-                  ? "bg-blue-500 text-white"
-                  : "bg-surface text-text hover:bg-surface-secondary"
-              }`}
-            >
-              AI response
-            </button>
+          <span id={phaseLabelId} className="block text-sm font-medium text-text-muted mb-1">
+            Phase
+          </span>
+          <div
+            className="inline-flex rounded-lg border border-border overflow-hidden"
+            role="radiogroup"
+            aria-labelledby={phaseLabelId}
+          >
+            {PHASE_OPTIONS.map((option, index) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={phase === option.value}
+                tabIndex={phase === option.value ? 0 : -1}
+                onClick={() => setPhase(option.value)}
+                onKeyDown={(event) => handlePhaseKeyDown(event, option.value)}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                  index > 0 ? "border-l border-border" : ""
+                } ${
+                  phase === option.value
+                    ? "bg-blue-500 text-white"
+                    : "bg-surface text-text hover:bg-surface-secondary"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
         </div>
 
         {/* User ID input */}
         <div>
-          <label className="block text-sm font-medium text-text-muted mb-1">User ID</label>
+          <label htmlFor={userIdInputId} className="block text-sm font-medium text-text-muted mb-1">User ID</label>
           <input
+            id={userIdInputId}
             type="text"
             value={userId}
             onChange={(e) => setUserId(e.target.value)}
@@ -226,8 +308,9 @@ const TestSandboxPanel: React.FC<TestSandboxPanelProps> = ({ tester, messageApi 
 
         {/* Sample text */}
         <div>
-          <label className="block text-sm font-medium text-text-muted mb-1">Sample Text</label>
+          <label htmlFor={sampleTextId} className="block text-sm font-medium text-text-muted mb-1">Sample Text</label>
           <textarea
+            id={sampleTextId}
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Enter text to test against moderation rules..."
@@ -270,7 +353,7 @@ const TestSandboxPanel: React.FC<TestSandboxPanelProps> = ({ tester, messageApi 
 
       {/* ---- Results Section ---- */}
       {result && (
-        <section className="space-y-4" data-testid="results-section">
+        <section className="space-y-4" data-testid="results-section" aria-live="polite">
           <h3 className="text-lg font-semibold text-text">Results</h3>
 
           {/* Status badge */}
@@ -279,6 +362,8 @@ const TestSandboxPanel: React.FC<TestSandboxPanelProps> = ({ tester, messageApi 
           {/* Match details + Before/After */}
           <ResultDetails result={result} text={text} phase={phase} />
 
+          <ResultExplanation result={result} phase={phase} />
+
           {/* Effective Policy */}
           <details className="mt-4">
             <summary className="text-sm font-medium text-text-muted cursor-pointer hover:text-text">
@@ -286,6 +371,7 @@ const TestSandboxPanel: React.FC<TestSandboxPanelProps> = ({ tester, messageApi 
             </summary>
             <textarea
               readOnly
+              aria-label="Effective policy JSON"
               value={JSON.stringify(result.effective, null, 2)}
               className="mt-2 w-full h-48 px-3 py-2 border border-border rounded-lg bg-surface-secondary text-text text-xs font-mono resize-y"
             />
@@ -315,7 +401,7 @@ const TestSandboxPanel: React.FC<TestSandboxPanelProps> = ({ tester, messageApi 
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm" data-testid="history-table">
+            <table className="min-w-[680px] w-full text-sm" data-testid="history-table">
               <thead>
                 <tr className="border-b border-border text-left text-text-muted">
                   <th className="py-2 pr-3 font-medium">#</th>

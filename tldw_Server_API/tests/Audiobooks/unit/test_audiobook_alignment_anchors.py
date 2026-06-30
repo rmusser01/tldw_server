@@ -29,6 +29,26 @@ def test_apply_alignment_anchors_shifts_target_block():
     assert adjusted[2].end_ms == 5950
 
 
+def test_apply_alignment_anchors_ignores_anchor_before_adjusted_previous_end():
+    words = [
+        AlignmentWord(word="one", start_ms=0, end_ms=100, char_start=0, char_end=3),
+        AlignmentWord(word="two", start_ms=200, end_ms=300, char_start=4, char_end=7),
+        AlignmentWord(word="three", start_ms=400, end_ms=500, char_start=8, char_end=13),
+    ]
+    anchors = [
+        AlignmentAnchor(offset=4, time_ms=1000),
+        AlignmentAnchor(offset=8, time_ms=350),
+    ]
+
+    adjusted = apply_alignment_anchors(words, anchors)
+
+    assert [(word.start_ms, word.end_ms) for word in adjusted] == [
+        (0, 100),
+        (1000, 1100),
+        (1200, 1300),
+    ]
+
+
 def test_scale_alignment_payload_scales_timestamps():
     payload_words = [
         AlignmentWord(word="Hello", start_ms=0, end_ms=400, char_start=0, char_end=5),

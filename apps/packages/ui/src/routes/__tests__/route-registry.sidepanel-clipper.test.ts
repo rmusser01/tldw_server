@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import { getRouteMetadata } from "../route-metadata"
 
 const routeRegistryPathCandidates = [
   "src/routes/sidepanel-route-registry.tsx",
@@ -23,5 +24,12 @@ describe("sidepanel route registry clipper parity", () => {
   it("registers a dedicated sidepanel clipper route", () => {
     expect(routeRegistrySource).toMatch(/path:\s*"\/clipper"/)
     expect(routeRegistrySource).toContain("SidepanelClipper")
+    expect(getRouteMetadata("/clipper")).toMatchObject({
+      surface: "extension_sidepanel",
+      nav: "hidden"
+    })
+    expect(getRouteMetadata("/clipper")?.availability).toEqual([
+      "extension_sidepanel"
+    ])
   })
 })

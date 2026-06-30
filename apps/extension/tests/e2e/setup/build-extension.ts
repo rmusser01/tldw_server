@@ -5,6 +5,14 @@ import path from 'path'
 export default async function globalSetup() {
   // If a built chrome extension already exists, skip rebuilding.
   const projectRoot = path.resolve(__dirname, '..', '..', '..')
+  const skipBuild =
+    process.env.TLDW_E2E_SKIP_EXTENSION_BUILD === '1' ||
+    process.env.TLDW_E2E_SKIP_EXTENSION_BUILD === 'true'
+  if (skipBuild) {
+    applyTestHostPermissions(projectRoot)
+    return
+  }
+
   const builtChromeCandidates = [
     path.resolve(projectRoot, 'build/chrome-mv3'),
     path.resolve(projectRoot, '.output/chrome-mv3')

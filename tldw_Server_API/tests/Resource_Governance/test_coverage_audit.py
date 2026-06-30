@@ -28,13 +28,38 @@ class _MockRoute:
     def __init__(self, path: str, methods: set[str] | None = None):
         self.path = path
         self.methods = methods or {"GET"}
+        self.tags = []
 
 
 class _MockApp:
     """Minimal mock of a FastAPI app."""
 
-    def __init__(self, routes: list[_MockRoute] | None = None):
+    def __init__(self, routes: list[_MockRoute] | None = None, *, user_middleware=None, state=None):
         self.routes = routes or []
+        self.user_middleware = user_middleware or []
+        self.state = state
+
+
+class _Middleware:
+    def __init__(self, cls):
+        self.cls = cls
+
+
+class _RGSimpleMiddleware:
+    pass
+
+
+class _Snap:
+    def __init__(self, route_map):
+        self.route_map = route_map
+
+
+class _Loader:
+    def __init__(self, route_map):
+        self._snap = _Snap(route_map)
+
+    def get_snapshot(self):
+        return self._snap
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +85,9 @@ class TestAuditGovernorCoverage:
             _MockRoute("/api/v1/chat", {"POST"}),
             _MockRoute("/api/v1/media", {"GET"}),
             _MockRoute("/api/v1/rag/search", {"POST"}),
-        ])
+        ], user_middleware=[_Middleware(_RGSimpleMiddleware)], state=type("State", (), {
+            "rg_policy_loader": _Loader({"by_path": {"/api/v1/*": "api.default"}})
+        })())
         result = audit_governor_coverage(app)
 
         assert result["total_routes"] == 3
@@ -75,7 +102,9 @@ class TestAuditGovernorCoverage:
             _MockRoute("/docs", {"GET"}),
             _MockRoute("/healthz", {"GET"}),
             _MockRoute("/openapi.json", {"GET"}),
-        ])
+        ], user_middleware=[_Middleware(_RGSimpleMiddleware)], state=type("State", (), {
+            "rg_policy_loader": _Loader({"by_path": {"/api/v1/chat": "chat.default"}})
+        })())
         result = audit_governor_coverage(app)
 
         assert result["total_routes"] == 4
@@ -89,7 +118,12 @@ class TestAuditGovernorCoverage:
             _MockRoute("/api/v1/chat", {"POST"}),
             _MockRoute("/api/v1/internal/debug", {"GET"}),
             _MockRoute("/docs", {"GET"}),
-        ])
+        ], user_middleware=[_Middleware(_RGSimpleMiddleware)], state=type("State", (), {
+            "rg_policy_loader": _Loader({"by_path": {
+                "/api/v1/chat": "chat.default",
+                "/docs": "docs.default",
+            }})
+        })())
         result = audit_governor_coverage(
             app, excluded_prefixes=["/api/v1/internal"]
         )
@@ -102,7 +136,9 @@ class TestAuditGovernorCoverage:
         """Each HTTP method on a route counts as a separate entry."""
         app = _MockApp(routes=[
             _MockRoute("/api/v1/items", {"GET", "POST", "DELETE"}),
-        ])
+        ], user_middleware=[_Middleware(_RGSimpleMiddleware)], state=type("State", (), {
+            "rg_policy_loader": _Loader({"by_path": {"/api/v1/items": "items.default"}})
+        })())
         result = audit_governor_coverage(app)
 
         assert result["total_routes"] == 3
@@ -114,7 +150,9 @@ class TestAuditGovernorCoverage:
             _MockRoute("/health", {"GET"}),
             _MockRoute("/readyz", {"GET"}),
             _MockRoute("/api/v1/chat", {"POST"}),
-        ])
+        ], user_middleware=[_Middleware(_RGSimpleMiddleware)], state=type("State", (), {
+            "rg_policy_loader": _Loader({"by_path": {"/api/v1/chat": "chat.default"}})
+        })())
         result = audit_governor_coverage(app)
 
         assert result["excluded_prefixes"] == DEFAULT_EXCLUDED_PREFIXES
@@ -133,7 +171,9 @@ class TestAuditGovernorCoverage:
     def test_protected_routes_capped_at_50(self):
         """Protected routes list is capped at 50 for readability."""
         routes = [_MockRoute(f"/api/v1/endpoint{i}", {"GET"}) for i in range(60)]
-        app = _MockApp(routes=routes)
+        app = _MockApp(routes=routes, user_middleware=[_Middleware(_RGSimpleMiddleware)], state=type("State", (), {
+            "rg_policy_loader": _Loader({"by_path": {"/api/v1/*": "api.default"}})
+        })())
         result = audit_governor_coverage(app)
 
         assert len(result["protected_routes"]) == 50
@@ -150,7 +190,9 @@ class TestAuditGovernorCoverage:
         app = _MockApp(routes=[
             _MockRoute("/api/v1/chat", {"POST"}),
             _MountRoute("/static"),
-        ])
+        ], user_middleware=[_Middleware(_RGSimpleMiddleware)], state=type("State", (), {
+            "rg_policy_loader": _Loader({"by_path": {"/api/v1/chat": "chat.default"}})
+        })())
         result = audit_governor_coverage(app)
 
         assert result["total_routes"] == 1
@@ -161,8 +203,22 @@ class TestAuditGovernorCoverage:
             _MockRoute("/api/v1/a", {"GET"}),
             _MockRoute("/api/v1/b", {"GET"}),
             _MockRoute("/docs", {"GET"}),
-        ])
+        ], user_middleware=[_Middleware(_RGSimpleMiddleware)], state=type("State", (), {
+            "rg_policy_loader": _Loader({"by_path": {"/api/v1/*": "api.default"}})
+        })())
         result = audit_governor_coverage(app)
 
         # 2/3 = 66.666...% -> 66.7
         assert result["coverage_pct"] == 66.7
+
+    def test_api_route_without_middleware_or_route_map_is_unprotected(self):
+        app = _MockApp(routes=[
+            _MockRoute("/api/v1/chat", {"POST"}),
+        ])
+
+        result = audit_governor_coverage(app)
+
+        assert result["protected_count"] == 0
+        assert result["unprotected_count"] == 1
+        assert result["coverage_pct"] == 0.0
+        assert result["unprotected_routes"][0]["reason"] == "rg_middleware_missing"

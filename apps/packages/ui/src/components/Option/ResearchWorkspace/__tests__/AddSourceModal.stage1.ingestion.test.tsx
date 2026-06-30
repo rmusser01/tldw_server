@@ -174,20 +174,61 @@ describe("AddSourceModal Stage 1 ingestion safety", () => {
     )
   })
 
-  it("rejects unsupported file types before upload starts", async () => {
+  it.each([
+    {
+      name: "archive.zip",
+      file: new File(["zip"], "archive.zip", { type: "application/zip" })
+    },
+    {
+      name: "legacy.doc",
+      file: new File(["legacy"], "legacy.doc", { type: "application/msword" })
+    }
+  ])("rejects unsupported file type $name before upload starts", async ({ file }) => {
     render(<AddSourceModal />)
 
-    const unsupportedFile = new File(["zip"], "archive.zip", {
-      type: "application/zip"
-    })
-
     await act(async () => {
-      fireEvent.change(getUploadInput(), { target: { files: [unsupportedFile] } })
+      fireEvent.change(getUploadInput(), { target: { files: [file] } })
     })
 
     expect(mockUploadMedia).not.toHaveBeenCalled()
     expect(mockSetAddSourceError).toHaveBeenCalledWith(
       expect.stringContaining("not a supported file type")
     )
+  })
+
+  it("closes the paste modal after adding a source without waiting for workspace tagging", async () => {
+    workspaceStoreState.addSourceModalTab = "paste"
+    mockUploadMedia.mockResolvedValueOnce({
+      results: [{ media_id: 9911, title: "Field Notes" }]
+    })
+    mockUpdateMediaKeywords.mockReturnValueOnce(new Promise(() => {}))
+
+    render(<AddSourceModal />)
+
+    fireEvent.change(screen.getByPlaceholderText("Give your content a title"), {
+      target: { value: "Field Notes" }
+    })
+    fireEvent.change(screen.getByPlaceholderText("Paste your text content here..."), {
+      target: { value: "BULK-RECOVERY-EVIDENCE pasted note" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add Text" }))
+
+    await waitFor(() => {
+      expect(mockAddSource).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mediaId: 9911,
+          title: "Field Notes"
+        })
+      )
+    })
+    expect(mockUpdateMediaKeywords).toHaveBeenCalledWith(
+      9911,
+      {
+        keywords: ["workspace:test"],
+        mode: "add"
+      },
+      { suppressBackendUnavailableEvent: true }
+    )
+    expect(mockCloseAddSourceModal).toHaveBeenCalled()
   })
 })

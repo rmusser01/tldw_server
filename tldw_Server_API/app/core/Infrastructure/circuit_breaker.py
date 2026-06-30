@@ -314,6 +314,11 @@ class CircuitBreaker:
 
         self.name = name
         self.config = config
+        if state_store is not None and config.window_size > 0:
+            raise ValueError(
+                "Persistent rolling-window circuit breakers are not supported "
+                "until window state is stored in the shared registry"
+            )
 
         # Resolve metrics labels
         self._category = config.category or ""
@@ -344,9 +349,6 @@ class CircuitBreaker:
 
         # Thread safety (sync path)
         self._lock = threading.RLock()
-
-        # Async lock (lazy-initialized per event-loop)
-        self._async_lock: asyncio.Lock | None = None
 
         # Optional persistent shared storage state
         self._state_store: _RegistryDB | None = state_store
@@ -745,6 +747,11 @@ class CircuitBreaker:
 
     def _attach_state_store(self, state_store: _RegistryDB, *, sync_interval: float = 0.0) -> None:
         with self._lock:
+            if self.config.window_size > 0:
+                raise ValueError(
+                    "Persistent rolling-window circuit breakers are not supported "
+                    "until window state is stored in the shared registry"
+                )
             self._state_store = state_store
             self._store_sync_interval = max(0.0, float(sync_interval))
             self._state_store_version = 0

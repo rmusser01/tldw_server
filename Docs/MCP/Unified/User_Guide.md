@@ -1,6 +1,8 @@
 # MCP Unified - User Guide
 
 > Part of the MCP Unified documentation set. See `Docs/MCP/Unified/README.md` for the full guide index.
+>
+> **Current state:** Unified MCP is embedded in TLDW Server today. The standalone package/gateway is planned but not shipped in this tree yet. Use the TLDW Server launch path below unless a future release explicitly says the standalone gateway is available.
 
 This guide is for users and integrators who want to run MCP Unified, connect clients, configure modules, and extend MCP with new modules/tools.
 
@@ -17,7 +19,15 @@ MCP Unified is the TLDW server's production Model Context Protocol surface. It s
 
 Main base path: `http://127.0.0.1:8000/api/v1/mcp`
 
-## 2. Getting Started
+## Which Path Should I Use?
+
+| Use case | Current path | Status |
+| --- | --- | --- |
+| Connect MCP clients to TLDW Server | `/api/v1/mcp/status`, `/api/v1/mcp/request`, `/api/v1/mcp/ws` | Supported embedded TLDW surface. Start TLDW Server with `uvicorn` and use these paths. |
+| Test a package-local mounted gateway | `/mcp/status`, `/mcp/request`, `/mcp/ws` | Package-local or host-mounted examples only. Another app must mount `apps/mcp-unified`; the package CLI does not launch a server. |
+| Run a separate standalone gateway process | None | Standalone gateway is planned but not shipped. Do not look for a `serve` command in this release. |
+
+## 2. Golden Path Quickstart
 
 ### Prerequisites
 
@@ -25,6 +35,9 @@ Main base path: `http://127.0.0.1:8000/api/v1/mcp`
 - Virtual environment created
 - Dependencies installed
 - TLDW server configured (including AuthNZ if required)
+- One usable credential:
+  - Single-user local mode: `SINGLE_USER_API_KEY`
+  - Multi-user mode: AuthNZ access token
 
 ### Step 1: Start the server
 
@@ -43,34 +56,82 @@ python -m uvicorn tldw_Server_API.app.main:app --reload
 curl http://127.0.0.1:8000/api/v1/mcp/status
 ```
 
+Check `problem_modules` and `config_warnings` in the response before digging through logs.
+
 Then check health:
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/mcp/health
 ```
 
-### Step 3: Authenticate
+### Step 3: Pick one default auth header
 
-Recommended in production: use an AuthNZ access token.
-
-```bash
-curl -H "Authorization: Bearer <authnz_access_token>" \
-  http://127.0.0.1:8000/api/v1/mcp/tools
-```
-
-HTTP API key option:
+Use a bearer token in multi-user mode:
 
 ```bash
-curl -H "X-API-KEY: <api_key>" \
-  http://127.0.0.1:8000/api/v1/mcp/tools
+export MCP_AUTH_HEADER="Authorization: Bearer <authnz_access_token>"
 ```
+
+Use an API key in local single-user mode:
+
+```bash
+export MCP_AUTH_HEADER="X-API-KEY: <api_key>"
+```
+
+### Step 4: Initialize MCP
+
+```bash
+curl -s \
+  -H "$MCP_AUTH_HEADER" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{"clientInfo":{"name":"docs-golden-path","version":"1.0.0"}}}' \
+  http://127.0.0.1:8000/api/v1/mcp/request
+```
+
+Expected response: a JSON-RPC response with `result.serverInfo` and `result.capabilities`.
+
+### Step 5: List available tools
+
+```bash
+curl -s \
+  -H "$MCP_AUTH_HEADER" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"tools-1","method":"tools/list","params":{}}' \
+  http://127.0.0.1:8000/api/v1/mcp/request
+```
+
+Expected response: `result.tools` is an array. Each tool includes a name and execution metadata such as `canExecute` when permissions are available.
+
+### Step 6: Call a read-only discovery tool
+
+The discovery module is enabled in the default module config. Use `mcp.modules.list` as the first safe tool call:
+
+```bash
+curl -s \
+  -H "$MCP_AUTH_HEADER" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"mcp.modules.list","arguments":{}}}' \
+  http://127.0.0.1:8000/api/v1/mcp/request
+```
+
+Expected response: `result.content` or `result.structuredContent` contains the visible MCP module list. If the response is a 403, the credential is valid but lacks the needed `tools.execute:mcp.modules.list` or wildcard execute permission.
 
 Demo token endpoint (`POST /auth/token`) exists only for debug/test workflows and is disabled unless explicitly enabled with:
 
 - `MCP_ENABLE_DEMO_AUTH=1`
 - `MCP_DEMO_AUTH_SECRET=<strong-secret>`
 
-## 3. Endpoint Quick Reference
+## 3. Authentication Matrix
+
+| Auth method | Best for | Default status | Where it is sent | Notes |
+|---|---|---|---|---|
+| AuthNZ JWT | Multi-user TLDW deployments | Recommended | `Authorization: Bearer ...` | Uses the main app identity and permissions. |
+| Single-user API key | Local single-user deployments | Supported | `X-API-KEY` | Keep out of URLs and logs. |
+| MCP JWT | Dedicated MCP integrations | Supported when configured | `Authorization: Bearer ...` or WebSocket subprotocol | Use when an MCP-only token lifecycle is desired. |
+| Demo token | Local demos only | Disabled unless explicitly enabled | Header/subprotocol | Never use for shared deployments. |
+| Query token/API key | Legacy/manual debugging only | Disabled by default | URL query string | Avoid because URLs are commonly logged. |
+
+## 4. Endpoint Quick Reference
 
 | Endpoint | Method | Purpose | Auth |
 |---|---|---|---|
@@ -154,6 +215,12 @@ curl -X POST http://127.0.0.1:8000/api/v1/mcp/request \
 - `GET /api/v1/mcp/prompts`
 
 The convenience endpoints map to MCP operations and keep the same RBAC behavior.
+When a failure has a known recovery path, JSON-RPC responses include
+`error.data.reason_code` and `error.data.next_action`. Convenience HTTP
+endpoints preserve their existing response body shape: object-shaped `detail`
+may include `reason_code` and `next_action`, while string-shaped `detail`
+exposes the same metadata in `X-MCP-Reason-Code` and `X-MCP-Next-Action`
+headers.
 
 ### Sessions and safe config
 
@@ -260,6 +327,20 @@ modules:
 ```
 
 Replace `<content-db>.db` with your configured per-user content DB filename.
+
+### Safer local module defaults
+
+Default installs no longer expose local filesystem or local command execution
+tools. They appear in `/api/v1/mcp/status` under
+`surface.disabled_available` with `requires_explicit_opt_in: true` until an
+operator enables them.
+
+To restore a previous local workflow intentionally:
+
+1. Copy the relevant entries from `tldw_Server_API/Config_Files/mcp_modules.local_opt_in.example.yaml`.
+2. Set only the needed modules to `enabled: true` in the selected `mcp_modules.yaml`.
+3. Restart TLDW Server.
+4. Recheck `/api/v1/mcp/status`; the module should move from `surface.disabled_available` to `surface.tiers`.
 
 ### Environment variable registration (quick dev path)
 
@@ -382,6 +463,7 @@ Catalogs reduce discovery noise by grouping tools. Use filters:
 - `GET /api/v1/mcp/tool_catalogs` (visible catalogs for current principal)
 
 Catalog membership affects discovery, not execution rights.
+If a catalog cannot be resolved, `tools/list` returns an empty list with `_meta.catalog.status` set to `unresolved`. Check the spelling, use `/api/v1/mcp/tool_catalogs` to see visible catalogs, or remove the catalog filter. `catalog_fail_open=true` is available for migration diagnostics when you intentionally want the RBAC-filtered full discovery result.
 
 Reference: `Docs/MCP/mcp_tool_catalogs.md`
 
@@ -463,6 +545,16 @@ There is no built-in autonomous multi-stage agent loop. The safe pattern is expl
 
 ## 12. Troubleshooting
 
+| Symptom | What to check | Recovery |
+| --- | --- | --- |
+| Auth rejected | Response `detail.message` and current auth mode | Use `Authorization: Bearer <token>` in multi-user mode or `X-API-KEY` in single-user mode. Regenerate expired tokens. |
+| Query auth ignored | WebSocket close reason or missing identity with `?token=`/`?api_key=` | Query auth is disabled by default. Move credentials to headers/subprotocol, or explicitly enable `MCP_WS_ALLOW_QUERY_AUTH` only for legacy clients. |
+| Catalog unresolved | `tools/list` `_meta.catalog.status=unresolved` | Check `/api/v1/mcp/tool_catalogs`, fix the name/id, or remove the catalog filter. |
+| Module degraded or unhealthy | `/api/v1/mcp/status` `problem_modules` | Follow `next_action`, check module config/dependencies, then restart or disable the module. |
+| Invalid safe config | HTTP 400 with `detail.code=invalid_safe_config` | Remove `config` or send base64url-encoded JSON object data only. |
+| Empty tool list | `/status` `modules`, `problem_modules`, `config_warnings`, and `/tool_catalogs` | Confirm modules are enabled, the catalog filter resolves, and the caller has discovery/execute permissions. |
+| Local file or command tool missing | `/api/v1/mcp/status` `surface.disabled_available` | Enable the module explicitly in YAML only if this deployment should expose local file/process access, then restart. |
+
 ### `503 Server not initialized` on `/health`
 
 - Call `/api/v1/mcp/status` first
@@ -494,6 +586,7 @@ There is no built-in autonomous multi-stage agent loop. The safe pattern is expl
 - Architecture and internals: `Docs/MCP/Unified/Developer_Guide.md`
 - Deployment and hardening: `Docs/MCP/Unified/System_Admin_Guide.md`
 - Module authoring: `Docs/MCP/Unified/Modules.md`
+- Native CodeGraph module: `Docs/MCP/Unified/CodeGraph.md`
 - YAML module config details: `Docs/MCP/Unified/Using_Modules_YAML.md`
 - External federation module: `Docs/MCP/Unified/External_Federation.md`
 - Client snippets: `Docs/MCP/Unified/Client_Snippets.md`

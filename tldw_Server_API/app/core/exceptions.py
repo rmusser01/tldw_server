@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from collections.abc import Mapping
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
+
+from .AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
+from .exception_types import PromptCatalogError  # noqa: F401 - re-exported for compatibility.
 
 if hasattr(status, "HTTP_422_UNPROCESSABLE_CONTENT"):
     DEFAULT_VALIDATION_STATUS = status.HTTP_422_UNPROCESSABLE_CONTENT
@@ -24,6 +28,10 @@ class NetworkError(Exception):
     """Raised for network transport errors (connect/read timeouts, DNS, TLS, etc.)."""
 
 
+class AudioQuotaStoreUnavailable(AuthNZDatabaseError):
+    """Raised when canonical audio daily-minute quota storage is unavailable."""
+
+
 class RetryExhaustedError(Exception):
     """Raised when a request exhausts all retry attempts without success."""
 
@@ -32,12 +40,222 @@ class JSONDecodeError(Exception):
     """Raised when a response expected to be JSON cannot be decoded or is invalid."""
 
 
+class ThirdPartyHTTPStatusError(RuntimeError):
+    """Raised when a Third_Party provider returns an HTTP error status."""
+
+    def __init__(self, status_code: int, reason: str | None = None) -> None:
+        self.status_code = int(status_code)
+        self.reason = reason or ""
+        message = f"HTTP Error: {self.status_code}"
+        if self.reason:
+            message = f"{message} - {self.reason}"
+        super().__init__(message)
+
+
 class TokenizerUnavailable(Exception):
     """Raised when tokenizer support is unavailable."""
 
 
 class BadRequestError(ValueError):
     """Raised when a caller provides invalid arguments for an operation."""
+
+
+class InvalidMetadataOrderKeyError(ValueError):
+    """Raised when a metadata order key cannot be safely used."""
+
+
+SafeJsonScalar = str | int | float | bool | None
+SafeDetail = dict[str, SafeJsonScalar]
+
+EmbeddingErrorCode = Literal[
+    "empty_input",
+    "invalid_input_type",
+    "too_many_inputs",
+    "input_too_long",
+    "invalid_token_array",
+    "unknown_provider",
+    "provider_model_mismatch",
+    "invalid_dimensions",
+    "provider_denied",
+    "model_denied",
+    "model_required",
+    "provider_unsupported",
+    "missing_provider_credentials",
+    "provider_malformed_response",
+    "provider_rate_limited",
+    "provider_unavailable",
+    "fallback_exhausted",
+    "circuit_breaker_open",
+    "internal_execution_failure",
+]
+
+_EMBEDDING_REDACTED = "[redacted]"
+_EMBEDDING_SENSITIVE_KEY_PARTS = (
+    "api_key",
+    "apikey",
+    "access_token",
+    "authorization",
+    "body",
+    "credential",
+    "header",
+    "input",
+    "password",
+    "raw",
+    "secret",
+    "text",
+)
+_EMBEDDING_SAFE_NUMERIC_TOKEN_KEYS = {"tokens", "token_count", "prompt_tokens", "total_tokens"}
+_EMBEDDING_SENSITIVE_VALUE_PARTS = (
+    "api_key",
+    "authorization",
+    "bearer ",
+    "password",
+    "secret",
+    "sk-",
+    "token",
+)
+
+
+def _is_embedding_sensitive_key(key: str) -> bool:
+    normalized = key.lower().replace("-", "_")
+    return any(part in normalized for part in _EMBEDDING_SENSITIVE_KEY_PARTS)
+
+
+def _is_embedding_sensitive_string(value: str) -> bool:
+    normalized = value.lower()
+    return any(part in normalized for part in _EMBEDDING_SENSITIVE_VALUE_PARTS)
+
+
+def _is_embedding_safe_numeric_token_count(key: str, value: object) -> bool:
+    normalized = key.lower().replace("-", "_")
+    return (
+        normalized in _EMBEDDING_SAFE_NUMERIC_TOKEN_KEYS
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    )
+
+
+def sanitize_embedding_public_details(details: list[SafeDetail] | None) -> list[SafeDetail]:
+    """Return public embedding error details with sensitive values redacted."""
+    if not isinstance(details, list):
+        return []
+
+    sanitized: list[SafeDetail] = []
+    for item in details:
+        if not isinstance(item, Mapping):
+            continue
+
+        safe_item: SafeDetail = {}
+        for raw_key, raw_value in item.items():
+            if not isinstance(raw_key, str):
+                continue
+
+            if _is_embedding_safe_numeric_token_count(raw_key, raw_value):
+                safe_item[raw_key] = raw_value
+                continue
+
+            if _is_embedding_sensitive_key(raw_key):
+                safe_item[raw_key] = _EMBEDDING_REDACTED
+                continue
+
+            if isinstance(raw_value, str):
+                safe_item[raw_key] = (
+                    _EMBEDDING_REDACTED if _is_embedding_sensitive_string(raw_value) else raw_value
+                )
+            elif isinstance(raw_value, (int, float, bool)) or raw_value is None:
+                safe_item[raw_key] = raw_value
+
+        if safe_item:
+            sanitized.append(safe_item)
+
+    return sanitized
+
+
+def sanitize_embedding_scalar_mapping(values: Mapping[str, object] | None) -> dict[str, SafeJsonScalar]:
+    """Return safe scalar observability values for embedding request metadata."""
+    if not isinstance(values, Mapping):
+        return {}
+
+    sanitized: dict[str, SafeJsonScalar] = {}
+    for raw_key, raw_value in values.items():
+        if not isinstance(raw_key, str):
+            continue
+
+        if _is_embedding_safe_numeric_token_count(raw_key, raw_value):
+            sanitized[raw_key] = raw_value
+            continue
+
+        if _is_embedding_sensitive_key(raw_key):
+            sanitized[raw_key] = _EMBEDDING_REDACTED
+            continue
+
+        if isinstance(raw_value, str):
+            sanitized[raw_key] = (
+                _EMBEDDING_REDACTED if _is_embedding_sensitive_string(raw_value) else raw_value
+            )
+        elif isinstance(raw_value, (int, float, bool)) or raw_value is None:
+            sanitized[raw_key] = raw_value
+
+    return sanitized
+
+
+class EmbeddingDomainError(Exception):
+    """Base domain error for embedding request planning and execution."""
+
+    def __init__(
+        self,
+        code: EmbeddingErrorCode,
+        message: str,
+        *,
+        retryable: bool = False,
+        provider: str | None = None,
+        model: str | None = None,
+        retry_after: int | float | None = None,
+        cause_class: str | None = None,
+        details: list[SafeDetail] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+        self.provider = provider
+        self.model = model
+        self.retry_after = retry_after
+        self.cause_class = cause_class
+        self.details = sanitize_embedding_public_details(details)
+
+    def to_http_payload(self) -> dict[str, SafeJsonScalar | list[SafeDetail]]:
+        """Return a stable, sanitized payload safe for HTTP responses."""
+        return {
+            "error_code": self.code,
+            "message": self.message,
+            "provider": self.provider,
+            "model": self.model,
+            "retryable": self.retryable,
+            "retry_after": self.retry_after,
+            "details": sanitize_embedding_public_details(self.details),
+            "cause_class": self.cause_class,
+        }
+
+
+class EmbeddingInputError(EmbeddingDomainError):
+    """Input validation failed before provider execution."""
+
+
+class EmbeddingPolicyError(EmbeddingDomainError):
+    """Provider or model policy rejected the request."""
+
+
+class EmbeddingProviderError(EmbeddingDomainError):
+    """Provider returned an error response or malformed result."""
+
+
+class EmbeddingRateLimitError(EmbeddingProviderError):
+    """Provider rate limit or quota throttled the request."""
+
+
+class EmbeddingExecutionError(EmbeddingDomainError):
+    """Embedding execution failed after request planning."""
 
 
 class RecipeEnqueueError(RuntimeError):
@@ -53,6 +271,89 @@ class RecipeEnqueueError(RuntimeError):
         self.error_code = error_code
 
 
+class WritingAnnotationReviewEnqueueError(RuntimeError):
+    """Raised when a manuscript scene annotation review cannot be queued."""
+
+    def __init__(
+        self,
+        message: str = "Failed to enqueue manuscript scene annotation review.",
+        *,
+        error_code: str = "writing_annotation_review_enqueue_failed",
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
+class ExplainerValidationError(ValueError):
+    """Raised when an Explainer API request violates workspace rules."""
+
+
+class ExplainerNotFoundError(LookupError):
+    """Raised when an Explainer resource is not visible to the requesting user."""
+
+
+class CodeGraphJobError(RuntimeError):
+    """Raised when a CodeGraph Jobs worker rejects or fails a job."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
+
+class PrototypeJobError(RuntimeError):
+    """Worker-visible prototype job failure with explicit retry metadata."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool,
+        failure_code: str,
+        backoff_seconds: int | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.failure_code = failure_code
+        self.backoff_seconds = backoff_seconds
+        self.details = details or {}
+
+
+class PrototypeTerminalRuntimeError(PrototypeJobError):
+    """Terminal prototype runtime state failure that should not be retried."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str = "runtime_terminal",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            retryable=False,
+            failure_code=failure_code,
+            details=details,
+        )
+
+
+class PrototypeJobPayloadError(ValueError):
+    """Terminal prototype job payload error that should not be retried."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str = "invalid_job_payload",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = False
+        self.failure_code = failure_code
+        self.backoff_seconds = None
+        self.details = details or {}
+
+
 class AuditLogError(RuntimeError):
     """Raised when persisting an audit event fails."""
 
@@ -61,12 +362,56 @@ class ValidationError(BadRequestError):
     """Raised when validation of input parameters fails."""
 
 
+class SetupError(RuntimeError):
+    """Base class for first-run setup and installer failures."""
+
+
+class SetupSubprocessError(SetupError):
+    """Raised when a setup-managed subprocess fails or times out."""
+
+
+class SetupLockTimeoutError(SetupError):
+    """Raised when setup state persistence cannot acquire its lock."""
+
+
+class InvalidGovernanceCandidateError(ValueError):
+    """Raised when a policy source returns a malformed governance candidate."""
+
+
+class ResearchDiscoveryError(Exception):
+    """Base class for public research discovery service failures."""
+
+    def __init__(self, public_detail: str) -> None:
+        super().__init__(public_detail)
+        self.public_detail = public_detail
+
+
+class ResearchDiscoveryValidationError(ResearchDiscoveryError):
+    """Raised when a research discovery request fails validation."""
+
+
+class ResearchDiscoveryBadRequestError(ResearchDiscoveryError):
+    """Raised when a research discovery request is malformed or unsupported."""
+
+
+class ResearchDiscoveryTimeoutError(ResearchDiscoveryError):
+    """Raised when research discovery exceeds its configured time budget."""
+
+
+class ResearchDiscoveryUpstreamError(ResearchDiscoveryError):
+    """Raised when all selected research discovery providers fail."""
+
+
 class IngestionSourceValidationError(ValidationError):
     """Raised when an ingestion source payload fails validation."""
 
 
 class ReferenceImportError(RuntimeError):
     """Raised when a reference-manager item cannot be persisted correctly."""
+
+
+class ConnectorServiceError(RuntimeError):
+    """Raised when External_Sources connector service operations fail."""
 
 
 class StructuredOutputParseError(ValueError):
@@ -99,6 +444,22 @@ class APIValidationError(HTTPException):
     def __init__(self, detail: Any, *, status_code: int | None = None) -> None:
         resolved_status = status_code if status_code is not None else DEFAULT_VALIDATION_STATUS
         super().__init__(status_code=resolved_status, detail=detail)
+
+
+class VNScriptAuthoringError(ValueError):
+    """Raised when VN script authoring preview/apply input cannot be patched."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status_code: int = 400,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+        self.details = details or {}
 
 
 class SyncCallInEventLoopError(BadRequestError):
@@ -156,12 +517,56 @@ class StorageUnavailableError(StoragePathValidationError):
     """Raised when storage base directories cannot be resolved."""
 
 
+class WorkspaceArtifactExportStateError(ValueError):
+    """Raised when a workspace artifact version is not eligible for export."""
+
+
+class WorkspaceMembershipAdapterError(Exception):
+    """Fail-closed adapter error for Workspace cross-resource memberships."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status_code: int = 404,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        self.details = dict(details or {})
+
+
+class WorkspaceMembershipServiceError(Exception):
+    """API-facing service error for Workspace cross-resource memberships."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status_code: int = 409,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        self.details = dict(details or {})
+
+
 class InvalidStorageUserIdError(StoragePathValidationError):
     """Raised when a storage path resolution is attempted with an invalid user id."""
 
 
 class UnsafeUserPathError(StoragePathValidationError):
     """Raised when a user-derived path escapes an allowed base directory."""
+
+
+class InvalidFirstRunTransition(ValueError):
+    """Raised when a setup state transition would violate first-run rules."""
 
 
 class AdminDataOpsError(ValueError):
@@ -352,7 +757,7 @@ class AdapterInitializationError(FileArtifactsError):
 class ResourceNotFoundError(Exception):
     """Generic resource-not-found error for domain-level lookups."""
 
-    def __init__(self, resource: str, identifier: Optional[str] = None, detail: Optional[str] = None):
+    def __init__(self, resource: str, identifier: str | None = None, detail: str | None = None):
         message = f"{resource} not found"
         if identifier:
             message = f"{message}: {identifier}"
@@ -379,7 +784,7 @@ class ServiceInitializationTimeoutError(ServiceInitializationError):
 class DataTablesJobError(RuntimeError):
     """Raised for data table job processing failures."""
 
-    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: Optional[int] = None) -> None:
+    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: int | None = None) -> None:
         super().__init__(message)
         self.retryable = retryable
         if backoff_seconds is not None:
@@ -389,7 +794,7 @@ class DataTablesJobError(RuntimeError):
 class FileArtifactsJobError(RuntimeError):
     """Raised for file artifact job processing failures."""
 
-    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: Optional[int] = None) -> None:
+    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: int | None = None) -> None:
         super().__init__(message)
         self.retryable = retryable
         if backoff_seconds is not None:
@@ -399,11 +804,26 @@ class FileArtifactsJobError(RuntimeError):
 class ReadingDigestJobError(RuntimeError):
     """Raised for reading digest job processing failures."""
 
-    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: Optional[int] = None) -> None:
+    def __init__(self, message: str, *, retryable: bool = False, backoff_seconds: int | None = None) -> None:
         super().__init__(message)
         self.retryable = retryable
         if backoff_seconds is not None:
             self.backoff_seconds = backoff_seconds
+
+
+class WritingAnnotationReviewJobError(RuntimeError):
+    """Raised for controlled Writing annotation review worker failures."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        failure_code: str = "writing_annotation_review_job_failed",
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.failure_code = failure_code
 
 
 class WorkflowAdapterError(Exception):

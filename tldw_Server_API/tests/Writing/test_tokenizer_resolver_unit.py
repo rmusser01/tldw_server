@@ -155,6 +155,29 @@ def test_resolve_tokenizer_custom_openai_api_openai_host_guard(monkeypatch):
     assert resolution.tokenizer == "tiktoken:cl100k_base"
 
 
+def test_resolve_tokenizer_numbered_custom_openai_openai_host_guard(monkeypatch):
+    from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver as resolver
+
+    monkeypatch.setattr(resolver, "resolve_tiktoken_encoding", lambda _model: _FakeTokenizer("cl100k_base"))
+
+    config = configparser.ConfigParser()
+    config.add_section("API")
+    config.set("API", "custom_openai37_api_ip", "https://api.openai.com/v1")
+    config.set("API", "custom_openai37_api_model", "gpt-4.1-2025-04-14")
+
+    resolution = resolver.resolve_tokenizer(
+        "custom-openai-api-37",
+        "gpt-4.1-2025-04-14",
+        strict_mode_effective=True,
+        config_parser=config,
+    )
+
+    assert resolution.available is True
+    assert resolution.count_accuracy == "unavailable"
+    assert resolution.kind == "tiktoken"
+    assert resolution.tokenizer == "tiktoken:cl100k_base"
+
+
 def test_resolve_tokenizer_anthropic_count_only_exact_from_config():
     from tldw_Server_API.app.core.LLM_Calls import tokenizer_resolver as resolver
 

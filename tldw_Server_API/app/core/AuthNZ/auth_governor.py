@@ -64,8 +64,8 @@ class AuthGovernor:
             fail_open = is_truthy(env_val)
         try:
             result = await is_key_over_budget(api_key_id)
-        except _AUTH_GOVERNOR_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"AuthGovernor: error during is_key_over_budget for key {api_key_id}: {exc}")
+        except _AUTH_GOVERNOR_NONCRITICAL_EXCEPTIONS:
+            logger.error("AuthGovernor budget check failed")
             if not fail_open:
                 return {
                     "over": True,
@@ -145,8 +145,8 @@ class AuthGovernor:
                     return await limiter.check_lockout(identifier, attempt_type=attempt_type)
                 except TypeError:
                     return await limiter.check_lockout(identifier)
-            except _AUTH_GOVERNOR_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"AuthGovernor lockout check failed for {identifier}: {exc}")
+            except _AUTH_GOVERNOR_NONCRITICAL_EXCEPTIONS:
+                logger.debug("AuthGovernor lockout check failed")
         return False, None
 
     async def record_auth_failure(
@@ -177,8 +177,8 @@ class AuthGovernor:
         if limiter and getattr(limiter, "enabled", False):
             try:
                 return await limiter.record_failed_attempt(identifier=identifier, attempt_type=attempt_type)
-            except _AUTH_GOVERNOR_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"AuthGovernor record failure failed for {identifier}: {exc}")
+            except _AUTH_GOVERNOR_NONCRITICAL_EXCEPTIONS:
+                logger.debug("AuthGovernor record failure failed")
 
         return {"is_locked": False, "remaining_attempts": 5}
 
@@ -218,8 +218,8 @@ class AuthGovernor:
                 )
             except TypeError:
                 return await limiter.check_rate_limit(identifier, endpoint)
-            except _AUTH_GOVERNOR_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"AuthGovernor rate limit failed for {identifier}: {exc}")
+            except _AUTH_GOVERNOR_NONCRITICAL_EXCEPTIONS:
+                logger.debug("AuthGovernor rate limit failed")
 
         return True, {}
 

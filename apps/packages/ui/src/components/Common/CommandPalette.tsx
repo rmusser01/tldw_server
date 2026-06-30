@@ -24,7 +24,6 @@ import {
   Eye,
   BrainCircuit,
   Activity,
-  X,
   Command,
   ArrowRight,
 } from "lucide-react"
@@ -35,6 +34,7 @@ import {
 } from "@/hooks/useKeyboardShortcuts"
 import { useShortcutConfig } from "@/hooks/keyboard/useShortcutConfig"
 import type { KeyboardShortcut as ConfiguredKeyboardShortcut } from "@/hooks/keyboard/useKeyboardShortcuts"
+import { getCommandPaletteTarget } from "@/routes/route-metadata"
 import { RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
 import { cn } from "@/libs/utils"
@@ -91,6 +91,7 @@ export interface CommandPaletteProps {
   onSearchHistory?: () => void
   onSwitchChat?: (chatId: string) => void
   sidepanelChats?: { id: string; label: string }[]
+  onQueryChange?: (query: string) => void
   scope?: "global" | "sidepanel"
   openSignal?: number
   registerGlobalOpenShortcut?: boolean
@@ -108,17 +109,20 @@ export function CommandPalette({
   onSearchHistory,
   onSwitchChat,
   sidepanelChats,
+  onQueryChange,
   scope = "global",
   openSignal,
   registerGlobalOpenShortcut = true,
   listenForOpenEvents = true,
 }: CommandPaletteProps) {
-  const [open, setOpen] = useState(() => (openSignal ?? 0) > 0)
+  const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [selectedIndex, setSelectedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  const lastOpenSignalRef = useRef(openSignal ?? 0)
+  const lastOpenSignalRef = useRef(0)
+  const focusReturnRef = useRef<HTMLElement | null>(null)
+  const wasOpenRef = useRef(false)
   const location = useLocation()
   const navigate = useNavigate()
   const { t } = useTranslation(["common", "settings"])
@@ -126,8 +130,29 @@ export function CommandPalette({
   const shortcutEnabled = location.pathname !== RESEARCH_WORKSPACE_PATH
   const { shortcuts: configuredShortcuts } = useShortcutConfig()
 
+  const rememberFocusBeforeOpen = useCallback(() => {
+    if (typeof document === "undefined") {
+      focusReturnRef.current = null
+      return
+    }
+    const activeElement = document.activeElement
+    focusReturnRef.current =
+      activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : null
+  }, [])
+
   const openPalette = useCallback(() => {
-    setOpen(true)
+    setOpen((currentOpen) => {
+      if (!currentOpen) {
+        rememberFocusBeforeOpen()
+      }
+      return true
+    })
+  }, [rememberFocusBeforeOpen])
+
+  const closePalette = useCallback(() => {
+    setOpen(false)
   }, [])
 
   // Register Cmd/Ctrl+K shortcut to open
@@ -149,54 +174,93 @@ export function CommandPalette({
     allowInInput: true,
   })
 
-  // Also allow Escape to close
+  // Also allow Escape to close — but only while the palette is open. useShortcut
+  // registers a capture-phase keydown that calls stopPropagation() on a match, so
+  // an always-on Escape shortcut would swallow Escape app-wide and prevent antd
+  // Drawer/Modal/Select from closing on Escape. Gating on `open` keeps Escape
+  // working for every other overlay when the palette is closed.
   useShortcut({
     key: "Escape",
     modifiers: [],
-    action: () => setOpen(false),
+    action: closePalette,
     description: "Close command palette",
     allowInInput: true,
-  })
+    enabled: open,
+  }, [closePalette, open])
 
   useIsomorphicLayoutEffect(() => {
     if (!listenForOpenEvents) {
       return
     }
-    const handleOpen = () => setOpen(true)
+    const handleOpen = () => openPalette()
     window.addEventListener("tldw:open-command-palette", handleOpen)
     return () => {
       window.removeEventListener("tldw:open-command-palette", handleOpen)
     }
-  }, [listenForOpenEvents])
+  }, [listenForOpenEvents, openPalette])
 
   useEffect(() => {
     const currentOpenSignal = openSignal ?? 0
     if (currentOpenSignal > lastOpenSignalRef.current) {
+      if (!open) {
+        rememberFocusBeforeOpen()
+      }
       setOpen(true)
     }
     lastOpenSignalRef.current = currentOpenSignal
-  }, [openSignal])
+  }, [open, openSignal, rememberFocusBeforeOpen])
+
+  useEffect(() => {
+    if (wasOpenRef.current && !open) {
+      const focusTarget = focusReturnRef.current
+      focusReturnRef.current = null
+      window.setTimeout(() => {
+        if (focusTarget?.isConnected) {
+          focusTarget.focus()
+        }
+      }, 0)
+    }
+    wasOpenRef.current = open
+  }, [open])
 
   // Build default commands
   const defaultCommands: CommandItem[] = useMemo(() => {
+    const buildRouteCommand = (routePath: string) => {
+      const targetPath = getCommandPaletteTarget(routePath)
+      return {
+        targetPath,
+        action: () => {
+          navigate(targetPath)
+          setOpen(false)
+        }
+      }
+    }
+    const chatRouteCommand = buildRouteCommand("/chat")
+    const knowledgeRouteCommand = buildRouteCommand("/knowledge")
+    const mediaRouteCommand = buildRouteCommand("/media")
+    const notesRouteCommand = buildRouteCommand("/notes")
+    const promptsRouteCommand = buildRouteCommand("/prompts")
+    const flashcardsRouteCommand = buildRouteCommand("/flashcards")
+    const documentationRouteCommand = buildRouteCommand("/documentation")
+    const settingsRouteCommand = buildRouteCommand("/settings")
+    const mcpHubRouteCommand = buildRouteCommand("/mcp-hub")
+
     const commands: CommandItem[] = [
       // Navigation
       {
         id: "nav-chat",
         label: t("common:commandPalette.goToChat", "Go to Chat"),
         icon: <MessageSquare className="size-4" />,
-        action: () => { navigate("/"); setOpen(false) },
-        targetPath: "/",
+        ...chatRouteCommand,
         category: "navigation",
         keywords: ["playground", "conversation"],
       },
       ...(!isSidepanel ? ([
         {
           id: "nav-knowledge",
-          label: t("common:commandPalette.goToKnowledge", "Go to Knowledge QA"),
+          label: t("common:commandPalette.goToKnowledge", "Go to Knowledge"),
           icon: <CombineIcon className="size-4" />,
-          action: () => { navigate("/knowledge"); setOpen(false) },
-          targetPath: "/knowledge",
+          ...knowledgeRouteCommand,
           category: "navigation" as const,
           keywords: ["knowledge", "qa", "rag", "search"],
         },
@@ -204,8 +268,7 @@ export function CommandPalette({
           id: "nav-media",
           label: t("common:commandPalette.goToMedia", "Go to Media"),
           icon: <BookText className="size-4" />,
-          action: () => { navigate("/media"); setOpen(false) },
-          targetPath: "/media",
+          ...mediaRouteCommand,
           category: "navigation" as const,
           keywords: ["documents", "files", "library"],
         },
@@ -213,8 +276,7 @@ export function CommandPalette({
           id: "nav-notes",
           label: t("common:commandPalette.goToNotes", "Go to Notes"),
           icon: <StickyNote className="size-4" />,
-          action: () => { navigate("/notes"); setOpen(false) },
-          targetPath: "/notes",
+          ...notesRouteCommand,
           category: "navigation" as const,
           keywords: ["notes", "notebook"],
         },
@@ -222,8 +284,7 @@ export function CommandPalette({
           id: "nav-prompts",
           label: t("common:commandPalette.goToPrompts", "Go to Prompts"),
           icon: <NotebookPen className="size-4" />,
-          action: () => { navigate("/prompts"); setOpen(false) },
-          targetPath: "/prompts",
+          ...promptsRouteCommand,
           category: "navigation" as const,
           keywords: ["prompts", "template", "studio"],
         },
@@ -231,8 +292,7 @@ export function CommandPalette({
           id: "nav-flashcards",
           label: t("common:commandPalette.goToFlashcards", "Go to Flashcards"),
           icon: <Layers className="size-4" />,
-          action: () => { navigate("/flashcards"); setOpen(false) },
-          targetPath: "/flashcards",
+          ...flashcardsRouteCommand,
           category: "navigation" as const,
           keywords: ["study", "cards", "learn"],
         },
@@ -243,8 +303,7 @@ export function CommandPalette({
             "Go to Documentation"
           ),
           icon: <BookOpen className="size-4" />,
-          action: () => { navigate("/documentation"); setOpen(false) },
-          targetPath: "/documentation",
+          ...documentationRouteCommand,
           category: "navigation" as const,
           keywords: ["docs", "documentation", "guide", "help", "reference"],
         },
@@ -253,8 +312,7 @@ export function CommandPalette({
         id: "nav-settings",
         label: t("common:commandPalette.goToSettings", "Go to Settings"),
         icon: <Settings className="size-4" />,
-        action: () => { navigate("/settings"); setOpen(false) },
-        targetPath: "/settings",
+        ...settingsRouteCommand,
         category: "navigation",
         keywords: ["preferences", "config", "options"],
       },
@@ -262,8 +320,7 @@ export function CommandPalette({
         id: "nav-mcp-hub",
         label: t("common:commandPalette.goToMcpHub", "Go to MCP Hub"),
         icon: <Settings className="size-4" />,
-        action: () => { navigate("/settings/mcp-hub"); setOpen(false) },
-        targetPath: "/settings/mcp-hub",
+        ...mcpHubRouteCommand,
         category: "navigation",
         keywords: ["mcp", "hub", "acp", "policy", "server"],
       },
@@ -479,6 +536,11 @@ export function CommandPalette({
     return [...defaultCommands, ...additionalCommands, ...settingCommands]
   }, [defaultCommands, additionalCommands, settingCommands])
 
+  const getCanonicalCommandTargetPath = useCallback((targetPath: string) => {
+    if (targetPath === "/settings/mcp-hub") return "/mcp-hub"
+    return targetPath
+  }, [])
+
   const dedupeByTargetPath = useCallback((commands: CommandItem[]) => {
     const dedupedCommands: CommandItem[] = []
     const targetPathIndex = new Map<string, number>()
@@ -489,9 +551,10 @@ export function CommandPalette({
         continue
       }
 
-      const existingIndex = targetPathIndex.get(command.targetPath)
+      const canonicalTargetPath = getCanonicalCommandTargetPath(command.targetPath)
+      const existingIndex = targetPathIndex.get(canonicalTargetPath)
       if (existingIndex === undefined) {
-        targetPathIndex.set(command.targetPath, dedupedCommands.length)
+        targetPathIndex.set(canonicalTargetPath, dedupedCommands.length)
         dedupedCommands.push(command)
         continue
       }
@@ -508,7 +571,7 @@ export function CommandPalette({
     }
 
     return dedupedCommands
-  }, [])
+  }, [getCanonicalCommandTargetPath])
 
   // Filter commands based on query
   const filteredCommands = useMemo(() => {
@@ -562,6 +625,10 @@ export function CommandPalette({
   useEffect(() => {
     setSelectedIndex(0)
   }, [query])
+
+  useEffect(() => {
+    onQueryChange?.(query)
+  }, [onQueryChange, query])
 
   // Focus input when opened
   useEffect(() => {
@@ -669,7 +736,7 @@ export function CommandPalette({
       {/* Backdrop */}
       <div
         className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
-        onClick={() => setOpen(false)}
+        onClick={closePalette}
       />
 
       {/* Palette */}
@@ -688,6 +755,7 @@ export function CommandPalette({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            aria-label={t("common:commandPalette.searchCommands", "Search commands")}
             placeholder={t("common:commandPalette.placeholder", "Type a command or search...")}
             className={cn(
               "flex-1 rounded-md bg-transparent text-base text-text placeholder:text-text-subtle",
@@ -736,7 +804,9 @@ export function CommandPalette({
                           key={cmd.id}
                           onClick={() => executeCommand(cmd)}
                           onMouseEnter={() => setSelectedIndex(currentIndex)}
+                          data-command-id={cmd.id}
                           data-selected={isSelected}
+                          data-target-path={cmd.targetPath}
                           className={cn(
                             "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
                             focusRingClasses,

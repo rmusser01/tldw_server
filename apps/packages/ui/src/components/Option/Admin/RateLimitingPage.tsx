@@ -3,7 +3,6 @@ import {
   Card,
   Table,
   Tag,
-  Alert,
   Button,
   Space,
   Progress,
@@ -13,6 +12,7 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { Alert } from "@/components/ui/primitives"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
@@ -193,10 +193,18 @@ const RateLimitingPage: React.FC = () => {
   // ── Render ──
 
   if (adminGuard === "forbidden") {
-    return <Alert type="error" title="Access Denied" description="You don't have permission to access rate limiting administration." showIcon />
+    return (
+      <Alert variant="error" title="Access Denied">
+        You don't have permission to access rate limiting administration.
+      </Alert>
+    )
   }
   if (adminGuard === "notFound") {
-    return <Alert type="warning" title="Not Available" description="Rate limiting administration is not available on this server." showIcon />
+    return (
+      <Alert variant="warning" title="Not Available">
+        Rate limiting administration is not available on this server.
+      </Alert>
+    )
   }
 
   return (
@@ -241,7 +249,7 @@ const RateLimitingPage: React.FC = () => {
             )}
           </Space>
         ) : (
-          <Alert type="info" title="No policy data loaded yet." showIcon />
+          <Alert title="No policy data loaded yet." />
         )}
       </Card>
 
@@ -286,7 +294,7 @@ const RateLimitingPage: React.FC = () => {
             )}
           </Space>
         ) : (
-          <Alert type="info" title="No coverage data loaded yet." showIcon />
+          <Alert title="No coverage data loaded yet." />
         )}
       </Card>
 
@@ -301,7 +309,7 @@ const RateLimitingPage: React.FC = () => {
         }
       >
         {rateLimitsError ? (
-          <Alert type="info" title={rateLimitsError} showIcon />
+          <Alert title={rateLimitsError} />
         ) : (
           <Table
             dataSource={rateLimits}

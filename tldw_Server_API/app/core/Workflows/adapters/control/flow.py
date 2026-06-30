@@ -76,13 +76,13 @@ async def run_prompt_adapter(config: dict[str, Any], context: dict[str, Any]) ->
     try:
         if isinstance(data.get("inputs"), dict):
             data["inputs"] = types.SimpleNamespace(**data["inputs"])  # type: ignore[arg-type]
-    except _FLOW_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Prompt adapter: failed to namespace inputs: {e}", exc_info=True)
+    except _FLOW_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Prompt adapter: failed to namespace inputs")
     try:
         # Keep a shallow namespace for convenience
         data.update(variables)
-    except _FLOW_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Prompt adapter: failed to merge variables into context: {e}", exc_info=True)
+    except _FLOW_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Prompt adapter: failed to merge variables into context")
 
     # Pre-pass: replacements for common tokens to be robust in sandbox
     try:
@@ -97,8 +97,8 @@ async def run_prompt_adapter(config: dict[str, Any], context: dict[str, Any]) ->
                 key = m.group(1)
                 return str(context["inputs"].get(key, ""))
             template = re.sub(r"\{\{\s*inputs\.(\w+)\s*\}\}", repl_simple, template)
-    except _FLOW_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Prompt adapter: pre-pass templating fallback failed: {e}", exc_info=True)
+    except _FLOW_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Prompt adapter: pre-pass templating fallback failed")
 
     # Optional simulated delay/error for testing retries/timeouts
     try:
@@ -112,8 +112,8 @@ async def run_prompt_adapter(config: dict[str, Any], context: dict[str, Any]) ->
                 sl = min(0.05, remaining)
                 await asyncio.sleep(sl)
                 remaining -= sl
-    except _FLOW_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Prompt adapter: simulate_delay handling failed: {e}", exc_info=True)
+    except _FLOW_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Prompt adapter: simulate_delay handling failed")
     # Force-error handling (test-friendly)
     fe = config.get("force_error")
     if isinstance(fe, str):
@@ -138,8 +138,8 @@ async def run_prompt_adapter(config: dict[str, Any], context: dict[str, Any]) ->
                 mime_type="text/plain",
                 metadata={"step": "prompt"},
             )
-    except _FLOW_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Prompt adapter: failed to persist prompt artifact: {e}", exc_info=True)
+    except _FLOW_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Prompt adapter: failed to persist prompt artifact")
     return {"text": rendered}
 
 
@@ -404,10 +404,10 @@ async def run_parallel_adapter(config: dict[str, Any], context: dict[str, Any]) 
                     results[idx] = result
                 else:
                     results[idx] = {"error": f"unknown_step_type: {step_type}"}
-            except _FLOW_NONCRITICAL_EXCEPTIONS as e:
-                results[idx] = {"error": str(e)}
+            except _FLOW_NONCRITICAL_EXCEPTIONS:
+                results[idx] = {"error": "parallel_step_error"}
                 if fail_fast:
-                    errors.append(str(e))
+                    errors.append("parallel_step_error")
 
     tasks = [run_step(i, step) for i, step in enumerate(steps)]
     await asyncio.gather(*tasks, return_exceptions=not fail_fast)

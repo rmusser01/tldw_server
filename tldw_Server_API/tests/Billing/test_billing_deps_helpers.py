@@ -116,3 +116,77 @@ class TestResolveOrgIdForPrincipal:
         principal = AuthPrincipal(kind="user", user_id=1, is_admin=False)
         result = await billing_deps.resolve_org_id_for_principal(principal)
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_generic_exception_log_omits_raw_backend_details(self, monkeypatch):
+        """Generic fallback logs must not expose backend exception text."""
+        monkeypatch.setenv("LIMIT_ENFORCEMENT_ENABLED", "true")
+        sensitive_detail = "sqlite:///private/billing.db?token=super-secret"
+        messages: list[str] = []
+        sink_id = billing_deps.logger.add(messages.append, level="DEBUG", format="{message}")
+
+        async def _fail_resolve(principal, org_id=None, x_tldw_org_id=None):
+            raise RuntimeError(sensitive_detail)
+
+        monkeypatch.setattr(billing_deps, "_resolve_org_id", _fail_resolve, raising=False)
+        principal = AuthPrincipal(kind="user", user_id=1, is_admin=False)
+
+        try:
+            result = await billing_deps.resolve_org_id_for_principal(principal)
+        finally:
+            billing_deps.logger.remove(sink_id)
+
+        assert result is None
+        rendered = "\n".join(messages)
+        assert "resolve_org_id_for_principal failed" in rendered
+        assert sensitive_detail not in rendered
+        assert "super-secret" not in rendered
+        assert "/private/billing.db" not in rendered
+
+
+# ---------------------------------------------------------------------------
+# add_billing_headers
+# ---------------------------------------------------------------------------
+
+class TestAddBillingHeaders:
+    """Tests for the best-effort billing header helper."""
+
+    @pytest.mark.asyncio
+    async def test_generic_header_exception_log_omits_raw_backend_details(self, monkeypatch):
+        """Header fallback logs must not expose backend exception text."""
+        monkeypatch.setenv("LIMIT_ENFORCEMENT_ENABLED", "true")
+        sensitive_detail = "failed reading /private/plans.db with api_key=super-secret"
+        messages: list[str] = []
+        sink_id = billing_deps.logger.add(messages.append, level="DEBUG", format="{message}")
+
+        async def _fake_resolve(principal, org_id=None, x_tldw_org_id=None):
+            return 17
+
+        class _FailingEnforcer:
+            async def get_org_limits(self, org_id):
+                raise RuntimeError(sensitive_detail)
+
+            async def get_org_usage(self, org_id):
+                raise AssertionError("usage should not be loaded after limits fail")
+
+        monkeypatch.setattr(billing_deps, "_resolve_org_id", _fake_resolve, raising=False)
+        monkeypatch.setattr(billing_deps, "get_billing_enforcer", lambda: _FailingEnforcer(), raising=False)
+        response = Response()
+        principal = AuthPrincipal(kind="user", user_id=1, is_admin=False)
+
+        try:
+            result = await billing_deps.add_billing_headers(
+                response=response,
+                principal=principal,
+                x_tldw_org_id=None,
+                org_id=None,
+            )
+        finally:
+            billing_deps.logger.remove(sink_id)
+
+        assert result is None
+        rendered = "\n".join(messages)
+        assert "Failed to add billing headers" in rendered
+        assert sensitive_detail not in rendered
+        assert "super-secret" not in rendered
+        assert "/private/plans.db" not in rendered

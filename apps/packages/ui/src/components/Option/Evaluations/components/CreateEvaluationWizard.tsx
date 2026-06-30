@@ -5,7 +5,6 @@
 
 import React, { useMemo, useState } from "react"
 import {
-  Alert,
   Button,
   Checkbox,
   Collapse,
@@ -19,6 +18,7 @@ import {
 import type { FormInstance } from "antd"
 import { ArrowLeft, ArrowRight } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { evalTypeOptions, getDefaultEvalSpecForType } from "../hooks/useEvaluations"
 import { JsonEditor } from "./JsonEditor"
 import { VisualSpecBuilder } from "./VisualSpecBuilder"
@@ -142,14 +142,16 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
       case 0:
         return (
           <div className="space-y-4">
-            <Alert
-              type="info"
-              showIcon
-              className="text-xs"
-              title={t("evaluations:evalTypesHint", {
-                defaultValue:
-                  "Supported: model_graded, response_quality, rag, rag_pipeline, geval, exact_match, includes, fuzzy_match, proposition_extraction, qa3, label_choice, nli_factcheck, ocr."
-              })}
+            <DsAlert
+              variant="info"
+              title={
+                <span className="text-xs">
+                  {t("evaluations:evalTypesHint", {
+                    defaultValue:
+                      "Supported: model_graded, response_quality, rag, rag_pipeline, geval, exact_match, includes, fuzzy_match, proposition_extraction, qa3, label_choice, nli_factcheck, ocr."
+                  })}
+                </span>
+              }
             />
             <Form.Item
               label={t("evaluations:evalNameLabel", { defaultValue: "Name" })}

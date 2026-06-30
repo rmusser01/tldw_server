@@ -55,7 +55,7 @@ async def apply_precomputed_spans(
     _ = (query, documents, config, user_id)  # preserve signature; avoid unused warnings
     try:
         logger.debug("Precomputed span index not configured; using on-the-fly spans")  # pragma: no cover - debug log
-    except Exception as log_error:
+    except Exception:
         # Logging is best-effort only.
-        logger.debug("Precomputed span fallback logging failed", exc_info=log_error)
+        logger.debug("Precomputed span fallback logging failed")
     return None

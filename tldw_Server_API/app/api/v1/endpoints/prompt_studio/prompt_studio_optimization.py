@@ -36,11 +36,16 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     require_project_access,
     require_project_write_access,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+    build_page_pagination_meta,
+    resolve_page_pagination_metadata,
+)
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Local imports
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import (
-    ListResponse,
-    PaginationMetadata,
+    PageListResponse,
+    PageStandardResponse,
     StandardResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_optimization import (
@@ -55,12 +60,13 @@ from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import Database
 from tldw_Server_API.app.core.Logging.log_context import (
     ensure_request_id,
     ensure_traceparent,
+    get_ps_logger,
     log_context,
 )
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.job_types import JobType
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.jobs_adapter import PromptStudioJobsAdapter
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.monitoring import prompt_studio_metrics
-from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
+from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 _OPTIMIZATION_NONCRITICAL_EXCEPTIONS = (
@@ -89,6 +95,21 @@ router = APIRouter(
         429: {"description": "Rate limit exceeded"}
     }
 )
+
+def _get_optimization_request_logger(
+    request: Request | None,
+    *,
+    optimization_id: int,
+):
+    request_id = ensure_request_id(request) if request is not None else None
+    traceparent = ensure_traceparent(request) if request is not None else ""
+    return get_ps_logger(
+        ps_component="endpoint",
+        ps_job_kind="optimization",
+        optimization_id=optimization_id,
+        request_id=request_id,
+        traceparent=traceparent,
+    )
 
 ########################################################################################################################
 # Optimization CRUD Endpoints
@@ -586,7 +607,7 @@ async def _rl_optimizations(
                                         "prompt_candidates_per_node": 3,
                                         "score_dedup_bin": 0.1,
                                         "early_stop_no_improve": 5,
-                                        "token_budget": 50000
+                                        "token_budget": 50000,  # nosec B105 - OpenAPI example value, not a secret
                                     }
                                 },
                                 "test_case_ids": [1, 2, 3],
@@ -608,7 +629,7 @@ async def _rl_optimizations(
                                         "mcts_max_depth": 3,
                                         "mcts_exploration_c": 1.4,
                                         "prompt_candidates_per_node": 2,
-                                        "token_budget": 20000,
+                                        "token_budget": 20000,  # nosec B105 - OpenAPI example value, not a secret
                                         "ws_throttle_every": 2
                                     }
                                 },
@@ -800,21 +821,12 @@ async def create_optimization(
         return StandardResponse(success=True, data=response_payload)
 
     except DatabaseError as exc:
-        logger.error(f"Database error creating optimization: {exc}")
-        import os as _os
-        if is_test_mode():
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create optimization: {exc}",
-            ) from exc
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create optimization",
-        ) from exc
+        logger.error("Database error creating optimization")
+        raise map_db_error_to_http(exc, default_detail="Failed to create optimization") from exc
     except HTTPException:
         raise
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - safety
-        logger.error(f"Unexpected error creating optimization: {exc}")
+        logger.error("Unexpected error creating optimization")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create optimization",
@@ -822,7 +834,7 @@ async def create_optimization(
 
 @router.get(
     "/list/{project_id}",
-    response_model=ListResponse,
+    response_model=PageListResponse,
     openapi_extra={
         "responses": {
             "200": {
@@ -856,10 +868,10 @@ async def list_optimizations(
     project_id: int = Path(..., description="Project ID"),
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
-    status: Optional[str] = Query(None, description="Filter by status"),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
     _: bool = Depends(require_project_access),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db)
-) -> ListResponse:
+) -> PageListResponse:
     """
     List optimizations for a project.
 
@@ -876,7 +888,7 @@ async def list_optimizations(
     try:
         result = db.list_optimizations(
             project_id=project_id,
-            status=status,
+            status=status_filter,
             page=page,
             per_page=per_page,
         )
@@ -885,18 +897,30 @@ async def list_optimizations(
             OptimizationResponse(**record)
             for record in result.get("optimizations", [])
         ]
-        metadata = PaginationMetadata(**result.get("pagination", {}))
+        metadata = resolve_page_pagination_metadata(
+            result.get("pagination"),
+            page=page,
+            per_page=per_page,
+            item_count=len(optimizations),
+        )
 
-        return ListResponse(success=True, data=optimizations, metadata=metadata)
+        return PageListResponse(
+            success=True,
+            data=optimizations,
+            metadata=metadata,
+            pagination=build_page_pagination_meta(
+                page=metadata["page"],
+                per_page=metadata["per_page"],
+                total=metadata["total"],
+                total_pages=metadata["total_pages"],
+            ),
+        )
 
     except DatabaseError as exc:
-        logger.error(f"Database error listing optimizations: {exc}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to list optimizations",
-        ) from exc
+        logger.error("Database error listing optimizations")
+        raise map_db_error_to_http(exc, default_detail="Failed to list optimizations") from exc
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Unexpected error listing optimizations: {exc}")
+        logger.error("Unexpected error listing optimizations")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list optimizations",
@@ -940,15 +964,12 @@ async def get_optimization(
         )
 
     except DatabaseError as exc:
-        logger.error(f"Database error fetching optimization {optimization_id}: {exc}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get optimization",
-        ) from exc
+        logger.error("Database error fetching optimization")
+        raise map_db_error_to_http(exc, default_detail="Failed to get optimization") from exc
     except HTTPException:
         raise
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Unexpected error getting optimization {optimization_id}: {exc}")
+        logger.error("Unexpected error getting optimization")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get optimization",
@@ -1034,10 +1055,7 @@ async def cancel_optimization(
             mark_completed=True,
         )
 
-        from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request) if request is not None else ""
-        get_ps_logger(ps_component="endpoint", ps_job_kind="optimization", optimization_id=optimization_id, request_id=rid, traceparent=tp).info(
+        _get_optimization_request_logger(request, optimization_id=optimization_id).info(
             "User %s cancelled optimization %s",
             user_context.get("user_id"),
             optimization_id,
@@ -1049,23 +1067,14 @@ async def cancel_optimization(
         )
 
     except DatabaseError as exc:
-        from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request) if request is not None else ""
-        get_ps_logger(ps_component="endpoint", ps_job_kind="optimization", optimization_id=optimization_id, request_id=rid, traceparent=tp).error(
+        _get_optimization_request_logger(request, optimization_id=optimization_id).error(
             "Database error cancelling optimization %s: %s", optimization_id, exc
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to cancel optimization",
-        ) from exc
+        raise map_db_error_to_http(exc, default_detail="Failed to cancel optimization") from exc
     except HTTPException:
         raise
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
-        rid = ensure_request_id(request) if request is not None else None
-        tp = ensure_traceparent(request) if request is not None else ""
-        get_ps_logger(ps_component="endpoint", ps_job_kind="optimization", optimization_id=optimization_id, request_id=rid, traceparent=tp).error(
+        _get_optimization_request_logger(request, optimization_id=optimization_id).error(
             "Unexpected error cancelling optimization %s: %s", optimization_id, exc
         )
         raise HTTPException(
@@ -1138,7 +1147,7 @@ async def get_optimization_strategies() -> StandardResponse:
                 "mcts_max_depth": "Search depth (1-10)",
                 "mcts_exploration_c": "UCT exploration constant (0.1-2.0)",
                 "prompt_candidates_per_node": "Candidates per node (1-5)",
-                "token_budget": "Hard token cap",
+                "token_budget": "Hard token cap",  # nosec B105 - parameter label, not a credential
                 "ws_throttle_every": "Throttling interval for WS iteration events"
             }
         }
@@ -1241,12 +1250,12 @@ async def get_optimization_history(
             },
         )
     except DatabaseError as exc:
-        logger.error(f"Database error fetching optimization history {optimization_id}: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to fetch optimization history") from exc
+        logger.error("Database error fetching optimization history")
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch optimization history") from exc
     except HTTPException:
         raise
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Unexpected error fetching optimization history {optimization_id}: {exc}")
+        logger.error("Unexpected error fetching optimization history")
         raise HTTPException(status_code=500, detail="Failed to fetch optimization history") from exc
 
 ########################################################################################################################
@@ -1320,18 +1329,18 @@ async def add_optimization_iteration(
 
         return StandardResponse(success=True, data=record)
     except DatabaseError as exc:
-        logger.error(f"Database error recording iteration for optimization {optimization_id}: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to add iteration") from exc
+        logger.error("Database error recording optimization iteration")
+        raise map_db_error_to_http(exc, default_detail="Failed to add iteration") from exc
     except HTTPException:
         raise
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Unexpected error adding iteration: {exc}")
+        logger.error("Unexpected error adding optimization iteration")
         raise HTTPException(status_code=500, detail="Failed to add iteration") from exc
 
 
 @router.get(
     "/iterations/{optimization_id}",
-    response_model=StandardResponse,
+    response_model=PageStandardResponse,
     openapi_extra={
         "responses": {
             "200": {
@@ -1366,7 +1375,7 @@ async def list_optimization_iterations(
     per_page: int = Query(50, ge=1, le=200),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db),
     user_context: dict = Depends(get_prompt_studio_user)
-) -> ListResponse:
+) -> PageStandardResponse:
     """List persisted iterations for an optimization."""
     try:
         optimization = db.get_optimization(optimization_id)
@@ -1385,16 +1394,31 @@ async def list_optimization_iterations(
             per_page=per_page,
         )
 
-        metadata = PaginationMetadata(**result.get("pagination", {}))
+        metadata = resolve_page_pagination_metadata(
+            result.get("pagination"),
+            page=page,
+            per_page=per_page,
+            item_count=len(result.get("iterations", [])),
+        )
         # Back-compat: wrap iterations under data.{iterations} for tests expecting this shape
-        return StandardResponse(success=True, data={"iterations": result.get("iterations", [])}, metadata=metadata.model_dump())
+        return PageStandardResponse(
+            success=True,
+            data={"iterations": result.get("iterations", [])},
+            metadata=metadata,
+            pagination=build_page_pagination_meta(
+                page=metadata["page"],
+                per_page=metadata["per_page"],
+                total=metadata["total"],
+                total_pages=metadata["total_pages"],
+            ),
+        )
     except DatabaseError as exc:
-        logger.error(f"Database error listing optimization iterations for {optimization_id}: {exc}")
-        raise HTTPException(status_code=500, detail="Failed to list iterations") from exc
+        logger.error("Database error listing optimization iterations")
+        raise map_db_error_to_http(exc, default_detail="Failed to list iterations") from exc
     except HTTPException:
         raise
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Unexpected error listing iterations: {exc}")
+        logger.error("Unexpected error listing optimization iterations")
         raise HTTPException(status_code=500, detail="Failed to list iterations") from exc
 @router.post(
     "/compare",
@@ -1520,15 +1544,12 @@ async def compare_strategies(
         )
 
     except DatabaseError as exc:
-        logger.error(f"Database error comparing strategies: {exc}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to compare strategies",
-        ) from exc
+        logger.error("Database error comparing strategies")
+        raise map_db_error_to_http(exc, default_detail="Failed to compare strategies") from exc
     except HTTPException:
         raise
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Unexpected error comparing strategies: {exc}")
+        logger.error("Unexpected error comparing strategies")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to compare strategies",

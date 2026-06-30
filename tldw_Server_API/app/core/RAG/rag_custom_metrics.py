@@ -263,8 +263,8 @@ class RAGCustomMetrics:
                 suggestions=suggestions
             )
 
-        except Exception as e:
-            logger.error(f"Failed to evaluate completeness: {e}")
+        except Exception:
+            logger.error("Failed to evaluate completeness; using heuristic fallback")
             # Fallback to simple heuristic
             word_count = len(response.split())
             score = min(1.0, word_count / 200)  # Assume 200 words is complete
@@ -482,8 +482,8 @@ class RAGCustomMetrics:
             try:
                 result = await task
                 results[name] = result
-            except Exception as e:
-                logger.error(f"Failed to evaluate {name}: {e}")
+            except Exception:
+                logger.error(f"Failed to evaluate {name}; skipping metric")
 
         # Add response time metric if provided
         if response_time_ms:

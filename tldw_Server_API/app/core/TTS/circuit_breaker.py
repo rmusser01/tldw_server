@@ -11,7 +11,7 @@
 # Imports
 import asyncio
 import contextlib
-import random
+import secrets
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
@@ -41,6 +41,8 @@ from .tts_exceptions import (
 #######################################################################################################################
 #
 # Circuit Breaker Implementation
+
+_JITTER_RANDOM = secrets.SystemRandom()
 
 
 @dataclass
@@ -85,7 +87,7 @@ class CircuitStats:
             return 0.0
         delay = base_delay * (2 ** min(self.consecutive_failures - 1, 10))
         delay = min(delay, max_delay)
-        jitter = delay * 0.25 * (2 * random.random() - 1)
+        jitter = delay * 0.25 * (2 * _JITTER_RANDOM.random() - 1)
         return max(0.1, delay + jitter)
 
 
@@ -340,7 +342,11 @@ class CircuitBreaker:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in health monitoring for {self.provider_name}: {e}")
+                logger.error(
+                    "Error in health monitoring for {} ({})",
+                    self.provider_name,
+                    type(e).__name__,
+                )
 
     async def _perform_health_check(self, health_check_func: Optional[Callable]):
         try:
@@ -361,7 +367,11 @@ class CircuitBreaker:
                         f"Automatic recovery attempt for {self.provider_name}"
                     )
         except Exception as e:
-            logger.error(f"Health check failed for {self.provider_name}: {e}")
+            logger.error(
+                "Health check failed for {} ({})",
+                self.provider_name,
+                type(e).__name__,
+            )
 
     def _should_attempt_recovery(self) -> bool:
         if self._cb.state != _UnifiedState.OPEN:

@@ -40,13 +40,15 @@ class TestContextualChunking:
     @pytest.fixture
     def mock_chroma_manager(self, mock_config):
         """Create a mock ChromaDBManager instance."""
-        with patch('tldw_Server_API.app.core.Embeddings.ChromaDB_Library.Path'):
-            with patch('tldw_Server_API.app.core.Embeddings.ChromaDB_Library.chromadb'):
-                manager = ChromaDBManager(
-                    user_id="test_user",
-                    user_embedding_config=mock_config
-                )
-                return manager
+        with patch('tldw_Server_API.app.core.Embeddings.ChromaDB_Library.chromadb'):
+            manager = ChromaDBManager(
+                user_id="test_user",
+                user_embedding_config=mock_config
+            )
+            try:
+                yield manager
+            finally:
+                manager.close()
 
     def test_contextual_chunking_disabled_by_default(self, mock_chroma_manager):
 
@@ -58,13 +60,15 @@ class TestContextualChunking:
         """Test that config settings can override contextual chunking default."""
         mock_config["embedding_config"]["enable_contextual_chunking"] = True
 
-        with patch('tldw_Server_API.app.core.Embeddings.ChromaDB_Library.Path'):
-            with patch('tldw_Server_API.app.core.Embeddings.ChromaDB_Library.chromadb'):
-                manager = ChromaDBManager(
-                    user_id="test_user",
-                    user_embedding_config=mock_config
-                )
+        with patch('tldw_Server_API.app.core.Embeddings.ChromaDB_Library.chromadb'):
+            manager = ChromaDBManager(
+                user_id="test_user",
+                user_embedding_config=mock_config
+            )
+            try:
                 assert manager.embedding_config.get("enable_contextual_chunking") == True
+            finally:
+                manager.close()
 
     @patch('tldw_Server_API.app.core.Embeddings.ChromaDB_Library.chunk_for_embedding')
     @patch('tldw_Server_API.app.core.Embeddings.ChromaDB_Library.create_embeddings_batch')

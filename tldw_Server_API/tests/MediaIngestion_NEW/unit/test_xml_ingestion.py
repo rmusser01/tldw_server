@@ -32,7 +32,42 @@ def test_import_xml_handler_reports_malformed_input(monkeypatch):
         api_key=None,
     )
 
-    assert "Error parsing XML file" in result
+    assert result == "Error parsing XML file"
+    assert "unclosed" not in result
+    assert "line" not in result
+
+
+@pytest.mark.unit
+def test_import_xml_handler_sanitizes_unexpected_processing_failure(monkeypatch):
+    if not xml_lib._DEFUSED_AVAILABLE:
+        pytest.skip("defusedxml not installed")
+
+    def _fail_chunking(*_args, **_kwargs):
+        raise RuntimeError("xml chunker exploded at /private/xml/source.xml")
+
+    monkeypatch.setattr(xml_lib, "improved_chunking_process", _fail_chunking)
+    monkeypatch.setattr(
+        xml_lib,
+        "managed_media_database",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("db should not be opened after chunking failure")),
+        raising=False,
+    )
+
+    result = xml_lib.import_xml_handler(
+        import_file=io.BytesIO(b"<root><item>Hello</item></root>"),
+        title="XML Title",
+        author="Tester",
+        keywords="xml,import",
+        system_prompt=None,
+        custom_prompt=None,
+        auto_summarize=False,
+        api_name=None,
+        api_key=None,
+    )
+
+    assert result == "Error processing XML file"
+    assert "xml chunker exploded" not in result
+    assert "/private/xml/source.xml" not in result
 
 
 @pytest.mark.unit

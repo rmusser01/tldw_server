@@ -309,6 +309,181 @@ async def test_add_media_orchestrate_handles_document_exceptions(monkeypatch, tm
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_add_media_orchestrate_passes_auto_chunk_options_to_document_processor(
+    monkeypatch,
+    fake_db,
+):
+    captured: Dict[str, Any] = {}
+
+    def fail_legacy_prepare(_form_data: Any) -> None:
+        raise AssertionError("legacy chunk option preparation should not run for Auto mode")
+
+    async def fake_process_doc_item_fn(
+        *,
+        chunk_options: Dict[str, Any] | None,
+        item_input_ref: str,
+        processing_source: str,
+        media_type: Any,
+        **_kwargs: Any,
+    ) -> Dict[str, Any]:
+        captured["chunk_options"] = dict(chunk_options or {})
+        return {
+            "status": "Success",
+            "input_ref": item_input_ref,
+            "processing_source": str(processing_source),
+            "media_type": media_type,
+            "metadata": {},
+            "content": "content",
+            "analysis": None,
+            "summary": None,
+            "analysis_details": None,
+            "db_id": 1,
+            "db_message": "ok",
+        }
+
+    monkeypatch.setattr(
+        ingestion_persistence,
+        "prepare_chunking_options_dict",
+        fail_legacy_prepare,
+    )
+    monkeypatch.setattr(ingestion_persistence, "process_document_like_item", fake_process_doc_item_fn)
+
+    form_data = SimpleNamespace(
+        media_type="document",
+        urls=["https://example.test/auto.md"],
+        keep_original_file=False,
+        perform_chunking=True,
+        chunking_mode="auto",
+        auto_chunking_goal="navigation_summary",
+        auto_chunking_use_llm=False,
+        chunk_method="words",
+        chunk_size=333,
+        chunk_overlap=1,
+        chunk_language=None,
+        transcription_language=None,
+        chunking_template_name=None,
+        auto_apply_template=True,
+        hierarchical_chunking=False,
+        hierarchical_template=None,
+        use_adaptive_chunking=False,
+        use_multi_level_chunking=False,
+        custom_chapter_pattern=None,
+        enable_contextual_chunking=False,
+        contextual_llm_model=None,
+        context_window_size=None,
+        context_strategy=None,
+        context_token_budget=None,
+        perform_analysis=False,
+        generate_embeddings=False,
+        keywords=[],
+        title=None,
+        author=None,
+        overwrite_existing=False,
+    )
+
+    response = await ingestion_persistence.add_media_orchestrate(
+        background_tasks=BackgroundTasks(),
+        form_data=form_data,
+        files=[],
+        db=fake_db,
+        current_user=SimpleNamespace(id=1),
+        usage_log=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert captured["chunk_options"]["method"] == "semantic"
+    assert captured["chunk_options"]["max_size"] == 1400
+    assert captured["chunk_options"]["overlap"] == 100
+    assert captured["chunk_options"]["method"] != "words"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_add_media_orchestrate_passes_auto_chunk_options_to_batch_processor(
+    monkeypatch,
+    fake_db,
+):
+    captured: Dict[str, Any] = {}
+
+    def fail_legacy_prepare(_form_data: Any) -> None:
+        raise AssertionError("legacy chunk option preparation should not run for Auto mode")
+
+    async def fake_process_batch_media(**kwargs: Any) -> List[Dict[str, Any]]:
+        captured["chunk_options"] = dict(kwargs.get("chunk_options") or {})
+        return [
+            {
+                "status": "Success",
+                "input_ref": "https://example.test/audio.mp3",
+                "processing_source": "https://example.test/audio.mp3",
+                "media_type": "audio",
+                "metadata": {},
+                "content": "transcript",
+                "analysis": None,
+                "summary": None,
+                "analysis_details": None,
+                "db_id": 1,
+                "db_message": "ok",
+            }
+        ]
+
+    monkeypatch.setattr(
+        ingestion_persistence,
+        "prepare_chunking_options_dict",
+        fail_legacy_prepare,
+    )
+    monkeypatch.setattr(ingestion_persistence, "process_batch_media", fake_process_batch_media)
+
+    form_data = SimpleNamespace(
+        media_type="audio",
+        urls=["https://example.test/audio.mp3"],
+        keep_original_file=False,
+        perform_chunking=True,
+        chunking_mode="auto",
+        auto_chunking_goal="qa_search",
+        auto_chunking_use_llm=False,
+        chunk_method="words",
+        chunk_size=333,
+        chunk_overlap=1,
+        chunk_language=None,
+        transcription_language=None,
+        chunking_template_name=None,
+        auto_apply_template=True,
+        hierarchical_chunking=False,
+        hierarchical_template=None,
+        use_adaptive_chunking=False,
+        use_multi_level_chunking=False,
+        custom_chapter_pattern=None,
+        enable_contextual_chunking=False,
+        contextual_llm_model=None,
+        context_window_size=None,
+        context_strategy=None,
+        context_token_budget=None,
+        perform_analysis=False,
+        generate_embeddings=False,
+        keywords=[],
+        title=None,
+        author=None,
+        overwrite_existing=False,
+    )
+
+    response = await ingestion_persistence.add_media_orchestrate(
+        background_tasks=BackgroundTasks(),
+        form_data=form_data,
+        files=[],
+        db=fake_db,
+        current_user=SimpleNamespace(id=1),
+        usage_log=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert captured["chunk_options"]["method"] == "sentences"
+    assert captured["chunk_options"]["max_size"] == 700
+    assert captured["chunk_options"]["overlap"] == 140
+    assert captured["chunk_options"]["method"] != "words"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_add_media_orchestrate_partial_upload_errors_returns_multi_status(monkeypatch, fake_db, fake_storage):
     db = fake_db
 

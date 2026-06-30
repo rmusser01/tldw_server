@@ -1,17 +1,11 @@
 import type { WatchlistRun } from "@/types/watchlists"
-
-const normalizeRunStatus = (status: unknown): string =>
-  String(status ?? "")
-    .trim()
-    .toLowerCase()
+import { isWatchlistRunActive } from "../shared/runStatus"
 
 const MIN_POLL_INTERVAL_MS = 100
 const IDLE_POLL_MIN_MS = 30_000
 const BACKGROUND_POLL_MIN_MS = 60_000
 const DEFAULT_ACTIVE_PAGE_SIZE = 25
 const DEFAULT_IDLE_PAGE_SIZE = 10
-
-const ACTIVE_RUN_STATUSES = new Set(["pending", "running", "queued"])
 
 const normalizePositiveInt = (value: number, fallback: number): number => {
   if (!Number.isFinite(value)) return fallback
@@ -24,7 +18,7 @@ export const hasActiveWatchlistRuns = (
   runs: Array<Pick<WatchlistRun, "status">> | null | undefined
 ): boolean => {
   if (!Array.isArray(runs) || runs.length === 0) return false
-  return runs.some((run) => ACTIVE_RUN_STATUSES.has(normalizeRunStatus(run.status)))
+  return runs.some((run) => isWatchlistRunActive(run.status))
 }
 
 export const resolveAdaptiveRunNotificationsPollMs = (

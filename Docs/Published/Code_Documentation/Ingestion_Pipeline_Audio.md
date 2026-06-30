@@ -44,7 +44,7 @@ process_audio_files(
  - inputs: URLs (including YouTube) or absolute local paths to audio files.
  - transcription_model: Supports multiple providers via naming scheme (parsed via the same logic as the HTTP `/audio/transcriptions` endpoint):
    - faster-whisper models (e.g., `base`, `medium`, `large-v3`, `distil-whisper-large-v3`, a local path, or HF hub id)
-   - NVIDIA NeMo Parakeet: `parakeet`, `parakeet-standard`, `parakeet-onnx`, `parakeet-mlx`, or any string where `parse_transcription_model` resolves the provider to `"parakeet"`
+   - NVIDIA NeMo Parakeet: `parakeet`, `parakeet-standard`, `parakeet-tdt-0.6b-v3-onnx`, `parakeet-onnx` (legacy alias), `parakeet-mlx`, or any string where `parse_transcription_model` resolves the provider to `"parakeet"`
    - NVIDIA NeMo Canary: `canary` or related aliases (provider `"canary"`)
    - Qwen2Audio: `qwen2audio` or `qwen2audio-*` (provider `"qwen2audio"`)
  - transcription_language: target/source language (default `en`). When `None`, the underlying STT provider is allowed to auto-detect; this matches the behavior of `speech_to_text(..., selected_source_lang=None)` and the `/audio/transcriptions` endpoint.

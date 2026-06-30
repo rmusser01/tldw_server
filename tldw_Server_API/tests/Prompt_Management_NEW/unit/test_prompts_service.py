@@ -11,7 +11,6 @@ from datetime import datetime
 import json
 
 from tldw_Server_API.app.core.Prompt_Management.Prompts_Interop import PromptsInteropService
-from tldw_Server_API.app.core.DB_Management.Prompts_DB_V2 import PromptsDB
 
 # ========================================================================
 # Service Initialization Tests
@@ -239,6 +238,42 @@ class TestSearchAndFilter:
 
         assert len(results) == 1
         assert results[0]['author'] == 'dev_user'
+
+    @pytest.mark.unit
+    def test_search_prompts_uses_real_database_signature(self, tmp_path):
+        """Test service search against the real database keyword signature."""
+        service = PromptsInteropService(
+            db_directory=str(tmp_path),
+            client_id="test_client"
+        )
+
+        class SignatureOnlyDB:
+            def __init__(self):
+                self.call = None
+
+            def search_prompts(self, *, search_query, search_fields, page, results_per_page, include_deleted):
+                self.call = {
+                    "search_query": search_query,
+                    "search_fields": search_fields,
+                    "page": page,
+                    "results_per_page": results_per_page,
+                    "include_deleted": include_deleted,
+                }
+                return ([{"id": 1, "name": "Code Helper"}], 1)
+
+        fake_db = SignatureOnlyDB()
+        service._db_instance = fake_db
+
+        results = service.search_prompts(query="code")
+
+        assert results == [{"id": 1, "name": "Code Helper"}]
+        assert fake_db.call == {
+            "search_query": "code",
+            "search_fields": None,
+            "page": 1,
+            "results_per_page": 50,
+            "include_deleted": False,
+        }
 
     @pytest.mark.unit
     def test_filter_prompts_by_keywords(self, mock_prompts_service):

@@ -1,8 +1,9 @@
 import React from "react"
-import { Button, Tag, Tooltip, Radio, Select, Dropdown, Switch, Spin, Skeleton, Empty, Typography, Alert } from "antd"
+import { Button, Tag, Tooltip, Radio, Select, Dropdown, Switch, Spin, Skeleton, Empty, Typography } from "antd"
 import { CopyIcon, HelpCircle, Settings2, ChevronLeft, ChevronRight, Layers, LayoutGrid, Focus, Rows3, Check, MessageSquare } from "lucide-react"
 import { ChevronDown, ChevronUp } from "lucide-react"
 import type { VirtualItem } from "@tanstack/react-virtual"
+import { Alert } from "@/components/ui/primitives"
 import { clearSetting } from "@/services/settings/registry"
 import {
   MEDIA_REVIEW_SELECTION_SETTING,
@@ -294,15 +295,13 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
 
         {hasFailed && (
           <Alert
-            type="error"
-            showIcon
+            variant="error"
             className="mt-3"
             title={t('mediaPage.loadFailed', 'Failed to load content')}
-            action={
-              <Button size="small" onClick={() => retryFetch(d.id)}>
-                {t('mediaPage.retry', 'Retry')}
-              </Button>
-            }
+            action={{
+              label: t('mediaPage.retry', 'Retry'),
+              onClick: () => retryFetch(d.id)
+            }}
           />
         )}
 

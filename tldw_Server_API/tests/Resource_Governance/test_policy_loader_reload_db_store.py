@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from pathlib import Path
 
@@ -41,6 +42,8 @@ route_map:
         """.strip(),
         encoding="utf-8",
     )
+    future_mtime = time.time() + 3600
+    os.utime(yaml_path, (future_mtime, future_mtime))
 
     store = _BumpStore()
     loader = PolicyLoader(str(yaml_path), PolicyReloadConfig(enabled=False), store=store)
@@ -48,7 +51,8 @@ route_map:
     assert snap1.version == 1
     assert snap1.route_map.get("by_path", {}).get("/api/v1/chat/*") == "chat.default"
 
-    # Bump store version & rpm; then maybe_reload should pull v2 and keep file route_map
+    # Bump store version & rpm; then maybe_reload should pull v2 even when the
+    # file route_map mtime is newer than the DB updated_at timestamp.
     store.bump(rpm=200)
     await loader._maybe_reload()  # type: ignore[attr-defined]
     snap2 = loader.get_snapshot()

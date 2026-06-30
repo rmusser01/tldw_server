@@ -48,11 +48,12 @@ vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>(
     "react-router-dom"
   )
-  return {
-    ...actual,
-    useNavigate: () => connectionState.navigate
-  }
-})
+    return {
+      ...actual,
+      useNavigate: () => connectionState.navigate,
+      useSearchParams: () => [new URLSearchParams()]
+    }
+  })
 vi.mock("@/hooks/useServerOnline", () => ({
   useServerOnline: () => connectionState.online
 }))

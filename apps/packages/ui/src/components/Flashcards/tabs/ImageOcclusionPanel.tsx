@@ -1,6 +1,7 @@
-import { Alert, Button, Card, Input, Typography } from "antd"
+import { Button, Card, Input, Typography } from "antd"
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 
 import {
   finalizeNormalizedOcclusionRect,
@@ -228,8 +229,7 @@ export const ImageOcclusionPanel: React.FC<ImageOcclusionPanelProps> = ({ onChan
 
       {!sourceUrl ? (
         <Alert
-          type="info"
-          showIcon
+          variant="info"
           title={t("option:flashcards.occlusionAwaitingImage", {
             defaultValue: "Choose an image to begin authoring occlusions."
           })}
@@ -315,8 +315,7 @@ export const ImageOcclusionPanel: React.FC<ImageOcclusionPanelProps> = ({ onChan
 
               {regions.length === 0 ? (
                 <Alert
-                  type="info"
-                  showIcon
+                  variant="info"
                   title={t("option:flashcards.occlusionNoRegions", {
                     defaultValue: "No regions yet. Draw on the image to add one."
                   })}

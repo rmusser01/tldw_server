@@ -167,6 +167,7 @@
     "providerChangeHelper": "아래 제공자 선택기에서 브라우저, tldw, OpenAI 또는 Supersonic으로 전환하세요.",
     "changeProvider": "제공자 변경",
     "title": "TTS 플레이그라운드",
+    "routeTitle": "텍스트 음성 변환",
     "subtitle": "텍스트 음성을 시험하고 제공자, 모델, 음성을 조정하세요.",
     "currentProvider": "현재 제공자",
     "settingsIntro": "TTS 제공자, 모델, 음성을 조정하세요. 이 설정은 채팅이나 미디어에서 오디오를 재생할 때 재사용됩니다.",

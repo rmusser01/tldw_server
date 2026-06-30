@@ -2,6 +2,7 @@ import asyncio
 import types
 import pytest
 
+from tldw_Server_API.app.core.RAG.rag_service.result_model import RAGResult
 from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
 import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
 
@@ -36,6 +37,23 @@ class FakeAnswerGenerator:
         if "CRITIQUE:" in context:
             return {"answer": "refined answer"}
         return {"answer": "draft answer"}
+
+
+class ManyDocRetriever:
+    def __init__(self, *args, **kwargs):
+        self.retrievers = {}
+
+    async def retrieve(self, query: str, sources=None, config=None, index_namespace=None, **kwargs):
+        return [
+            Document(
+                id=f"m{i}",
+                content=f"Document {i}",
+                source=DataSource.MEDIA_DB,
+                metadata={},
+                score=1.0 - (i * 0.01),
+            )
+            for i in range(7)
+        ]
 
 
 @pytest.mark.asyncio
@@ -101,7 +119,14 @@ async def test_generation_uses_explicit_provider_and_model(monkeypatch):
             captured["kwargs"] = kwargs
 
         async def generate(self, *, query: str, context: str, prompt_template=None, max_tokens=None, temperature=None):
-            return {"answer": "provider-model-ok"}
+            captured["context"] = context
+            return {
+                "answer": "provider-model-ok",
+                "provider": "anthropic",
+                "model": "claude-3-5-haiku-latest",
+                "tokens_used": 22,
+                "generation_time": 0.12,
+            }
 
     monkeypatch.setattr(up, "AnswerGenerator", CapturingAnswerGenerator)
 
@@ -122,3 +147,147 @@ async def test_generation_uses_explicit_provider_and_model(monkeypatch):
     assert init_kwargs.get("model") == "claude-3-5-haiku-latest"
     ga = getattr(res, "generated_answer", None) or (res.get("generated_answer") if isinstance(res, dict) else None)
     assert ga == "provider-model-ok"
+    md = getattr(res, "metadata", None) or (res.get("metadata") if isinstance(res, dict) else {})
+    assert md.get("provider") == "anthropic"
+    assert md.get("model") == "claude-3-5-haiku-latest"
+    assert md.get("tokens_used") == 22
+    assert md.get("generation_time") == 0.12
+
+
+@pytest.mark.asyncio
+async def test_standard_generation_routes_through_generation_executor(monkeypatch):
+    monkeypatch.setattr(up, "MultiDatabaseRetriever", FakeRetriever)
+    monkeypatch.setattr(up, "AnswerGenerator", FakeAnswerGenerator)
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_generation_phase(
+        *,
+        resolved_request,
+        retrieval_plan,
+        derived_evidence,
+        generate_answer_fn,
+        generation_context,
+    ):
+        captured["resolved_request"] = resolved_request
+        captured["retrieval_plan"] = retrieval_plan
+        captured["derived_evidence"] = derived_evidence
+        captured["generate_answer_fn"] = generate_answer_fn
+        captured["generation_context"] = generation_context
+        return RAGResult(
+            documents=list(derived_evidence.documents),
+            query=resolved_request.query,
+            metadata={"model": "stub"},
+            chunk_citations=[{"id": "doc-1"}],
+            verification_report={"ok": True},
+            generated_answer="executor answer",
+        )
+
+    monkeypatch.setattr(up, "execute_generation_phase", fake_execute_generation_phase)
+
+    res = await up.unified_rag_pipeline(
+        query="Use executor path",
+        sources=["media_db"],
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=True,
+        generation_prompt="concise",
+        max_generation_tokens=64,
+        top_k=2,
+    )
+
+    resolved_request = captured.get("resolved_request")
+    derived_evidence = captured.get("derived_evidence")
+
+    assert resolved_request is not None
+    assert getattr(resolved_request, "query", None) == "Use executor path"
+    assert getattr(resolved_request, "payload", {}).get("generation_prompt") == "concise"
+    assert getattr(resolved_request, "payload", {}).get("max_generation_tokens") == 64
+    assert captured.get("retrieval_plan") is not None
+    assert derived_evidence is not None
+    assert len(getattr(derived_evidence, "documents", [])) == 2
+    assert captured.get("generation_context") == "First doc with content\n\nSecond doc with content"
+
+    ga = getattr(res, "generated_answer", None) or (res.get("generated_answer") if isinstance(res, dict) else None)
+    md = getattr(res, "metadata", None) or (res.get("metadata") if isinstance(res, dict) else {})
+    assert ga == "executor answer"
+    assert md.get("chunk_citations") == [{"id": "doc-1"}]
+
+
+@pytest.mark.asyncio
+async def test_generation_keeps_full_retrieval_set_when_executor_returns_smaller_document_sample(monkeypatch):
+    monkeypatch.setattr(up, "MultiDatabaseRetriever", ManyDocRetriever)
+    monkeypatch.setattr(up, "AnswerGenerator", FakeAnswerGenerator)
+
+    async def fake_execute_generation_phase(
+        *,
+        resolved_request,
+        retrieval_plan,
+        derived_evidence,
+        generate_answer_fn,
+        generation_context,
+    ):
+        assert retrieval_plan is not None
+        assert generation_context == "Document 0\n\nDocument 1\n\nDocument 2\n\nDocument 3\n\nDocument 4"
+        return RAGResult(
+            documents=list(derived_evidence.documents[:5]),
+            query=resolved_request.query,
+            metadata={"provider": "stub"},
+            chunk_citations=[{"id": "doc-1"}],
+            verification_report={"ok": True},
+            generated_answer="executor answer",
+        )
+
+    monkeypatch.setattr(up, "execute_generation_phase", fake_execute_generation_phase)
+
+    res = await up.unified_rag_pipeline(
+        query="Keep all docs",
+        sources=["media_db"],
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=True,
+        top_k=7,
+    )
+
+    docs = getattr(res, "documents", None) or (res.get("documents") if isinstance(res, dict) else None)
+    assert len(docs) == 7
+    assert [doc["id"] if isinstance(doc, dict) else doc.id for doc in docs] == [f"m{i}" for i in range(7)]
+
+
+@pytest.mark.asyncio
+async def test_structured_response_generation_uses_writer_transformed_context(monkeypatch):
+    monkeypatch.setattr(up, "MultiDatabaseRetriever", FakeRetriever)
+
+    monkeypatch.setattr(up, "format_context_xml", lambda chunks: "XML::" + "|".join(chunk["content"] for chunk in chunks))
+    monkeypatch.setattr(up, "build_writer_system_prompt", lambda mode, max_generation_tokens: f"SYSTEM::{mode}::{max_generation_tokens}")
+    monkeypatch.setattr(up, "build_writer_user_prompt", lambda query, context_xml: f"USER::{query}::{context_xml}")
+    monkeypatch.setattr(up, "get_writer_depth_policy", lambda **kwargs: {"mode": kwargs["mode"], "max_generation_tokens": kwargs["max_generation_tokens"]})
+
+    captured: dict[str, object] = {}
+
+    class CapturingStructuredAnswerGenerator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def generate(self, *, query: str, context: str, prompt_template=None, max_tokens=None, temperature=None):
+            captured["context"] = context
+            captured["prompt_template"] = prompt_template
+            return {"answer": "writer answer"}
+
+    monkeypatch.setattr(up, "AnswerGenerator", CapturingStructuredAnswerGenerator)
+
+    res = await up.unified_rag_pipeline(
+        query="Use writer context",
+        sources=["media_db"],
+        enable_cache=False,
+        enable_reranking=False,
+        enable_generation=True,
+        enable_structured_response=True,
+        generation_prompt="base prompt",
+        top_k=2,
+    )
+
+    assert captured["context"] == "USER::Use writer context::XML::First doc with content|Second doc with content"
+    assert captured["prompt_template"] == "base prompt\n\nSYSTEM::balanced::500"
+    ga = getattr(res, "generated_answer", None) or (res.get("generated_answer") if isinstance(res, dict) else None)
+    assert ga == "writer answer"

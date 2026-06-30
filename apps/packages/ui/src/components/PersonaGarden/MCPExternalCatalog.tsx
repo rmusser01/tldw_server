@@ -32,6 +32,14 @@ export const MCPExternalCatalog: React.FC<MCPExternalCatalogProps> = ({
 
   // Track which card is actively being tested so we show the result on the right card
   const [testingKey, setTestingKey] = React.useState<string | null>(null)
+  const handleCustomAuthChange = React.useCallback(
+    (value: string) => {
+      setCustomAuth(
+        value === "bearer" || value === "api_key" ? value : "none"
+      )
+    },
+    []
+  )
 
   const sorted = React.useMemo(() => {
     const suggested = entries.filter((e) => suggestedServers.includes(e.key))
@@ -137,7 +145,7 @@ export const MCPExternalCatalog: React.FC<MCPExternalCatalogProps> = ({
               aria-label="Authentication type"
               value={customAuth}
               className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
-              onChange={(e) => setCustomAuth(e.target.value)}
+              onChange={(e) => handleCustomAuthChange(e.target.value)}
             >
               <option value="none">None</option>
               <option value="bearer">Bearer token</option>

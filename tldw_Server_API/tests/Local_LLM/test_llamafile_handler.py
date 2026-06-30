@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import platform
 import zipfile
 from pathlib import Path
@@ -66,6 +67,39 @@ async def test_llamafile_start_server_redacts_api_key(monkeypatch, tmp_path: Pat
     assert res["status"] == "started"
     assert "REDACTED" in res["command"]
     assert "supersecret" not in res["command"]
+
+
+@pytest.mark.asyncio
+async def test_llamafile_executable_download_requires_opt_in_and_sha256(monkeypatch, tmp_path: Path):
+    llama_dir = tmp_path / "llamafile"
+    model_dir = tmp_path / "models"
+    llama_dir.mkdir()
+    model_dir.mkdir()
+
+    cfg = LlamafileConfig(llamafile_dir=llama_dir, models_dir=model_dir)
+    handler = LlamafileHandler(cfg, global_app_config={})
+
+    async def fake_request_json(*_args, **_kwargs):
+        return {
+            "tag_name": "v1.0",
+            "assets": [
+                {
+                    "name": "llamafile-linux-arm64",
+                    "browser_download_url": "https://example.com/llamafile",
+                }
+            ],
+        }
+
+    async def fake_download(*_args, **_kwargs):
+        raise AssertionError("remote executable download should fail before network fetch")
+
+    import tldw_Server_API.app.core.Local_LLM.http_utils as http_utils
+
+    monkeypatch.setattr(http_utils, "request_json", fake_request_json)
+    monkeypatch.setattr(http_utils, "async_stream_download", fake_download)
+
+    with pytest.raises(ModelDownloadError, match="auto-download|sha256|checksum"):
+        await handler.download_latest_llamafile_executable()
 
 
 @pytest.mark.asyncio
@@ -141,6 +175,9 @@ async def test_llamafile_stop_timeout(monkeypatch, tmp_path: Path):
         def terminate(self):
             self.returncode = None
 
+        def kill(self):
+            self.returncode = -9
+
     handler._active_servers[5555] = SlowProc()
 
     async def fake_wait_for(coro, timeout):
@@ -151,9 +188,28 @@ async def test_llamafile_stop_timeout(monkeypatch, tmp_path: Path):
     import os as _os
 
     monkeypatch.setattr(_os, "killpg", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
 
     msg = await handler.stop_server(port=5555)
     assert "stopped" in msg.lower() or "terminated" in msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_llamafile_stop_server_rejects_unmanaged_pid(monkeypatch, tmp_path: Path):
+    llama_dir = tmp_path / "llamafile"
+    llama_dir.mkdir()
+    cfg = LlamafileConfig(llamafile_dir=llama_dir, models_dir=tmp_path)
+    handler = LlamafileHandler(cfg, global_app_config={})
+
+    def fail_kill(*_args, **_kwargs):
+        raise AssertionError("unmanaged PID termination must not be attempted")
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    monkeypatch.setattr("os.kill", fail_kill)
+
+    msg = await handler.stop_server(pid=424242)
+
+    assert "no managed" in msg.lower()
 
 
 @pytest.mark.asyncio
@@ -245,13 +301,21 @@ async def test_llamafile_start_server_not_ready_terminates_process(monkeypatch, 
     from tldw_Server_API.app.core.Local_LLM import http_utils
 
     monkeypatch.setattr(http_utils, "wait_for_http_ready", lambda *a, **k: asyncio.sleep(0, result=False))
-    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    import tldw_Server_API.app.core.Local_LLM.Llamafile_Handler as llamafile_mod
+
+    monkeypatch.setattr(llamafile_mod.os, "getpgid", lambda pid: pid, raising=False)
+
+    def fail_killpg(*_args):
+        raise AssertionError("fake subprocess cleanup must not signal a real process group")
+
+    monkeypatch.setattr(llamafile_mod.os, "killpg", fail_killpg, raising=False)
 
     with pytest.raises(ServerError):
         await handler.start_server("toy.gguf", server_args={"port": 8077})
 
     proc = proc_holder["proc"]
-    assert proc.terminated or proc.killed
+    assert proc.terminated is True
+    assert proc.killed is False
 
 
 @pytest.mark.unit
@@ -457,7 +521,12 @@ async def test_llamafile_inference_drops_timeout(monkeypatch, tmp_path: Path):
 async def test_llamafile_download_selects_exe_asset(monkeypatch, tmp_path: Path):
     llama_dir = tmp_path / "llamafile"
     llama_dir.mkdir()
-    cfg = LlamafileConfig(llamafile_dir=llama_dir, models_dir=tmp_path)
+    cfg = LlamafileConfig(
+        llamafile_dir=llama_dir,
+        models_dir=tmp_path,
+        allow_executable_auto_download=True,
+        executable_sha256=hashlib.sha256(b"binary").hexdigest(),
+    )
     handler = LlamafileHandler(cfg, global_app_config={})
     handler.llamafile_exe_path = llama_dir / "llamafile.exe"
 
@@ -489,7 +558,7 @@ async def test_llamafile_download_selects_exe_asset(monkeypatch, tmp_path: Path)
 
     async def fake_download(url, dest_path):
         downloads.append(url)
-        Path(dest_path).write_text("binary")
+        Path(dest_path).write_bytes(b"binary")
 
     import tldw_Server_API.app.core.Local_LLM.Llamafile_Handler as lf_mod
     import tldw_Server_API.app.core.Local_LLM.http_utils as http_utils
@@ -510,7 +579,12 @@ async def test_llamafile_download_selects_exe_asset(monkeypatch, tmp_path: Path)
 async def test_llamafile_download_extracts_zip_asset(monkeypatch, tmp_path: Path):
     llama_dir = tmp_path / "llamafile"
     llama_dir.mkdir()
-    cfg = LlamafileConfig(llamafile_dir=llama_dir, models_dir=tmp_path)
+    cfg = LlamafileConfig(
+        llamafile_dir=llama_dir,
+        models_dir=tmp_path,
+        allow_executable_auto_download=True,
+        executable_sha256=hashlib.sha256(b"binary").hexdigest(),
+    )
     handler = LlamafileHandler(cfg, global_app_config={})
     handler.llamafile_exe_path = llama_dir / "llamafile.exe"
 

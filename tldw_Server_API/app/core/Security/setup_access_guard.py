@@ -29,7 +29,6 @@ def _env_true(name: str) -> bool:
     return is_truthy(raw)
 
 
-
 def _get_peer_ip(request: Request) -> str | None:
     try:
         return request.client.host if request.client else None
@@ -104,33 +103,47 @@ class SetupAccessGuardMiddleware(BaseHTTPMiddleware):
     def _resolve_client_ip(self, request: Request, trusted_proxies: list[ipaddress._BaseNetwork]) -> str | None:
         """Resolve client IP using X-Forwarded-For only when the peer is a trusted proxy.
 
-        - If remote peer is in trusted_proxies and XFF present, use the first (leftmost) XFF IP.
+        - If remote peer is in trusted_proxies and XFF present, walk the chain
+          from right to left and return the first untrusted IP.
         - Else, use the socket peer.
-        - X-Real-IP is considered only when peer is trusted and header is present.
+        - X-Real-IP is considered only when peer is trusted, XFF is absent, and
+          the header is valid.
         """
         peer = _get_peer_ip(request)
         try:
             peer_ip_obj = ipaddress.ip_address(peer) if peer else None
         except ValueError:
             peer_ip_obj = None
+
         def _is_trusted(ip: ipaddress._BaseAddress | None) -> bool:
             return bool(ip and any(ip in net for net in trusted_proxies))
 
         if _is_trusted(peer_ip_obj):
-            # Prefer X-Real-IP if present and valid; else leftmost XFF element
+            fwd = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
+            if fwd:
+                parsed_chain: list[ipaddress._BaseAddress] = []
+                malformed_entries = False
+                for raw_part in fwd.split(","):
+                    part = raw_part.strip()
+                    if not part:
+                        continue
+                    try:
+                        parsed_chain.append(ipaddress.ip_address(part))
+                    except ValueError:
+                        malformed_entries = True
+                        continue
+                if malformed_entries:
+                    logger.warning("Malformed X-Forwarded-For entry ignored for trusted Setup proxy")
+                for ip_obj in reversed(parsed_chain):
+                    if not _is_trusted(ip_obj):
+                        return str(ip_obj)
+                if parsed_chain:
+                    return str(parsed_chain[0])
             xr = request.headers.get("x-real-ip") or request.headers.get("X-Real-IP")
             if xr:
                 try:
                     ipaddress.ip_address(xr.strip())
                     return xr.strip()
-                except ValueError:
-                    pass
-            fwd = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
-            if fwd:
-                try:
-                    leftmost = fwd.split(",")[0].strip()
-                    ipaddress.ip_address(leftmost)
-                    return leftmost
                 except ValueError:
                     pass
         return peer

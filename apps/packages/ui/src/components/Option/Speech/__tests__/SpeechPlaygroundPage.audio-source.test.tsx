@@ -176,6 +176,10 @@ vi.mock("@/components/Option/Speech/RenderStrip", () => ({
   RenderStrip: () => <div data-testid="render-strip" />
 }))
 
+vi.mock("@/components/Option/Audio/AudioPresetControls", () => ({
+  AudioPresetControls: () => <div data-testid="audio-preset-controls" />
+}))
+
 vi.mock("@/components/Option/Speech/VoicePickerModal", () => ({
   VoicePickerModal: () => <div data-testid="voice-picker-modal" />
 }))
@@ -488,7 +492,9 @@ describe("SpeechPlaygroundPage audio source", () => {
     expect(mockGetUserMedia).not.toHaveBeenCalled()
     await waitFor(() => {
       expect(
-        screen.getAllByText("Audio capture is already active for live_voice").length
+        screen.getAllByText(
+          "Stop the active capture session in live_voice and try again."
+        ).length
       ).toBeGreaterThanOrEqual(1)
     })
   })

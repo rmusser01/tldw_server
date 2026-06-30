@@ -20,7 +20,11 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.Slides.slides_assets import SlidesAssetError, resolve_slide_asset
+from tldw_Server_API.app.core.Slides.slides_assets import (
+    MAX_RESOLVED_SLIDE_ASSET_BYTES,
+    SlidesAssetError,
+    resolve_slide_asset,
+)
 from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase
 
 _SUPPORTED_RENDER_FORMATS = {"mp4", "webm"}
@@ -33,6 +37,10 @@ _ACCENT_COLOR = "#38bdf8"
 _DEFAULT_FFMPEG_TIMEOUT_SECONDS = 120
 _DEFAULT_FFPROBE_TIMEOUT_SECONDS = 30
 _TRANSITION_DURATION_SECONDS = 0.75
+MAX_RENDER_SLIDES = 200
+MAX_RENDER_SLIDE_DURATION_SECONDS = 300.0
+MAX_RENDER_TOTAL_DURATION_SECONDS = 3600.0
+MAX_RENDER_AUDIO_ASSET_BYTES = 50 * 1024 * 1024
 _TRANSITION_FILTERS = {
     "cut": "cut",
     "fade": "fade",
@@ -238,6 +246,34 @@ def _duration_seconds_from_ms(value: Any) -> float | None:
     return float(value) / 1000.0
 
 
+def _validate_render_slides_before_ffmpeg(slides: list[dict[str, Any]]) -> None:
+    if len(slides) > MAX_RENDER_SLIDES:
+        raise PresentationRenderError("presentation_render_slides_too_many")
+    for slide in slides:
+        manual_duration_seconds = _duration_seconds_from_ms(
+            _slide_studio_metadata(slide).get("manual_duration_ms")
+        )
+        if (
+            manual_duration_seconds is not None
+            and manual_duration_seconds > MAX_RENDER_SLIDE_DURATION_SECONDS
+        ):
+            raise PresentationRenderError("presentation_render_duration_too_long")
+
+
+def _validate_resolved_render_duration(
+    *,
+    slide_duration_seconds: float,
+    total_duration_seconds: float | None = None,
+) -> None:
+    if slide_duration_seconds > MAX_RENDER_SLIDE_DURATION_SECONDS:
+        raise PresentationRenderError("presentation_render_duration_too_long")
+    if (
+        total_duration_seconds is not None
+        and total_duration_seconds > MAX_RENDER_TOTAL_DURATION_SECONDS
+    ):
+        raise PresentationRenderError("presentation_render_duration_too_long")
+
+
 def _probe_media_duration_seconds(media_path: Path) -> float | None:
     ffprobe_path = _resolve_ffprobe_path()
     if ffprobe_path is None or not media_path.exists():
@@ -343,7 +379,12 @@ def _materialize_slide_image(
     asset_ref = image.get("asset_ref")
     if isinstance(asset_ref, str) and asset_ref.strip():
         try:
-            resolved = resolve_slide_asset(asset_ref, collections_db=collections_db, user_id=user_id)
+            resolved = resolve_slide_asset(
+                asset_ref,
+                collections_db=collections_db,
+                user_id=user_id,
+                max_bytes=MAX_RESOLVED_SLIDE_ASSET_BYTES,
+            )
         except SlidesAssetError as exc:
             raise PresentationRenderError("presentation_render_asset_unavailable") from exc
         raw_bytes = _decode_data_b64(str(resolved.get("data_b64") or ""), error_code="presentation_render_asset_invalid")
@@ -382,7 +423,12 @@ def _materialize_slide_audio(
         return None
 
     try:
-        resolved = resolve_slide_asset(asset_ref, collections_db=collections_db, user_id=user_id)
+        resolved = resolve_slide_asset(
+            asset_ref,
+            collections_db=collections_db,
+            user_id=user_id,
+            max_bytes=MAX_RENDER_AUDIO_ASSET_BYTES,
+        )
     except SlidesAssetError as exc:
         raise PresentationRenderError("presentation_render_asset_unavailable") from exc
 
@@ -817,16 +863,6 @@ def render_presentation_video(
     if normalized_format not in _SUPPORTED_RENDER_FORMATS:
         raise PresentationRenderError("presentation_render_format_invalid")
 
-    output_root = Path(output_dir)
-    output_root.mkdir(parents=True, exist_ok=True)
-    storage_name = _build_storage_name(
-        presentation_id=presentation_id,
-        presentation_version=presentation_version,
-        output_format=normalized_format,
-    )
-    output_path = output_root / storage_name
-    ffmpeg_path = _resolve_ffmpeg_path()
-
     render_slides = slides or [
         {
             "order": 0,
@@ -837,6 +873,17 @@ def render_presentation_video(
             "metadata": {},
         }
     ]
+    _validate_render_slides_before_ffmpeg(render_slides)
+
+    output_root = Path(output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+    storage_name = _build_storage_name(
+        presentation_id=presentation_id,
+        presentation_version=presentation_version,
+        output_format=normalized_format,
+    )
+    output_path = output_root / storage_name
+    ffmpeg_path = _resolve_ffmpeg_path()
 
     with tempfile.TemporaryDirectory(prefix="presentation-render-") as temp_dir_str:
         temp_dir = Path(temp_dir_str)
@@ -865,6 +912,7 @@ def render_presentation_video(
                     slide,
                     audio_duration_seconds=audio_duration_seconds,
                 )
+                _validate_resolved_render_duration(slide_duration_seconds=slide_duration_seconds)
                 prepared_slides.append(
                     _PreparedSlideRender(
                         slide=slide,
@@ -882,6 +930,10 @@ def render_presentation_video(
         has_visual_transitions = any(transition != "cut" for transition in boundary_transitions)
         total_expected_duration_seconds = sum(
             prepared.effective_duration_seconds for prepared in prepared_slides
+        )
+        _validate_resolved_render_duration(
+            slide_duration_seconds=0.0,
+            total_duration_seconds=total_expected_duration_seconds,
         )
 
         if not has_visual_transitions:

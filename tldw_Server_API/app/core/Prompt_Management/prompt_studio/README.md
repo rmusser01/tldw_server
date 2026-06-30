@@ -706,8 +706,10 @@ The Program Evaluator executes code (runner="python") for test cases and maps ob
 It is disabled by default and guarded by a feature flag and per-project controls.
 
 Enable:
-- `PROMPT_STUDIO_ENABLE_CODE_EVAL=true` to enable globally, and/or
-- Set project metadata `{ "enable_code_eval": true }`.
+- `PROMPT_STUDIO_ENABLE_CODE_EVAL=true` to request global code evaluation.
+- `PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL=true` to acknowledge that subprocess execution is unsafe without OS-level isolation.
+- `PROMPT_STUDIO_ALLOW_PROJECT_CODE_EVAL=true` to let project metadata `{ "enable_code_eval": true }` request code evaluation.
+- `PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL_IN_PRODUCTION=true` is additionally required in production-like environments (`tldw_production=true`, `ENVIRONMENT=production`, `APP_ENV=prod`, etc.).
 
 Runtime knobs:
 - `PROMPT_STUDIO_CODE_EVAL_TIMEOUT_MS` (wall timeout)
@@ -717,12 +719,12 @@ Runtime knobs:
 Runner convention:
 - Test cases that should be executed must declare `runner="python"` and provide inputs/expected_outputs compatible with the evaluator.
 - The evaluator extracts fenced code blocks or heuristically detects Python in the output.
-- Execution is sandboxed with resource limits (best-effort, POSIX RLIMIT); no network/files; import whitelist only.
+- Execution uses a restricted subprocess with resource limits (best-effort, POSIX RLIMIT); no network/files; import whitelist only. This is not an OS-level sandbox.
 - On non-POSIX (e.g., Windows), the sandbox is best-effort only; use extra caution.
 
 Status and safety:
 - If disabled, a heuristic text-based reward is used instead.
-- Do not enable in untrusted multi-tenant contexts.
+- Do not enable in untrusted multi-tenant contexts unless the deployment provides its own container, gVisor, microVM, or equivalent isolation boundary.
 - Long-running loops are mitigated with CPU/memory/time limits; still use with care.
 
 See also:

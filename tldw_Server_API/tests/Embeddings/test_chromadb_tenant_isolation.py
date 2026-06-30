@@ -317,6 +317,19 @@ class TestUserIdValidation:
         with pytest.raises(ValueError):
             validate_user_id(bad_id)
 
+    def test_validate_user_id_rejects_path_traversal_when_audit_times_out(self, monkeypatch):
+        """Audit timeouts must not mask the path traversal validation error."""
+        def _timeout(**_kwargs):
+            raise TimeoutError("audit write timed out")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Embeddings.ChromaDB_Library.log_security_violation",
+            _timeout,
+        )
+
+        with pytest.raises(ValueError, match="forbidden characters"):
+            validate_user_id("../evil")
+
     @pytest.mark.parametrize(
         "bad_id",
         [

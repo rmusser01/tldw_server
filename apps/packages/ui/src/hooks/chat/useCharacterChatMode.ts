@@ -3,7 +3,10 @@ import type { TFunction } from "i18next";
 import { generateID } from "@/db/dexie/helpers";
 import { getModelNicknameByID } from "@/db/dexie/nickname";
 import { isReasoningEnded, isReasoningStarted } from "@/libs/reasoning";
-import { buildAssistantErrorContent } from "@/utils/chat-error-message";
+import {
+  buildAssistantErrorContent,
+  encodeChatErrorPayload,
+} from "@/utils/chat-error-message";
 import { detectCharacterMood } from "@/utils/character-mood";
 import {
   buildMessageVariant,
@@ -17,6 +20,10 @@ import {
 } from "@/utils/resolve-api-provider";
 import { consumeStreamingChunk } from "@/utils/streaming-chunks";
 import { normalizeConversationState } from "@/utils/conversation-state";
+import {
+  WEBUI_CHARACTER_CHAT_SOURCE,
+  buildCharacterChatSessionTitle,
+} from "@/utils/character-chat-session";
 import {
   buildGreetingOptionsFromEntries,
   collectGreetingEntries,
@@ -39,7 +46,6 @@ import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPers
 import type { Character } from "@/types/character";
 import type { ChatScope } from "@/types/chat-scope";
 import type { ChatHistory, Message } from "@/store/option";
-import type { SaveMessageData } from "@/types/chat-modes";
 import {
   attemptCharacterStreamRecoveryPersist,
   type TldwChatMeta,
@@ -48,6 +54,244 @@ import {
 } from "./chat-action-utils";
 
 const STREAMING_UPDATE_INTERVAL_MS = 80;
+
+export type CharacterChatFailureRecovery =
+  | {
+      kind: "provider_unconfigured";
+      action: "open-model-settings";
+      summary: string;
+      message: string;
+      detail: string;
+    }
+  | {
+      kind: "model_unavailable";
+      action: "open-model-settings";
+      summary: string;
+      message: string;
+      detail: string;
+    }
+  | {
+      kind: "transient";
+      action: "retry";
+      summary: string;
+      message: string;
+      detail: string;
+    };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const MAX_FAILURE_DETAIL_VALUES = 20;
+const MAX_FAILURE_DETAIL_VALUE_CHARS = 500;
+const MAX_FAILURE_DETAIL_CHARS = 3000;
+
+const redactFailureDetail = (value: string): string =>
+  value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "sk-[redacted]");
+
+const clampFailureDetail = (value: string, maxLength: number): string =>
+  value.length > maxLength
+    ? `${value.slice(0, Math.max(0, maxLength - 1))}…`
+    : value;
+
+const normalizeFailureDetailValue = (value: string): string =>
+  clampFailureDetail(
+    redactFailureDetail(value.trim()),
+    MAX_FAILURE_DETAIL_VALUE_CHARS,
+  );
+
+const pushStringValue = (values: string[], value: unknown) => {
+  if (values.length >= MAX_FAILURE_DETAIL_VALUES) return;
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    values.push(normalizeFailureDetailValue(value));
+  } else if (typeof value === "number" || typeof value === "boolean") {
+    values.push(String(value));
+  }
+};
+
+const collectChatFailureStrings = (
+  value: unknown,
+  values: string[] = [],
+  seen = new WeakSet<object>(),
+): string[] => {
+  pushStringValue(values, value);
+
+  if (!isRecord(value) || values.length >= MAX_FAILURE_DETAIL_VALUES) {
+    return values;
+  }
+
+  if (seen.has(value)) {
+    return values;
+  }
+  seen.add(value);
+
+  if (value instanceof Error) {
+    pushStringValue(values, value.name);
+    pushStringValue(values, value.message);
+    collectChatFailureStrings(value.cause, values, seen);
+  }
+
+  for (const key of [
+    "code",
+    "error",
+    "message",
+    "detail",
+    "type",
+    "reason",
+    "status",
+    "statusText",
+  ]) {
+    const candidate = value[key];
+    if (isRecord(candidate)) {
+      collectChatFailureStrings(candidate, values, seen);
+    } else {
+      pushStringValue(values, candidate);
+    }
+    if (values.length >= MAX_FAILURE_DETAIL_VALUES) return values;
+  }
+
+  for (const key of ["response", "data", "body", "cause"]) {
+    collectChatFailureStrings(value[key], values, seen);
+    if (values.length >= MAX_FAILURE_DETAIL_VALUES) return values;
+  }
+
+  return values;
+};
+
+const buildCharacterFailureDetail = (error: unknown): string => {
+  const values = Array.from(new Set(collectChatFailureStrings(error)));
+  if (values.length > 0) {
+    return clampFailureDetail(values.join(" | "), MAX_FAILURE_DETAIL_CHARS);
+  }
+  return clampFailureDetail(
+    normalizeFailureDetailValue(
+      error instanceof Error ? error.message : String(error || ""),
+    ),
+    MAX_FAILURE_DETAIL_CHARS,
+  );
+};
+
+const translateRecoveryCopy = (
+  t: TFunction | undefined,
+  key: string,
+  defaultValue: string,
+): string => {
+  if (!t) return defaultValue;
+  const translated = t(`playground:characterChatFailure.${key}`, {
+    defaultValue,
+  });
+  return typeof translated === "string" ? translated : defaultValue;
+};
+
+export const classifyCharacterChatFailureRecovery = (
+  error: unknown,
+  t?: TFunction,
+): CharacterChatFailureRecovery => {
+  const detail = buildCharacterFailureDetail(error);
+  const lower = detail.toLowerCase();
+
+  const providerUnconfigured =
+    lower.includes("provider_not_configured") ||
+    lower.includes("no_provider_configured") ||
+    lower.includes("no llm providers are configured") ||
+    lower.includes("no providers configured") ||
+    lower.includes("missing_api_key") ||
+    lower.includes("provider not configured") ||
+    lower.includes("api key is missing") ||
+    (lower.includes("provider") &&
+      (lower.includes("not configured") ||
+        lower.includes("no api key") ||
+        lower.includes("missing api key"))) ||
+    (lower.includes("api key") &&
+      (lower.includes("missing") || lower.includes("not configured")));
+
+  if (providerUnconfigured) {
+    return {
+      kind: "provider_unconfigured",
+      action: "open-model-settings",
+      summary: translateRecoveryCopy(
+        t,
+        "providerUnconfigured.summary",
+        "Character chat model setup needs attention.",
+      ),
+      message: translateRecoveryCopy(
+        t,
+        "providerUnconfigured.message",
+        "Open model settings and configure the selected model provider. Your character chat state and draft are kept so you can return and try again.",
+      ),
+      detail,
+    };
+  }
+
+  const modelUnavailable =
+    lower.includes("model_not_found") ||
+    lower.includes("invalid model id") ||
+    lower.includes("not a valid model id") ||
+    lower.includes("no such model") ||
+    lower.includes("model unavailable") ||
+    lower.includes("not callable") ||
+    lower.includes("catalog_only");
+
+  if (modelUnavailable) {
+    return {
+      kind: "model_unavailable",
+      action: "open-model-settings",
+      summary: translateRecoveryCopy(
+        t,
+        "modelUnavailable.summary",
+        "The selected Character Chat model is not callable.",
+      ),
+      message: translateRecoveryCopy(
+        t,
+        "modelUnavailable.message",
+        "Open model settings and choose or configure a callable chat model. Your character chat state and draft are kept so you can return and try again.",
+      ),
+      detail,
+    };
+  }
+
+  return {
+    kind: "transient",
+    action: "retry",
+    summary: translateRecoveryCopy(
+      t,
+      "transient.summary",
+      "Character chat response failed.",
+    ),
+    message: translateRecoveryCopy(
+      t,
+      "transient.message",
+      "Try again in a moment, or open Health & diagnostics to inspect server health.",
+    ),
+    detail,
+  };
+};
+
+const buildCharacterChatAssistantErrorContent = (
+  botMessage: string | undefined,
+  rawError: unknown,
+  t: TFunction,
+): string => {
+  if (botMessage && String(botMessage).trim().length > 0) {
+    return String(botMessage);
+  }
+
+  const recovery = classifyCharacterChatFailureRecovery(rawError, t);
+  if (recovery.action === "open-model-settings") {
+    return encodeChatErrorPayload({
+      summary: recovery.summary,
+      hint: recovery.message,
+      detail: recovery.detail,
+      category: `character_chat.${recovery.kind}`,
+      recoveryAction: "open-model-settings",
+      recoveryLabel: "Open model settings",
+    });
+  }
+
+  return buildAssistantErrorContent(botMessage, rawError);
+};
 
 export type CharacterChatModeParams = {
   message: string;
@@ -453,13 +697,24 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       let chatId = shouldResetServerChat ? null : resolvedServerChatId;
       let createdNewChat = false;
       if (!chatId) {
+        const fallbackTitle = String(
+          t("playground:characterChat.sessionFallbackTitle", "{{name}} role-play", {
+            name: characterName,
+          }),
+        );
+        const title = buildCharacterChatSessionTitle({
+          characterName,
+          firstUserMessage: message,
+          fallbackTitle,
+        });
         const created = (await tldwClient.createChat(
           {
             character_id: activeCharacter.id,
+            title,
             state: serverChatState || "in-progress",
             topic_label: serverChatTopic || undefined,
             cluster_id: serverChatClusterId || undefined,
-            source: serverChatSource || undefined,
+            source: serverChatSource || WEBUI_CHARACTER_CHAT_SOURCE,
             external_ref: serverChatExternalRef || undefined,
           },
           scope ? { scope } : undefined,
@@ -1048,7 +1303,11 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
           return true;
         },
       });
-      const assistantContent = buildAssistantErrorContent(fullText, e);
+      const assistantContent = buildCharacterChatAssistantErrorContent(
+        fullText,
+        e,
+        t,
+      );
       const interruptionReason =
         e instanceof Error ? e.message : t("somethingWentWrong");
       if (generateMessageId) {

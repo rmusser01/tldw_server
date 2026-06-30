@@ -32,7 +32,7 @@ ACP (Agent Client Protocol) lets you control AI coding assistants from your brow
 The flow:
 1. You type a prompt in the browser
 2. tldw_server sends it to tldw-agent (Go runner)
-3. tldw-agent launches your coding agent (e.g., Claude Code)
+3. tldw-agent launches your configured downstream ACP command or adapter
 4. Results stream back through tldw_server to your browser
 5. Permission requests appear in the UI for you to approve/deny
 
@@ -42,8 +42,8 @@ Before starting, ensure you have:
 
 - **tldw_server running** - See [Self-Hosting Profiles](../../Getting_Started/README.md)
 - **Go 1.22+** - Required for building tldw-agent ([go.dev/dl](https://go.dev/dl))
-- **Claude Code installed** - Or another ACP-compatible agent
-- **Anthropic API key** - For Claude Code (get one at [console.anthropic.com](https://console.anthropic.com))
+- **ACP-compatible downstream agent or adapter** - For Claude Code, install Claude Code plus the pinned `@agentclientprotocol/claude-agent-acp` adapter; for native ACP agents, install the agent binary.
+- **Provider/auth state for the chosen agent** - Configure credentials in the agent or adapter environment according to that agent's documentation.
 
 ## Step-by-Step Setup
 
@@ -92,18 +92,19 @@ enabled = true
 runtime = docker
 base_image = tldw/acp-agent:latest
 network_policy = allow_all
-agent_command = claude
-agent_args = ["code"]
+agent_command = claude-agent-acp
+agent_args = []
 ```
 
-`agent_command` must point to the downstream coding agent binary (`claude`, `codex`, `opencode`, etc.).  
+For a native ACP command, set `agent_command` plus `agent_args` to the command that serves ACP over stdio, such as `opencode` with `["acp"]`.
+For an external adapter, set `agent_command` to the adapter binary, such as `codex-acp` or `claude-agent-acp`.
 Do not set `agent_command` to `tldw-agent-acp` because that recursively launches the runner and will fail with `resource temporarily unavailable`.
 
 3. Set required env vars:
 
 ```bash
 export ACP_SANDBOX_ENABLED=1
-export ACP_SANDBOX_AGENT_COMMAND=claude
+export ACP_SANDBOX_AGENT_COMMAND=claude-agent-acp
 export SANDBOX_ENABLE_EXECUTION=1
 export SANDBOX_BACKGROUND_EXECUTION=1
 export SANDBOX_DOCKER_BIND_WORKSPACE=1
@@ -160,17 +161,38 @@ Create the config directory:
 mkdir -p ~/.tldw-agent
 ```
 
-### Step 3: Configure for Claude Code
+### Step 3: Configure for Claude Code via ACP Adapter
 
-Create `~/.tldw-agent/config.yaml` with your Claude Code settings:
+Install the pinned adapter before using Claude Code through ACP:
+
+```bash
+npm install -g @agentclientprotocol/claude-agent-acp@0.40.0
+```
+
+Create `~/.tldw-agent/config.yaml` with the Claude Code ACP adapter profile:
 
 ```yaml
 # ~/.tldw-agent/config.yaml
-agent:
-  command: "claude"
-  args: ["code"]
-  env:
-    ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+agents:
+  default: claude_code
+  agents:
+    - type: claude_code
+      name: Claude Code
+      description: Claude Code via agentclientprotocol/claude-agent-acp.
+      command: claude
+      args: []
+      env:
+        - TERM=xterm-256color
+        - HOME=${TLDW_ACP_HOST_HOME}
+      entrypoint_strategy: external_acp_adapter
+      acp_command: claude-agent-acp
+      acp_args: []
+      adapter_source: agentclientprotocol/claude-agent-acp
+      adapter_docs_url: https://github.com/agentclientprotocol/claude-agent-acp
+      adapter_package: "@agentclientprotocol/claude-agent-acp"
+      adapter_version: "0.40.0"
+      credential_policy: delegated_to_adapter
+      runtime_backend: acp_downstream
 
 # Optional: Restrict file operations to specific directories
 workspace:
@@ -192,13 +214,7 @@ logging:
   level: "info"
 ```
 
-Set your Anthropic API key:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-Or add it to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.).
+Claude Code ACP support is live-E2E certified with caveats for the verified macOS host runner profile using pinned `@agentclientprotocol/claude-agent-acp@0.40.0`. Validate both `claude --version` and `claude-agent-acp --help`, ensure the adapter is on the `tldw_server` and runner `PATH`, and configure Claude Code or the adapter's provider settings in the same runner environment. Sandbox, artifact-producing workflows, non-empty MCP injection, reviewer-loop behavior, and other host profiles remain unverified.
 
 ### Step 4: Test the Connection
 
@@ -283,13 +299,38 @@ When you're done:
 
 ### Codex CLI (OpenAI)
 
+Codex uses an external ACP adapter profile. Install the OpenAI Codex CLI
+separately first, then install `zed-industries/codex-acp` `0.15.0` from the
+GitHub release artifact and ensure both `codex` and `codex-acp` are on PATH.
+
+For operator setup or certification environments where release artifacts are not
+available, a pinned npm install of `@zed-industries/codex-acp@0.15.0` is an
+acceptable alternative. Do not use `@latest` for certification or seeded runtime
+configuration.
+
+Passive readiness checks only inspect configured binaries and metadata. They do
+not install packages, invoke package managers, or run `npx @latest`.
+
+Codex CLI `0.128.0` through `codex-acp` `0.15.0` has backend live E2E
+coverage on the macOS host runner for health/setup-guide, session creation,
+prompting, redacted support views, diagnostics, cancel, and close. Sandbox,
+non-empty MCP injection, artifact-producing workflows, and reviewer-loop
+behavior remain unverified.
+
 ```yaml
-# ~/.tldw-agent/config.yaml
-agent:
-  command: "codex"
-  args: []
-  env:
-    OPENAI_API_KEY: "${OPENAI_API_KEY}"
+# tldw_Server_API/Config_Files/agents.yaml
+- type: codex
+  command: codex
+  entrypoint_strategy: external_acp_adapter
+  acp_command: codex-acp
+  acp_args: []
+  adapter_source: zed-industries/codex-acp
+  adapter_version: "0.15.0"
+  adapter_version_policy: exact_pin_required
+  adapter_install_source: github_release_preferred
+  credential_policy: delegated_to_adapter
+  support_state: supported_with_caveats
+  verification_level: live_e2e_tested
 ```
 
 ### OpenCode
@@ -344,18 +385,17 @@ Then restart tldw_server.
 
 ### "Agent not responding"
 
-**Cause:** Agent configuration issue or missing API key.
+**Cause:** Agent configuration issue, missing adapter, or missing provider/login state.
 
 **Fix:**
 1. Verify your config file exists: `cat ~/.tldw-agent/config.yaml`
-2. Check the agent command works directly:
+2. Check the agent and adapter commands work directly:
    ```bash
-   claude code --help
+   claude --version
+   claude-agent-acp --help
    ```
-3. Ensure API key is set:
-   ```bash
-   echo $ANTHROPIC_API_KEY
-   ```
+   For Codex adapter setups, also check `codex --version` and `codex-acp --version`.
+3. Confirm provider/login state is configured in the same environment used by the runner.
 4. Check the HOME environment in `runner_env` points to the config directory
 
 ### WebSocket Connection Fails

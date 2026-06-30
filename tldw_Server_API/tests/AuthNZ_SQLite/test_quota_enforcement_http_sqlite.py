@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Any, Callable
 
 import pytest
 from fastapi.testclient import TestClient
@@ -43,6 +44,28 @@ def _restore_env_vars(previous: dict[str, str | None]) -> None:
             os.environ[key] = value
 
 
+def _file_backed_chacha_override(
+    db_path: Path,
+    *,
+    client_id: str,
+) -> tuple[Callable[..., Any], Callable[[], None]]:
+    """Return a file-backed ChaChaNotes override and cleanup callback."""
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    opened_dbs: list[CharactersRAGDB] = []
+
+    async def _override_chacha_db_for_user(current_user=None):
+        db = CharactersRAGDB(db_path=str(db_path), client_id=client_id)
+        opened_dbs.append(db)
+        return db
+
+    def _cleanup() -> None:
+        for db in opened_dbs:
+            db.close_all_connections()
+
+    return _override_chacha_db_for_user, _cleanup
+
+
 @pytest.mark.asyncio
 async def test_jwt_quota_enforced_for_chat_and_rag_sqlite(monkeypatch, tmp_path):
     # Multi-user mode to ensure JWTs are treated as Bearer tokens.
@@ -64,6 +87,7 @@ async def test_jwt_quota_enforced_for_chat_and_rag_sqlite(monkeypatch, tmp_path)
     await reset_api_key_manager()
     fastapi_app = None
     chacha_deps = None
+    cleanup_chacha = None
     try:
         pool = await get_db_pool()
         ensure_authnz_tables(Path(pool.db_path))
@@ -104,14 +128,16 @@ async def test_jwt_quota_enforced_for_chat_and_rag_sqlite(monkeypatch, tmp_path)
 
         # Avoid exercising the real ChaChaNotes executor in this SQLite-focused
         # test by overriding the ChaChaNotes DB dependency with a lightweight
-        # in-memory CharactersRAGDB instance.
+        # temp-file CharactersRAGDB. A file-backed DB is required because the
+        # chat endpoint persists through executor threads, and SQLite :memory:
+        # databases are scoped to each connection/thread.
         from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
-        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
         from tldw_Server_API.app.main import app as fastapi_app
 
-        async def _override_chacha_db_for_user(current_user=None):
-            return CharactersRAGDB(db_path=":memory:", client_id="test-jwt-quota")
-
+        _override_chacha_db_for_user, cleanup_chacha = _file_backed_chacha_override(
+            tmp_path / "jwt_quota_chacha.db",
+            client_id="test-jwt-quota",
+        )
         fastapi_app.dependency_overrides[chacha_deps.get_chacha_db_for_user] = _override_chacha_db_for_user
 
         with TestClient(_app()) as client:
@@ -149,6 +175,8 @@ async def test_jwt_quota_enforced_for_chat_and_rag_sqlite(monkeypatch, tmp_path)
     finally:
         if fastapi_app is not None and chacha_deps is not None:
             fastapi_app.dependency_overrides.pop(chacha_deps.get_chacha_db_for_user, None)
+        if cleanup_chacha is not None:
+            cleanup_chacha()
         _restore_env_vars(old_env)
         reset_settings()
         await reset_db_pool()
@@ -176,6 +204,7 @@ async def test_api_key_quota_enforced_for_rag_and_chat_sqlite(monkeypatch, tmp_p
     await reset_api_key_manager()
     fastapi_app = None
     chacha_deps = None
+    cleanup_chacha = None
     try:
         pool = await get_db_pool()
         ensure_authnz_tables(Path(pool.db_path))
@@ -214,16 +243,15 @@ async def test_api_key_quota_enforced_for_rag_and_chat_sqlite(monkeypatch, tmp_p
 
         # Avoid exercising the real ChaChaNotes executor (which may have been shut
         # down in other tests) by overriding the ChaChaNotes DB dependency with a
-        # lightweight in-memory CharactersRAGDB instance.
+        # lightweight temp-file CharactersRAGDB. A file-backed DB is required
+        # because the chat endpoint can persist through executor threads.
         from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
-        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
         from tldw_Server_API.app.main import app as fastapi_app
 
-        async def _override_chacha_db_for_user(current_user=None):
-            # Each call gets its own in-memory DB; sufficient for quota tests which
-            # only need the dependency to resolve successfully.
-            return CharactersRAGDB(db_path=":memory:", client_id="test-quota")
-
+        _override_chacha_db_for_user, cleanup_chacha = _file_backed_chacha_override(
+            tmp_path / "api_key_quota_chacha.db",
+            client_id="test-quota",
+        )
         fastapi_app.dependency_overrides[chacha_deps.get_chacha_db_for_user] = _override_chacha_db_for_user
 
         with TestClient(_app()) as client:
@@ -256,6 +284,8 @@ async def test_api_key_quota_enforced_for_rag_and_chat_sqlite(monkeypatch, tmp_p
     finally:
         if fastapi_app is not None and chacha_deps is not None:
             fastapi_app.dependency_overrides.pop(chacha_deps.get_chacha_db_for_user, None)
+        if cleanup_chacha is not None:
+            cleanup_chacha()
         _restore_env_vars(old_env)
         reset_settings()
         await reset_db_pool()

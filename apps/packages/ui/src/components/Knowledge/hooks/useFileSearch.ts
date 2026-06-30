@@ -236,7 +236,10 @@ export function useFileSearch({
         return
       }
       try {
-        await navigator.clipboard.writeText(formatRagResult(pinned, format))
+        const resolvedPinned = await withFullMediaTextIfAvailable(pinned)
+        await navigator.clipboard.writeText(
+          formatRagResult(resolvedPinned, format)
+        )
       } catch (error) {
         console.error("Failed to copy result to clipboard:", error)
       }

@@ -9,6 +9,7 @@ import os
 
 #
 # Local Imports
+from tldw_Server_API.app.core.TTS import tts_validation
 from tldw_Server_API.app.core.TTS.tts_validation import TTSInputValidator, validate_tts_request, ProviderLimits
 from tldw_Server_API.app.core.TTS.adapters.base import TTSRequest, AudioFormat
 from tldw_Server_API.app.core.TTS.tts_exceptions import (
@@ -177,6 +178,89 @@ class TestTTSInputValidator:
         error = exc_info.value
         assert "Speed must be between 0.1 and 3.0" in str(error)
 
+    def test_validate_request_unexpected_error_log_sanitizes_exception_text(self, validator, monkeypatch):
+        """Unexpected validation failures should not leak raw exception text to logs."""
+        raw_error = "validation backend exploded"
+        logged_messages: list[str] = []
+
+        def fail_parameter_validation(request, provider=None):
+            raise RuntimeError(raw_error)
+
+        monkeypatch.setattr(validator, "_validate_parameters", fail_parameter_validation)
+        request = TTSRequest(text="Hello world", voice="alloy", format=AudioFormat.MP3, speed=1.0)
+        sink_id = tts_validation.logger.add(
+            lambda message: logged_messages.append(message.record["message"]),
+            level="ERROR",
+        )
+        try:
+            is_valid, error_message = validator.validate_request(request, provider="openai")
+        finally:
+            tts_validation.logger.remove(sink_id)
+
+        assert is_valid is False
+        assert error_message == f"Validation failed: {raw_error}"
+        assert any("Unexpected validation error" in message for message in logged_messages)
+        assert all(raw_error not in message for message in logged_messages)
+
+    def test_chatterbox_standard_rejects_non_english_language(self, validator):
+        """Original Chatterbox remains English-only unless a multilingual model is requested."""
+        request = TTSRequest(
+            text="Bonjour tout le monde.",
+            model="chatterbox",
+            language="fr",
+            format=AudioFormat.MP3,
+        )
+
+        is_valid, error_message = validator.validate_request(request, provider="chatterbox")
+
+        assert is_valid is False
+        assert error_message is not None
+        assert "Language 'fr' not supported" in error_message
+
+    def test_chatterbox_multilingual_model_accepts_supported_language(self, validator):
+        """The multilingual Chatterbox model should validate known upstream language codes."""
+        request = TTSRequest(
+            text="Bonjour tout le monde.",
+            model="chatterbox-multilingual",
+            language="fr",
+            format=AudioFormat.MP3,
+        )
+
+        is_valid, error_message = validator.validate_request(request, provider="chatterbox")
+
+        assert is_valid is True
+        assert error_message is None
+
+    def test_chatterbox_turbo_is_english_only(self, validator):
+        """Turbo is a separate Chatterbox family member but remains English-only upstream."""
+        request = TTSRequest(
+            text="Bonjour tout le monde.",
+            model="chatterbox-turbo",
+            language="fr",
+            format=AudioFormat.MP3,
+        )
+
+        is_valid, error_message = validator.validate_request(request, provider="chatterbox")
+
+        assert is_valid is False
+        assert error_message is not None
+        assert "Language 'fr' not supported" in error_message
+
+    @pytest.mark.parametrize("audio_format", [AudioFormat.FLAC, AudioFormat.PCM])
+    def test_chatterbox_accepts_adapter_advertised_formats(self, validator, audio_format):
+        """Chatterbox validation should allow every format its adapter advertises."""
+        request = TTSRequest(
+            text="Hello from Chatterbox.",
+            model="chatterbox",
+            language="en",
+            format=audio_format,
+        )
+
+        is_valid, error_message = validator.validate_request(request, provider="chatterbox")
+
+        assert is_valid is True
+        assert error_message is None
+
     def test_validate_voice_reference(self, validator):
         """Test voice reference validation"""
         # Valid WAV header
@@ -239,6 +323,9 @@ class TestProviderLimits:
         assert kitten_limits["max_text_length"] == 5000
         assert "pcm" in kitten_limits["valid_formats"]
         assert kitten_limits["max_speed"] == 4.0
+
+        chatterbox_limits = ProviderLimits.get_limits("chatterbox")
+        assert {"wav", "mp3", "opus", "flac", "pcm"}.issubset(chatterbox_limits["valid_formats"])
 
     def test_provider_specific_validation(self):
         """Test that provider limits are enforced"""

@@ -1,5 +1,5 @@
 import { useRef } from "react"
-import { Alert, Modal, Radio, Select, Switch } from "antd"
+import { Modal, Radio, Select, Switch } from "antd"
 import { useNavigate } from "react-router-dom"
 import { SearchModeSettings } from "./search-mode"
 import { useTranslation } from "react-i18next"
@@ -8,6 +8,7 @@ import { useStorage } from "@plasmohq/storage/hook"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { SystemSettings } from "./system-settings"
 import { ThemePicker } from "@/components/Common/Settings/ThemePicker"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { getDefaultOcrLanguage, ocrLanguages } from "@/data/ocr-language"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useConnectionState, useConnectionActions } from "@/hooks/useConnectionState"
@@ -393,18 +394,20 @@ export const GeneralSettings = () => {
 
       {/* Browser extension promotion (webui only) */}
       {!isExtensionRuntime() && (
-        <Alert
-          type="info"
-          showIcon
-          message={t(
+        <DsAlert
+          variant="info"
+          title={t(
             "generalSettings.extensionPromo.title",
             "Browser Extension Available"
           )}
-          description={t(
-            "generalSettings.extensionPromo.description",
-            "Get the tldw browser extension for quick access to chat, ingestion, and more from any tab."
-          )}
-          action={
+        >
+          <div className="space-y-2">
+            <p>
+              {t(
+                "generalSettings.extensionPromo.description",
+                "Get the tldw browser extension for quick access to chat, ingestion, and more from any tab."
+              )}
+            </p>
             <a
               href="https://github.com/rmusser01/tldw_server"
               target="_blank"
@@ -413,8 +416,8 @@ export const GeneralSettings = () => {
             >
               {t("generalSettings.extensionPromo.cta", "Learn More")}
             </a>
-          }
-        />
+          </div>
+        </DsAlert>
       )}
 
       <div className="space-y-2">
@@ -430,25 +433,31 @@ export const GeneralSettings = () => {
           />
         </div>
         {!enableOcrAssets && (
-          <Alert
-            type="info"
-            showIcon
-            title={t(
-              "generalSettings.settings.enableOcrAssets.downloadNotice",
-              "Enable to download OCR language assets for image text recognition"
-            )}
-            className="!py-1.5 !text-xs"
+          <DsAlert
+            variant="info"
+            title={
+              <span className="text-xs">
+                {t(
+                  "generalSettings.settings.enableOcrAssets.downloadNotice",
+                  "Enable to download OCR language assets for image text recognition"
+                )}
+              </span>
+            }
+            className="!py-1.5"
           />
         )}
         {enableOcrAssets && (
-          <Alert
-            type="success"
-            showIcon
-            title={t(
-              "generalSettings.settings.enableOcrAssets.assetsEnabled",
-              "OCR assets enabled and ready"
-            )}
-            className="!py-1.5 !text-xs"
+          <DsAlert
+            variant="success"
+            title={
+              <span className="text-xs">
+                {t(
+                  "generalSettings.settings.enableOcrAssets.assetsEnabled",
+                  "OCR assets enabled and ready"
+                )}
+              </span>
+            }
+            className="!py-1.5"
           />
         )}
       </div>

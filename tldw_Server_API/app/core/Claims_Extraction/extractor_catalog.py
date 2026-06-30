@@ -8,6 +8,7 @@ from functools import lru_cache
 from typing import Any
 
 from tldw_Server_API.app.core.config import settings as _settings
+from tldw_Server_API.app.core.custom_openai_providers import iter_custom_openai_provider_names
 
 NO_SPACE_LANGS = {"zh", "zh-cn", "zh-tw", "ja", "ko", "th"}
 
@@ -51,6 +52,7 @@ LLM_PROVIDER_MODES = {
     "local-llm",
     "llama.cpp",
 }
+LLM_PROVIDER_MODES.update(iter_custom_openai_provider_names(start=3))
 
 
 @dataclass(frozen=True)

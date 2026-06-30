@@ -9,6 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.core.AuthNZ import migrations
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseLockError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 
@@ -32,6 +33,12 @@ class _AcquireCM:
 class _FakeDBPool:
     def acquire(self) -> _AcquireCM:
         return _AcquireCM()
+
+
+class _ExplodingPoolProperty:
+    @property
+    def pool(self) -> object:
+        raise RuntimeError("db pool secret /tmp/authnz.sqlite token=user-123")
 
 
 class _DummyRequest:
@@ -212,6 +219,99 @@ async def test_api_key_auth_error_logging_does_not_leak_exception_message_outsid
     captured = sink.getvalue()
     assert "API key authentication error in get_current_user" in captured
     assert secret not in captured
+
+
+@pytest.mark.asyncio
+async def test_test_mode_ensure_authnz_tables_fallback_log_is_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "/tmp/authnz-users.db token=single-user-secret"
+
+    def _raise_secret_path(_path: object) -> None:
+        raise RuntimeError(secret)
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", "test-key")
+    monkeypatch.setattr(
+        auth_deps,
+        "get_settings",
+        lambda: SimpleNamespace(
+            AUTH_MODE="single_user",
+            DATABASE_URL="sqlite:////tmp/authnz-users.db",
+            SINGLE_USER_API_KEY=None,
+            SINGLE_USER_FIXED_ID=7,
+        ),
+    )
+    monkeypatch.setattr(auth_deps, "resolve_client_ip", lambda request, settings: "127.0.0.1")
+    monkeypatch.setattr(auth_deps, "is_single_user_ip_allowed", lambda client_ip, settings: True)
+    monkeypatch.setattr(migrations, "ensure_authnz_tables", _raise_secret_path)
+
+    sink = io.StringIO()
+    token = logger.add(sink, level="DEBUG")
+    try:
+        user = await auth_deps._authenticate_api_key_from_request(_DummyRequest(), "test-key")
+    finally:
+        logger.remove(token)
+
+    captured = sink.getvalue()
+    assert user["id"] == 7
+    assert "AuthNZ test fallback: ensure_authnz_tables skipped/failed" in captured
+    assert "RuntimeError" in captured
+    assert secret not in captured
+    assert "Traceback" not in captured
+
+
+@pytest.mark.asyncio
+async def test_maintenance_guard_skipped_log_is_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
+    secret = "maintenance secret path=/tmp/maintenance.json user_id=444"
+
+    async def _principal(_request: object) -> AuthPrincipal:
+        return AuthPrincipal(kind="user", user_id=444, email="person@example.com")
+
+    def _raise_secret_state() -> dict[str, object]:
+        raise RuntimeError(secret)
+
+    from tldw_Server_API.app.services import admin_system_ops_service
+
+    monkeypatch.setattr(auth_deps, "_resolve_auth_principal", _principal)
+    monkeypatch.setattr(admin_system_ops_service, "get_maintenance_state", _raise_secret_state)
+
+    sink = io.StringIO()
+    token = logger.add(sink, level="DEBUG")
+    try:
+        principal = await auth_deps.get_auth_principal(_DummyRequest())
+    finally:
+        logger.remove(token)
+
+    captured = sink.getvalue()
+    assert principal.user_id == 444
+    assert "Maintenance guard skipped" in captured
+    assert "RuntimeError" in captured
+    assert secret not in captured
+    assert "444" not in captured
+    assert "Traceback" not in captured
+
+
+@pytest.mark.asyncio
+async def test_rbac_rate_limit_selection_failure_log_is_sanitized() -> None:
+    request = _DummyRequest()
+    request.state.user_id = "user-secret-123"
+    resource = "resource:/private/path?token=secret"
+
+    sink = io.StringIO()
+    token = logger.add(sink, level="DEBUG")
+    try:
+        await auth_deps.enforce_rbac_rate_limit(request, resource, _ExplodingPoolProperty())
+    finally:
+        logger.remove(token)
+
+    captured = sink.getvalue()
+    assert "RBAC rate-limit selection failed" in captured
+    assert "RuntimeError" in captured
+    assert "user-secret-123" not in captured
+    assert resource not in captured
+    assert "/tmp/authnz.sqlite" not in captured
+    assert "Traceback" not in captured
 
 
 @pytest.mark.asyncio

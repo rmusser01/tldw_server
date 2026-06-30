@@ -17,6 +17,11 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.config import (
     ACPRunnerConfig,
     load_acp_runner_config,
 )
+from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
+    bounded_session_update_payload,
+    make_session_update_queue,
+    validate_acp_session_launch_inputs,
+)
 from tldw_Server_API.app.core.Agent_Client_Protocol.permission_tiers import determine_permission_tier
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import (
     ACPMessage,
@@ -46,6 +51,27 @@ _ACP_GOVERNANCE_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     json.JSONDecodeError,
 )
+
+
+def _is_method_not_found_error(exc: ACPResponseError, method: str) -> bool:
+    if getattr(exc, "code", None) == -32601:
+        return True
+    message = str(exc).lower()
+    return (
+        "method not found" in message
+        or "-32601" in message
+        or ("not supported" in message and method.lower() in message)
+    )
+
+
+async def _call_session_close_with_fallback(client: Any, session_id: str) -> None:
+    params = {"sessionId": session_id}
+    try:
+        await client.call("session/close", params)
+    except ACPResponseError as exc:
+        if not _is_method_not_found_error(exc, "session/close"):
+            raise
+        await client.call("_tldw/session/close", params)
 
 
 def _policy_match_patterns(policy_document: dict[str, Any], *keys: str) -> list[str]:
@@ -513,7 +539,7 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         )
         self._client.set_notification_handler(self._handle_notification)
         self._client.set_request_handler(self._handle_request)
-        self._updates: dict[str, deque[dict[str, Any]]] = defaultdict(deque)
+        self._updates: dict[str, deque[dict[str, Any]]] = defaultdict(make_session_update_queue)
         self._session_owners: dict[str, int] = {}
         self._agent_capabilities: dict[str, Any] = {}
         # WebSocket registry per session
@@ -572,13 +598,57 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         mcp_servers: list[dict[str, Any]] | None = None,
         agent_type: str | None = None,
         user_id: int | None = None,
+        session_env: dict[str, str] | None = None,
     ) -> str:
-        params: dict[str, Any] = {"cwd": cwd}
-        if mcp_servers:
-            params["mcpServers"] = mcp_servers
+        try:
+            validate_acp_session_launch_inputs(
+                cwd=cwd,
+                allowed_cwd_roots=list(self.config.allowed_session_cwd_roots),
+                runner_cwd=self.config.cwd,
+                mcp_servers=mcp_servers,
+                session_env=session_env,
+                allow_session_env=self.config.allow_session_env,
+                allow_inline_stdio_mcp_servers=self.config.allow_inline_stdio_mcp_servers,
+                allow_private_mcp_http=self.config.allow_private_mcp_http,
+            )
+        except ValueError as exc:
+            raise ACPResponseError(str(exc)) from exc
+
+        params: dict[str, Any] = {
+            "cwd": cwd,
+            "mcpServers": mcp_servers if mcp_servers is not None else [],
+        }
         if agent_type:
             params["agentType"] = agent_type
-        response = await self._client.call("session/new", params)
+        if session_env:
+            params["env"] = dict(session_env)
+        try:
+            response = await self._client.call("session/new", params)
+        except ACPResponseError as exc:
+            if "invalid params" not in str(exc).lower():
+                raise
+            fallback_params = dict(params)
+            if "agentType" in fallback_params:
+                fallback_params.pop("agentType", None)
+                logger.debug(
+                    "ACP session/new rejected agentType for this runner; retrying without agentType"
+                )
+                try:
+                    response = await self._client.call("session/new", fallback_params)
+                except ACPResponseError as second_exc:
+                    if "invalid params" not in str(second_exc).lower():
+                        raise
+                    fallback_params.pop("mcpServers", None)
+                    logger.debug(
+                        "ACP session/new rejected mcpServers for this runner; retrying without mcpServers"
+                    )
+                    response = await self._client.call("session/new", fallback_params)
+            else:
+                fallback_params.pop("mcpServers", None)
+                logger.debug(
+                    "ACP session/new rejected mcpServers for this runner; retrying without mcpServers"
+                )
+                response = await self._client.call("session/new", fallback_params)
         result = response.result or {}
         session_id = result.get("sessionId")
         if not session_id:
@@ -779,7 +849,7 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         await self._client.notify("session/cancel", {"sessionId": session_id})
 
     async def close_session(self, session_id: str) -> None:
-        await self._client.call("_tldw/session/close", {"sessionId": session_id})
+        await _call_session_close_with_fallback(self._client, session_id)
         self._updates.pop(session_id, None)
         self._session_owners.pop(str(session_id), None)
         self._clear_runtime_policy_session_state(session_id)
@@ -910,7 +980,7 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
             return
 
         # Queue update for polling clients
-        self._updates[session_id].append(params)
+        self._updates[str(session_id)].append(bounded_session_update_payload(params))
 
         # Broadcast to WebSocket clients
         update_message = {

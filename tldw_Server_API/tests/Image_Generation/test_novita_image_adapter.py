@@ -5,6 +5,8 @@ from tldw_Server_API.app.core.Image_Generation.adapters import novita_image_adap
 from tldw_Server_API.app.core.Image_Generation.config import ImageGenerationConfig
 from tldw_Server_API.app.core.Image_Generation.exceptions import ImageGenerationError
 
+PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg=="
+
 
 def _make_config(**overrides) -> ImageGenerationConfig:
     base = dict(
@@ -97,7 +99,7 @@ def test_novita_generate_async_polling_success(monkeypatch):
             poll_counter["count"] += 1
             if poll_counter["count"] == 1:
                 return {"status": "pending"}
-            return {"status": "success", "images": [{"image_base64": "aGVsbG8="}]}
+            return {"status": "success", "images": [{"image_base64": PNG_B64}]}
         raise AssertionError("unexpected request")
 
     monkeypatch.setattr(novita_module, "fetch_json", fake_fetch_json)
@@ -105,9 +107,9 @@ def test_novita_generate_async_polling_success(monkeypatch):
 
     adapter = novita_module.NovitaImageAdapter()
     result = adapter.generate(_make_request())
-    assert result.content == b"hello"
+    assert result.content.startswith(b"\x89PNG\r\n\x1a\n")
     assert result.content_type == "image/png"
-    assert result.bytes_len == 5
+    assert result.bytes_len == len(result.content)
     assert poll_counter["count"] == 2
     assert any(call[1].endswith("/v3/async/txt2img") for call in calls)
     assert any(call[1].endswith("/v3/async/task-result") for call in calls)

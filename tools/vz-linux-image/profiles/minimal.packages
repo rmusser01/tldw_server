@@ -1,0 +1,9 @@
+# Canonical minimal profile for the Debian arm64 reference image.
+systemd
+initramfs-tools
+linux-image-arm64
+bash
+coreutils
+util-linux
+kmod
+ca-certificates

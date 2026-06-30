@@ -57,7 +57,7 @@ describe("TldwApiClient ownership guard", () => {
           .filter((name) => baseMethodNames.has(name))
           .sort()
       ])
-    ) as typeof TRANSITIONAL_DOMAIN_OVERLAPS
+    ) as unknown as typeof TRANSITIONAL_DOMAIN_OVERLAPS
 
     expect(actualOverlaps).toEqual(TRANSITIONAL_DOMAIN_OVERLAPS)
   })

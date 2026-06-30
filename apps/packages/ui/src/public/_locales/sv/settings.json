@@ -3349,5 +3349,29 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "Bakgrundsfärg för citat"
+  },
+  "navigation_connect": {
+    "message": "Anslutning"
+  },
+  "navigation_aiModels": {
+    "message": "AI och modeller"
+  },
+  "navigation_experience": {
+    "message": "Upplevelse"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "Kunskap och arbetsyta"
+  },
+  "navigation_safetyAdmin": {
+    "message": "Säkerhet och administration"
+  },
+  "providerKeys_navTitle": {
+    "message": "Leverantörsnycklar"
+  },
+  "navigation_dataManagement": {
+    "message": "Datahantering"
+  },
+  "dataManagement_navTitle": {
+    "message": "Datahantering"
   }
 }

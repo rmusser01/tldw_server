@@ -1,12 +1,53 @@
-import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+
+type ClassDictionary = Record<string, unknown>;
+
+export type ClassValue =
+  | string
+  | number
+  | bigint
+  | boolean
+  | null
+  | undefined
+  | ClassDictionary
+  | ClassValue[];
+
+function appendClassValue(value: ClassValue, classes: string[]): void {
+  if (!value || typeof value === 'boolean' || typeof value === 'bigint') {
+    return;
+  }
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    classes.push(String(value));
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => appendClassValue(item, classes));
+    return;
+  }
+
+  Object.entries(value).forEach(([className, enabled]) => {
+    if (enabled) {
+      classes.push(className);
+    }
+  });
+}
+
+function classNames(values: ClassValue[]): string {
+  const classes: string[] = [];
+
+  values.forEach((value) => appendClassValue(value, classes));
+
+  return classes.join(' ');
+}
 
 /**
  * Utility function to merge Tailwind CSS classes
- * Combines clsx for conditional classes and tailwind-merge to handle conflicts
+ * Combines conditional classes and uses tailwind-merge to handle conflicts
  */
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+  return twMerge(classNames(inputs));
 }
 
 /**

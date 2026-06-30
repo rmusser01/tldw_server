@@ -41,6 +41,22 @@ class FakeAsyncRedis:
         self.closed = True
 
 
+class FailingListRedis:
+    async def xrevrange(self, name, max, min, count=None):
+        raise RuntimeError("redis password leaked")
+
+    async def close(self):
+        pass
+
+
+class FailingRequeueRedis:
+    async def xrange(self, name, min, max, count=None):
+        raise RuntimeError("redis password leaked")
+
+    async def close(self):
+        pass
+
+
 @pytest.mark.unit
 def test_dlq_list_and_requeue(monkeypatch, admin_user):
     client = TestClient(app)
@@ -95,3 +111,46 @@ def test_dlq_list_and_requeue(monkeypatch, admin_user):
     assert len(fake.streams.get(dlq_stream, [])) == 0
 
     # Cleanup handled by admin_user fixture
+
+
+@pytest.mark.unit
+def test_dlq_list_sanitizes_backend_failure(monkeypatch, admin_user):
+    client = TestClient(app)
+    client.cookies.set("csrf_token", "x")
+    client.headers["X-CSRF-Token"] = "x"
+    client.headers["Authorization"] = "Bearer key"
+
+    import redis.asyncio as aioredis
+
+    async def fake_from_url(url, decode_responses=True):
+        return FailingListRedis()
+
+    monkeypatch.setattr(aioredis, "from_url", fake_from_url)
+
+    response = client.get("/api/v1/embeddings/dlq", params={"stage": "embedding"})
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to list DLQ items"
+
+
+@pytest.mark.unit
+def test_dlq_requeue_sanitizes_backend_failure(monkeypatch, admin_user):
+    client = TestClient(app)
+    client.cookies.set("csrf_token", "x")
+    client.headers["X-CSRF-Token"] = "x"
+    client.headers["Authorization"] = "Bearer key"
+
+    import redis.asyncio as aioredis
+
+    async def fake_from_url(url, decode_responses=True):
+        return FailingRequeueRedis()
+
+    monkeypatch.setattr(aioredis, "from_url", fake_from_url)
+
+    response = client.post(
+        "/api/v1/embeddings/dlq/requeue",
+        json={"stage": "embedding", "entry_id": "1-0", "delete_from_dlq": True},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to requeue DLQ item"

@@ -177,6 +177,33 @@ def get_media_by_id(
     )
 
 
+def get_media_status_by_id(
+    db: MediaDbLike | MediaDbReadLike,
+    media_id: int,
+    *,
+    include_deleted: bool = False,
+    include_trash: bool = False,
+) -> dict[str, Any] | None:
+    """Return lightweight media readiness fields without loading document content."""
+    db_instance = unwrap_media_database_like(db)
+    if is_media_database_like(db_instance):
+        return MediaLookupRepository.from_legacy_db(db_instance).status_by_id(
+            media_id,
+            include_deleted=include_deleted,
+            include_trash=include_trash,
+        )
+    reader = _require_read_method(
+        db,
+        "get_media_status_by_id",
+        error_message="db must expose the lightweight Media DB status read contract.",
+    )
+    return reader.get_media_status_by_id(
+        media_id,
+        include_deleted=include_deleted,
+        include_trash=include_trash,
+    )
+
+
 def has_unvectorized_chunks(
     db: MediaDbLike | MediaDbReadLike,
     media_id: int,
@@ -586,6 +613,40 @@ def get_unvectorized_chunk_count(
         error_message="db must expose the Media DB read contract.",
     )
     return reader.get_unvectorized_chunk_count(media_id)
+
+
+def get_unvectorized_max_chunk_index(
+    db: MediaDbLike | MediaDbReadLike,
+    media_id: int,
+) -> int | None:
+    """Return the highest active unvectorized chunk index for a media item."""
+    db_instance = unwrap_media_database_like(db)
+    if is_media_database_like(db_instance):
+        try:
+            media_id_int = int(media_id)
+        except (TypeError, ValueError):
+            return None
+
+        try:
+            cursor = db_instance.execute_query(
+                "SELECT MAX(chunk_index) AS max_chunk_index FROM UnvectorizedMediaChunks "
+                "WHERE media_id = ? AND deleted = 0",
+                (media_id_int,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            value = row.get("max_chunk_index") if isinstance(row, dict) else row[0]
+            return int(value) if value is not None else None
+        except Exception as exc:
+            _raise_read_error("get_unvectorized_max_chunk_index", exc)
+
+    reader = _require_read_method(
+        db,
+        "get_unvectorized_max_chunk_index",
+        error_message="db must expose the Media DB read contract.",
+    )
+    return reader.get_unvectorized_max_chunk_index(media_id)
 
 
 def get_unvectorized_anchor_index_for_offset(
@@ -1096,6 +1157,7 @@ __all__ = [
     "get_unvectorized_chunk_count",
     "get_unvectorized_chunk_index_by_uuid",
     "get_unvectorized_chunks_in_range",
+    "get_unvectorized_max_chunk_index",
     "get_paginated_files",
     "get_paginated_trash_files",
     "list_chunking_templates",
@@ -1108,6 +1170,7 @@ __all__ = [
     "check_media_exists",
     "permanently_delete_item",
     "get_media_by_id",
+    "get_media_status_by_id",
     "get_media_by_uuid",
     "managed_media_database",
     "get_media_repository",

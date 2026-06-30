@@ -64,6 +64,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.fts_ops import (
     _delete_fts_media,
     _update_fts_keyword,
     _update_fts_media,
+    sync_get_media_fts_values,
     sync_refresh_fts_for_entity,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.chunk_fts_ops import (
@@ -146,6 +147,14 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.tts_history_ops imp
     soft_delete_tts_history_entry,
     update_tts_history_favorite,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.audio_preset_ops import (
+    count_audio_presets,
+    create_audio_preset,
+    get_audio_preset,
+    list_audio_presets,
+    soft_delete_audio_preset,
+    update_audio_preset,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.document_keyword_ops import (
     create_document_version,
     get_all_document_versions,
@@ -196,6 +205,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.safe_metadata_searc
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.synced_document_update_ops import (
     apply_synced_document_content_update,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.media_item_update_ops import (
+    apply_media_item_update,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.document_version_rollback_ops import (
     rollback_to_version,
@@ -284,6 +296,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_search_ops i
     search_claims,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_metrics_ops import (
+    count_claims_review_extractor_metrics_daily,
     get_claims_review_extractor_metrics_daily,
     list_claims_review_extractor_metrics_daily,
     list_claims_review_user_ids,
@@ -365,6 +378,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.query_ops import (
     get_distinct_media_types,
     get_media_by_id,
     get_media_by_hash,
+    get_media_status_by_id,
     get_media_by_title,
     get_media_by_url,
     get_media_by_uuid,
@@ -450,6 +464,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_tts_source_
     ensure_postgres_source_hash_column,
     ensure_postgres_tts_history,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_audio_preset_structures import (
+    ensure_postgres_audio_presets,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_claims_collection_structures import (
     ensure_postgres_claims_extensions,
     ensure_postgres_claims_tables,
@@ -478,6 +495,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.unvectorized_chunk_
     get_unvectorized_chunk_count,
     get_unvectorized_chunk_index_by_uuid,
     get_unvectorized_chunks_in_range,
+    get_unvectorized_max_chunk_index,
 )
 
 class MediaDatabase:
@@ -1254,6 +1272,38 @@ class MediaDatabase:
     CREATE INDEX IF NOT EXISTS idx_tts_history_user_text_hash ON tts_history(user_id, text_hash);
     """
 
+    _AUDIO_PRESETS_TABLE_SQL = """
+    -- Audio Presets Table --
+    CREATE TABLE IF NOT EXISTS audio_presets (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        favorite BOOLEAN NOT NULL DEFAULT 0,
+        is_default BOOLEAN NOT NULL DEFAULT 0,
+        config_json TEXT NOT NULL,
+        capability_assumptions_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted BOOLEAN NOT NULL DEFAULT 0,
+        deleted_at TEXT,
+        version INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_audio_presets_user_kind_updated
+        ON audio_presets(user_id, kind, deleted, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_audio_presets_user_kind_favorite
+        ON audio_presets(user_id, kind, favorite, deleted);
+    CREATE INDEX IF NOT EXISTS idx_audio_presets_user_kind_default
+        ON audio_presets(user_id, kind, is_default, deleted);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_presets_user_kind_name_active
+        ON audio_presets(user_id, kind, LOWER(name))
+        WHERE deleted = FALSE;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_audio_presets_user_kind_default_active
+        ON audio_presets(user_id, kind)
+        WHERE is_default = TRUE AND deleted = FALSE;
+    """
+
     _DATA_TABLES_SQL = """
     -- Data Tables (LLM-generated structured tables) --
     CREATE TABLE IF NOT EXISTS data_tables (
@@ -1733,6 +1783,7 @@ MediaDatabase.get_chunking_template = get_chunking_template
 MediaDatabase.get_distinct_media_types = get_distinct_media_types
 MediaDatabase.get_media_by_id = get_media_by_id
 MediaDatabase.get_media_by_hash = get_media_by_hash
+MediaDatabase.get_media_status_by_id = get_media_status_by_id
 MediaDatabase.get_media_by_title = get_media_by_title
 MediaDatabase.get_media_by_url = get_media_by_url
 MediaDatabase.get_media_by_uuid = get_media_by_uuid
@@ -1746,6 +1797,7 @@ MediaDatabase.get_unvectorized_chunk_by_index = get_unvectorized_chunk_by_index
 MediaDatabase.get_unvectorized_chunk_count = get_unvectorized_chunk_count
 MediaDatabase.get_unvectorized_chunk_index_by_uuid = get_unvectorized_chunk_index_by_uuid
 MediaDatabase.get_unvectorized_chunks_in_range = get_unvectorized_chunks_in_range
+MediaDatabase.get_unvectorized_max_chunk_index = get_unvectorized_max_chunk_index
 MediaDatabase._postgres_migrate_to_v5 = run_postgres_migrate_to_v5
 MediaDatabase._postgres_migrate_to_v6 = run_postgres_migrate_to_v6
 MediaDatabase._postgres_migrate_to_v7 = run_postgres_migrate_to_v7
@@ -1783,6 +1835,7 @@ MediaDatabase._ensure_postgres_data_tables = ensure_postgres_data_tables
 MediaDatabase._ensure_postgres_columns = ensure_postgres_columns
 MediaDatabase._ensure_postgres_data_tables_columns = ensure_postgres_data_tables_columns
 MediaDatabase._ensure_postgres_tts_history = ensure_postgres_tts_history
+MediaDatabase._ensure_postgres_audio_presets = ensure_postgres_audio_presets
 MediaDatabase._ensure_postgres_source_hash_column = ensure_postgres_source_hash_column
 MediaDatabase._ensure_postgres_claims_tables = ensure_postgres_claims_tables
 MediaDatabase._ensure_postgres_collections_tables = ensure_postgres_collections_tables
@@ -1853,6 +1906,7 @@ MediaDatabase.soft_delete_data_table = soft_delete_data_table
 MediaDatabase.persist_data_table_generation = persist_data_table_generation
 MediaDatabase.replace_data_table_contents = replace_data_table_contents
 MediaDatabase.search_by_safe_metadata = search_by_safe_metadata
+MediaDatabase.apply_media_item_update = apply_media_item_update
 MediaDatabase.apply_synced_document_content_update = (
     apply_synced_document_content_update
 )
@@ -1894,6 +1948,9 @@ MediaDatabase.upsert_claims_review_extractor_metrics_daily = (
 )
 MediaDatabase.list_claims_review_extractor_metrics_daily = (
     list_claims_review_extractor_metrics_daily
+)
+MediaDatabase.count_claims_review_extractor_metrics_daily = (
+    count_claims_review_extractor_metrics_daily
 )
 MediaDatabase.list_claims_review_user_ids = list_claims_review_user_ids
 MediaDatabase.get_claim_clusters_by_ids = get_claim_clusters_by_ids
@@ -2002,6 +2059,12 @@ MediaDatabase.mark_tts_history_artifacts_deleted_for_file_id = (
 )
 MediaDatabase.purge_tts_history_for_user = purge_tts_history_for_user
 MediaDatabase.list_tts_history_user_ids = list_tts_history_user_ids
+MediaDatabase.create_audio_preset = create_audio_preset
+MediaDatabase.list_audio_presets = list_audio_presets
+MediaDatabase.count_audio_presets = count_audio_presets
+MediaDatabase.get_audio_preset = get_audio_preset
+MediaDatabase.update_audio_preset = update_audio_preset
+MediaDatabase.soft_delete_audio_preset = soft_delete_audio_preset
 MediaDatabase.get_connection = get_connection
 MediaDatabase.close_connection = close_connection
 MediaDatabase.release_context_connection = release_context_connection
@@ -2015,6 +2078,7 @@ MediaDatabase._update_fts_media = _update_fts_media
 MediaDatabase._delete_fts_media = _delete_fts_media
 MediaDatabase._update_fts_keyword = _update_fts_keyword
 MediaDatabase._delete_fts_keyword = _delete_fts_keyword
+MediaDatabase.sync_get_media_fts_values = sync_get_media_fts_values
 MediaDatabase.sync_refresh_fts_for_entity = sync_refresh_fts_for_entity
 MediaDatabase.ensure_chunk_fts = ensure_chunk_fts
 MediaDatabase.maybe_rebuild_chunk_fts_if_empty = maybe_rebuild_chunk_fts_if_empty

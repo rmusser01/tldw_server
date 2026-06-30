@@ -73,4 +73,18 @@ describe("message helper wrappers", () => {
       | undefined
     expect(payload.setHistoryId).toBe(setHistoryId)
   })
+
+  it("links a discovered server conversation id after a successful save", async () => {
+    const setHistoryId = vi.fn()
+    const onServerConversationLinked = vi.fn()
+    const wrapped = createSaveMessageOnSuccess(false, setHistoryId, {
+      onServerConversationLinked
+    })
+
+    await wrapped({
+      conversationId: "server-chat-42"
+    })
+
+    expect(onServerConversationLinked).toHaveBeenCalledWith("server-chat-42")
+  })
 })

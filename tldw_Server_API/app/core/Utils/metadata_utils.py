@@ -9,6 +9,7 @@ _ARXIV_RE = re.compile(r"^[a-z\-]+(\/\d{7})$|^(\d{4}\.\d{4,5})(v\d+)?$", re.IGNO
 
 
 def _norm_str(v: Any) -> Optional[str]:
+    """Normalize optional metadata values to non-empty strings."""
     if v is None:
         return None
     s = str(v).strip()
@@ -146,6 +147,17 @@ def update_version_safe_metadata_in_transaction(
             connection=connection,
         )
 
+    def _identifier_index_failure_is_compatible(exc: Exception) -> bool:
+        """Return whether an identifier index error matches legacy-compatible failures."""
+        message = str(exc or "").lower()
+        compatible_markers = (
+            "no such table",
+            "does not exist",
+            "undefined table",
+            "unsupported upsert",
+        )
+        return any(marker in message for marker in compatible_markers)
+
     # Maintain identifier index using backend-specific upsert.
     # Accept both canonical and legacy key variants for robustness.
     try:
@@ -179,6 +191,8 @@ def update_version_safe_metadata_in_transaction(
         )
     except (sqlite3.OperationalError, DatabaseError) as exc:
         # Missing identifier table or unsupported upsert is not fatal.
+        if not _identifier_index_failure_is_compatible(exc):
+            raise
         logger.debug(
             'Identifier index update skipped (missing table/unsupported upsert) for dv_id={}: {}',
             dv_id,
@@ -191,3 +205,4 @@ def update_version_safe_metadata_in_transaction(
             exc,
             exc_info=True,
         )
+        raise

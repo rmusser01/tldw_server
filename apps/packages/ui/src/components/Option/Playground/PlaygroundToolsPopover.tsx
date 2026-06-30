@@ -426,7 +426,7 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
           to="/model-playground"
           title={
             t(
-              "playground:actions.compareModels",
+              "playground:actions.workspacePlayground",
               "Compare models"
             ) as string
           }

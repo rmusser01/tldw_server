@@ -12,6 +12,7 @@ import {
 import { replaceUserDisplayNamePlaceholders } from "@/utils/chat-display-name"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
+import type { AssistantSelectionMode } from "@/types/assistant-selection"
 import {
   SELECTED_CHARACTER_STORAGE_KEY,
   selectedCharacterStorage,
@@ -21,6 +22,7 @@ import {
 type UseCharacterGreetingOptions = {
   playgroundReady: boolean
   selectedCharacter: Character | null
+  selectedCharacterMode: AssistantSelectionMode | null
   serverChatId: string | number | null
   historyId: string | null
   messagesLength: number
@@ -36,6 +38,7 @@ type UseCharacterGreetingOptions = {
 export const useCharacterGreeting = ({
   playgroundReady,
   selectedCharacter,
+  selectedCharacterMode,
   serverChatId,
   historyId,
   messagesLength,
@@ -62,9 +65,13 @@ export const useCharacterGreeting = ({
   const greetingEnabled = settings?.greetingEnabled ?? true
   const greetingInjectedRef = React.useRef<string | null>(null)
   const greetingFetchRef = React.useRef<string | null>(null)
+  const greetingFetchedRef = React.useRef<string | null>(null)
   const greetingTemplateRef = React.useRef<{
     characterId: string
+    characterName: string
     greeting: string
+    rendered: string
+    avatarUrl: string | null
     selectionId: string | null
     checksum: string | null
   } | null>(null)
@@ -95,6 +102,7 @@ export const useCharacterGreeting = ({
   React.useEffect(() => {
     if (!playgroundReady) return
     if (serverChatId != null) return
+    if (selectedCharacterMode === "overlay") return
     let cancelled = false
     const syncSelection = async () => {
       try {
@@ -118,7 +126,13 @@ export const useCharacterGreeting = ({
     return () => {
       cancelled = true
     }
-  }, [playgroundReady, selectedCharacter?.id, serverChatId, setSelectedCharacter])
+  }, [
+    playgroundReady,
+    selectedCharacter?.id,
+    selectedCharacterMode,
+    serverChatId,
+    setSelectedCharacter
+  ])
 
   React.useEffect(() => {
     const isEmpty = messagesLength === 0
@@ -131,12 +145,19 @@ export const useCharacterGreeting = ({
 
   React.useEffect(() => {
     greetingFetchRef.current = null
+    greetingFetchedRef.current = null
     greetingTemplateRef.current = null
   }, [selectedCharacter?.id])
 
   React.useEffect(() => {
     if (!playgroundReady) return
     if (serverChatId != null) {
+      selectedCharacterIdRef.current = null
+      greetingFetchRef.current = null
+      greetingTemplateRef.current = null
+      return
+    }
+    if (selectedCharacterMode === "overlay") {
       selectedCharacterIdRef.current = null
       greetingFetchRef.current = null
       greetingTemplateRef.current = null
@@ -179,6 +200,23 @@ export const useCharacterGreeting = ({
       )
       const trimmed = rendered.trim()
       if (!trimmed) return
+      const selectionId = meta?.selectionId ?? null
+      const checksum = meta?.checksum ?? null
+      const normalizedAvatarUrl = avatarUrl ?? null
+      const cached = greetingTemplateRef.current
+      if (
+        messagesLength > 0 &&
+        greetingInjectedRef.current === characterId &&
+        cached?.characterId === characterId &&
+        cached.characterName === characterName &&
+        cached.greeting === greetingValue &&
+        cached.rendered === trimmed &&
+        cached.avatarUrl === normalizedAvatarUrl &&
+        cached.selectionId === selectionId &&
+        cached.checksum === checksum
+      ) {
+        return
+      }
 
       const createdAt = Date.now()
       const messageId = generateID()
@@ -233,9 +271,12 @@ export const useCharacterGreeting = ({
       greetingInjectedRef.current = characterId
       greetingTemplateRef.current = {
         characterId,
+        characterName,
         greeting: greetingValue,
-        selectionId: meta?.selectionId ?? null,
-        checksum: meta?.checksum ?? null
+        rendered: trimmed,
+        avatarUrl: normalizedAvatarUrl,
+        selectionId,
+        checksum
       }
 
       if (greetingSettingsRef.current.greetingEnabled) {
@@ -338,7 +379,10 @@ export const useCharacterGreeting = ({
     }
 
     const fallbackGreeting = greetingOptions[0]?.text?.trim() || ""
-    if (greetingFetchRef.current !== characterId) {
+    if (
+      greetingFetchRef.current !== characterId &&
+      greetingFetchedRef.current !== characterId
+    ) {
       greetingFetchRef.current = characterId
       void (async () => {
         try {
@@ -350,6 +394,7 @@ export const useCharacterGreeting = ({
             return
           }
           const full = await tldwClient.getCharacter(characterId)
+          greetingFetchedRef.current = characterId
           if (
             !isCurrentSelection() ||
             greetingFetchRef.current !== characterId
@@ -387,6 +432,7 @@ export const useCharacterGreeting = ({
               }
           setSelectedCharacter(mergedCharacter)
         } catch {
+          greetingFetchedRef.current = characterId
           if (fallbackGreeting) {
             resolveAndPersistGreeting(
               buildGreetingOptionsFromEntries([
@@ -409,11 +455,13 @@ export const useCharacterGreeting = ({
   }, [
     playgroundReady,
     selectedCharacter,
+    selectedCharacterMode,
     serverChatId,
     historyId,
     setHistory,
     setMessages,
     setSelectedCharacter,
+    messagesLength,
     userDisplayName,
     greetingSelectionId,
     greetingsChecksum,

@@ -298,9 +298,9 @@ Count function invocations:
 ```python
 @count_calls(
     metric_name="function_calls_total",
-    label_extractor=lambda *args, **kwargs: {"user_id": kwargs.get("user_id")}
+    label_extractor=lambda *args, **kwargs: {"operation": kwargs.get("operation", "default")}
 )
-def process_user_request(user_id: str):
+def process_request(operation: str):
     pass
 ```
 
@@ -650,7 +650,6 @@ observe_histogram("evaluation_duration_seconds", duration)
 - `tldw_Server_API/app/core/Metrics/traces.py`: tracer provider, context propagation, span helpers
 - `tldw_Server_API/app/core/Metrics/decorators.py`: `@track_metrics`, `@measure_latency`, `@count_calls`, `@track_llm_usage`, `@cache_metrics`
 - `tldw_Server_API/app/core/Metrics/http_middleware.py`: `HTTPMetricsMiddleware` for per-route request count/latency
-- `tldw_Server_API/app/core/Metrics/logger_config.py`: logging integration and metrics-safe logger setup
 - `tldw_Server_API/app/core/Metrics/metrics_logger.py`: legacy compatibility helpers (migrate to registry helpers)
 
 ### Adding New Metrics
@@ -678,8 +677,8 @@ reg.register(
   - Core metrics (Prometheus): `tldw_Server_API/app/main.py:2701`
   - Core metrics (JSON): `tldw_Server_API/app/main.py:2758`
   - Embeddings service metrics (admin): `tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py:2608`
-  - Evaluations metrics endpoint: `tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:878`
-  - Media ingestion metrics usage: `tldw_Server_API/app/api/v1/endpoints/media.py:3733`, `tldw_Server_API/app/api/v1/endpoints/media.py:4680`
+  - Evaluations metrics endpoint: `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_unified.py`
+  - Media ingestion metrics usage: `tldw_Server_API/app/api/v1/endpoints/media/`
   - Chat request metrics usage: `tldw_Server_API/app/api/v1/endpoints/chat.py:708`, `tldw_Server_API/app/api/v1/endpoints/chat.py:3082`
   - HTTP middleware class: `tldw_Server_API/app/core/Metrics/http_middleware.py:10`
 - Schemas
@@ -699,6 +698,6 @@ reg.register(
 ## Support
 
 For issues or questions:
-- Check the [main documentation](../../../README.md)
-- Review [example implementations](./examples/)
-- Open an issue on GitHub
+- Check the main project documentation at `README.md`.
+- Review metric call sites listed in this README for implementation examples.
+- Open an issue on GitHub.

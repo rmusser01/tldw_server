@@ -3,9 +3,7 @@ import {
   Typography,
   Card,
   List,
-  Tag,
   Space,
-  Alert,
   Button,
   Input,
   Select,
@@ -20,6 +18,7 @@ import { PageShell } from "@/components/Common/PageShell"
 import { buildMlxLoadRequest } from "@/utils/build-mlx-load-request"
 import { StatusBanner } from "./StatusBanner"
 import { CollapsibleSection } from "./CollapsibleSection"
+import { Alert, Badge } from "@/components/ui/primitives"
 import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
@@ -266,34 +265,31 @@ export const MlxAdminPage: React.FC = () => {
         {/* Admin Guard Alert */}
         {adminGuard && (
           <Alert
-            type="warning"
-            showIcon
+            variant="warning"
             title={
               adminGuard === "forbidden"
                 ? t("settings:admin.adminGuardForbiddenTitle", "Admin access required")
                 : t("settings:admin.adminGuardNotFoundTitle", "Admin APIs not available")
-            }
-            description={
-              <span>
-                {adminGuard === "forbidden"
-                  ? t(
-                      "settings:admin.adminGuardForbiddenBody",
-                      "Sign in as an admin user on your tldw server to access these controls."
-                    )
-                  : t(
-                      "settings:admin.adminGuardNotFoundBody",
-                      "This tldw server does not expose the admin endpoints."
-                    )}{" "}
-                <a
-                  href="https://github.com/rmusser01/tldw_server#documentation--resources"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {t("settings:admin.adminGuardLearnMore", "Learn more")}
-                </a>
-              </span>
-            }
-          />
+            }>
+            <span>
+              {adminGuard === "forbidden"
+                ? t(
+                    "settings:admin.adminGuardForbiddenBody",
+                    "Sign in as an admin user on your tldw server to access these controls."
+                  )
+                : t(
+                    "settings:admin.adminGuardNotFoundBody",
+                    "This tldw server does not expose the admin endpoints."
+                  )}{" "}
+              <a
+                href="https://github.com/rmusser01/tldw_server#documentation--resources"
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t("settings:admin.adminGuardLearnMore", "Learn more")}
+              </a>
+            </span>
+          </Alert>
         )}
 
         {/* Page Header */}
@@ -354,8 +350,7 @@ export const MlxAdminPage: React.FC = () => {
             )}
             {statusUnavailable && (
               <Alert
-                type="warning"
-                showIcon
+                variant="warning"
                 title={t(
                   "settings:admin.mlxUnavailableHint",
                   "MLX controls are temporarily unavailable until status checks succeed."
@@ -556,9 +551,10 @@ export const MlxAdminPage: React.FC = () => {
                         onChange={setTrustRemoteCode}
                       />
                       {trustRemoteCode && (
-                        <Tag color="warning" icon={<AlertTriangle size={12} />}>
+                        <Badge variant="warning" size="sm" outline>
+                          <AlertTriangle size={12} aria-hidden="true" />
                           {t("settings:admin.mlxTrustRemoteCodeWarning", "Security risk")}
-                        </Tag>
+                        </Badge>
                       )}
                     </div>
 
@@ -665,12 +661,11 @@ export const MlxAdminPage: React.FC = () => {
 
                 {status?.active && (
                   <Alert
-                    type="info"
+                    variant="info"
                     title={t(
                       "settings:admin.mlxAlreadyLoaded",
                       "A model is currently loaded. Unload it first or load a different model to replace it."
                     )}
-                    showIcon
                   />
                 )}
               </Space>
@@ -711,19 +706,19 @@ export const MlxAdminPage: React.FC = () => {
                           <div className="flex flex-wrap items-center gap-2">
                             <Text code>{idLabel}</Text>
                             {capabilities?.vision && (
-                              <Tag color="purple">
+                              <Badge variant="primary" size="sm">
                                 {t("settings:admin.mlxVision", "Vision")}
-                              </Tag>
+                              </Badge>
                             )}
                             {capabilities?.tool_use && (
-                              <Tag color="geekblue">
+                              <Badge variant="info" size="sm">
                                 {t("settings:admin.mlxTools", "Tools")}
-                              </Tag>
+                              </Badge>
                             )}
                             {capabilities?.audio_input && (
-                              <Tag color="volcano">
+                              <Badge variant="warning" size="sm">
                                 {t("settings:admin.mlxAudio", "Audio")}
-                              </Tag>
+                              </Badge>
                             )}
                           </div>
                           {notes && (

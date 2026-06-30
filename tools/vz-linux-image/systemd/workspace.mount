@@ -1,0 +1,12 @@
+[Unit]
+Description=Mount helper workspace share
+Before=tldw-agent-guest.service
+
+[Mount]
+What=workspace
+Where=/workspace
+Type=virtiofs
+Options=rw
+
+[Install]
+WantedBy=multi-user.target

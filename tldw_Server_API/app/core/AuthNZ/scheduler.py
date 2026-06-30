@@ -534,24 +534,35 @@ class AuthNZScheduler:
                             except (ValueError, IndexError):
                                 purged_duplicates = 0
                     else:
-                        # Use string-based comparisons and week bucketing compatible with ISO8601 strings.
+                        # Use string-based comparisons and ISO week bucketing compatible with ISO8601 strings.
+                        # SQLite lacks native ISO week formatting, so anchor each date to its ISO-week Thursday.
                         dedupe_sql = """
-                        WITH ranked AS (
+                        WITH normalized AS (
                             SELECT
                                 snapshot_id,
                                 COALESCE(org_id, '__global__') AS org_bucket,
                                 COALESCE(team_id, '__none__') AS team_bucket,
-                                substr(generated_at, 1, 4) || '-' || printf('%02d', cast((strftime('%j', replace(replace(generated_at, 'Z',''), '+00:00','')) - 1) / 7 + 1 as integer)) AS iso_week,
-                                ROW_NUMBER() OVER (
-                                    PARTITION BY
-                                        COALESCE(org_id, '__global__'),
-                                        COALESCE(team_id, '__none__'),
-                                        substr(generated_at, 1, 4) || '-' || printf('%02d', cast((strftime('%j', replace(replace(generated_at, 'Z',''), '+00:00','')) - 1) / 7 + 1 as integer))
-                                    ORDER BY generated_at ASC
-                                ) AS rn
+                                date(
+                                    replace(replace(generated_at, 'Z',''), '+00:00',''),
+                                    '-3 days',
+                                    'weekday 4'
+                                ) AS iso_week_anchor,
+                                generated_at
                             FROM privilege_snapshots
                             WHERE generated_at < ?
                               AND generated_at >= ?
+                        ),
+                        ranked AS (
+                            SELECT
+                                snapshot_id,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY
+                                        org_bucket,
+                                        team_bucket,
+                                        strftime('%Y', iso_week_anchor) || '-' || printf('%02d', cast((strftime('%j', iso_week_anchor) - 1) / 7 + 1 as integer))
+                                    ORDER BY generated_at ASC
+                                ) AS rn
+                            FROM normalized
                         )
                         DELETE FROM privilege_snapshots
                         WHERE snapshot_id IN (

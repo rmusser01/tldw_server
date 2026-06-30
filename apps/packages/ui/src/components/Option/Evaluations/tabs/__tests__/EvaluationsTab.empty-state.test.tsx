@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { EvaluationsTab } from "../EvaluationsTab"
 
 const storeState = {
   selectedEvalId: null as string | null,
+  setActiveTab: vi.fn(),
   setSelectedEvalId: vi.fn(),
   setSelectedRunId: vi.fn(),
   editingEvalId: null as string | null,
@@ -138,7 +139,7 @@ describe("EvaluationsTab empty-state guardrails", () => {
     render(<EvaluationsTab />)
 
     expect(
-      screen.getByText("No evaluations yet. Once you create one, it will appear here.")
+      screen.getByText("No evaluations yet. Start with Recipes for guided setup, or create a custom evaluation.")
     ).toBeInTheDocument()
     expect(
       screen.getByText("Select an evaluation to inspect its spec.")
@@ -148,5 +149,12 @@ describe("EvaluationsTab empty-state guardrails", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled()
   })
-})
 
+  it("offers a direct recovery path back to the recipe-first workflow", () => {
+    render(<EvaluationsTab />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Recipes" }))
+
+    expect(storeState.setActiveTab).toHaveBeenCalledWith("recipes")
+  })
+})

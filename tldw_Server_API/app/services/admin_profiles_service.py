@@ -14,7 +14,6 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.org_deps import ROLE_HIERARCHY
 from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
     UserProfileBatchResponse,
-    UserProfileBulkUpdateDiff,
     UserProfileBulkUpdateRequest,
     UserProfileBulkUpdateResponse,
     UserProfileBulkUpdateUserResult,
@@ -26,7 +25,7 @@ from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
     UserProfileUpdateRequest,
     UserProfileUpdateResponse,
 )
-from tldw_Server_API.app.api.v1.utils.profile_errors import classify_profile_update_skips
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import UserNotFoundError
@@ -39,6 +38,17 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.UserProfiles.bulk_command_service import ProfileBulkCommandService
+from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
+from tldw_Server_API.app.core.UserProfiles.contracts import (
+    ProfileContractMode,
+    ProfileReadRequest,
+    ProfileUpdateCommand,
+)
+from tldw_Server_API.app.core.UserProfiles.query_service import ProfileQueryService
+from tldw_Server_API.app.core.UserProfiles.response_mappers import (
+    LegacyProfileCommandResult,
+)
 from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
 from tldw_Server_API.app.core.UserProfiles.update_service import (
     ProfileUpdateScope,
@@ -102,8 +112,21 @@ def _get_bulk_confirm_threshold() -> int:
                 if raw_cfg:
                     return max(1, int(raw_cfg))
     except Exception as threshold_error:
-        logger.debug("Failed to load bulk-update threshold from config; using default", exc_info=threshold_error)
+        logger.bind(error_type=type(threshold_error).__name__).debug(
+            "Failed to load bulk-update threshold from config; using default"
+        )
     return 1000
+
+
+def _coerce_bulk_candidate_user_id(user: Any) -> int | None:
+    """Return a candidate user id, or None when a malformed repo row should be skipped."""
+    try:
+        return int(user.get("id"))
+    except Exception as user_id_error:
+        logger.bind(error_type=type(user_id_error).__name__).debug(
+            "Skipping bulk user candidate with invalid id"
+        )
+        return None
 
 
 def _profile_error_response(
@@ -120,6 +143,23 @@ def _profile_error_response(
         errors=errors or [],
     )
     return JSONResponse(status_code=status_code, content=payload.model_dump())
+
+
+def _legacy_profile_command_response(
+    result: LegacyProfileCommandResult,
+) -> UserProfileUpdateResponse | JSONResponse:
+    if result.status_code != status.HTTP_200_OK:
+        return _profile_error_response(
+            status_code=result.status_code,
+            error_code=result.error_code or "profile_update_invalid",
+            detail=result.detail or "One or more updates failed validation",
+            errors=[UserProfileErrorDetail(**item) for item in result.skipped],
+        )
+    return UserProfileUpdateResponse(
+        profile_version=result.profile_version,
+        applied=list(result.applied),
+        skipped=[UserProfileUpdateError(**item) for item in result.skipped],
+    )
 
 
 def _mask_profile_diff_value(
@@ -462,10 +502,10 @@ async def _load_bulk_user_candidates(
             org_ids=org_ids,
         )
         for user in users:
-            try:
-                target_ids.add(int(user.get("id")))
-            except Exception:
+            user_id = _coerce_bulk_candidate_user_id(user)
+            if user_id is None:
                 continue
+            target_ids.add(user_id)
         offset += limit
         if len(target_ids) >= total:
             break
@@ -513,6 +553,7 @@ async def list_user_profiles(
 
     db_pool = await get_db_pool()
     service = UserProfileService(db_pool)
+    query_service = ProfileQueryService(service)
     requested = service.parse_sections(sections)
     if requested is None:
         requested = {"identity", "memberships", "quotas"}
@@ -535,13 +576,18 @@ async def list_user_profiles(
                 api_key_manager=api_mgr,
             )
 
-        profile = await service.build_profile(
+        profile = await query_service.build(
+            ProfileReadRequest(
+                actor_user_id=principal.user_id,
+                target_user_id=int(user_id),
+                sections=frozenset(requested) if requested is not None else None,
+                include_sources=include_sources,
+                include_raw=include_raw,
+                mask_secrets=mask_secrets,
+                contract_mode=ProfileContractMode.LEGACY_V1,
+            ),
             user=user_dict,
-            sections=requested,
             security=security,
-            include_sources=include_sources,
-            include_raw=include_raw,
-            mask_secrets=mask_secrets,
             metrics_scope="batch",
         )
         profiles.append(UserProfileResponse(**profile))
@@ -553,6 +599,12 @@ async def list_user_profiles(
         page=page,
         limit=limit,
         pages=pages,
+        pagination=build_page_pagination_meta(
+            page=page,
+            per_page=limit,
+            total=total,
+            total_pages=pages,
+        ),
     )
 
     try:
@@ -592,7 +644,9 @@ async def list_user_profiles(
                     timeout_ms,
                 )
     except Exception as telemetry_error:
-        logger.debug("Bulk profile update telemetry failed; continuing", exc_info=telemetry_error)
+        logger.bind(error_type=type(telemetry_error).__name__).debug(
+            "Bulk profile update telemetry failed; continuing"
+        )
 
     audit_metadata = {
         "filters": {
@@ -650,6 +704,7 @@ async def get_user_profile(
 
         db_pool = await get_db_pool()
         service = UserProfileService(db_pool)
+        query_service = ProfileQueryService(service)
         requested = service.parse_sections(sections)
         api_mgr = await get_api_key_manager()
         security = await service.build_security(
@@ -657,13 +712,18 @@ async def get_user_profile(
             session_manager=session_manager,
             api_key_manager=api_mgr,
         )
-        profile = await service.build_profile(
+        profile = await query_service.build(
+            ProfileReadRequest(
+                actor_user_id=principal.user_id,
+                target_user_id=int(user_id),
+                sections=frozenset(requested) if requested is not None else None,
+                include_sources=include_sources,
+                include_raw=include_raw,
+                mask_secrets=mask_secrets,
+                contract_mode=ProfileContractMode.LEGACY_V1,
+            ),
             user=user_dict,
-            sections=requested,
             security=security,
-            include_sources=include_sources,
-            include_raw=include_raw,
-            mask_secrets=mask_secrets,
             metrics_scope="admin",
         )
         response = UserProfileResponse(**profile)
@@ -691,7 +751,10 @@ async def get_user_profile(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to build profile for user {user_id}: {exc}")
+        logger.bind(error_type=type(exc).__name__).error(
+            "Failed to build profile for user {}",
+            user_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve user profile",
@@ -736,76 +799,34 @@ async def update_user_profile(
             ),
             None,
         )
-    profile_service = UserProfileService(db_pool)
-    current_version = await profile_service.get_profile_version(user_id=int(user_id))
-    if payload.profile_version is not None:
-        if not profile_service.versions_match(current_version, payload.profile_version):
-            return (
-                _profile_error_response(
-                    status_code=status.HTTP_409_CONFLICT,
-                    error_code="profile_version_mismatch",
-                    detail="profile_version_mismatch",
-                    errors=[UserProfileErrorDetail(key="profile_version", message="mismatch")],
-                ),
-                None,
-            )
 
     roles = _derive_profile_update_roles(principal)
-    service = UserProfileUpdateService(db_pool)
-    updates = [(entry.key, entry.value) for entry in payload.updates]
-    preflight = await service.apply_updates(
-        user_id=int(user_id),
-        updates=updates,
-        roles=roles,
-        dry_run=True,
-        db_conn=db,
-        updated_by=principal.user_id,
-        scope=ProfileUpdateScope(
-            actor_user_id=principal.user_id,
-            active_org_id=principal.active_org_id,
-            active_team_id=principal.active_team_id,
-        ),
+    scope = ProfileUpdateScope(
+        actor_user_id=principal.user_id,
+        active_org_id=principal.active_org_id,
+        active_team_id=principal.active_team_id,
     )
-
-    error_payload = classify_profile_update_skips(preflight.skipped)
-    if error_payload:
-        status_code, error_code, detail, errors = error_payload
+    command = ProfileUpdateCommand(
+        actor_user_id=principal.user_id,
+        target_user_id=int(user_id),
+        updates=tuple((entry.key, entry.value) for entry in payload.updates),
+        roles=frozenset(roles),
+        dry_run=payload.dry_run,
+        expected_profile_version=payload.profile_version,
+        active_org_id=principal.active_org_id,
+        active_team_id=principal.active_team_id,
+        contract_mode=ProfileContractMode.LEGACY_V1,
+    )
+    result = await ProfileCommandService(db_pool=db_pool).apply(
+        command,
+        db_conn=db,
+        scope=scope,
+    )
+    response = _legacy_profile_command_response(result)
+    if isinstance(response, JSONResponse):
         return (
-            _profile_error_response(
-                status_code=status_code,
-                error_code=error_code,
-                detail=detail,
-                errors=errors,
-            ),
+            response,
             None,
-        )
-
-    if payload.dry_run:
-        response = UserProfileUpdateResponse(
-            profile_version=current_version,
-            applied=preflight.applied,
-            skipped=[],
-        )
-    else:
-        result = await service.apply_updates(
-            user_id=int(user_id),
-            updates=updates,
-            roles=roles,
-            dry_run=False,
-            db_conn=db,
-            updated_by=principal.user_id,
-            scope=ProfileUpdateScope(
-                actor_user_id=principal.user_id,
-                active_org_id=principal.active_org_id,
-                active_team_id=principal.active_team_id,
-            ),
-        )
-        current_version = await profile_service.get_profile_version(user_id=int(user_id))
-        skipped = [UserProfileUpdateError(**item) for item in result.skipped]
-        response = UserProfileUpdateResponse(
-            profile_version=current_version,
-            applied=result.applied,
-            skipped=skipped,
         )
 
     audit_metadata = {
@@ -844,8 +865,14 @@ async def bulk_update_user_profiles(
         user_ids=payload.user_ids,
     )
     total_targets = len(target_ids)
+    bulk_command_service = ProfileBulkCommandService()
     threshold = _get_bulk_confirm_threshold()
-    if not payload.dry_run and total_targets > threshold and not payload.confirm:
+    if bulk_command_service.requires_confirmation(
+        dry_run=payload.dry_run,
+        total_targets=total_targets,
+        threshold=threshold,
+        confirmed=payload.confirm,
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
@@ -910,6 +937,11 @@ async def bulk_update_user_profiles(
                 )
             else:
                 async with db_pool.transaction() as conn:
+                    await profile_service.get_profile_version(
+                        user_id=int(user_id),
+                        db_conn=conn,
+                        lock_user=True,
+                    )
                     result = await update_service.apply_updates(
                         user_id=int(user_id),
                         updates=updates,
@@ -926,21 +958,17 @@ async def bulk_update_user_profiles(
 
             profile_version = await profile_service.get_profile_version(user_id=int(user_id))
             skipped_entries = [UserProfileUpdateError(**item) for item in result.skipped]
-            applied_keys = set(result.applied)
-            diffs = [
-                UserProfileBulkUpdateDiff(
-                    key=entry.key,
-                    before=before_values.get(entry.key),
-                    after=_mask_profile_diff_value(
-                        profile_service,
-                        catalog_map,
-                        entry.key,
-                        entry.value,
-                    ),
-                )
-                for entry in payload.updates
-                if entry.key in applied_keys
-            ]
+            diffs = bulk_command_service.build_diffs(
+                updates=updates,
+                applied_keys=result.applied,
+                before_values=before_values,
+                mask_value=lambda key, value: _mask_profile_diff_value(
+                    profile_service,
+                    catalog_map,
+                    key,
+                    value,
+                ),
+            )
             results.append(
                 UserProfileBulkUpdateUserResult(
                     user_id=int(user_id),
@@ -963,7 +991,10 @@ async def bulk_update_user_profiles(
                 )
             )
         except Exception as exc:
-            logger.error("Bulk profile update failed for user {}: {}", user_id, exc)
+            logger.bind(error_type=type(exc).__name__).error(
+                "Bulk profile update failed for user {}",
+                user_id,
+            )
             failed_count += 1
             results.append(
                 UserProfileBulkUpdateUserResult(
@@ -981,7 +1012,9 @@ async def bulk_update_user_profiles(
                 labels={"dry_run": str(payload.dry_run).lower()},
             )
     except Exception as metrics_error:
-        logger.debug("Bulk profile update metrics emission failed; continuing", exc_info=metrics_error)
+        logger.bind(error_type=type(metrics_error).__name__).debug(
+            "Bulk profile update metrics emission failed; continuing"
+        )
 
     response = UserProfileBulkUpdateResponse(
         total_targets=total_targets,

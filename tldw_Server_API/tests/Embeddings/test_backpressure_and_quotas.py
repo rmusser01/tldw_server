@@ -1,12 +1,13 @@
 import json
 import os
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 from fastapi.routing import APIRoute
 
-from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
 
 
 class FakeRedisBP:
@@ -47,8 +48,62 @@ def _override_user(admin=False, uid="u1"):
     return _f
 
 
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_backpressure_ignores_default_local_redis_when_redis_disabled(monkeypatch):
+    """Disabled Redis config must not let a stray localhost Redis block embeddings."""
+
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as ep
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    import redis.asyncio as aioredis
+
+    stale = FakeRedisBP(depth=1, age_first_ms=1000)
+
+    async def fake_from_url(url, decode_responses=True):  # noqa: ARG001
+        return stale
+
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("EMBEDDINGS_REDIS_URL", raising=False)
+    monkeypatch.setenv("EMB_BACKPRESSURE_MAX_AGE_SECONDS", "0.1")
+    monkeypatch.setitem(ep.settings, "REDIS_ENABLED", False)
+    monkeypatch.setitem(ep.settings, "REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setattr(aioredis, "from_url", fake_from_url)
+
+    user = User(id="u1", username="u1", email="u1@example.test", is_active=True, is_admin=False)
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    assert await ep._check_backpressure_and_quotas(request, user) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_backpressure_respects_settings_redis_disabled_when_env_url_exists(monkeypatch):
+    """Explicit settings REDIS_ENABLED=False wins over ambient Redis URL env vars."""
+
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as ep
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    import redis.asyncio as aioredis
+
+    stale = FakeRedisBP(depth=1, age_first_ms=1000)
+
+    async def fake_from_url(url, decode_responses=True):  # noqa: ARG001
+        return stale
+
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("EMBEDDINGS_REDIS_URL", raising=False)
+    monkeypatch.setenv("EMB_BACKPRESSURE_MAX_AGE_SECONDS", "0.1")
+    monkeypatch.setitem(ep.settings, "REDIS_ENABLED", False)
+    monkeypatch.setattr(aioredis, "from_url", fake_from_url)
+
+    user = User(id="u1", username="u1", email="u1@example.test", is_active=True, is_admin=False)
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    assert await ep._check_backpressure_and_quotas(request, user) is None
+
+
 @pytest.mark.unit
 def test_backpressure_by_age_returns_429(monkeypatch):
+    app = reload_app_main().app
     client = TestClient(app)
     app.dependency_overrides[get_request_user] = _override_user(admin=True)
     # Force age above threshold
@@ -60,6 +115,7 @@ def test_backpressure_by_age_returns_429(monkeypatch):
         return fake
 
     monkeypatch.setenv("EMB_BACKPRESSURE_MAX_AGE_SECONDS", "0.1")
+    monkeypatch.setenv("REDIS_ENABLED", "true")
     monkeypatch.setattr(aioredis, "from_url", fake_from_url)
     r = client.post("/api/v1/embeddings", json={"input": "hello", "model": "text-embedding-3-small"})
     assert r.status_code == 429
@@ -67,10 +123,12 @@ def test_backpressure_by_age_returns_429(monkeypatch):
     app.dependency_overrides.pop(get_request_user, None)
 
 
+@pytest.mark.asyncio
 @pytest.mark.unit
-def test_tenant_quota_429(monkeypatch):
-    client = TestClient(app)
-    app.dependency_overrides[get_request_user] = _override_user(admin=False, uid="tenant1")
+async def test_tenant_quota_429(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as ep
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
     fake = FakeRedisBP(depth=0, age_first_ms=0)
     import redis.asyncio as aioredis
 
@@ -81,17 +139,119 @@ def test_tenant_quota_429(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("EMBEDDINGS_TENANT_RPS", "1")
 
-    r1 = client.post("/api/v1/embeddings", json={"input": "hello", "model": "text-embedding-3-small"})
-    # First should pass through to provider path; in CI it may 503 if providers missing; allow 200-503
-    assert r1.status_code in (200, 503, 429)
-    r2 = client.post("/api/v1/embeddings", json={"input": "hello", "model": "text-embedding-3-small"})
-    assert r2.status_code == 429
-    assert r2.headers.get("Retry-After") == "1"
-    app.dependency_overrides.pop(get_request_user, None)
+    user = User(
+        id="tenant1",
+        username="tenant1",
+        email="tenant1@example.test",
+        is_active=True,
+        is_admin=False,
+    )
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    assert await ep._check_backpressure_and_quotas(request, user) is None
+    second = await ep._check_backpressure_and_quotas(request, user)
+
+    assert second is not None
+    assert second.status_code == 429
+    assert second.headers.get("Retry-After") == "1"
+
+
+@pytest.mark.unit
+async def test_tenant_quota_fails_closed_when_redis_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Embeddings tenant quota returns 503 when Redis quota state is unavailable."""
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as ep
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _redis_unavailable() -> None:
+        """Simulate quota Redis being unavailable."""
+        raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(ep, "_is_embeddings_backpressure_redis_enabled", lambda: False)
+    monkeypatch.setattr(ep, "_tenant_rps_runtime", lambda: 1)
+    monkeypatch.setattr(ep, "_should_enforce_tenant_rps", lambda _request: True)
+    monkeypatch.setattr(ep, "_get_redis_client", _redis_unavailable)
+
+    user = User(
+        id="tenant1",
+        username="tenant1",
+        email="tenant1@example.test",
+        is_active=True,
+        is_admin=False,
+    )
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    result = await ep._check_backpressure_and_quotas(request, user)
+
+    assert result is not None
+    assert result.status_code == 503
+    assert result.headers["Retry-After"] == "1"
+    assert "tenant quota" in str(result.detail).lower()
+
+
+@pytest.mark.unit
+async def test_ingest_tenant_quota_fails_closed_when_redis_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ingest tenant quota returns 503 with structured logs when Redis is unavailable."""
+    from fastapi import HTTPException, Response
+
+    from tldw_Server_API.app.api.v1.API_Deps import backpressure as bp
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+    async def _redis_unavailable() -> None:
+        """Simulate quota Redis being unavailable."""
+        raise RuntimeError("redis unavailable")
+
+    class _CapturedLogger:
+        """Capture Loguru bind/opt/warning calls for structured-log assertions."""
+
+        def __init__(self) -> None:
+            self.bound: dict[str, object] = {}
+            self.opt_kwargs: dict[str, object] = {}
+            self.warning_message: str | None = None
+
+        def bind(self, **kwargs: object) -> "_CapturedLogger":
+            """Store structured fields passed through logger.bind."""
+            self.bound.update(kwargs)
+            return self
+
+        def opt(self, **kwargs: object) -> "_CapturedLogger":
+            """Store options passed through logger.opt."""
+            self.opt_kwargs.update(kwargs)
+            return self
+
+        def warning(self, message: str, *_args: object, **_kwargs: object) -> None:
+            """Store the warning message for assertions."""
+            self.warning_message = message
+
+    captured_logger = _CapturedLogger()
+    monkeypatch.setenv("INGEST_TENANT_RPS", "1")
+    monkeypatch.delenv("EMBEDDINGS_TENANT_RPS", raising=False)
+    monkeypatch.setattr(bp, "_get_redis_client", _redis_unavailable)
+    monkeypatch.setattr(bp, "is_single_user_profile_mode", lambda: False)
+    monkeypatch.setattr(bp, "logger", captured_logger)
+
+    user = User(id="tenant1", username="tenant1", email="tenant1@example.test", is_active=True, is_admin=False)
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    with pytest.raises(HTTPException) as exc_info:
+        await bp.guard_backpressure_and_quota(request, Response(), user)
+
+    assert exc_info.value.status_code == 503
+    assert "tenant quota" in str(exc_info.value.detail).lower()
+    assert exc_info.value.headers == {"Retry-After": "1"}
+    assert captured_logger.bound["tenant_id"] == "tenant1"
+    assert captured_logger.bound["exception_type"] == "RuntimeError"
+    assert captured_logger.bound["event"] == "ingest_tenant_quota_redis_unavailable"
+    assert isinstance(captured_logger.opt_kwargs["exception"], RuntimeError)
+    assert captured_logger.warning_message == "Ingest tenant quota Redis unavailable; failing closed"
 
 
 @pytest.mark.unit
 def test_embeddings_batch_route_has_rbac_rate_limit_parity():
+    app = reload_app_main().app
     single_route = None
     batch_route = None
     for route in app.routes:

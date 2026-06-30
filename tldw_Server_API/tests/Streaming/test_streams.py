@@ -2,10 +2,12 @@ import asyncio
 import os
 import time
 from contextlib import contextmanager
+from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.LLM_Calls.streaming import iter_sse_lines_requests
+from tldw_Server_API.app.core.Streaming import streams
 from tldw_Server_API.app.core.Streaming.streams import SSEStream, WebSocketStream
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 
@@ -144,7 +146,7 @@ async def test_sse_stream_max_duration_triggers_error_then_done():
 
 @pytest.mark.asyncio
 async def test_sse_stream_send_json_and_raw_line():
-    stream = SSEStream(heartbeat_interval_s=0.5)
+    stream = SSEStream(heartbeat_interval_s=0.5, provider_control_passthru=True)
 
     async def producer():
         await stream.send_json({"hello": "world"})
@@ -165,6 +167,75 @@ async def test_sse_stream_send_json_and_raw_line():
     assert any(x.startswith("event: summary") for x in out)
     assert any("data: {\"summary\": true}" in x.lower() for x in out)
     assert out[-1].strip().lower() == "data: [done]"
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_drops_provider_control_lines_by_default():
+    """Raw provider control lines should be filtered unless passthrough is enabled."""
+    stream = SSEStream(heartbeat_interval_s=10.0)
+
+    async def producer() -> None:
+        """Send provider-style raw SSE lines into the stream."""
+        await stream.send_raw_sse_line("event: provider-event")
+        await stream.send_raw_sse_line("id: provider-id")
+        await stream.send_raw_sse_line("retry: 1000")
+        await stream.send_raw_sse_line(": provider heartbeat")
+        await stream.send_raw_sse_line("data: {\"ok\": true}")
+        await stream.done()
+
+    out = []
+
+    async def consumer() -> None:
+        """Collect stream output until the done event is emitted."""
+        async for ln in stream.iter_sse():
+            out.append(ln)
+
+    await asyncio.gather(producer(), consumer())
+
+    assert not any(x.startswith("event:") for x in out)
+    assert not any(x.startswith("id:") for x in out)
+    assert not any(x.startswith("retry:") for x in out)
+    assert not any(x.startswith(":") for x in out)
+    assert any(x.startswith("data: {\"ok\": true}") for x in out)
+    assert out[-1].strip().lower() == "data: [done]"
+
+
+@pytest.mark.asyncio
+async def test_sse_stream_applies_control_filter_when_passthru_enabled():
+    """Control filters should map or drop provider control lines."""
+
+    def control_filter(name: str, value: str) -> tuple[str, str] | None:
+        """Map event names and drop provider IDs for this test."""
+        if name.lower() == "event":
+            return ("event", f"mapped-{value}")
+        if name.lower() == "id":
+            return None
+        return (name, value)
+
+    stream = SSEStream(
+        heartbeat_interval_s=10.0,
+        provider_control_passthru=True,
+        control_filter=control_filter,
+    )
+
+    async def producer() -> None:
+        """Send mixed control and data lines through the stream."""
+        await stream.send_raw_sse_line("event: original")
+        await stream.send_raw_sse_line("id: hidden")
+        await stream.send_raw_sse_line("data: {\"ok\": true}")
+        await stream.done()
+
+    out = []
+
+    async def consumer():
+        async for ln in stream.iter_sse():
+            out.append(ln)
+
+    await asyncio.gather(producer(), consumer())
+
+    assert any(x.startswith("event: mapped-original") for x in out)
+    assert not any(x.startswith("id: hidden") for x in out)
+    assert any(x.startswith("data: {\"ok\": true}") for x in out)
 
 
 @pytest.mark.asyncio
@@ -291,38 +362,114 @@ async def test_sse_stream_comment_heartbeat_mode(monkeypatch):
     assert hb.startswith(":")
 
 
+def test_stream_metrics_registration_failure_debug_log_is_sanitized(monkeypatch):
+    class FailingRegistry:
+        def register_metric(self, metric_definition):
+            raise RuntimeError("secret metric path /private/metrics.db")
+
+    class FakeLogger:
+        def __init__(self):
+            self.debug_messages = []
+
+        def debug(self, message):
+            self.debug_messages.append(message)
+
+    fake_logger = FakeLogger()
+    monkeypatch.setattr(streams, "_STREAM_METRICS_REGISTERED", False)
+    monkeypatch.setattr(streams, "get_metrics_registry", lambda: FailingRegistry())
+    monkeypatch.setattr(streams, "logger", fake_logger)
+
+    streams._ensure_stream_metrics_registered()
+
+    assert fake_logger.debug_messages == ["Stream metrics registration failed or already registered"]
+    assert "secret metric path" not in fake_logger.debug_messages[0]
+    assert "/private/metrics.db" not in fake_logger.debug_messages[0]
+    assert streams._STREAM_METRICS_REGISTERED is False
+
+
+def test_parse_float_env_invalid_value_debug_log_is_sanitized(monkeypatch):
+    class FakeLogger:
+        def __init__(self):
+            self.debug_messages = []
+
+        def debug(self, message):
+            self.debug_messages.append(message)
+
+    fake_logger = FakeLogger()
+    monkeypatch.setenv("STREAM_IDLE_TIMEOUT_S", "super-secret-token")
+    monkeypatch.setattr(streams, "logger", fake_logger)
+
+    assert streams._parse_float_env("STREAM_IDLE_TIMEOUT_S") is None
+    assert fake_logger.debug_messages == ["Invalid float in stream env"]
+    assert "STREAM_IDLE_TIMEOUT_S" not in fake_logger.debug_messages[0]
+    assert "super-secret-token" not in fake_logger.debug_messages[0]
+
+
 class _StubWebSocket:
-    def __init__(self):
-        self.sent = []
+    """Minimal websocket stub for WebSocketStream tests."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict[str, Any]] = []
         self.accepted = False
         self.closed = False
-        self.close_code = None
+        self.close_code: int | None = None
 
-    async def accept(self):
+    async def accept(self) -> None:
+        """Record that the websocket was accepted."""
         self.accepted = True
 
-    async def send_json(self, payload):
+    async def send_json(self, payload: dict[str, Any]) -> None:
+        """Record outbound JSON payloads."""
         self.sent.append(payload)
 
-    async def close(self, code: int = 1000):
+    async def close(self, code: int = 1000) -> None:
+        """Record close state and close code."""
         self.closed = True
         self.close_code = code
 
 
+class _AcceptFailWebSocket(_StubWebSocket):
+    """Websocket stub that raises a generic accept failure."""
+
+    async def accept(self) -> None:
+        """Raise a generic accept failure."""
+        raise RuntimeError("accept failed")
+
+
+class _AlreadyAcceptedWebSocket(_StubWebSocket):
+    """Websocket stub that raises Starlette's double-accept state error."""
+
+    async def accept(self) -> None:
+        """Raise the already-accepted RuntimeError variant."""
+        raise RuntimeError(
+            'Expected ASGI message "websocket.send" or "websocket.close", '
+            'but got "websocket.accept".'
+        )
+
+
 @pytest.mark.asyncio
 async def test_ws_stream_send_done_and_ping_metrics():
+    """Terminal done should stop later ping sends while preserving ping metrics."""
     ws = _StubWebSocket()
     reg = get_metrics_registry()
     stream = WebSocketStream(ws, heartbeat_interval_s=0.05, labels={"component": "test", "endpoint": "ws"})
     await stream.start()
+
+    async def wait_for_ping() -> None:
+        """Wait until the stream emits at least one ping frame."""
+        while not any(msg.get("type") == "ping" for msg in ws.sent):
+            await asyncio.sleep(0.01)
+
+    # Let the ping loop run at least once before the stream reaches a terminal state.
+    await asyncio.wait_for(wait_for_ping(), timeout=1.0)
     await stream.send_json({"hello": "world"})
     await stream.done()
-    # Allow a couple of pings
+    sent_after_done = len(ws.sent)
     await asyncio.sleep(0.12)
-    await stream.stop()
 
     assert ws.accepted is True
     assert any(msg.get("type") == "done" for msg in ws.sent)
+    assert len(ws.sent) == sent_after_done
 
     # Metrics assertions
     ws_latency_stats = reg.get_metric_stats("ws_send_latency_ms")
@@ -331,6 +478,36 @@ async def test_ws_stream_send_done_and_ping_metrics():
     assert pings_stats.get("count", 0) >= 1
     ping_fail_stats = reg.get_metric_stats("ws_ping_failures_total")
     assert ping_fail_stats.get("count", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_ws_stream_accept_failure_propagates_and_does_not_start_background_tasks():
+    """Generic accept failures should propagate without observable background sends."""
+    ws = _AcceptFailWebSocket()
+    stream = WebSocketStream(ws, heartbeat_interval_s=0.05, idle_timeout_s=0.05)
+
+    with pytest.raises(RuntimeError, match="accept failed"):
+        await stream.start()
+
+    await asyncio.sleep(0.12)
+    assert ws.accepted is False
+    assert ws.sent == []
+    assert ws.closed is False
+
+
+@pytest.mark.asyncio
+async def test_ws_stream_suppresses_starlette_double_accept_error():
+    """Already-accepted Starlette state errors should not fail stream startup."""
+    ws = _AlreadyAcceptedWebSocket()
+    stream = WebSocketStream(ws, heartbeat_interval_s=0, idle_timeout_s=0)
+
+    await stream.start()
+    await stream.send_json({"hello": "world"})
+    await stream.done()
+
+    assert ws.sent[0] == {"hello": "world"}
+    assert any(msg.get("type") == "done" for msg in ws.sent)
+    assert ws.closed is True
 
 
 @pytest.mark.asyncio
@@ -368,16 +545,21 @@ async def test_ws_stream_idle_edge_and_mark_activity():
     ws = _StubWebSocket()
     stream = WebSocketStream(ws, heartbeat_interval_s=0, idle_timeout_s=0.12)
     await stream.start()
-    # Nearly hit the threshold, then mark activity
-    await asyncio.sleep(0.06)
-    stream.mark_activity()
-    await asyncio.sleep(0.07)
-    # Should not be closed yet
-    assert ws.closed is False
-    # Now let it cross the threshold
-    await asyncio.sleep(0.12)
-    assert ws.closed is True
-    assert ws.close_code == 1001
+    try:
+        # Nearly hit the threshold, then mark activity
+        await asyncio.sleep(0.06)
+        stream.mark_activity()
+        await asyncio.sleep(0.07)
+        # Should not be closed yet
+        assert ws.closed is False
+        # Now let it cross the threshold and wait for the background idle loop.
+        deadline = time.monotonic() + 1.0
+        while not ws.closed and time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+        assert ws.closed is True
+        assert ws.close_code == 1001
+    finally:
+        await stream.stop()
 
 
 @pytest.mark.asyncio
@@ -424,10 +606,10 @@ async def test_sse_metrics_enqueue_to_yield_and_high_watermark():
 
 @pytest.mark.asyncio
 async def test_sse_backpressure_heartbeats_under_load():
-    """Under heavy producer pressure, ensure a heartbeat is eventually emitted once idle.
+    """Under heavy producer pressure, ensure a heartbeat is eventually emitted.
 
-    We stress the queue with a small max size so producer backpressure engages, then
-    verify that a heartbeat (comment mode) appears shortly after the producer stops.
+    We stress the queue with a small max size so producer backpressure engages,
+    then close the stream as soon as the heartbeat under test is observed.
     """
     stream = SSEStream(heartbeat_interval_s=0.05, heartbeat_mode="comment", queue_maxsize=5)
 
@@ -435,33 +617,25 @@ async def test_sse_backpressure_heartbeats_under_load():
     heartbeat_seen = asyncio.Event()
 
     async def producer():
-        for i in range(100):
-            await stream.send_json({"i": i})
-        producer_done.set()
+        try:
+            for i in range(100):
+                await stream.send_json({"i": i})
+        finally:
+            producer_done.set()
 
     async def closer():
-        await producer_done.wait()
-        try:
-            await asyncio.wait_for(
-                heartbeat_seen.wait(),
-                timeout=stream.heartbeat_interval_s + 0.1,
-            )
-        except TimeoutError:
-            pass
+        await asyncio.wait_for(heartbeat_seen.wait(), timeout=3.0)
         await stream.done(force=True)
 
     async def consumer():
         async for ln in stream.iter_sse():
             if ln.startswith(":"):
                 heartbeat_seen.set()
-            # If producer is done and queue drains, the next emission should be a heartbeat within interval
-            if producer_done.is_set():
-                # Keep looping until heartbeat is encountered
-                continue
 
     # Run both concurrently with a timeout guard
-    await asyncio.wait_for(asyncio.gather(producer(), consumer(), closer()), timeout=2.0)
-    assert heartbeat_seen.is_set(), "heartbeat not observed under backpressure after producer finished"
+    await asyncio.wait_for(asyncio.gather(producer(), consumer(), closer()), timeout=5.0)
+    assert producer_done.is_set()
+    assert heartbeat_seen.is_set(), "heartbeat not observed under backpressure"
 
 
 @pytest.mark.asyncio

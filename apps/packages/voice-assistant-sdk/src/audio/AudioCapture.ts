@@ -208,7 +208,6 @@ export class AudioCapture extends EventEmitter<AudioCaptureEvents> {
 
     // Use ScriptProcessorNode as fallback (deprecated but widely supported)
     const bufferSize = 4096;
-    // @ts-expect-error - createScriptProcessor is deprecated but still works
     const scriptNode = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
 
     scriptNode.onaudioprocess = (event: AudioProcessingEvent) => {

@@ -1,57 +1,102 @@
 # Moderation
 
-## 1. Descriptive of Current Feature Set
+The Moderation module provides configurable content policy checks, review
+workflows, supervised policy evaluation, governance helpers, category taxonomy,
+and family-wizard policy materialization. It is safety-sensitive and should stay
+explicit about when text is blocked, warned, redacted, queued for review, or
+allowed.
 
-- Purpose: Centralized, configurable moderation/guardrails for chat inputs/outputs with support for redaction or blocking.
-- Capabilities:
-  - Global policy from config.txt ([Moderation]) with per-user runtime overrides
-  - Blocklist with literals/regex, per-rule action (block|warn|redact:replacement)
-  - Categories filter and optional built-in PII patterns
-  - Streaming-friendly redaction and graceful block handling
-- Inputs/Outputs:
-  - Input: text (request/response frames)
-  - Output: moderated text or block/warn signals
-- Related Usage:
-  - Chat endpoints depend on moderation service for pre/post filtering
+## Start Here
 
-## 2. Technical Details of Features
+- Runtime checks: `moderation_service.py`.
+- Supervised and governance policy helpers: `supervised_policy.py`,
+  `governance_utils.py`, `governance_io.py`, and `conflict_resolution.py`.
+- Reviews: `review_service.py` and `review_store.py`.
+- Taxonomy and matching: `category_taxonomy.py` and `semantic_matcher.py`.
+- API endpoint: `app/api/v1/endpoints/moderation.py`; family setup endpoint:
+  `app/api/v1/endpoints/family_wizard.py`.
+- Tests: moderation tests under `tests/unit/`, chat integration moderation tests,
+  Guardian family-wizard tests, and
+  `tests/AuthNZ_Unit/test_moderation_permissions_claims.py`.
 
-- Architecture & Data Flow:
-  - `ModerationService` loads config and overrides, compiles `PatternRule`s, evaluates input/output with per-rule actions
-- Key Classes/Functions:
-  - `ModerationService`, `ModerationPolicy`, `PatternRule` in `moderation_service.py:1`
-- Dependencies:
-  - Internal: `core.config` loader; loguru
-- Data Models & DB:
-  - No DB; runtime overrides JSON file optional
-- Configuration:
-  - `[Moderation]` in config.txt; env overrides (e.g., `MODERATION_MAX_SCAN_CHARS`, `MODERATION_PII_ENABLED`)
-- Concurrency & Performance:
-  - Scan char limits and max replacements per pattern; optional debounce for blocklist writes
-- Error Handling:
-  - Fails safely, defaulting to heuristics; retains streaming behavior on errors
-- Security:
-  - PII rulepack (optional); user override path anchored to project root
+## Responsibilities
 
-## 3. Developer-Related/Relevant Information for Contributors
+- Load and apply moderation policy from config and runtime overrides.
+- Evaluate literal, regex, category, and optional PII-style rules.
+- Support supervised policies and governance schedules/chat-type scoping.
+- Persist and process moderation review items.
+- Materialize family-wizard settings into moderation/governance policy records.
 
-- Folder Structure:
-  - `Moderation/moderation_service.py`
-  - `Moderation/governance_utils.py` — pure utility functions for governance policy schedule/chat-type filtering; used by `supervised_policy.py` and `self_monitoring_service.py`
-- Extension Points:
-  - Additional rule sources (e.g., remote policy loaders); category taxonomy
-  - Governance policy scheduling and chat-type scoping via `GovernancePolicy` objects linked to supervised policies and self-monitoring rules
-- Coding Patterns:
-  - Keep scanning O(N); guard regex with clear limits
-- Tests:
-  - `tldw_Server_API/tests/unit/test_moderation_blocklist_parse.py:1`
-  - `tldw_Server_API/tests/unit/test_moderation_check_text_snippet.py:1`
-  - `tldw_Server_API/tests/unit/test_moderation_redact_categories.py:1`
-  - `tldw_Server_API/tests/Chat_NEW/integration/test_moderation.py:1`
-  - `tldw_Server_API/tests/Chat_NEW/integration/test_moderation_categories.py:1`
-- Local Dev Tips:
-  - Start with warn-only to validate patterns; add categories incrementally
-- Pitfalls & Gotchas:
-  - Over-greedy regex, catastrophic backtracking; ensure replacement counts bounded
-- Roadmap/TODOs:
-  - Pluggable remote policy providers; metrics hooks per action
+## Module Map
+
+- `moderation_service.py` evaluates text and applies block/warn/redact actions.
+- `supervised_policy.py` composes policy decisions and review requirements.
+- `review_service.py` and `review_store.py` own review lifecycle data.
+- `category_taxonomy.py` defines category naming and metadata.
+- `semantic_matcher.py` supports similarity-style policy matching.
+- `family_wizard_materializer.py` converts family wizard input into policy data.
+
+## How It Connects
+
+- Chat and other text-generation endpoints call moderation before or after model
+  output depending on route policy.
+- Governance and Monitoring share policy schedule/chat-type utility functions.
+- AuthNZ permission tests protect moderation endpoint claims.
+
+## Architecture Notes
+
+### Core Flow
+
+- Endpoints and chat flows obtain the effective moderation policy, evaluate input or output text with `ModerationService`, then apply block, warn, redact, allow, or review outcomes.
+- Literal, regex, managed-blocklist, category, and override rules are combined through explicit precedence so stricter actions win where rules overlap.
+- Review capture flows pass sanitized event data through `review_service.py` into `review_store.py`.
+- Family wizard materialization writes settings into moderation and governance policy records rather than special-casing family behavior in chat routes.
+
+### State And Data
+
+- Runtime policy can come from config, managed blocklists, user overrides, and family-wizard materialized records.
+- Managed blocklist updates use version/ETag-style concurrency checks in the API path.
+- Review storage owns review item lifecycle and idempotent event capture.
+- Category taxonomy names and supervised policy schedules are shared with adjacent governance and monitoring helpers.
+
+### Security And Operations
+
+- Regex and redaction rules must keep scan limits, replacement limits, and dangerous-pattern linting to avoid runaway matches.
+- Do not log raw moderated content, blocklist secrets, or review payloads that may contain sensitive user text.
+- Endpoint permissions are guarded by AuthNZ moderation claims; update permission tests when adding moderation routes.
+- Block, warn, and redact behavior must stay deterministic so test endpoints and chat integration checks agree.
+
+### Extension Checklist
+
+- New rule type: update `moderation_service.py`, schemas/endpoints, conflict behavior, and unit/chat integration tests.
+- New review field: update `review_store.py`, `review_service.py`, endpoint schemas, and review capture tests.
+- New family setup setting: update `family_wizard_materializer.py`, Guardian tests, and the moderation/governance policy mapping.
+
+## Extension Points
+
+- Add rule sources in `moderation_service.py` only after defining conflict and
+  precedence behavior.
+- Add review fields through `review_store.py`, schemas/endpoints, and review
+  tests together.
+- Keep governance helper functions pure so they can be reused by Monitoring and
+  supervised policy code.
+
+## Testing
+
+- Runtime text checks: `tests/unit/test_moderation_check_text_snippet.py`,
+  `tests/unit/test_moderation_redact_categories.py`, and
+  `tests/Chat_NEW/integration/test_moderation.py`.
+- Endpoint and permission coverage: `tests/AuthNZ_Unit/test_moderation_permissions_claims.py`
+  and `tests/unit/test_moderation_test_endpoint_sample.py`.
+- Family/governance behavior: `tests/Guardian/test_family_wizard_endpoints.py`,
+  `tests/Guardian/test_family_wizard_materialization.py`, and related Guardian
+  family-wizard tests. There is no direct
+  `tests/Moderation/` directory in this tree; use the adjacent unit and chat
+  integration moderation tests listed above.
+
+## Gotchas
+
+- Regex rules can create performance and false-positive risks. Keep scan limits,
+  replacement limits, and tests for edge cases.
+- Do not log raw moderated content when the failure path may include sensitive
+  user input.

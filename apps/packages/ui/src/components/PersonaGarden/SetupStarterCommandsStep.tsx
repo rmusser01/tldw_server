@@ -43,10 +43,14 @@ export const SetupStarterCommandsStep: React.FC<SetupStarterCommandsStepProps> =
   const [checkedKeys, setCheckedKeys] = React.useState<Set<string>>(
     () => new Set(defaultTemplateKeys)
   )
+  const [lastRequestedTemplateKey, setLastRequestedTemplateKey] = React.useState<string | null>(
+    null
+  )
 
   // Sync checked keys when defaultTemplateKeys changes (new archetype selected)
   React.useEffect(() => {
     setCheckedKeys(new Set(defaultTemplateKeys))
+    setLastRequestedTemplateKey(null)
   }, [defaultTemplateKeys])
 
   const [toolName, setToolName] = React.useState("")
@@ -55,6 +59,16 @@ export const SetupStarterCommandsStep: React.FC<SetupStarterCommandsStepProps> =
     error && /starter command/i.test(error)
       ? "Try a starter template again, add an MCP starter instead, or continue without starter commands."
       : null
+  const retryTemplate = React.useMemo(() => {
+    if (!retryHint || !lastRequestedTemplateKey || !checkedKeys.has(lastRequestedTemplateKey)) {
+      return null
+    }
+    return (
+      PERSONA_STARTER_COMMAND_TEMPLATES.find(
+        (template) => template.key === lastRequestedTemplateKey
+      ) || null
+    )
+  }, [checkedKeys, lastRequestedTemplateKey, retryHint])
 
   const handleCreateMcpStarter = React.useCallback(() => {
     const normalizedToolName = String(toolName || "").trim()
@@ -76,6 +90,16 @@ export const SetupStarterCommandsStep: React.FC<SetupStarterCommandsStepProps> =
           <div>{error}</div>
           {retryHint ? (
             <div className="mt-1 text-xs text-red-100">{retryHint}</div>
+          ) : null}
+          {retryTemplate ? (
+            <button
+              type="button"
+              className="mt-2 rounded-md border border-red-300/50 px-3 py-1 text-xs font-medium text-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={saving}
+              onClick={() => onCreateFromTemplate(retryTemplate.key)}
+            >
+              Retry {retryTemplate.label}
+            </button>
           ) : null}
         </div>
       ) : null}
@@ -106,7 +130,12 @@ export const SetupStarterCommandsStep: React.FC<SetupStarterCommandsStepProps> =
                   }
                   return next
                 })
-                if (!wasChecked) {
+                if (wasChecked) {
+                  if (lastRequestedTemplateKey === template.key) {
+                    setLastRequestedTemplateKey(null)
+                  }
+                } else {
+                  setLastRequestedTemplateKey(template.key)
                   onCreateFromTemplate(template.key)
                 }
               }}

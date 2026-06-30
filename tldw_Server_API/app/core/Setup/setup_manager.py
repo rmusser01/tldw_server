@@ -7,9 +7,12 @@ file handling logic across routers or UI layers.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
+import tempfile
+import time
 from configparser import ConfigParser
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -19,6 +22,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from tldw_Server_API.app.core.config_paths import resolve_config_file, resolve_config_root
+from tldw_Server_API.app.core.exceptions import SetupLockTimeoutError
 from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.core.Utils.Utils import get_project_root
 
@@ -48,8 +52,23 @@ _USER_DB_BASE_DIR_ALLOWED_ROOT_ENVS = (
 )
 _INGESTION_SOURCE_ALLOWED_ROOTS_SECTION = "Files"
 _INGESTION_SOURCE_ALLOWED_ROOTS_KEY = "ingestion_source_allowed_roots"
+_OPTIONAL_EMPTY_VALUE_FIELDS = {
+    ("LlamaCpp", "executable_path"),
+    ("LlamaCpp", "models_dir"),
+    ("LlamaCpp", "default_host"),
+    ("LlamaCpp", "default_port"),
+    ("LlamaCpp", "default_threads"),
+    ("LlamaCpp", "default_n_gpu_layers"),
+    ("LlamaCpp", "default_ctx_size"),
+    ("LlamaCpp", "port_probe_max"),
+    ("LlamaCpp", "allowed_paths"),
+    ("LlamaCpp", "log_output_file"),
+}
+_provider_catalog_update_fields: set[tuple[str, str]] | None = None
 
 _remote_access_hook: Callable[[bool], None] | None = None
+_CONFIG_LOCK_TIMEOUT_SECONDS = 10.0
+_CONFIG_LOCK_STALE_SECONDS = 300.0
 
 
 def register_remote_access_hook(callback: Callable[[bool], None]) -> None:
@@ -280,6 +299,14 @@ def _coerce_to_string(value: Any) -> str:
     return str(value)
 
 
+def validate_config_value_single_line(section: str, key: str, value: Any) -> str:
+    """Return a config value string after rejecting multiline injection chars."""
+    text = _coerce_to_string(value)
+    if any(char in text for char in ("\r", "\n", "\x00")):
+        raise ValueError(f"Invalid config value for {section}.{key}: line breaks and NUL bytes are not allowed.")
+    return text
+
+
 def _infer_type(raw_value: str) -> str:
     lowered = raw_value.strip().lower()
     if lowered in {"true", "false", "yes", "no", "on", "off", "1", "0"}:
@@ -391,6 +418,33 @@ def _validate_ingestion_source_allowed_roots_update(new_value: Any) -> None:
             raise ValueError("Ingestion source allowed roots must not contain empty entries")
 
 
+def validate_ingestion_source_allowed_roots(value: Any) -> None:
+    """Validate a proposed local-ingestion roots value without writing config."""
+    _validate_ingestion_source_allowed_roots_update(value)
+
+
+def _setup_provider_catalog_update_fields() -> set[tuple[str, str]]:
+    """Return setup provider catalog fields that may be added to existing sections."""
+    global _provider_catalog_update_fields
+    if _provider_catalog_update_fields is not None:
+        return _provider_catalog_update_fields
+
+    from tldw_Server_API.app.core.Setup.provider_catalog import get_setup_provider_catalog
+
+    fields: set[tuple[str, str]] = set()
+    for entry in get_setup_provider_catalog().providers:
+        for key in (entry.api_key_field, entry.base_url_field, entry.model_field):
+            if key:
+                fields.add((entry.config_section, key))
+    _provider_catalog_update_fields = fields
+    return fields
+
+
+def _is_setup_provider_catalog_update(section: str, key: str) -> bool:
+    """Return True when the field belongs to the first-run provider catalog."""
+    return (section, key) in _setup_provider_catalog_update_fields()
+
+
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
     return any(marker in lowered for marker in SENSITIVE_KEY_MARKERS)
@@ -398,6 +452,19 @@ def _is_sensitive_key(key: str) -> bool:
 
 def _is_placeholder(value: str) -> bool:
     return value.strip() in PLACEHOLDER_VALUES
+
+
+def is_secret_configured(section: str, key: str) -> bool:
+    """Return True when a secret config field has a non-placeholder value."""
+    if not section or not key:
+        return False
+
+    parser = _load_config_parser()
+    if not parser.has_option(section, key):
+        return False
+
+    value = parser.get(section, key, fallback="")
+    return bool(value.strip()) and not _is_placeholder(value)
 
 
 def get_setup_flags(config: ConfigParser | None = None) -> dict[str, bool]:
@@ -515,43 +582,106 @@ def update_config(updates: dict[str, dict[str, Any]], *, create_backup: bool = T
     if not updates:
         raise ValueError("No updates provided for configuration")
 
-    parser = _load_config_parser()
     config_path = get_config_file_path()
+    remote_access_value: bool | None = None
 
-    # Validate sections/keys and types against existing config
-    _validate_updates(parser, updates)
+    with _config_file_lock(config_path):
+        parser = _load_config_parser()
 
-    # Stage updates into the in-memory parser so that downstream hooks can read booleans
-    for section, items in updates.items():
-        if not parser.has_section(section):
-            parser.add_section(section)
-        for key, value in items.items():
-            parser.set(section, key, _coerce_to_string(value))
+        # Validate sections/keys and types against existing config
+        _validate_updates(parser, updates)
 
-    backup_path = None
-    if create_backup:
-        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-        backup_path = config_path.with_suffix(config_path.suffix + f".pre-setup-{timestamp}.bak")
-        shutil.copy2(config_path, backup_path)
-        logger.info(f"Created backup of config.txt at {backup_path}")
+        # Stage updates into the in-memory parser so that downstream hooks can read booleans
+        for section, items in updates.items():
+            if not parser.has_section(section):
+                parser.add_section(section)
+            for key, value in items.items():
+                parser.set(section, key, _coerce_to_string(value))
 
-    # Write changes back while preserving comments and unrelated formatting
-    _write_config_preserving_comments(config_path, updates)
+        backup_path = None
+        if create_backup:
+            timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+            backup_path = config_path.with_suffix(config_path.suffix + f".pre-setup-{timestamp}.bak")
+            shutil.copy2(config_path, backup_path)
+            logger.info(f"Created backup of config.txt at {backup_path}")
+
+        # Write changes back while preserving comments and unrelated formatting
+        _write_config_preserving_comments(config_path, updates)
+
+        if (
+            _remote_access_hook
+            and SETUP_SECTION in updates
+            and REMOTE_ACCESS_FIELD in updates[SETUP_SECTION]
+        ):
+            remote_access_value = parser.getboolean(SETUP_SECTION, REMOTE_ACCESS_FIELD, fallback=False)
 
     logger.info("Configuration file updated via setup manager (comments preserved)")
 
-    if (
-        _remote_access_hook
-        and SETUP_SECTION in updates
-        and REMOTE_ACCESS_FIELD in updates[SETUP_SECTION]
-    ):
+    if remote_access_value is not None:
         try:
-            new_value = parser.getboolean(SETUP_SECTION, REMOTE_ACCESS_FIELD, fallback=False)
-            _remote_access_hook(new_value)
+            _remote_access_hook(remote_access_value)
         except Exception:  # noqa: BLE001
             logger.exception("Failed to propagate remote setup access change")
 
     return backup_path
+
+
+@contextlib.contextmanager
+def _config_file_lock(config_path: Path):
+    lock_path = config_path.with_name(f"{config_path.name}.lock")
+    deadline = time.monotonic() + _CONFIG_LOCK_TIMEOUT_SECONDS
+    fd: int | None = None
+    while fd is None:
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            os.write(fd, str(os.getpid()).encode("ascii", errors="ignore"))
+        except FileExistsError:
+            with contextlib.suppress(FileNotFoundError):
+                if time.time() - lock_path.stat().st_mtime > _CONFIG_LOCK_STALE_SECONDS:
+                    lock_path.unlink()
+                    continue
+            if time.monotonic() >= deadline:
+                raise SetupLockTimeoutError(f"Timed out waiting for setup config lock: {lock_path}")
+            time.sleep(0.05)
+    try:
+        yield
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(FileNotFoundError):
+            lock_path.unlink()
+
+
+def _write_text_atomically(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: str | None = None
+    existing_mode: int | None = None
+    with contextlib.suppress(FileNotFoundError):
+        existing_mode = path.stat().st_mode
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            newline="",
+            dir=path.parent,
+            prefix=f"{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+            tmp_path = handle.name
+        if existing_mode is not None:
+            os.chmod(tmp_path, existing_mode & 0o7777)
+        os.replace(tmp_path, path)
+    except Exception:
+        if tmp_path:
+            with contextlib.suppress(FileNotFoundError):
+                Path(tmp_path).unlink()
+        raise
 
 
 def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict[str, Any]]) -> None:
@@ -565,17 +695,30 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
       - Leave comments and spacing outside the key/value token intact where reasonable.
     """
     try:
-        original_lines = config_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        with config_path.open("r", encoding="utf-8", newline="") as handle:
+            original_lines = handle.read().splitlines(keepends=True)
     except FileNotFoundError:
         raise
+    default_line_ending = "\r\n" if any(line.endswith("\r\n") for line in original_lines) else "\n"
 
     # Prepare a mutable copy of updates: section -> key -> str(value)
     pending: dict[str, dict[str, str]] = {
-        section: {k: _coerce_to_string(v) for k, v in items.items()} for section, items in updates.items()
+        section: {k: validate_config_value_single_line(section, k, v) for k, v in items.items()}
+        for section, items in updates.items()
     }
 
     current_section: str | None = None
     out_lines: list[str] = []
+
+    def _append_pending_items_for_section(section: str | None) -> None:
+        if not section:
+            return
+        items = pending.get(section, {})
+        if not items:
+            return
+        for key, value in list(items.items()):
+            out_lines.append(f"{key} = {value}\n")
+            items.pop(key)
 
     for raw in original_lines:
         line = raw
@@ -583,6 +726,7 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
 
         # Section header detection: [Section]
         if stripped.startswith("[") and stripped.endswith("]") and len(stripped) >= 2:
+            _append_pending_items_for_section(current_section)
             current_section = stripped[1:-1].strip()
             out_lines.append(line)
             continue
@@ -606,34 +750,33 @@ def _write_config_preserving_comments(config_path: Path, updates: dict[str, dict
                     leading_ws_len = len(left) - len(left.lstrip(" \t"))
                     leading_ws = left[:leading_ws_len]
                     new_value = items.pop(key)
+                    line_ending = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else ""
                     # Build normalized key/value token; keep one space around '='
                     new_code = f"{leading_ws}{key} = {new_value}"
                     # Ensure a space before inline comment if it exists and doesn't already start with whitespace
                     if comment_part and not comment_part.startswith((" ", "\t")):
                         comment_part = " " + comment_part
-                    out_lines.append(new_code + comment_part)
+                    out_lines.append(new_code + comment_part + ("" if comment_part else line_ending))
                     continue
 
         out_lines.append(line)
 
-    # Sanity: Ensure all keys were applied; if not, fall back to parser write for missed keys
+    _append_pending_items_for_section(current_section)
+
+    # Sanity: Ensure all keys were applied; if not, create missing sections at EOF.
     leftovers = sum(len(items) for items in pending.values())
     if leftovers:
-        logger.warning("Some config updates were not applied via comment-preserving writer; falling back for {} keys.", leftovers)
-        # As a conservative fallback: append missing keys at end of their section
-        text = "".join(out_lines)
+        logger.warning("Some config updates targeted missing sections; appending {} keys at EOF.", leftovers)
         for section, items in pending.items():
             if not items:
                 continue
-            # Append under a section header (create if missing)
-            header = f"[{section}]"
-            if header not in text:
-                text += f"\n{header}\n"
-            for k, v in items.items():
-                text += f"{k} = {v}\n"
-        out_lines = [text]
+            if out_lines and out_lines[-1].strip():
+                out_lines.append(default_line_ending)
+            out_lines.append(f"[{section}]{default_line_ending}")
+            for key, value in items.items():
+                out_lines.append(f"{key} = {value}{default_line_ending}")
 
-    config_path.write_text("".join(out_lines), encoding="utf-8")
+    _write_text_atomically(config_path, "".join(out_lines))
 
 
 def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) -> None:
@@ -646,14 +789,23 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
         the current value is boolean/integer/number. String values accept any.
     """
     for section, items in updates.items():
-        if not parser.has_section(section):
+        section_allows_provider_catalog_fields = bool(items) and all(
+            _is_setup_provider_catalog_update(section, key) for key in items
+        )
+        if not parser.has_section(section) and not section_allows_provider_catalog_fields:
             raise ValueError(f"Unknown section '{section}' in updates")
         for key, new_value in items.items():
+            serialized_value = validate_config_value_single_line(section, key, new_value)
             allows_new_ingestion_roots = (
                 section == _INGESTION_SOURCE_ALLOWED_ROOTS_SECTION
                 and key == _INGESTION_SOURCE_ALLOWED_ROOTS_KEY
             )
-            if not parser.has_option(section, key) and not allows_new_ingestion_roots:
+            allows_provider_catalog_field = _is_setup_provider_catalog_update(section, key)
+            if (
+                not parser.has_option(section, key)
+                and not allows_new_ingestion_roots
+                and not allows_provider_catalog_field
+            ):
                 raise ValueError(f"Unknown key '{key}' in section '{section}'")
 
             if section == _USER_DB_BASE_DIR_SECTION and key == _USER_DB_BASE_DIR_KEY:
@@ -661,17 +813,19 @@ def _validate_updates(parser: ConfigParser, updates: dict[str, dict[str, Any]]) 
             if section == _INGESTION_SOURCE_ALLOWED_ROOTS_SECTION and key == _INGESTION_SOURCE_ALLOWED_ROOTS_KEY:
                 _validate_ingestion_source_allowed_roots_update(new_value)
 
-            if allows_new_ingestion_roots and not parser.has_option(section, key):
+            if (allows_new_ingestion_roots or allows_provider_catalog_field) and not parser.has_option(section, key):
                 continue
 
             current_value = parser.get(section, key, fallback="")
             expected_type = _infer_type(current_value)
+            if serialized_value.strip() == "" and (section, key) in _OPTIONAL_EMPTY_VALUE_FIELDS:
+                continue
 
             # Accept any string when expected type is string
             if expected_type == "string":
                 continue
 
-            raw = str(new_value)
+            raw = serialized_value
             if expected_type == "boolean":
                 lowered = raw.strip().lower()
                 if lowered not in {"true", "false", "yes", "no", "on", "off", "1", "0"}:

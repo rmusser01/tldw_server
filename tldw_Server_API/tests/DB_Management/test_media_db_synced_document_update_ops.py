@@ -91,7 +91,7 @@ def test_apply_synced_document_content_update_rejects_optimistic_conflict() -> N
             return False
 
     fetch_rows = [
-        {"uuid": "media-uuid", "version": 1, "title": "Current Title"},
+        {"uuid": "media-uuid", "version": 1, "title": "Current Title", "content": "old body"},
     ]
 
     def _fetchone(_conn, _query, _params):
@@ -124,7 +124,7 @@ def test_apply_synced_document_content_update_updates_media_creates_version_logs
 
     events: list[tuple[str, object]] = []
     fetch_rows = [
-        {"uuid": "media-uuid", "version": 1, "title": "Current Title"},
+        {"uuid": "media-uuid", "version": 1, "title": "Current Title", "content": "old body"},
         {"id": 9, "uuid": "media-uuid", "title": "Current Title", "version": 2},
     ]
 
@@ -139,7 +139,7 @@ def test_apply_synced_document_content_update_updates_media_creates_version_logs
 
     def _fetchone(conn, query, params):
         normalized = " ".join(query.split())
-        if normalized.startswith("SELECT uuid, version, title FROM Media"):
+        if normalized.startswith("SELECT uuid, version, title, content FROM Media"):
             events.append(("fetch_media", params))
         else:
             events.append(("fetch_updated_media", params))
@@ -147,7 +147,7 @@ def test_apply_synced_document_content_update_updates_media_creates_version_logs
 
     execute_calls: list[tuple[str, tuple[object, ...]]] = []
     sync_payloads: list[dict[str, object]] = []
-    fts_calls: list[tuple[object, int, str, str]] = []
+    fts_calls: list[tuple[object, int, str, str, str | None, str | None]] = []
     collection_calls: list[tuple[int, str]] = []
     vector_calls: list[str] = []
 
@@ -164,9 +164,9 @@ def test_apply_synced_document_content_update_updates_media_creates_version_logs
         events.append(("log_sync_event", version))
         sync_payloads.append(payload)
 
-    def _update_fts_media(conn, media_id, title, content):
+    def _update_fts_media(conn, media_id, title, content, *, old_title=None, old_content=None):
         events.append(("update_fts_media", media_id))
-        fts_calls.append((conn, media_id, title, content))
+        fts_calls.append((conn, media_id, title, content, old_title, old_content))
 
     class _FakeCollectionsDatabase:
         @classmethod
@@ -255,7 +255,9 @@ def test_apply_synced_document_content_update_updates_media_creates_version_logs
             "created_doc_ver_num": 4,
         }
     ]
-    assert fts_calls == [("conn", 9, "Current Title", "updated body")]
+    assert fts_calls == [
+        ("conn", 9, "Current Title", "updated body", "Current Title", "old body")
+    ]
     assert collection_calls == [(9, expected_hash)]
     assert vector_calls == ["9"]
     assert [name for name, _value in events] == [
@@ -286,7 +288,7 @@ def test_apply_synced_document_content_update_swallows_best_effort_post_commit_h
             return False
 
     fetch_rows = [
-        {"uuid": "media-uuid", "version": 1, "title": "Current Title"},
+        {"uuid": "media-uuid", "version": 1, "title": "Current Title", "content": "old body"},
         {"id": 9, "uuid": "media-uuid", "title": "Current Title", "version": 2},
     ]
 

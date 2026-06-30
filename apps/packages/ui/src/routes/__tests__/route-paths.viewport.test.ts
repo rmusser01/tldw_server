@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest"
 
 import {
-  DOCUMENT_WORKSPACE_PATH,
+  CHAT_PATH,
   RESEARCH_WORKSPACE_PATH,
   VIEWPORT_CONSTRAINED_PATHS
 } from "../route-paths"
 
 describe("viewport constrained routes", () => {
-  it("preserves existing non-chat constrained routes", () => {
-    expect(VIEWPORT_CONSTRAINED_PATHS).toContain(DOCUMENT_WORKSPACE_PATH)
-    expect(VIEWPORT_CONSTRAINED_PATHS).toContain("/media-multi")
+  it("keeps the main chat route viewport constrained", () => {
+    expect(VIEWPORT_CONSTRAINED_PATHS).toContain(CHAT_PATH)
   })
 
   it("uses research workspace as the constrained research workspace route", () => {

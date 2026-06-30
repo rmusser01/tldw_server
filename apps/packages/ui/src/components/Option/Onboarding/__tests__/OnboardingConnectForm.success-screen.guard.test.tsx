@@ -30,9 +30,13 @@ const buildHarness = (): HarnessState => ({
 })
 
 const renderSuccessScreen = async ({
-  familyGuardrailsAvailable = true
+  familyGuardrailsAvailable = true,
+  entryIntent,
+  returnTo
 }: {
   familyGuardrailsAvailable?: boolean
+  entryIntent?: "character-chat"
+  returnTo?: string | null
 } = {}) => {
   const harness = buildHarness()
 
@@ -375,7 +379,7 @@ const renderSuccessScreen = async ({
   }))
 
   const { OnboardingConnectForm } = await import("../OnboardingConnectForm")
-  render(<OnboardingConnectForm />)
+  render(<OnboardingConnectForm entryIntent={entryIntent} returnTo={returnTo} />)
 
   await waitFor(() => {
     expect(screen.getByTestId("onboarding-success-screen")).toBeInTheDocument()
@@ -428,6 +432,30 @@ describe("OnboardingConnectForm success screen guards", () => {
       expect(harness.setUserPersona).not.toHaveBeenCalled()
       expect(harness.openSidepanelForActiveTab).toHaveBeenCalledTimes(1)
       expect(harness.navigate).toHaveBeenCalledWith("/chat")
+    })
+  })
+
+  it("prioritizes character-chat setup actions when launched from character intent", async () => {
+    const harness = await renderSuccessScreen({
+      entryIntent: "character-chat",
+      returnTo: "/characters?from=header-select&create=true"
+    })
+
+    expect(screen.getByTestId("character-chat-onboarding-lane")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Create character" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Import character" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Choose model" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Start character chat" })
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Create character" }))
+
+    await waitFor(() => {
+      expect(harness.markFirstRunComplete).toHaveBeenCalled()
+      expect(harness.navigate).toHaveBeenCalledWith(
+        "/characters?from=header-select&create=true"
+      )
     })
   })
 })

@@ -7,7 +7,7 @@ Focused on testing only the unified pipeline that's actually in use.
 # Note: pgvector fixtures are registered at the top-level tests/conftest.py.
 # Keep this file free of pytest_plugins to avoid pytest deprecation warnings.
 
-import tempfile
+import sys
 from pathlib import Path
 from typing import Dict, Any, Generator
 from unittest.mock import MagicMock, AsyncMock
@@ -16,6 +16,7 @@ import pytest
 from loguru import logger
 
 # Import actual MediaDatabase for integration tests
+from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
 from tldw_Server_API.app.core.RAG.rag_service.metrics_collector import QueryMetrics
@@ -65,6 +66,30 @@ def _disable_limit_enforcement(monkeypatch):
     monkeypatch.setenv("LIMIT_ENFORCEMENT_ENABLED", "false")
 
     yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_main_app_lifecycle_between_rag_tests():
+    """Keep lifespan-driven RAG tests from leaving the shared app draining."""
+    def _reset_if_main_app_loaded() -> None:
+        main_module = sys.modules.get("tldw_Server_API.app.main")
+        app = getattr(main_module, "app", None) if main_module is not None else None
+        if app is None:
+            return
+        try:
+            from tldw_Server_API.app.core.Jobs.manager import JobManager
+            from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
+
+            reset_lifecycle_state(app)
+            JobManager.set_acquire_gate(False)
+        except Exception as exc:
+            raise RuntimeError("Lifecycle reset failed in RAG_NEW autouse fixture") from exc
+
+    _reset_if_main_app_loaded()
+
+    yield
+
+    _reset_if_main_app_loaded()
 
 # =====================================================================
 # Cross-suite fixtures (mirrors Embeddings fixtures used by RAG tests)
@@ -127,11 +152,9 @@ def admin_user():
 # =====================================================================
 
 @pytest.fixture
-def temp_db_path() -> Generator[Path, None, None]:
+def temp_db_path(tmp_path: Path) -> Path:
     """Create a temporary database path."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        db_path = Path(temp_dir) / "test_media.db"
-        yield db_path
+    return tmp_path / "test_media.db"
 
 @pytest.fixture
 def media_database(temp_db_path) -> Generator[MediaDatabase, None, None]:
@@ -148,6 +171,9 @@ def media_database(temp_db_path) -> Generator[MediaDatabase, None, None]:
             db.close_connection()
         except Exception:
             _ = None
+        reset_managed_sqlite_backends(
+            sqlite_targets=[str(temp_db_path), str(temp_db_path.resolve())]
+        )
 
 @pytest.fixture
 def populated_media_db(media_database) -> MediaDatabase:

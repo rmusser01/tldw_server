@@ -52,6 +52,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     get_user_media_db_path,
 )
+from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import _kanban_card_indexable
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_id
@@ -124,9 +125,12 @@ def _coerce_bool(value: Any) -> bool:
 
 
 def _normalize_chunk_type(value: Any) -> str | None:
+    """Normalize a chunk-type candidate while surfacing non-fatal normalization failures."""
+
     try:
         return Chunker.normalize_chunk_type(value)
-    except _EMBEDDINGS_JOB_NONCRITICAL_EXCEPTIONS:
+    except _EMBEDDINGS_JOB_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Failed to normalize chunk type candidate {!r}: {}", value, exc)
         return None
 
 
@@ -135,16 +139,6 @@ def _root_job_uuid(payload: dict[str, Any]) -> str | None:
     if root is None:
         return None
     return str(root)
-
-
-def _normalize_chunk_type(value: Any) -> str | None:
-    """Normalize a chunk-type candidate while surfacing non-fatal normalization failures."""
-
-    try:
-        return Chunker.normalize_chunk_type(value)
-    except _EMBEDDINGS_JOB_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Failed to normalize chunk type candidate {!r}: {}", value, exc)
-        return None
 
 
 def _resolve_chunk_type(*candidates: Any) -> str:
@@ -180,6 +174,62 @@ def _update_root_job(
     elif status == "failed":
         message = error or "Embeddings stage failed"
         jm.fail_job(root_id, error=message, retryable=False, enforce=False)
+
+
+def _should_track_media_state(job_type: str | None, payload: dict[str, Any]) -> bool:
+    """Return whether this embeddings job should update Media DB readiness state."""
+
+    if job_type in {
+        _EMBEDDINGS_CHUNKING_JOB_TYPE,
+        _EMBEDDINGS_EMBEDDING_JOB_TYPE,
+        _EMBEDDINGS_STORAGE_JOB_TYPE,
+    }:
+        return True
+    if job_type != _CONTENT_JOB_TYPE:
+        return False
+    return not (payload.get("collection_name") and payload.get("document_id"))
+
+
+def _mark_media_embeddings_complete(*, user_id: str, media_id: int) -> None:
+    """Mark a media item as vector-ready after embeddings storage completes."""
+
+    db_path = get_user_media_db_path(user_id)
+    with managed_media_database(
+        client_id="embeddings_jobs_worker",
+        db_path=db_path,
+        initialize=False,
+    ) as db:
+        mark_media_as_processed(db_instance=db, media_id=int(media_id))
+
+
+def _mark_media_embeddings_error(*, user_id: str, media_id: int, error_message: str) -> None:
+    """Mark embeddings processing as failed for a media item."""
+
+    db_path = get_user_media_db_path(user_id)
+    with managed_media_database(
+        client_id="embeddings_jobs_worker",
+        db_path=db_path,
+        initialize=False,
+    ) as db:
+        db.mark_embeddings_error(int(media_id), str(error_message))
+
+
+def _mark_media_embeddings_error_safely(
+    *, user_id: str, media_id: int, error_message: str
+) -> None:
+    """Best-effort failure-state marker for worker exception paths."""
+
+    try:
+        _mark_media_embeddings_error(
+            user_id=user_id,
+            media_id=media_id,
+            error_message=error_message,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to mark media embeddings error state "
+            f"(user_id={user_id}, media_id={media_id}): {exc}"
+        )
 
 
 def _load_media_content(media_id: int, user_id: str) -> dict[str, Any]:
@@ -267,10 +317,53 @@ def _artifact_dir(
 ) -> Path:
     base_dir = DatabasePaths.get_user_vector_store_dir(user_id) / "embeddings_jobs"
     base_dir.mkdir(parents=True, exist_ok=True)
-    name = root_uuid or job_uuid or f"media_{media_id}"
-    path = base_dir / str(name)
+    name = _validate_artifact_identifier(root_uuid or job_uuid or f"media_{media_id}")
+    base_resolved = base_dir.resolve()
+    path = (base_dir / name).resolve()
+    try:
+        path.relative_to(base_resolved)
+    except ValueError as exc:
+        raise EmbeddingsJobError("Invalid embeddings artifact identifier", retryable=False) from exc
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _validate_artifact_identifier(value: Any) -> str:
+    raw = str(value or "").strip()
+    if (
+        not raw
+        or raw in {".", ".."}
+        or ".." in raw
+        or "/" in raw
+        or "\\" in raw
+        or "\x00" in raw
+    ):
+        raise EmbeddingsJobError("Invalid embeddings artifact identifier", retryable=False)
+    return raw
+
+
+def _resolve_artifact_path(
+    artifact_dir: Path,
+    payload: dict[str, Any],
+    key: str,
+    default_path: Path,
+) -> Path:
+    raw_value = payload.get(key)
+    try:
+        if raw_value in (None, ""):
+            candidate = default_path
+        elif isinstance(raw_value, (str, os.PathLike)):
+            candidate = Path(raw_value)
+        else:
+            raise TypeError(f"{key} must be a filesystem path string")
+        if not candidate.is_absolute():
+            candidate = artifact_dir / candidate
+        artifact_root = artifact_dir.resolve()
+        resolved = candidate.resolve()
+        resolved.relative_to(artifact_root)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise EmbeddingsJobError(f"Invalid embeddings artifact path for {key}", retryable=False) from exc
+    return resolved
 
 
 def _chunk_artifact_path(base_dir: Path) -> Path:
@@ -442,7 +535,7 @@ async def _handle_chunking_job(
 ) -> tuple[dict[str, Any], bool]:
     force_regenerate = _coerce_bool(payload.get("force_regenerate"))
     artifact_dir = _artifact_dir(user_id, root_uuid, media_id, str(job.get("uuid") or job.get("id")))
-    chunks_path = Path(payload.get("chunks_path") or _chunk_artifact_path(artifact_dir))
+    chunks_path = _resolve_artifact_path(artifact_dir, payload, "chunks_path", _chunk_artifact_path(artifact_dir))
 
     if chunks_path.exists() and not force_regenerate:
         chunks = _read_json(chunks_path)
@@ -512,11 +605,16 @@ async def _handle_embedding_job(
 ) -> dict[str, Any]:
     force_regenerate = _coerce_bool(payload.get("force_regenerate"))
     artifact_dir = _artifact_dir(user_id, root_uuid, media_id, str(job.get("uuid") or job.get("id")))
-    chunks_path = Path(payload.get("chunks_path") or _chunk_artifact_path(artifact_dir))
+    chunks_path = _resolve_artifact_path(artifact_dir, payload, "chunks_path", _chunk_artifact_path(artifact_dir))
     if not chunks_path.exists():
         raise EmbeddingsJobError("Chunk artifacts missing for embedding stage", retryable=False)
 
-    embeddings_path = Path(payload.get("embeddings_path") or _embedding_artifact_path(artifact_dir))
+    embeddings_path = _resolve_artifact_path(
+        artifact_dir,
+        payload,
+        "embeddings_path",
+        _embedding_artifact_path(artifact_dir),
+    )
     if embeddings_path.exists() and not force_regenerate:
         stored = _read_json(embeddings_path)
         if isinstance(stored, dict):
@@ -620,9 +718,14 @@ async def _handle_storage_job(
 ) -> dict[str, Any]:
     force_regenerate = _coerce_bool(payload.get("force_regenerate"))
     artifact_dir = _artifact_dir(user_id, root_uuid, media_id, str(job.get("uuid") or job.get("id")))
-    chunks_path = Path(payload.get("chunks_path") or _chunk_artifact_path(artifact_dir))
-    embeddings_path = Path(payload.get("embeddings_path") or _embedding_artifact_path(artifact_dir))
-    storage_path = Path(payload.get("storage_path") or _storage_artifact_path(artifact_dir))
+    chunks_path = _resolve_artifact_path(artifact_dir, payload, "chunks_path", _chunk_artifact_path(artifact_dir))
+    embeddings_path = _resolve_artifact_path(
+        artifact_dir,
+        payload,
+        "embeddings_path",
+        _embedding_artifact_path(artifact_dir),
+    )
+    storage_path = _resolve_artifact_path(artifact_dir, payload, "storage_path", _storage_artifact_path(artifact_dir))
 
     if storage_path.exists() and not force_regenerate:
         stored = _read_json(storage_path)
@@ -1098,7 +1201,7 @@ async def _handle_job(job: dict[str, Any]) -> dict[str, Any]:
         if not getattr(exc, "retryable", False):
             _update_root_job(root_uuid, status="failed", error=str(exc))
             if _should_track_media_state(job_type, payload):
-                _mark_media_embeddings_error(
+                _mark_media_embeddings_error_safely(
                     user_id=user_id,
                     media_id=media_id,
                     error_message=str(exc),
@@ -1107,7 +1210,7 @@ async def _handle_job(job: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         _update_root_job(root_uuid, status="failed", error=str(exc))
         if _should_track_media_state(job_type, payload):
-            _mark_media_embeddings_error(
+            _mark_media_embeddings_error_safely(
                 user_id=user_id,
                 media_id=media_id,
                 error_message=str(exc),

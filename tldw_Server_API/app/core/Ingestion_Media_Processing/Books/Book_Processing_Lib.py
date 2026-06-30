@@ -968,7 +968,7 @@ def process_epub(
     except _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
         logging.exception(f"Unexpected error processing EPUB {file_path}: {str(e)}")
         result["status"] = "Error"
-        result["error"] = f"Unexpected processing error: {str(e)}"
+        result["error"] = "Ebook processing failed"
         log_counter("epub_processing_error", labels={"file_path": file_path, "error": type(e).__name__})
 
 
@@ -1072,7 +1072,12 @@ def process_zip_of_epubs(
                             }]
 
                         member_path = Path(member.filename)
-                        if ".." in member_path.parts:
+                        if (
+                            member_path.is_absolute()
+                            or member_path.drive
+                            or ":" in member.filename
+                            or ".." in member_path.parts
+                        ):
                             logging.error(f"ZIP {zip_file_path} contains path traversal entry: {member.filename}")
                             return [{
                                 "status": "Error", "input_ref": zip_file_path, "media_type": "zip",
@@ -1097,8 +1102,8 @@ def process_zip_of_epubs(
                         if member.is_dir():
                             continue
 
-                        destination = (temp_dir_path_obj / member.filename).resolve()
-                        if not str(destination).startswith(str(temp_dir_path_obj.resolve())):
+                        destination = resolve_safe_local_path(temp_dir_path_obj / member.filename, temp_dir_path_obj)
+                        if destination is None:
                             logging.error(f"ZIP {zip_file_path} contains entry escaping temp dir: {member.filename}")
                             return [{
                                 "status": "Error", "input_ref": zip_file_path, "media_type": "zip",
@@ -1488,7 +1493,7 @@ def _process_markup_or_plain_text(
     except _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
         logging.exception(f"Error processing {file_type} file {file_path}: {str(e)}")
         result["status"] = "Error"
-        result["error"] = str(e)
+        result["error"] = "Document processing failed"
         log_counter(f"{file_type}_processing_error", labels={"file_path": file_path, "error": type(e).__name__})
 
     end_time = datetime.now()
@@ -1609,9 +1614,12 @@ def ingest_text_file(file_path, title=None, author=None, keywords=None, base_dir
 
         logging.info(f"Text file '{title}' by {author} ingested successfully.")
         return f"Text file '{title}' by {author} ingested successfully."
-    except _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
+    except ValueError as e:
         logging.error(f"Error ingesting text file: {str(e)}")
         return f"Error ingesting text file: {str(e)}"
+    except _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
+        logging.error(f"Error ingesting text file: {str(e)}")
+        return "Error ingesting text file"
 
 
 def ingest_folder(folder_path, keywords=None, base_dir: Optional[Path] = None):
@@ -1651,9 +1659,12 @@ def ingest_folder(folder_path, keywords=None, base_dir: Optional[Path] = None):
                 )
                 results.append(result)
         logging.info("Completed ingestion of all text files in the folder.")
-    except _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
+    except OSError as e:
         logging.exception(f"Error ingesting folder: {str(e)}")
         return f"Error ingesting folder: {str(e)}"
+    except _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS as e:
+        logging.exception(f"Error ingesting folder: {str(e)}")
+        return "Error ingesting folder"
 
     return "\n".join(results)
 

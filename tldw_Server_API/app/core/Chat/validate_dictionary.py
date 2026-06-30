@@ -153,6 +153,8 @@ _DISALLOWED_NODE_TYPES = {
     nodes.Extends,
     nodes.With,
     nodes.ScopedEvalContextModifier,
+    nodes.Mul,
+    nodes.Pow,
 }
 
 # Functions available in templates (Stage 1)
@@ -173,6 +175,10 @@ _ALLOWED_FUNCS = {
     "matched_text",
     "env",
     "user",
+}
+
+_ALLOWED_METHOD_CALLS_BY_ROOT = {
+    "match": frozenset({"end", "group", "groupdict", "groups", "start"}),
 }
 
 
@@ -196,6 +202,15 @@ def _template_ast_checks(text: str) -> tuple[list[dict[str, Any]], list[dict[str
             "message": str(e),
         })
         return errs, warns
+
+    def _root_name(n: nodes.Node) -> str | None:
+        if isinstance(n, nodes.Name):
+            return n.name
+        if isinstance(n, nodes.Getattr):
+            return _root_name(n.node)
+        if isinstance(n, nodes.Getitem):
+            return _root_name(n.node)
+        return None
 
     def _walk(n: nodes.Node) -> None:
         if isinstance(n, tuple(_DISALLOWED_NODE_TYPES)):
@@ -222,6 +237,21 @@ def _template_ast_checks(text: str) -> tuple[list[dict[str, Any]], list[dict[str
                             "field": "replacement",
                             "message": f"Unknown function: {func_name}",
                         })
+            elif isinstance(target, nodes.Getattr):
+                root = _root_name(target.node)
+                allowed_methods = _ALLOWED_METHOD_CALLS_BY_ROOT.get(str(root or ""))
+                if allowed_methods is None or target.attr not in allowed_methods:
+                    errs.append({
+                        "code": "template_forbidden_construct",
+                        "field": "replacement",
+                        "message": f"Forbidden method call: {target.attr}",
+                    })
+            else:
+                errs.append({
+                    "code": "template_forbidden_construct",
+                    "field": "replacement",
+                    "message": f"Forbidden callable: {type(target).__name__}",
+                })
         for child in n.iter_child_nodes():
             _walk(child)
 

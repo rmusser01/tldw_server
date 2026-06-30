@@ -5,9 +5,12 @@
 import pytest
 pytestmark = pytest.mark.unit
 import asyncio
+import sys
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 #
 # Local Imports
+from tldw_Server_API.app.core.TTS.adapters import vibevoice_adapter as vibevoice_adapter_module
 from tldw_Server_API.app.core.TTS.adapters.vibevoice_adapter import VibeVoiceAdapter
 from tldw_Server_API.app.core.TTS.adapters.base import (
     TTSRequest,
@@ -24,6 +27,57 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import (
 #######################################################################################################################
 #
 # Mock Tests for VibeVoice Adapter
+
+_SENSITIVE_VOICE_REFERENCE_MARKERS = (
+    "raw-voice-marker",
+    "/private/tmp/raw-voice-reference.wav",
+    "token=voice-secret",
+)
+
+
+def _render_logger_calls(fake_logger):
+    return repr(
+        fake_logger.debug.call_args_list
+        + fake_logger.info.call_args_list
+        + fake_logger.warning.call_args_list
+        + fake_logger.error.call_args_list
+    )
+
+
+def _assert_sensitive_markers_not_logged(fake_logger):
+    rendered = _render_logger_calls(fake_logger)
+    for marker in _SENSITIVE_VOICE_REFERENCE_MARKERS:
+        assert marker not in rendered
+
+
+def _install_voice_reference_dependency_stubs(monkeypatch):
+    monkeypatch.setitem(
+        sys.modules,
+        "librosa",
+        SimpleNamespace(resample=lambda audio_data, orig_sr, target_sr: audio_data),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "soundfile",
+        SimpleNamespace(
+            read=lambda _path: ([0] * 96000, 24000),
+            write=MagicMock(),
+        ),
+    )
+
+
+class _NamedTemporaryFileStub:
+    def __init__(self, path):
+        self.name = str(path)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def write(self, data):
+        return len(data)
 
 @pytest.mark.asyncio
 class TestVibeVoiceAdapterMock:
@@ -278,6 +332,118 @@ class TestVibeVoiceAdapterMock:
         adapter_15b = VibeVoiceAdapter({"vibevoice_variant": "1.5B"})
         caps_15b = await adapter_15b.get_capabilities()
         assert "1.5B" in caps_15b.provider_name
+
+    async def test_prepare_voice_reference_sanitizes_processing_error_log(self, monkeypatch):
+        """Voice-reference processing errors should not leak raw backend details."""
+        _install_voice_reference_dependency_stubs(monkeypatch)
+        fake_logger = MagicMock()
+
+        async def _process_voice_reference_async(*_args, **_kwargs):
+            return None, (
+                "raw-voice-marker failed at /private/tmp/raw-voice-reference.wav "
+                "token=voice-secret"
+            )
+
+        from tldw_Server_API.app.core.TTS import audio_utils
+
+        monkeypatch.setattr(vibevoice_adapter_module, "logger", fake_logger)
+        monkeypatch.setattr(audio_utils, "process_voice_reference_async", _process_voice_reference_async)
+
+        adapter = VibeVoiceAdapter({})
+        result = await adapter._prepare_voice_reference(b"raw-reference")
+
+        assert result is None
+        fake_logger.error.assert_called_once_with("Voice reference processing failed")
+        _assert_sensitive_markers_not_logged(fake_logger)
+
+    async def test_prepare_voice_reference_sanitizes_prepared_temp_path_log(self, monkeypatch, tmp_path):
+        """Prepared temp path logs should not expose filesystem path or tokens."""
+        _install_voice_reference_dependency_stubs(monkeypatch)
+        fake_logger = MagicMock()
+        prepared_path = tmp_path / "raw-voice-marker-token=voice-secret.wav"
+
+        async def _process_voice_reference_async(*_args, **_kwargs):
+            return b"processed-audio", None
+
+        from tldw_Server_API.app.core.TTS import audio_utils
+        import tempfile
+
+        monkeypatch.setattr(vibevoice_adapter_module, "logger", fake_logger)
+        monkeypatch.setattr(audio_utils, "process_voice_reference_async", _process_voice_reference_async)
+        monkeypatch.setattr(
+            tempfile,
+            "NamedTemporaryFile",
+            lambda **_kwargs: _NamedTemporaryFileStub(prepared_path),
+        )
+
+        adapter = VibeVoiceAdapter({})
+        result = await adapter._prepare_voice_reference(b"raw-reference")
+
+        assert result == str(prepared_path)
+        assert result not in _render_logger_calls(fake_logger)
+        fake_logger.info.assert_any_call("Voice reference prepared for VibeVoice")
+        _assert_sensitive_markers_not_logged(fake_logger)
+
+    async def test_prepare_voice_reference_sanitizes_prepare_exception_log(self, monkeypatch):
+        """Prepare exceptions should log only a fixed message with exception type."""
+        _install_voice_reference_dependency_stubs(monkeypatch)
+        fake_logger = MagicMock()
+
+        async def _process_voice_reference_async(*_args, **_kwargs):
+            raise RuntimeError(
+                "raw-voice-marker failed at /private/tmp/raw-voice-reference.wav "
+                "token=voice-secret"
+            )
+
+        from tldw_Server_API.app.core.TTS import audio_utils
+
+        monkeypatch.setattr(vibevoice_adapter_module, "logger", fake_logger)
+        monkeypatch.setattr(audio_utils, "process_voice_reference_async", _process_voice_reference_async)
+
+        adapter = VibeVoiceAdapter({})
+        result = await adapter._prepare_voice_reference(b"raw-reference")
+
+        assert result is None
+        fake_logger.error.assert_called_once_with("Failed to prepare voice reference ({})", "RuntimeError")
+        _assert_sensitive_markers_not_logged(fake_logger)
+
+    async def test_cleanup_resources_sanitizes_cleanup_exception_log(self, monkeypatch):
+        """Resource cleanup fallback logs should not expose raw exception text."""
+        fake_logger = MagicMock()
+
+        def _raise_collect_error():
+            raise RuntimeError(
+                "raw-voice-marker failed at /private/tmp/raw-voice-reference.wav "
+                "token=voice-secret"
+            )
+
+        monkeypatch.setattr(vibevoice_adapter_module, "logger", fake_logger)
+        monkeypatch.setattr(vibevoice_adapter_module.gc, "collect", _raise_collect_error)
+
+        adapter = VibeVoiceAdapter({})
+        await adapter._cleanup_resources()
+
+        fake_logger.warning.assert_called_once_with("VibeVoice: Error during cleanup ({})", "RuntimeError")
+        _assert_sensitive_markers_not_logged(fake_logger)
+
+    async def test_cleanup_after_generation_sanitizes_cleanup_exception_log(self, monkeypatch):
+        """Post-generation cleanup fallback logs should not expose raw exception text."""
+        fake_logger = MagicMock()
+
+        def _raise_collect_error():
+            raise RuntimeError(
+                "raw-voice-marker failed at /private/tmp/raw-voice-reference.wav "
+                "token=voice-secret"
+            )
+
+        monkeypatch.setattr(vibevoice_adapter_module, "logger", fake_logger)
+        monkeypatch.setattr(vibevoice_adapter_module.gc, "collect", _raise_collect_error)
+
+        adapter = VibeVoiceAdapter({})
+        await adapter.cleanup_after_generation()
+
+        fake_logger.debug.assert_called_once_with("Post-generation cleanup error ({})", "RuntimeError")
+        _assert_sensitive_markers_not_logged(fake_logger)
 
 #######################################################################################################################
 #

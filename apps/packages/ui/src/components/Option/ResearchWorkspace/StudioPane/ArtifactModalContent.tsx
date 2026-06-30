@@ -1,15 +1,11 @@
-import React, { useRef, useState } from "react"
+import React, { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Button, Input, Table as AntTable, message } from "antd"
-import {
-  Plus,
-  Save,
-  Search,
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react"
+import { Plus, Save, Search } from "lucide-react"
 
-import Mermaid from "@/components/Common/Mermaid"
+import { MermaidDiagramBlock } from "@/components/Common/MermaidDiagramBlock"
+import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
+import type { GeneratedArtifact } from "@/types/workspace"
 
 import {
   extractMermaidCode,
@@ -27,40 +23,19 @@ import {
   scheduleWorkspaceUndoAction,
   undoWorkspaceAction,
 } from "../undo-manager"
+import { buildProposalDeepResearchVerificationSections } from "./proposal-deep-research-verification"
+import { renderWorkspaceMessageActionContent } from "../workspace-message-content"
+
+const MAX_DISPLAYED_UNRESOLVED_QUESTIONS = 3
 
 export const MindMapArtifactViewer: React.FC<{
-  title: string
   content: string
-}> = ({ title, content }) => {
-  const [zoom, setZoom] = useState(1)
-  const containerRef = useRef<HTMLDivElement | null>(null)
+}> = ({ content }) => {
   const mermaidCode = React.useMemo(() => extractMermaidCode(content), [content])
   const canRenderMermaid = React.useMemo(
     () => isLikelyMermaidDiagram(mermaidCode),
     [mermaidCode]
   )
-
-  const handleExportSvg = () => {
-    const svg = containerRef.current?.querySelector("svg")
-    if (!svg) return
-    const svgBlob = new Blob([svg.outerHTML], {
-      type: "image/svg+xml;charset=utf-8"
-    })
-    downloadBlobFile(svgBlob, `${title || "mind-map"}.svg`)
-  }
-
-  const handleExportPng = async () => {
-    if (!containerRef.current) return
-    const html2canvas = (await import("html2canvas")).default
-    const canvas = await html2canvas(containerRef.current, {
-      backgroundColor: "#ffffff",
-      scale: 2
-    })
-    canvas.toBlob((blob) => {
-      if (!blob) return
-      downloadBlobFile(blob, `${title || "mind-map"}.png`)
-    }, "image/png")
-  }
 
   if (!canRenderMermaid) {
     return (
@@ -76,47 +51,8 @@ export const MindMapArtifactViewer: React.FC<{
   }
 
   return (
-    <div className="flex max-h-[70vh] flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="small"
-          icon={<ZoomOut className="h-3.5 w-3.5" />}
-          onClick={() => setZoom((prev) => Math.max(0.5, Number((prev - 0.1).toFixed(2))))}
-        >
-          Zoom out
-        </Button>
-        <span className="text-xs text-text-muted">{Math.round(zoom * 100)}%</span>
-        <Button
-          size="small"
-          icon={<ZoomIn className="h-3.5 w-3.5" />}
-          onClick={() => setZoom((prev) => Math.min(2.5, Number((prev + 0.1).toFixed(2))))}
-        >
-          Zoom in
-        </Button>
-        <Button size="small" onClick={() => setZoom(1)}>
-          Reset
-        </Button>
-        <Button size="small" onClick={handleExportSvg}>
-          Export SVG
-        </Button>
-        <Button size="small" onClick={() => void handleExportPng()}>
-          Export PNG
-        </Button>
-      </div>
-
-      <div className="rounded border border-border bg-surface2/40 p-2 text-xs text-text-muted">
-        Scroll to pan the diagram when zoomed in.
-      </div>
-
-      <div className="max-h-[56vh] overflow-auto rounded border border-border bg-surface p-4">
-        <div
-          ref={containerRef}
-          style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}
-          className="inline-block min-w-full"
-        >
-          <Mermaid code={mermaidCode} />
-        </div>
-      </div>
+    <div className="max-h-[70vh] overflow-y-auto">
+      <MermaidDiagramBlock source={mermaidCode} enableArtifactAction={false} />
     </div>
   )
 }
@@ -169,6 +105,24 @@ export const DataTableArtifactViewer: React.FC<{
     downloadBlobFile(csvBlob, `${title || "data-table"}.csv`)
   }
 
+  const handleDownloadJson = () => {
+    if (!tableData) return
+    const jsonBlob = new Blob(
+      [
+        JSON.stringify(
+          {
+            title: title || "Data Table",
+            table: tableData
+          },
+          null,
+          2
+        )
+      ],
+      { type: "application/json;charset=utf-8" }
+    )
+    downloadBlobFile(jsonBlob, `${title || "data-table"}.json`)
+  }
+
   if (!tableData) {
     return (
       <div className="max-h-[70vh] overflow-y-auto whitespace-pre-wrap rounded border border-border bg-surface p-3 text-sm">
@@ -181,6 +135,7 @@ export const DataTableArtifactViewer: React.FC<{
     <div className="flex max-h-[70vh] flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <Input
+          aria-label="Filter table rows"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Filter table rows"
@@ -190,6 +145,9 @@ export const DataTableArtifactViewer: React.FC<{
         <Button size="small" onClick={handleDownloadCsv}>
           Export CSV
         </Button>
+        <Button size="small" onClick={handleDownloadJson}>
+          Export JSON
+        </Button>
       </div>
       <AntTable
         columns={columns}
@@ -198,6 +156,107 @@ export const DataTableArtifactViewer: React.FC<{
         size="small"
         scroll={{ x: true, y: 420 }}
       />
+    </div>
+  )
+}
+
+export const ProposalDeepResearchVerificationViewer: React.FC<{
+  proposalArtifact: GeneratedArtifact
+  verificationArtifact: GeneratedArtifact
+}> = ({ proposalArtifact, verificationArtifact }) => {
+  const sections = React.useMemo(
+    () =>
+      buildProposalDeepResearchVerificationSections(
+        proposalArtifact,
+        verificationArtifact
+      ),
+    [proposalArtifact, verificationArtifact]
+  )
+
+  return (
+    <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto">
+      <div className="rounded border border-border bg-surface2/40 p-3 text-xs text-text-muted">
+        Deep Research verification is shown beside compatible proposal sections
+        as imported run evidence. The original proposal content, source coverage,
+        and review checklist are unchanged.
+      </div>
+      {sections.map((section, index) => {
+        const showDetailedVerification =
+          section.heading.trim().toLowerCase() === "source audit"
+
+        return (
+          <section
+            key={`${section.heading}-${index}`}
+            className="grid gap-3 rounded border border-border bg-surface p-3 md:grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)]"
+          >
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-text">
+                {section.heading}
+              </h3>
+              {section.body ? (
+                <MarkdownPreview
+                  className="mt-2 text-text"
+                  content={section.body}
+                  size="sm"
+                />
+              ) : (
+                <p className="mt-2 text-sm text-text-muted">No section body.</p>
+              )}
+            </div>
+            {section.verification ? (
+              <aside
+                aria-label={`Deep Research verification for ${section.heading}`}
+                className="rounded border border-primary/20 bg-primary/5 p-3 text-xs text-text"
+              >
+                <p className="font-semibold text-text">
+                  Deep Research verification
+                </p>
+                <p className="mt-1 text-text-muted">
+                  Run {section.verification.runId}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <span className="rounded bg-success/10 px-2 py-0.5 text-success">
+                    {section.verification.supportedClaimCount} supported
+                  </span>
+                  <span className="rounded bg-warning/10 px-2 py-0.5 text-warning">
+                    {section.verification.unsupportedClaimCount} unsupported
+                  </span>
+                  <span className="rounded bg-error/10 px-2 py-0.5 text-error">
+                    {section.verification.contradictionCount} contradiction
+                    {section.verification.contradictionCount === 1 ? "" : "s"}
+                  </span>
+                </div>
+                {showDetailedVerification &&
+                  section.verification.sourceTrustCount > 0 && (
+                    <p className="mt-2 text-text-muted">
+                      Source trust entries:{" "}
+                      {section.verification.sourceTrustCount}
+                    </p>
+                  )}
+                {showDetailedVerification &&
+                  section.verification.unresolvedQuestions.length > 0 && (
+                    <div className="mt-2">
+                      <p className="font-medium text-text">
+                        Unresolved questions
+                      </p>
+                      <ul className="mt-1 list-disc space-y-1 pl-4 text-text-muted">
+                        {section.verification.unresolvedQuestions
+                          .slice(0, MAX_DISPLAYED_UNRESOLVED_QUESTIONS)
+                          .map((question, questionIndex) => (
+                            <li key={`${question}-${questionIndex}`}>
+                              {question}
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                  )}
+              </aside>
+            ) : (
+              <div className="hidden md:block" aria-hidden="true" />
+            )}
+          </section>
+        )
+      })}
     </div>
   )
 }
@@ -246,15 +305,16 @@ export const FlashcardArtifactEditor: React.FC<{
       const maybeOpen = (
         messageApi as { open?: (config: unknown) => void }
       ).open
+      const removeContent = t(
+        "playground:studio.flashcardRemoved",
+        "Flashcard removed."
+      )
       const messageConfig = {
         key: undoMessageKey,
         type: "warning",
         duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-        content: t(
-          "playground:studio.flashcardRemoved",
-          "Flashcard removed."
-        ),
-        btn: (
+        content: renderWorkspaceMessageActionContent(
+          removeContent,
           <Button
             size="small"
             type="link"
@@ -278,12 +338,12 @@ export const FlashcardArtifactEditor: React.FC<{
       if (typeof maybeOpen === "function") {
         maybeOpen(messageConfig)
       } else {
-        const maybeWarning = (
-          messageApi as { warning?: (content: string) => void }
-        ).warning
-        if (typeof maybeWarning === "function") {
-          maybeWarning(t("playground:studio.flashcardRemoved", "Flashcard removed."))
-        }
+      const maybeWarning = (
+        messageApi as { warning?: (content: string) => void }
+      ).warning
+      if (typeof maybeWarning === "function") {
+          maybeWarning(removeContent)
+      }
       }
     },
     [draftCards, messageApi, t]
@@ -317,6 +377,7 @@ export const FlashcardArtifactEditor: React.FC<{
               </Button>
             </div>
             <Input.TextArea
+              aria-label={`Flashcard front ${index + 1}`}
               value={card.front}
               onChange={(event) => updateCard(index, { front: event.target.value })}
               rows={2}
@@ -324,6 +385,7 @@ export const FlashcardArtifactEditor: React.FC<{
               className="mb-2"
             />
             <Input.TextArea
+              aria-label={`Flashcard back ${index + 1}`}
               value={card.back}
               onChange={(event) => updateCard(index, { back: event.target.value })}
               rows={3}
@@ -396,15 +458,16 @@ export const QuizArtifactEditor: React.FC<{
       const maybeOpen = (
         messageApi as { open?: (config: unknown) => void }
       ).open
+      const removeContent = t(
+        "playground:studio.quizQuestionRemoved",
+        "Question removed."
+      )
       const messageConfig = {
         key: undoMessageKey,
         type: "warning",
         duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-        content: t(
-          "playground:studio.quizQuestionRemoved",
-          "Question removed."
-        ),
-        btn: (
+        content: renderWorkspaceMessageActionContent(
+          removeContent,
           <Button
             size="small"
             type="link"
@@ -432,9 +495,7 @@ export const QuizArtifactEditor: React.FC<{
           messageApi as { warning?: (content: string) => void }
         ).warning
         if (typeof maybeWarning === "function") {
-          maybeWarning(
-            t("playground:studio.quizQuestionRemoved", "Question removed.")
-          )
+          maybeWarning(removeContent)
         }
       }
     },
@@ -474,6 +535,7 @@ export const QuizArtifactEditor: React.FC<{
               </Button>
             </div>
             <Input.TextArea
+              aria-label={`Question prompt ${index + 1}`}
               value={question.question}
               onChange={(event) =>
                 updateQuestion(index, { question: event.target.value })
@@ -483,6 +545,7 @@ export const QuizArtifactEditor: React.FC<{
               className="mb-2"
             />
             <Input.TextArea
+              aria-label={`Question options ${index + 1}`}
               value={question.options.join("\n")}
               onChange={(event) =>
                 updateQuestion(index, {
@@ -497,6 +560,7 @@ export const QuizArtifactEditor: React.FC<{
               className="mb-2"
             />
             <Input
+              aria-label={`Correct answer ${index + 1}`}
               value={question.answer}
               onChange={(event) =>
                 updateQuestion(index, { answer: event.target.value })
@@ -505,6 +569,7 @@ export const QuizArtifactEditor: React.FC<{
               className="mb-2"
             />
             <Input.TextArea
+              aria-label={`Question explanation ${index + 1}`}
               value={question.explanation || ""}
               onChange={(event) =>
                 updateQuestion(index, { explanation: event.target.value })

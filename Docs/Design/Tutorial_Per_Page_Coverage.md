@@ -9,7 +9,7 @@ Define the release rationale and route-by-route scope for baseline (`*-basics`) 
 | Route | Basics Tutorial ID | Release Tier |
 |------|---------------------|--------------|
 | `/chat` | `playground-basics` | P0 |
-| `/workspace-playground` | `workspace-playground-basics` | P0 |
+| `/research-workspace` | `research-workspace-basics` | P0 |
 | `/media` | `media-basics` | P0 |
 | `/knowledge` | `knowledge-basics` | P0 |
 | `/characters` | `characters-basics` | P0 |
@@ -21,7 +21,7 @@ Define the release rationale and route-by-route scope for baseline (`*-basics`) 
 
 ## Design Rationale
 
-1. Prioritize P0 routes where first-run confusion is highest (`/chat`, `/workspace-playground`, `/media`, `/knowledge`, `/characters`).
+1. Prioritize P0 routes where first-run confusion is highest (`/chat`, `/research-workspace`, `/media`, `/knowledge`, `/characters`).
 2. Ensure each route has one clear entry tutorial before expanding to advanced/tutorial chains.
 3. Keep route ownership explicit via one canonical basics ID per page to simplify QA and completion tracking.
 4. Gate release readiness on this map plus the manual QA checklist in `Docs/Design/Tutorial_Per_Page_Coverage.md`.

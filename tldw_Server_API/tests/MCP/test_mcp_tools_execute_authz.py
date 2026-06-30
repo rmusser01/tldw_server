@@ -16,6 +16,50 @@ from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 client = TestClient(app)
 
 
+def _write_run_command_test_config(tmp_path: Path) -> Path:
+    """Write an explicit opt-in MCP module config for tests that execute `run`."""
+    config_path = tmp_path / "mcp_modules_with_run.yaml"
+    config_path.write_text(
+        """
+modules:
+  - id: template
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.template_module:TemplateModule
+    enabled: true
+    name: Template
+    version: "1.0.0"
+    department: demo
+    settings: {}
+  - id: filesystem
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule
+    enabled: true
+    name: Filesystem
+    version: "1.0.0"
+    department: system
+    settings: {}
+  - id: knowledge
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.knowledge_module:KnowledgeModule
+    enabled: true
+    name: Knowledge
+    version: "1.0.0"
+    department: knowledge
+    settings: {}
+  - id: run_command
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module:RunCommandModule
+    enabled: true
+    name: Run Command
+    version: "0.1.0"
+    department: system
+    settings:
+      spill_dir: .mcp-test-spills
+      spill_threshold_bytes: 65536
+      preview_line_limit: 200
+      preview_byte_limit: 51200
+""".lstrip(),
+        encoding="utf-8",
+    )
+    return config_path
+
+
 def _run(coro):
 
 
@@ -54,13 +98,18 @@ def test_tools_execute_with_bearer_token_no_permission_403():
 def test_tools_execute_with_api_key_and_role_permission_allows_200(tmp_path, monkeypatch):
 
 
+    from tldw_Server_API.app.core.MCP_unified.server import reset_mcp_server
+
     # Point AuthNZ DB to a fresh SQLite file
     db_file = tmp_path / "mcp_allow.sqlite"
-    os.environ["DATABASE_URL"] = f"sqlite:///{db_file}"
-    os.environ["AUTH_MODE"] = "single_user"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_file}")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("MCP_MODULES_CONFIG", str(_write_run_command_test_config(tmp_path)))
+    monkeypatch.setenv("MCP_MODULES", "")
     # Reset settings and DB pool to pick up new config
     _run(reset_db_pool())
     reset_settings()
+    _run(reset_mcp_server())
 
     # Run AuthNZ migrations (creates RBAC tables and expands api_keys schema)
     ensure_authnz_tables(Path(db_file))
@@ -200,15 +249,15 @@ def test_tools_execute_with_api_key_and_role_permission_allows_200(tmp_path, mon
     assert "[exit:0 |" in run_body["result"]
 
 
-def test_tools_execute_with_api_key_can_run_virtual_cli_help(tmp_path):
+def test_tools_execute_with_api_key_can_run_virtual_cli_help(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.MCP_unified.config import get_config
     from tldw_Server_API.app.core.MCP_unified.server import get_mcp_server, reset_mcp_server
 
     db_file = tmp_path / "mcp_run_help.sqlite"
-    os.environ["DATABASE_URL"] = f"sqlite:///{db_file}"
-    os.environ["AUTH_MODE"] = "single_user"
-    os.environ.pop("MCP_MODULES", None)
-    os.environ.pop("MCP_MODULES_CONFIG", None)
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_file}")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("MCP_MODULES_CONFIG", str(_write_run_command_test_config(tmp_path)))
+    monkeypatch.setenv("MCP_MODULES", "")
 
     _run(reset_db_pool())
     reset_settings()

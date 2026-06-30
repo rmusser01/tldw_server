@@ -31,6 +31,24 @@ def _lower_keys(d: dict) -> dict:
     return out
 
 
+def _rate_value(rates: dict, *keys: str, default: float | None = None) -> float | None:
+    for key in keys:
+        if key in rates:
+            try:
+                return float(rates.get(key) or 0.0)
+            except (TypeError, ValueError):
+                return default
+    return default
+
+
+UNKNOWN_BILLABLE_RATE = {"prompt": 0.01, "completion": 0.03}
+
+
+def _unknown_billable_rate() -> dict[str, float]:
+    """Return a fresh copy of the conservative unknown billable rate sentinel."""
+    return dict(UNKNOWN_BILLABLE_RATE)
+
+
 # Baseline defaults (USD per 1K tokens). These are indicative and can be
 # refined over time. Kept conservative to avoid under-estimating.
 DEFAULT_PRICING: dict[str, dict[str, dict[str, float]]] = {
@@ -157,15 +175,6 @@ class PricingCatalog:
         self._load_overrides()
 
     def _load_overrides(self) -> None:
-        # Env JSON overrides
-        raw = os.getenv("PRICING_OVERRIDES")
-        if raw:
-            try:
-                data = json.loads(raw)
-                self._merge_overrides(_lower_keys(data))
-            except Exception as e:
-                logger.warning(f"Failed to parse PRICING_OVERRIDES: {e}")
-
         # File overrides
         try:
             # Resolve to repo_root/tldw_Server_API/Config_Files/model_pricing.json
@@ -175,8 +184,18 @@ class PricingCatalog:
             if cfg_path.exists():
                 data = json.loads(cfg_path.read_text())
                 self._merge_overrides(_lower_keys(data))
-        except Exception as e:
-            logger.warning(f"Failed to load pricing overrides file: {e}")
+        except Exception:
+            logger.warning("Failed to load pricing overrides file")
+
+        # Env JSON overrides intentionally load last so deployment/test env
+        # settings take precedence over checked-in placeholder catalog entries.
+        raw = os.getenv("PRICING_OVERRIDES")
+        if raw:
+            try:
+                data = json.loads(raw)
+                self._merge_overrides(_lower_keys(data))
+            except Exception:
+                logger.warning("Failed to parse PRICING_OVERRIDES")
 
     def _merge_overrides(self, overrides: dict) -> None:
         for provider, models in overrides.items():
@@ -187,6 +206,7 @@ class PricingCatalog:
                 if not isinstance(rates, dict):
                     continue
                 placeholder = bool(rates.get("placeholder", False))
+                estimated = bool(rates.get("estimated", False))
                 note = rates.get("note")
                 if placeholder:
                     entry = {"prompt": 0.0, "completion": 0.0, "placeholder": True}
@@ -194,14 +214,81 @@ class PricingCatalog:
                         entry["note"] = str(note)
                     base[model] = entry
                     continue
-                pr = float(rates.get("prompt", rates.get("in", 0.0)) or 0.0)
-                cr = float(rates.get("completion", rates.get("out", 0.0)) or 0.0)
+                pr = _rate_value(rates, "prompt", "in", "input", default=0.0) or 0.0
+                cr = _rate_value(rates, "completion", "out", "output", default=0.0) or 0.0
                 entry = {"prompt": pr, "completion": cr}
+                cache_read = _rate_value(
+                    rates,
+                    "cache_read",
+                    "cache-read",
+                    "cached",
+                    "cached_input",
+                    "cache_read_input",
+                    "cached_input_tokens",
+                    default=None,
+                )
+                cache_write = _rate_value(
+                    rates,
+                    "cache_write",
+                    "cache-write",
+                    "cache_creation",
+                    "cache_creation_input",
+                    "cache_write_input",
+                    "cache_write_input_tokens",
+                    default=None,
+                )
+                if cache_read is not None:
+                    entry["cache_read"] = cache_read
+                if cache_write is not None:
+                    entry["cache_write"] = cache_write
                 if "placeholder" in rates:
                     entry["placeholder"] = bool(rates.get("placeholder"))
+                if "estimated" in rates:
+                    entry["estimated"] = estimated
                 if note is not None:
                     entry["note"] = str(note)
                 base[model] = entry
+
+    def get_rate_details(self, provider: str, model: str) -> tuple[dict[str, float], bool]:
+        """
+        Return pricing fields and estimated flag for provider/model.
+
+        The returned mapping always contains ``prompt`` and ``completion``.
+        Optional ``cache_read`` and ``cache_write`` rates are present only when
+        supplied by defaults or overrides.
+        """
+        prov = (provider or "").lower()
+        mdl = (model or "").lower()
+        prov_map = self._catalog.get(prov, {})
+
+        if mdl in prov_map:
+            return self._entry_rate_details(prov_map[mdl], estimated=False)
+
+        best_match: tuple[str, dict] | None = None
+        for mk, rates in prov_map.items():
+            if mdl and mk and (mk in mdl or mdl in mk):
+                if best_match is None or len(mk) > len(best_match[0]):
+                    best_match = (mk, rates)
+        if best_match is not None:
+            return self._entry_rate_details(best_match[1], estimated=True)
+
+        return _unknown_billable_rate(), True
+
+    @staticmethod
+    def _entry_rate_details(rates: dict, *, estimated: bool) -> tuple[dict[str, float], bool]:
+        if isinstance(rates, dict) and rates.get("placeholder"):
+            return _unknown_billable_rate(), True
+        if not isinstance(rates, dict):
+            return {"prompt": 0.0, "completion": 0.0}, True
+        details = {
+            "prompt": float(rates.get("prompt", 0.0) or 0.0),
+            "completion": float(rates.get("completion", 0.0) or 0.0),
+        }
+        if "cache_read" in rates:
+            details["cache_read"] = float(rates.get("cache_read", 0.0) or 0.0)
+        if "cache_write" in rates:
+            details["cache_write"] = float(rates.get("cache_write", 0.0) or 0.0)
+        return details, bool(rates.get("estimated", estimated))
 
     def get_rates(self, provider: str, model: str) -> tuple[float, float, bool]:
         """
@@ -209,27 +296,8 @@ class PricingCatalog:
         If exact model not found, try partial matches; otherwise fall back to a
         small sentinel rate (estimated=True).
         """
-        prov = (provider or "").lower()
-        mdl = (model or "").lower()
-        prov_map = self._catalog.get(prov, {})
-
-        # Exact match
-        if mdl in prov_map:
-            r = prov_map[mdl]
-            if isinstance(r, dict) and r.get("placeholder"):
-                return 0.0, 0.0, True
-            return float(r.get("prompt", 0.0)), float(r.get("completion", 0.0)), False
-
-        # Partial match (substring)
-        for mk, r in prov_map.items():
-            if mk in mdl or mdl in mk:
-                if isinstance(r, dict) and r.get("placeholder"):
-                    return 0.0, 0.0, True
-                return float(r.get("prompt", 0.0)), float(r.get("completion", 0.0)), True
-
-        # Provider baseline fallback (conservative): avoid under-estimating unknown models
-        # Defaults approximate a mid/high rate similar to GPT-4o/4.1 tiers
-        return 0.01, 0.03, True
+        rates, estimated = self.get_rate_details(provider, model)
+        return rates["prompt"], rates["completion"], estimated
 
 
 _DEFAULT_CATALOG = PricingCatalog()
@@ -286,19 +354,29 @@ def _lookup_model_across_providers(catalog: PricingCatalog, model: str) -> tuple
         if mdl in prov_map:
             r = prov_map[mdl]
             if isinstance(r, dict) and r.get("placeholder"):
-                return 0.0, 0.0, True
-            return float(r.get("prompt", 0.0)), float(r.get("completion", 0.0)), False
+                return UNKNOWN_BILLABLE_RATE["prompt"], UNKNOWN_BILLABLE_RATE["completion"], True
+            return (
+                float(r.get("prompt", 0.0)),
+                float(r.get("completion", 0.0)),
+                bool(r.get("estimated", False)),
+            )
 
-    # Second pass: partial match across all providers
+    # Second pass: partial match across all providers, preferring the most
+    # specific catalog key.
+    best_match: dict | None = None
+    best_key_length = -1
     for prov_name, prov_map in catalog._catalog.items():
         for mk, r in prov_map.items():
-            if mk in mdl or mdl in mk:
-                if isinstance(r, dict) and r.get("placeholder"):
-                    return 0.0, 0.0, True
-                return float(r.get("prompt", 0.0)), float(r.get("completion", 0.0)), True
+            if mdl and mk and (mk in mdl or mdl in mk) and len(mk) > best_key_length:
+                best_match = r
+                best_key_length = len(mk)
+    if best_match is not None:
+        if isinstance(best_match, dict) and best_match.get("placeholder"):
+            return UNKNOWN_BILLABLE_RATE["prompt"], UNKNOWN_BILLABLE_RATE["completion"], True
+        return float(best_match.get("prompt", 0.0)), float(best_match.get("completion", 0.0)), True
 
     # Fallback: same conservative default as PricingCatalog.get_rates
-    return 0.01, 0.03, True
+    return UNKNOWN_BILLABLE_RATE["prompt"], UNKNOWN_BILLABLE_RATE["completion"], True
 
 
 def list_provider_models(provider: str) -> list[str]:

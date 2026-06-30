@@ -1,7 +1,6 @@
 import React from "react"
 import { useQuery, useMutation } from "@tanstack/react-query"
 import {
-  Alert,
   Button,
   Card,
   Descriptions,
@@ -15,6 +14,7 @@ import {
 } from "antd"
 import { useTranslation } from "react-i18next"
 
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import {
   getPromptStudioStatus,
   hasPromptStudio,
@@ -143,8 +143,8 @@ export const PromptStudioSettings: React.FC = () => {
       {capabilityQuery.isLoading && <Skeleton active paragraph={{ rows: 3 }} />}
 
       {capabilityQuery.isError && (
-        <Alert
-          type="error"
+        <DsAlert
+          variant="error"
           title={t("settings:promptStudio.probeError", "Unable to reach Prompt Studio")}
         />
       )}
@@ -181,12 +181,13 @@ export const PromptStudioSettings: React.FC = () => {
             </Form.Item>
           </Form>
           {statusError && (
-            <Alert
+            <DsAlert
               className="mt-3"
-              type="error"
+              variant="error"
               title={t("settings:promptStudio.statusError", "Status endpoint unavailable")}
-              description={statusError}
-            />
+            >
+              {statusError}
+            </DsAlert>
           )}
           {statusResult && (
             <div className="mt-3">
@@ -315,17 +316,18 @@ export const PromptStudioSettings: React.FC = () => {
       </Space>
 
       {!capabilityReady && !capabilityQuery.isLoading && (
-        <Alert
-          type="info"
+        <DsAlert
+          variant="info"
           title={t(
             "settings:promptStudio.unavailable",
             "Prompt Studio isn’t available on the server yet."
           )}
-          description={t(
+        >
+          {t(
             "settings:promptStudio.unavailableBody",
             "Once enabled, you can monitor queue health and set defaults here."
           )}
-        />
+        </DsAlert>
       )}
     </div>
   )

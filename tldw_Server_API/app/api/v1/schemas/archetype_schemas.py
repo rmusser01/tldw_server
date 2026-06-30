@@ -9,11 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from mcp_unified.federation.models import MCPAuthType, MCPCatalogEntry
 from pydantic import BaseModel, Field, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.persona import PersonaConfirmationMode
-
-MCPAuthType = Literal["none", "bearer", "api_key"]
 
 
 class ArchetypePersonaDefaults(BaseModel):
@@ -108,19 +107,6 @@ class ArchetypePreviewResponse(BaseModel):
     archetype_key: str
     voice_defaults: dict[str, Any] = Field(default_factory=dict)
     setup: ArchetypePreviewSetupState = Field(default_factory=ArchetypePreviewSetupState)
-
-
-class MCPCatalogEntry(BaseModel):
-    """One entry in the external MCP server catalog shown during setup."""
-
-    key: str
-    name: str
-    description: str
-    url_template: str
-    auth_type: MCPAuthType = "none"
-    category: str
-    logo_key: str | None = None
-    suggested_for: list[str] = Field(default_factory=list)
 
 
 __all__ = [

@@ -179,8 +179,8 @@ class StreamingSession:
                 f"duration={time.time() - self.created_at:.2f}s"
             )
 
-        except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Error closing streaming session {self.session_id}: {e}")
+        except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS:
+            logger.error(f"Error closing streaming session {self.session_id}")
 
     def is_expired(self, timeout: float = 300) -> bool:
         """Check if session has expired"""
@@ -475,8 +475,8 @@ class MemoryMonitor:
                     await callback()
                 else:
                     callback()
-            except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Error in cleanup callback: {e}")
+            except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS:
+                logger.error("Error in cleanup callback")
 
         # Clean up dead references
         self._model_references = {ref for ref in self._model_references if ref() is not None}
@@ -522,8 +522,8 @@ class MemoryMonitor:
 
             except asyncio.CancelledError:
                 break
-            except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Error in memory monitoring: {e}")
+            except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS:
+                logger.error("Error in memory monitoring")
                 await asyncio.sleep(self.check_interval)
 
 
@@ -823,8 +823,8 @@ class TTSResourceManager:
                         await handler()
                     else:
                         handler()
-                except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS as e:
-                    logger.error(f"Error in {resource_type} cleanup handler: {e}")
+                except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS:
+                    logger.error(f"Error in {resource_type} cleanup handler")
 
         logger.info("TTS Resource Manager shutdown complete")
 
@@ -965,16 +965,16 @@ class TTSResourceManager:
             async def _wrapped():
                 try:
                     await cleanup_cb()
-                except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS as e:
-                    logger.error(f"Error cleaning model for {cache_key}: {e}")
+                except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS:
+                    logger.error(f"Error cleaning model for {cache_key}")
                 finally:
                     self._cleanup_device_cache()
             return _wrapped()
 
         try:
             cleanup_cb()
-        except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Error cleaning model for {cache_key}: {e}")
+        except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS:
+            logger.error(f"Error cleaning model for {cache_key}")
         self._cleanup_device_cache()
         return None
 
@@ -1006,8 +1006,8 @@ class TTSResourceManager:
 
             except asyncio.CancelledError:
                 break
-            except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Error in session cleanup: {e}")
+            except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS:
+                logger.error("Error in session cleanup")
                 await asyncio.sleep(60)
 
     async def unregister_model(self, provider: str):
@@ -1021,8 +1021,8 @@ class TTSResourceManager:
                         await cleanup_cb()
                     else:
                         cleanup_cb()
-                except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS as e:
-                    logger.error(f"Error in model cleanup for {provider}: {e}")
+                except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS:
+                    logger.error(f"Error in model cleanup for {provider}")
             logger.debug(f"Unregistered model for provider: {provider}")
         # Drop any cached entries for this provider
         with self._model_cache_lock:
@@ -1076,15 +1076,15 @@ class TTSResourceManager:
         for provider in list(self._registered_models.keys()):
             try:
                 await self.unregister_model(provider)
-            except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Error cleaning model {provider}: {e}")
+            except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS:
+                logger.error(f"Error cleaning model {provider}")
 
         # Close all sessions managed by the session manager
         for sid in list(self.session_manager._sessions.keys()):
             try:
                 await self.session_manager.close_session(sid)
-            except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Error closing session {sid}: {e}")
+            except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS:
+                logger.error(f"Error closing session {sid}")
 
         # Close all HTTP clients
         await self.connection_pool.close_all()

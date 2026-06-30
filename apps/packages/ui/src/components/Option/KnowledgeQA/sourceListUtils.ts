@@ -1,4 +1,4 @@
-import type { RagResult } from "./types"
+import type { EvidenceOrigin, RagResult } from "./types"
 
 export type SourceSortMode = "relevance" | "title" | "date" | "cited"
 export type SourceDateFilter = "all" | "last_30d" | "last_365d" | "older_365d"
@@ -64,6 +64,119 @@ const DATE_METADATA_KEYS = [
   "source_date",
 ] as const
 
+const EVIDENCE_ORIGIN_LABELS: Record<EvidenceOrigin, string> = {
+  local_library: "Local library",
+  web_fallback: "Web fallback",
+  mixed: "Mixed sources",
+  unknown_origin: "Origin unknown",
+}
+
+function normalizeMetadataString(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const normalized = value.trim()
+  return normalized.length > 0 ? normalized : null
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    const normalized = normalizeMetadataString(value)
+    if (normalized) return normalized
+  }
+  return null
+}
+
+function normalizeIdentifierString(value: unknown): string | null {
+  const normalizedString = normalizeMetadataString(value)
+  if (normalizedString) return normalizedString
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(Math.round(value))
+  }
+  return null
+}
+
+function firstIdentifier(...values: unknown[]): string | null {
+  for (const value of values) {
+    const normalized = normalizeIdentifierString(value)
+    if (normalized) return normalized
+  }
+  return null
+}
+
+function titleCaseSnake(value: string): string {
+  return value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ")
+}
+
+export function normalizeEvidenceOrigin(value: unknown): EvidenceOrigin {
+  const normalized = normalizeMetadataString(value)?.toLowerCase()
+  if (
+    normalized === "local_library" ||
+    normalized === "web_fallback" ||
+    normalized === "mixed" ||
+    normalized === "unknown_origin"
+  ) {
+    return normalized
+  }
+  return "unknown_origin"
+}
+
+export function getEvidenceOrigin(result: RagResult): EvidenceOrigin {
+  return normalizeEvidenceOrigin(
+    result.evidenceOrigin ?? result.metadata?.evidence_origin
+  )
+}
+
+export function getEvidenceOriginLabel(origin: EvidenceOrigin): string {
+  return EVIDENCE_ORIGIN_LABELS[origin]
+}
+
+export function getResultSourceId(result: RagResult): string | null {
+  return firstIdentifier(
+    result.sourceId,
+    result.metadata?.source_id,
+    result.metadata?.media_id,
+    result.metadata?.note_id
+  )
+}
+
+export function getResultChunkId(result: RagResult): string | null {
+  return firstIdentifier(result.chunkId, result.metadata?.chunk_id)
+}
+
+export function getResultSourceStatus(result: RagResult): string | null {
+  return firstString(result.sourceStatus, result.metadata?.source_status)
+}
+
+export function getResultUnavailableReason(result: RagResult): string | null {
+  return firstString(result.unavailableReason, result.metadata?.unavailable_reason)
+}
+
+export function getResultEvidenceText(result: RagResult): string {
+  return (
+    firstString(result.excerpt, result.content, result.text, result.chunk) ?? ""
+  )
+}
+
+export function formatUnavailableReason(reason: string | null): string | null {
+  if (!reason) return null
+  return titleCaseSnake(reason)
+}
+
+export function getUnavailableEvidenceMessage(result: RagResult): string | null {
+  const reason = getResultUnavailableReason(result)
+  if (reason) {
+    return `Source unavailable: ${formatUnavailableReason(reason)}.`
+  }
+  const status = getResultSourceStatus(result)
+  if (status && status !== "searched") {
+    return `Source unavailable: ${titleCaseSnake(status)}.`
+  }
+  return null
+}
+
 export function normalizeSourceType(sourceType: unknown): string {
   const normalized = String(sourceType || "").trim().toLowerCase()
   if (!normalized) return "unknown"
@@ -82,7 +195,7 @@ export function getSourceTypeLabel(
 
 export function buildSourceTypeCounts(results: RagResult[]): Record<string, number> {
   return results.reduce<Record<string, number>>((acc, result) => {
-    const sourceType = normalizeSourceType(result.metadata?.source_type)
+    const sourceType = normalizeSourceType(result.sourceType ?? result.metadata?.source_type)
     acc[sourceType] = (acc[sourceType] || 0) + 1
     return acc
   }, {})
@@ -95,7 +208,7 @@ function normalizeText(value: unknown): string {
 
 export function detectSourceContentFacet(result: RagResult): SourceContentFacet {
   const metadata = result.metadata || {}
-  const sourceType = normalizeSourceType(metadata.source_type)
+  const sourceType = normalizeSourceType(result.sourceType ?? metadata.source_type)
 
   if (sourceType === "notes") return "note"
   if (sourceType === "web") return "web"

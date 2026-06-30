@@ -46,6 +46,11 @@ if (!(globalThis as any).ResizeObserver) {
   }
 }
 
+const expectDesignSystemAlert = (text: string | RegExp) => {
+  const node = screen.getByText(text)
+  expect(node.closest('[data-ds-component="Alert"]')).toBeInTheDocument()
+}
+
 const DEFAULT_WEAK_SUPERVISION_BUDGET = {
   review_sample_fraction: 0.2,
   max_review_samples: 25,
@@ -310,6 +315,11 @@ describe("RagRetrievalTuningConfig", () => {
 
     render(<Harness />)
 
+    expectDesignSystemAlert("Current corpus scope")
+    expectDesignSystemAlert(
+      "Approved synthetic queries should be reviewed before they count toward recommendations."
+    )
+
     fireEvent.change(screen.getByLabelText("Total draft set size"), {
       target: { value: "12" }
     })
@@ -320,6 +330,7 @@ describe("RagRetrievalTuningConfig", () => {
     expect(
       await screen.findByText("Batch batch-123 created 2 drafts and is ready for review.")
     ).toBeInTheDocument()
+    expectDesignSystemAlert("Synthetic drafts created")
     expect(datasetState).toEqual([
       {
         sample_id: "sample-1",
@@ -359,6 +370,7 @@ describe("RagRetrievalTuningConfig", () => {
     expect(
       await screen.findByText("generation failed")
     ).toBeInTheDocument()
+    expectDesignSystemAlert("Failed to generate synthetic drafts")
   })
 
   it("uses saved dataset samples as preferred real examples for synthetic generation", async () => {

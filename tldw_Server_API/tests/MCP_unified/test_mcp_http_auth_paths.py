@@ -1,16 +1,19 @@
+import builtins
+import json
 import os
 from typing import Any, Dict, List, Optional
 
+from fastapi import Response
 from fastapi.testclient import TestClient
 from loguru import logger
 import pytest
+from starlette.requests import Request
 
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_ep
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
-from tldw_Server_API.app.core.MCP_unified import server as mcp_server
 
 
 # Disable HTTP security guard for these tests (IP allowlist/mTLS) to focus on auth behavior.
@@ -25,6 +28,23 @@ except Exception as exc:  # pragma: no cover - defensive
 
 
 client = TestClient(app)
+
+
+def _json_request(payload: Any) -> Request:
+    body = json.dumps(payload).encode("utf-8")
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/mcp/request",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+    )
 
 
 class _DummyProtocol:
@@ -70,12 +90,79 @@ class _DummyServer:
         return [MCPResponse(result={"ok": True}, id=getattr(req, "id", None)) for req in requests]
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debug_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def debug(self, *args: Any, **kwargs: Any) -> None:
+        self.debug_calls.append((args, kwargs))
+
+
 def _install_dummy_server(monkeypatch) -> _DummyServer:
 
 
     server = _DummyServer()
     monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
     return server
+
+
+def test_mcp_get_client_ip_sanitizes_resolution_failure_log(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(mcp_ep, "logger", logger_stub)
+
+    def _raise_resolution_failure(*_args: Any, **_kwargs: Any) -> str:
+        raise RuntimeError("client IP parser leaked /private/mcp-client-ip.txt")
+
+    monkeypatch.setattr(mcp_ep, "resolve_client_ip", _raise_resolution_failure)
+
+    result = mcp_ep._get_client_ip(Request({"type": "http", "headers": []}))
+
+    assert result is None
+    assert logger_stub.debug_calls == [(("Failed to extract client IP",), {})]
+    assert "/private/mcp-client-ip.txt" not in repr(logger_stub.debug_calls)
+
+
+@pytest.mark.asyncio
+async def test_mcp_initialize_session_id_logs_are_sanitized(monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(mcp_ep, "logger", logger_stub)
+    _install_dummy_server(monkeypatch)
+
+    original_import = builtins.__import__
+
+    def _raise_uuid_import(name: str, *args: Any, **kwargs: Any):
+        if name == "uuid":
+            raise RuntimeError("uuid generator leaked /private/mcp-session.txt")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _raise_uuid_import)
+    auth = mcp_ep.McpAuthContext(user=None, principal=None, api_key_info=None, raw_api_key=None)
+
+    await mcp_ep.mcp_request(
+        http_request=_json_request({"jsonrpc": "2.0", "method": "initialize", "id": 1}),
+        response=Response(),
+        client_id=None,
+        auth=auth,
+        mcp_session_id=None,
+        config=None,
+        _guard=None,
+    )
+    await mcp_ep.mcp_request_batch(
+        http_request=_json_request([{"jsonrpc": "2.0", "method": "initialize", "id": 2}]),
+        response=Response(),
+        client_id=None,
+        auth=auth,
+        mcp_session_id=None,
+        config=None,
+        _guard=None,
+    )
+
+    assert [args[0] for args, _kwargs in logger_stub.debug_calls if args] == [
+        "Failed to generate session ID for initialize request",
+        "Failed to generate session ID for batch initialize",
+    ]
+    assert all(not kwargs.get("exc_info") for _args, kwargs in logger_stub.debug_calls)
+    assert "/private/mcp-session.txt" not in repr(logger_stub.debug_calls)
 
 
 class _RBACAllow:
@@ -202,9 +289,11 @@ def test_http_api_key_scopes_enforced(monkeypatch):
 
     payload = {"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "media.search"}, "id": 1}
 
-    # Scope mismatch -> authorization error (403)
+    # Scope mismatch -> protocol authorization error envelope.
     r0 = client.post("/api/v1/mcp/request", headers={"X-API-KEY": "scope-mismatch"}, json=payload)
-    assert r0.status_code == 403
+    assert r0.status_code == 200
+    body0 = r0.json()
+    assert body0.get("error", {}).get("code") == -32001
 
     # Scope match -> passes auth (handler will fail later with tool-not-found)
     r1 = client.post("/api/v1/mcp/request", headers={"X-API-KEY": "scope-match"}, json=payload)
@@ -616,20 +705,16 @@ async def test_get_current_user_authnz_revoked_does_not_fallback(monkeypatch):
             detail="Could not validate credentials",
         )
 
-    class _JwtService:
-        def decode_access_token(self, token: str):
-            assert token == "revoked.jwt.token"
-            return {"sub": "42"}
-
     class _FailingJwtManager:
         def verify_token(self, _token: str):
             raise AssertionError("MCP JWT fallback should not be attempted")
 
+    revoked_token = ".".join(("revoked", "jwt", "token"))
     monkeypatch.setattr(mcp_ep, "verify_jwt_and_fetch_user", _revoked_verify)
-    monkeypatch.setattr(mcp_server, "get_jwt_service", lambda: _JwtService())
+    monkeypatch.setattr(mcp_ep, "_is_authnz_access_token", lambda token: token == revoked_token)
     monkeypatch.setattr(mcp_ep, "get_jwt_manager", lambda: _FailingJwtManager())
 
-    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="revoked.jwt.token")
+    creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=revoked_token)
 
     user = await mcp_ep._resolve_token_data_compat(credentials=creds, x_api_key=None, request=None)
 
@@ -674,7 +759,7 @@ async def test_get_current_user_authnz_and_mcp_failure_use_api_key_and_set_state
     class _DummyApiManager:
         async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> Dict[str, Any]:
             calls.append({"key": key, "ip": ip_address})
-            return {"user_id": "42", "org_id": 99, "team_id": 7}
+            return {"user_id": "42", "org_id": 99, "team_id": 7, "scope": ["read"]}
 
     async def _fake_get_api_key_manager():
         return _DummyApiManager()
@@ -697,7 +782,12 @@ async def test_get_current_user_authnz_and_mcp_failure_use_api_key_and_set_state
     assert len(calls) == 1
     assert calls[0]["key"] == "api-key-xyz"
     # Request state should carry the resolved API key metadata.
-    assert getattr(request.state, "mcp_api_key_info", None) == {"user_id": "42", "org_id": 99, "team_id": 7}
+    assert getattr(request.state, "mcp_api_key_info", None) == {
+        "user_id": "42",
+        "org_id": 99,
+        "team_id": 7,
+        "scope": ["read"],
+    }
 
 
 @pytest.mark.asyncio
@@ -795,7 +885,7 @@ async def test_single_user_test_api_key_uses_api_key_manager_outside_dev_context
     class _DummyApiManager:
         async def validate_api_key(self, key: str, ip_address: Optional[str] = None) -> Dict[str, Any]:
             calls.append({"key": key, "ip": ip_address})
-            return {"user_id": "777", "org_id": 1, "team_id": 2}
+            return {"user_id": "777", "org_id": 1, "team_id": 2, "scope": ["read"]}
 
     async def _fake_get_api_key_manager():
         return _DummyApiManager()

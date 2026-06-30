@@ -2,6 +2,13 @@ import React, { useCallback, useState } from "react"
 import { Button, Card, Collapse, Modal, Tag, Typography } from "antd"
 import { Download, RefreshCcw, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import type {
+  SttComparisonConfig,
+  SttComparisonMetadata
+} from "@/components/Option/Audio/comparison-provenance"
+import {
+  buildSttProvenanceTags
+} from "@/components/Option/Audio/comparison-provenance"
 
 const { Text } = Typography
 
@@ -14,6 +21,8 @@ export interface SttHistoryResult {
   text: string
   latencyMs?: number
   wordCount?: number
+  config?: SttComparisonConfig
+  metadata?: SttComparisonMetadata
 }
 
 export interface SttHistoryEntry {
@@ -57,6 +66,15 @@ const truncateText = (text: string): string =>
     ? `${text.slice(0, TRUNCATE_LENGTH)}...`
     : text
 
+const buildProvenanceTags = (result: SttHistoryResult): string[] => {
+  return buildSttProvenanceTags({
+    metadata: result.metadata,
+    config: result.config,
+    latencyMs: result.latencyMs,
+    wordCount: result.wordCount
+  })
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -92,12 +110,9 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
         {entry.results.map((result) => (
           <div key={result.model} style={{ marginBottom: 8 }}>
             <Tag color="green">{result.model}</Tag>
-            {result.latencyMs != null && (
-              <Tag>{result.latencyMs}ms</Tag>
-            )}
-            {result.wordCount != null && (
-              <Tag>{result.wordCount} words</Tag>
-            )}
+            {buildProvenanceTags(result).map((tag) => (
+              <Tag key={tag}>{tag}</Tag>
+            ))}
             <div style={{ marginTop: 4 }}>
               <Text type="secondary">{truncateText(result.text)}</Text>
             </div>
@@ -157,7 +172,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
           <Text type="secondary">
             {t(
               "stt.history.empty",
-              "Start a recording to see transcripts here."
+              "Completed transcriptions will appear here after you run a comparison."
             )}
           </Text>
         ) : (

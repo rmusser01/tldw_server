@@ -1,5 +1,3 @@
-import type { TFunction } from "i18next"
-
 export type CompareInteroperabilityNotice = {
   id: string
   tone: "neutral" | "warning"
@@ -7,7 +5,7 @@ export type CompareInteroperabilityNotice = {
 }
 
 type Params = {
-  t: TFunction
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
   characterName?: string | null
   pinnedSourceCount: number
   webSearch: boolean

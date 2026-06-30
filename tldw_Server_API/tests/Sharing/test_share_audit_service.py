@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from tldw_Server_API.app.core.exceptions import AuditLogError
+from tldw_Server_API.app.core.Sharing import share_audit_service as share_audit_service_module
 from tldw_Server_API.app.core.Sharing.share_audit_service import (
     SHARE_CREATED,
     SHARE_REVOKED,
@@ -12,6 +13,14 @@ from tldw_Server_API.app.core.Sharing.share_audit_service import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.error_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def error(self, *args: object, **kwargs: object) -> None:
+        self.error_calls.append((args, dict(kwargs)))
 
 
 @pytest.fixture
@@ -138,3 +147,36 @@ async def test_log_raises_audit_log_error_when_repo_write_fails(audit_service, m
             owner_user_id=1,
         )
     assert "Failed to log share audit event" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_log_failure_sanitizes_fallback_log(audit_service, monkeypatch):
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(share_audit_service_module, "logger", logger_stub, raising=True)
+
+    raw_event_type = f"{SHARE_CREATED}.raw-marker./private/tmp/share-audit.db?token=secret-token"
+
+    async def _fail(*args, **kwargs):
+        raise RuntimeError("backend exploded /private/tmp/share-audit.db token=secret-token")
+
+    monkeypatch.setattr(audit_service._repo, "log_audit_event", _fail)
+
+    with pytest.raises(AuditLogError):
+        await audit_service.log(
+            raw_event_type,
+            resource_type="workspace",
+            resource_id="ws-1",
+            owner_user_id=1,
+        )
+
+    rendered_log = repr(logger_stub.error_calls)
+    for marker in (
+        "raw-marker",
+        "/private/tmp/share-audit.db",
+        "token=secret-token",
+        "backend exploded",
+    ):
+        assert marker not in rendered_log
+    assert logger_stub.error_calls == [
+        (("ShareAuditService.log failed; exception_type=RuntimeError",), {})
+    ]

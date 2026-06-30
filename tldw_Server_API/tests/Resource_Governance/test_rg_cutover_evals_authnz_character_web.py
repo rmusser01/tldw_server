@@ -229,11 +229,11 @@ async def test_evaluations_rg_allows_still_enforces_cost_caps(monkeypatch):
 
     limiter = evals_rl.UserRateLimiter()
 
-    cost_denied = False
+    usage_denied = False
 
-    async def _deny_cost(*args, **kwargs):  # noqa: ARG001
-        nonlocal cost_denied
-        cost_denied = True
+    async def _deny_usage(*args, **kwargs):  # noqa: ARG001
+        nonlocal usage_denied
+        usage_denied = True
         return False, {
             "error": "Daily cost limit exceeded",
             "limit": 1.0,
@@ -242,7 +242,7 @@ async def test_evaluations_rg_allows_still_enforces_cost_caps(monkeypatch):
             "retry_after": 3600,
         }
 
-    monkeypatch.setattr(limiter, "_check_cost_limits", _deny_cost)
+    monkeypatch.setattr(limiter, "_reserve_request_usage", _deny_usage)
 
     allowed, meta = await limiter.check_rate_limit(
         user_id="user-cost-test",
@@ -251,7 +251,7 @@ async def test_evaluations_rg_allows_still_enforces_cost_caps(monkeypatch):
         estimated_cost=0.5,
     )
 
-    assert cost_denied is True
+    assert usage_denied is True
     assert allowed is False
     assert "cost" in meta.get("error", "").lower()
 

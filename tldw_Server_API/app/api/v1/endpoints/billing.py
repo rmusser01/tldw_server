@@ -12,8 +12,8 @@ from fastapi import APIRouter, Depends, Query
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
     get_auth_principal,
-    require_roles,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeam
 router = APIRouter(
     prefix="/billing",
     tags=["billing"],
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 
 
@@ -142,8 +142,8 @@ async def list_subscriptions(
                     name = org.get("name")
                     if org_id is not None and name:
                         org_names[int(org_id)] = str(name)
-            except Exception as exc:
-                logger.warning(f"Failed to resolve org names for subscriptions: {exc}")
+            except Exception:
+                logger.warning("Failed to resolve org names for subscriptions")
 
         now = datetime.now(timezone.utc)
         result = []
@@ -201,6 +201,6 @@ async def list_subscriptions(
             result.append(item)
 
         return result
-    except Exception as exc:
-        logger.error(f"list_subscriptions failed: {exc}")
+    except Exception:
+        logger.error("list_subscriptions failed")
         raise

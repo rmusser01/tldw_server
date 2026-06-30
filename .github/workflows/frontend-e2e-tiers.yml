@@ -24,6 +24,9 @@ on:
 permissions:
   contents: read
 
+env:
+  SKIP_WXT_PREPARE: '1'
+
 concurrency:
   group: frontend-e2e-tiers-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -40,7 +43,7 @@ jobs:
        contains(fromJSON('["critical","all-tiers"]'), github.event.inputs.tier))
     services:
       redis:
-        image: redis:8-alpine
+        image: mirror.gcr.io/library/redis:8-alpine@sha256:9eb6a7ba3d344e1958c7e1589fa3dee90373a934e8159c634562a91d622759a0
         ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
@@ -65,6 +68,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Setup Python and backend
@@ -132,7 +136,7 @@ jobs:
       contains(fromJSON('["features","all-tiers"]'), github.event.inputs.tier)
     services:
       redis:
-        image: redis:8-alpine
+        image: mirror.gcr.io/library/redis:8-alpine@sha256:9eb6a7ba3d344e1958c7e1589fa3dee90373a934e8159c634562a91d622759a0
         ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
@@ -157,6 +161,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Setup Python and backend
@@ -216,7 +221,7 @@ jobs:
       contains(fromJSON('["admin","all-tiers"]'), github.event.inputs.tier)
     services:
       redis:
-        image: redis:8-alpine
+        image: mirror.gcr.io/library/redis:8-alpine@sha256:9eb6a7ba3d344e1958c7e1589fa3dee90373a934e8159c634562a91d622759a0
         ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
@@ -241,6 +246,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
+          install-ffmpeg: 'false'
           install-portaudio: 'true'
 
       - name: Setup Python and backend

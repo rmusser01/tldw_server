@@ -26,8 +26,8 @@ Centralized helpers for shared runtime infrastructure. Today this module focuses
   - Factory resolves the URL (config/env precedence), attempts to connect/ping real Redis, and records metrics.
   - On failure (or if redis is not installed) and when `fallback_to_fake=True`, it returns an in‑memory stub implementing the subset of Redis features used by the application.
 - Key Classes/Functions (entry points):
-  - `create_async_redis_client(preferred_url=None, decode_responses=True, fallback_to_fake=True, context="default", redis_kwargs=None)`
-  - `create_sync_redis_client(preferred_url=None, decode_responses=True, fallback_to_fake=True, context="default", redis_kwargs=None)`
+  - `create_async_redis_client(preferred_url=None, decode_responses=True, fallback_to_fake=False, context="default", redis_kwargs=None)`
+  - `create_sync_redis_client(preferred_url=None, decode_responses=True, fallback_to_fake=False, context="default", redis_kwargs=None)`
   - `ensure_async_client_closed(client)`, `ensure_sync_client_closed(client)`
   - In‑memory clients: `InMemoryAsyncRedis`, `InMemorySyncRedis` (with thin pipeline helpers)
 - Dependencies:
@@ -46,7 +46,7 @@ Centralized helpers for shared runtime infrastructure. Today this module focuses
   - In‑memory stubs are protected by an `asyncio.Lock` (async) or `threading.Lock` (sync) to avoid races when used concurrently.
   - Streams and sorted‑set operations in the stub are implemented for the project’s use cases (XRANGE/XLEN/XADD; ZADD/ZCARD/ZREMRANGEBYSCORE), adequate for tests and single‑node dev.
 - Error Handling:
-  - Connection errors emit metrics and fall back to stub when allowed; callers can disable fallback via `fallback_to_fake=False` (raises the original error).
+  - Connection errors emit metrics and raise by default; callers that explicitly support per-process memory can enable stub fallback with `fallback_to_fake=True`.
   - Close helpers are best‑effort and safe to call on both real and stub clients.
 - Security:
   - Secrets come from env or config; do not log credentials. Logs include a `context` label only.
@@ -73,14 +73,14 @@ Centralized helpers for shared runtime infrastructure. Today this module focuses
   - Metrics behavior tests: tldw_Server_API/tests/Infrastructure/test_redis_factory_metrics.py:17, tldw_Server_API/tests/Infrastructure/test_redis_factory_metrics.py:60, tldw_Server_API/tests/Infrastructure/test_redis_factory_metrics.py:108
   - Embeddings orchestrator tests exercise streams/queues against the stub (e.g., DLQ/orchestrator snapshot): see tests under `tldw_Server_API/tests/Embeddings/`.
 - Local Dev Tips:
-  - No Redis running? Do nothing — the factory falls back to an in‑memory client automatically.
+  - No Redis running? Pass `fallback_to_fake=True` only for local/cache/test paths that can tolerate per-process in-memory state.
   - To use a real Redis, set `REDIS_URL` (or `EMBEDDINGS_REDIS_URL`) and ensure `redis` extras are installed.
   - Example (async):
 
     ```python
     from tldw_Server_API.app.core.Infrastructure.redis_factory import create_async_redis_client, ensure_async_client_closed
 
-    client = await create_async_redis_client(context="demo")
+    client = await create_async_redis_client(context="demo", fallback_to_fake=True)
     try:
         await client.xadd("embeddings:embedding", {"doc_id": "123", "ev": "enqueue"})
         depth = await client.xlen("embeddings:embedding")
@@ -93,13 +93,13 @@ Centralized helpers for shared runtime infrastructure. Today this module focuses
     ```python
     from tldw_Server_API.app.core.Infrastructure.redis_factory import create_sync_redis_client
 
-    client = create_sync_redis_client(context="demo-sync")
+    client = create_sync_redis_client(context="demo-sync", fallback_to_fake=True)
     client.incr("rl:req:demo:0")
     ```
 - Pitfalls & Gotchas:
   - In‑memory client does not implement full Redis feature parity. Pub/Sub is not available in the stub.
   - If you rely on strict Redis behavior (e.g., exact stream IDs, ordering guarantees, Lua semantics), add integration tests with a real Redis and gate them via env.
-  - When `fallback_to_fake=False`, be prepared to handle connection exceptions during startup.
-- Roadmap/TODOs:
+  - The default `fallback_to_fake=False` fails closed. Production-sensitive callers should handle connection exceptions or return a controlled service-unavailable response.
+- Follow-up candidates:
   - Consider factories for additional infra (Postgres pool, object storage) following the same pattern.
   - Expand metrics (pool usage, cache hit/miss) if/when additional factories are introduced.

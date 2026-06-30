@@ -4,25 +4,34 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const hookMocks = vi.hoisted(() => ({
   useCreateIngestionSourceMutation: vi.fn(),
+  useIngestionSourceDirectoryBrowseQuery: vi.fn(),
   useUpdateIngestionSourceMutation: vi.fn()
+}))
+
+const capabilityMocks = vi.hoisted(() => ({
+  useServerCapabilities: vi.fn()
 }))
 
 const routerMocks = vi.hoisted(() => ({
   navigate: vi.fn()
 }))
 
+const translationMocks = vi.hoisted(() => ({
+  t: vi.fn((
+    key: string,
+    fallbackOrOptions?: string | { defaultValue?: string }
+  ) => {
+    if (typeof fallbackOrOptions === "string") return fallbackOrOptions
+    if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
+      return fallbackOrOptions.defaultValue || key
+    }
+    return key
+  })
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (
-      key: string,
-      fallbackOrOptions?: string | { defaultValue?: string }
-    ) => {
-      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-      if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        return fallbackOrOptions.defaultValue || key
-      }
-      return key
-    }
+    t: translationMocks.t
   })
 }))
 
@@ -37,8 +46,14 @@ vi.mock("react-router-dom", async () => {
 vi.mock("@/hooks/use-ingestion-sources", () => ({
   useCreateIngestionSourceMutation: (...args: unknown[]) =>
     hookMocks.useCreateIngestionSourceMutation(...args),
+  useIngestionSourceDirectoryBrowseQuery: (...args: unknown[]) =>
+    hookMocks.useIngestionSourceDirectoryBrowseQuery(...args),
   useUpdateIngestionSourceMutation: (...args: unknown[]) =>
     hookMocks.useUpdateIngestionSourceMutation(...args)
+}))
+
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => capabilityMocks.useServerCapabilities()
 }))
 
 import { SourceForm } from "@/components/Option/Sources/SourceForm"
@@ -54,6 +69,140 @@ describe("SourceForm", () => {
       mutateAsync: vi.fn(async () => ({ id: "42" })),
       isPending: false
     })
+    hookMocks.useIngestionSourceDirectoryBrowseQuery.mockReturnValue({
+      data: {
+        roots: [],
+        current_path: null,
+        parent_path: null,
+        entries: [],
+        error: null
+      },
+      isFetching: false,
+      isLoading: false,
+      error: null
+    })
+    capabilityMocks.useServerCapabilities.mockReturnValue({
+      capabilities: { canCreateLocalDirectoryIngestionSource: true },
+      loading: false,
+      refresh: vi.fn()
+    })
+  })
+
+  it("uses notes folder sync preset defaults when creating a source", async () => {
+    const mutateAsync = vi.fn(async () => ({ id: "42" }))
+    hookMocks.useCreateIngestionSourceMutation.mockReturnValue({
+      mutateAsync,
+      isPending: false
+    })
+
+    render(<SourceForm mode="create" preset="notes-folder-sync" />)
+
+    fireEvent.change(screen.getByLabelText("Server directory path"), {
+      target: { value: "/srv/tldw/notes" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create source" }))
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith({
+        source_type: "local_directory",
+        sink_type: "notes",
+        policy: "canonical",
+        enabled: true,
+        schedule_enabled: false,
+        schedule: {},
+        config: {
+          path: "/srv/tldw/notes"
+        }
+      })
+    })
+  })
+
+  it("renders a Scheduled rescans switch", () => {
+    render(<SourceForm mode="create" />)
+
+    expect(screen.getByText("Scheduled rescans")).toBeInTheDocument()
+    expect(
+      screen.getByText(/cadence is managed by the server/i)
+    ).toBeInTheDocument()
+  })
+
+  it("sends schedule_enabled true when Scheduled rescans is enabled", async () => {
+    const mutateAsync = vi.fn(async () => ({ id: "42" }))
+    hookMocks.useCreateIngestionSourceMutation.mockReturnValue({
+      mutateAsync,
+      isPending: false
+    })
+
+    render(<SourceForm mode="create" />)
+
+    fireEvent.click(screen.getByRole("switch", { name: "Scheduled rescans" }))
+    fireEvent.change(screen.getByLabelText("Server directory path"), {
+      target: { value: "/srv/tldw/notes" }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create source" }))
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schedule_enabled: true
+        })
+      )
+    })
+  })
+
+  it("disables local-directory create when the server capability is unavailable", async () => {
+    const mutateAsync = vi.fn(async () => ({ id: "42" }))
+    hookMocks.useCreateIngestionSourceMutation.mockReturnValue({
+      mutateAsync,
+      isPending: false
+    })
+    capabilityMocks.useServerCapabilities.mockReturnValue({
+      capabilities: { canCreateLocalDirectoryIngestionSource: false },
+      loading: false,
+      refresh: vi.fn()
+    })
+
+    render(<SourceForm mode="create" />)
+
+    const createButton = screen.getByRole("button", { name: "Create source" })
+    expect(createButton).toBeDisabled()
+    expect(
+      screen.getByText(
+        "The administrator must enable server folder sync before you can create a local directory source."
+      )
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("radio", { name: "Archive snapshot" }))
+
+    await waitFor(() => {
+      expect(createButton).not.toBeDisabled()
+    })
+    fireEvent.click(createButton)
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          source_type: "archive_snapshot"
+        })
+      )
+    })
+  })
+
+  it("keeps local-directory create available while entitlement is unknown", async () => {
+    capabilityMocks.useServerCapabilities.mockReturnValue({
+      capabilities: { canCreateLocalDirectoryIngestionSource: null },
+      loading: false,
+      refresh: vi.fn()
+    })
+
+    render(<SourceForm mode="create" />)
+
+    expect(screen.getByRole("button", { name: "Create source" })).toBeEnabled()
+    expect(
+      screen.queryByText(
+        "The administrator must enable server folder sync before you can create a local directory source."
+      )
+    ).not.toBeInTheDocument()
   })
 
   it("switches fields between local directory and archive source modes", async () => {
@@ -70,6 +219,53 @@ describe("SourceForm", () => {
       expect(screen.queryByLabelText("Server directory path")).not.toBeInTheDocument()
     })
     expect(screen.getByText("Upload archive after creation")).toBeInTheDocument()
+  })
+
+  it("opens the server directory picker and writes the selected path", async () => {
+    hookMocks.useIngestionSourceDirectoryBrowseQuery.mockImplementation((path: string | null) => {
+      if (path === "/srv/tldw/imports") {
+        return {
+          data: {
+            roots: [{ name: "imports", path: "/srv/tldw/imports", is_root: true }],
+            current_path: "/srv/tldw/imports",
+            parent_path: null,
+            entries: [
+              { name: "notes", path: "/srv/tldw/imports/notes", is_root: false }
+            ],
+            error: null
+          },
+          isFetching: false,
+          isLoading: false,
+          error: null
+        }
+      }
+      return {
+        data: {
+          roots: [{ name: "imports", path: "/srv/tldw/imports", is_root: true }],
+          current_path: null,
+          parent_path: null,
+          entries: [{ name: "imports", path: "/srv/tldw/imports", is_root: true }],
+          error: null
+        },
+        isFetching: false,
+        isLoading: false,
+        error: null
+      }
+    })
+
+    render(<SourceForm mode="create" />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse server folders" }))
+    expect(await screen.findByRole("dialog", { name: "Browse server folders" })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Open imports" }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Use notes folder" })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Use notes folder" }))
+
+    expect(screen.getByLabelText("Server directory path")).toHaveValue("/srv/tldw/imports/notes")
   })
 
   it("switches git repository fields between local and remote modes", async () => {
@@ -230,6 +426,14 @@ describe("SourceForm", () => {
     expect(
       screen.getByText("Locked after first successful sync")
     ).toBeInTheDocument()
+    expect(translationMocks.t).toHaveBeenCalledWith(
+      "sources:form.lockedAfterSync",
+      "Locked after first successful sync"
+    )
+    expect(translationMocks.t).toHaveBeenCalledWith(
+      "sources:form.currentDestination",
+      "Current destination"
+    )
     expect(screen.getByText("/srv/tldw/notes")).toBeInTheDocument()
     expect(screen.queryByRole("radio", { name: "Archive snapshot" })).not.toBeInTheDocument()
     expect(screen.queryByLabelText("Server directory path")).not.toBeInTheDocument()

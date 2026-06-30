@@ -1,8 +1,9 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { Document, Page } from "react-pdf"
-import { Empty, Skeleton, Alert } from "antd"
+import { Empty, Skeleton } from "antd"
 import { Image as ImageIcon } from "lucide-react"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 
 const MAX_THUMBNAILS = 24
@@ -109,13 +110,13 @@ export const PagesTab: React.FC = () => {
   return (
     <div className="h-full overflow-auto p-3">
       {loadError ? (
-        <Alert
+        <DesignSystemAlert
           className="mb-3"
-          type="error"
+          variant="error"
           title={t("option:documentWorkspace.pagesError", "Failed to load document")}
-          description={loadError || t("common:unknownError", "An unknown error occurred")}
-          showIcon
-        />
+        >
+          {loadError || t("common:unknownError", "An unknown error occurred")}
+        </DesignSystemAlert>
       ) : null}
       <Document
         file={documentUrl}

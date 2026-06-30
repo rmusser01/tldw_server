@@ -1,6 +1,6 @@
 import React from 'react'
 import { useStorage } from '@plasmohq/storage/hook'
-import type { IngestPreset, TypeDefaults } from "../QuickIngest/types"
+import type { CommonOptions, IngestPreset, TypeDefaults } from "../QuickIngest/types"
 import {
   DEFAULT_PRESET,
   detectPreset,
@@ -16,12 +16,8 @@ import {
 export interface UseIngestPresetsDeps {
   open: boolean
   /** Common ingest options from the options hook */
-  common: {
-    perform_analysis: boolean
-    perform_chunking: boolean
-    overwrite_existing: boolean
-  }
-  setCommon: (v: { perform_analysis: boolean; perform_chunking: boolean; overwrite_existing: boolean }) => void
+  common: CommonOptions
+  setCommon: (v: CommonOptions) => void
   storeRemote: boolean
   setStoreRemote: (v: boolean) => void
   reviewBeforeStorage: boolean

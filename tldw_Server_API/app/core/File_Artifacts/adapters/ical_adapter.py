@@ -263,7 +263,7 @@ class IcalAdapter:
         try:
             from icalendar import Calendar, Event
         except Exception as exc:
-            raise FileArtifactsError("icalendar_library_unavailable", detail=str(exc)) from exc
+            raise FileArtifactsError("icalendar_library_unavailable", detail="icalendar export backend unavailable") from exc
 
         calendar = structured.get("calendar") or {}
         cal = Calendar()

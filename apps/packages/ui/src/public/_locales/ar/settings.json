@@ -3349,5 +3349,29 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "لون خلفية الاقتباس"
+  },
+  "navigation_connect": {
+    "message": "الاتصال"
+  },
+  "navigation_aiModels": {
+    "message": "الذكاء الاصطناعي والنماذج"
+  },
+  "navigation_experience": {
+    "message": "التجربة"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "المعرفة ومساحة العمل"
+  },
+  "navigation_safetyAdmin": {
+    "message": "السلامة والإدارة"
+  },
+  "providerKeys_navTitle": {
+    "message": "مفاتيح المزوّدين"
+  },
+  "navigation_dataManagement": {
+    "message": "إدارة البيانات"
+  },
+  "dataManagement_navTitle": {
+    "message": "إدارة البيانات"
   }
 }

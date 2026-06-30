@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
+import uuid
 from collections.abc import AsyncIterator
 from io import BytesIO
 from pathlib import Path
@@ -90,7 +92,9 @@ class FileSystemStorage(StorageBackend):
         """
         try:
             resolved = path.resolve()
-            if not str(resolved).startswith(str(self.base_path)):
+            try:
+                resolved.relative_to(self.base_path)
+            except ValueError:
                 raise StorageError(
                     f"Path escapes base directory: {path}",
                     path=str(path),
@@ -124,6 +128,8 @@ class FileSystemStorage(StorageBackend):
         """
         file_path = self._build_path(user_id, media_id, filename)
         self._validate_path(file_path)
+        temp_path = file_path.with_name(f".{file_path.name}.{uuid.uuid4().hex}.tmp")
+        self._validate_path(temp_path)
 
         try:
             # Ensure parent directory exists
@@ -133,12 +139,12 @@ class FileSystemStorage(StorageBackend):
             total_bytes = 0
             if isinstance(data, bytes):
                 file_bytes = data
-                async with aiofiles.open(file_path, 'wb') as f:
+                async with aiofiles.open(temp_path, 'wb') as f:
                     await f.write(file_bytes)
                 total_bytes = len(file_bytes)
             else:
                 # Stream from file-like object to avoid loading into memory
-                async with aiofiles.open(file_path, 'wb') as f:
+                async with aiofiles.open(temp_path, 'wb') as f:
                     while True:
                         chunk = await asyncio.to_thread(data.read, 1024 * 1024)
                         if not chunk:
@@ -148,6 +154,8 @@ class FileSystemStorage(StorageBackend):
                 if hasattr(data, 'seek'):
                     data.seek(0)  # Reset position for potential re-use
 
+            await aiofiles.os.replace(temp_path, file_path)
+
             # Return relative path for storage in database
             relative_path = str(file_path.relative_to(self.base_path))
             logger.info(
@@ -156,6 +164,8 @@ class FileSystemStorage(StorageBackend):
             return relative_path
 
         except Exception as e:
+            with contextlib.suppress(FileNotFoundError, OSError):
+                await aiofiles.os.remove(temp_path)
             logger.error(f"Failed to store file {file_path}: {e}")
             raise StorageError(f"Failed to store file: {e}", path=str(file_path)) from e
 
@@ -258,7 +268,11 @@ class FileSystemStorage(StorageBackend):
         """
         try:
             current = dir_path
-            while current != self.base_path and str(current).startswith(str(self.base_path)):
+            while current != self.base_path:
+                try:
+                    current.resolve().relative_to(self.base_path)
+                except ValueError:
+                    break
                 if current.exists() and not any(current.iterdir()):
                     await aiofiles.os.rmdir(current)
                     logger.debug(f"Removed empty directory: {current}")

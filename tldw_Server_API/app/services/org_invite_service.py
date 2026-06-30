@@ -363,7 +363,7 @@ class OrgInviteService:
             logger.error(f"Failed to add user {user_id} to org {org_id}: {e}")
             return RedemptionResult(
                 success=False,
-                message=f"Failed to join organization: {str(e)}"
+                message="Failed to join organization"
             )
 
         # If team-specific invite, also add to team

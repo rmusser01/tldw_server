@@ -220,7 +220,7 @@ class TestExecuteDsrErasure:
         """If a handler raises, the category should be marked as error."""
         from tldw_Server_API.app.services import admin_data_subject_requests_service as svc
 
-        mock_notes = AsyncMock(side_effect=RuntimeError("db locked"))
+        mock_notes = AsyncMock(side_effect=RuntimeError("db locked at /private/dsr.db"))
         original = dict(svc._ERASURE_HANDLERS)
         svc._ERASURE_HANDLERS["notes"] = mock_notes
         try:
@@ -233,7 +233,16 @@ class TestExecuteDsrErasure:
 
             assert result["status"] == "failed"
             assert "notes" in result["errors"]
+            assert result["errors"]["notes"] == "Erasure handler failed"
             assert result["categories"]["notes"]["status"] == "error"
+            assert result["categories"]["notes"]["error"] == "Erasure handler failed"
+            assert "db locked" not in repr(result)
+            assert "/private/dsr.db" not in repr(result)
+
+            final_status_call = mock_dsr_repo.update_request_status.call_args_list[-1]
+            assert final_status_call.kwargs["notes"] == (
+                "Erasure errors: {'notes': 'Erasure handler failed'}"
+            )
         finally:
             svc._ERASURE_HANDLERS.update(original)
 

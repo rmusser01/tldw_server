@@ -57,6 +57,20 @@ export interface IngestionSourceItemsListResponse {
   total: number
 }
 
+export interface IngestionSourceDirectoryEntry {
+  name: string
+  path: string
+  is_root: boolean
+}
+
+export interface IngestionSourceDirectoryBrowseResponse {
+  roots: IngestionSourceDirectoryEntry[]
+  current_path?: string | null
+  parent_path?: string | null
+  entries: IngestionSourceDirectoryEntry[]
+  error?: string | null
+}
+
 export interface IngestionSourceItemFilters {
   sync_status?: string
   present_in_source?: boolean

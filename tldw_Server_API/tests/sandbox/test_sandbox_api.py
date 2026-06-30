@@ -12,11 +12,33 @@ from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus, Runtime
 from tldw_Server_API.app.core.Sandbox.orchestrator import SessionActiveRunsConflict
 
 
+def _force_docker_preflight_available(monkeypatch) -> None:
+    from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+    from tldw_Server_API.app.core.Sandbox.service import SandboxService
+
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
+
+
 def _client(monkeypatch) -> TestClient:
-
-
-     # Enable test-mode behaviors in auth to avoid API key requirements
+    # Enable test-mode behaviors in auth to avoid API key requirements
     monkeypatch.setenv("TEST_MODE", "1")
+    _force_docker_preflight_available(monkeypatch)
     return TestClient(app)
 
 
@@ -29,8 +51,7 @@ def test_runtimes_discovery_shape(monkeypatch) -> None:
         data = r.json()
         assert "runtimes" in data and isinstance(data["runtimes"], list)
         assert len(data["runtimes"]) >= 1
-        first = data["runtimes"][0]
-        for key in [
+        required_keys = [
             "name",
             "available",
             "default_images",
@@ -38,11 +59,17 @@ def test_runtimes_discovery_shape(monkeypatch) -> None:
             "max_mem_mb",
             "max_upload_mb",
             "max_log_bytes",
+            "max_artifact_file_bytes",
+            "max_artifact_total_bytes",
             "workspace_cap_mb",
             "artifact_ttl_hours",
             "supported_spec_versions",
-        ]:
-            assert key in first
+            "isolation_warnings",
+        ]
+        for runtime in data["runtimes"]:
+            for key in required_keys:
+                assert key in runtime
+            assert isinstance(runtime["isolation_warnings"], list)
 
 
 def test_create_session_scaffold(monkeypatch) -> None:
@@ -471,3 +498,63 @@ def test_clone_session_returns_conflict_when_active_runs_exist(monkeypatch) -> N
             "session_id": "sess-clone-busy",
         }
     }
+
+
+def test_create_snapshot_sanitizes_oserror(monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+
+    monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
+
+    def _raise_oserror(session_id: str) -> dict[str, Any]:
+        _ = session_id
+        raise OSError("snapshot path exploded")
+
+    monkeypatch.setattr(sb._service, "create_snapshot", _raise_oserror)
+
+    with _client(monkeypatch) as client:
+        response = client.post("/api/v1/sandbox/sessions/sess-snapshot-error/snapshot")
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to create snapshot"
+
+
+def test_restore_snapshot_sanitizes_oserror(monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+
+    monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
+
+    def _raise_oserror(session_id: str, snapshot_id: str) -> bool:
+        _ = (session_id, snapshot_id)
+        raise OSError("snapshot restore exploded")
+
+    monkeypatch.setattr(sb._service, "restore_snapshot", _raise_oserror)
+
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/api/v1/sandbox/sessions/sess-restore-error/restore",
+            json={"snapshot_id": "snap-123"},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to restore snapshot"
+
+
+def test_clone_session_sanitizes_oserror(monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+
+    monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
+
+    def _raise_oserror(session_id: str, new_name: str | None = None):
+        _ = (session_id, new_name)
+        raise OSError("session clone exploded")
+
+    monkeypatch.setattr(sb._service, "clone_session", _raise_oserror)
+
+    with _client(monkeypatch) as client:
+        response = client.post(
+            "/api/v1/sandbox/sessions/sess-clone-error/clone",
+            json={"new_session_name": "copy"},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to clone session"

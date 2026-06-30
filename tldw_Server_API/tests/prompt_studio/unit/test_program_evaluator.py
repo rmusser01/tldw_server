@@ -15,6 +15,7 @@ def test_forbidden_imports_detected(monkeypatch):
     """
     # Force enabled to test validator path
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "true")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", "true")
     res = pe.evaluate(project_id=None, db=None, llm_output=code, spec={})
     assert res.success is False
     assert "Import not allowed" in (res.error or "")
@@ -36,6 +37,7 @@ def test_runner_python_path_enabled_vs_disabled(tmp_path, monkeypatch):
     spec = {"runner": "python", "objective": "maximize", "metric_var": "val"}
     # Enabled
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "true")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", "true")
     r_on = pe.evaluate(project_id=None, db=None, llm_output=code, spec=spec)
     # reward = 10*(1 - 1/(1+2.5)) ~= 7.142 => score 0.714 in TestRunner
     assert r_on.success is True
@@ -50,11 +52,100 @@ def test_runner_python_path_enabled_vs_disabled(tmp_path, monkeypatch):
     assert r_off.reward <= r_on.reward
 
 
+def test_code_eval_requires_explicit_unsafe_acknowledgement(monkeypatch):
+    pe = ProgramEvaluator()
+    monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "true")
+    monkeypatch.delenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", raising=False)
+
+    def _fail_execute(*_args, **_kwargs):
+        raise AssertionError("unsafe code execution should stay disabled")
+
+    monkeypatch.setattr(pe, "_execute_in_sandbox", _fail_execute, raising=True)
+    res = pe.evaluate(
+        project_id=None,
+        db=None,
+        llm_output="""```python\nval = 9.0\n```""",
+        spec={"metric_var": "val", "objective": "maximize"},
+    )
+
+    assert res.success is True
+    assert res.metrics.get("mode") == "heuristic"
+    assert res.metrics.get("code_eval_disabled_reason") == "unsafe_code_eval_not_enabled"
+
+
+def test_code_eval_requires_production_acknowledgement_in_production(monkeypatch):
+    pe = ProgramEvaluator()
+    monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "true")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", "true")
+    monkeypatch.setenv("tldw_production", "true")
+    monkeypatch.delenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL_IN_PRODUCTION", raising=False)
+
+    def _fail_execute(*_args, **_kwargs):
+        raise AssertionError("unsafe production code execution should stay disabled")
+
+    monkeypatch.setattr(pe, "_execute_in_sandbox", _fail_execute, raising=True)
+    res = pe.evaluate(
+        project_id=None,
+        db=None,
+        llm_output="""```python\nval = 9.0\n```""",
+        spec={"metric_var": "val", "objective": "maximize"},
+    )
+
+    assert res.success is True
+    assert res.metrics.get("mode") == "heuristic"
+    assert res.metrics.get("code_eval_disabled_reason") == "unsafe_code_eval_production_disabled"
+
+
+def test_code_eval_allows_production_when_explicitly_acknowledged(monkeypatch):
+    pe = ProgramEvaluator()
+    monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "true")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", "true")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL_IN_PRODUCTION", "true")
+    monkeypatch.setenv("APP_ENV", "prod")
+
+    def _fake_execute(code: str, *, timeout_sec: float, memory_mb: int, import_whitelist: set[str]):
+        return True, 0, "ok", "", {"val": 2.0}
+
+    monkeypatch.setattr(pe, "_execute_in_sandbox", _fake_execute, raising=True)
+    res = pe.evaluate(
+        project_id=None,
+        db=None,
+        llm_output="""```python\nval = 2.0\n```""",
+        spec={"metric_var": "val", "objective": "maximize"},
+    )
+
+    assert res.success is True
+    assert res.metrics.get("mode") == "sandbox"
+
+
+def test_project_metadata_cannot_enable_code_eval_without_operator_flag(monkeypatch):
+    class ProjectMetadataDB:
+        def get_project(self, project_id):
+            return {"id": project_id, "metadata": {"enable_code_eval": True}}
+
+    pe = ProgramEvaluator()
+    monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "false")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", "true")
+    monkeypatch.delenv("PROMPT_STUDIO_ALLOW_PROJECT_CODE_EVAL", raising=False)
+
+    res = pe.evaluate(
+        project_id=1,
+        db=ProjectMetadataDB(),
+        llm_output="""```python\nval = 9.0\n```""",
+        spec={"metric_var": "val", "objective": "maximize"},
+    )
+
+    assert res.success is True
+    assert res.metrics.get("mode") == "heuristic"
+    assert res.metrics.get("code_eval_disabled_reason") == "code_eval_disabled"
+
+
 def test_program_evaluator_timeout(monkeypatch):
 
 
     pe = ProgramEvaluator()
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "true")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", "true")
     monkeypatch.setenv("PROMPT_STUDIO_CODE_EVAL_TIMEOUT_MS", "100")
     code = """
     ```python
@@ -73,6 +164,7 @@ def test_program_evaluator_timeout(monkeypatch):
 def test_program_evaluator_import_whitelist_env(monkeypatch):
     pe = ProgramEvaluator()
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "true")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", "true")
     monkeypatch.setenv("PROMPT_STUDIO_CODE_EVAL_IMPORT_WHITELIST", "math")
 
     allowed_code = """
@@ -107,6 +199,7 @@ def test_program_evaluator_import_whitelist_env(monkeypatch):
 def test_program_evaluator_blocks_unsafe_calls(monkeypatch, snippet):
     pe = ProgramEvaluator()
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "true")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", "true")
     code = f"""
     ```python
     {snippet}
@@ -137,6 +230,7 @@ def test_extract_code_handles_markdown_indentation():
 def test_program_evaluator_memory_limit_env_is_applied(monkeypatch):
     pe = ProgramEvaluator()
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_CODE_EVAL", "true")
+    monkeypatch.setenv("PROMPT_STUDIO_ALLOW_UNSAFE_CODE_EVAL", "true")
     monkeypatch.setenv("PROMPT_STUDIO_CODE_EVAL_MEM_MB", "64")
 
     seen = {}

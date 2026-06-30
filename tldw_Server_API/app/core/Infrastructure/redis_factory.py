@@ -9,6 +9,7 @@ import os
 import threading
 import time
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from loguru import logger
 
@@ -79,6 +80,35 @@ def _resolve_url(preferred: str | None = None) -> str:
     return url or DEFAULT_REDIS_URL
 
 
+def _redact_redis_url(url: str) -> str:
+    """Return *url* with any username/password userinfo redacted."""
+    text = str(url or "")
+    try:
+        parsed = urlsplit(text)
+        password = parsed.password
+        username = parsed.username
+        if password is None and username is None:
+            return text
+
+        host = parsed.hostname or ""
+        port = parsed.port
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        if port is not None:
+            host = f"{host}:{port}"
+
+        if password is not None:
+            redacted_username = "" if username is None else "***"
+            userinfo = f"{redacted_username}:***"
+        else:
+            userinfo = "***" if username is not None else ""
+
+        netloc = f"{userinfo}@{host}" if userinfo or password is not None else host
+        return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+    except ValueError:
+        return "<invalid-redis-url>"
+
+
 def _metrics_registry():
     if _get_metrics_registry is None:
         return None
@@ -130,7 +160,7 @@ async def create_async_redis_client(
     *,
     preferred_url: str | None = None,
     decode_responses: bool = True,
-    fallback_to_fake: bool = True,
+    fallback_to_fake: bool = False,
     context: str = "default",
     redis_kwargs: dict | None = None,
 ):
@@ -141,17 +171,13 @@ async def create_async_redis_client(
         preferred_url: Explicit URL to prioritize (e.g., embeddings queue).
         decode_responses: Whether to decode bytes into str.
         fallback_to_fake: If True, transparently fallback to an in-memory stub when
-            the real server is unreachable.
+            the real server is unreachable. Production-sensitive callers should
+            leave this disabled unless they explicitly support per-process memory.
         context: Human-readable label for logging (helps trace callers).
 
     Returns:
         An asyncio Redis client implementing the standard redis-py API.
     """
-
-    if aioredis is None:
-        raise RuntimeError(
-            "redis[asyncio] is required but not installed"
-        ) from _import_error
 
     url = _resolve_url(preferred_url)
     context_label = (context or "default").strip() or "default"
@@ -159,9 +185,36 @@ async def create_async_redis_client(
     if "decode_responses" not in options:
         options["decode_responses"] = decode_responses
     start_time = time.perf_counter()
+    decode_option = options.get("decode_responses", decode_responses)
+
+    if aioredis is None:
+        exc = RuntimeError("redis[asyncio] is required but not installed")
+        if not fallback_to_fake:
+            _record_connection_metrics(
+                mode="async",
+                context=context_label,
+                outcome="error",
+                start_time=start_time,
+                error=exc,
+            )
+            raise exc from _import_error
+        cache_key = f"{url}::{context_label}::{decode_option}"
+        fake_client = _ASYNC_STUB_CACHE.get(cache_key)
+        if fake_client is None:
+            fake_client = InMemoryAsyncRedis(decode_responses=decode_option)
+            _ASYNC_STUB_CACHE[cache_key] = fake_client
+        fake_client._tldw_is_stub = True
+        await fake_client.ping()
+        _record_connection_metrics(
+            mode="async",
+            context=context_label,
+            outcome="stub",
+            start_time=start_time,
+            error=exc,
+        )
+        return fake_client
 
     client = None
-    decode_option = options.get("decode_responses", decode_responses)
     try:
         candidate = aioredis.from_url(url, **options)
         if inspect.isawaitable(candidate):  # redis<5 compatibility
@@ -194,7 +247,7 @@ async def create_async_redis_client(
             raise
         logger.warning(
             "Redis unavailable at {url} for {context}; using in-memory stub. Error: {err}",
-            url=url,
+            url=_redact_redis_url(url),
             context=context_label,
             err=exc,
         )
@@ -227,7 +280,7 @@ def create_sync_redis_client(
     *,
     preferred_url: str | None = None,
     decode_responses: bool = True,
-    fallback_to_fake: bool = True,
+    fallback_to_fake: bool = False,
     context: str = "default",
     redis_kwargs: dict | None = None,
 ):
@@ -235,17 +288,38 @@ def create_sync_redis_client(
     Instantiate a synchronous Redis client with optional in-memory fallback.
     """
 
-    if redis is None:
-        raise RuntimeError(
-            "redis client is required but not installed"
-        ) from _import_error
-
     url = _resolve_url(preferred_url)
     context_label = (context or "default").strip() or "default"
     options = dict(redis_kwargs or {})
     if "decode_responses" not in options:
         options["decode_responses"] = decode_responses
     start_time = time.perf_counter()
+
+    if redis is None:
+        exc = RuntimeError("redis client is required but not installed")
+        if not fallback_to_fake:
+            _record_connection_metrics(
+                mode="sync",
+                context=context_label,
+                outcome="error",
+                start_time=start_time,
+                error=exc,
+            )
+            raise exc from _import_error
+        fake_client = InMemorySyncRedis(
+            decode_responses=options.get("decode_responses", True)
+        )
+        fake_client._tldw_is_stub = True
+        fake_client.ping()
+        _record_connection_metrics(
+            mode="sync",
+            context=context_label,
+            outcome="stub",
+            start_time=start_time,
+            error=exc,
+        )
+        return fake_client
+
     client = None
 
     try:
@@ -266,7 +340,7 @@ def create_sync_redis_client(
             raise
         logger.warning(
             "Redis unavailable at {url} for {context}; using in-memory stub. Error: {err}",
-            url=url,
+            url=_redact_redis_url(url),
             context=context_label,
             err=exc,
         )

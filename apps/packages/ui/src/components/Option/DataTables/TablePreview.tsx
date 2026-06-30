@@ -3,7 +3,6 @@ import { DragDropProvider, type DragDropEvents } from "@dnd-kit/react"
 import { useSortable } from "@dnd-kit/react/sortable"
 import { closestCenter } from "@dnd-kit/collision"
 import {
-  Alert,
   Button,
   Empty,
   Popconfirm,
@@ -29,6 +28,7 @@ import { useDataTablesStore } from "@/store/data-tables"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { pollDataTableJob } from "@/utils/data-tables-jobs"
 import type { DataTableColumn, DataTableRow } from "@/types/data-tables"
+import { Alert } from "@/components/ui/primitives"
 import { EditableCell } from "./EditableCell"
 const AddColumnModal = React.lazy(() =>
   import("./AddColumnModal").then((module) => ({
@@ -459,11 +459,11 @@ export const TablePreview: React.FC = () => {
     return (
       <div className="space-y-4">
         <Alert
-          type="error"
+          variant="error"
           title={t("dataTables:generationFailed", "Generation Failed")}
-          description={generationError}
-          showIcon
-        />
+        >
+          {generationError}
+        </Alert>
         <div className="flex justify-center">
           <Button
             type="primary"
@@ -492,17 +492,15 @@ export const TablePreview: React.FC = () => {
       {/* Warnings */}
       {generationWarnings.length > 0 && (
         <Alert
-          type="warning"
+          variant="warning"
           title={t("dataTables:warnings", "Warnings")}
-          description={
-            <ul className="list-disc list-inside">
-              {generationWarnings.map((warning, index) => (
-                <li key={index}>{warning}</li>
-              ))}
-            </ul>
-          }
-          showIcon
-        />
+        >
+          <ul className="list-disc list-inside">
+            {generationWarnings.map((warning, index) => (
+              <li key={index}>{warning}</li>
+            ))}
+          </ul>
+        </Alert>
       )}
 
       {/* Toolbar */}

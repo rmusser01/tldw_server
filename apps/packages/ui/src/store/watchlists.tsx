@@ -6,6 +6,7 @@
 import { createWithEqualityFn } from "zustand/traditional"
 import type { WatchlistsOverviewHealthModel } from "@/services/watchlists-overview"
 import type {
+  WatchlistContainer,
   WatchlistGroup,
   WatchlistJob,
   WatchlistOutput,
@@ -20,6 +21,13 @@ import type {
 // ─────────────────────────────────────────────────────────────────────────────
 // State Types
 // ─────────────────────────────────────────────────────────────────────────────
+
+interface WatchlistContainersState {
+  watchlists: WatchlistContainer[]
+  watchlistsLoading: boolean
+  watchlistsError: string | null
+  selectedWatchlistId: number | null
+}
 
 interface SourcesState {
   sources: WatchlistSource[]
@@ -131,6 +139,16 @@ interface SourcesActions {
   removeSource: (sourceId: number) => void
 }
 
+interface WatchlistContainersActions {
+  setWatchlists: (watchlists: WatchlistContainer[], selectedId?: number | null) => void
+  setWatchlistsLoading: (loading: boolean) => void
+  setWatchlistsError: (error: string | null) => void
+  setSelectedWatchlistId: (id: number | null) => void
+  addWatchlist: (watchlist: WatchlistContainer) => void
+  updateWatchlistInList: (watchlistId: number, updates: Partial<WatchlistContainer>) => void
+  removeWatchlist: (watchlistId: number) => void
+}
+
 interface JobsActions {
   setJobs: (jobs: WatchlistJob[], total?: number) => void
   setJobsLoading: (loading: boolean) => void
@@ -217,7 +235,8 @@ interface UIActions {
 // Combined State & Actions
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type WatchlistsState = SourcesState &
+export type WatchlistsState = WatchlistContainersState &
+  SourcesState &
   JobsState &
   RunsState &
   OutputsState &
@@ -226,6 +245,7 @@ export type WatchlistsState = SourcesState &
   ItemsTriageState &
   OverviewHealthState &
   UIState &
+  WatchlistContainersActions &
   SourcesActions &
   JobsActions &
   RunsActions &
@@ -254,6 +274,13 @@ const initialSourcesState: SourcesState = {
   sourcesSearch: "",
   sourcesPage: 1,
   sourcesPageSize: 20
+}
+
+const initialWatchlistContainersState: WatchlistContainersState = {
+  watchlists: [],
+  watchlistsLoading: false,
+  watchlistsError: null,
+  selectedWatchlistId: null
 }
 
 const initialJobsState: JobsState = {
@@ -329,6 +356,7 @@ const initialUIState: UIState = {
 }
 
 const initialState = {
+  ...initialWatchlistContainersState,
   ...initialSourcesState,
   ...initialJobsState,
   ...initialRunsState,
@@ -346,6 +374,49 @@ const initialState = {
 
 export const useWatchlistsStore = createWithEqualityFn<WatchlistsState>()((set) => ({
   ...initialState,
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Watchlist Container Actions
+  // ─────────────────────────────────────────────────────────────────────────
+
+  setWatchlists: (watchlists, selectedId) =>
+    set((state) => ({
+      watchlists,
+      selectedWatchlistId: selectedId !== undefined
+        ? selectedId
+        : state.selectedWatchlistId != null &&
+            watchlists.some((watchlist) => watchlist.id === state.selectedWatchlistId)
+          ? state.selectedWatchlistId
+          : watchlists[0]?.id ?? null
+    })),
+  setWatchlistsLoading: (watchlistsLoading) => set({ watchlistsLoading }),
+  setWatchlistsError: (watchlistsError) => set({ watchlistsError }),
+  setSelectedWatchlistId: (selectedWatchlistId) => set({ selectedWatchlistId }),
+
+  addWatchlist: (watchlist) =>
+    set((state) => ({
+      watchlists: [watchlist, ...state.watchlists],
+      selectedWatchlistId: state.selectedWatchlistId ?? watchlist.id
+    })),
+
+  updateWatchlistInList: (watchlistId, updates) =>
+    set((state) => ({
+      watchlists: state.watchlists.map((watchlist) =>
+        watchlist.id === watchlistId ? { ...watchlist, ...updates } : watchlist
+      )
+    })),
+
+  removeWatchlist: (watchlistId) =>
+    set((state) => {
+      const watchlists = state.watchlists.filter((watchlist) => watchlist.id !== watchlistId)
+      return {
+        watchlists,
+        selectedWatchlistId:
+          state.selectedWatchlistId === watchlistId
+            ? watchlists[0]?.id ?? null
+            : state.selectedWatchlistId
+      }
+    }),
 
   // ─────────────────────────────────────────────────────────────────────────
   // Sources Actions

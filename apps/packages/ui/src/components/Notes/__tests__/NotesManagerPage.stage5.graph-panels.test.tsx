@@ -2,6 +2,7 @@ import React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { getDesignSystemState } from '@/design-system'
 import NotesManagerPage from '../NotesManagerPage'
 
 const {
@@ -25,6 +26,28 @@ const {
     mockConfirmDanger: vi.fn(),
     mockGetSetting: vi.fn(),
     mockClearSetting: vi.fn()
+  }
+})
+
+const registryLabels = vi.hoisted(() => ({
+  unavailable: 'Registry Unavailable'
+}))
+
+vi.mock('@/design-system', async (importActual) => {
+  const actual = await importActual<typeof import('@/design-system')>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === 'unavailable' ? registryLabels.unavailable : state.label
+        }
+      }
+    )
   }
 })
 
@@ -233,6 +256,137 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
     await waitFor(() => {
       const called = mockBgRequest.mock.calls.some(([request]) => String(request?.path || '') === '/api/v1/notes/note-b')
       expect(called).toBe(true)
+    })
+  })
+
+  it('labels connection chips by relationship type and keeps source nodes out of related notes', async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || '')
+      const method = String(request.method || 'GET').toUpperCase()
+
+      if (path.startsWith('/api/v1/notes/?')) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+      if (path === '/api/v1/notes/' && method === 'POST') {
+        return { id: 'note-a', version: 1, last_modified: '2026-02-18T10:00:00.000Z' }
+      }
+      if (path === '/api/v1/notes/note-a' && method === 'GET') {
+        return {
+          id: 'note-a',
+          title: 'Graph seed note',
+          content: 'Seed content',
+          metadata: { keywords: [] },
+          version: 1,
+          last_modified: '2026-02-18T10:00:00.000Z'
+        }
+      }
+      if (path.startsWith('/api/v1/notes/note-a/neighbors')) {
+        return {
+          nodes: [
+            { id: 'note-a', type: 'note', label: 'Graph seed note' },
+            { id: 'note-b', type: 'note', label: 'Linked note' },
+            { id: 'note-c', type: 'note', label: 'Referencing note' },
+            { id: 'source:web:media-77', type: 'source', label: 'web: media-77' }
+          ],
+          edges: [
+            { id: 'e1', source: 'note-a', target: 'note-b', type: 'manual', directed: false },
+            { id: 'e2', source: 'note-c', target: 'note-a', type: 'wikilink', directed: true },
+            {
+              id: 'e3',
+              source: 'note-a',
+              target: 'source:web:media-77',
+              type: 'source_membership',
+              directed: false
+            }
+          ]
+        }
+      }
+      return {}
+    })
+
+    renderPage()
+    await seedAndSaveNote()
+
+    const relatedList = await screen.findByTestId('notes-related-list')
+    const linkedNoteChip = within(relatedList).getByTestId('notes-related-note-note-b')
+    expect(linkedNoteChip).toHaveTextContent('Linked note')
+    expect(linkedNoteChip).toHaveTextContent('Manual link')
+    expect(relatedList).not.toHaveTextContent('web: media-77')
+    expect(relatedList).not.toHaveTextContent('Note source:web:media-77')
+
+    const backlinksList = await screen.findByTestId('notes-backlinks-list')
+    const backlinkChip = within(backlinksList).getByTestId('notes-backlink-note-note-c')
+    expect(backlinkChip).toHaveTextContent('Referencing note')
+    expect(backlinkChip).toHaveTextContent('Backlink')
+
+    const sourceChip = await screen.findByTestId('notes-source-link-source_web_media-77')
+    expect(sourceChip).toHaveTextContent('web: media-77')
+  })
+
+  it('marks deleted linked-note targets as unavailable instead of opening them', async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || '')
+      const method = String(request.method || 'GET').toUpperCase()
+
+      if (path.startsWith('/api/v1/notes/?')) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+      if (path === '/api/v1/notes/' && method === 'POST') {
+        return { id: 'note-a', version: 1, last_modified: '2026-02-18T10:00:00.000Z' }
+      }
+      if (path === '/api/v1/notes/note-a' && method === 'GET') {
+        return {
+          id: 'note-a',
+          title: 'Graph seed note',
+          content: 'Seed content',
+          metadata: { keywords: [] },
+          version: 1,
+          last_modified: '2026-02-18T10:00:00.000Z'
+        }
+      }
+      if (path.startsWith('/api/v1/notes/note-a/neighbors')) {
+        return {
+          nodes: [
+            { id: 'note-a', type: 'note', label: 'Graph seed note' },
+            { id: 'note-deleted', type: 'note', label: 'Archived target', deleted: true }
+          ],
+          edges: [
+            { id: 'e:deleted', source: 'note-a', target: 'note-deleted', type: 'manual', directed: false }
+          ]
+        }
+      }
+      throw new Error(`Unexpected request ${method} ${path}`)
+    })
+
+    renderPage()
+    await seedAndSaveNote()
+
+    const relatedChip = await screen.findByTestId('notes-related-note-note-deleted')
+    expect(relatedChip).toHaveTextContent('Archived target')
+    expect(relatedChip).toHaveTextContent(registryLabels.unavailable)
+    expect(within(relatedChip).getByRole('button', { name: /Archived target/i })).toBeDisabled()
+
+    const manualLinkChip = await screen.findByTestId('notes-manual-link-e_deleted')
+    expect(manualLinkChip).toHaveTextContent('Archived target')
+    expect(manualLinkChip).toHaveTextContent(registryLabels.unavailable)
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith('unavailable')
+    const manualOpenButton = within(manualLinkChip)
+      .getAllByRole('button')
+      .find((button) => button.getAttribute('aria-label')?.startsWith('Archived target'))
+    expect(manualOpenButton).toBeDisabled()
+
+    fireEvent.click(within(relatedChip).getByRole('button', { name: /Archived target/i }))
+    await waitFor(() => {
+      const openedDeletedTarget = mockBgRequest.mock.calls.some(
+        ([request]) => String(request?.path || '') === '/api/v1/notes/note-deleted'
+      )
+      expect(openedDeletedTarget).toBe(false)
     })
   })
 

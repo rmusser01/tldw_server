@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.api.v1.endpoints.notes_graph import _can_use_heavy_graph_limits
 
 pytestmark = pytest.mark.integration
 
@@ -63,11 +64,34 @@ def client_and_db(tmp_path, monkeypatch):
         yield client, db
 
     fastapi_app.dependency_overrides.clear()
+    db.close_connection()
+
+    # This fixture reloads the shared app module in full-app mode so the
+    # notes graph routes are available. Restore the default lightweight test
+    # profile before later tests reuse app_main.app via client_user_only.
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("MINIMAL_TEST_APP", "1")
+    monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
+    reset_settings()
+    importlib.reload(app_main)
     reset_settings()
 
 
 def _headers():
     return {"Authorization": f"Bearer {_make_token('notes')}"}
+
+
+def _graph_user(**overrides) -> User:
+    data = {
+        "id": 1,
+        "username": "tester",
+        "email": "t@e.com",
+        "is_active": True,
+        "roles": ["user"],
+        "permissions": ["notes.graph.read"],
+    }
+    data.update(overrides)
+    return User(**data)
 
 
 def _create_note(client, title="N", content="body"):
@@ -195,6 +219,37 @@ def test_seedless_small_collection(client_and_db):
     data = resp.json()
     note_ids = {n["id"] for n in data["nodes"] if n["type"] == "note"}
     assert {n1, n2, n3} <= note_ids
+
+
+def test_allow_heavy_requires_graph_admin_permission(client_and_db):
+    client, db = client_and_db
+    h = _headers()
+    n1 = _create_note(client, "Heavy", "heavy content")
+
+    resp = client.get(
+        "/api/v1/notes/graph",
+        params={"center_note_id": n1, "allow_heavy": "true", "max_nodes": 1000},
+        headers=h,
+    )
+
+    assert resp.status_code == 403
+    assert "notes.graph.admin" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "user",
+    [
+        _graph_user(role="admin", roles=[], permissions=[]),
+        _graph_user(is_admin=True, roles=[], permissions=[]),
+        _graph_user(is_superuser=True, roles=[], permissions=[]),
+        _graph_user(roles=["Admin"], permissions=[]),
+        _graph_user(roles=[], permissions=["SYSTEM.CONFIGURE"]),
+        _graph_user(roles=[], permissions=["notes.graph.admin"]),
+        _graph_user(roles=[], permissions=["*"]),
+    ],
+)
+def test_heavy_graph_permission_accepts_authnz_admin_signals(user):
+    assert _can_use_heavy_graph_limits(user) is True
 
 
 def test_edge_type_filter(client_and_db):

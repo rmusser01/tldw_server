@@ -6,13 +6,16 @@ Provides CRUD operations for messages in conversations.
 
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
 from loguru import logger
 from pydantic import ValidationError
 
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
@@ -24,7 +27,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     MessageResponse,
     MessageUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
 # Character chat helpers
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
@@ -49,6 +52,17 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
+from tldw_Server_API.app.core.Sync.v2.server_origin import (
+    SyncServerOriginIdempotencyConflictError,
+    SyncServerOriginMaterializationError,
+    SyncServerOriginMutationNotSupportedError,
+    capture_server_origin_mutation,
+    get_active_server_origin_sync_service_for_user,
+    server_origin_object_id,
+    server_origin_stable_key,
+)
+from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 
 _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -128,6 +142,68 @@ def _convert_db_message_to_response(msg_data: dict[str, Any]) -> MessageResponse
         has_image=bool(msg_data.get('image_data')),
         version=msg_data.get('version', 1)
     )
+
+
+def _message_sync_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, SyncServerOriginIdempotencyConflictError):
+        envelope = exc.envelope
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": "sync_server_origin_idempotency_conflict",
+                "message": "The idempotency key was already used for a different chat message change.",
+                "server_cursor": envelope.server_cursor,
+                "apply_status": envelope.apply_status,
+            },
+        )
+    if isinstance(exc, SyncServerOriginMaterializationError):
+        envelope = exc.envelope
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "sync_server_origin_materialization_failed",
+                "message": "Sync accepted the server-origin message change but projection apply failed.",
+                "server_cursor": envelope.server_cursor,
+                "apply_status": envelope.apply_status,
+                "apply_error_code": envelope.apply_error_code,
+                "apply_error_message": envelope.apply_error_message,
+            },
+        )
+    if isinstance(exc, SyncServerOriginMutationNotSupportedError):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": exc.error_code,
+                "message": str(exc),
+                "dataset_id": exc.dataset.dataset_id,
+                "domain": exc.domain,
+            },
+        )
+    if isinstance(exc, SyncStoreError):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error_code": "sync_server_origin_append_failed",
+                "message": "Sync could not record the server-origin message change.",
+            },
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={
+            "error_code": "sync_server_origin_failed",
+            "message": "Sync failed while recording the server-origin message change.",
+        },
+    )
+
+
+def _active_message_sync_service(
+    current_user: User,
+    scope: ConversationScopeParams,
+) -> SyncV2Service | None:
+    if scope.scope_type == "workspace":
+        return None
+    return get_active_server_origin_sync_service_for_user(str(current_user.id))
+
 
 def _verify_conversation_access(
     db: CharactersRAGDB,
@@ -237,7 +313,8 @@ async def send_message(
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    current_user: User = Depends(get_request_user)
+    current_user: User = Depends(get_request_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     """
     Add a new message to a chat session.
@@ -360,24 +437,64 @@ async def send_message(
                     detail="Failed to decode image data. Please provide valid base64-encoded image."
                 ) from e
 
-        # Add to database via Character_Chat guardrails
-        created_id = post_message_to_conversation(
-            db=db,
-            conversation_id=chat_id,
-            character_name=character_name,
-            message_content=message_data.content,
-            is_user_message=is_user_message,
-            parent_message_id=message_data.parent_message_id,
-            image_data=image_data,
-            image_mime_type=image_mime_type,
-            sender_override=sender_override,
-        )
-
-        if not created_id:
+        sync_service = _active_message_sync_service(current_user, scope)
+        if sync_service is not None and image_data is not None:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create message"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "sync_v2_binary_message_unsupported",
+                    "message": "Sync v2 M1 does not support binary chat message attachments.",
+                },
             )
+        if sync_service is not None:
+            created_id = server_origin_object_id("chat.message", idempotency_key) or str(uuid.uuid4())
+            stable_key = server_origin_stable_key(
+                source="server_api",
+                domain="chat.message",
+                operation="append",
+                idempotency_key=idempotency_key,
+            )
+            timestamp = sync_service.clock() or datetime.now(timezone.utc).isoformat()
+            try:
+                capture_server_origin_mutation(
+                    sync_service,
+                    user_id=str(current_user.id),
+                    domain="chat.message",
+                    operation="append",
+                    object_id=created_id,
+                    parent_id=chat_id,
+                    payload={
+                        "conversation_id": chat_id,
+                        "parent_message_id": message_data.parent_message_id,
+                        "sender": sender_override,
+                        "content": message_data.content,
+                        "timestamp": timestamp,
+                        "client_id": str(current_user.id),
+                    },
+                    source="server_api",
+                    stable_key=stable_key,
+                )
+            except Exception as sync_exc:
+                raise _message_sync_http_error(sync_exc) from sync_exc
+        else:
+            # Add to database via Character_Chat guardrails
+            created_id = post_message_to_conversation(
+                db=db,
+                conversation_id=chat_id,
+                character_name=character_name,
+                message_content=message_data.content,
+                is_user_message=is_user_message,
+                parent_message_id=message_data.parent_message_id,
+                image_data=image_data,
+                image_mime_type=image_mime_type,
+                sender_override=sender_override,
+            )
+
+            if not created_id:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to create message"
+                )
 
         # Retrieve created message with placeholder parameters
         created_msg = retrieve_message_details(db, created_id, character_name, user_name)
@@ -391,18 +508,16 @@ async def send_message(
     except ConflictError as e:
         # Optimistic lock or state conflict during creation
         logger.warning(f"Conflict sending message to chat {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    except InputError as e:
-        # Map DB validation errors to appropriate HTTP codes
-        msg = str(e)
-        status_code = status.HTTP_400_BAD_REQUEST
-        if "exceeds maximum size" in msg.lower():
-            status_code = status.HTTP_413_CONTENT_TOO_LARGE
-        logger.warning(f"Input error sending message to chat {chat_id}: {e}")
-        raise HTTPException(status_code=status_code, detail=msg) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"DB error sending message to chat {chat_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
+    except InputError as exc:
+        logger.warning(f"Input error sending message to chat {chat_id}: {exc}")
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to send message",
+            payload_too_large_substrings=("exceeds maximum size",),
+        ) from exc
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to send message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error sending message to chat {chat_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -621,12 +736,23 @@ async def get_chat_messages(
                         # No tools: append base message as-is
                         formatted_messages.append(base_message)
 
+                pagination = build_offset_pagination_meta(
+                    total=total_count,
+                    limit=limit,
+                    offset=offset,
+                    count=len(paginated),
+                )
                 resp_obj: dict[str, Any] = {
                     "character_name": character.get('name') if character else None,
                     "character_id": character_id,
                     "chat_id": chat_id,
                     "messages": formatted_messages,
                     "total": total_count,
+                    "limit": limit,
+                    "offset": offset,
+                    "pagination": pagination.model_dump(mode="json"),
+                    "has_more": pagination.has_more,
+                    "next_offset": pagination.next_offset,
                     "usage_instructions": "Use these messages with POST /api/v1/chat/completions"
                 }
                 if include_metadata and metadata_extra_map:
@@ -660,7 +786,13 @@ async def get_chat_messages(
                 messages=built_messages,
                 total=total_count,
                 limit=limit,
-                offset=offset
+                offset=offset,
+                pagination=build_offset_pagination_meta(
+                    total=total_count,
+                    limit=limit,
+                    offset=offset,
+                    count=len(built_messages),
+                ),
             )
 
             # Add character context as additional field
@@ -723,7 +855,13 @@ async def get_chat_messages(
             messages=built_messages,
             total=total_count,
             limit=limit,
-            offset=offset
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=total_count,
+                limit=limit,
+                offset=offset,
+                count=len(built_messages),
+            ),
         )
 
     except HTTPException:
@@ -832,6 +970,14 @@ async def edit_message(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Version mismatch. Expected {expected_version}, found {message.get('version', 1)}"
             )
+        if _active_message_sync_service(current_user, scope) is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "sync_v2_message_edit_not_supported",
+                    "message": "Sync v2 M1 does not support editing chat messages.",
+                },
+            )
 
         content_updated = False
         if update_data.content is not None and str(update_data.content).strip():
@@ -910,10 +1056,9 @@ async def edit_message(
         raise
     except ConflictError as e:
         logger.warning(f"Conflict editing message {message_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"DB error editing message {message_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to edit message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error editing message {message_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -965,18 +1110,40 @@ async def delete_message(
                 detail=f"Version mismatch. Expected {expected_version}, found {message.get('version', 1)}"
             )
 
-        # Soft delete the message
-        success = remove_message_from_conversation(db, message_id, expected_version)
+        sync_service = _active_message_sync_service(current_user, scope)
+        if sync_service is not None:
+            try:
+                capture_server_origin_mutation(
+                    sync_service,
+                    user_id=str(current_user.id),
+                    domain="chat.message",
+                    operation="tombstone",
+                    object_id=message_id,
+                    parent_id=str(message.get("conversation_id") or ""),
+                    payload={
+                        "id": message_id,
+                        "deleted": True,
+                        "conversation_id": str(message.get("conversation_id") or ""),
+                        "client_id": str(current_user.id),
+                        "owner_user_id": str(current_user.id),
+                    },
+                    source="server_api",
+                )
+            except Exception as sync_exc:
+                raise _message_sync_http_error(sync_exc) from sync_exc
+        else:
+            # Soft delete the message
+            success = remove_message_from_conversation(db, message_id, expected_version)
 
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to delete message"
-            )
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to delete message"
+                )
 
         # Update conversation metadata (last_modified/version) via DB abstraction
         conv = db.get_conversation_by_id(message['conversation_id'])
-        if conv:
+        if conv and sync_service is None:
             try:
                 db.update_conversation(message['conversation_id'], {}, conv.get('version', 1))
             except (ConflictError, CharactersRAGDBError) as e:
@@ -994,10 +1161,9 @@ async def delete_message(
         raise
     except ConflictError as e:
         logger.warning(f"Conflict deleting message {message_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
-    except CharactersRAGDBError as e:
-        logger.error(f"DB error deleting message {message_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error deleting message {message_id}: {e}", exc_info=True)
         raise HTTPException(
@@ -1016,6 +1182,7 @@ async def search_messages(
     chat_id: str = Path(..., description="Chat session ID"),
     query: str = Query(..., description="Search query", min_length=1, max_length=MAX_SEARCH_QUERY_LENGTH),
     limit: int = Query(50, ge=1, le=200, description="Maximum results"),
+    offset: int = Query(0, ge=0, description="Offset for search pagination"),
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -1028,6 +1195,7 @@ async def search_messages(
         chat_id: Chat session ID
         query: Search query string
         limit: Maximum number of results
+        offset: Offset for search pagination
         db: Database instance
         current_user: Authenticated user
 
@@ -1058,17 +1226,27 @@ async def search_messages(
             query,
             character_name_for_placeholders=character_name,
             user_name_for_placeholders=user_name,
-            limit=limit,
+            limit=limit + 1,
+            offset=offset,
         )
 
         if not results:
             results = []
+        has_more = len(results) > limit
+        page_results = results[:limit]
 
         return MessageListResponse(
-            messages=[_convert_db_message_to_response(msg) for msg in results],
-            total=len(results),
+            messages=[_convert_db_message_to_response(msg) for msg in page_results],
+            total=len(page_results),
             limit=limit,
-            offset=0
+            offset=offset,
+            pagination=build_offset_pagination_meta(
+                total=None,
+                limit=limit,
+                offset=offset,
+                count=len(page_results),
+                has_more=has_more,
+            ),
         )
 
     except HTTPException:

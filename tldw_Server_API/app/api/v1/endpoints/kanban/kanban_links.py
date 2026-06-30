@@ -12,9 +12,9 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.kanban_deps import (
     get_kanban_db_for_user,
-    handle_kanban_db_error,
     kanban_rate_limit,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     BulkCardLinksAddResponse,
     BulkCardLinksRemoveResponse,
@@ -38,12 +38,6 @@ from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
 router = APIRouter(tags=["kanban"])
 
 ALLOWED_LINKED_TYPES = ("media", "note")
-
-
-# --- Helper for Exception Handling ---
-def _handle_error(e: Exception) -> HTTPException:
-    """Convert exceptions to appropriate HTTP responses."""
-    return handle_kanban_db_error(e)
 
 
 def _validate_linked_type_or_400(linked_type: Optional[str]) -> Optional[str]:
@@ -94,7 +88,7 @@ async def add_card_link(
         logger.info(f"Added link from card {card_id} to {link_in.linked_type}:{link_in.linked_id}")
         return CardLinkResponse(**link)
     except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to add card link") from e
 @router.get(
     "/cards/{card_id}/links",
     response_model=CardLinksListResponse,
@@ -117,7 +111,7 @@ async def get_card_links(
         links = db.get_card_links(card_id=card_id, linked_type=linked_type)
         return CardLinksListResponse(links=[CardLinkResponse(**link) for link in links])
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to fetch card links") from e
 @router.get(
     "/cards/{card_id}/links/counts",
     response_model=CardLinkCountsResponse,
@@ -137,7 +131,7 @@ async def get_card_link_counts(
         counts = db.get_linked_content_counts(card_id=card_id)
         return CardLinkCountsResponse(**counts)
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to fetch card link counts") from e
 @router.delete(
     "/cards/{card_id}/links/{linked_type}/{linked_id}",
     response_model=DetailResponse,
@@ -172,7 +166,7 @@ async def remove_card_link(
         logger.info(f"Removed link from card {card_id} to {linked_type}:{linked_id}")
         return DetailResponse(detail="Link removed successfully")
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to remove card link") from e
 @router.delete(
     "/cards/{card_id}/links/{link_id}",
     response_model=DetailResponse,
@@ -196,7 +190,7 @@ async def remove_card_link_by_id_for_card(
         logger.info(f"Removed link {link_id} from card {card_id}")
         return DetailResponse(detail="Link removed successfully")
     except KanbanDBError as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to remove card link") from e
 @router.delete(
     "/links/{link_id}",
     response_model=DetailResponse,
@@ -219,7 +213,7 @@ async def remove_card_link_by_id(
         logger.info(f"Removed link {link_id}")
         return DetailResponse(detail="Link removed successfully")
     except KanbanDBError as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to remove card link") from e
 # =============================================================================
 # Bulk Link Operations
 # =============================================================================
@@ -248,7 +242,7 @@ async def bulk_add_card_links(
         logger.info(f"Bulk added {result['added_count']} links to card {card_id}")
         return BulkCardLinksAddResponse(**result)
     except (NotFoundError, InputError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to bulk add card links") from e
 @router.post(
     "/cards/{card_id}/links/bulk-remove",
     response_model=BulkCardLinksRemoveResponse,
@@ -273,7 +267,7 @@ async def bulk_remove_card_links(
         logger.info(f"Bulk removed {result['removed_count']} links from card {card_id}")
         return BulkCardLinksRemoveResponse(**result)
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to bulk remove card links") from e
 # =============================================================================
 # Bidirectional Lookup Endpoints
 # =============================================================================
@@ -318,4 +312,4 @@ async def get_cards_by_linked_content(
             cards=[LinkedCardResponse(**card) for card in cards]
         )
     except KanbanDBError as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to fetch linked cards") from e

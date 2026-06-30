@@ -1,0 +1,35 @@
+"""Constants for VN asset pack core helpers."""
+
+ASSET_TYPE_SPRITE = "sprite"
+ASSET_TYPE_BACKGROUND = "background"
+ASSET_TYPE_DEPTH_COMPANION = "depth_companion"
+ASSET_TYPE_CG = "cg"
+
+ITEM_REVIEW_STATUS_DRAFT = "draft"
+ITEM_REVIEW_STATUS_APPROVED = "approved"
+ITEM_REVIEW_STATUS_REJECTED = "rejected"
+ITEM_REVIEW_STATUS_HIDDEN = "hidden"
+
+PACK_STATUS_DRAFT = "draft"
+PACK_STATUS_READY = "ready"
+PACK_STATUS_NOT_READY = "not_ready"
+PACK_STATUS_GENERATING = "generating"
+
+SLOT_STATUS_PLANNED = "planned"
+SLOT_STATUS_QUEUED = "queued"
+SLOT_STATUS_GENERATING = "generating"
+SLOT_STATUS_REVIEWING = "reviewing"
+SLOT_STATUS_APPROVED = "approved"
+SLOT_STATUS_FAILED = "failed"
+SLOT_STATUS_SKIPPED = "skipped"
+SLOT_STATUS_CANCELLED = "cancelled"
+
+DEFAULT_VN_ASSET_PACK_ITEM_LIMIT = 300
+DEFAULT_VN_ASSET_SLOT_VARIANT_LIMIT = 6
+DEFAULT_VN_ASSET_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+ERROR_ITEM_LIMIT_EXCEEDED = "vn_asset_pack_item_limit_exceeded"
+ERROR_SLOT_VARIANT_LIMIT_EXCEEDED = "vn_asset_slot_variant_limit_exceeded"
+
+WARNING_DEPTH_UNAVAILABLE = "depth_unavailable"
+
+MANIFEST_SCHEMA_VERSION = "vn_asset_manifest.v1"

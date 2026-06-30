@@ -1,66 +1,70 @@
 # Collections
 
-## 1. Descriptive of Current Feature Set
+Collections manages reading-list content, saved outputs, feed/digest jobs,
+reading import/export, embeddings enqueue, and collection utility helpers. It is
+the core service layer behind reading, items, output templates, generated
+outputs, reading highlights, and reading digest/import sidecar workers.
 
-- Purpose: Unified content collections (reading list, outputs, tags) with search, filtering, and artifact generation.
-- Capabilities:
-  - Reading list: save URLs, list/filter, update status/favorite/tags
-  - Outputs: template CRUD, preview, artifact creation (md/html/mp3 via TTS), retention and purge
-  - Items: unified listing across Collections with legacy Media DB fallback (deprecated; retained for compatibility)
-  - Automatic embeddings enqueue on new/changed reading items
-- Inputs/Outputs:
-  - Inputs: URLs, metadata, item/job/run filters; template bodies and context
-  - Outputs: Content items, output templates, output artifacts on disk
-- Related Endpoints:
-  - Reading: `tldw_Server_API/app/api/v1/endpoints/reading.py:1`
-  - Items: `tldw_Server_API/app/api/v1/endpoints/items.py:1`
-  - Output Templates: `tldw_Server_API/app/api/v1/endpoints/outputs_templates.py:1`
-  - Outputs: `tldw_Server_API/app/api/v1/endpoints/outputs.py:1`
-- Related Schemas:
-  - Reading: `tldw_Server_API/app/api/v1/schemas/reading_schemas.py:1`
-  - Items: `tldw_Server_API/app/api/v1/schemas/items_schemas.py:1`
-  - Outputs/Templates: `tldw_Server_API/app/api/v1/schemas/outputs_schemas.py:1`, `tldw_Server_API/app/api/v1/schemas/outputs_templates_schemas.py:1`
+## Start Here
 
-## 2. Technical Details of Features
+- Reading service: `reading_service.py`.
+- Imports and jobs: `reading_importers.py`, `reading_import_jobs.py`,
+  `reading_import_jobs_worker.py`, `reading_digest_jobs.py`, and
+  `reading_digest_jobs_worker.py`.
+- Embeddings queue: `embedding_queue.py`.
+- Helpers: `utils.py`.
+- API endpoints and schemas: `app/api/v1/endpoints/reading.py`,
+  `reading_highlights.py`, `items.py`, `outputs.py`, `outputs_templates.py`,
+  and matching schemas in `app/api/v1/schemas/`.
+- Tests: `tests/Collections/`.
 
-- Architecture & Data Flow:
-  - Service: `core/Collections/reading_service.py` handles fetch, dedupe, persist, and embeddings enqueue
-  - API uses Collections DB via DI; legacy fallback to Media DB search to maintain compatibility (deprecated)
-- Key Classes/Functions:
-  - `ReadingService.save_url`, `.list_items`, `.update_item`
-  - `embedding_queue.enqueue_embeddings_job_for_item` (core Jobs-backed enqueue)
-  - Templating: `services/outputs_service.render_output_template` for outputs
-- Dependencies:
-  - Internal: `DB_Management/Collections_DB`, core Jobs, `Web_Scraping.Article_Extractor_Lib`
-  - External (optional): Redis for embeddings queue; provider TTS for mp3 outputs
-- Data Models & DB:
-  - `Collections_DB.py`: tables `output_templates`, `outputs`, `reading_highlights`, `content_items` (+ indices/uniques)
-- Configuration:
-  - Redis URL for embeddings queue: `EMBEDDINGS_REDIS_URL` or `REDIS_URL`
-- Concurrency & Performance:
-  - Background embeddings job per new/updated item
-  - Paging on list endpoints; FTS optional depending on backend
-  - HTML tag detection uses a linear scan to avoid regex backtracking on user input
-- Error Handling:
-  - Safe fallbacks when outputs re-encode fails; DB backfills in schema initializer
-- Security:
-  - AuthNZ enforced at endpoints; per-user DB paths; soft-delete for outputs
+## Responsibilities
 
-## 3. Developer-Related/Relevant Information for Contributors
+- Save, list, update, import, and export reading-list items.
+- Queue embeddings work for new or changed reading content.
+- Manage reading import/digest jobs and sidecar worker entry points.
+- Support generated output/template flows through endpoint/service layers.
+- Provide small collection helpers such as deterministic text hashing.
 
-- Folder Structure:
-  - `Collections/reading_service.py`, `embedding_queue.py`, `utils.py`; DB adapter in `DB_Management/Collections_DB.py`
-- Extension Points:
-  - Add new origins 
-  - to `content_items`; extend outputs formats; add highlight strategies
-- Coding Patterns:
-  - DI for DB, loguru for logging; avoid raw SQL in endpoints (use DB adapter)
-- Tests:
-  - `tldw_Server_API/tests/Collections/test_reading_service.py:1`
-  - `tldw_Server_API/tests/Collections/test_items_and_outputs_api.py:1`
-- Local Dev Tips:
-  - Save reading items with inline content override for offline tests; render outputs to inspect saved files
-- Pitfalls & Gotchas:
-  - Large selections for outputs; ensure retention and purge behavior matches expectations
-- Roadmap/TODOs:
-  - Highlights CRUD endpoints; richer tags and collection views
+## Module Map
+
+- `reading_service.py` fetches, normalizes, deduplicates, persists, and updates
+  reading items.
+- `reading_importers.py` parses import formats.
+- `reading_import_jobs.py` and `reading_digest_jobs.py` define Jobs-backed work.
+- `reading_import_jobs_worker.py` and `reading_digest_jobs_worker.py` are worker
+  entry points.
+- `embedding_queue.py` enqueues collection item embeddings.
+- `utils.py` contains shared hashing and helper functions.
+
+## How It Connects
+
+- DB adapters live in `app/core/DB_Management/Collections_DB.py`.
+- Jobs tracks reading import/digest/embedding work.
+- Web scraping/article extraction can hydrate reading content.
+- Outputs and templates are exposed through API endpoints and may create files or
+  notification-ready artifacts.
+
+## Extension Points
+
+- Add collection item origins through DB adapter/schema changes, then update API
+  and tests.
+- Add import formats in `reading_importers.py` with deterministic fixture tests.
+- Add background workflows using Jobs definitions plus a worker entry point.
+
+## Testing
+
+- Reading service/API: `tests/Collections/test_reading_service.py` and
+  `tests/Collections/test_reading_api.py`.
+- Items and outputs: `tests/Collections/test_items_and_outputs_api.py`,
+  `tests/Collections/test_outputs_templates_api.py`, and
+  `tests/Collections/test_output_templates_seeding.py`.
+- Import/export and workers: `tests/Collections/test_reading_import_export.py`
+  and `tests/Collections/test_reading_digests.py`.
+- Embeddings queue: `tests/Collections/test_embedding_queue.py`.
+
+## Gotchas
+
+- Some endpoint paths still keep compatibility fallbacks to legacy Media DB
+  shapes. Preserve compatibility tests when changing listing behavior.
+- Use DB adapters rather than raw SQL in endpoints and services.

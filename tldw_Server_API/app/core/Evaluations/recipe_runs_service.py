@@ -19,6 +19,10 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import (
 )
 from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_mode
+from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+    decrypt_byok_payload,
+    encrypt_byok_payload,
+)
 from tldw_Server_API.app.core.DB_Management.Evaluations_DB import EvaluationsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Evaluations.recipes.dataset_snapshot import (
@@ -32,6 +36,7 @@ from tldw_Server_API.app.core.Evaluations.recipes.registry import (
 from tldw_Server_API.app.core.Evaluations.recipes.reporting import RecipeRunReport
 
 RECIPE_RUN_REUSE_ENTITY_TYPE = "recipe_run_reuse"
+RUN_CONFIG_ENCRYPTED_METADATA_KEY = "run_config_encrypted"
 _SENSITIVE_RUN_CONFIG_KEYS = {
     "api_key",
     "api_keys",
@@ -50,6 +55,38 @@ REQUIRED_RECOMMENDATION_SLOTS: tuple[str, ...] = (
     "best_cheap",
     "best_local",
 )
+
+
+def _clone_json_like(value: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return json.loads(json.dumps(value))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return dict(value)
+
+
+def encrypt_recipe_run_config_for_metadata(run_config: dict[str, Any]) -> dict[str, Any]:
+    """Encrypt a full recipe run config for durable worker-side execution."""
+
+    try:
+        return encrypt_byok_payload({"run_config": _clone_json_like(run_config)})
+    except ValueError as exc:
+        raise ValueError(
+            "Recipe run config contains sensitive values; configure BYOK_ENCRYPTION_KEY "
+            "so it can be stored encrypted for worker retries."
+        ) from exc
+
+
+def decrypt_recipe_run_config_from_metadata(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    """Decrypt a full recipe run config from persisted metadata when present."""
+
+    envelope = metadata.get(RUN_CONFIG_ENCRYPTED_METADATA_KEY)
+    if not isinstance(envelope, dict):
+        return None
+    payload = decrypt_byok_payload(envelope)
+    run_config = payload.get("run_config")
+    if not isinstance(run_config, dict):
+        raise ValueError("Encrypted recipe run config payload is malformed.")
+    return _clone_json_like(run_config)
 
 
 class RecipeDefinitionNotFoundError(LookupError):
@@ -220,6 +257,17 @@ class RecipeRunsService:
         if not validation["valid"]:
             joined = "; ".join(validation["errors"])
             raise ValueError(f"Dataset validation failed: {joined}")
+        recipe = self.recipe_registry.get_recipe(recipe_id)
+        launch_validator = getattr(recipe, "validate_run_config_for_launch", None)
+        if callable(launch_validator):
+            launch_errors = [
+                str(error)
+                for error in (launch_validator(normalized_run_config) or [])
+                if str(error).strip()
+            ]
+            if launch_errors:
+                joined = "; ".join(launch_errors)
+                raise ValueError(f"Run config validation failed: {joined}")
         validation_metadata = {
             key: value
             for key, value in validation.items()
@@ -248,27 +296,32 @@ class RecipeRunsService:
                 self._record_reuse_mapping(reusable.run_id, reuse_hash)
                 return self.get_run(reusable.run_id)
 
+        run_metadata = {
+            "run_config": self._sanitize_run_config_for_metadata(normalized_run_config),
+            "reuse_hash": reuse_hash,
+            "dataset_mode": validation["dataset_mode"],
+            "dataset_id": dataset_id,
+            "inline_dataset": (
+                self._normalize_dataset_samples(dataset)
+                if dataset_id is None and dataset is not None
+                else None
+            ),
+            "owner_user_id": self.user_id,
+            "recipe_validation": validation_metadata,
+            "review_sample": validation_metadata.get("review_sample"),
+        }
+        if self._run_config_contains_sensitive_value(normalized_run_config):
+            run_metadata[RUN_CONFIG_ENCRYPTED_METADATA_KEY] = encrypt_recipe_run_config_for_metadata(
+                normalized_run_config
+            )
+
         run_id = self.db.create_recipe_run(
             recipe_id=manifest.recipe_id,
             recipe_version=manifest.recipe_version,
             status=RunStatus.PENDING,
             dataset_snapshot_ref=validation["dataset_snapshot_ref"],
             dataset_content_hash=validation["dataset_content_hash"],
-            metadata={
-                "run_config": self._sanitize_run_config_for_metadata(normalized_run_config),
-                "run_config_internal": normalized_run_config,
-                "reuse_hash": reuse_hash,
-                "dataset_mode": validation["dataset_mode"],
-                "dataset_id": dataset_id,
-                "inline_dataset": (
-                    self._normalize_dataset_samples(dataset)
-                    if dataset_id is None and dataset is not None
-                    else None
-                ),
-                "owner_user_id": self.user_id,
-                "recipe_validation": validation_metadata,
-                "review_sample": validation_metadata.get("review_sample"),
-            },
+            metadata=run_metadata,
         )
         self._record_reuse_mapping(run_id, reuse_hash)
         return self.get_run(run_id)
@@ -573,7 +626,24 @@ class RecipeRunsService:
     def _public_record(self, record: RecipeRunRecord) -> RecipeRunRecord:
         metadata = dict(record.metadata or {})
         metadata.pop("run_config_internal", None)
+        metadata.pop(RUN_CONFIG_ENCRYPTED_METADATA_KEY, None)
         return record.model_copy(update={"metadata": metadata})
+
+    def _run_config_contains_sensitive_value(self, value: Any, *, key_name: str | None = None) -> bool:
+        if key_name:
+            lowered = key_name.lower()
+            if lowered in _SENSITIVE_RUN_CONFIG_KEYS or lowered.endswith(
+                ("_api_key", "_token", "_secret", "_password")
+            ):
+                return True
+        if isinstance(value, dict):
+            return any(
+                self._run_config_contains_sensitive_value(item, key_name=str(key))
+                for key, item in value.items()
+            )
+        if isinstance(value, list):
+            return any(self._run_config_contains_sensitive_value(item) for item in value)
+        return False
 
     def _sanitize_run_config_for_metadata(self, value: Any) -> Any:
         if isinstance(value, dict):

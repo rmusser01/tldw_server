@@ -57,6 +57,7 @@ vi.mock("antd", () => ({
 }))
 
 vi.mock("react-router-dom", () => ({
+  useLocation: () => ({ pathname: "/collections", search: "", hash: "", state: null }),
   useNavigate: () => navigateMock
 }))
 

@@ -15,6 +15,8 @@ type SourceRecord = {
   active: boolean
   tags: string[]
   group_ids?: number[]
+  watchlist_ids?: number[]
+  settings?: Record<string, unknown> | null
   status: string
   created_at: string
   updated_at: string
@@ -33,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   deleteWatchlistSourceMock: vi.fn(),
   restoreWatchlistSourceMock: vi.fn(),
   updateWatchlistSourceMock: vi.fn(),
+  sourceFormModalProps: { current: null as any },
   showUndoNotificationMock: vi.fn(),
   tMock: (key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
     if (typeof defaultValue !== "string") return key
@@ -173,7 +176,33 @@ vi.mock("@/store/watchlists", () => ({
 }))
 
 vi.mock("../SourceFormModal", () => ({
-  SourceFormModal: () => null
+  SourceFormModal: (props: any) => {
+    mocks.sourceFormModalProps.current = props
+    if (!props.open) return null
+    const initialValues = props.initialValues || {}
+    return (
+      <div data-testid="source-form-modal">
+        <div data-testid="source-form-mode">{props.mode || ""}</div>
+        <div data-testid="source-form-name">{initialValues.name || ""}</div>
+        <div data-testid="source-form-url">{initialValues.url || ""}</div>
+        <button
+          type="button"
+          data-testid="source-form-submit"
+          onClick={() =>
+            props.onSubmit({
+              name: initialValues.name,
+              url: "https://copy.example.com/feed.xml",
+              source_type: initialValues.source_type,
+              tags: initialValues.tags,
+              settings: initialValues.settings
+            })
+          }
+        >
+          submit
+        </button>
+      </div>
+    )
+  }
 }))
 
 vi.mock("../GroupsTree", () => ({
@@ -196,6 +225,11 @@ const buildSource = (id: number): SourceRecord => ({
   active: true,
   tags: ["tech", "ai"],
   group_ids: [7],
+  watchlist_ids: [3],
+  settings: {
+    fetch_mode: "rss",
+    dedupe_identity: ["canonical_url", "title"]
+  },
   status: "healthy",
   created_at: "2026-02-20T00:00:00Z",
   updated_at: "2026-02-20T00:00:00Z",
@@ -214,6 +248,7 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
   groupsLoading: false,
   selectedGroupId: null,
   selectedTagName: null,
+  selectedWatchlistId: 42,
   sourceFormOpen: false,
   sourceFormEditId: null,
   setSources: vi.fn(),
@@ -227,8 +262,20 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
   setActiveTab: vi.fn(),
   setSelectedGroupId: vi.fn(),
   setSelectedTagName: vi.fn(),
-  openSourceForm: vi.fn(),
-  closeSourceForm: vi.fn(),
+  openSourceForm: vi.fn((editId?: number | null) => {
+    mocks.storeStateRef.current = {
+      ...mocks.storeStateRef.current,
+      sourceFormOpen: true,
+      sourceFormEditId: editId ?? null
+    }
+  }),
+  closeSourceForm: vi.fn(() => {
+    mocks.storeStateRef.current = {
+      ...mocks.storeStateRef.current,
+      sourceFormOpen: false,
+      sourceFormEditId: null
+    }
+  }),
   addSource: vi.fn(),
   updateSourceInList: vi.fn(),
   removeSource: vi.fn(),
@@ -353,5 +400,56 @@ describe("SourcesTab advanced details disclosure", () => {
       expect(mocks.fetchWatchlistSourcesMock).toHaveBeenCalledTimes(2)
     })
     expect(mocks.exportOpmlMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens cloned feeds in the source form before creating so duplicate URLs can be edited", async () => {
+    const source = {
+      ...buildSource(101),
+      group_ids: [7, 8],
+      watchlist_ids: [11],
+      settings: {
+        fetch: { user_agent: "tldw-test" },
+        extraction: { title_selector: "h1" },
+        dedupe: { identity: ["canonical_url", "title"] }
+      }
+    }
+    mocks.storeStateRef.current = baseState({
+      sources: [source],
+      sourcesTotal: 1,
+      selectedWatchlistId: 42
+    })
+    mocks.fetchWatchlistSourcesMock.mockResolvedValue({
+      items: [source],
+      total: 1,
+      page: 1,
+      size: 20,
+      has_more: false
+    })
+
+    render(<SourcesTab />)
+
+    fireEvent.click(await screen.findByRole("button", { name: "Clone Feed 101" }))
+
+    expect(mocks.createWatchlistSourceMock).not.toHaveBeenCalled()
+    expect(mocks.storeStateRef.current.openSourceForm).toHaveBeenCalledWith()
+    expect(await screen.findByTestId("source-form-modal")).toBeInTheDocument()
+    expect(screen.getByTestId("source-form-mode")).toHaveTextContent("create")
+    expect(screen.getByTestId("source-form-name")).toHaveTextContent("Feed 101 copy")
+    expect(screen.getByTestId("source-form-url")).toHaveTextContent("https://example.com/feed-101.xml")
+
+    fireEvent.click(screen.getByTestId("source-form-submit"))
+
+    await waitFor(() => {
+      expect(mocks.createWatchlistSourceMock).toHaveBeenCalledWith({
+        name: "Feed 101 copy",
+        url: "https://copy.example.com/feed.xml",
+        source_type: "rss",
+        active: false,
+        tags: ["tech", "ai"],
+        settings: source.settings,
+        group_ids: [7, 8],
+        watchlist_id: 42
+      })
+    })
   })
 })

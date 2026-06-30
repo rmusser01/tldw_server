@@ -89,9 +89,9 @@ async def run_json_transform_adapter(config: dict[str, Any], context: dict[str, 
                 result = None
                 break
         return {"result": result, "expression": expression}
-    except Exception as e:
-        logger.exception(f"JSON transform error: {e}")
-        return {"error": str(e), "result": None}
+    except Exception:
+        logger.exception("JSON transform error")
+        return {"error": "json_transform_error", "result": None}
 
 
 @registry.register(
@@ -132,8 +132,9 @@ async def run_json_validate_adapter(config: dict[str, Any], context: dict[str, A
         return {"error": "jsonschema_not_installed", "valid": False, "errors": ["Install jsonschema package"]}
     except jsonschema.ValidationError as e:
         return {"valid": False, "errors": [str(e.message)], "path": list(e.path)}
-    except Exception as e:
-        return {"error": str(e), "valid": False, "errors": [str(e)]}
+    except Exception:
+        logger.exception("JSON validate error")
+        return {"error": "json_validate_error", "valid": False, "errors": ["json_validate_error"]}
 
 
 @registry.register(
@@ -185,9 +186,9 @@ async def run_xml_transform_adapter(config: dict[str, Any], context: dict[str, A
         return {"results": output, "count": len(output), "xpath": xpath}
     except ImportError:
         return {"error": "lxml_not_installed", "results": []}
-    except Exception as e:
-        logger.exception(f"XML transform error: {e}")
-        return {"error": str(e), "results": []}
+    except Exception:
+        logger.exception("XML transform error")
+        return {"error": "xml_transform_error", "results": []}
 
 
 @registry.register(
@@ -220,8 +221,8 @@ async def run_template_render_adapter(config: dict[str, Any], context: dict[str,
         try:
             file_path = resolve_workflow_file_path(template_file, context, config)
             template = Path(file_path).read_text(encoding="utf-8")
-        except Exception as e:
-            return {"error": f"template_file_error: {e}", "text": ""}
+        except Exception:
+            return {"error": "template_file_error", "text": ""}
 
     if not template:
         return {"error": "missing_template", "text": ""}
@@ -234,9 +235,9 @@ async def run_template_render_adapter(config: dict[str, Any], context: dict[str,
     try:
         rendered = _tmpl(template, render_context) or template
         return {"text": rendered}
-    except Exception as e:
-        logger.exception(f"Template render error: {e}")
-        return {"error": str(e), "text": ""}
+    except Exception:
+        logger.exception("Template render error")
+        return {"error": "template_render_error", "text": ""}
 
 
 @registry.register(
@@ -297,11 +298,11 @@ async def run_regex_extract_adapter(config: dict[str, Any], context: dict[str, A
             matches.append(m)
 
         return {"matches": matches, "count": len(matches), "pattern": pattern}
-    except re.error as e:
-        return {"error": f"invalid_pattern: {e}", "matches": [], "count": 0}
-    except Exception as e:
-        logger.exception(f"Regex extract error: {e}")
-        return {"error": str(e), "matches": [], "count": 0}
+    except re.error:
+        return {"error": "invalid_pattern", "matches": [], "count": 0}
+    except Exception:
+        logger.exception("Regex extract error")
+        return {"error": "regex_extract_error", "matches": [], "count": 0}
 
 
 @registry.register(

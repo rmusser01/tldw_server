@@ -5,13 +5,12 @@ Allows administrators to generate short-lived JWT tokens that act on behalf
 of another user.  The token includes an ``impersonated_by`` claim for full
 audit traceability.
 """
-from __future__ import annotations
 
-from typing import Any
+from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -26,6 +25,7 @@ _IMPERSONATION_TTL_MINUTES = 15
 # Response schema
 # ---------------------------------------------------------------------------
 
+
 class ImpersonationTokenResponse(BaseModel):
     """Response containing the impersonation JWT."""
 
@@ -39,6 +39,7 @@ class ImpersonationTokenResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
+
 
 @router.post("/{user_id}/token", response_model=ImpersonationTokenResponse)
 async def create_impersonation_token(
@@ -118,8 +119,8 @@ async def create_impersonation_token(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Impersonation token creation failed: {}", exc)
+        logger.error("Impersonation token creation failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Impersonation token creation failed: {exc}",
+            detail="Impersonation token creation failed",
         ) from exc

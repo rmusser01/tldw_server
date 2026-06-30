@@ -1,8 +1,6 @@
 import json
 import csv
 import io
-import os
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,34 +13,30 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture()
-def client_with_user(monkeypatch):
+def client_with_user(monkeypatch, tmp_path):
     async def override_user():
         return User(id=909, username="wluser", email=None, is_active=True)
 
-    base_dir = Path.cwd() / "Databases" / "test_user_dbs_runs_csv"
+    base_dir = tmp_path / "test_user_dbs_runs_csv"
     base_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
     monkeypatch.setenv("TEST_MODE", "1")
-    # Ensure a clean per-user DB for user 909, resolving base dir from env
-    try:
-        base_env = os.environ.get("USER_DB_BASE_DIR")
-        user_db_base = Path(base_env) if base_env else (Path.cwd() / "Databases" / "user_databases")
-        user_db_path = user_db_base / "909" / "Media_DB_v2.db"
-        if user_db_path.exists():
-            user_db_path.unlink()
-    except Exception as e:
-        print(f"[WARN] Failed to remove test user DB at {user_db_path}: {e}")
 
     from fastapi import FastAPI
     from tldw_Server_API.app.core.config import API_V1_PREFIX
     from tldw_Server_API.app.api.v1.endpoints.watchlists import router as watchlists_router
+    from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 
     app = FastAPI()
     app.include_router(watchlists_router, prefix=f"{API_V1_PREFIX}")
     app.dependency_overrides[get_request_user] = override_user
-    with TestClient(app) as client:
-        yield client
-    app.dependency_overrides.clear()
+    user_db_path = base_dir / "909" / "Media_DB_v2.db"
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        reset_managed_sqlite_backends(sqlite_targets=[str(user_db_path)], mode="hard")
+        app.dependency_overrides.clear()
 
 
 def _seed_run_with_stats(job_id: int, stats: dict) -> int:

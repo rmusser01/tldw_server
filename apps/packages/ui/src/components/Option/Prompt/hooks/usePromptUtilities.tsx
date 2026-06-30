@@ -1,10 +1,11 @@
 import React from "react"
 import { notification } from "antd"
+import type { TFunction } from "i18next"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
 
 export interface UsePromptUtilitiesDeps {
-  t: (key: string, opts?: Record<string, any>) => string
+  t: TFunction
   data: any[] | undefined
 }
 

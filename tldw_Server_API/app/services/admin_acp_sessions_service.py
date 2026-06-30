@@ -65,6 +65,8 @@ class SessionRecord:
     workspace_id: str | None = None
     workspace_group_id: str | None = None
     scope_snapshot_id: str | None = None
+    sandbox_session_id: str | None = None
+    sandbox_run_id: str | None = None
     policy_snapshot_version: str | None = None
     policy_snapshot_fingerprint: str | None = None
     policy_snapshot_refreshed_at: str | None = None
@@ -100,6 +102,8 @@ class SessionRecord:
             "workspace_id": self.workspace_id,
             "workspace_group_id": self.workspace_group_id,
             "scope_snapshot_id": self.scope_snapshot_id,
+            "sandbox_session_id": self.sandbox_session_id,
+            "sandbox_run_id": self.sandbox_run_id,
             "policy_snapshot_version": self.policy_snapshot_version,
             "policy_snapshot_fingerprint": self.policy_snapshot_fingerprint,
             "policy_snapshot_refreshed_at": self.policy_snapshot_refreshed_at,
@@ -283,6 +287,8 @@ class ACPSessionStore:
         self._max_concurrent_per_user: int = 5
         self._max_tokens_per_session: int = 1_000_000
         self._max_session_duration_seconds: int = 14400
+        self._session_retention_days: int = 30
+        self._audit_retention_days: int = 30
 
     def get_db(self) -> ACPSessionsDB:
         """Return the underlying database instance."""
@@ -348,6 +354,8 @@ class ACPSessionStore:
             workspace_id=d.get("workspace_id"),
             workspace_group_id=d.get("workspace_group_id"),
             scope_snapshot_id=d.get("scope_snapshot_id"),
+            sandbox_session_id=d.get("sandbox_session_id"),
+            sandbox_run_id=d.get("sandbox_run_id"),
             policy_snapshot_version=d.get("policy_snapshot_version"),
             policy_snapshot_fingerprint=d.get("policy_snapshot_fingerprint"),
             policy_snapshot_refreshed_at=d.get("policy_snapshot_refreshed_at"),
@@ -387,6 +395,16 @@ class ACPSessionStore:
             max_session_duration_seconds=max_session_duration_seconds,
         )
 
+    def configure_retention(
+        self,
+        *,
+        session_retention_days: int = 30,
+        audit_retention_days: int = 30,
+    ) -> None:
+        """Set ACP hard-delete retention windows."""
+        self._session_retention_days = int(session_retention_days)
+        self._audit_retention_days = max(0, int(audit_retention_days))
+
     def start_cleanup_task(self) -> None:
         """Start background task to evict expired sessions."""
         if self._cleanup_task is None or self._cleanup_task.done():
@@ -399,11 +417,11 @@ class ACPSessionStore:
             self._cleanup_task = None
 
     async def _cleanup_loop(self) -> None:
-        """Periodically evict expired sessions."""
+        """Periodically evict expired sessions and enforce retention."""
         while True:
             try:
                 await asyncio.sleep(300)  # Check every 5 minutes
-                await self._evict_expired_sessions()
+                await self.run_retention_maintenance()
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -413,6 +431,24 @@ class ACPSessionStore:
     async def _evict_expired_sessions(self) -> int:
         """Evict sessions past TTL or max duration. Returns count evicted."""
         return self._db.evict_expired_sessions()
+
+    async def run_retention_maintenance(self, *, audit_db: Any | None = None) -> dict[str, int]:
+        """Enforce ACP TTL and hard-delete retention policies."""
+        sessions_evicted = self._db.evict_expired_sessions()
+        sessions_purged = self._db.purge_retained_sessions(
+            retention_days=self._session_retention_days,
+        )
+        if audit_db is None:
+            from tldw_Server_API.app.core.DB_Management.ACP_Audit_DB import get_acp_audit_db
+
+            audit_db = get_acp_audit_db(retention_days=self._audit_retention_days)
+        audit_db.flush()
+        audit_events_purged = audit_db.purge_old_events()
+        return {
+            "sessions_evicted": int(sessions_evicted),
+            "sessions_purged": int(sessions_purged),
+            "audit_events_purged": int(audit_events_purged),
+        }
 
     async def check_session_quota(self, user_id: int) -> dict[str, Any] | None:
         """Check if user can create a new session. Returns None if ok, or error dict."""
@@ -445,6 +481,8 @@ class ACPSessionStore:
         workspace_id: str | None = None,
         workspace_group_id: str | None = None,
         scope_snapshot_id: str | None = None,
+        sandbox_session_id: str | None = None,
+        sandbox_run_id: str | None = None,
         policy_snapshot_version: str | None = None,
         policy_snapshot_fingerprint: str | None = None,
         policy_snapshot_refreshed_at: str | None = None,
@@ -468,6 +506,8 @@ class ACPSessionStore:
             workspace_id=workspace_id,
             workspace_group_id=workspace_group_id,
             scope_snapshot_id=scope_snapshot_id,
+            sandbox_session_id=sandbox_session_id,
+            sandbox_run_id=sandbox_run_id,
             policy_snapshot_version=policy_snapshot_version,
             policy_snapshot_fingerprint=policy_snapshot_fingerprint,
             policy_snapshot_refreshed_at=policy_snapshot_refreshed_at,
@@ -599,16 +639,75 @@ class ACPSessionStore:
         user_id: int | None = None,
         status: str | None = None,
         agent_type: str | None = None,
+        workspace_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[SessionRecord], int]:
         """List sessions with optional filters. Returns (records, total_count)."""
         rows, total = self._db.list_sessions(
             user_id=user_id, status=status, agent_type=agent_type,
+            workspace_id=workspace_id,
             limit=limit, offset=offset,
         )
         records = [self._dict_to_record(d) for d in rows]
         return records, total
+
+    async def list_sessions_with_messages_since(
+        self,
+        *,
+        since: datetime,
+        page_size: int = 1000,
+    ) -> list[SessionRecord]:
+        """List sessions in the lookback window with messages batch-loaded."""
+        return await asyncio.to_thread(
+            self._list_sessions_with_messages_since_sync,
+            since,
+            page_size,
+        )
+
+    def _list_sessions_with_messages_since_sync(
+        self,
+        since: datetime,
+        page_size: int,
+    ) -> list[SessionRecord]:
+        """Synchronously page filtered sessions and batch-load messages."""
+        from tldw_Server_API.app.core.Agent_Client_Protocol.execution_health import (
+            session_within_range,
+        )
+
+        if since.tzinfo:
+            since_iso = since.astimezone(timezone.utc).isoformat()
+        else:
+            since_iso = since.replace(tzinfo=timezone.utc).isoformat()
+        safe_page_size = max(1, min(int(page_size), 1000))
+        offset = 0
+        rows_in_range: list[dict[str, Any]] = []
+
+        while True:
+            rows, total = self._db.list_sessions_since(
+                since_iso=since_iso,
+                limit=safe_page_size,
+                offset=offset,
+            )
+            if not rows:
+                break
+            rows_in_range.extend(row for row in rows if session_within_range(row, since=since))
+            offset += len(rows)
+            if offset >= total:
+                break
+
+        messages_by_id = self._db.get_messages_for_sessions([
+            str(row["session_id"]) for row in rows_in_range
+        ])
+        return [
+            self._dict_to_record(
+                row,
+                self._db_messages_to_record_messages(
+                    messages_by_id.get(str(row["session_id"]), []),
+                ),
+            )
+            for row in rows_in_range
+        ]
 
     async def get_agent_usage_stats(self, *, range_days: int = 7) -> list[dict[str, Any]]:
         """Return per-agent aggregated token usage for the last *range_days* days."""
@@ -929,6 +1028,10 @@ async def get_acp_session_store() -> ACPSessionStore:
                         max_tokens_per_session=cfg.max_tokens_per_session,
                         max_session_duration_seconds=cfg.max_session_duration_seconds,
                     )
+                    store.configure_retention(
+                        session_retention_days=cfg.session_retention_days,
+                        audit_retention_days=cfg.audit_retention_days,
+                    )
                 except Exception as exc:
                     logger.warning("Failed to load ACP quota config, using defaults: {}", exc)
 
@@ -950,5 +1053,9 @@ async def get_acp_session_store() -> ACPSessionStore:
                     logger.warning("Failed to wire agent registry/health monitor: {}", exc)
 
                 store.start_cleanup_task()
+                try:
+                    await store.run_retention_maintenance()
+                except Exception as exc:
+                    logger.warning("Failed to run ACP retention maintenance at startup: {}", exc)
                 _store = store
     return _store

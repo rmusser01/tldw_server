@@ -72,7 +72,9 @@ class AuthnzLLMProviderOverridesRepo:
         try:
             return dict(row)
         except Exception as row_cast_error:
-            logger.debug("LLM provider override row cast failed; trying keys()/mapping fallback", exc_info=row_cast_error)
+            logger.bind(error_type=type(row_cast_error).__name__).debug(
+                "LLM provider override row cast failed; trying keys()/mapping fallback"
+            )
         try:
             keys = row.keys()
             return {key: row[key] for key in keys}

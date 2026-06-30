@@ -15,10 +15,14 @@ from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
+    ConflictError,
+    InputError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.WebClipper import service as web_clipper_service_module
+from tldw_Server_API.app.core.WebClipper.schemas import MAX_CAPTURE_METADATA_JSON_CHARS
 from tldw_Server_API.app.core.WebClipper.service import WebClipperService
-
 
 pytestmark = pytest.mark.unit
 
@@ -29,6 +33,13 @@ def clipper_db(tmp_path: Path):
     db.upsert_workspace("ws-1", "Research Workspace")
     yield db
     db.close_connection()
+
+
+@pytest.fixture()
+def media_db(tmp_path: Path):
+    db = MediaDatabase(db_path=str(tmp_path / "media_unit.db"), client_id="1")
+    db.initialize_db()
+    yield db
 
 
 def _save_request(
@@ -75,6 +86,51 @@ def _save_request(
     )
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.update(
+            {
+                "content": {
+                    "visible_body": "x" * 1_000_001,
+                    "full_extract": None,
+                    "selected_text": None,
+                }
+            }
+        ),
+        lambda payload: payload.update(
+            {
+                "note": {
+                    "title": "Example Story",
+                    "comment": None,
+                    "keywords": ["k" * 129],
+                }
+            }
+        ),
+        lambda payload: payload.update(
+            {
+                "attachments": [
+                    {
+                        "slot": f"slot-{index}",
+                        "file_name": f"slot-{index}.txt",
+                        "media_type": "text/plain",
+                        "text_content": "payload",
+                    }
+                    for index in range(17)
+                ]
+            }
+        ),
+        lambda payload: payload.update({"capture_metadata": {"oversized": "x" * 65_537}}),
+    ],
+)
+def test_web_clipper_request_rejects_unbounded_payloads(mutation):
+    payload = _save_request(destination_mode="note", clip_id="clip-bounds").model_dump()
+    mutation(payload)
+
+    with pytest.raises(ValueError):
+        WebClipperSaveRequest.model_validate(payload)
+
+
 def test_save_clip_creates_canonical_note_and_sidecar(clipper_db):
     service = WebClipperService(db=clipper_db, user_id=1)
 
@@ -97,6 +153,49 @@ def test_save_clip_creates_canonical_note_and_sidecar(clipper_db):
     assert clip_doc["note_id"] == "clip-123"
 
 
+def test_save_clip_rejects_existing_non_clipper_note_id(clipper_db):
+    service = WebClipperService(db=clipper_db, user_id=1)
+    clipper_db.add_note(
+        title="Existing user note",
+        content="This note must not be claimed by a clipper request.",
+        note_id="existing-note",
+    )
+
+    request = _save_request(destination_mode="note", clip_id="existing-note")
+
+    with pytest.raises(ConflictError):
+        service.save_clip(request)
+
+    note = clipper_db.get_note_by_id("existing-note")
+    assert note is not None
+    assert note["title"] == "Existing user note"
+    assert note["content"] == "This note must not be claimed by a clipper request."
+    assert clipper_db.get_note_clipper_document_by_clip_id("existing-note") is None
+
+
+def test_save_clip_rechecks_clipper_document_inside_transaction(clipper_db, monkeypatch: pytest.MonkeyPatch):
+    clipper_db.add_note(title="Existing Clip", content="Previous body", note_id="clip-race")
+    clipper_db.upsert_note_clipper_document(
+        clip_id="clip-race",
+        note_id="clip-race",
+        clip_type="article",
+        source_url="https://example.com/story",
+        source_title="Example Story",
+        capture_metadata={"captured_at": "2026-01-01T00:00:00+00:00"},
+        enrichments={},
+        content_budget={},
+        source_note_version=1,
+    )
+    monkeypatch.setattr(clipper_db, "get_note_clipper_document_by_clip_id", lambda _clip_id: None)
+    service = WebClipperService(db=clipper_db, user_id=1)
+
+    result = service.save_clip(_save_request(clip_id="clip-race", destination_mode="note"))
+
+    assert result.status == "saved"
+    assert result.note is not None
+    assert result.note.id == "clip-race"
+
+
 def test_save_clip_retry_reuses_note_workspace_and_attachment(clipper_db):
     service = WebClipperService(db=clipper_db, user_id=1)
     request = _save_request(include_attachment=True)
@@ -114,7 +213,124 @@ def test_save_clip_retry_reuses_note_workspace_and_attachment(clipper_db):
     assert status.attachments[0].slot == "page-screenshot"
 
 
-def test_save_clip_returns_partially_saved_when_workspace_creation_fails_after_note(clipper_db, monkeypatch: pytest.MonkeyPatch):
+def test_save_clip_rejects_active_html_and_svg_attachments(clipper_db):
+    service = WebClipperService(db=clipper_db, user_id=1)
+    request = _save_request(destination_mode="note", clip_id="clip-active-attachments")
+    request.attachments = [
+        WebClipperSaveRequest.AttachmentPayload(
+            slot="html-capture",
+            file_name="html-capture.html",
+            media_type="text/html",
+            text_content="<script>window.pwned = true</script>",
+        ),
+        WebClipperSaveRequest.AttachmentPayload(
+            slot="svg-capture",
+            file_name="svg-capture.svg",
+            media_type="image/svg+xml",
+            text_content="<svg><script>window.pwned = true</script></svg>",
+        ),
+    ]
+
+    result = service.save_clip(request)
+    status = service.get_clip_status("clip-active-attachments")
+
+    assert result.status == "saved_with_warnings"
+    assert result.attachments == []
+    assert status.attachments == []
+    assert len(result.warnings) == 2
+    assert all("not allowed" in warning for warning in result.warnings)
+
+
+def test_save_clip_rejects_oversized_merged_capture_metadata(clipper_db):
+    existing_metadata = {"stored": "x" * (MAX_CAPTURE_METADATA_JSON_CHARS - len(json.dumps({"stored": ""})) - 64)}
+    clipper_db.add_note(title="Existing Clip", content="Previous body", note_id="clip-metadata")
+    clipper_db.upsert_note_clipper_document(
+        clip_id="clip-metadata",
+        note_id="clip-metadata",
+        clip_type="article",
+        source_url="https://example.com/story",
+        source_title="Example Story",
+        capture_metadata=existing_metadata,
+        enrichments={},
+        content_budget={},
+        source_note_version=1,
+    )
+    service = WebClipperService(db=clipper_db, user_id=1)
+
+    with pytest.raises(InputError, match="capture_metadata JSON"):
+        service.save_clip(_save_request(clip_id="clip-metadata", destination_mode="note"))
+
+
+def test_save_clip_creates_media_backed_workspace_source(clipper_db, media_db):
+    service = WebClipperService(db=clipper_db, media_db=media_db, user_id=1, promote_workspace_sources=True)
+
+    result = service.save_clip(_save_request(clip_id="clip-source", destination_mode="workspace"))
+
+    assert result.status == "saved"
+    assert result.workspace_placement is not None
+
+    sources = clipper_db.list_workspace_sources("ws-1")
+    assert len(sources) == 1
+    source = sources[0]
+    assert source["id"] == "web-clipper:clip-source"
+    assert source["title"] == "Example Story"
+    assert source["source_type"] == "web_clip"
+    assert source["url"] == "https://example.com/story"
+    assert source["selected"] == 1
+
+    media = media_db_api.get_media_by_id(media_db, int(source["media_id"]))
+    assert media is not None
+    assert media["title"] == "Example Story"
+    assert media["type"] == "article"
+    assert "Alpha paragraph." in media["content"]
+    assert "Beta paragraph." in media["content"]
+
+
+def test_save_clip_notifies_workspace_source_job_enqueuer(clipper_db, media_db):
+    calls: list[tuple[str, dict]] = []
+    service = WebClipperService(
+        db=clipper_db,
+        media_db=media_db,
+        user_id=1,
+        promote_workspace_sources=True,
+        workspace_source_job_enqueuer=lambda workspace_id, source: calls.append((workspace_id, source)),
+    )
+
+    service.save_clip(_save_request(clip_id="clip-source-job", destination_mode="workspace"))
+
+    assert len(calls) == 1
+    workspace_id, source = calls[0]
+    assert workspace_id == "ws-1"
+    assert source["id"] == "web-clipper:clip-source-job"
+    assert source["media_id"] > 0
+
+
+def test_save_clip_retry_reuses_workspace_source_and_still_attempts_job_enqueue(clipper_db, media_db):
+    calls: list[tuple[str, dict]] = []
+    service = WebClipperService(
+        db=clipper_db,
+        media_db=media_db,
+        user_id=1,
+        promote_workspace_sources=True,
+        workspace_source_job_enqueuer=lambda workspace_id, source: calls.append((workspace_id, source)),
+    )
+    request = _save_request(clip_id="clip-source-retry", destination_mode="workspace")
+
+    service.save_clip(request)
+    service.save_clip(request)
+
+    sources = clipper_db.list_workspace_sources("ws-1")
+    assert len(sources) == 1
+    assert sources[0]["id"] == "web-clipper:clip-source-retry"
+    assert len(calls) == 2
+    assert calls[0][0] == calls[1][0] == "ws-1"
+    assert calls[0][1]["id"] == calls[1][1]["id"] == "web-clipper:clip-source-retry"
+    assert calls[0][1]["media_id"] == calls[1][1]["media_id"] == sources[0]["media_id"]
+
+
+def test_save_clip_returns_partially_saved_when_workspace_creation_fails_after_note(
+    clipper_db, monkeypatch: pytest.MonkeyPatch
+):
     service = WebClipperService(db=clipper_db, user_id=1)
 
     def _boom(*_args, **_kwargs):

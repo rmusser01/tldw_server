@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Billing.enforcement import (
     LimitCategory,
     LimitCheckResult,
 )
+from tldw_Server_API.app.api.v1.API_Deps import billing_deps
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import (
     LimitEnforcer as APILimitEnforcer,
 )
@@ -172,6 +173,94 @@ async def test_limit_enforcer_records_cost_units_for_llm_tokens(monkeypatch):
     assert rec["tokens"] == actual_tokens
     assert rec["requests"] == 0
     assert rec["minutes"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_limit_enforcer_usage_delta_failure_log_omits_backend_details(monkeypatch):
+    """Usage delta failures should not log raw backend details or org IDs."""
+    leaked_secret = "sk-limit-secret"
+    leaked_path = "/private/billing/cache.db"
+    messages: list[str] = []
+    mock_enforcer = MagicMock()
+    mock_enforcer.check_limit = AsyncMock(
+        return_value=LimitCheckResult(
+            category=LimitCategory.API_CALLS_DAY.value,
+            action=EnforcementAction.ALLOW,
+            current=0,
+            limit=-1,
+            percent_used=0,
+            unlimited=True,
+        )
+    )
+    mock_enforcer.apply_usage_delta = MagicMock(
+        side_effect=RuntimeError(f"cache failed token={leaked_secret} path={leaked_path}")
+    )
+    mock_enforcer.invalidate_cache = MagicMock()
+
+    async def fake_record_cost_units_for_entity(**_kwargs):
+        return 1
+
+    monkeypatch.setattr(billing_deps, "get_billing_enforcer", lambda: mock_enforcer)
+    monkeypatch.setattr(billing_deps, "enforcement_enabled", lambda: True)
+    monkeypatch.setattr(billing_deps.cost_units, "record_cost_units_for_entity", fake_record_cost_units_for_entity)
+    monkeypatch.setattr(billing_deps.logger, "debug", messages.append)
+
+    async with APILimitEnforcer(
+        org_id=777,
+        category=LimitCategory.API_CALLS_DAY,
+        estimated_units=1,
+    ) as ctx:
+        ctx.record_actual(3)
+
+    assert "LimitEnforcer usage delta recording failed" in messages
+    joined = "\n".join(messages)
+    assert leaked_secret not in joined
+    assert leaked_path not in joined
+    assert "cache failed" not in joined
+    assert "777" not in joined
+
+
+@pytest.mark.asyncio
+async def test_limit_enforcer_cost_units_failure_log_omits_backend_details(monkeypatch):
+    """Cost-units ledger failures should not log raw backend details or org IDs."""
+    leaked_secret = "sk-ledger-secret"
+    leaked_path = "/private/billing/ledger.db"
+    messages: list[str] = []
+    mock_enforcer = MagicMock()
+    mock_enforcer.check_limit = AsyncMock(
+        return_value=LimitCheckResult(
+            category=LimitCategory.LLM_TOKENS_MONTH.value,
+            action=EnforcementAction.ALLOW,
+            current=0,
+            limit=-1,
+            percent_used=0,
+            unlimited=True,
+        )
+    )
+    mock_enforcer.apply_usage_delta = MagicMock(return_value=True)
+    mock_enforcer.invalidate_cache = MagicMock()
+
+    async def fail_record_cost_units_for_entity(**_kwargs):
+        raise RuntimeError(f"ledger failed token={leaked_secret} path={leaked_path}")
+
+    monkeypatch.setattr(billing_deps, "get_billing_enforcer", lambda: mock_enforcer)
+    monkeypatch.setattr(billing_deps, "enforcement_enabled", lambda: True)
+    monkeypatch.setattr(billing_deps.cost_units, "record_cost_units_for_entity", fail_record_cost_units_for_entity)
+    monkeypatch.setattr(billing_deps.logger, "debug", messages.append)
+
+    async with APILimitEnforcer(
+        org_id=888,
+        category=LimitCategory.LLM_TOKENS_MONTH,
+        estimated_units=1,
+    ) as ctx:
+        ctx.record_actual(5)
+
+    assert "LimitEnforcer cost-units ledger write failed" in messages
+    joined = "\n".join(messages)
+    assert leaked_secret not in joined
+    assert leaked_path not in joined
+    assert "ledger failed" not in joined
+    assert "888" not in joined
 
 
 @pytest.mark.asyncio

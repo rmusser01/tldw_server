@@ -8,7 +8,10 @@ Schema versions:
     v1 — original projects/tasks/runs/reviews tables
     v2 — adds acp_workspaces, acp_workspace_mcp_servers tables;
           adds workspace_id FK to projects
+    v3 — adds canonical workspace link column and uniqueness index
+    v4 — enforces at most one running run per task
 """
+
 from __future__ import annotations
 
 import json
@@ -19,8 +22,6 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 
 from tldw_Server_API.app.core.Agent_Orchestration.models import (
     ACPWorkspace,
@@ -29,8 +30,11 @@ from tldw_Server_API.app.core.Agent_Orchestration.models import (
     AgentTask,
     RunStatus,
     TaskStatus,
+    is_valid_run_transition,
     is_valid_transition,
 )
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 
 # ---------------------------------------------------------------------------
 # Custom exceptions
@@ -45,7 +49,15 @@ class InvalidTransitionError(ValueError):
     """Raised when a task state transition is not allowed."""
 
 
-_SCHEMA_VERSION = 2
+class CanonicalWorkspaceBridgeConflictError(ValueError):
+    """Raised when a canonical workspace bridge would create an ambiguous link."""
+
+
+_SCHEMA_VERSION = 4
+CANONICAL_WORKSPACE_ID_METADATA_KEY = "canonical_workspace_id"
+CANONICAL_WORKSPACE_SOURCE_METADATA_KEY = "canonical_workspace_source"
+CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY = "link_status"
+CANONICAL_WORKSPACE_LINKED_STATUS = "linked"
 
 # Base schema (v1) — applied to fresh databases
 _SCHEMA_V1_SQL = """\
@@ -151,6 +163,18 @@ CREATE TABLE IF NOT EXISTS acp_workspace_mcp_servers (
 CREATE INDEX IF NOT EXISTS idx_ws_mcp_workspace ON acp_workspace_mcp_servers(workspace_id);
 """
 
+_SCHEMA_V3_SQL = """\
+CREATE UNIQUE INDEX IF NOT EXISTS idx_acp_workspaces_user_canonical
+ON acp_workspaces(user_id, canonical_workspace_id)
+WHERE canonical_workspace_id IS NOT NULL;
+"""
+
+_SCHEMA_V4_SQL = """\
+CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_one_running_per_task
+ON runs(task_id)
+WHERE status = 'running';
+"""
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -163,6 +187,14 @@ def _parse_json(raw: str | None) -> dict[str, Any]:
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return {}
+
+
+def _canonical_workspace_id_from_metadata(metadata: dict[str, Any] | None) -> str | None:
+    """Return a normalized canonical workspace ID from workspace metadata."""
+    if not isinstance(metadata, dict):
+        return None
+    canonical_id = str(metadata.get(CANONICAL_WORKSPACE_ID_METADATA_KEY) or "").strip()
+    return canonical_id or None
 
 
 def _parse_json_list(raw: str | None) -> list[Any]:
@@ -196,7 +228,7 @@ class OrchestrationDB:
     """Per-user SQLite store for orchestration projects, tasks, runs, reviews, workspaces."""
 
     @classmethod
-    def for_user(cls, user_id: int) -> "OrchestrationDB":
+    def for_user(cls, user_id: int) -> OrchestrationDB:
         safe_user_id = int(user_id)
         safe_db_dir = DatabasePaths.get_user_base_directory(safe_user_id)
         return cls(user_id=safe_user_id, db_dir=safe_db_dir, _trusted_db_dir=True)
@@ -223,6 +255,7 @@ class OrchestrationDB:
         self._conn_local = threading.local()
         self._initialized = False
         self._init_lock = threading.Lock()
+        self._bridge_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Connection helpers
@@ -258,6 +291,16 @@ class OrchestrationDB:
                 self._migrate_v1_to_v2(conn)
                 current_version = 2
 
+            if current_version < 3:
+                # Migrate v2 → v3
+                self._migrate_v2_to_v3(conn)
+                current_version = 3
+
+            if current_version < 4:
+                # Migrate v3 → v4
+                self._migrate_v3_to_v4(conn)
+                current_version = 4
+
             conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
             conn.commit()
             self._initialized = True
@@ -273,6 +316,72 @@ class OrchestrationDB:
                 "ALTER TABLE projects ADD COLUMN workspace_id INTEGER "
                 "REFERENCES acp_workspaces(id) ON DELETE SET NULL"
             )
+        conn.commit()
+
+    def _migrate_v2_to_v3(self, conn: sqlite3.Connection) -> None:
+        """Apply v3 canonical workspace link column and uniqueness index."""
+        logger.info("Orchestration DB: migrating schema v2 → v3")
+        if not _col_exists(conn, "acp_workspaces", "canonical_workspace_id"):
+            conn.execute("ALTER TABLE acp_workspaces ADD COLUMN canonical_workspace_id TEXT")
+
+        rows = conn.execute("SELECT id, user_id, metadata, canonical_workspace_id FROM acp_workspaces").fetchall()
+        seen: dict[tuple[int, str], int] = {}
+        duplicates: list[tuple[int, str, int, int]] = []
+        updates: list[tuple[str, int]] = []
+        for row in rows:
+            metadata = _parse_json(row["metadata"])
+            canonical_id = str(row["canonical_workspace_id"] or "").strip()
+            canonical_id = canonical_id or _canonical_workspace_id_from_metadata(metadata)
+            if not canonical_id:
+                continue
+            key = (int(row["user_id"]), canonical_id)
+            if key in seen:
+                duplicates.append((key[0], canonical_id, seen[key], int(row["id"])))
+                continue
+            seen[key] = int(row["id"])
+            updates.append((canonical_id, int(row["id"])))
+
+        if duplicates:
+            details = "; ".join(
+                f"user_id={user_id} canonical_workspace_id={canonical_id} " f"workspace_ids={first_id},{duplicate_id}"
+                for user_id, canonical_id, first_id, duplicate_id in duplicates
+            )
+            raise ValueError(
+                "Duplicate canonical workspace links detected during orchestration "
+                f"schema migration; remove duplicate ACP workspace metadata before retrying: {details}"
+            )
+
+        conn.executemany(
+            "UPDATE acp_workspaces SET canonical_workspace_id = ? WHERE id = ?",
+            updates,
+        )
+        conn.executescript(_SCHEMA_V3_SQL)
+        conn.commit()
+
+    def _migrate_v3_to_v4(self, conn: sqlite3.Connection) -> None:
+        """Apply v4 run uniqueness invariant for active dispatches."""
+        logger.info("Orchestration DB: migrating schema v3 → v4")
+        # Some legacy test/dev databases were stamped with a version after
+        # creating only a subset of the base tables. The base schema is
+        # idempotent and guarantees the runs table exists before indexing it.
+        conn.executescript(_SCHEMA_V1_SQL)
+        duplicates = conn.execute(
+            "SELECT task_id, COUNT(*) AS count "
+            "FROM runs "
+            "WHERE status = ? "
+            "GROUP BY task_id "
+            "HAVING COUNT(*) > 1",
+            (RunStatus.RUNNING.value,),
+        ).fetchall()
+        if duplicates:
+            details = "; ".join(
+                f"task_id={int(row['task_id'])} running_count={int(row['count'])}" for row in duplicates
+            )
+            raise ValueError(
+                "Duplicate running orchestration runs detected during schema migration; "
+                f"resolve duplicate active runs before retrying: {details}"
+            )
+        conn.executescript(_SCHEMA_V4_SQL)
         conn.commit()
 
     # ------------------------------------------------------------------
@@ -301,11 +410,12 @@ class OrchestrationDB:
         )
 
     def _row_to_project(self, row: sqlite3.Row) -> AgentProject:
+        columns = set(row.keys())
         return AgentProject(
             id=row["id"],
             name=row["name"],
             description=row["description"],
-            workspace_id=row["workspace_id"] if "workspace_id" in row.keys() else None,
+            workspace_id=row["workspace_id"] if "workspace_id" in columns else None,
             user_id=row["user_id"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
@@ -379,15 +489,19 @@ class OrchestrationDB:
     ) -> ACPWorkspace:
         self._ensure_schema()
         conn = self._get_conn()
+        metadata_payload = dict(metadata or {})
+        canonical_workspace_id = _canonical_workspace_id_from_metadata(metadata_payload)
 
         # Validate parent exists if provided
         if parent_workspace_id is not None:
-            if conn.execute(
-                "SELECT 1 FROM acp_workspaces WHERE id = ?", (parent_workspace_id,)
-            ).fetchone() is None:
-                raise OrchestrationNotFoundError(
-                    f"Parent workspace {parent_workspace_id} not found"
-                )
+            if (
+                conn.execute(
+                    "SELECT 1 FROM acp_workspaces WHERE id = ? AND user_id = ?",
+                    (parent_workspace_id, self._user_id),
+                ).fetchone()
+                is None
+            ):
+                raise OrchestrationNotFoundError(f"Parent workspace {parent_workspace_id} not found")
 
         now = _now_iso()
         try:
@@ -395,15 +509,24 @@ class OrchestrationDB:
                 "INSERT INTO acp_workspaces "
                 "(name, root_path, description, workspace_type, parent_workspace_id, "
                 " env_vars, git_remote_url, git_default_branch, git_current_branch, "
-                " git_is_dirty, health_status, user_id, metadata, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " git_is_dirty, health_status, user_id, metadata, canonical_workspace_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    name, root_path, description, workspace_type,
-                    parent_workspace_id, json.dumps(env_vars or {}),
-                    git_remote_url, git_default_branch, git_current_branch,
+                    name,
+                    root_path,
+                    description,
+                    workspace_type,
+                    parent_workspace_id,
+                    json.dumps(env_vars or {}),
+                    git_remote_url,
+                    git_default_branch,
+                    git_current_branch,
                     int(git_is_dirty) if git_is_dirty is not None else None,
-                    health_status, self._user_id,
-                    json.dumps(metadata or {}), now,
+                    health_status,
+                    self._user_id,
+                    json.dumps(metadata_payload),
+                    canonical_workspace_id,
+                    now,
                 ),
             )
             conn.commit()
@@ -411,8 +534,8 @@ class OrchestrationDB:
             err = str(exc).lower()
             if "unique" in err:
                 raise ValueError(
-                    f"Workspace with name '{name}' or root_path '{root_path}' "
-                    f"already exists for this user"
+                    f"Workspace with name '{name}', root_path '{root_path}', or "
+                    f"canonical_workspace_id '{canonical_workspace_id}' already exists for this user"
                 ) from exc
             raise
 
@@ -431,7 +554,7 @@ class OrchestrationDB:
             health_status=health_status,
             user_id=self._user_id,
             created_at=now,
-            metadata=dict(metadata or {}),
+            metadata=metadata_payload,
         )
 
     def get_workspace(self, workspace_id: int) -> ACPWorkspace | None:
@@ -445,6 +568,20 @@ class OrchestrationDB:
             return None
         return self._row_to_workspace(row)
 
+    def get_workspaces_by_ids(self, workspace_ids: list[int]) -> dict[int, ACPWorkspace]:
+        """Return current-user workspaces keyed by ID for the provided IDs."""
+        self._ensure_schema()
+        unique_ids = sorted({int(workspace_id) for workspace_id in workspace_ids})
+        if not unique_ids:
+            return {}
+        conn = self._get_conn()
+        placeholders = ",".join("?" for _ in unique_ids)
+        rows = conn.execute(
+            f"SELECT * FROM acp_workspaces WHERE user_id = ? AND id IN ({placeholders})",  # nosec B608
+            [self._user_id, *unique_ids],
+        ).fetchall()
+        return {int(row["id"]): self._row_to_workspace(row) for row in rows}
+
     def get_workspace_by_root_path(self, root_path: str) -> ACPWorkspace | None:
         """Look up a workspace by its root_path for the current user."""
         self._ensure_schema()
@@ -456,6 +593,133 @@ class OrchestrationDB:
         if row is None:
             return None
         return self._row_to_workspace(row)
+
+    def get_workspace_by_canonical_workspace_id(
+        self,
+        canonical_workspace_id: str,
+    ) -> ACPWorkspace | None:
+        """Look up a workspace linked to a canonical product workspace."""
+        canonical_id = str(canonical_workspace_id or "").strip()
+        if not canonical_id:
+            return None
+        self._ensure_schema()
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM acp_workspaces " "WHERE canonical_workspace_id = ? AND user_id = ?",
+            (canonical_id, self._user_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_workspace(row)
+
+    def link_workspace_to_canonical(
+        self,
+        workspace_id: int,
+        *,
+        canonical_workspace_id: str,
+        canonical_workspace_source: str = "research_workspace",
+        link_status: str = CANONICAL_WORKSPACE_LINKED_STATUS,
+        metadata: dict[str, Any] | None = None,
+    ) -> ACPWorkspace:
+        """Attach canonical workspace metadata to an existing ACP workspace."""
+        workspace = self.get_workspace(workspace_id)
+        if workspace is None:
+            raise OrchestrationNotFoundError(f"Workspace {workspace_id} not found")
+
+        canonical_id = str(canonical_workspace_id).strip()
+        existing_canonical_id = _canonical_workspace_id_from_metadata(workspace.metadata)
+        if existing_canonical_id and existing_canonical_id != canonical_id:
+            raise CanonicalWorkspaceBridgeConflictError(
+                "ACP workspace root is already linked to a different canonical workspace."
+            )
+
+        merged_metadata = dict(workspace.metadata or {})
+        merged_metadata.update(metadata or {})
+        merged_metadata[CANONICAL_WORKSPACE_ID_METADATA_KEY] = canonical_id
+        merged_metadata[CANONICAL_WORKSPACE_SOURCE_METADATA_KEY] = str(canonical_workspace_source)
+        merged_metadata[CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY] = str(link_status)
+        conn = self._get_conn()
+        try:
+            cur = conn.execute(
+                "UPDATE acp_workspaces SET metadata = ?, canonical_workspace_id = ?, "
+                "updated_at = ? WHERE id = ? AND user_id = ? "
+                "AND (canonical_workspace_id IS NULL OR canonical_workspace_id = ?)",
+                (
+                    json.dumps(merged_metadata),
+                    canonical_id,
+                    _now_iso(),
+                    workspace_id,
+                    self._user_id,
+                    canonical_id,
+                ),
+            )
+            if cur.rowcount == 0:
+                conn.rollback()
+                raise CanonicalWorkspaceBridgeConflictError(
+                    "ACP workspace root is already linked to a different canonical workspace."
+                )
+            conn.commit()
+        except sqlite3.IntegrityError as exc:
+            conn.rollback()
+            raise CanonicalWorkspaceBridgeConflictError(
+                "Canonical workspace is already linked to a different ACP workspace."
+            ) from exc
+        updated = self.get_workspace(workspace_id)
+        if updated is None:
+            raise OrchestrationNotFoundError(f"Workspace {workspace_id} not found")
+        return updated
+
+    def find_or_create_canonical_workspace_bridge(
+        self,
+        *,
+        canonical_workspace_id: str,
+        canonical_workspace_source: str,
+        root_path: str,
+        name: str,
+        description: str = "",
+        env_vars: dict[str, str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ACPWorkspace:
+        """Atomically find or create the ACP workspace for a canonical workspace."""
+        canonical_id = str(canonical_workspace_id).strip()
+        with self._bridge_lock:
+            existing_link = self.get_workspace_by_canonical_workspace_id(canonical_id)
+            if existing_link:
+                if existing_link.root_path != root_path:
+                    raise CanonicalWorkspaceBridgeConflictError(
+                        "Canonical workspace is already linked to a different ACP workspace root."
+                    )
+                return existing_link
+
+            existing_root = self.get_workspace_by_root_path(root_path)
+            if existing_root:
+                existing_canonical_id = _canonical_workspace_id_from_metadata(existing_root.metadata)
+                if existing_canonical_id and existing_canonical_id != canonical_id:
+                    raise CanonicalWorkspaceBridgeConflictError(
+                        "ACP workspace root is already linked to a different canonical workspace."
+                    )
+                return self.link_workspace_to_canonical(
+                    existing_root.id,
+                    canonical_workspace_id=canonical_id,
+                    canonical_workspace_source=canonical_workspace_source,
+                    metadata=metadata,
+                )
+
+            bridge_metadata = dict(metadata or {})
+            bridge_metadata[CANONICAL_WORKSPACE_ID_METADATA_KEY] = canonical_id
+            bridge_metadata[CANONICAL_WORKSPACE_SOURCE_METADATA_KEY] = canonical_workspace_source
+            bridge_metadata[CANONICAL_WORKSPACE_LINK_STATUS_METADATA_KEY] = CANONICAL_WORKSPACE_LINKED_STATUS
+            try:
+                return self.create_workspace(
+                    name=name,
+                    root_path=root_path,
+                    description=description,
+                    workspace_type="manual",
+                    env_vars=env_vars,
+                    metadata=bridge_metadata,
+                )
+            except ValueError as exc:
+                raise CanonicalWorkspaceBridgeConflictError(str(exc)) from exc
 
     def list_workspaces(
         self,
@@ -494,42 +758,50 @@ class OrchestrationDB:
 
         # workspace_type and parent_workspace_id are immutable after creation
         allowed = {"name", "root_path", "description", "env_vars", "metadata"}
-        sets: list[str] = []
-        params: list[Any] = []
-        for key, value in fields.items():
-            if key not in allowed:
-                continue
-            if key in ("env_vars", "metadata"):
-                sets.append(f"{key} = ?")
-                params.append(json.dumps(value or {}))
-            else:
-                sets.append(f"{key} = ?")
-                params.append(value)
-
-        if not sets:
+        if not any(key in allowed for key in fields):
             return self._row_to_workspace(existing)
 
-        sets.append("updated_at = ?")
-        params.append(_now_iso())
-        params.append(workspace_id)
+        name = fields["name"] if "name" in fields else existing["name"]
+        root_path = fields["root_path"] if "root_path" in fields else existing["root_path"]
+        description = fields["description"] if "description" in fields else existing["description"]
+        env_vars_payload = json.dumps(fields.get("env_vars") or {}) if "env_vars" in fields else existing["env_vars"]
+        metadata_payload = json.dumps(fields.get("metadata") or {}) if "metadata" in fields else existing["metadata"]
+        canonical_workspace_id = (
+            _canonical_workspace_id_from_metadata(fields.get("metadata") or {})
+            if "metadata" in fields
+            else existing["canonical_workspace_id"]
+        )
 
         try:
-            # Column names are constrained by the local allowlist above.
-            conn.execute(
-                f"UPDATE acp_workspaces SET {', '.join(sets)} WHERE id = ?",  # nosec B608
-                params,
-            )
-            conn.commit()
+            with conn:
+                conn.execute(
+                    "UPDATE acp_workspaces "
+                    "SET name = ?, root_path = ?, description = ?, env_vars = ?, "
+                    "metadata = ?, canonical_workspace_id = ?, updated_at = ? "
+                    "WHERE id = ? AND user_id = ?",
+                    (
+                        name,
+                        root_path,
+                        description,
+                        env_vars_payload,
+                        metadata_payload,
+                        canonical_workspace_id,
+                        _now_iso(),
+                        workspace_id,
+                        self._user_id,
+                    ),
+                )
         except sqlite3.IntegrityError as exc:
             err = str(exc).lower()
             if "unique" in err:
                 raise ValueError(
-                    "Workspace name or root_path conflicts with an existing workspace"
+                    "Workspace name, root_path, or canonical workspace link conflicts with an existing workspace"
                 ) from exc
             raise
 
         row = conn.execute(
-            "SELECT * FROM acp_workspaces WHERE id = ?", (workspace_id,)
+            "SELECT * FROM acp_workspaces WHERE id = ? AND user_id = ?",
+            (workspace_id, self._user_id),
         ).fetchone()
         return self._row_to_workspace(row)
 
@@ -566,17 +838,23 @@ class OrchestrationDB:
         conn.execute(
             "UPDATE acp_workspaces SET health_status = ?, git_remote_url = ?, "
             "git_default_branch = ?, git_current_branch = ?, git_is_dirty = ?, "
-            "last_health_check = ?, updated_at = ? WHERE id = ?",
+            "last_health_check = ?, updated_at = ? WHERE id = ? AND user_id = ?",
             (
-                health_status, git_remote_url, git_default_branch,
+                health_status,
+                git_remote_url,
+                git_default_branch,
                 git_current_branch,
                 int(git_is_dirty) if git_is_dirty is not None else None,
-                now, _now_iso(), workspace_id,
+                now,
+                _now_iso(),
+                workspace_id,
+                self._user_id,
             ),
         )
         conn.commit()
         row = conn.execute(
-            "SELECT * FROM acp_workspaces WHERE id = ?", (workspace_id,)
+            "SELECT * FROM acp_workspaces WHERE id = ? AND user_id = ?",
+            (workspace_id, self._user_id),
         ).fetchone()
         return self._row_to_workspace(row)
 
@@ -584,8 +862,7 @@ class OrchestrationDB:
         self._ensure_schema()
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT * FROM acp_workspaces WHERE parent_workspace_id = ? AND user_id = ? "
-            "ORDER BY name",
+            "SELECT * FROM acp_workspaces WHERE parent_workspace_id = ? AND user_id = ? " "ORDER BY name",
             (workspace_id, self._user_id),
         ).fetchall()
         return [self._row_to_workspace(r) for r in rows]
@@ -609,10 +886,13 @@ class OrchestrationDB:
         conn = self._get_conn()
 
         # Verify workspace exists and belongs to user
-        if conn.execute(
-            "SELECT 1 FROM acp_workspaces WHERE id = ? AND user_id = ?",
-            (workspace_id, self._user_id),
-        ).fetchone() is None:
+        if (
+            conn.execute(
+                "SELECT 1 FROM acp_workspaces WHERE id = ? AND user_id = ?",
+                (workspace_id, self._user_id),
+            ).fetchone()
+            is None
+        ):
             raise OrchestrationNotFoundError(f"Workspace {workspace_id} not found")
 
         try:
@@ -621,16 +901,19 @@ class OrchestrationDB:
                 "(workspace_id, server_name, server_type, command, args, env, url, enabled) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    workspace_id, server_name, server_type, command,
-                    json.dumps(args or []), json.dumps(env or {}),
-                    url, int(enabled),
+                    workspace_id,
+                    server_name,
+                    server_type,
+                    command,
+                    json.dumps(args or []),
+                    json.dumps(env or {}),
+                    url,
+                    int(enabled),
                 ),
             )
             conn.commit()
         except sqlite3.IntegrityError as exc:
-            raise ValueError(
-                f"MCP server '{server_name}' already exists for workspace {workspace_id}"
-            ) from exc
+            raise ValueError(f"MCP server '{server_name}' already exists for workspace {workspace_id}") from exc
 
         return {
             "id": cur.lastrowid,
@@ -648,8 +931,11 @@ class OrchestrationDB:
         self._ensure_schema()
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT * FROM acp_workspace_mcp_servers WHERE workspace_id = ? ORDER BY server_name",
-            (workspace_id,),
+            "SELECT s.* FROM acp_workspace_mcp_servers s "
+            "JOIN acp_workspaces w ON w.id = s.workspace_id "
+            "WHERE s.workspace_id = ? AND w.user_id = ? "
+            "ORDER BY s.server_name",
+            (workspace_id, self._user_id),
         ).fetchall()
         return [self._row_to_mcp_server(r) for r in rows]
 
@@ -683,10 +969,13 @@ class OrchestrationDB:
 
         # Validate workspace exists if provided
         if workspace_id is not None:
-            if conn.execute(
-                "SELECT 1 FROM acp_workspaces WHERE id = ? AND user_id = ?",
-                (workspace_id, self._user_id),
-            ).fetchone() is None:
+            if (
+                conn.execute(
+                    "SELECT 1 FROM acp_workspaces WHERE id = ? AND user_id = ?",
+                    (workspace_id, self._user_id),
+                ).fetchone()
+                is None
+            ):
                 raise OrchestrationNotFoundError(f"Workspace {workspace_id} not found")
 
         now = _now_iso()
@@ -709,7 +998,10 @@ class OrchestrationDB:
     def get_project(self, project_id: int) -> AgentProject | None:
         self._ensure_schema()
         conn = self._get_conn()
-        row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM projects WHERE id = ? AND user_id = ?",
+            (project_id, self._user_id),
+        ).fetchone()
         if row is None:
             return None
         return self._row_to_project(row)
@@ -731,14 +1023,12 @@ class OrchestrationDB:
             ).fetchall()
         elif workspace_id is None:
             rows = conn.execute(
-                "SELECT * FROM projects WHERE user_id = ? AND workspace_id IS NULL "
-                "ORDER BY created_at DESC",
+                "SELECT * FROM projects WHERE user_id = ? AND workspace_id IS NULL " "ORDER BY created_at DESC",
                 (self._user_id,),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM projects WHERE user_id = ? AND workspace_id = ? "
-                "ORDER BY created_at DESC",
+                "SELECT * FROM projects WHERE user_id = ? AND workspace_id = ? " "ORDER BY created_at DESC",
                 (self._user_id, workspace_id),
             ).fetchall()
         return [self._row_to_project(r) for r in rows]
@@ -746,7 +1036,10 @@ class OrchestrationDB:
     def delete_project(self, project_id: int) -> bool:
         self._ensure_schema()
         conn = self._get_conn()
-        cur = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        cur = conn.execute(
+            "DELETE FROM projects WHERE id = ? AND user_id = ?",
+            (project_id, self._user_id),
+        )
         conn.commit()
         return cur.rowcount > 0
 
@@ -770,12 +1063,24 @@ class OrchestrationDB:
         conn = self._get_conn()
 
         # Validate project exists
-        if conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
+        if (
+            conn.execute(
+                "SELECT 1 FROM projects WHERE id = ? AND user_id = ?",
+                (project_id, self._user_id),
+            ).fetchone()
+            is None
+        ):
             raise OrchestrationNotFoundError(f"Project {project_id} not found")
 
         # Validate dependency exists
         if dependency_id is not None:
-            if conn.execute("SELECT 1 FROM tasks WHERE id = ?", (dependency_id,)).fetchone() is None:
+            if (
+                conn.execute(
+                    "SELECT 1 FROM tasks WHERE id = ? AND user_id = ?",
+                    (dependency_id, self._user_id),
+                ).fetchone()
+                is None
+            ):
                 raise OrchestrationNotFoundError(f"Dependency task {dependency_id} not found")
 
         now = _now_iso()
@@ -786,10 +1091,18 @@ class OrchestrationDB:
             " user_id, metadata, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
             (
-                project_id, title, description, TaskStatus.TODO.value,
-                agent_type, dependency_id, reviewer_agent_type,
-                max_review_attempts, success_criteria,
-                self._user_id, json.dumps(metadata or {}), now,
+                project_id,
+                title,
+                description,
+                TaskStatus.TODO.value,
+                agent_type,
+                dependency_id,
+                reviewer_agent_type,
+                max_review_attempts,
+                success_criteria,
+                self._user_id,
+                json.dumps(metadata or {}),
+                now,
             ),
         )
         conn.commit()
@@ -813,7 +1126,10 @@ class OrchestrationDB:
     def get_task(self, task_id: int) -> AgentTask | None:
         self._ensure_schema()
         conn = self._get_conn()
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
         if row is None:
             return None
         return self._row_to_task(row)
@@ -827,43 +1143,48 @@ class OrchestrationDB:
         conn = self._get_conn()
         if status is not None:
             rows = conn.execute(
-                "SELECT * FROM tasks WHERE project_id = ? AND status = ? ORDER BY created_at",
-                (project_id, status.value),
+                "SELECT * FROM tasks " "WHERE project_id = ? AND user_id = ? AND status = ? " "ORDER BY created_at",
+                (project_id, self._user_id, status.value),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at",
-                (project_id,),
+                "SELECT * FROM tasks WHERE project_id = ? AND user_id = ? " "ORDER BY created_at",
+                (project_id, self._user_id),
             ).fetchall()
         return [self._row_to_task(r) for r in rows]
 
     def transition_task(self, task_id: int, new_status: TaskStatus) -> AgentTask:
         self._ensure_schema()
         conn = self._get_conn()
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
         if row is None:
             raise OrchestrationNotFoundError(f"Task {task_id} not found")
 
         current = TaskStatus(row["status"])
         if not is_valid_transition(current, new_status):
-            raise InvalidTransitionError(
-                f"Invalid transition from {current.value} to {new_status.value}"
-            )
+            raise InvalidTransitionError(f"Invalid transition from {current.value} to {new_status.value}")
 
         now = _now_iso()
         conn.execute(
-            "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
-            (new_status.value, now, task_id),
+            "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+            (new_status.value, now, task_id, self._user_id),
         )
         conn.commit()
-        updated = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        updated = conn.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
         return self._row_to_task(updated)
 
     def check_dependency_ready(self, task_id: int) -> bool:
         self._ensure_schema()
         conn = self._get_conn()
         row = conn.execute(
-            "SELECT dependency_id FROM tasks WHERE id = ?", (task_id,),
+            "SELECT dependency_id FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
         ).fetchone()
         if row is None:
             raise OrchestrationNotFoundError(f"Task {task_id} not found")
@@ -871,7 +1192,8 @@ class OrchestrationDB:
         if dep_id is None:
             return True
         dep_row = conn.execute(
-            "SELECT status FROM tasks WHERE id = ?", (dep_id,),
+            "SELECT status FROM tasks WHERE id = ? AND user_id = ?",
+            (dep_id, self._user_id),
         ).fetchone()
         if dep_row is None:
             return True  # dependency deleted
@@ -890,7 +1212,8 @@ class OrchestrationDB:
                 return True  # already a cycle in the chain
             visited.add(current)
             row = conn.execute(
-                "SELECT dependency_id FROM tasks WHERE id = ?", (current,),
+                "SELECT dependency_id FROM tasks WHERE id = ? AND user_id = ?",
+                (current, self._user_id),
             ).fetchone()
             if row is None:
                 break
@@ -901,6 +1224,39 @@ class OrchestrationDB:
     # Runs
     # ------------------------------------------------------------------
 
+    def _get_owned_run_row(
+        self,
+        conn: sqlite3.Connection,
+        run_id: int,
+    ) -> sqlite3.Row | None:
+        """Return a run row only when its parent task belongs to this DB user."""
+        return conn.execute(
+            "SELECT r.* FROM runs r " "JOIN tasks t ON t.id = r.task_id " "WHERE r.id = ? AND t.user_id = ?",
+            (run_id, self._user_id),
+        ).fetchone()
+
+    @staticmethod
+    def _validate_run_transition(current: RunStatus, target: RunStatus) -> None:
+        """Raise when a run transition would rewrite a terminal or invalid state."""
+        if not is_valid_run_transition(current, target):
+            raise InvalidTransitionError(f"Invalid run transition from {current.value} to {target.value}")
+
+    def has_running_run(self, task_id: int) -> bool:
+        """Return whether the current user's task already has an active run."""
+        self._ensure_schema()
+        conn = self._get_conn()
+        task_row = conn.execute(
+            "SELECT 1 FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
+        if task_row is None:
+            raise OrchestrationNotFoundError(f"Task {task_id} not found")
+        active = conn.execute(
+            "SELECT 1 FROM runs WHERE task_id = ? AND status = ?",
+            (task_id, RunStatus.RUNNING.value),
+        ).fetchone()
+        return active is not None
+
     def create_run(
         self,
         task_id: int,
@@ -909,21 +1265,61 @@ class OrchestrationDB:
     ) -> AgentRun:
         self._ensure_schema()
         conn = self._get_conn()
+        task_row = conn.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
+        if task_row is None:
+            raise OrchestrationNotFoundError(f"Task {task_id} not found")
+        active = conn.execute(
+            "SELECT 1 FROM runs WHERE task_id = ? AND status = ?",
+            (task_id, RunStatus.RUNNING.value),
+        ).fetchone()
+        if active is not None:
+            raise InvalidTransitionError(f"Task {task_id} already has a running run")
+
         now = _now_iso()
-        cur = conn.execute(
-            "INSERT INTO runs (task_id, session_id, status, agent_type, started_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (task_id, session_id, RunStatus.RUNNING.value, agent_type, now),
-        )
-        conn.commit()
+        resolved_agent_type = agent_type or task_row["agent_type"]
+        try:
+            with conn:
+                cur = conn.execute(
+                    "INSERT INTO runs (task_id, session_id, status, agent_type, started_at) " "VALUES (?, ?, ?, ?, ?)",
+                    (task_id, session_id, RunStatus.RUNNING.value, resolved_agent_type, now),
+                )
+        except sqlite3.IntegrityError as exc:
+            if "unique" in str(exc).lower():
+                raise InvalidTransitionError(f"Task {task_id} already has a running run") from exc
+            raise
         return AgentRun(
             id=cur.lastrowid,
             task_id=task_id,
             session_id=session_id,
             status=RunStatus.RUNNING,
-            agent_type=agent_type,
+            agent_type=resolved_agent_type,
             started_at=now,
         )
+
+    def update_run_session_id(self, run_id: int, session_id: str | None) -> AgentRun:
+        """Attach an ACP session id to an owned run with an atomic ownership check."""
+        self._ensure_schema()
+        conn = self._get_conn()
+        with conn:
+            cur = conn.execute(
+                "UPDATE runs "
+                "SET session_id = ? "
+                "WHERE id = ? "
+                "AND EXISTS ("
+                "    SELECT 1 FROM tasks t "
+                "    WHERE t.id = runs.task_id AND t.user_id = ?"
+                ")",
+                (session_id, run_id, self._user_id),
+            )
+            if cur.rowcount == 0:
+                raise OrchestrationNotFoundError(f"Run {run_id} not found")
+        updated = self._get_owned_run_row(conn, run_id)
+        if updated is None:
+            raise OrchestrationNotFoundError(f"Run {run_id} not found")
+        return self._row_to_run(updated)
 
     def complete_run(
         self,
@@ -933,37 +1329,79 @@ class OrchestrationDB:
     ) -> AgentRun:
         self._ensure_schema()
         conn = self._get_conn()
+        row = self._get_owned_run_row(conn, run_id)
+        if row is None:
+            raise OrchestrationNotFoundError(f"Run {run_id} not found")
+        self._validate_run_transition(RunStatus(row["status"]), RunStatus.COMPLETED)
         now = _now_iso()
-        conn.execute(
-            "UPDATE runs SET status = ?, completed_at = ?, result_summary = ?, token_usage = ? "
-            "WHERE id = ?",
-            (
-                RunStatus.COMPLETED.value, now, result_summary,
-                json.dumps(token_usage or {}), run_id,
-            ),
-        )
-        conn.commit()
-        row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
-        return self._row_to_run(row)
+        with conn:
+            cur = conn.execute(
+                "UPDATE runs "
+                "SET status = ?, completed_at = ?, result_summary = ?, token_usage = ? "
+                "WHERE id = ? AND status = ? "
+                "AND EXISTS ("
+                "    SELECT 1 FROM tasks t "
+                "    WHERE t.id = runs.task_id AND t.user_id = ?"
+                ")",
+                (
+                    RunStatus.COMPLETED.value,
+                    now,
+                    result_summary,
+                    json.dumps(token_usage or {}),
+                    run_id,
+                    row["status"],
+                    self._user_id,
+                ),
+            )
+            if cur.rowcount == 0:
+                raise InvalidTransitionError(f"Run {run_id} changed status before completion could be recorded")
+        updated = self._get_owned_run_row(conn, run_id)
+        if updated is None:
+            raise OrchestrationNotFoundError(f"Run {run_id} not found")
+        return self._row_to_run(updated)
 
     def fail_run(self, run_id: int, error: str = "") -> AgentRun:
         self._ensure_schema()
         conn = self._get_conn()
+        row = self._get_owned_run_row(conn, run_id)
+        if row is None:
+            raise OrchestrationNotFoundError(f"Run {run_id} not found")
+        self._validate_run_transition(RunStatus(row["status"]), RunStatus.FAILED)
         now = _now_iso()
-        conn.execute(
-            "UPDATE runs SET status = ?, completed_at = ?, error = ? WHERE id = ?",
-            (RunStatus.FAILED.value, now, error, run_id),
-        )
-        conn.commit()
-        row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
-        return self._row_to_run(row)
+        with conn:
+            cur = conn.execute(
+                "UPDATE runs "
+                "SET status = ?, completed_at = ?, error = ? "
+                "WHERE id = ? AND status = ? "
+                "AND EXISTS ("
+                "    SELECT 1 FROM tasks t "
+                "    WHERE t.id = runs.task_id AND t.user_id = ?"
+                ")",
+                (
+                    RunStatus.FAILED.value,
+                    now,
+                    error,
+                    run_id,
+                    row["status"],
+                    self._user_id,
+                ),
+            )
+            if cur.rowcount == 0:
+                raise InvalidTransitionError(f"Run {run_id} changed status before failure could be recorded")
+        updated = self._get_owned_run_row(conn, run_id)
+        if updated is None:
+            raise OrchestrationNotFoundError(f"Run {run_id} not found")
+        return self._row_to_run(updated)
 
     def list_runs(self, task_id: int) -> list[AgentRun]:
         self._ensure_schema()
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT * FROM runs WHERE task_id = ? ORDER BY started_at DESC",
-            (task_id,),
+            "SELECT r.* FROM runs r "
+            "JOIN tasks t ON t.id = r.task_id "
+            "WHERE r.task_id = ? AND t.user_id = ? "
+            "ORDER BY r.started_at DESC",
+            (task_id, self._user_id),
         ).fetchall()
         return [self._row_to_run(r) for r in rows]
 
@@ -980,7 +1418,10 @@ class OrchestrationDB:
     ) -> AgentTask:
         self._ensure_schema()
         conn = self._get_conn()
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
         if row is None:
             raise OrchestrationNotFoundError(f"Task {task_id} not found")
         if TaskStatus(row["status"]) != TaskStatus.REVIEW:
@@ -998,24 +1439,29 @@ class OrchestrationDB:
             new_status = TaskStatus.IN_PROGRESS
 
         conn.execute(
-            "UPDATE tasks SET status = ?, review_count = ?, updated_at = ? WHERE id = ?",
-            (new_status.value, new_review_count, now, task_id),
+            "UPDATE tasks SET status = ?, review_count = ?, updated_at = ? " "WHERE id = ? AND user_id = ?",
+            (new_status.value, new_review_count, now, task_id, self._user_id),
         )
         conn.execute(
-            "INSERT INTO reviews (task_id, approved, feedback, reviewer, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO reviews (task_id, approved, feedback, reviewer, created_at) " "VALUES (?, ?, ?, ?, ?)",
             (task_id, int(approved), feedback, reviewer, now),
         )
         conn.commit()
-        updated = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        updated = conn.execute(
+            "SELECT * FROM tasks WHERE id = ? AND user_id = ?",
+            (task_id, self._user_id),
+        ).fetchone()
         return self._row_to_task(updated)
 
     def list_reviews(self, task_id: int) -> list[dict[str, Any]]:
         self._ensure_schema()
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT * FROM reviews WHERE task_id = ? ORDER BY created_at",
-            (task_id,),
+            "SELECT r.* FROM reviews r "
+            "JOIN tasks t ON t.id = r.task_id "
+            "WHERE r.task_id = ? AND t.user_id = ? "
+            "ORDER BY r.created_at",
+            (task_id, self._user_id),
         ).fetchall()
         return [
             {
@@ -1037,8 +1483,11 @@ class OrchestrationDB:
         self._ensure_schema()
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT status, COUNT(*) as cnt FROM tasks WHERE project_id = ? GROUP BY status",
-            (project_id,),
+            "SELECT t.status, COUNT(*) as cnt FROM tasks t "
+            "JOIN projects p ON p.id = t.project_id "
+            "WHERE t.project_id = ? AND p.user_id = ? "
+            "GROUP BY t.status",
+            (project_id, self._user_id),
         ).fetchall()
         status_counts: dict[str, int] = {}
         total = 0

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import threading
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
@@ -16,6 +15,10 @@ from tldw_Server_API.app.core.http_client import (
 )
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import normalize_payload, validate_payload
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import _safe_cast
+from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
+    apply_billing_prompt_cache_intent,
+    attach_cache_intent_metadata,
+)
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
@@ -23,6 +26,7 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
     normalize_provider_line,
     sse_done,
 )
+from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 
 from .base import ChatProvider
 
@@ -270,6 +274,7 @@ class OpenAIAdapter(ChatProvider):
             payload = self._build_openai_payload(request)
             payload["stream"] = False
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
+            payload, cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
             payload = merge_extra_body(payload, request)
             headers = merge_extra_headers(self._openai_headers(api_key), request)
             try:
@@ -277,7 +282,7 @@ class OpenAIAdapter(ChatProvider):
                 with http_client_factory(timeout=resolved_timeout) as client:
                     resp = client.post(url, headers=headers, json=payload)
                     resp.raise_for_status()
-                    return resp.json()
+                    return attach_cache_intent_metadata(resp.json(), cache_intent_diagnostic)
             except _OPENAI_ADAPTER_NONCRITICAL_EXCEPTIONS as e:
                 raise self.normalize_error(e) from e
 
@@ -293,6 +298,7 @@ class OpenAIAdapter(ChatProvider):
             payload = self._build_openai_payload(request)
             payload["stream"] = True
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
+            payload, _cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
             payload = merge_extra_body(payload, request)
             headers = merge_extra_headers(self._openai_headers(api_key), request)
             try:
@@ -330,41 +336,8 @@ class OpenAIAdapter(ChatProvider):
         return await asyncio.to_thread(self.chat, request, timeout=timeout)
 
     async def astream(self, request: dict[str, Any], *, timeout: float | None = None) -> AsyncIterator[str]:
-        gen = self.stream(request, timeout=timeout)
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[Any] = asyncio.Queue()
-        sentinel = object()
-        stop_event = threading.Event()
-
-        def _worker() -> None:
-            try:
-                for item in gen:
-                    if stop_event.is_set():
-                        break
-                    loop.call_soon_threadsafe(queue.put_nowait, item)
-            except Exception as exc:
-                loop.call_soon_threadsafe(queue.put_nowait, exc)
-            finally:
-                try:
-                    if hasattr(gen, "close"):
-                        gen.close()
-                except _OPENAI_ADAPTER_NONCRITICAL_EXCEPTIONS:
-                    pass
-                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
-
-        thread = threading.Thread(target=_worker, daemon=True)
-        thread.start()
-
-        try:
-            while True:
-                item = await queue.get()
-                if item is sentinel:
-                    break
-                if isinstance(item, Exception):
-                    raise item
-                yield item
-        finally:
-            stop_event.set()
+        async for item in wrap_sync_stream(self.stream(request, timeout=timeout)):
+            yield item
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
         from tldw_Server_API.app.core.LLM_Calls.error_utils import (

@@ -31,9 +31,8 @@ def test_ready_endpoint_returns_non_success_when_dependency_raises(monkeypatch) 
     def _fake_get_db_pool() -> object:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
-
     with TestClient(app) as client:
+        monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.database.get_db_pool", _fake_get_db_pool)
         response = client.get("/ready")
 
     payload = response.json()

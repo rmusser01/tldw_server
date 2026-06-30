@@ -1,13 +1,12 @@
-import React from "react"
-import { useSimpleForm } from "@/hooks/useSimpleForm"
-import { useDraftPersistence } from "@/hooks/useDraftPersistence"
-import useDynamicTextareaSize from "~/hooks/useDynamicTextareaSize"
-import { handleChatInputKeyDown } from "@/utils/key-down"
-import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant"
-import { isFirefoxTarget } from "@/config/platform"
-import { createComposerPerfTracker } from "@/utils/perf/composer-perf"
-import { createRenderPerfTracker } from "@/utils/perf/render-profiler"
-import type { CollapsedRange } from "@/hooks/playground"
+import React from "react";
+import useDynamicTextareaSize from "~/hooks/useDynamicTextareaSize";
+import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText";
+import { handleChatInputKeyDown } from "@/utils/key-down";
+import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant";
+import { isFirefoxTarget } from "@/config/platform";
+import { createComposerPerfTracker } from "@/utils/perf/composer-perf";
+import { createRenderPerfTracker } from "@/utils/perf/render-profiler";
+import type { CollapsedRange } from "@/hooks/playground";
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -15,48 +14,56 @@ import type { CollapsedRange } from "@/hooks/playground"
 
 export interface UseComposerInputDeps {
   /** Textarea ref shared with parent */
-  textareaRef: React.RefObject<HTMLTextAreaElement>
+  textareaRef: React.RefObject<HTMLTextAreaElement>;
   /** Message collapse controls from useMessageCollapse */
-  isMessageCollapsed: boolean
-  setIsMessageCollapsed: (collapsed: boolean) => void
-  collapsedRange: CollapsedRange | null
-  setCollapsedRange: (range: CollapsedRange | null) => void
-  hasExpandedLargeText: boolean
-  setHasExpandedLargeText: (expanded: boolean) => void
+  isMessageCollapsed: boolean;
+  setIsMessageCollapsed: (collapsed: boolean) => void;
+  collapsedRange: CollapsedRange | null;
+  setCollapsedRange: (range: CollapsedRange | null) => void;
+  hasExpandedLargeText: boolean;
+  setHasExpandedLargeText: (expanded: boolean) => void;
   collapseLargeMessage: (
     value: string,
-    options?: { force?: boolean; range?: CollapsedRange }
-  ) => void
+    options?: { force?: boolean; range?: CollapsedRange },
+  ) => void;
   restoreCollapseState: (
     value: string,
-    metadata?: { wasExpanded?: boolean; collapsedRange?: CollapsedRange | null }
-  ) => void
-  getCollapsedDisplayMeta: (message: string, range: CollapsedRange) => any
-  getDisplayCaretFromMessage: (caret: number, meta: any) => number
+    metadata?: {
+      wasExpanded?: boolean;
+      collapsedRange?: CollapsedRange | null;
+    },
+  ) => void;
+  getCollapsedDisplayMeta: (message: string, range: CollapsedRange) => any;
+  getDisplayCaretFromMessage: (caret: number, meta: any) => number;
   getMessageCaretFromDisplay: (
     displayCaret: number,
     meta: any,
-    options?: { prefer?: string }
-  ) => number
-  normalizeCollapsedRange: (range: CollapsedRange, length: number) => CollapsedRange
-  expandLargeMessage: (options?: { force?: boolean }) => void
-  pendingCaretRef: React.MutableRefObject<number | null>
+    options?: { prefer?: string },
+  ) => number;
+  normalizeCollapsedRange: (
+    range: CollapsedRange,
+    length: number,
+  ) => CollapsedRange;
+  expandLargeMessage: (options?: { force?: boolean }) => void;
+  pendingCaretRef: React.MutableRefObject<number | null>;
   lastDisplaySelectionRef: React.MutableRefObject<{
-    start: number
-    end: number
-  } | null>
+    start: number;
+    end: number;
+  } | null>;
   pendingCollapsedStateRef: React.MutableRefObject<{
-    message: string
-    range: CollapsedRange
-    caret: number
-  } | null>
-  pointerDownRef: React.MutableRefObject<boolean>
-  selectionFromPointerRef: React.MutableRefObject<boolean>
+    message: string;
+    range: CollapsedRange;
+    caret: number;
+  } | null>;
+  pointerDownRef: React.MutableRefObject<boolean>;
+  selectionFromPointerRef: React.MutableRefObject<boolean>;
   /** Tab mentions */
-  tabMentionsEnabled: boolean
-  handleTextChange: (value: string, cursorPosition: number) => void
+  tabMentionsEnabled: boolean;
+  handleTextChange: (value: string, cursorPosition: number) => void;
   /** Pro mode */
-  isProMode: boolean
+  isProMode: boolean;
+  /** Sticky dock-specific textarea cap */
+  textareaMaxHeightOverride?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,253 +93,252 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     selectionFromPointerRef,
     tabMentionsEnabled,
     handleTextChange,
-    isProMode
-  } = deps
+    isProMode,
+    textareaMaxHeightOverride,
+  } = deps;
 
-  // --- Form ---
-  const form = useSimpleForm({
-    initialValues: {
-      message: "",
-      image: ""
-    }
-  })
+  // --- Shared text/draft/focus primitive ---
+  // See apps/packages/ui/src/components/Chat/composer/hooks/useComposerText.ts.
+  // `form`, `draftSaved`, and `textAreaFocus` live there; auto-resize is
+  // wired separately below so we can size against `messageDisplayValue`.
+  const composerText = useComposerText({
+    draftKey: "tldw:playgroundChatDraft",
+    textareaRef,
+    isProMode,
+    maxHeight: textareaMaxHeightOverride,
+    getDraftMetadata: () => ({
+      wasExpanded: hasExpandedLargeText,
+      collapsedRange: collapsedRange
+        ? { start: collapsedRange.start, end: collapsedRange.end }
+        : null,
+    }),
+    restoreWithMetadata: (value, metadata) => {
+      // `useComposerText` already wrote the message into the form; layer on
+      // the Playground-specific collapse-state restore.
+      restoreCollapseState(value, metadata as any);
+    },
+  });
+  const { form, textAreaFocus, draftSaved, textareaMaxHeight } = composerText;
 
-  const setFieldValueRef = React.useRef(form.setFieldValue)
+  const setFieldValueRef = React.useRef(form.setFieldValue);
   React.useEffect(() => {
-    setFieldValueRef.current = form.setFieldValue
-  }, [form.setFieldValue])
+    setFieldValueRef.current = form.setFieldValue;
+  }, [form.setFieldValue]);
 
   // --- Perf tracking ---
   const composerPerfTrackerRef = React.useRef(
     createComposerPerfTracker({
-      enabled: Boolean((globalThis as any).__TLDW_CHAT_PERF__)
-    })
-  )
+      enabled: Boolean((globalThis as any).__TLDW_CHAT_PERF__),
+    }),
+  );
   const renderPerfTrackerRef = React.useRef(
     createRenderPerfTracker({
-      enabled: Boolean((globalThis as any).__TLDW_CHAT_PERF__)
-    })
-  )
+      enabled: Boolean((globalThis as any).__TLDW_CHAT_PERF__),
+    }),
+  );
 
   const markComposerPerf = React.useCallback((label: string) => {
-    return composerPerfTrackerRef.current.start(label)
-  }, [])
+    return composerPerfTrackerRef.current.start(label);
+  }, []);
 
-  const onComposerRenderProfile = React.useCallback<React.ProfilerOnRenderCallback>(
-    (id, phase, actualDuration, baseDuration, startTime, commitTime) => {
-      renderPerfTrackerRef.current.onRender(
-        String(id),
-        phase,
-        actualDuration,
-        baseDuration,
-        startTime,
-        commitTime
-      )
-    },
-    []
-  )
+  const onComposerRenderProfile =
+    React.useCallback<React.ProfilerOnRenderCallback>(
+      (id, phase, actualDuration, baseDuration, startTime, commitTime) => {
+        renderPerfTrackerRef.current.onRender(
+          String(id),
+          phase,
+          actualDuration,
+          baseDuration,
+          startTime,
+          commitTime,
+        );
+      },
+      [],
+    );
 
   const measureComposerPerf = React.useCallback(
     <T,>(label: string, fn: () => T): T => {
-      const end = markComposerPerf(label)
+      const end = markComposerPerf(label);
       try {
-        return fn()
+        return fn();
       } finally {
-        end()
+        end();
       }
     },
-    [markComposerPerf]
-  )
+    [markComposerPerf],
+  );
 
   const wrapComposerProfile = React.useCallback(
     (id: string, node: React.ReactNode): React.ReactNode => {
-      if (!renderPerfTrackerRef.current.isEnabled()) return node
+      if (!renderPerfTrackerRef.current.isEnabled()) return node;
       return (
         <React.Profiler id={id} onRender={onComposerRenderProfile}>
           {node}
         </React.Profiler>
-      )
+      );
     },
-    [onComposerRenderProfile]
-  )
+    [onComposerRenderProfile],
+  );
 
   // Expose perf APIs on window
   React.useEffect(() => {
-    const inputTracker = composerPerfTrackerRef.current
-    const renderTracker = renderPerfTrackerRef.current
-    if (!inputTracker.isEnabled() || typeof window === "undefined") return
-    ;(window as any).__TLDW_CHAT_PERF_SNAPSHOT__ = () => inputTracker.snapshot()
-    ;(window as any).__TLDW_CHAT_PERF_CLEAR__ = () => {
-      inputTracker.clear()
-      renderTracker.clear()
-    }
-    ;(window as any).__TLDW_CHAT_RENDER_PERF_SNAPSHOT__ = () =>
-      renderTracker.snapshot()
-    ;(window as any).__TLDW_CHAT_RENDER_PERF_SUMMARY__ = () =>
-      renderTracker.summarize()
-    ;(window as any).__TLDW_CHAT_RENDER_PERF_CLEAR__ = () =>
-      renderTracker.clear()
+    const inputTracker = composerPerfTrackerRef.current;
+    const renderTracker = renderPerfTrackerRef.current;
+    if (!inputTracker.isEnabled() || typeof window === "undefined") return;
+    (window as any).__TLDW_CHAT_PERF_SNAPSHOT__ = () => inputTracker.snapshot();
+    (window as any).__TLDW_CHAT_PERF_CLEAR__ = () => {
+      inputTracker.clear();
+      renderTracker.clear();
+    };
+    (window as any).__TLDW_CHAT_RENDER_PERF_SNAPSHOT__ = () =>
+      renderTracker.snapshot();
+    (window as any).__TLDW_CHAT_RENDER_PERF_SUMMARY__ = () =>
+      renderTracker.summarize();
+    (window as any).__TLDW_CHAT_RENDER_PERF_CLEAR__ = () =>
+      renderTracker.clear();
     return () => {
-      delete (window as any).__TLDW_CHAT_PERF_SNAPSHOT__
-      delete (window as any).__TLDW_CHAT_PERF_CLEAR__
-      delete (window as any).__TLDW_CHAT_RENDER_PERF_SNAPSHOT__
-      delete (window as any).__TLDW_CHAT_RENDER_PERF_SUMMARY__
-      delete (window as any).__TLDW_CHAT_RENDER_PERF_CLEAR__
-    }
-  }, [])
+      delete (window as any).__TLDW_CHAT_PERF_SNAPSHOT__;
+      delete (window as any).__TLDW_CHAT_PERF_CLEAR__;
+      delete (window as any).__TLDW_CHAT_RENDER_PERF_SNAPSHOT__;
+      delete (window as any).__TLDW_CHAT_RENDER_PERF_SUMMARY__;
+      delete (window as any).__TLDW_CHAT_RENDER_PERF_CLEAR__;
+    };
+  }, []);
 
   // --- Message value helpers ---
   const restoreMessageValue = React.useCallback(
     (
       value: string,
-      metadata?: { wasExpanded?: boolean; collapsedRange?: CollapsedRange | null }
+      metadata?: {
+        wasExpanded?: boolean;
+        collapsedRange?: CollapsedRange | null;
+      },
     ) => {
-      setFieldValueRef.current("message", value)
-      restoreCollapseState(value, metadata)
+      setFieldValueRef.current("message", value);
+      restoreCollapseState(value, metadata);
     },
-    [restoreCollapseState]
-  )
+    [restoreCollapseState],
+  );
 
   const setMessageValue = React.useCallback(
     (
       nextValue: string,
       options?: {
-        collapseLarge?: boolean
-        forceCollapse?: boolean
-        collapsedRange?: CollapsedRange
-      }
+        collapseLarge?: boolean;
+        forceCollapse?: boolean;
+        collapsedRange?: CollapsedRange;
+      },
     ) => {
-      form.setFieldValue("message", nextValue)
+      form.setFieldValue("message", nextValue);
       if (options?.collapseLarge) {
         collapseLargeMessage(nextValue, {
           force: options?.forceCollapse,
-          range: options?.collapsedRange
-        })
+          range: options?.collapsedRange,
+        });
       }
     },
-    [collapseLargeMessage, form.setFieldValue]
-  )
+    [collapseLargeMessage, form.setFieldValue],
+  );
 
   // --- Display value ---
   const collapsedDisplayMeta = React.useMemo(() => {
-    const message = form.values.message || ""
-    if (!message || !collapsedRange) return null
-    return getCollapsedDisplayMeta(message, collapsedRange)
-  }, [collapsedRange, form.values.message, getCollapsedDisplayMeta])
+    const message = form.values.message || "";
+    if (!message || !collapsedRange) return null;
+    return getCollapsedDisplayMeta(message, collapsedRange);
+  }, [collapsedRange, form.values.message, getCollapsedDisplayMeta]);
 
   const messageDisplayValue = React.useMemo(() => {
-    const message = form.values.message || ""
-    if (!message) return ""
-    if (!isMessageCollapsed || !collapsedDisplayMeta) return message
-    return collapsedDisplayMeta.display
-  }, [collapsedDisplayMeta, form.values.message, isMessageCollapsed])
+    const message = form.values.message || "";
+    if (!message) return "";
+    if (!isMessageCollapsed || !collapsedDisplayMeta) return message;
+    return collapsedDisplayMeta.display;
+  }, [collapsedDisplayMeta, form.values.message, isMessageCollapsed]);
 
   // Reset collapse state when message is short
   React.useEffect(() => {
-    const message = form.values.message || ""
+    const message = form.values.message || "";
     if (!message || message.length <= PASTED_TEXT_CHAR_LIMIT) {
-      setIsMessageCollapsed(false)
-      setHasExpandedLargeText(false)
-      setCollapsedRange(null)
+      setIsMessageCollapsed(false);
+      setHasExpandedLargeText(false);
+      setCollapsedRange(null);
     }
-  }, [form.values.message])
-
-  // --- Draft persistence ---
-  const { draftSaved } = useDraftPersistence({
-    storageKey: "tldw:playgroundChatDraft",
-    getValue: () => form.values.message,
-    getMetadata: () => ({
-      wasExpanded: hasExpandedLargeText,
-      collapsedRange: collapsedRange
-        ? { start: collapsedRange.start, end: collapsedRange.end }
-        : null
-    }),
-    setValue: (value) => restoreMessageValue(value),
-    setValueWithMetadata: restoreMessageValue
-  })
+  }, [form.values.message]);
 
   // --- Textarea sizing ---
-  const textareaMaxHeight = isProMode ? 160 : 120
-  useDynamicTextareaSize(textareaRef, messageDisplayValue, textareaMaxHeight)
-
-  // --- Focus helper ---
-  const textAreaFocus = React.useCallback(() => {
-    const el = textareaRef.current
-    if (!el) return
-    if (el.selectionStart === el.selectionEnd) {
-      const ua = typeof navigator !== "undefined" ? navigator.userAgent : ""
-      const isMobile =
-        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)
-      if (!isMobile) {
-        el.focus()
-      } else {
-        el.blur()
-      }
-    }
-  }, [])
+  // Sized against `messageDisplayValue` (not the raw form value) so the
+  // textarea shrinks when the paste-collapse overlay swaps in a short label.
+  useDynamicTextareaSize(textareaRef, messageDisplayValue, textareaMaxHeight);
 
   // --- Collapsed caret sync ---
   const syncCollapsedCaret = React.useCallback(
     (options?: {
-      message?: string
-      range?: CollapsedRange | null
-      caret?: number
+      message?: string;
+      range?: CollapsedRange | null;
+      caret?: number;
     }) => {
-      if (!isMessageCollapsed) return
-      const pendingState = pendingCollapsedStateRef.current
+      if (!isMessageCollapsed) return;
+      const pendingState = pendingCollapsedStateRef.current;
       const message =
-        options?.message ?? pendingState?.message ?? form.values.message ?? ""
-      const range = options?.range ?? pendingState?.range ?? collapsedRange
-      if (!range) return
-      if (!message) return
+        options?.message ?? pendingState?.message ?? form.values.message ?? "";
+      const range = options?.range ?? pendingState?.range ?? collapsedRange;
+      if (!range) return;
+      if (!message) return;
       requestAnimationFrame(() => {
-        const el = textareaRef.current
-        if (!el) return
-        const meta = getCollapsedDisplayMeta(message, range)
+        const el = textareaRef.current;
+        if (!el) return;
+        const meta = getCollapsedDisplayMeta(message, range);
         const selection =
           lastDisplaySelectionRef.current ??
           (el.selectionStart !== null
             ? {
                 start: el.selectionStart ?? 0,
-                end: el.selectionEnd ?? el.selectionStart ?? 0
+                end: el.selectionEnd ?? el.selectionStart ?? 0,
               }
-            : null)
-        const hasSelection = selection ? selection.start !== selection.end : false
+            : null);
+        const hasSelection = selection
+          ? selection.start !== selection.end
+          : false;
         let caret =
-          options?.caret ?? pendingState?.caret ?? pendingCaretRef.current
+          options?.caret ?? pendingState?.caret ?? pendingCaretRef.current;
         if (caret === undefined || caret === null) {
           if (selection && hasSelection) {
-            const start = Math.max(0, Math.min(selection.start, meta.display.length))
-            const end = Math.max(0, Math.min(selection.end, meta.display.length))
-            el.focus()
-            el.setSelectionRange(start, end)
-            pendingCollapsedStateRef.current = null
-            return
+            const start = Math.max(
+              0,
+              Math.min(selection.start, meta.display.length),
+            );
+            const end = Math.max(
+              0,
+              Math.min(selection.end, meta.display.length),
+            );
+            el.focus();
+            el.setSelectionRange(start, end);
+            pendingCollapsedStateRef.current = null;
+            return;
           }
           if (selection) {
             const displayCaret = Math.max(
               0,
-              Math.min(selection.start, meta.display.length)
-            )
+              Math.min(selection.start, meta.display.length),
+            );
             const prefer =
               displayCaret > meta.labelStart && displayCaret < meta.labelEnd
                 ? "after"
-                : undefined
-            caret = getMessageCaretFromDisplay(displayCaret, meta, { prefer })
+                : undefined;
+            caret = getMessageCaretFromDisplay(displayCaret, meta, { prefer });
           } else {
-            caret = meta.messageLength
+            caret = meta.messageLength;
           }
         }
         if (caret > meta.rangeStart && caret < meta.rangeEnd) {
-          caret = meta.rangeEnd
+          caret = meta.rangeEnd;
         }
-        caret = Math.max(0, Math.min(caret, meta.messageLength))
-        pendingCaretRef.current = caret
-        pendingCollapsedStateRef.current = null
-        const displayCaret = getDisplayCaretFromMessage(caret, meta)
-        el.focus()
-        el.setSelectionRange(displayCaret, displayCaret)
-      })
+        caret = Math.max(0, Math.min(caret, meta.messageLength));
+        pendingCaretRef.current = caret;
+        pendingCollapsedStateRef.current = null;
+        const displayCaret = getDisplayCaretFromMessage(caret, meta);
+        el.focus();
+        el.setSelectionRange(displayCaret, displayCaret);
+      });
     },
     [
       collapsedRange,
@@ -340,57 +346,66 @@ export function useComposerInput(deps: UseComposerInputDeps) {
       getDisplayCaretFromMessage,
       getCollapsedDisplayMeta,
       isMessageCollapsed,
-      textareaRef
-    ]
-  )
+      textareaRef,
+    ],
+  );
 
   // Sync caret after collapsed range changes
   React.useEffect(() => {
-    if (!isMessageCollapsed || !collapsedRange) return
+    if (!isMessageCollapsed || !collapsedRange) return;
     if (!pendingCollapsedStateRef.current && pendingCaretRef.current === null) {
-      const el = textareaRef.current
+      const el = textareaRef.current;
       if (el) {
         lastDisplaySelectionRef.current = {
           start: el.selectionStart ?? 0,
-          end: el.selectionEnd ?? el.selectionStart ?? 0
-        }
+          end: el.selectionEnd ?? el.selectionStart ?? 0,
+        };
       }
     }
-    syncCollapsedCaret()
-  }, [collapsedRange, form.values.message, isMessageCollapsed, syncCollapsedCaret])
+    syncCollapsedCaret();
+  }, [
+    collapsedRange,
+    form.values.message,
+    isMessageCollapsed,
+    syncCollapsedCaret,
+  ]);
 
   // --- Collapsed editing helpers ---
   const commitCollapsedEdit = React.useCallback(
-    (nextValue: string, nextCaret: number, nextRange: CollapsedRange | null) => {
-      const shouldCollapse = nextValue.length > PASTED_TEXT_CHAR_LIMIT
+    (
+      nextValue: string,
+      nextCaret: number,
+      nextRange: CollapsedRange | null,
+    ) => {
+      const shouldCollapse = nextValue.length > PASTED_TEXT_CHAR_LIMIT;
       const range = shouldCollapse
         ? normalizeCollapsedRange(
             nextRange ?? { start: 0, end: nextValue.length },
-            nextValue.length
+            nextValue.length,
           )
-        : null
-      pendingCaretRef.current = nextCaret
+        : null;
+      pendingCaretRef.current = nextCaret;
       pendingCollapsedStateRef.current = range
         ? { message: nextValue, range, caret: nextCaret }
-        : null
+        : null;
       setMessageValue(nextValue, {
         collapseLarge: shouldCollapse,
         forceCollapse: shouldCollapse,
-        collapsedRange: range ?? undefined
-      })
+        collapsedRange: range ?? undefined,
+      });
       if (range) {
-        syncCollapsedCaret({ message: nextValue, range, caret: nextCaret })
-        return
+        syncCollapsedCaret({ message: nextValue, range, caret: nextCaret });
+        return;
       }
       requestAnimationFrame(() => {
-        const el = textareaRef.current
-        if (!el) return
-        el.focus()
-        el.setSelectionRange(nextCaret, nextCaret)
-      })
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(nextCaret, nextCaret);
+      });
     },
-    [normalizeCollapsedRange, setMessageValue, syncCollapsedCaret, textareaRef]
-  )
+    [normalizeCollapsedRange, setMessageValue, syncCollapsedCaret, textareaRef],
+  );
 
   const replaceCollapsedRange = React.useCallback(
     (
@@ -398,69 +413,75 @@ export function useComposerInput(deps: UseComposerInputDeps) {
       meta: ReturnType<typeof getCollapsedDisplayMeta>,
       editStart: number,
       editEnd: number,
-      replacement: string
+      replacement: string,
     ) => {
-      const safeStart = Math.max(0, Math.min(editStart, currentValue.length))
-      const safeEnd = Math.max(safeStart, Math.min(editEnd, currentValue.length))
+      const safeStart = Math.max(0, Math.min(editStart, currentValue.length));
+      const safeEnd = Math.max(
+        safeStart,
+        Math.min(editEnd, currentValue.length),
+      );
       const nextValue =
         currentValue.slice(0, safeStart) +
         replacement +
-        currentValue.slice(safeEnd)
-      const nextCaret = safeStart + replacement.length
+        currentValue.slice(safeEnd);
+      const nextCaret = safeStart + replacement.length;
       const overlapsBlock =
-        safeStart < meta.rangeEnd && safeEnd > meta.rangeStart
+        safeStart < meta.rangeEnd && safeEnd > meta.rangeStart;
       if (overlapsBlock) {
-        commitCollapsedEdit(nextValue, nextCaret, null)
-        return
+        commitCollapsedEdit(nextValue, nextCaret, null);
+        return;
       }
-      const delta = replacement.length - (safeEnd - safeStart)
+      const delta = replacement.length - (safeEnd - safeStart);
       const nextRng =
         safeEnd <= meta.rangeStart
           ? { start: meta.rangeStart + delta, end: meta.rangeEnd + delta }
-          : { start: meta.rangeStart, end: meta.rangeEnd }
-      commitCollapsedEdit(nextValue, nextCaret, nextRng)
+          : { start: meta.rangeStart, end: meta.rangeEnd };
+      commitCollapsedEdit(nextValue, nextCaret, nextRng);
     },
-    [commitCollapsedEdit]
-  )
+    [commitCollapsedEdit],
+  );
 
   // --- Textarea event handlers ---
-  const [typing, setTyping] = React.useState<boolean>(false)
+  const [typing, setTyping] = React.useState<boolean>(false);
 
   const handleCompositionStart = React.useCallback(() => {
-    if (!isFirefoxTarget) setTyping(true)
-  }, [])
+    if (!isFirefoxTarget) setTyping(true);
+  }, []);
 
   const handleCompositionEnd = React.useCallback(() => {
-    if (!isFirefoxTarget) setTyping(false)
-  }, [])
+    if (!isFirefoxTarget) setTyping(false);
+  }, []);
 
   const handleTextareaMouseDown = React.useCallback(() => {
     if (isMessageCollapsed) {
-      pointerDownRef.current = true
-      selectionFromPointerRef.current = true
+      pointerDownRef.current = true;
+      selectionFromPointerRef.current = true;
     }
-  }, [isMessageCollapsed])
+  }, [isMessageCollapsed]);
 
   const handleTextareaMouseUp = React.useCallback(() => {
-    pointerDownRef.current = false
+    pointerDownRef.current = false;
     if (selectionFromPointerRef.current) {
       requestAnimationFrame(() => {
-        selectionFromPointerRef.current = false
-      })
+        selectionFromPointerRef.current = false;
+      });
     }
-  }, [])
+  }, []);
 
   const handleTextareaChange = React.useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const endPerf = markComposerPerf("input:textarea-change")
+      const endPerf = markComposerPerf("input:textarea-change");
       try {
-        if (isMessageCollapsed) return
-        form.getInputProps("message").onChange(e)
+        if (isMessageCollapsed) return;
+        form.getInputProps("message").onChange(e);
         if (tabMentionsEnabled && textareaRef.current) {
-          handleTextChange(e.target.value, textareaRef.current.selectionStart || 0)
+          handleTextChange(
+            e.target.value,
+            textareaRef.current.selectionStart || 0,
+          );
         }
       } finally {
-        endPerf()
+        endPerf();
       }
     },
     [
@@ -469,62 +490,63 @@ export function useComposerInput(deps: UseComposerInputDeps) {
       tabMentionsEnabled,
       textareaRef,
       handleTextChange,
-      markComposerPerf
-    ]
-  )
+      markComposerPerf,
+    ],
+  );
 
   const handleTextareaSelect = React.useCallback(() => {
-    const textarea = textareaRef.current
+    const textarea = textareaRef.current;
     if (textarea) {
       lastDisplaySelectionRef.current = {
         start: textarea.selectionStart ?? 0,
-        end: textarea.selectionEnd ?? textarea.selectionStart ?? 0
-      }
+        end: textarea.selectionEnd ?? textarea.selectionStart ?? 0,
+      };
     }
     if (isMessageCollapsed && collapsedRange) {
-      const message = form.values.message || ""
-      if (!message || !textarea) return
+      const message = form.values.message || "";
+      if (!message || !textarea) return;
       const meta =
-        collapsedDisplayMeta ?? getCollapsedDisplayMeta(message, collapsedRange)
-      const selectionStart = textarea.selectionStart ?? meta.labelStart
-      const selectionEnd = textarea.selectionEnd ?? selectionStart
-      const displayStart = Math.min(selectionStart, selectionEnd)
-      const displayEnd = Math.max(selectionStart, selectionEnd)
-      const hasSelection = displayStart !== displayEnd
+        collapsedDisplayMeta ??
+        getCollapsedDisplayMeta(message, collapsedRange);
+      const selectionStart = textarea.selectionStart ?? meta.labelStart;
+      const selectionEnd = textarea.selectionEnd ?? selectionStart;
+      const displayStart = Math.min(selectionStart, selectionEnd);
+      const displayEnd = Math.max(selectionStart, selectionEnd);
+      const hasSelection = displayStart !== displayEnd;
       const selectionTouchesLabel =
-        displayStart < meta.labelEnd && displayEnd > meta.labelStart
-      const fromPointer = selectionFromPointerRef.current
-      selectionFromPointerRef.current = false
+        displayStart < meta.labelEnd && displayEnd > meta.labelStart;
+      const fromPointer = selectionFromPointerRef.current;
+      selectionFromPointerRef.current = false;
       if (hasSelection) {
-        pendingCaretRef.current = null
-        return
+        pendingCaretRef.current = null;
+        return;
       }
       const caretInsideLabel =
-        displayStart > meta.labelStart && displayStart < meta.labelEnd
+        displayStart > meta.labelStart && displayStart < meta.labelEnd;
       if (selectionTouchesLabel && fromPointer && caretInsideLabel) {
-        pendingCaretRef.current = meta.rangeEnd
-        expandLargeMessage({ force: true })
-        return
+        pendingCaretRef.current = meta.rangeEnd;
+        expandLargeMessage({ force: true });
+        return;
       }
       const prefer =
         caretInsideLabel &&
         (pendingCaretRef.current ?? meta.rangeEnd) <= meta.rangeStart
           ? "before"
-          : "after"
+          : "after";
       const caret = getMessageCaretFromDisplay(displayStart, meta, {
-        prefer: caretInsideLabel ? prefer : undefined
-      })
-      pendingCaretRef.current = caret
+        prefer: caretInsideLabel ? prefer : undefined,
+      });
+      pendingCaretRef.current = caret;
       if (caretInsideLabel) {
-        syncCollapsedCaret({ caret })
+        syncCollapsedCaret({ caret });
       }
-      return
+      return;
     }
     if (tabMentionsEnabled && textareaRef.current) {
       handleTextChange(
         textareaRef.current.value,
-        textareaRef.current.selectionStart || 0
-      )
+        textareaRef.current.selectionStart || 0,
+      );
     }
   }, [
     textareaRef,
@@ -537,8 +559,8 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     getMessageCaretFromDisplay,
     syncCollapsedCaret,
     tabMentionsEnabled,
-    handleTextChange
-  ])
+    handleTextChange,
+  ]);
 
   return {
     form,
@@ -566,6 +588,6 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     onComposerRenderProfile,
     wrapComposerProfile,
     // Draft persistence
-    draftSaved
-  }
+    draftSaved,
+  };
 }

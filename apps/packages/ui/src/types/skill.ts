@@ -4,6 +4,31 @@
  */
 
 export type SkillContext = "inline" | "fork"
+export type SkillListSort = "name" | "context" | "created_at" | "last_modified"
+export type SkillListOrder = "asc" | "desc"
+
+export interface SkillRuntimeMetadata {
+  execution_mode: SkillContext
+  test_run_may_call_model: boolean
+  declares_tools: boolean
+  declared_tool_count: number
+  model_override: string | null
+  auto_invocation_enabled: boolean
+}
+
+export interface SkillsListParams {
+  q?: string
+  includeHidden?: boolean
+  userInvocable?: boolean
+  hasTools?: boolean
+  context?: SkillContext
+  model?: string
+  sort?: SkillListSort
+  order?: SkillListOrder
+  limit?: number
+  offset?: number
+  abortSignal?: AbortSignal
+}
 
 export interface SkillSummary {
   name: string
@@ -11,7 +36,11 @@ export interface SkillSummary {
   argument_hint: string | null
   user_invocable: boolean
   disable_model_invocation: boolean
+  allowed_tools?: string[] | null
+  model?: string | null
   context: SkillContext
+  runtime?: SkillRuntimeMetadata | null
+  version: number
 }
 
 export interface SkillResponse {
@@ -24,6 +53,7 @@ export interface SkillResponse {
   allowed_tools: string[] | null
   model: string | null
   context: SkillContext
+  runtime?: SkillRuntimeMetadata | null
   content: string
   raw_content?: string | null
   supporting_files: Record<string, string> | null
@@ -41,6 +71,16 @@ export interface SkillsListResponse {
   offset: number
 }
 
+export interface SkillBulkDeleteItem {
+  name: string
+  version?: number
+}
+
+export interface SkillBulkDeleteResponse {
+  deleted: string[]
+  count: number
+}
+
 export interface SkillCreate {
   name: string
   content: string
@@ -54,6 +94,7 @@ export interface SkillUpdate {
 
 export interface SkillExecuteRequest {
   args?: string | null
+  dry_run?: boolean
 }
 
 export interface SkillExecutionResult {
@@ -63,6 +104,7 @@ export interface SkillExecutionResult {
   model_override: string | null
   execution_mode: SkillContext
   fork_output: string | null
+  dry_run: boolean
 }
 
 export interface SkillImportRequest {
@@ -70,6 +112,23 @@ export interface SkillImportRequest {
   content: string
   supporting_files?: Record<string, string> | null
   overwrite?: boolean
+}
+
+export interface SkillImportPreviewResponse {
+  valid: boolean
+  errors: string[]
+  name: string | null
+  description: string | null
+  argument_hint: string | null
+  disable_model_invocation: boolean | null
+  user_invocable: boolean | null
+  allowed_tools: string[] | null
+  model: string | null
+  context: SkillContext | null
+  supporting_file_count: number
+  conflict: boolean
+  can_overwrite: boolean
+  existing_version: number | null
 }
 
 export interface SkillContextPayload {

@@ -1,6 +1,6 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { Empty, Skeleton, Tag, Tooltip, Input, message, Button, Select } from "antd"
+import { Empty, Tag, Tooltip, Input, message, Button, Select } from "antd"
 import {
   BookOpen,
   ExternalLink,
@@ -23,6 +23,8 @@ import {
 import { useConnectionStore } from "@/store/connection"
 import { tldwClient } from "@/services/tldw"
 import { useQueryClient } from "@tanstack/react-query"
+import { EmptyState } from "@/components/ui/feedback/EmptyState"
+import { LoadingState as SharedLoadingState } from "@/components/ui/feedback/LoadingState"
 
 /** FNV-1a 32-bit hash for generating stable, short identifiers from reference text. */
 const hashReferenceText = (value: string): string => {
@@ -343,9 +345,11 @@ const ServerUnavailableState: React.FC = () => {
   const { t } = useTranslation(["option", "common"])
   return (
     <div className="flex h-full items-center justify-center p-4">
-      <Empty
-        image={<BookOpen className="h-10 w-10 text-muted mx-auto mb-2" />}
-        description={t(
+      <EmptyState
+        variant="inline"
+        size="md"
+        icon={BookOpen}
+        title={t(
           "option:documentWorkspace.serverUnavailable",
           "Connect to your server in Settings to use this feature"
         )}
@@ -375,13 +379,29 @@ const NoFilteredReferencesState: React.FC = () => {
 /**
  * Loading state.
  */
-const LoadingState: React.FC = () => {
+const ReferencePlaceholders: React.FC = () => {
   return (
     <div className="space-y-3 p-4">
-      <Skeleton active paragraph={{ rows: 2 }} />
-      <Skeleton active paragraph={{ rows: 2 }} />
-      <Skeleton active paragraph={{ rows: 2 }} />
-      <Skeleton active paragraph={{ rows: 2 }} />
+      <SharedLoadingState
+        mode="skeleton"
+        rows={2}
+        className="!items-start !p-0"
+      />
+      <SharedLoadingState
+        mode="skeleton"
+        rows={2}
+        className="!items-start !p-0"
+      />
+      <SharedLoadingState
+        mode="skeleton"
+        rows={2}
+        className="!items-start !p-0"
+      />
+      <SharedLoadingState
+        mode="skeleton"
+        rows={2}
+        className="!items-start !p-0"
+      />
     </div>
   )
 }
@@ -393,19 +413,17 @@ const ErrorState: React.FC<{ error: Error }> = ({ error }) => {
   const { t } = useTranslation(["option", "common"])
   return (
     <div className="flex h-full items-center justify-center p-4">
-      <Empty
+      <EmptyState
+        variant="inline"
+        size="md"
+        icon={FileText}
+        iconClassName="text-error"
+        title={t(
+          "option:documentWorkspace.referencesError",
+          "Failed to load references"
+        )}
         description={
-          <div>
-            <p className="text-error mb-1">
-              {t(
-                "option:documentWorkspace.referencesError",
-                "Failed to load references"
-              )}
-            </p>
-            <p className="text-xs text-text-muted">
-              {error.message || t("common:unknownError", "An unknown error occurred")}
-            </p>
-          </div>
+          error.message || t("common:unknownError", "An unknown error occurred")
         }
       />
     </div>
@@ -499,7 +517,7 @@ export const ReferencesTab: React.FC = () => {
 
   // Loading state
   if (isLoading) {
-    return <LoadingState />
+    return <ReferencePlaceholders />
   }
 
   // Error state

@@ -1,7 +1,6 @@
 import dynamic from "next/dynamic"
-import { useRouter } from "next/router"
-import { useEffect } from "react"
 
+import { RouteRedirect } from "@web/components/navigation/RouteRedirect"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 
 const TldwSettings = dynamic(
@@ -10,17 +9,16 @@ const TldwSettings = dynamic(
 )
 
 const LoginPage = () => {
-  const router = useRouter()
   const hostedMode = isHostedTldwDeployment()
 
-  useEffect(() => {
-    if (!hostedMode) {
-      void router.replace("/settings/tldw")
-    }
-  }, [hostedMode, router])
-
   if (!hostedMode) {
-    return null
+    return (
+      <RouteRedirect
+        to="/settings/tldw"
+        title="Login is managed in local settings"
+        description="Self-host deployments configure server URL and authentication from the tldw settings page."
+      />
+    )
   }
 
   return (

@@ -627,67 +627,15 @@ class WebhookManager:
         url = webhook["url"]
         secret = webhook["secret"]
 
-        # Validate URL before delivery to prevent SSRF
-        import ipaddress
-        import socket
-        from urllib.parse import urlparse
-
         # In tests, skip DNS validation to keep runs deterministic.
         from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
         testing_env = (_is_test_mode() or "PYTEST_CURRENT_TEST" in os.environ)
         skip_dns = testing_env
+        delivery_url = url
+        host_headers: dict[str, str] = {}
         if not skip_dns:
             try:
-                parsed_url = urlparse(url)
-                if parsed_url.hostname:
-                    # Check if hostname is an IP address
-                    try:
-                        ip_addr = ipaddress.ip_address(parsed_url.hostname)
-                        # Check against private networks
-                        private_networks = [
-                            ipaddress.IPv4Network("10.0.0.0/8"),
-                            ipaddress.IPv4Network("172.16.0.0/12"),
-                            ipaddress.IPv4Network("192.168.0.0/16"),
-                            ipaddress.IPv4Network("169.254.0.0/16"),
-                            ipaddress.IPv4Network("127.0.0.0/8"),
-                            ipaddress.IPv6Network("::1/128"),
-                            ipaddress.IPv6Network("fc00::/7"),
-                            ipaddress.IPv6Network("fe80::/10"),
-                        ]
-                        for network in private_networks:
-                            if ip_addr in network:
-                                logger.error(f"Webhook URL points to private network: {url}")
-                                self._update_webhook_stats(webhook_id, success=False, error="URL points to private network")
-                                return
-                    except ValueError:
-                        # Not an IP, resolve hostname
-                        try:
-                            resolved_ips = socket.getaddrinfo(parsed_url.hostname, None)
-                            for addr_info in resolved_ips:
-                                ip_str = addr_info[4][0]
-                                try:
-                                    ip_addr = ipaddress.ip_address(ip_str)
-                                    private_networks = [
-                                        ipaddress.IPv4Network("10.0.0.0/8"),
-                                        ipaddress.IPv4Network("172.16.0.0/12"),
-                                        ipaddress.IPv4Network("192.168.0.0/16"),
-                                        ipaddress.IPv4Network("169.254.0.0/16"),
-                                        ipaddress.IPv4Network("127.0.0.0/8"),
-                                        ipaddress.IPv6Network("::1/128"),
-                                        ipaddress.IPv6Network("fc00::/7"),
-                                        ipaddress.IPv6Network("fe80::/10"),
-                                    ]
-                                    for network in private_networks:
-                                        if ip_addr in network:
-                                            logger.error(f"Webhook hostname resolves to private IP: {url}")
-                                            self._update_webhook_stats(webhook_id, success=False, error="Hostname resolves to private IP")
-                                            return
-                                except ValueError:
-                                    pass
-                        except socket.gaierror:
-                            logger.error(f"Failed to resolve webhook hostname: {url}")
-                            self._update_webhook_stats(webhook_id, success=False, error="DNS resolution failed")
-                            return
+                delivery_url, host_headers = await webhook_validator.resolve_safe_delivery_target_async(url)
             except _WEBHOOK_MANAGER_NONCRITICAL_EXCEPTIONS as e:
                 logger.error(f"URL validation failed: {e}")
                 self._update_webhook_stats(webhook_id, success=False, error=f"URL validation failed: {str(e)}")
@@ -721,6 +669,7 @@ class WebhookManager:
                     "X-Webhook-Event": payload.event,
                     "X-Webhook-Delivery": str(delivery_id)
                 }
+                headers.update(host_headers)
                 start_time = datetime.now()
 
                 try:
@@ -729,7 +678,7 @@ class WebhookManager:
                     timeout = 5
                 resp = await afetch(
                     method="POST",
-                    url=url,
+                    url=delivery_url,
                     data=payload_json,
                     headers=headers,
                     timeout=timeout,

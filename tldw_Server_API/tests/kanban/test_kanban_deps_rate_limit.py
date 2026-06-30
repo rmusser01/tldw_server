@@ -15,6 +15,12 @@ from cachetools import LRUCache
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.API_Deps import kanban_deps
+from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
+    ConflictError,
+    InputError,
+    KanbanDBError,
+    NotFoundError,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -100,3 +106,84 @@ class TestKanbanDbCacheShutdown:
         assert dummy.closed is True
         assert len(kanban_deps._kanban_db_instances) == 0
         assert kanban_deps._kanban_db_health_checks == {}
+
+
+class TestKanbanDbErrorMapping:
+    @pytest.mark.parametrize(
+        ("exc", "expected_status", "expected_detail"),
+        [
+            (NotFoundError("missing board"), 404, "missing board"),
+            (InputError("invalid card"), 400, "invalid card"),
+            (ConflictError("stale card"), 409, "stale card"),
+            (KanbanDBError("backend failed"), 500, "Kanban operation failed"),
+        ],
+    )
+    def test_handle_kanban_db_error_maps_known_contracts(
+        self,
+        exc: Exception,
+        expected_status: int,
+        expected_detail: str,
+    ):
+        mapped = kanban_deps.handle_kanban_db_error(exc)
+
+        assert mapped.status_code == expected_status
+        assert mapped.detail == expected_detail
+
+    def test_handle_kanban_db_error_preserves_unexpected_contract(self):
+        mapped = kanban_deps.handle_kanban_db_error(RuntimeError("boom"))
+
+        assert mapped.status_code == 500
+        assert mapped.detail == "An unexpected error occurred"
+
+
+class TestKanbanDbInitializationErrorMapping:
+    @staticmethod
+    def _patch_init_failure(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
+        monkeypatch.setattr(kanban_deps, "_kanban_db_instances", LRUCache(maxsize=10))
+        monkeypatch.setattr(kanban_deps, "_kanban_db_health_checks", {})
+        monkeypatch.setattr(kanban_deps, "_KANBAN_INIT_TIMEOUT_SECS", 1.0)
+        kanban_deps.shutdown_kanban_executor(wait=True)
+
+        def fail_create(user_id: int):
+            raise exc
+
+        monkeypatch.setattr(kanban_deps, "_create_kanban_db", fail_create)
+
+    @pytest.mark.asyncio
+    async def test_get_or_init_db_instance_maps_base_kanban_db_error(self, monkeypatch: pytest.MonkeyPatch):
+        self._patch_init_failure(monkeypatch, KanbanDBError("backend exploded"))
+
+        try:
+            with pytest.raises(HTTPException) as exc_info:
+                await kanban_deps._get_or_init_db_instance(321)
+        finally:
+            kanban_deps.shutdown_kanban_executor(wait=True)
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Kanban DB unavailable"
+
+    @pytest.mark.asyncio
+    async def test_get_or_init_db_instance_keeps_input_init_errors_as_500(self, monkeypatch: pytest.MonkeyPatch):
+        self._patch_init_failure(monkeypatch, InputError("invalid bootstrap path"))
+
+        try:
+            with pytest.raises(HTTPException) as exc_info:
+                await kanban_deps._get_or_init_db_instance(322)
+        finally:
+            kanban_deps.shutdown_kanban_executor(wait=True)
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "invalid bootstrap path"
+
+    @pytest.mark.asyncio
+    async def test_get_or_init_db_instance_keeps_conflict_init_errors_as_500(self, monkeypatch: pytest.MonkeyPatch):
+        self._patch_init_failure(monkeypatch, ConflictError("duplicate bootstrap state"))
+
+        try:
+            with pytest.raises(HTTPException) as exc_info:
+                await kanban_deps._get_or_init_db_instance(323)
+        finally:
+            kanban_deps.shutdown_kanban_executor(wait=True)
+
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.detail == "Kanban DB unavailable"

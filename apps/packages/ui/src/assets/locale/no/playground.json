@@ -167,6 +167,7 @@
     "providerChangeHelper": "Åpne leverandørvelgeren nedenfor for å bytte mellom Nettleser, tldw, OpenAI eller Supersonic.",
     "changeProvider": "Bytt leverandør",
     "title": "TTS-lekeplass",
+    "routeTitle": "Tekst til tale",
     "subtitle": "Prøv tekst-til-tale og juster leverandører, modeller og stemmer.",
     "currentProvider": "Gjeldende leverandør",
     "settingsIntro": "Juster TTS-leverandør, modell og stemme. Disse innstillingene gjenbrukes når du spiller av lyd fra chat eller media.",

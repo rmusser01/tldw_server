@@ -3,7 +3,7 @@
 import React from "react"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { TFunction } from "react-i18next"
+import type { TFunction } from "i18next"
 
 const {
   formItemSpy,
@@ -308,6 +308,46 @@ describe("settings PR review fixes", () => {
       name: undefined,
       rules: undefined
     })
+  })
+
+  it("renders the login-required notice through the design-system alert primitive", () => {
+    render(
+      <TldwConnectionSettings
+        {...createConnectionProps({
+          authMode: "multi-user",
+          isLoggedIn: false
+        })}
+      />
+    )
+
+    const loginRequiredTitle = screen.getByText(/Login Required/)
+    const alert = loginRequiredTitle.closest('[data-ds-component="Alert"]')
+    expect(alert).toBeInTheDocument()
+    expect(alert).toHaveAttribute("role", "status")
+    expect(alert).toHaveAttribute("aria-live", "polite")
+  })
+
+  it("renders the logged-in notice through the design-system alert primitive and preserves logout", () => {
+    const onLogout = vi.fn()
+
+    render(
+      <TldwConnectionSettings
+        {...createConnectionProps({
+          authMode: "multi-user",
+          isLoggedIn: true,
+          onLogout
+        })}
+      />
+    )
+
+    const loggedInTitle = screen.getByText(/Logged In/)
+    const alert = loggedInTitle.closest('[data-ds-component="Alert"]')
+    expect(alert).toBeInTheDocument()
+    expect(alert).toHaveAttribute("role", "status")
+    expect(alert).toHaveAttribute("aria-live", "polite")
+
+    fireEvent.click(screen.getByRole("button", { name: "Logout" }))
+    expect(onLogout).toHaveBeenCalledTimes(1)
   })
 
   it("formats invoice amounts using the invoice currency instead of a hardcoded dollar prefix", () => {

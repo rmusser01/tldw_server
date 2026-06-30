@@ -195,6 +195,48 @@ class TestCharacterExemplarEndpoints:
         assert len(payload["items"]) == 1
         assert payload["items"][0]["labels"]["scenario"] == "boardroom"
 
+    def test_character_exemplar_search_includes_canonical_pagination(self, test_client, auth_headers) -> None:
+        """Search responses expose canonical offset pagination while preserving legacy total."""
+        char_id = self._create_character(test_client, auth_headers, "Exemplar API Character Pagination")
+
+        for index in range(3):
+            create_response = test_client.post(
+                f"/api/v1/characters/{char_id}/exemplars",
+                json={
+                    "text": f"Pagination exemplar {index}",
+                    "labels": {
+                        "emotion": "neutral",
+                        "scenario": "boardroom",
+                        "rhetorical": ["opener"],
+                    },
+                },
+                headers=auth_headers,
+            )
+            assert create_response.status_code == 201
+
+        search_response = test_client.post(
+            f"/api/v1/characters/{char_id}/exemplars/search",
+            json={
+                "filter": {"emotion": "neutral", "scenario": "boardroom"},
+                "limit": 1,
+                "offset": 1,
+            },
+            headers=auth_headers,
+        )
+
+        assert search_response.status_code == 200
+        payload = search_response.json()
+        assert payload["total"] == 3
+        assert len(payload["items"]) == 1
+        assert payload["pagination"] == {
+            "mode": "offset",
+            "limit": 1,
+            "offset": 1,
+            "total": 3,
+            "has_more": True,
+            "next_offset": 2,
+        }
+
     def test_character_exemplar_debug_selection_can_use_embedding_scores(
         self,
         test_client,

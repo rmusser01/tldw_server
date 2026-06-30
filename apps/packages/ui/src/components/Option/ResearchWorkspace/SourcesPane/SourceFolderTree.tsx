@@ -15,6 +15,11 @@ interface SourceFolderTreeProps {
   selectionStateByFolderId: Record<string, FolderSelectionState>
   onClearFocus: () => void
   onCreateFolder: () => void
+  editingFolderId?: string | null
+  editingFolderName?: string
+  onEditingFolderNameChange?: (name: string) => void
+  onCommitFolderRename?: (folderId: string) => void
+  onCancelFolderRename?: () => void
   onFocusFolder: (folderId: string) => void
   onToggleFolderSelection: (folderId: string) => void
 }
@@ -24,11 +29,18 @@ const renderNode = (
   depth: number,
   activeFolderId: string | null,
   selectionStateByFolderId: Record<string, FolderSelectionState>,
+  editingFolderId: string | null | undefined,
+  editingFolderName: string | undefined,
+  onEditingFolderNameChange: ((name: string) => void) | undefined,
+  onCommitFolderRename: ((folderId: string) => void) | undefined,
+  onFolderRenameInputBlur: ((folderId: string) => void) | undefined,
+  onCancelFolderRename: (() => void) | undefined,
   onFocusFolder: (folderId: string) => void,
   onToggleFolderSelection: (folderId: string) => void
 ): React.ReactElement => {
   const selectionState = selectionStateByFolderId[node.id] || "unchecked"
   const isActive = activeFolderId === node.id
+  const isEditing = editingFolderId === node.id
 
   return (
     <div key={node.id} className="space-y-1">
@@ -44,16 +56,37 @@ const renderNode = (
           indeterminate={selectionState === "indeterminate"}
           onChange={() => onToggleFolderSelection(node.id)}
         />
-        <button
-          type="button"
-          aria-label={`Focus folder ${node.name}`}
-          className={`min-w-0 flex-1 truncate text-left text-sm ${
-            isActive ? "font-medium text-primary" : "text-text"
-          }`}
-          onClick={() => onFocusFolder(node.id)}
-        >
-          {node.name}
-        </button>
+        {isEditing ? (
+          <input
+            autoFocus
+            aria-label={`Rename folder ${node.name}`}
+            className="min-w-0 flex-1 rounded border border-primary/40 bg-surface px-1.5 py-0.5 text-sm text-text outline-none focus:ring-2 focus:ring-focus"
+            value={editingFolderName ?? node.name}
+            onChange={(event) => onEditingFolderNameChange?.(event.target.value)}
+            onBlur={() => onFolderRenameInputBlur?.(node.id)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault()
+                onCommitFolderRename?.(node.id)
+              }
+              if (event.key === "Escape") {
+                event.preventDefault()
+                onCancelFolderRename?.()
+              }
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            aria-label={`Focus folder ${node.name}`}
+            className={`min-w-0 flex-1 truncate text-left text-sm ${
+              isActive ? "font-medium text-primary" : "text-text"
+            }`}
+            onClick={() => onFocusFolder(node.id)}
+          >
+            {node.name}
+          </button>
+        )}
         <span className="shrink-0 text-[11px] text-text-muted">
           {node.sourceCount}
         </span>
@@ -64,6 +97,12 @@ const renderNode = (
           depth + 1,
           activeFolderId,
           selectionStateByFolderId,
+          editingFolderId,
+          editingFolderName,
+          onEditingFolderNameChange,
+          onCommitFolderRename,
+          onFolderRenameInputBlur,
+          onCancelFolderRename,
           onFocusFolder,
           onToggleFolderSelection
         )
@@ -78,9 +117,53 @@ export const SourceFolderTree: React.FC<SourceFolderTreeProps> = ({
   selectionStateByFolderId,
   onClearFocus,
   onCreateFolder,
+  editingFolderId,
+  editingFolderName,
+  onEditingFolderNameChange,
+  onCommitFolderRename,
+  onCancelFolderRename,
   onFocusFolder,
   onToggleFolderSelection
 }) => {
+  const cancelingRenameRef = React.useRef(false)
+  const cancelingRenameResetRef = React.useRef<number | null>(null)
+
+  React.useEffect(
+    () => () => {
+      if (cancelingRenameResetRef.current !== null) {
+        window.clearTimeout(cancelingRenameResetRef.current)
+      }
+    },
+    []
+  )
+
+  const handleCancelFolderRename = React.useCallback(() => {
+    cancelingRenameRef.current = true
+    if (cancelingRenameResetRef.current !== null) {
+      window.clearTimeout(cancelingRenameResetRef.current)
+    }
+    cancelingRenameResetRef.current = window.setTimeout(() => {
+      cancelingRenameRef.current = false
+      cancelingRenameResetRef.current = null
+    }, 0)
+    onCancelFolderRename?.()
+  }, [onCancelFolderRename])
+
+  const handleFolderRenameInputBlur = React.useCallback(
+    (folderId: string) => {
+      if (cancelingRenameRef.current) {
+        cancelingRenameRef.current = false
+        if (cancelingRenameResetRef.current !== null) {
+          window.clearTimeout(cancelingRenameResetRef.current)
+          cancelingRenameResetRef.current = null
+        }
+        return
+      }
+      onCommitFolderRename?.(folderId)
+    },
+    [onCommitFolderRename]
+  )
+
   return (
     <div
       className="rounded-lg border border-border/70 bg-surface/60 p-2"
@@ -122,6 +205,12 @@ export const SourceFolderTree: React.FC<SourceFolderTreeProps> = ({
               0,
               activeFolderId,
               selectionStateByFolderId,
+              editingFolderId,
+              editingFolderName,
+              onEditingFolderNameChange,
+              onCommitFolderRename,
+              handleFolderRenameInputBlur,
+              handleCancelFolderRename,
               onFocusFolder,
               onToggleFolderSelection
             )

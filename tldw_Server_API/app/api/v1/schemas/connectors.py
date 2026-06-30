@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
+
 
 def _validate_connector_source_type(provider: str, type_: str) -> None:
     normalized_provider = str(provider or "").strip().lower()
@@ -27,6 +29,15 @@ class ConnectorAccount(BaseModel):
     created_at: str | None = None
     connected: bool = True
     email: str | None = None
+
+
+class ConnectorBrowseResponse(BaseModel):
+    items: list[dict[str, Any]]
+    limit: int
+    cursor: str | None = None
+    next_cursor: str | None = None
+    has_more: bool
+    pagination: CursorPaginationMeta
 
 
 class SyncOptions(BaseModel):

@@ -71,8 +71,8 @@ class FileLock:
     Parameters:
         path: Path to the lock file.
         timeout: Maximum seconds to wait for lock acquisition.
-        stale_timeout: Seconds after which a lock file is considered stale
-            (the owning PID is dead or the file is too old).
+        stale_timeout: Retained for API compatibility. Native file locks are
+            expected to be released by the platform when the owner exits.
     """
 
     def __init__(
@@ -109,11 +109,6 @@ class FileLock:
                     0o644,
                 )
                 _acquire_platform_file_lock(fd)
-                # Write our PID so stale detection works from other processes.
-                os.ftruncate(fd, 0)
-                os.lseek(fd, 0, os.SEEK_SET)
-                os.write(fd, f"{os.getpid()}\n".encode())
-                os.fsync(fd)
                 self._fd = fd
                 logger.debug("FileLock acquired: {}", self.path)
                 return True
@@ -125,17 +120,18 @@ class FileLock:
                 except OSError:
                     pass
 
-                # Try to break stale locks on first failure.
-                if attempt == 1:
-                    self._break_stale_lock()
-
                 if time.monotonic() >= deadline:
                     return False
 
                 time.sleep(min(0.1, max(0, deadline - time.monotonic())))
 
     def release(self) -> None:
-        """Release the lock and remove the lock file."""
+        """Release the lock.
+
+        The lock file is intentionally left in place. Removing it during normal
+        release creates a race where another owner can acquire the path and then
+        have its active lock file unlinked by the previous releaser.
+        """
         if self._fd is not None:
             try:
                 _release_platform_file_lock(self._fd)
@@ -146,54 +142,6 @@ class FileLock:
             except OSError:
                 pass
             self._fd = None
-        # Best-effort removal of the lock file.
-        try:
-            self.path.unlink(missing_ok=True)
-        except OSError:
-            pass
-
-    # ------------------------------------------------------------------
-    # Stale lock detection
-    # ------------------------------------------------------------------
-
-    def _break_stale_lock(self) -> None:
-        """Remove the lock file if the owning PID is dead or the file is older
-        than *stale_timeout* seconds."""
-        try:
-            if not self.path.exists():
-                return
-
-            # Check file age.
-            try:
-                mtime = self.path.stat().st_mtime
-                if (time.time() - mtime) > self.stale_timeout:
-                    logger.warning(
-                        "Breaking stale lock (age exceeded): {}", self.path
-                    )
-                    self.path.unlink(missing_ok=True)
-                    return
-            except OSError:
-                return
-
-            # Check if the PID is still alive.
-            try:
-                content = self.path.read_text().strip()
-                pid = int(content)
-            except (OSError, ValueError):
-                return
-
-            try:
-                os.kill(pid, 0)  # Signal 0 — just check existence.
-            except ProcessLookupError:
-                logger.warning(
-                    "Breaking stale lock (PID {} dead): {}", pid, self.path
-                )
-                self.path.unlink(missing_ok=True)
-            except PermissionError:
-                # Process exists but we can't signal it — lock is NOT stale.
-                pass
-        except OSError:
-            pass
 
     # ------------------------------------------------------------------
     # Context manager
@@ -227,6 +175,13 @@ class RedisLock:
     _RELEASE_LUA = """
     if redis.call("get", KEYS[1]) == ARGV[1] then
         return redis.call("del", KEYS[1])
+    else
+        return 0
+    end
+    """
+    _RENEW_LUA = """
+    if redis.call("get", KEYS[1]) == ARGV[1] then
+        return redis.call("expire", KEYS[1], ARGV[2])
     else
         return 0
     end
@@ -281,6 +236,21 @@ class RedisLock:
         except Exception as exc:
             logger.debug("RedisLock release failed (non-critical): {}", exc)
 
+    def renew(self) -> bool:
+        """Extend the lock TTL only if this instance still owns the key."""
+        try:
+            renewed = self._client.eval(
+                self._RENEW_LUA,
+                1,
+                self.key,
+                self._token,
+                int(self.ttl),
+            )
+            return bool(renewed)
+        except Exception as exc:
+            logger.debug("RedisLock renew failed: {}", exc)
+            return False
+
     # ------------------------------------------------------------------
     # Context manager
     # ------------------------------------------------------------------
@@ -308,33 +278,73 @@ def acquire_migration_lock(
     lock_name: str = "db_migration",
     redis_url: Optional[str] = None,
     timeout: float = 60,
+    allow_file_fallback_on_redis_error: bool = False,
 ) -> Generator[FileLock | RedisLock, None, None]:
     """Context manager that picks the best lock backend.
 
-    If *redis_url* is provided **and** the server is reachable, a
-    :class:`RedisLock` is used.  Otherwise falls back to :class:`FileLock`.
+    If *redis_url* is provided, a :class:`RedisLock` is used.  Redis
+    configuration errors fail closed unless
+    ``allow_file_fallback_on_redis_error`` is explicitly enabled.  Without
+    *redis_url*, a local :class:`FileLock` is used.
 
     Parameters:
         lock_dir: Directory for file-based locks.  Defaults to ``~/.tldw/locks/``.
         lock_name: Base name for the lock (file or Redis key).
         redis_url: Optional Redis connection URL.
         timeout: Maximum seconds to wait for the lock.
+        allow_file_fallback_on_redis_error: When true, fall back to a local
+            file lock if an explicitly configured Redis lock cannot be used.
     """
     # Try Redis first.
-    if redis_url and _redis_mod is not None:
-        try:
-            client = _redis_mod.from_url(redis_url, decode_responses=True)
-            client.ping()
-            key = f"tldw:{lock_name}:lock"
-            lock = RedisLock(client, key=key, timeout=timeout)
-            with lock:
-                yield lock
-            return
-        except Exception as exc:
+    if redis_url:
+        if _redis_mod is None:
+            if not allow_file_fallback_on_redis_error:
+                raise LockAcquisitionError(
+                    "Redis unavailable for migration lock: redis package is not installed"
+                )
             logger.debug(
-                "Redis unavailable for migration lock ({}); falling back to file lock",
-                exc,
+                "Redis package unavailable for migration lock; falling back to file lock",
             )
+        else:
+            client = None
+            lock = None
+            try:
+                client = _redis_mod.from_url(redis_url, decode_responses=True)
+                client.ping()
+                key = f"tldw:{lock_name}:lock"
+                lock = RedisLock(client, key=key, timeout=timeout)
+            except Exception as exc:
+                if client is not None:
+                    try:
+                        client.close()
+                    except Exception as close_exc:
+                        logger.debug(
+                            "Failed to close Redis migration lock client: {}",
+                            type(close_exc).__name__,
+                        )
+                    client = None
+                if not allow_file_fallback_on_redis_error:
+                    raise LockAcquisitionError(
+                        "Redis unavailable for migration lock; refusing local file fallback"
+                    ) from exc
+                logger.debug(
+                    "Redis unavailable for migration lock ({}); falling back to file lock",
+                    type(exc).__name__,
+                )
+
+            if client is not None and lock is not None:
+                try:
+                    with lock:
+                        yield lock
+                    return
+                finally:
+                    try:
+                        client.close()
+                    except Exception as close_exc:
+                        logger.debug(
+                            "Failed to close Redis migration lock client: {}",
+                            type(close_exc).__name__,
+                        )
 
     # Fall back to FileLock.
     if lock_dir is None:

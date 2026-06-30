@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-onboarding-uat-source-summary",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "The research note says a short first-run wizard can reduce setup abandonment. Deterministic evidence makes onboarding regressions easier to diagnose."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 18,
+    "completion_tokens": 18,
+    "total_tokens": 36
+  }
+}

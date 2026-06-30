@@ -8,6 +8,39 @@ import {
   shouldProbeVoiceConversationAudioHealth
 } from "@/services/tldw/voice-conversation"
 
+type VoiceConversationTtsResolution = ReturnType<
+  typeof resolveVoiceConversationTtsConfig
+>
+type VoiceConversationTtsConfig = Extract<
+  VoiceConversationTtsResolution,
+  { ok: true }
+>["value"]
+type VoiceConversationTtsErrorReason = Extract<
+  VoiceConversationTtsResolution,
+  { ok: false }
+>["reason"]
+
+const getTtsConfigValue = (
+  result: VoiceConversationTtsResolution
+): VoiceConversationTtsConfig => {
+  expect(result.ok).toBe(true)
+  if (!("value" in result)) {
+    const reason = "reason" in result ? result.reason : "unknown"
+    throw new Error(`Expected TTS config to be valid, got ${reason}`)
+  }
+  return result.value
+}
+
+const getTtsConfigErrorReason = (
+  result: VoiceConversationTtsResolution
+): VoiceConversationTtsErrorReason => {
+  expect(result.ok).toBe(false)
+  if (!("reason" in result)) {
+    throw new Error("Expected TTS config to be invalid")
+  }
+  return result.reason
+}
+
 describe("voice conversation contract", () => {
   it("keeps voice conversation unavailable when only broad audio flags exist", () => {
     const result = resolveVoiceConversationAvailability({
@@ -43,12 +76,12 @@ describe("voice conversation contract", () => {
       voiceChatTtsMode: "stream"
     })
 
-    expect(result.ok).toBe(true)
-    expect(result.value?.model).toBe("kokoro")
-    expect(result.value?.voice).toBe("af_heart")
-    expect(result.value?.speed).toBe(1.25)
-    expect(result.value?.format).toBe("mp3")
-    expect(result.value?.provider).toBeUndefined()
+    const tts = getTtsConfigValue(result)
+    expect(tts.model).toBe("kokoro")
+    expect(tts.voice).toBe("af_heart")
+    expect(tts.speed).toBe(1.25)
+    expect(tts.format).toBe("mp3")
+    expect(tts.provider).toBeUndefined()
   })
 
   it("preserves explicit tldw provider on the voice conversation wire shape", () => {
@@ -66,12 +99,12 @@ describe("voice conversation contract", () => {
       voiceChatTtsMode: "stream"
     })
 
-    expect(result.ok).toBe(true)
-    expect(result.value?.model).toBe("kokoro")
-    expect(result.value?.voice).toBe("af_heart")
-    expect(result.value?.speed).toBe(1.25)
-    expect(result.value?.format).toBe("mp3")
-    expect(result.value?.provider).toBe("tldw")
+    const tts = getTtsConfigValue(result)
+    expect(tts.model).toBe("kokoro")
+    expect(tts.voice).toBe("af_heart")
+    expect(tts.speed).toBe(1.25)
+    expect(tts.format).toBe("mp3")
+    expect(tts.provider).toBe("tldw")
   })
 
   it("rejects voice conversation availability when STT health is unhealthy", () => {
@@ -148,8 +181,7 @@ describe("voice conversation contract", () => {
       voiceChatTtsMode: "stream"
     })
 
-    expect(result.ok).toBe(false)
-    expect(result.reason).toBe("tts_config_missing")
+    expect(getTtsConfigErrorReason(result)).toBe("tts_config_missing")
   })
 
   it("requires explicit ElevenLabs model and voice id when elevenlabs is selected", () => {
@@ -167,8 +199,7 @@ describe("voice conversation contract", () => {
       voiceChatTtsMode: "stream"
     })
 
-    expect(result.ok).toBe(false)
-    expect(result.reason).toBe("tts_config_missing")
+    expect(getTtsConfigErrorReason(result)).toBe("tts_config_missing")
   })
 
   it("builds preflight with backend defaults when no model is requested", async () => {

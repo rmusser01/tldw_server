@@ -25,6 +25,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("react-router-dom", () => ({
+  useLocation: () => ({ pathname: "/world-books", search: "", hash: "", state: null }),
   useNavigate: () => navigateMock
 }))
 

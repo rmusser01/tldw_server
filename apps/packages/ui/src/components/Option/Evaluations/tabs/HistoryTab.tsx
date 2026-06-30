@@ -19,6 +19,7 @@ import { useTranslation } from "react-i18next"
 import { useFetchHistory, historyTypePresets } from "../hooks/useHistory"
 import { useEvaluationsStore } from "@/store/evaluations"
 import { CopyButton } from "../components"
+import { EvaluationRecoveryCallout } from "../components/EvaluationRecoveryCallout"
 
 const { Text } = Typography
 
@@ -115,7 +116,15 @@ export const HistoryTab: React.FC = () => {
 
         <Divider />
 
-        {fetchHistoryMutation.isPending ? (
+        {fetchHistoryMutation.isError ? (
+          <EvaluationRecoveryCallout
+            title={t("evaluations:historyFetchErrorTitle", {
+              defaultValue: "Unable to fetch history"
+            })}
+            endpoint="/api/v1/evaluations/history"
+            error={fetchHistoryMutation.error}
+          />
+        ) : fetchHistoryMutation.isPending ? (
           <div className="flex justify-center py-4">
             <Spin size="small" />
           </div>

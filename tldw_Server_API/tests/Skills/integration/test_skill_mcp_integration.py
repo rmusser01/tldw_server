@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.Skills.context_integration import (
     get_skills_context_text,
     handle_skill_tool_call,
 )
+from tldw_Server_API.app.core.Skills.exceptions import SkillsError
 from tldw_Server_API.app.core.Skills.skills_service import SkillsService
 
 pytestmark = pytest.mark.integration
@@ -41,16 +42,21 @@ def temp_env():
 def env_with_skills(temp_env):
     """Provide temp env with 2 skills already created."""
     import asyncio
+
     service = temp_env["service"]
     loop = asyncio.new_event_loop()
-    loop.run_until_complete(service.create_skill(
-        "summarize",
-        "---\ndescription: Summarize text\nargument-hint: \"[text]\"\n---\nSummarize: $ARGUMENTS",
-    ))
-    loop.run_until_complete(service.create_skill(
-        "review",
-        "---\ndescription: Code review\n---\nReview the code:\n$ARGUMENTS",
-    ))
+    loop.run_until_complete(
+        service.create_skill(
+            "summarize",
+            '---\ndescription: Summarize text\nargument-hint: "[text]"\n---\nSummarize: $ARGUMENTS',
+        )
+    )
+    loop.run_until_complete(
+        service.create_skill(
+            "review",
+            "---\ndescription: Code review\n---\nReview the code:\n$ARGUMENTS",
+        )
+    )
     loop.close()
     return temp_env
 
@@ -94,6 +100,35 @@ class TestBuildSystemMessageWithSkills:
             db=env["db"],
         )
         assert result == "Base message"
+
+    @pytest.mark.asyncio
+    async def test_async_variant_uses_async_context_payload(self, monkeypatch, temp_env):
+        """Async chat paths should not call the synchronous Skills context scan."""
+        env = temp_env
+
+        async def _fake_async_payload(self):
+            return {
+                "available_skills": [{"name": "async-skill"}],
+                "context_text": "<available-skills>\n- async-skill: Async context\n</available-skills>",
+            }
+
+        def _unexpected_sync_payload(self):
+            raise AssertionError("async Skills context must not call sync payload")
+
+        monkeypatch.setattr(SkillsService, "get_context_payload_async", _fake_async_payload)
+        monkeypatch.setattr(SkillsService, "get_context_payload", _unexpected_sync_payload)
+
+        from tldw_Server_API.app.core.Skills.context_integration import build_system_message_with_skills_async
+
+        result = await build_system_message_with_skills_async(
+            "Base message",
+            env["user_id"],
+            env["base_path"],
+            db=env["db"],
+        )
+
+        assert result.startswith("Base message")
+        assert "async-skill" in result
 
 
 class TestGetSkillToolDefinition:
@@ -139,13 +174,87 @@ class TestHandleSkillToolCall:
         assert result["success"] is False
         assert "not found" in result["error"]
 
+    @pytest.mark.asyncio
+    async def test_sanitizes_backend_errors(self, monkeypatch, temp_env):
+        env = temp_env
+
+        async def fail_get_skill(self, name):
+            raise SkillsError("skills backend exploded at /private/skills-context-cache")
+
+        monkeypatch.setattr(SkillsService, "get_skill", fail_get_skill)
+
+        result = await handle_skill_tool_call(
+            skill_name="summarize",
+            args="",
+            user_id=env["user_id"],
+            base_path=env["base_path"],
+            db=env["db"],
+        )
+
+        assert result == {"success": False, "error": "skill_execution_failed"}
+
+    @pytest.mark.asyncio
+    async def test_returns_content_free_integrity_error(self, temp_env):
+        from tldw_Server_API.app.core.Context_Integrity.models import (
+            ContextIntegrityBootState,
+            ContextIntegrityFinding,
+        )
+        from tldw_Server_API.app.core.Context_Integrity.resolver import (
+            ContextIntegrityResolver,
+            clear_global_context_integrity_resolver,
+            set_global_context_integrity_resolver,
+        )
+
+        env = temp_env
+        await env["service"].create_skill(
+            "blocked-skill",
+            "---\ndescription: Blocked\n---\nBody",
+        )
+        resolver = ContextIntegrityResolver(
+            ContextIntegrityBootState(
+                mode="enforce",
+                degraded=False,
+                manifest_sequence=1,
+                manifest_digest="sha256:manifest",
+                findings=(
+                    ContextIntegrityFinding(
+                        asset_id="skill:user:1/blocked-skill",
+                        state="changed_approved_executable",
+                        severity="error",
+                        summary="changed",
+                        remediation="review",
+                        source_type="skill_file",
+                    ),
+                ),
+            )
+        )
+        set_global_context_integrity_resolver(resolver)
+        try:
+            result = await handle_skill_tool_call(
+                skill_name="blocked-skill",
+                args="",
+                user_id=env["user_id"],
+                base_path=env["base_path"],
+                db=env["db"],
+            )
+        finally:
+            clear_global_context_integrity_resolver()
+
+        assert result == {
+            "success": False,
+            "error": "context_integrity_blocked",
+        }
+
 
 class TestAddSkillToolToToolsList:
     def test_adds_when_skills_exist(self, env_with_skills):
         env = env_with_skills
         tools = [{"type": "function", "function": {"name": "Read"}}]
         result = add_skill_tool_to_tools_list(
-            tools, env["user_id"], env["base_path"], db=env["db"],
+            tools,
+            env["user_id"],
+            env["base_path"],
+            db=env["db"],
         )
 
         tool_names = []
@@ -163,7 +272,10 @@ class TestAddSkillToolToToolsList:
         env = temp_env
         tools = [{"type": "function", "function": {"name": "Read"}}]
         result = add_skill_tool_to_tools_list(
-            tools, env["user_id"], env["base_path"], db=env["db"],
+            tools,
+            env["user_id"],
+            env["base_path"],
+            db=env["db"],
         )
 
         # Skill tool should NOT be added since no skills exist
@@ -176,3 +288,39 @@ class TestAddSkillToolToToolsList:
 
         assert "Skill" not in tool_names
         assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_async_variant_uses_async_context_payload(self, monkeypatch, temp_env):
+        """Async tool injection should use the async Skills service method."""
+        env = temp_env
+
+        async def _fake_async_payload(self):
+            return {
+                "available_skills": [{"name": "async-tool-skill"}],
+                "context_text": "<available-skills />",
+            }
+
+        def _unexpected_sync_payload(self):
+            raise AssertionError("async Skills tool injection must not call sync payload")
+
+        monkeypatch.setattr(SkillsService, "get_context_payload_async", _fake_async_payload)
+        monkeypatch.setattr(SkillsService, "get_context_payload", _unexpected_sync_payload)
+
+        from tldw_Server_API.app.core.Skills.context_integration import add_skill_tool_to_tools_list_async
+
+        result = await add_skill_tool_to_tools_list_async(
+            [{"type": "function", "function": {"name": "Read"}}],
+            env["user_id"],
+            env["base_path"],
+            db=env["db"],
+        )
+
+        tool_names = []
+        for tool in result:
+            func = tool.get("function", {})
+            name = func.get("name") or tool.get("name")
+            if name:
+                tool_names.append(name)
+
+        assert "Skill" in tool_names
+        assert "Read" in tool_names

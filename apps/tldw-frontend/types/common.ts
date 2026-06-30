@@ -2,17 +2,33 @@
  * Shared types used across the tldw-frontend codebase.
  */
 
-import type { AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
-
 // ========================================
 // API Types
 // ========================================
 
-/** Extended Axios config with request metadata for timing */
-export interface AxiosConfigWithMetadata extends InternalAxiosRequestConfig {
+/** Request options supported by the WebUI fetch-backed API client. */
+export interface ApiRequestConfig {
+  baseURL?: string;
+  data?: unknown;
+  headers?: HeadersInit;
+  method?: string;
+  params?: Record<string, string | number | boolean | null | undefined>;
+  responseType?: 'json' | 'text' | 'arraybuffer' | 'blob';
+  signal?: AbortSignal;
+  timeout?: number;
+  url?: string;
+  withCredentials?: boolean;
+}
+
+/** Extended API config with request metadata for timing */
+export interface ApiRequestConfigWithMetadata extends ApiRequestConfig {
   metadata?: {
     start: number;
   };
+  data?: unknown;
+  headers?: Record<string, string>;
+  method?: string;
+  url?: string;
 }
 
 /** Standard API error response structure */
@@ -22,7 +38,7 @@ export interface ApiErrorResponse {
 }
 
 /** Generic API client config */
-export type ApiClientConfig = AxiosRequestConfig;
+export type ApiClientConfig = ApiRequestConfig;
 
 // ========================================
 // User/Auth Types

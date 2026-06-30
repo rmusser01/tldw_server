@@ -16,12 +16,12 @@ test.describe("Privileges Page", () => {
     if (panelVisible) {
       // Verify the redirect panel heading
       await expect(
-        authedPage.getByRole("heading", { name: /this route has moved/i })
+        authedPage.getByRole("heading", { name: /privileges moved to settings/i })
       ).toBeVisible()
 
       // Verify redirect description
       await expect(
-        authedPage.getByText(/sending you to the updated page/i)
+        authedPage.getByText(/role and permission controls/i)
       ).toBeVisible()
     } else {
       // If redirect happened already, we should be on /settings
@@ -62,10 +62,10 @@ test.describe("Privileges Page", () => {
     const panelVisible = await redirectPanel.isVisible().catch(() => false)
 
     if (panelVisible) {
-      // "Go to Chat" fallback link
-      const goChatLink = authedPage.getByTestId("route-redirect-go-chat")
-      await expect(goChatLink).toBeVisible()
-      await expect(goChatLink).toHaveAttribute("href", "/")
+      // "Open Home" fallback link
+      const openHomeLink = authedPage.getByTestId("route-redirect-open-home")
+      await expect(openHomeLink).toBeVisible()
+      await expect(openHomeLink).toHaveAttribute("href", "/")
 
       // "Open Settings" fallback link
       const openSettingsLink = authedPage.getByTestId("route-redirect-open-settings")

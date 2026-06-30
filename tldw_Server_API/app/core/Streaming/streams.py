@@ -10,6 +10,7 @@ from loguru import logger
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     ensure_sse_control_line,
     ensure_sse_line,
+    normalize_provider_line,
     sse_data,
     sse_done,
 )
@@ -22,7 +23,6 @@ from tldw_Server_API.app.core.Metrics.metrics_manager import (
 _STREAM_METRICS_REGISTERED = False
 
 _STREAMING_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,
@@ -101,8 +101,22 @@ def _ensure_stream_metrics_registered() -> None:
             )
         )
         _STREAM_METRICS_REGISTERED = True
-    except _STREAMING_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"Stream metrics registration failed or already registered: {e}")
+    except _STREAMING_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Stream metrics registration failed or already registered")
+
+
+def _is_already_accepted_websocket_error(exc: RuntimeError) -> bool:
+    """Return True for Starlette's double-accept state error."""
+    message = str(exc).lower()
+    return (
+        (
+            "websocket.accept" in message
+            and ("websocket.send" in message or "websocket.close" in message)
+        )
+        or "already accepted" in message
+        or ('cannot call "accept"' in message and "connection is established" in message)
+        or ("accept" in message and "already" in message and "connection" in message)
+    )
 
 
 class SSEStream:
@@ -192,19 +206,14 @@ class SSEStream:
         await self._enqueue(sse_data(payload), force=force)
 
     async def send_raw_sse_line(self, line: str) -> None:
-        if "\n" in line:
-            lower = line.lower()
-            if "data:" in lower:
-                await self._enqueue(ensure_sse_line(line))
-            else:
-                await self._enqueue(ensure_sse_control_line(line))
-            return
-        stripped = line.lstrip()
-        lower = stripped.lower()
-        if lower.startswith(("event:", "id:", "retry:", ":")):
-            await self._enqueue(ensure_sse_control_line(line))
-        else:
-            await self._enqueue(ensure_sse_line(line))
+        for raw_line in str(line).splitlines() or [str(line)]:
+            normalized = normalize_provider_line(
+                raw_line,
+                provider_control_passthru=self.provider_control_passthru,
+                control_filter=self.control_filter,
+            )
+            if normalized is not None:
+                await self._enqueue(normalized)
 
     async def error(
         self,
@@ -304,10 +313,10 @@ class SSEStream:
                                 f"SSEStream heartbeat emit mode={self.heartbeat_mode} interval_s={self.heartbeat_interval_s}"
                             )
                         if self.heartbeat_mode == "data":
-                            await self._enqueue(sse_data({"heartbeat": True}))
+                            await self._enqueue(sse_data({"heartbeat": True}), force=True)
                         else:
                             # Comment heartbeat
-                            await self._enqueue(ensure_sse_line(":"))
+                            await self._enqueue(ensure_sse_line(":"), force=True)
                         last_hb_ts = time.monotonic()
                         # Drain immediately
                         continue
@@ -400,9 +409,17 @@ class WebSocketStream:
             except _STREAMING_NONCRITICAL_EXCEPTIONS:
                 already_accepted = False
             if hasattr(self.ws, "accept") and not already_accepted:
-                await maybe_await(self.ws.accept())
+                try:
+                    await maybe_await(self.ws.accept())
+                except RuntimeError as exc:
+                    if not _is_already_accepted_websocket_error(exc):
+                        raise
+        except asyncio.CancelledError:
+            self._running = False
+            raise
         except _STREAMING_NONCRITICAL_EXCEPTIONS:
-            pass
+            self._running = False
+            raise
         if self.heartbeat_interval_s and self.heartbeat_interval_s > 0:
             self._ping_task = asyncio.create_task(self._ping_loop())
         if self.idle_timeout_s and self.idle_timeout_s > 0:
@@ -410,8 +427,12 @@ class WebSocketStream:
 
     async def stop(self) -> None:
         self._running = False
-        for task in (self._ping_task, self._idle_task):
+        current_task = asyncio.current_task()
+        for attr in ("_ping_task", "_idle_task"):
+            task = getattr(self, attr)
             if task:
+                if task is current_task:
+                    continue
                 task.cancel()
                 try:
                     await task
@@ -420,6 +441,7 @@ class WebSocketStream:
                     pass
                 except _STREAMING_NONCRITICAL_EXCEPTIONS:
                     pass
+                setattr(self, attr, None)
 
     def mark_activity(self) -> None:
         self._last_activity = time.monotonic()
@@ -449,10 +471,13 @@ class WebSocketStream:
         await self._send_json_with_metrics(payload, kind="json")
 
     async def done(self, *, close_code: int = 1000) -> None:
-        await self._send_json_with_metrics({"type": "done"}, kind="done")
-        if self.close_on_done:
-            with contextlib.suppress(_STREAMING_NONCRITICAL_EXCEPTIONS):
-                await maybe_await(self.ws.close(code=close_code))
+        try:
+            await self._send_json_with_metrics({"type": "done"}, kind="done")
+            if self.close_on_done:
+                with contextlib.suppress(_STREAMING_NONCRITICAL_EXCEPTIONS):
+                    await maybe_await(self.ws.close(code=close_code))
+        finally:
+            await self.stop()
 
     async def error(self, code: str, message: str, *, data: Optional[dict[str, Any]] = None) -> None:
         payload: dict[str, Any] = {"type": "error", "code": code, "message": message}
@@ -466,10 +491,13 @@ class WebSocketStream:
                     payload["quota"] = data.get("quota")
             except _STREAMING_NONCRITICAL_EXCEPTIONS:
                 pass
-        await self._send_json_with_metrics(payload, kind="error")
         close_code = self._map_close_code(code)
-        with contextlib.suppress(_STREAMING_NONCRITICAL_EXCEPTIONS):
-            await maybe_await(self.ws.close(code=close_code))
+        try:
+            await self._send_json_with_metrics(payload, kind="error")
+            with contextlib.suppress(_STREAMING_NONCRITICAL_EXCEPTIONS):
+                await maybe_await(self.ws.close(code=close_code))
+        finally:
+            await self.stop()
 
     async def _send_json_with_metrics(self, payload: dict[str, Any], *, kind: str) -> None:
         t0 = time.monotonic()
@@ -492,6 +520,8 @@ class WebSocketStream:
         try:
             while self._running:
                 await asyncio.sleep(self.heartbeat_interval_s)
+                if not self._running:
+                    break
                 try:
                     await self._send_json_with_metrics({"type": "ping"}, kind="ping")
                     reg.increment("ws_pings_total", 1, self._labels)
@@ -507,6 +537,8 @@ class WebSocketStream:
         try:
             while self._running:
                 await asyncio.sleep(max(0.05, min(self.idle_timeout_s or 60.0, 1.0)))
+                if not self._running:
+                    break
                 now = time.monotonic()
                 if self.idle_timeout_s and now - self._last_activity >= self.idle_timeout_s:
                     # Close with 1001 and increment counter
@@ -543,5 +575,5 @@ def _parse_float_env(name: str) -> Optional[float]:
     try:
         return float(raw)
     except _STREAMING_NONCRITICAL_EXCEPTIONS:
-        logger.debug(f"Invalid float in env {name}={raw}")
+        logger.debug("Invalid float in stream env")
         return None

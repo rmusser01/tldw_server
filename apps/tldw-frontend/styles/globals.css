@@ -1,5 +1,23 @@
 @import "../../packages/ui/src/assets/tailwind.css";
 
+.server-readiness-degraded-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.server-readiness-degraded-content {
+  flex: 1 1 0%;
+  min-height: 0;
+}
+
+.server-readiness-degraded-content > * {
+  height: 100% !important;
+  min-height: 0 !important;
+}
+
 /* Citation mark styles for TipTap editor */
 .citation-mark {
   background: rgb(var(--color-primary) / 0.1);

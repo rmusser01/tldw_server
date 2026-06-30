@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Final
 
 
@@ -34,8 +34,12 @@ class CommandRegistry:
     def visible_commands(self, allowed_tools: set[str]) -> dict[str, CommandDescriptor]:
         visible: dict[str, CommandDescriptor] = {}
         for name, descriptor in self._commands.items():
-            if descriptor.pure_transform or any(tool in allowed_tools for tool in descriptor.backend_tools):
+            if descriptor.pure_transform:
                 visible[name] = descriptor
+                continue
+            visible_backend_tools = tuple(tool for tool in descriptor.backend_tools if tool in allowed_tools)
+            if visible_backend_tools:
+                visible[name] = replace(descriptor, backend_tools=visible_backend_tools)
         return visible
 
 
@@ -57,18 +61,60 @@ _DEFAULT_COMMANDS: Final[tuple[CommandDescriptor, ...]] = (
     CommandDescriptor(
         name="cat",
         summary="Read a UTF-8 text file from the current workspace scope.",
-        backend_tools=("fs.read_text",),
+        backend_tools=("fs.read", "fs.read_text"),
     ),
     CommandDescriptor(
         name="write",
-        summary="Write a UTF-8 text file in the current workspace scope.",
-        backend_tools=("fs.write_text",),
+        summary="Create a UTF-8 text file in the current workspace scope.",
+        backend_tools=("fs.write",),
+    ),
+    CommandDescriptor(
+        name="write-create",
+        summary="Create a UTF-8 text file in the current workspace scope.",
+        backend_tools=("fs.write",),
     ),
     CommandDescriptor(
         name="grep",
         summary="Filter lines matching a pattern.",
         backend_tools=(),
         pure_transform=True,
+    ),
+    CommandDescriptor(
+        name="pwd",
+        summary="Print the current virtual workspace directory.",
+        backend_tools=(),
+        pure_transform=True,
+    ),
+    CommandDescriptor(
+        name="cd",
+        summary="Change the virtual workspace directory for later commands in this run.",
+        backend_tools=(),
+        pure_transform=True,
+    ),
+    CommandDescriptor(
+        name="stat",
+        summary="Inspect workspace file metadata.",
+        backend_tools=("fs.stat",),
+    ),
+    CommandDescriptor(
+        name="glob",
+        summary="Find workspace paths matching a portable pattern.",
+        backend_tools=("fs.glob",),
+    ),
+    CommandDescriptor(
+        name="find",
+        summary="Alias for glob over workspace paths.",
+        backend_tools=("fs.glob",),
+    ),
+    CommandDescriptor(
+        name="rg",
+        summary="Search workspace UTF-8 text files.",
+        backend_tools=("fs.grep",),
+    ),
+    CommandDescriptor(
+        name="grep-files",
+        summary="Alias for governed workspace file search.",
+        backend_tools=("fs.grep",),
     ),
     CommandDescriptor(
         name="head",
@@ -101,7 +147,7 @@ _DEFAULT_COMMANDS: Final[tuple[CommandDescriptor, ...]] = (
     CommandDescriptor(
         name="mcp",
         summary="Inspect visible MCP modules and tools.",
-        backend_tools=("mcp.modules.list", "mcp.tools.list"),
+        backend_tools=("mcp.modules.list", "mcp.tools.list", "mcp.catalogs.list"),
     ),
     CommandDescriptor(
         name="sandbox",

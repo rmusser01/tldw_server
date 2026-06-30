@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import threading
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
+from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
+    apply_billing_prompt_cache_intent,
+    attach_cache_intent_metadata,
+)
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
@@ -16,6 +19,7 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
     sse_data,
     sse_done,
 )
+from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .base import ChatProvider
@@ -388,6 +392,7 @@ class AnthropicAdapter(ChatProvider):
             headers = self._headers(api_key)
             payload = self._build_payload(request)
             payload["stream"] = False
+            payload, cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
             payload = merge_extra_body(payload, request)
             headers = merge_extra_headers(headers, request)
             try:
@@ -396,7 +401,10 @@ class AnthropicAdapter(ChatProvider):
                     resp = client.post(url, headers=headers, json=payload)
                     resp.raise_for_status()
                     data = resp.json()
-                    return self._normalize_to_openai_shape(data)
+                    return attach_cache_intent_metadata(
+                        self._normalize_to_openai_shape(data),
+                        cache_intent_diagnostic,
+                    )
             except _ANTHROPIC_NONCRITICAL_EXCEPTIONS as e:
                 raise self.normalize_error(e) from e
         # If native HTTP is explicitly disabled, raise a clear error rather than
@@ -436,6 +444,7 @@ class AnthropicAdapter(ChatProvider):
             headers = self._headers(api_key)
             payload = self._build_payload(request)
             payload["stream"] = True
+            payload, _cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
             payload = merge_extra_body(payload, request)
             headers = merge_extra_headers(headers, request)
             try:
@@ -554,41 +563,8 @@ class AnthropicAdapter(ChatProvider):
         return await asyncio.to_thread(self.chat, request, timeout=timeout)
 
     async def astream(self, request: dict[str, Any], *, timeout: float | None = None) -> AsyncIterator[str]:
-        gen = self.stream(request, timeout=timeout)
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[Any] = asyncio.Queue()
-        sentinel = object()
-        stop_event = threading.Event()
-
-        def _worker() -> None:
-            try:
-                for item in gen:
-                    if stop_event.is_set():
-                        break
-                    loop.call_soon_threadsafe(queue.put_nowait, item)
-            except Exception as exc:
-                loop.call_soon_threadsafe(queue.put_nowait, exc)
-            finally:
-                try:
-                    if hasattr(gen, "close"):
-                        gen.close()
-                except _ANTHROPIC_NONCRITICAL_EXCEPTIONS:
-                    pass
-                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
-
-        thread = threading.Thread(target=_worker, daemon=True)
-        thread.start()
-
-        try:
-            while True:
-                item = await queue.get()
-                if item is sentinel:
-                    break
-                if isinstance(item, Exception):
-                    raise item
-                yield item
-        finally:
-            stop_event.set()
+        async for item in wrap_sync_stream(self.stream(request, timeout=timeout)):
+            yield item
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
         from tldw_Server_API.app.core.LLM_Calls.error_utils import (

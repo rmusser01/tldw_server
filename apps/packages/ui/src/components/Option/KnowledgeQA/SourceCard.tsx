@@ -22,6 +22,13 @@ import { cn } from "@/libs/utils"
 import type { RagResult } from "./types"
 import {
   detectSourceContentFacet,
+  getEvidenceOrigin,
+  getEvidenceOriginLabel,
+  getResultChunkId,
+  getResultEvidenceText,
+  getResultSourceId,
+  getResultSourceStatus,
+  getUnavailableEvidenceMessage,
   formatChunkPosition,
   getSourceContentFacetLabel,
   formatSourceDate,
@@ -123,7 +130,7 @@ export function SourceCard({
   className,
 }: SourceCardProps) {
   const { t } = useTranslation("knowledge")
-  const [copiedState, setCopiedState] = React.useState<"text" | "citation" | null>(null)
+  const [copiedState, setCopiedState] = React.useState<"excerpt" | "citation" | null>(null)
   const [isExpanded, setIsExpanded] = React.useState(false)
   const [overflowOpen, setOverflowOpen] = React.useState(false)
   const overflowRef = React.useRef<HTMLDivElement>(null)
@@ -132,22 +139,31 @@ export function SourceCard({
   const isMountedRef = React.useRef(true)
 
   const title = result.metadata?.title || result.metadata?.source || `Source ${index}`
-  const content = result.content || result.text || result.chunk || ""
+  const content = getResultEvidenceText(result)
+  const unavailableMessage = getUnavailableEvidenceMessage(result)
+  const displayExcerptText = content || unavailableMessage || ""
   const compactDensity = density === "compact"
   const excerptLength = compactDensity ? 180 : 300
-  const excerpt = isExpanded ? content : truncateText(content, excerptLength)
+  const excerpt = isExpanded ? displayExcerptText : truncateText(displayExcerptText, excerptLength)
   const excerptSegments = useMemo(
     () => splitTextByHighlights(excerpt, highlightTerms),
     [excerpt, highlightTerms]
   )
-  const canExpand = content.length > excerptLength
+  const canExpand = displayExcerptText.length > excerptLength
   const url = result.metadata?.url
   const score = result.score
-  const sourceType = result.metadata?.source_type || "media_db"
+  const sourceType =
+    result.sourceType || result.metadata?.source_type || "media_db"
   const sourceTypeLabel = getSourceTypeLabel(sourceType)
+  const sourceId = getResultSourceId(result)
+  const chunkId = getResultChunkId(result)
+  const sourceStatus = getResultSourceStatus(result)
+  const evidenceOrigin = getEvidenceOrigin(result)
+  const evidenceOriginLabel =
+    evidenceOrigin !== "unknown_origin" ? getEvidenceOriginLabel(evidenceOrigin) : null
   const sourceFacetLabel = getSourceContentFacetLabel(detectSourceContentFacet(result))
   const sourceKindLabel = sourceTypeLabel === "Other" ? sourceFacetLabel : sourceTypeLabel
-  const chunkPosition = formatChunkPosition(result.metadata?.chunk_id)
+  const chunkPosition = formatChunkPosition(chunkId ?? result.metadata?.chunk_id)
   const sourceDate = formatSourceDate(result)
   const freshnessDescriptor = getFreshnessDescriptor(result)
   const relevanceDescriptor = getRelevanceDescriptor(score)
@@ -172,6 +188,8 @@ export function SourceCard({
   // Resolve the numeric media_id from metadata for workspace navigation.
   const resolvedMediaId = (() => {
     const raw =
+      result.sourceId ??
+      result.metadata?.source_id ??
       (result.metadata as Record<string, unknown> | undefined)?.media_id ??
       result.metadata?.id ??
       result.id
@@ -226,20 +244,20 @@ export function SourceCard({
     }, 2000)
   }, [])
 
-  const handleCopyText = useCallback(async () => {
+  const handleCopyExcerpt = useCallback(async () => {
     const requestId = latestCopyRequestIdRef.current + 1
     latestCopyRequestIdRef.current = requestId
     try {
-      await navigator.clipboard.writeText(content)
+      await navigator.clipboard.writeText(excerpt)
       if (!isMountedRef.current || latestCopyRequestIdRef.current !== requestId) {
         return
       }
-      setCopiedState("text")
+      setCopiedState("excerpt")
       scheduleCopiedStateReset(requestId)
     } catch (error) {
-      console.error("Failed to copy source text:", error)
+      console.error("Failed to copy source excerpt:", error)
     }
-  }, [content, scheduleCopiedStateReset])
+  }, [excerpt, scheduleCopiedStateReset])
 
   const handleCopyCitation = useCallback(async () => {
     const requestId = latestCopyRequestIdRef.current + 1
@@ -303,6 +321,10 @@ export function SourceCard({
           ? `Source ${index}. Cited in answer. Press Enter to jump to citation ${index}.`
           : undefined
       }
+      data-source-id={sourceId ?? undefined}
+      data-chunk-id={chunkId ?? undefined}
+      data-evidence-origin={evidenceOrigin}
+      data-source-status={sourceStatus ?? undefined}
       className={cn(
         "group rounded-lg border transition-all duration-200",
         isFocused
@@ -358,6 +380,9 @@ export function SourceCard({
                       >
                         {relevanceDescriptor.percent}% match
                       </span>
+                    ) : null}
+                    {evidenceOriginLabel ? (
+                      <span className="shrink-0 truncate">{evidenceOriginLabel}</span>
                     ) : null}
                   </div>
                   {compactMetaItems.length > 0 ? (
@@ -427,6 +452,7 @@ export function SourceCard({
                       )}
                       {sourceKindLabel}
                     </span>
+                    {evidenceOriginLabel ? <span>{evidenceOriginLabel}</span> : null}
                     {chunkPosition ? <span>{chunkPosition}</span> : null}
                     {freshnessDescriptor ? (
                       <span
@@ -497,7 +523,13 @@ export function SourceCard({
 
       {/* Content excerpt */}
       <div className={cn("px-3 pb-2", compactDensity ? "sm:px-3 sm:pb-2" : "sm:px-4 sm:pb-3")}>
-        <p className={cn("text-xs text-text-muted leading-relaxed whitespace-pre-wrap", !compactDensity && "sm:text-sm")}>
+        <p
+          className={cn(
+            "text-xs leading-relaxed whitespace-pre-wrap",
+            unavailableMessage && !content ? "text-warn" : "text-text-muted",
+            !compactDensity && "sm:text-sm"
+          )}
+        >
           {excerptSegments.map((segment, segmentIndex) =>
             segment.highlight ? (
               <mark
@@ -548,8 +580,9 @@ export function SourceCard({
             onClick={handleCopyCitation}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-border bg-surface text-text-subtle hover:bg-hover hover:text-text transition-colors"
             title="Copy citation"
+            aria-label={`Copy citation for source ${index}`}
           >
-            {copiedState === "citation" ? "Copied!" : "Cite"}
+            {copiedState === "citation" ? "Copied!" : "Copy citation"}
           </button>
 
           <div ref={overflowRef} className="relative">
@@ -621,18 +654,23 @@ export function SourceCard({
                 <button
                   type="button"
                   role="menuitem"
+                  aria-label={
+                    copiedState === "excerpt"
+                      ? `Copied excerpt from source ${index}`
+                      : `Copy excerpt from source ${index}`
+                  }
                   onClick={() => {
-                    handleCopyText()
+                    handleCopyExcerpt()
                     setOverflowOpen(false)
                   }}
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-text-subtle hover:bg-hover hover:text-text transition-colors"
                 >
-                  {copiedState === "text" ? (
+                  {copiedState === "excerpt" ? (
                     <Check className="w-3.5 h-3.5" />
                   ) : (
                     <Copy className="w-3.5 h-3.5" />
                   )}
-                  {copiedState === "text" ? "Copied text" : "Copy text"}
+                  {copiedState === "excerpt" ? "Copied excerpt" : "Copy excerpt"}
                 </button>
                 {url && (
                   <button

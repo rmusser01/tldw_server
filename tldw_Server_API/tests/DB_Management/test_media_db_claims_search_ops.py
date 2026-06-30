@@ -264,8 +264,8 @@ def test_claims_search_helper_postgres_branch_uses_tsquery_and_ilike_fallback(
     fallback_sql, fallback_params = fetchall_calls[1]
     assert "to_tsquery('english', ?)" in fts_sql
     assert "ILIKE" in fallback_sql
-    assert fts_params == ("alpha & beta", "alpha & beta", 20)
-    assert fallback_params == ("%alpha beta%", 20)
+    assert fts_params == ("alpha & beta", "alpha & beta", 20, 0)
+    assert fallback_params == ("%alpha beta%", 20, 0)
     assert rows == [
         {
             "id": 9,

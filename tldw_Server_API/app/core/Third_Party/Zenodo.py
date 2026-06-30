@@ -123,16 +123,20 @@ def search_records(
             total = len(hits)
         items = [_normalize_record(h) for h in hits if isinstance(h, dict)]
         return items, total, None
-    except _ZENODO_REQUEST_EXCEPTIONS as e:
-        return None, 0, f"Zenodo error: {str(e)}"
+    except TimeoutError:
+        return None, 0, "Zenodo request timed out."
+    except _ZENODO_REQUEST_EXCEPTIONS:
+        return None, 0, "Zenodo request failed."
 
 
 def get_record_by_id(record_id: str) -> tuple[dict[str, Any] | None, str | None]:
     try:
         data = fetch_json(method="GET", url=f"{RECORDS_URL}/{record_id}", timeout=20)
         return _normalize_record(data), None
-    except _ZENODO_REQUEST_EXCEPTIONS as e:
-        return None, f"Zenodo error: {str(e)}"
+    except TimeoutError:
+        return None, "Zenodo record request timed out."
+    except _ZENODO_REQUEST_EXCEPTIONS:
+        return None, "Zenodo record request failed."
 
 
 def get_record_by_doi(doi: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -149,8 +153,10 @@ def get_record_by_doi(doi: str) -> tuple[dict[str, Any] | None, str | None]:
         if items:
             return _normalize_record(items[0]), None
         return None, None
-    except _ZENODO_REQUEST_EXCEPTIONS as e:
-        return None, f"Zenodo error: {str(e)}"
+    except TimeoutError:
+        return None, "Zenodo DOI request timed out."
+    except _ZENODO_REQUEST_EXCEPTIONS:
+        return None, "Zenodo DOI request failed."
 
 
 def oai_raw(params: dict[str, Any]) -> tuple[bytes | None, str | None, str | None]:
@@ -160,8 +166,10 @@ def oai_raw(params: dict[str, Any]) -> tuple[bytes | None, str | None, str | Non
             return None, None, f"Zenodo OAI-PMH HTTP error: {r.status_code}"
         ct = r.headers.get("content-type") or "application/xml"
         return r.content, ct.split(";")[0], None
-    except _ZENODO_REQUEST_EXCEPTIONS as e:
-        return None, None, f"Zenodo OAI-PMH error: {str(e)}"
+    except TimeoutError:
+        return None, None, "Zenodo OAI-PMH request timed out."
+    except _ZENODO_REQUEST_EXCEPTIONS:
+        return None, None, "Zenodo OAI-PMH request failed."
 
 
 def get_record_raw(record_id: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -169,8 +177,10 @@ def get_record_raw(record_id: str) -> tuple[dict[str, Any] | None, str | None]:
     try:
         data = fetch_json(method="GET", url=f"{RECORDS_URL}/{record_id}", timeout=20)
         return data or {}, None
-    except _ZENODO_REQUEST_EXCEPTIONS as e:
-        return None, f"Zenodo error: {str(e)}"
+    except TimeoutError:
+        return None, "Zenodo raw record request timed out."
+    except _ZENODO_REQUEST_EXCEPTIONS:
+        return None, "Zenodo raw record request failed."
 
 
 def extract_pdf_from_raw(rec: dict[str, Any]) -> str | None:

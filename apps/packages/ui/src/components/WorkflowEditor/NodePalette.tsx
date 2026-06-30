@@ -6,10 +6,11 @@
  */
 
 import { useState, useMemo, useEffect } from "react"
-import { Input, Collapse, Tooltip, Spin, Alert, Button } from "antd"
+import { Input, Collapse, Tooltip, Spin, Button } from "antd"
 import { Search, GripVertical } from "lucide-react"
 import type { WorkflowStepType } from "@/types/workflow-editor"
 import { useWorkflowEditorStore } from "@/store/workflow-editor"
+import { Alert } from "@/components/ui/primitives"
 import { getCategorizedSteps, type StepTypeMetadata } from "./step-registry"
 import { STEP_ICON_COMPONENTS, DEFAULT_STEP_ICON } from "./step-icons"
 
@@ -355,20 +356,17 @@ export const NodePalette = ({ className = "" }: NodePaletteProps) => {
       {stepTypesStatus === "error" && (
         <div className="px-3 pt-2">
           <Alert
-            type="warning"
-            showIcon
+            variant="warning"
             title="Limited node library"
-            description={
-              <span className="text-xs">
-                Could not load server step types. Showing fallback steps.
-              </span>
-            }
-            action={
-              <Button size="small" onClick={handleRetryStepTypes}>
-                Retry
-              </Button>
-            }
-          />
+            action={{
+              label: "Retry",
+              onClick: handleRetryStepTypes
+            }}
+          >
+            <span className="text-xs">
+              Could not load server step types. Showing fallback steps.
+            </span>
+          </Alert>
         </div>
       )}
 

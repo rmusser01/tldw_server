@@ -1,6 +1,7 @@
 import { createWithEqualityFn } from "zustand/traditional"
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
+import type { AssistantSelection } from "@/types/assistant-selection"
 
 const STORAGE_KEY = "tldw-playground-session"
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000 // 24 hours
@@ -15,6 +16,13 @@ export interface PlaygroundSessionData {
   // Core identifier (used to restore messages from Dexie)
   historyId: string | null
   serverChatId: string | null
+  trackedAssistantSelection: AssistantSelection | null
+  trackedAssistantKind: "character" | "persona" | null
+  trackedAssistantId: string | null
+  trackedCharacterId: string | null
+  trackedAssistantDisplayName: string | null
+  trackedAssistantAvatarUrl: string | null
+  serverChatPersonaMemoryMode: "read_only" | "read_write" | null
   scopeKey: string | null
 
   // Settings NOT already persisted elsewhere (selectedModel uses useStorage)
@@ -46,6 +54,13 @@ interface PlaygroundSessionState extends PlaygroundSessionData {
 const initialState: PlaygroundSessionData = {
   historyId: null,
   serverChatId: null,
+  trackedAssistantSelection: null,
+  trackedAssistantKind: null,
+  trackedAssistantId: null,
+  trackedCharacterId: null,
+  trackedAssistantDisplayName: null,
+  trackedAssistantAvatarUrl: null,
+  serverChatPersonaMemoryMode: null,
   scopeKey: null,
   chatMode: "normal",
   webSearch: false,
@@ -109,6 +124,13 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       partialize: (state) => ({
         historyId: state.historyId,
         serverChatId: state.serverChatId,
+        trackedAssistantSelection: state.trackedAssistantSelection,
+        trackedAssistantKind: state.trackedAssistantKind,
+        trackedAssistantId: state.trackedAssistantId,
+        trackedCharacterId: state.trackedCharacterId,
+        trackedAssistantDisplayName: state.trackedAssistantDisplayName,
+        trackedAssistantAvatarUrl: state.trackedAssistantAvatarUrl,
+        serverChatPersonaMemoryMode: state.serverChatPersonaMemoryMode,
         scopeKey: state.scopeKey,
         chatMode: state.chatMode,
         webSearch: state.webSearch,

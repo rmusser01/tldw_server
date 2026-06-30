@@ -74,6 +74,55 @@ def test_restore_snapshot_rejects_symlink_member(tmp_path: Path) -> None:
     assert (workspace / "keep.txt").read_text(encoding="utf-8") == "safe"
 
 
+def test_restore_snapshot_rejects_symlink_workspace_root_before_touching_target(tmp_path: Path) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    source_workspace = tmp_path / "source-workspace"
+    source_workspace.mkdir(parents=True, exist_ok=True)
+    (source_workspace / "restored.txt").write_text("snapshot", encoding="utf-8")
+    snapshot = manager.create_snapshot("sess-root-link", str(source_workspace))
+
+    outside_target = tmp_path / "outside-target"
+    outside_target.mkdir(parents=True, exist_ok=True)
+    outside_file = outside_target / "keep.txt"
+    outside_file.write_text("do not touch", encoding="utf-8")
+    symlink_root = tmp_path / "workspace-link"
+    try:
+        os.symlink(str(outside_target), str(symlink_root))
+    except OSError as exc:
+        pytest.skip(f"symlink creation not supported in this environment: {exc}")
+
+    with pytest.raises(ValueError, match="Refusing symlink workspace root"):
+        manager.restore_snapshot("sess-root-link", snapshot["snapshot_id"], str(symlink_root))
+
+    assert outside_file.read_text(encoding="utf-8") == "do not touch"
+    assert not (outside_target / "restored.txt").exists()
+
+
+def test_restore_snapshot_rejects_symlink_workspace_ancestor_before_touching_target(tmp_path: Path) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    source_workspace = tmp_path / "source-workspace"
+    source_workspace.mkdir(parents=True, exist_ok=True)
+    (source_workspace / "restored.txt").write_text("snapshot", encoding="utf-8")
+    snapshot = manager.create_snapshot("sess-ancestor-link", str(source_workspace))
+
+    outside_parent = tmp_path / "outside-parent"
+    outside_workspace = outside_parent / "workspace"
+    outside_workspace.mkdir(parents=True, exist_ok=True)
+    outside_file = outside_workspace / "keep.txt"
+    outside_file.write_text("do not touch", encoding="utf-8")
+    symlink_parent = tmp_path / "workspace-parent-link"
+    try:
+        os.symlink(str(outside_parent), str(symlink_parent))
+    except OSError as exc:
+        pytest.skip(f"symlink creation not supported in this environment: {exc}")
+
+    with pytest.raises(ValueError, match="Refusing symlink workspace ancestor"):
+        manager.restore_snapshot("sess-ancestor-link", snapshot["snapshot_id"], str(symlink_parent / "workspace"))
+
+    assert outside_file.read_text(encoding="utf-8") == "do not touch"
+    assert not (outside_workspace / "restored.txt").exists()
+
+
 def test_create_snapshot_during_concurrent_atomic_writes_is_consistent(tmp_path: Path) -> None:
     manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
     workspace = tmp_path / "workspace"
@@ -115,6 +164,74 @@ def test_create_snapshot_during_concurrent_atomic_writes_is_consistent(tmp_path:
     restored = state_file.read_text(encoding="utf-8")
     assert restored in observed
     assert restored.startswith("version-")
+
+
+def test_create_snapshot_skips_locked_atomic_temp_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    state_file = workspace / "state.txt"
+    state_file.write_text("stable", encoding="utf-8")
+    (workspace / "state.tmp").write_text("in progress", encoding="utf-8")
+
+    original_add = tarfile.TarFile.add
+
+    def _raise_for_atomic_tmp(
+        self: tarfile.TarFile,
+        name: str,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        if Path(name).name == "state.tmp":
+            raise PermissionError("locked atomic temp file")
+        original_add(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(tarfile.TarFile, "add", _raise_for_atomic_tmp)
+
+    snapshot = manager.create_snapshot("sess-locked-temp", str(workspace))
+
+    state_file.write_text("mutated", encoding="utf-8")
+    (workspace / "state.tmp").unlink()
+    assert manager.restore_snapshot("sess-locked-temp", snapshot["snapshot_id"], str(workspace)) is True
+    assert state_file.read_text(encoding="utf-8") == "stable"
+    assert not (workspace / "state.tmp").exists()
+
+
+def test_create_snapshot_retries_transient_locked_workspace_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    manager = SnapshotManager(storage_path=str(tmp_path / "snapshots"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    state_file = workspace / "state.txt"
+    state_file.write_text("stable", encoding="utf-8")
+
+    original_add = tarfile.TarFile.add
+    attempts = {"state.txt": 0}
+
+    def _raise_once_for_state_file(
+        self: tarfile.TarFile,
+        name: str,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        if Path(name).name == "state.txt" and attempts["state.txt"] == 0:
+            attempts["state.txt"] += 1
+            raise PermissionError("transient final file lock")
+        original_add(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(tarfile.TarFile, "add", _raise_once_for_state_file)
+
+    snapshot = manager.create_snapshot("sess-transient-lock", str(workspace))
+
+    assert attempts["state.txt"] == 1
+    state_file.write_text("mutated", encoding="utf-8")
+    assert manager.restore_snapshot("sess-transient-lock", snapshot["snapshot_id"], str(workspace)) is True
+    assert state_file.read_text(encoding="utf-8") == "stable"
 
 
 def test_clone_session_rejects_symlink_escape(tmp_path: Path) -> None:

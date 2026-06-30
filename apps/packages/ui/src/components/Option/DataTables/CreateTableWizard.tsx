@@ -1,8 +1,9 @@
 import React, { useCallback, useMemo } from "react"
-import { Steps, Card, Button, Alert } from "antd"
+import { Steps, Card, Button } from "antd"
 import { ArrowLeft, ArrowRight, Sparkles } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useDataTablesStore } from "@/store/data-tables"
+import { Alert } from "@/components/ui/primitives"
 import { SourceSelector } from "./SourceSelector"
 import { GenerationPanel } from "./GenerationPanel"
 import { TablePreview } from "./TablePreview"
@@ -124,20 +125,16 @@ export const CreateTableWizard: React.FC = () => {
       {/* Intro tip */}
       {wizardStep === "sources" && (
         <Alert
-          title={
-            <span className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4" />
-              {t("dataTables:wizard.tip", "Tip")}
-            </span>
-          }
-          description={t(
+          variant="info"
+          icon={<Sparkles className="size-4" />}
+          title={t("dataTables:wizard.tip", "Tip")}
+          className="mb-4"
+        >
+          {t(
             "dataTables:wizard.tipText",
             "Select chats, documents, or search your knowledge base to extract structured data. The more specific your sources, the better the results."
           )}
-          type="info"
-          showIcon={false}
-          className="mb-4"
-        />
+        </Alert>
       )}
 
       {/* Step content */}

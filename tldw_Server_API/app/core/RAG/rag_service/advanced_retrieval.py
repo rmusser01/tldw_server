@@ -123,8 +123,8 @@ async def apply_multi_vector_passages(
     # Embed query
     try:
         q_vec = await svc.create_embedding(text=query, user_id=user_id)
-    except (AttributeError, ConnectionError, OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
-        logger.warning(f"Query embedding failed; skipping multi-vector passages: {exc}")
+    except (AttributeError, ConnectionError, OSError, RuntimeError, TimeoutError, TypeError, ValueError):
+        logger.warning("Query embedding failed; skipping multi-vector passages")
         return documents
 
     # Build spans for all docs
@@ -146,8 +146,8 @@ async def apply_multi_vector_passages(
             batch = all_spans[i : i + cfg.batch_size]
             vecs = await svc.create_embeddings_batch(batch, user_id=user_id)
             span_vectors.extend(vecs)
-    except (AttributeError, ConnectionError, OSError, RuntimeError, TimeoutError, TypeError, ValueError) as exc:
-        logger.warning(f"Span embeddings failed; skipping multi-vector passages: {exc}")
+    except (AttributeError, ConnectionError, OSError, RuntimeError, TimeoutError, TypeError, ValueError):
+        logger.warning("Span embeddings failed; skipping multi-vector passages")
         return documents
 
     # For each document, compute best span similarity

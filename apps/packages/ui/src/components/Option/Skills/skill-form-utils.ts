@@ -8,6 +8,19 @@ export interface SupportingFileFormEntry {
   originalFilename?: string
 }
 
+export const SKILL_TEMPLATE_IDS = ["summarizer", "explainer", "extractor", "blank"] as const
+
+export type SkillTemplateId = (typeof SKILL_TEMPLATE_IDS)[number]
+
+export interface SkillTemplateOption {
+  id: SkillTemplateId
+  label: string
+  description: string
+  defaultName: string
+  argumentHint: string
+  body: string
+}
+
 const quoteYamlString = (value: string): string => JSON.stringify(value)
 
 const pushYamlLine = (lines: string[], key: string, value: string | null | undefined): void => {
@@ -48,6 +61,105 @@ export const buildInitialSkillContent = (skill: SkillResponse): string => {
   const frontmatter = serializeSkillFrontmatter(skill)
   const body = skill.content || ""
   return `---\n${frontmatter}\n---\n\n${body}`
+}
+
+export const SKILL_TEMPLATE_OPTIONS: SkillTemplateOption[] = [
+  {
+    id: "summarizer",
+    label: "Summarizer",
+    description: "Condense source material into a short, useful answer.",
+    defaultName: "summarizer-skill",
+    argumentHint: "[brief|medium|detailed] [text or topic]",
+    body: `Summarize the following source material.
+
+Input:
+$ARGUMENTS
+
+Return:
+- A concise summary at the requested depth
+- Key points the user should keep
+- Any uncertainty or missing context`
+  },
+  {
+    id: "explainer",
+    label: "Explainer",
+    description: "Teach a concept step by step for a specific audience.",
+    defaultName: "explainer-skill",
+    argumentHint: "[concept] [audience or current understanding]",
+    body: `Explain the following concept.
+
+Topic and audience:
+$ARGUMENTS
+
+Return:
+- A plain-language explanation
+- One concrete example
+- A quick check for understanding`
+  },
+  {
+    id: "extractor",
+    label: "Extractor",
+    description: "Pull structured facts or fields from messy input.",
+    defaultName: "extractor-skill",
+    argumentHint: "[fields to extract] [source text]",
+    body: `Extract structured information from the following input.
+
+Extraction request:
+$ARGUMENTS
+
+Return:
+- The requested fields in a clear list or table
+- Missing fields marked as unknown
+- Source snippets when they help verify the extraction`
+  },
+  {
+    id: "blank",
+    label: "Blank",
+    description: "Start from valid frontmatter and write custom instructions.",
+    defaultName: "blank-skill",
+    argumentHint: "[input]",
+    body: `Write the instructions for this skill.
+
+Input:
+$ARGUMENTS
+
+Return the result the user should receive.`
+  }
+]
+
+const getSkillTemplateOption = (templateId: SkillTemplateId): SkillTemplateOption =>
+  SKILL_TEMPLATE_OPTIONS.find((template) => template.id === templateId) ??
+  SKILL_TEMPLATE_OPTIONS[0]
+
+const normalizeSkillTemplateName = (name: string, fallback: string): string => {
+  const normalized = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+
+  if (!normalized) {
+    return fallback
+  }
+
+  const validStart = /^[a-z]/.test(normalized) ? normalized : `skill-${normalized}`
+  return validStart.slice(0, 64).replace(/-+$/g, "") || fallback
+}
+
+export const buildSkillTemplateContent = (
+  templateId: SkillTemplateId,
+  name: string
+): string => {
+  const template = getSkillTemplateOption(templateId)
+  const skillName = normalizeSkillTemplateName(name, template.defaultName)
+  const frontmatter = [
+    `name: ${quoteYamlString(skillName)}`,
+    `description: ${quoteYamlString(template.description)}`,
+    `argument-hint: ${quoteYamlString(template.argumentHint)}`,
+    "context: inline"
+  ].join("\n")
+
+  return `---\n${frontmatter}\n---\n\n${template.body}`
 }
 
 const validateSupportingFilename = (filename: string): void => {

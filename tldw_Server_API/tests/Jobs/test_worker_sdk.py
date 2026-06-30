@@ -25,6 +25,50 @@ class DummySleep:
 
 
 @pytest.mark.asyncio
+async def test_run_with_job_type_filter_only_handles_matching_jobs(tmp_path):
+    db_path = tmp_path / "jobs_wsdk_job_type.db"
+    ensure_jobs_tables(db_path)
+    jm = JobManager(db_path)
+    unwanted = jm.create_job(
+        domain="writing",
+        queue="default",
+        job_type="unwanted",
+        payload={"name": "skip"},
+        owner_user_id="u",
+    )
+    wanted = jm.create_job(
+        domain="writing",
+        queue="default",
+        job_type="wanted",
+        payload={"name": "handle"},
+        owner_user_id="u",
+    )
+
+    cfg = WorkerConfig(
+        domain="writing",
+        queue="default",
+        worker_id="w-job-type",
+        lease_seconds=5,
+        renew_threshold_seconds=1,
+        renew_jitter_seconds=0,
+    )
+    sdk = WorkerSDK(jm, cfg)
+    sdk._sleep = DummySleep(asyncio.sleep)
+    handled: list[str] = []
+
+    async def handler(job_row):
+        handled.append(str(job_row["job_type"]))
+        sdk.stop()
+        return {"ok": True}
+
+    await asyncio.wait_for(sdk.run(handler=handler, job_type="wanted"), timeout=1)
+
+    assert handled == ["wanted"]
+    assert jm.get_job(int(wanted["id"]))["status"] == "completed"
+    assert jm.get_job(int(unwanted["id"]))["status"] == "queued"
+
+
+@pytest.mark.asyncio
 async def test_auto_renew_jitter_and_progress(monkeypatch, tmp_path):
     db_path = tmp_path / "jobs_wsdk.db"
     ensure_jobs_tables(db_path)
@@ -256,6 +300,7 @@ async def test_run_non_retryable_failure_marks_failed(monkeypatch, tmp_path):
 
     class NonRetryableErr(Exception):
         retryable = False
+        failure_code = "prototype_runtime_terminal"
 
     async def handler(job_row):
         raise NonRetryableErr("boom")
@@ -268,6 +313,7 @@ async def test_run_non_retryable_failure_marks_failed(monkeypatch, tmp_path):
     assert any(c.get("retryable") is False for c in calls)
     stored = jm.get_job(int(job["id"]))
     assert stored["status"] == "failed"
+    assert stored["error_code"] == "prototype_runtime_terminal"
 
 
 @pytest.mark.asyncio

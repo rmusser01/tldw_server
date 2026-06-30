@@ -203,6 +203,16 @@ def test_claims_dashboard_analytics_and_export():
             list_payload = r4.json()
             export_ids = [item["export_id"] for item in list_payload.get("exports", [])]
             assert export_meta["export_id"] in export_ids
+            assert list_payload["has_more"] is False
+            assert list_payload["next_offset"] is None
+            assert list_payload["pagination"] == {
+                "mode": "offset",
+                "limit": 10,
+                "offset": 0,
+                "total": list_payload["total"],
+                "has_more": False,
+                "next_offset": None,
+            }
     finally:
         fastapi_app.dependency_overrides.pop(get_auth_principal, None)
         fastapi_app.dependency_overrides.pop(get_request_user, None)

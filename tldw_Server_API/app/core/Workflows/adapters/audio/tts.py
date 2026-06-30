@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.Workflows.adapters._common import (
     AsyncFileWriter,
     resolve_artifact_filename,
     resolve_artifacts_dir,
+    watchlist_artifact_metadata,
 )
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.audio._config import TTSConfig
@@ -199,10 +200,10 @@ async def run_tts_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
                     data = bytes(chunk)
                     await writer.write(data)
                     size_bytes += len(data)
-    except _WORKFLOW_TTS_NONCRITICAL_EXCEPTIONS as e:
-        return {"error": "tts_unavailable", "details": str(e)}
-    except Exception as e:
-        return {"error": "tts_unavailable", "details": str(e)}
+    except _WORKFLOW_TTS_NONCRITICAL_EXCEPTIONS:
+        return {"error": "tts_unavailable"}
+    except Exception:
+        return {"error": "tts_unavailable"}
 
     # Optional post-process normalization via ffmpeg (best-effort)
     pp = config.get("post_process") or {}
@@ -275,12 +276,27 @@ async def run_tts_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
 
             mime, _ = mimetypes.guess_type(str(out_path))
             audio_artifact_id = f"tts_{uuid.uuid4()}"
+            artifact_metadata = config.get("artifact_metadata")
+            if not isinstance(artifact_metadata, dict):
+                artifact_metadata = {}
+            watchlist_metadata = watchlist_artifact_metadata(context)
+            artifact_metadata = {
+                key: value
+                for key, value in artifact_metadata.items()
+                if key not in watchlist_metadata
+            }
             context["add_artifact"](
                 type="tts_audio",
                 uri=f"file://{normalized_path}",
                 size_bytes=size_bytes,
                 mime_type=mime or "application/octet-stream",
-                metadata={"model": model, "voice": voice, "format": ext},
+                metadata={
+                    **artifact_metadata,
+                    "model": model,
+                    "voice": voice,
+                    "format": ext,
+                    **watchlist_metadata,
+                },
                 artifact_id=audio_artifact_id,
             )
     except _WORKFLOW_TTS_NONCRITICAL_EXCEPTIONS:

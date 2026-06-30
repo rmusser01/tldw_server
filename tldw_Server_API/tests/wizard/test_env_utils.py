@@ -36,6 +36,9 @@ def test_ensure_env_updates_and_backs_up(tmp_path):
     assert result.backup_path is not None
     assert result.backup_path.exists()
     assert result.backup_path.read_text(encoding="utf-8") == original
+    if os.name != "nt":
+        backup_mode = stat.S_IMODE(result.backup_path.stat().st_mode)
+        assert backup_mode == 0o600
 
 
 def test_mask_env_values():
@@ -49,6 +52,44 @@ def test_mask_env_values():
     assert masked["AUTH_MODE"] == "single_user"
     assert masked["SINGLE_USER_API_KEY"] != values["SINGLE_USER_API_KEY"]
     assert masked["SINGLE_USER_API_KEY"].endswith("3456")
+
+
+def test_mask_env_values_masks_url_credentials():
+    values = {
+        "DATABASE_URL": "postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users",
+    }
+
+    masked = env_utils.mask_env_values(values)
+
+    assert masked["DATABASE_URL"] == "postgresql://tldw_user:********@postgres:5432/tldw_users"
+    assert "TestPassword123!" not in masked["DATABASE_URL"]
+
+
+def test_mask_env_values_masks_url_credentials_with_malformed_port():
+    values = {
+        "DATABASE_URL": "postgresql://tldw_user:TestPassword123!@postgres:bad/tldw_users",
+    }
+
+    masked = env_utils.mask_env_values(values)
+
+    assert masked["DATABASE_URL"] == "postgresql://tldw_user:********@postgres:bad/tldw_users"
+    assert "TestPassword123!" not in masked["DATABASE_URL"]
+
+
+def test_mask_env_values_fallback_masks_credentials_when_urlsplit_raises(monkeypatch):
+    values = {
+        "DATABASE_URL": "postgresql://tldw_user:TestPassword123!@postgres:5432/tldw_users",
+    }
+
+    def fail_urlsplit(_value):
+        raise ValueError("malformed URL")
+
+    monkeypatch.setattr(env_utils, "urlsplit", fail_urlsplit)
+
+    masked = env_utils.mask_env_values(values)
+
+    assert masked["DATABASE_URL"] == "postgresql://tldw_user:********@postgres:5432/tldw_users"
+    assert "TestPassword123!" not in masked["DATABASE_URL"]
 
 
 def test_ensure_env_dry_run_does_not_write_or_backup(tmp_path):

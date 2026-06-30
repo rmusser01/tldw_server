@@ -317,6 +317,14 @@ class UnifiedEvaluationService:
                     description=f"Dataset for {name}",
                     created_by=created_by
                 )
+            elif dataset_id:
+                existing_dataset = self.db.get_dataset(
+                    dataset_id,
+                    created_by=created_by,
+                    include_samples=False,
+                )
+                if not existing_dataset:
+                    raise ValueError(f"Dataset {dataset_id} not found")
 
             # Create evaluation
             eval_id = self.db.create_evaluation(
@@ -1505,7 +1513,7 @@ class UnifiedEvaluationService:
 
         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to store evaluation result: {e}")
-            return f"temp_{int(time.time())}"
+            raise
 
     async def get_metrics_summary(self) -> dict[str, Any]:
         """Get evaluation metrics summary"""
@@ -1573,6 +1581,24 @@ _MAX_SERVICE_INSTANCES = 128
 _service_instances_by_user: "OrderedDict[str, UnifiedEvaluationService]" = OrderedDict()  # type: ignore[name-defined]
 
 
+def _schedule_service_shutdown(svc: "UnifiedEvaluationService") -> None:
+    """Schedule best-effort async shutdown for a cached service instance."""
+    shutdown = getattr(svc, "shutdown", None)
+    if not callable(shutdown):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+        result = shutdown()
+        if asyncio.iscoroutine(result):
+            loop.create_task(result)
+    except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(
+            "Unified evaluation service shutdown scheduling skipped for {}: {}",
+            type(svc).__name__,
+            exc,
+        )
+
+
 def get_unified_evaluation_service(db_path: Optional[str] = None) -> UnifiedEvaluationService:
     """
     Get or create the unified evaluation service singleton.
@@ -1612,18 +1638,23 @@ def get_unified_evaluation_service_for_user(user_id: str | int) -> UnifiedEvalua
             legacy_numeric_key = int(uid_key)
         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
             legacy_numeric_key = None
-        # Return existing and mark as recently used
-        if uid_key in _service_instances_by_user:
-            svc = _service_instances_by_user.pop(uid_key)
-            # If tests override the DB via env, ensure the cached instance matches
+        def _ensure_test_db_override(svc: UnifiedEvaluationService) -> UnifiedEvaluationService:
             try:
                 import os as _os
                 override_path = _os.getenv("EVALUATIONS_TEST_DB_PATH")
                 if override_path and getattr(getattr(svc, "db", None), "db_path", None) != override_path:
-                    # Replace with a new instance bound to the override path
-                    svc = UnifiedEvaluationService(db_path=override_path)
+                    replacement = UnifiedEvaluationService(db_path=override_path)
+                    _schedule_service_shutdown(svc)
+                    return replacement
             except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
                 pass
+            return svc
+
+        # Return existing and mark as recently used
+        if uid_key in _service_instances_by_user:
+            svc = _service_instances_by_user.pop(uid_key)
+            # If tests override the DB via env, ensure the cached instance matches.
+            svc = _ensure_test_db_override(svc)
             _service_instances_by_user[uid_key] = svc
             return svc
         # Temporary migration path: older in-process callers cached services under numeric
@@ -1631,6 +1662,7 @@ def get_unified_evaluation_service_for_user(user_id: str | int) -> UnifiedEvalua
         # callers and long-lived workers have been restarted on the string-scope contract.
         if legacy_numeric_key is not None and legacy_numeric_key in _service_instances_by_user:  # type: ignore[operator]
             svc = _service_instances_by_user.pop(legacy_numeric_key)  # type: ignore[arg-type]
+            svc = _ensure_test_db_override(svc)
             _service_instances_by_user[uid_key] = svc
             return svc
 
@@ -1643,13 +1675,7 @@ def get_unified_evaluation_service_for_user(user_id: str | int) -> UnifiedEvalua
         if hasattr(_service_instances_by_user, "popitem") and len(_service_instances_by_user) > _MAX_SERVICE_INSTANCES:  # type: ignore[attr-defined]
             try:
                 old_user_id, old_svc = _service_instances_by_user.popitem(last=False)  # type: ignore[arg-type]
-                # Best effort shutdown without blocking
-                try:
-                    import asyncio as _aio
-                    if hasattr(old_svc, "shutdown"):
-                        _aio.create_task(old_svc.shutdown())
-                except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
-                    pass
+                _schedule_service_shutdown(old_svc)
             except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
                 pass
         return svc

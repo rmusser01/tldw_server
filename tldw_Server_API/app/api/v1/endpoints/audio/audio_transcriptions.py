@@ -17,13 +17,8 @@ from fastapi.responses import JSONResponse, Response
 from loguru import logger
 import soundfile as sf
 from starlette import status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_db_transaction, get_request_user, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    check_rate_limit,
-    get_auth_principal,
-    get_db_transaction,
-    require_token_scope,
-)
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import get_billing_org_id, require_within_limit
 from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.Billing.enforcement import (
@@ -46,7 +41,7 @@ from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
 from tldw_Server_API.app.core.Audio.quota_helpers import EXPECTED_DB_EXC
 from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_audio_model_to_whisper
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import (
     apply_transcript_text_policy,
     build_audio_retention_decision,
@@ -67,6 +62,8 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     add_daily_minutes,
     can_start_job,
     check_daily_minutes_allow,
+    consume_daily_minutes,
+    consume_daily_minutes_with_compat,
     finish_job,
     get_job_heartbeat_interval_seconds,
     get_limits_for_user,
@@ -82,6 +79,7 @@ router = APIRouter(
         429: {"description": "Rate limit exceeded"},
     },
 )
+_AUDIO_QUOTA_DB_EXC = (*EXPECTED_DB_EXC, AudioQuotaStoreUnavailable)
 
 _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -102,6 +100,19 @@ _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     ValueError,
 )
+_OPENAI_AUDIO_TRANSCRIPT_RESPONSE_CONTENT = {
+    "application/json": {},
+    "application/x-subrip": {},
+    "text/plain": {},
+    "text/vtt": {},
+}
+_OPENAI_AUDIO_TRANSCRIPT_RESPONSES = {
+    status.HTTP_200_OK: {
+        "description": "OpenAI-compatible transcript response in JSON, plain text, SRT, or VTT format.",
+        "content": _OPENAI_AUDIO_TRANSCRIPT_RESPONSE_CONTENT,
+    },
+    status.HTTP_402_PAYMENT_REQUIRED: {"description": "Billing limit exceeded. Upgrade plan to continue."},
+}
 
 _AUDIO_UPLOAD_SUFFIX_BY_CONTENT_TYPE: dict[str, str] = {
     "audio/wav": ".wav",
@@ -178,6 +189,7 @@ def _audio_shim_attr(name: str):
     defaults: dict[str, Any] = {
         "check_daily_minutes_allow": check_daily_minutes_allow,
         "add_daily_minutes": add_daily_minutes,
+        "consume_daily_minutes": consume_daily_minutes,
         "get_job_heartbeat_interval_seconds": get_job_heartbeat_interval_seconds,
         "heartbeat_jobs": heartbeat_jobs,
         "get_limits_for_user": get_limits_for_user,
@@ -211,18 +223,18 @@ def _audio_shim_attr(name: str):
         if hasattr(audio_pkg_shim, name):
             package_candidate = getattr(audio_pkg_shim, name)
     except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
-        logger.debug("audio_transcriptions shim package lookup failed for {}", name, exc_info=True)
+        logger.debug("audio_transcriptions shim package lookup failed")
     except Exception:
-        logger.debug("audio_transcriptions shim package lookup raised unexpected error for {}", name, exc_info=True)
+        logger.debug("audio_transcriptions shim package lookup raised unexpected error")
     try:
         from tldw_Server_API.app.api.v1.endpoints.audio import audio as audio_module_shim
 
         if hasattr(audio_module_shim, name):
             module_candidate = getattr(audio_module_shim, name)
     except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
-        logger.debug("audio_transcriptions shim module lookup failed for {}", name, exc_info=True)
+        logger.debug("audio_transcriptions shim module lookup failed")
     except Exception:
-        logger.debug("audio_transcriptions shim module lookup raised unexpected error for {}", name, exc_info=True)
+        logger.debug("audio_transcriptions shim module lookup raised unexpected error")
 
     if package_candidate is not None and module_candidate is not None:
         if package_candidate is module_candidate:
@@ -255,6 +267,20 @@ async def _check_daily_minutes_allow(user_id: int, minutes: float):
 
 async def _add_daily_minutes(user_id: int, minutes: float):
     return await _audio_shim_attr("add_daily_minutes")(user_id, minutes)
+
+
+async def _consume_daily_minutes(
+    user_id: int,
+    minutes: float,
+    *,
+    operation_id: str | None = None,
+) -> tuple[bool, float | None]:
+    return await consume_daily_minutes_with_compat(
+        user_id=user_id,
+        minutes=minutes,
+        operation_id=operation_id,
+        quota_helper_resolver=_audio_shim_attr,
+    )
 
 
 def _stt_provider_envelope(stt_registry: Any, provider_name: str) -> Optional[dict[str, Any]]:
@@ -435,13 +461,11 @@ def _dictation_error_detail(
 @router.post(
     "/transcriptions",
     summary="Transcribes audio into text (OpenAI Compatible)",
-    responses={
-        status.HTTP_402_PAYMENT_REQUIRED: {"description": "Billing limit exceeded. Upgrade plan to continue."},
-    },
+    responses=_OPENAI_AUDIO_TRANSCRIPT_RESPONSES,
     dependencies=[
         Depends(check_rate_limit),
         Depends(
-            require_token_scope("any", require_if_present=True, endpoint_id="audio.transcriptions", count_as="call")
+            TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.transcriptions", count_as="call")
         ),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
         # Pessimistic pre-check: verifies at least 1 minute of transcription
@@ -560,11 +584,8 @@ async def create_transcription(
         """Best-effort RG job heartbeat loop (no-op when unsupported)."""
         try:
             interval = _audio_shim_attr("get_job_heartbeat_interval_seconds")()
-        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(
-                "audio.transcriptions: get_job_heartbeat_interval_seconds failed; "
-                f"skipping job heartbeat. user_id={user_id}, error={exc}"
-            )
+        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("audio.transcriptions job heartbeat interval lookup failed; skipping job heartbeat")
             return None
         if not interval or interval <= 0:
             return None
@@ -576,16 +597,13 @@ async def create_transcription(
                     await _audio_shim_attr("heartbeat_jobs")(user_id)
                 except asyncio.CancelledError:
                     raise
-                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as hb_exc:
-                    logger.debug(f"audio.transcriptions heartbeat_jobs failed: {hb_exc}")
+                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("audio.transcriptions job heartbeat failed; continuing")
 
         try:
             return asyncio.create_task(_hb_loop())
-        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(
-                "audio.transcriptions: failed to start job heartbeat task; "
-                f"user_id={user_id}, error={exc}"
-            )
+        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("audio.transcriptions failed to start job heartbeat task; continuing without heartbeat")
             return None
 
     # Resolve per-tier file size limit
@@ -717,8 +735,7 @@ async def create_transcription(
                 canonical_path = temp_audio_path
 
         if is_test_mode():
-            source_label = "converted" if canonical_path != temp_audio_path else "original"
-            logger.debug(f"TEST_MODE: canonical audio path resolved: path={canonical_path}, source={source_label}")
+            logger.debug("TEST_MODE: canonical audio path resolved")
 
         base_dir = PathLib(canonical_path).parent
 
@@ -734,13 +751,13 @@ async def create_transcription(
             if frames is None or not samplerate:
                 raise ValueError("soundfile.info returned incomplete metadata")
             duration_seconds = float(frames) / float(samplerate)
-        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"soundfile.info failed; falling back to read for duration: error={e}")
+        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("soundfile.info failed; falling back to read for duration")
             try:
                 audio_data, sample_rate = sf_mod.read(canonical_path)
                 duration_seconds = float(len(audio_data)) / float(sample_rate or 16000)
-            except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as read_err:
-                logger.debug(f"Failed to compute audio duration; defaulting to 0: error={read_err}")
+            except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to compute audio duration; defaulting to 0")
                 duration_seconds = 0.0
 
         granularity_tokens = set()
@@ -753,8 +770,8 @@ async def create_transcription(
                         granularity_tokens = {str(x).strip().lower() for x in arr}
                 else:
                     granularity_tokens = {t.strip().lower() for t in s.split(",") if t.strip()}
-        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Failed to parse timestamp_granularities; defaulting to 'segment': error={e}")
+        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to parse timestamp_granularities; defaulting to 'segment'")
             granularity_tokens = {"segment"}
         if not granularity_tokens:
             granularity_tokens = {"segment"}
@@ -771,8 +788,8 @@ async def create_transcription(
                     parsed_hotwords = json.loads(raw_hotwords)
                     if isinstance(parsed_hotwords, list):
                         hotwords_norm = [str(x).strip() for x in parsed_hotwords if str(x).strip()]
-                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as hotwords_exc:
-                    logger.debug(f"Failed to parse hotwords JSON; falling back to CSV parsing: {hotwords_exc}")
+                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("Failed to parse hotwords JSON; falling back to CSV parsing")
             if hotwords_norm is None:
                 hotwords_norm = [part.strip() for part in raw_hotwords.split(",") if part.strip()]
             hotwords_norm = hotwords_norm[:128] if hotwords_norm else None
@@ -822,7 +839,7 @@ async def create_transcription(
 
         def _raise_on_transcription_error(text: Any) -> None:
             if _is_transcription_error_message(text):
-                logger.error(f"Transcription failed: {text}")
+                logger.error("Transcription returned error sentinel")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail=_dictation_error_detail(
@@ -834,10 +851,14 @@ async def create_transcription(
 
         minutes_est = duration_seconds / 60.0
         try:
-            allow, remaining_after = await _check_daily_minutes_allow(current_user.id, minutes_est)
-        except EXPECTED_DB_EXC as e:
+            allow, remaining_after = await _consume_daily_minutes(
+                current_user.id,
+                minutes_est,
+                operation_id=f"audio-transcription:{rid}:daily-minutes",
+            )
+        except _AUDIO_QUOTA_DB_EXC as e:
             logger.exception(
-                'check_daily_minutes_allow failed; allowing by default: user_id={}, error={}; request_id={}',
+                'consume_daily_minutes failed; allowing by default: user_id={}, error={}; request_id={}',
                 current_user.id,
                 e,
                 rid,
@@ -891,8 +912,8 @@ async def create_transcription(
                     )
             except HTTPException:
                 raise
-            except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as _billing_err:
-                logger.debug(f"Billing secondary minutes check failed (fail-open): {_billing_err}")
+            except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Billing secondary minutes check failed; allowing by default")
 
         detected_language: Optional[str] = None
         segments_for_timing: Optional[list[dict[str, Any]]] = None
@@ -920,8 +941,8 @@ async def create_transcription(
                         )
                 except HTTPException:
                     raise
-                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as preflight_exc:  # pragma: no cover - defensive
-                    logger.debug(f"Whisper model preflight check failed; proceeding without it: {preflight_exc}")
+                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - defensive
+                    logger.debug("Whisper model preflight check failed; proceeding without it")
                 try:
                     if task_normalized == "translate":
                         selected_lang_for_stt: Optional[str] = None
@@ -957,7 +978,7 @@ async def create_transcription(
                     segments_for_timing = artifact.get("segments") or []
                     transcribed_text = artifact.get("text", "")
                 except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
-                    logger.error(f"Whisper transcription failed: {e}")
+                    logger.error("Whisper transcription failed")
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail=_dictation_error_detail(
@@ -1022,12 +1043,7 @@ async def create_transcription(
                     segments_for_timing = artifact.get("segments") or []
                     transcribed_text = artifact.get("text", "")
                 except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
-                    logger.error(
-                        'Transcription failed for provider={}, model={}: {}',
-                        provider,
-                        model_for_provider,
-                        e,
-                    )
+                    logger.error("Transcription failed for STT provider")
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail=_dictation_error_detail(
@@ -1068,8 +1084,8 @@ async def create_transcription(
             )
 
             transcribed_text = _cv_post(transcribed_text)
-        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Custom vocabulary postprocessing failed; continuing without it: {exc}")
+        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Custom vocabulary postprocessing failed; continuing without it")
 
         raw_transcribed_text = transcribed_text
         raw_timed_segments = _normalize_timed_segments(segments_for_timing)
@@ -1090,15 +1106,6 @@ async def create_transcription(
         else:
             redaction_outcome = "skipped"
 
-        try:
-            await _add_daily_minutes(current_user.id, minutes_est)
-        except EXPECTED_DB_EXC as e:
-            logger.exception(
-                'Failed to record daily minutes: user_id={}, error={}; request_id={}',
-                current_user.id,
-                e,
-                rid,
-            )
         # Billing: record actual transcription minutes to org-level enforcement
         if enforcement_enabled() and billing_org_id is not None and minutes_est > 0:
             _billed_minutes = max(1, int(math.ceil(minutes_est)))
@@ -1177,7 +1184,7 @@ async def create_transcription(
             else:
                 srt_content = f"1\n00:00:00,000 --> 00:00:10,000\n{transcribed_text}\n"
             _emit_success_metrics(redaction_outcome=redaction_outcome)
-            return Response(content=srt_content, media_type="text/plain")
+            return Response(content=srt_content, media_type="application/x-subrip")
 
         if response_format == "vtt":
             _raise_on_transcription_error(transcribed_text)
@@ -1281,8 +1288,8 @@ async def create_transcription(
                         "transition_indices": segmenter.get_transition_indices(),
                         "segments": segs,
                     }
-            except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as seg_err:
-                logger.warning(f"Auto-segmentation failed: {seg_err}")
+            except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+                logger.warning("Auto-segmentation failed; continuing without it")
 
         if response_format == "verbose_json":
             response_data["task"] = task_normalized
@@ -1318,7 +1325,7 @@ async def create_transcription(
         raise
     except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
         _emit_error_metrics(status_label="internal_error", reason="internal")
-        logger.error(f"Error during transcription: {e}", exc_info=True)
+        logger.error("Error during transcription")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=_dictation_error_detail(
@@ -1333,30 +1340,28 @@ async def create_transcription(
         if canonical_path and canonical_path != temp_audio_path and os.path.exists(canonical_path):
             try:
                 os.remove(canonical_path)
-            except OSError as e:
-                logger.warning(f"Failed to remove canonical audio file: path={canonical_path}, error={e}")
+            except OSError:
+                logger.warning("Failed to remove canonical audio file")
         if temp_audio_path and os.path.exists(temp_audio_path):
             try:
                 os.remove(temp_audio_path)
-            except OSError as e:
-                logger.warning(f"Failed to remove temp audio file: path={temp_audio_path}, error={e}")
+            except OSError:
+                logger.warning("Failed to remove temp audio file")
                 try:
                     increment_counter(
                         "app_warning_events_total", labels={"component": "audio", "event": "tempfile_remove_failed"}
                     )
-                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as m_err:
-                    logger.debug(f"metrics increment failed (audio tempfile_remove_failed): error={m_err}")
+                except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("metrics increment failed (audio tempfile_remove_failed)")
 
 
 @router.post(
     "/translations",
     summary="Translates audio into English (OpenAI Compatible)",
-    responses={
-        status.HTTP_402_PAYMENT_REQUIRED: {"description": "Billing limit exceeded. Upgrade plan to continue."},
-    },
+    responses=_OPENAI_AUDIO_TRANSCRIPT_RESPONSES,
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.translations", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.translations", count_as="call")),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
         # Pessimistic pre-check: verifies at least 1 minute of transcription
         # quota remains.  Actual duration is unknown until after processing,
@@ -1402,8 +1407,8 @@ async def create_translation(
             tags=[str(model or "")],
             metadata={"filename": getattr(file, "filename", None), "language": "en"},
         )
-    except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"usage_log audio.translations failed: error={e}")
+    except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("usage_log audio.translations failed")
 
     return await create_transcription(
         request=request,
@@ -1473,5 +1478,5 @@ async def segment_transcript(
     except HTTPException:
         raise
     except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Transcript segmentation error: {e}", exc_info=True)
+        logger.error("Transcript segmentation failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Transcript segmentation failed") from e

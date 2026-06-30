@@ -120,6 +120,16 @@ def test_list_chat_sessions_uses_batched_message_counts_and_filters_character_sc
     body = response.json()
     assert [item["id"] for item in body["chats"]] == ["character-chat"]
     assert body["total"] == 1
+    assert body["pagination"] == {
+        "mode": "offset",
+        "limit": 50,
+        "offset": 0,
+        "total": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert body["has_more"] is False
+    assert body["next_offset"] is None
     assert single_calls == []
     assert batched_calls == [["character-chat"]]
 

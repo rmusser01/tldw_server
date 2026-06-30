@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from loguru import logger
+
 from tldw_Server_API.app.core.RAG.rag_service.document_grader import (
     DocumentGrader,
     GradingConfig,
@@ -22,6 +24,7 @@ from tldw_Server_API.app.core.RAG.rag_service.document_grader import (
     GradingBatchResult,
     grade_and_filter_documents,
     _resolve_grading_config,
+    StructuredOutputParseError,
 )
 
 
@@ -212,6 +215,51 @@ class TestDocumentGrader:
         assert result.is_relevant is True
 
     @pytest.mark.asyncio
+    async def test_grade_document_parse_fallback_sanitizes_parser_error_logs(self):
+        """Test parse fallback logs avoid raw parser exception details."""
+        leaked_path = "/Users/example/private/grading-response.json"
+        leaked_token = "sk-test-parser-secret"
+        parser_error = (
+            f"parser failed while reading {leaked_path} "
+            f"with token {leaked_token}"
+        )
+
+        def analyze(*args, **kwargs):
+            return (
+                f"This relevant useful response references {leaked_path} "
+                f"and token {leaked_token}"
+            )
+
+        captured_logs = []
+        sink_id = logger.add(captured_logs.append, format="{message}")
+        try:
+            with patch(
+                "tldw_Server_API.app.core.RAG.rag_service.document_grader.parse_structured_output",
+                side_effect=StructuredOutputParseError(parser_error),
+            ):
+                grader = DocumentGrader(analyze_fn=analyze)
+                doc = MockDocument(id="parse_safe_doc", content="Content", score=0.1)
+
+                result = await grader.grade_document("Query", doc)
+        finally:
+            logger.remove(sink_id)
+
+        assert result.method == "llm_heuristic"
+        assert result.is_relevant is True
+        assert result.relevance_score == 0.7
+        assert result.reasoning == "Heuristic parsing from LLM response"
+
+        combined_result_text = f"{result.reasoning} {result.metadata}"
+        combined_log_text = " ".join(str(message) for message in captured_logs)
+        for leaked_fragment in (
+            parser_error,
+            leaked_path,
+            leaked_token,
+        ):
+            assert leaked_fragment not in combined_result_text
+            assert leaked_fragment not in combined_log_text
+
+    @pytest.mark.asyncio
     async def test_grade_document_fallback_to_score(self):
         """Test fallback to score when analyze function raises exception."""
         def failing_analyze(*args, **kwargs):
@@ -235,6 +283,91 @@ class TestDocumentGrader:
         assert result_low.method == "score_fallback"
 
     @pytest.mark.asyncio
+    async def test_grade_document_score_fallback_sanitizes_error_details(self):
+        """Test score fallback does not expose raw exception details."""
+        leaked_error = (
+            "LLM failed for /Users/example/private/doc.txt "
+            "with token sk-test-secret-value"
+        )
+
+        def failing_analyze(*args, **kwargs):
+            raise RuntimeError(leaked_error)
+
+        captured_logs = []
+        sink_id = logger.add(captured_logs.append, format="{message}")
+        try:
+            config = GradingConfig(fallback_to_score=True, fallback_min_score=0.4)
+            grader = DocumentGrader(analyze_fn=failing_analyze, config=config)
+            doc = MockDocument(id="safe_doc", content="Content", score=0.8)
+
+            result = await grader.grade_document("Query", doc)
+        finally:
+            logger.remove(sink_id)
+
+        assert result.method == "score_fallback"
+        assert result.is_relevant is True
+        assert result.relevance_score == 0.8
+        assert result.reasoning == "Using retrieval score as fallback"
+        assert result.metadata == {"error": "grading_error"}
+
+        combined_result_text = f"{result.reasoning} {result.metadata}"
+        combined_log_text = " ".join(str(message) for message in captured_logs)
+        for leaked_fragment in (
+            leaked_error,
+            "/Users/example/private/doc.txt",
+            "sk-test-secret-value",
+        ):
+            assert leaked_fragment not in combined_result_text
+            assert leaked_fragment not in combined_log_text
+
+    @pytest.mark.asyncio
+    async def test_grade_document_score_fallback_passes_sanitized_error_label(self, monkeypatch):
+        """Test score fallback boundary receives a fixed label for provider failures."""
+        leaked_error = (
+            "provider failed while reading /Users/example/private/request.json "
+            "with token sk-test-boundary-secret"
+        )
+        fallback_errors = []
+
+        def failing_analyze(*args, **kwargs):
+            raise RuntimeError(leaked_error)
+
+        original_fallback = DocumentGrader._fallback_to_score
+
+        def tracking_fallback(self, doc_id, doc_score, start_time, error=None):
+            fallback_errors.append(error)
+            return original_fallback(self, doc_id, doc_score, start_time, error)
+
+        monkeypatch.setattr(DocumentGrader, "_fallback_to_score", tracking_fallback)
+
+        captured_logs = []
+        sink_id = logger.add(captured_logs.append, format="{message}")
+        try:
+            config = GradingConfig(fallback_to_score=True, fallback_min_score=0.4)
+            grader = DocumentGrader(analyze_fn=failing_analyze, config=config)
+            doc = MockDocument(id="safe_doc", content="Content", score=0.8)
+
+            result = await grader.grade_document("Query", doc)
+        finally:
+            logger.remove(sink_id)
+
+        assert fallback_errors == ["grading_error"]
+        assert result.method == "score_fallback"
+        assert result.is_relevant is True
+        assert result.relevance_score == 0.8
+        assert result.metadata == {"error": "grading_error"}
+
+        combined_result_text = f"{result.reasoning} {result.metadata}"
+        combined_log_text = " ".join(str(message) for message in captured_logs)
+        for leaked_fragment in (
+            leaked_error,
+            "/Users/example/private/request.json",
+            "sk-test-boundary-secret",
+        ):
+            assert leaked_fragment not in combined_result_text
+            assert leaked_fragment not in combined_log_text
+
+    @pytest.mark.asyncio
     async def test_grade_document_fallback_disabled(self):
         """Test behavior when fallback is disabled and LLM fails."""
         def failing_analyze(*args, **kwargs):
@@ -249,6 +382,37 @@ class TestDocumentGrader:
         assert result.is_relevant is False
         assert result.relevance_score == 0.0
         assert result.method == "error_fallback"
+
+    @pytest.mark.asyncio
+    async def test_grade_document_error_fallback_sanitizes_error_details(self):
+        """Test disabled fallback does not expose raw exception details."""
+        leaked_error = (
+            "provider failure at /var/private/tldw/request.json "
+            "using token secret-token-123"
+        )
+
+        def failing_analyze(*args, **kwargs):
+            raise RuntimeError(leaked_error)
+
+        config = GradingConfig(fallback_to_score=False)
+        grader = DocumentGrader(analyze_fn=failing_analyze, config=config)
+        doc = MockDocument(id="safe_doc", content="Content", score=0.9)
+
+        result = await grader.grade_document("Query", doc)
+
+        assert result.method == "error_fallback"
+        assert result.is_relevant is False
+        assert result.relevance_score == 0.0
+        assert result.reasoning == "Grading failed and fallback disabled"
+        assert result.metadata == {"error": "grading_error"}
+
+        combined_result_text = f"{result.reasoning} {result.metadata}"
+        for leaked_fragment in (
+            leaked_error,
+            "/var/private/tldw/request.json",
+            "secret-token-123",
+        ):
+            assert leaked_fragment not in combined_result_text
 
     @pytest.mark.asyncio
     async def test_grade_documents_batch(self, mock_analyze_relevant, sample_documents):

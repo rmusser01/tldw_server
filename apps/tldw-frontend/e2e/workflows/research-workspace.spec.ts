@@ -6,6 +6,7 @@
 import { test, expect, assertNoCriticalErrors } from "../utils/fixtures"
 import { seedAuth } from "../utils/helpers"
 import { ResearchWorkspacePage } from "../utils/page-objects"
+import type { Locator, Page } from "@playwright/test"
 
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 }
 const SUMMARY_TEST_MODEL = "gpt-4o-mini"
@@ -33,6 +34,66 @@ const setWorkspaceSelectedModel = async (page: Parameters<typeof seedAuth>[0]) =
     }
     store.setState({ selectedModel: modelId })
   }, SUMMARY_TEST_MODEL)
+}
+
+const locatorContainsFocus = async (locator: Locator): Promise<boolean> =>
+  (await locator.count()) > 0
+    ? locator
+        .evaluate((element) => {
+          const active = document.activeElement
+          const activeIsDocumentRoot =
+            active === document.body || active === document.documentElement
+          const activeIsCheckboxWrapper =
+            active instanceof HTMLElement &&
+            active.matches("label, .ant-checkbox-wrapper, [role='checkbox']")
+          return (
+            active === element ||
+            (active instanceof Node && element.contains(active)) ||
+            (active instanceof HTMLElement &&
+              !activeIsDocumentRoot &&
+              activeIsCheckboxWrapper &&
+              active.contains(element))
+          )
+        })
+        .catch(() => false)
+    : false
+
+const describeActiveElement = async (page: Page): Promise<string> =>
+  page.evaluate(() => {
+    const active = document.activeElement as HTMLElement | null
+    if (!active) return "none"
+    const label = active.getAttribute("aria-label")
+    const role = active.getAttribute("role")
+    const testId = active.getAttribute("data-testid")
+    const text = active.textContent?.replace(/\s+/g, " ").trim().slice(0, 80)
+    return [
+      active.tagName.toLowerCase(),
+      role ? `role=${role}` : null,
+      label ? `aria-label=${label}` : null,
+      testId ? `data-testid=${testId}` : null,
+      text ? `text=${text}` : null
+    ]
+      .filter(Boolean)
+      .join(" ")
+  })
+
+const pressTabUntilFocused = async (
+  page: Page,
+  locator: Locator,
+  maxTabs = 40
+): Promise<void> => {
+  for (let attempt = 0; attempt < maxTabs; attempt += 1) {
+    if (await locatorContainsFocus(locator)) {
+      return
+    }
+    await page.keyboard.press("Tab")
+  }
+
+  throw new Error(
+    `Expected keyboard focus to reach target after ${maxTabs} Tab presses; active=${await describeActiveElement(
+      page
+    )}`
+  )
 }
 
 test.describe("Research Workspace Workflow", () => {
@@ -85,6 +146,138 @@ test.describe("Research Workspace Workflow", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({ items: [], total: 0 })
+      })
+    })
+
+    await page.route(/\/api\/v1\/workspaces\/[^/]+(?:\/.*)?$/i, async (route) => {
+      const request = route.request()
+      const url = new URL(request.url())
+      const workspaceId = decodeURIComponent(
+        url.pathname.match(/\/api\/v1\/workspaces\/([^/]+)/i)?.[1] || "workspace-e2e"
+      )
+      const method = request.method().toUpperCase()
+      const path = url.pathname
+
+      if (path.endsWith("/context")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            sources: {
+              items: [],
+              summary: {
+                total: 0,
+                selected: 0,
+                queryable: 0,
+                partially_queryable: 0,
+                processing: 0,
+                failed: 0,
+                missing: 0
+              }
+            },
+            capabilities: {
+              workspace_id: workspaceId,
+              capabilities: {}
+            },
+            partial_errors: []
+          })
+        })
+        return
+      }
+
+      if (path.endsWith("/sources/status")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            sources: [],
+            summary: {
+              total: 0,
+              selected: 0,
+              queryable: 0,
+              partially_queryable: 0,
+              processing: 0,
+              failed: 0,
+              missing: 0
+            }
+          })
+        })
+        return
+      }
+
+      if (path.endsWith("/capabilities")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            workspace_id: workspaceId,
+            capabilities: {}
+          })
+        })
+        return
+      }
+
+      if (path.endsWith("/sources")) {
+        if (method === "GET") {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify([])
+          })
+          return
+        }
+
+        const body = request.postDataJSON() as
+          | {
+              source_id?: string
+              media_id?: number
+              title?: string
+              selected?: boolean
+            }
+          | undefined
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: body?.source_id || `source-${body?.media_id || "mock"}`,
+            workspace_id: workspaceId,
+            media_id: body?.media_id || null,
+            title: body?.title || "Mock source",
+            selected: Boolean(body?.selected),
+            state: "queryable",
+            readiness: {
+              metadata_ready: true,
+              text_extracted: true,
+              fts_ready: true,
+              vector_ready: true,
+              citation_ready: true,
+              summary_ready: true,
+              tool_accessible: true
+            }
+          })
+        })
+        return
+      }
+
+      if (path.endsWith("/sources/selection")) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ workspace_id: workspaceId, selected_source_ids: [] })
+        })
+        return
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: workspaceId,
+          workspace_id: workspaceId,
+          name: "Workspace E2E"
+        })
       })
     })
   })
@@ -562,6 +755,143 @@ test.describe("Research Workspace Workflow", () => {
     await assertNoCriticalErrors(diagnostics)
   })
 
+  test("supports keyboard-only source selection and grounded chat submission", async ({
+    authedPage,
+    diagnostics
+  }) => {
+    const sourceMediaId = 8_844_903
+    const sourceTitle = "Keyboard Grounded Source"
+    const userQuestion = "What evidence does the keyboard-selected source provide?"
+    const groundedAnswer = "Keyboard selected source evidence is cited and ready."
+    const ragRequests: Array<Record<string, unknown>> = []
+    const streamChunk = (text: string) =>
+      `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`
+
+    await authedPage.route("**/api/v1/rag/search/stream", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain",
+        body: ""
+      })
+    })
+
+    await authedPage.route("**/api/v1/rag/search", async (route) => {
+      ragRequests.push((route.request().postDataJSON() as Record<string, unknown>) || {})
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          results: [
+            {
+              id: "keyboard-source-result",
+              content: "Evidence from the keyboard-selected source.",
+              metadata: {
+                title: sourceTitle,
+                source: sourceTitle,
+                source_type: "media_db",
+                media_id: sourceMediaId
+              },
+              score: 0.92
+            }
+          ],
+          generated_answer: groundedAnswer,
+          answer: groundedAnswer,
+          citations: [{ source: sourceTitle, media_id: sourceMediaId }]
+        })
+      })
+    })
+
+    await authedPage.route("**/api/v1/chat/completions", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        headers: {
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive"
+        },
+        body: streamChunk(groundedAnswer) + "data: [DONE]\n\n"
+      })
+    })
+
+    const workspacePage = new ResearchWorkspacePage(authedPage)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+    await setWorkspaceSelectedModel(authedPage)
+
+    await workspacePage.seedSources([
+      {
+        mediaId: sourceMediaId,
+        title: sourceTitle,
+        type: "document",
+        status: "ready"
+      }
+    ])
+
+    await expect
+      .poll(async () => (await workspacePage.getSourceIds()).length, {
+        timeout: 10_000
+      })
+      .toBe(1)
+    const [sourceId] = await workspacePage.getSourceIds()
+    const sourceCheckbox = workspacePage.sourcesPanel.getByRole("checkbox", {
+      name: `Select ${sourceTitle}`
+    })
+
+    await expect(sourceCheckbox).toHaveCount(1, { timeout: 5_000 })
+    const skipToSourcesLink = authedPage.getByRole("link", {
+      name: /skip to sources panel/i
+    })
+    await pressTabUntilFocused(authedPage, skipToSourcesLink, 40)
+    await skipToSourcesLink.press("Enter")
+    await expect
+      .poll(
+        () =>
+          workspacePage.sourcesPanel.evaluate((panel) =>
+            panel.contains(document.activeElement)
+          ),
+        { timeout: 5_000 }
+      )
+      .toBe(true)
+    await pressTabUntilFocused(authedPage, sourceCheckbox)
+    await expect
+      .poll(() => locatorContainsFocus(sourceCheckbox), { timeout: 5_000 })
+      .toBe(true)
+    await expect
+      .poll(
+        async () =>
+          authedPage.evaluate(() => {
+            const active = document.activeElement as HTMLElement | null
+            return active
+              ?.closest("[data-source-id]")
+              ?.getAttribute("data-source-id") ?? null
+          }),
+        { timeout: 5_000 }
+      )
+      .toBe(sourceId)
+
+    await authedPage.keyboard.press("Space")
+    await workspacePage.expectSourceSelected(sourceId)
+    await expect(workspacePage.getSelectedSourceTag(sourceTitle)).toBeVisible()
+
+    const chatInput = workspacePage.chatPanel.getByPlaceholder(/ask about your sources/i)
+    await pressTabUntilFocused(authedPage, chatInput, 80)
+    await expect(chatInput).toBeFocused({ timeout: 5_000 })
+    await authedPage.keyboard.type(userQuestion)
+    await expect(chatInput).toHaveValue(userQuestion)
+    await authedPage.keyboard.press("Enter")
+
+    await expect
+      .poll(() => ragRequests.length, { timeout: 10_000 })
+      .toBe(1)
+    expect(ragRequests[0]?.query).toBe(userQuestion)
+    expect(ragRequests[0]?.include_media_ids).toEqual([sourceMediaId])
+    await expect(workspacePage.chatPanel.getByText(groundedAnswer)).toBeVisible({
+      timeout: 10_000
+    })
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
   test("generates compare-sources output for two selected sources through the studio pane", async ({
     authedPage,
     diagnostics
@@ -578,43 +908,55 @@ test.describe("Research Workspace Workflow", () => {
     }
     const comparisonToken = "workspace-compare-sources-token"
     const comparisonOutput = `## Agreements\n- Both sources reference ${comparisonToken}.\n\n## Disagreements\n- Source B adds extra caveats.\n\n## Evidence Strength\n- Evidence is moderate.\n\n## Open Questions\n- Verify the missing caveat.`
-    const compareRequests: Array<Record<string, unknown>> = []
+    const chatCompletionRequests: Array<Record<string, unknown>> = []
 
-    await authedPage.route("**/api/v1/rag/search", async (route) => {
-      compareRequests.push((route.request().postDataJSON() as Record<string, unknown>) || {})
+    await authedPage.route(/\/api\/v1\/media\/\d+\?.*include_content=true/i, async (route) => {
+      const url = new URL(route.request().url())
+      const mediaId = Number(url.pathname.match(/\/media\/(\d+)$/)?.[1] || 0)
+      const source =
+        mediaId === sourceA.mediaId
+          ? sourceA
+          : mediaId === sourceB.mediaId
+            ? sourceB
+            : null
+      await route.fulfill({
+        status: source ? 200 : 404,
+        contentType: "application/json",
+        body: JSON.stringify(
+          source
+            ? {
+                source: { title: source.title, media_id: source.mediaId },
+                content: {
+                  text:
+                    source.mediaId === sourceA.mediaId
+                      ? "Source A states both documents reference the shared comparison token."
+                      : "Source B references the shared comparison token and adds caveats."
+                }
+              }
+            : { detail: "not found" }
+        )
+      })
+    })
+
+    await authedPage.route("**/api/v1/chat/completions", async (route) => {
+      chatCompletionRequests.push(
+        (route.request().postDataJSON() as Record<string, unknown>) || {}
+      )
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          generation: comparisonOutput,
+          choices: [
+            {
+              message: {
+                content: comparisonOutput
+              }
+            }
+          ],
           usage: {
             total_tokens: 321,
             total_cost_usd: 0.12
-          },
-          citations: [
-            { source: sourceA.title, media_id: sourceA.mediaId },
-            { source: sourceB.title, media_id: sourceB.mediaId }
-          ],
-          results: [
-            {
-              id: "compare-source-a",
-              content: "Source A evidence",
-              metadata: {
-                title: sourceA.title,
-                media_id: sourceA.mediaId
-              },
-              score: 0.91
-            },
-            {
-              id: "compare-source-b",
-              content: "Source B evidence",
-              metadata: {
-                title: sourceB.title,
-                media_id: sourceB.mediaId
-              },
-              score: 0.88
-            }
-          ]
+          }
         })
       })
     })
@@ -622,6 +964,7 @@ test.describe("Research Workspace Workflow", () => {
     const workspacePage = new ResearchWorkspacePage(authedPage)
     await workspacePage.goto()
     await workspacePage.waitForReady()
+    await setWorkspaceSelectedModel(authedPage)
 
     await workspacePage.seedSources([sourceA, sourceB])
 
@@ -648,18 +991,19 @@ test.describe("Research Workspace Workflow", () => {
     await compareButton.click()
 
     await expect
-      .poll(() => compareRequests.length, { timeout: 10_000 })
+      .poll(() => chatCompletionRequests.length, { timeout: 10_000 })
       .toBe(1)
-    expect(compareRequests[0]?.query).toBe("agreements disagreements claims evidence")
-    expect(compareRequests[0]?.include_media_ids).toEqual([
-      sourceA.mediaId,
-      sourceB.mediaId
-    ])
-    expect(compareRequests[0]?.top_k).toBe(30)
-    expect(compareRequests[0]?.enable_generation).toBe(true)
-    expect(compareRequests[0]?.enable_citations).toBe(true)
-    expect(String(compareRequests[0]?.generation_prompt || "")).toContain(
-      "Compare the selected sources"
+    expect(chatCompletionRequests[0]?.model).toBe(SUMMARY_TEST_MODEL)
+    const comparisonMessages = chatCompletionRequests[0]?.messages as
+      | Array<{ role?: string; content?: string }>
+      | undefined
+    expect(comparisonMessages?.[0]?.content).toContain(
+      "source-grounded comparison analyst"
+    )
+    expect(comparisonMessages?.[1]?.content).toContain(sourceA.title)
+    expect(comparisonMessages?.[1]?.content).toContain(sourceB.title)
+    expect(comparisonMessages?.[1]?.content).toContain(
+      "Source B references the shared comparison token"
     )
 
     const artifactCard = workspacePage.studioPanel
@@ -696,7 +1040,7 @@ test.describe("Research Workspace Workflow", () => {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            source: { title: "Workspace Studio Summary Source" },
+            source: { title: "Research Workspace Summary Source" },
             content: { text: SUMMARY_SOURCE_TEXT }
           })
         })
@@ -713,7 +1057,7 @@ test.describe("Research Workspace Workflow", () => {
     await workspacePage.seedSources([
       {
         mediaId: 8_844_001,
-        title: "Workspace Studio Summary Source",
+        title: "Research Workspace Summary Source",
         type: "document",
         status: "ready"
       }
@@ -773,7 +1117,7 @@ test.describe("Research Workspace Workflow", () => {
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            source: { title: "Workspace Studio Reload Source" },
+            source: { title: "Research Workspace Reload Source" },
             content: { text: SUMMARY_SOURCE_TEXT }
           })
         })
@@ -790,7 +1134,7 @@ test.describe("Research Workspace Workflow", () => {
     await workspacePage.seedSources([
       {
         mediaId: 8_844_002,
-        title: "Workspace Studio Reload Source",
+        title: "Research Workspace Reload Source",
         type: "document",
         status: "ready"
       }

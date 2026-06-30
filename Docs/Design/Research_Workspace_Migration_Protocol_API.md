@@ -32,10 +32,10 @@ Research Workspace needs a durable backend protocol for migrating local WebUI/br
   Records an accepted chunk receipt. Repeating the same hash and byte count is idempotent. Reusing a chunk id with different content is a conflict.
 
 - `POST /api/v1/workspaces/migrations/{migration_id}/finalize`
-  Finalizes only when all declared chunks are accepted. It returns a recovery manifest and keeps `client_delete_eligible=false`.
+  Finalizes only when all declared chunks are accepted. It performs server read-back verification against the persisted declarations and accepted receipts. It returns a recovery manifest and sets `client_delete_eligible=true` only when every declared chunk has a matching accepted receipt and at least one chunk was declared.
 
 - `POST /api/v1/workspaces/migrations/{migration_id}/client-delete-ack`
-  Explicitly rejects deletion acknowledgement in this slice so clients cannot treat server receipt as authorization to purge local legacy state.
+  Records explicit client acknowledgement only after the migration is finalized, server read-back verification succeeded, `client_delete_eligible=true`, and the acknowledged manifest hash matches the finalized session.
 
 ## Persistence
 
@@ -66,7 +66,8 @@ This API owns migration session and receipt state only. User-visible ingestion, 
 - Conflicting idempotency key, manifest hash, or duplicate chunk content: `409`.
 - Oversized manifest/chunk/diagnostics or invalid hash: `422`.
 - Premature finalize: `409` with missing chunk ids.
-- Client delete acknowledgement: `409` until a later slice explicitly enables deletion eligibility.
+- Client delete acknowledgement before eligibility, before finalize, or with a mismatched manifest hash: `409`.
+- Finalized zero-chunk or failed read-back verification sessions remain recoverable with `client_delete_eligible=false`.
 
 ## Route Ordering
 

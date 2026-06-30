@@ -17,7 +17,7 @@ const STATIC_ROUTE_SPECS = [
   "e2e/workflows/tier-5-specialized/osint.spec.ts",
   "e2e/workflows/tier-5-specialized/researchers.spec.ts",
   "e2e/workflows/tier-5-specialized/journalists.spec.ts",
-  "e2e/workflows/tier-5-specialized/moderation-playground.spec.ts",
+  "e2e/workflows/tier-5-specialized/moderation-routes.spec.ts",
   "e2e/workflows/tier-5-specialized/chunking-playground.spec.ts",
 ]
 

@@ -113,7 +113,7 @@ from .modules.character_templates import (
 MODULE_STRUCTURE = {
     "character_utils.py": {
         "description": "Utility functions for text processing and UI helpers",
-        "lines": "~150",
+        "lines": "~220",
         "functions": [
             "replace_placeholders",
             "replace_user_placeholder",
@@ -123,7 +123,7 @@ MODULE_STRUCTURE = {
     },
     "character_io.py": {
         "description": "Import/export operations for character cards",
-        "lines": "~600",
+        "lines": "~1439",
         "functions": [
             "extract_json_from_image_file",
             "import_character_card_from_json_string",
@@ -134,7 +134,7 @@ MODULE_STRUCTURE = {
     },
     "character_validation.py": {
         "description": "Validation and parsing for different card formats",
-        "lines": "~500",
+        "lines": "~727",
         "functions": [
             "parse_v1_card",
             "parse_v2_card",
@@ -149,7 +149,7 @@ MODULE_STRUCTURE = {
     },
     "character_db.py": {
         "description": "Database CRUD operations for characters",
-        "lines": "~700",
+        "lines": "~448",
         "functions": [
             "_prepare_character_data_for_db_storage",
             "create_new_character_from_data",
@@ -163,7 +163,7 @@ MODULE_STRUCTURE = {
     },
     "character_chat.py": {
         "description": "Chat session and message management",
-        "lines": "~700",
+        "lines": "~1555",
         "functions": [
             "process_db_messages_to_ui_history",
             "process_db_messages_to_rich_ui_history",
@@ -185,7 +185,7 @@ MODULE_STRUCTURE = {
     },
     "character_templates.py": {
         "description": "Character template management",
-        "lines": "~200",
+        "lines": "~130",
         "functions": [
             "get_character_template",
             "list_character_templates",

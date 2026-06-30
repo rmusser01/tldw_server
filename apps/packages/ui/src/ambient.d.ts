@@ -45,6 +45,7 @@ interface ImportMetaEnv {
 
 interface ImportMeta {
   readonly env: ImportMetaEnv
+  readonly main?: boolean
   glob?: {
     <T = unknown>(
       pattern: string,
@@ -72,6 +73,25 @@ declare module "*.png" {
 
 declare module "pa-tesseract.js" {
   export const createWorker: any
+}
+
+declare module "rehype-highlight" {
+  const rehypeHighlight: any
+  export default rehypeHighlight
+}
+
+declare module "xterm/css/xterm.css" {
+  const css: string
+  export default css
+}
+
+declare module "exceljs" {
+  export class Workbook {
+    addWorksheet(name: string): any
+    xlsx: {
+      writeBuffer(): Promise<import("node:buffer").Buffer>
+    }
+  }
 }
 
 declare module "xterm" {

@@ -17,6 +17,7 @@ export type ScopeSnapshot = {
   preset: RagPresetName
   sources: RagSettings["sources"]
   webFallback: boolean
+  collectionId: number | null
   includeMediaIds: number[]
   includeNoteIds: string[]
 }
@@ -28,18 +29,66 @@ export type PinnedSourceFilters = {
 
 export type ThreadHydrationResult = boolean | "terminal"
 
+export type KnowledgeAnswerTrustState =
+  | "cited_answer"
+  | "uncited_degraded_answer"
+  | "no_answer_insufficient_evidence"
+  | "no_results"
+  | "failed_search"
+  | "unsynced_local_result"
+  | "unknown_trust"
+
+export type ExtensionKnowledgeFailureState =
+  | "setup_missing"
+  | "setup_invalid"
+  | "backend_unreachable"
+  | "backend_auth_failed"
+  | "api_allowlist_blocked"
+  | "search_succeeded_sync_failed"
+  | "search_failed"
+
+export type KnowledgeTrustReasonCode =
+  | "missing_citations"
+  | "missing_inspectable_evidence"
+  | "citation_source_not_returned"
+  | "low_relevance"
+  | "web_fallback_used"
+  | "no_evidence"
+  | "unclassified"
+  | string
+
 // Retrieved document with citation info
+export type EvidenceOrigin =
+  | "local_library"
+  | "web_fallback"
+  | "mixed"
+  | "unknown_origin"
+
+export type KnowledgeTrustMetadata = {
+  state?: KnowledgeAnswerTrustState
+  reasonCodes?: KnowledgeTrustReasonCode[]
+  reason_codes?: KnowledgeTrustReasonCode[]
+  evidenceOrigin?: EvidenceOrigin
+  evidence_origin?: EvidenceOrigin
+}
+
 export type RagResult = {
   id?: string
   content?: string
   text?: string
   chunk?: string
+  sourceId?: string
+  sourceType?: string
+  chunkId?: string
+  evidenceOrigin?: EvidenceOrigin
+  sourceStatus?: string
+  unavailableReason?: string | null
   metadata?: {
     title?: string
     source?: string
     url?: string
     page_number?: number
-    chunk_id?: string
+    chunk_id?: string | number
     source_type?: string
     [key: string]: unknown
   }
@@ -63,17 +112,25 @@ export type RagContextData = {
   settings_snapshot?: Partial<RagSettings>
   retrieved_documents: Array<{
     id?: string
+    source_id?: string
     source_type?: string
     title?: string
     score?: number
     chunk_id?: string
     excerpt?: string
+    evidence_origin?: EvidenceOrigin
+    source_status?: string
+    unavailable_reason?: string | null
     url?: string
     page_number?: number
     line_range?: [number, number]
     metadata?: Record<string, unknown>
   }>
   generated_answer?: string
+  trust_state?: KnowledgeAnswerTrustState
+  trust_reason_codes?: KnowledgeTrustReasonCode[]
+  trust_evidence_origin?: EvidenceOrigin
+  knowledge_trust?: KnowledgeTrustMetadata
   citations?: Array<{
     index?: number
     text: string
@@ -96,6 +153,7 @@ export type SearchRuntimeDetails = {
   rerankingEnabled: boolean
   rerankingStrategy: string
   averageRelevance: number | null
+  sourceStatus: Record<string, KnowledgeSourceStatus>
   webFallbackEnabled: boolean
   webFallbackTriggered: boolean
   webFallbackEngine: string | null
@@ -131,6 +189,55 @@ export type SearchRuntimeDetails = {
   }>
 }
 
+export type KnowledgeSourceStatus = {
+  status: "searched" | "empty" | "unavailable" | "skipped" | "error" | string
+  count: number
+  reason?: string
+}
+
+export type KnowledgeSourceIndexStatus =
+  | "ready"
+  | "indexing"
+  | "stale"
+  | "empty"
+  | "unavailable"
+  | "error"
+  | "unknown"
+
+export type KnowledgeSourceEmbeddingStatus =
+  | "ready"
+  | "indexing"
+  | "missing"
+  | "unavailable"
+  | "not_applicable"
+  | "error"
+  | "unknown"
+
+export type KnowledgeSourceHealth = {
+  sourceId: RagSettings["sources"][number]
+  label: string
+  available: boolean
+  searchable: boolean
+  itemCount: number | null
+  indexedCount: number | null
+  lastUpdated: string | null
+  lastIndexed: string | null
+  indexStatus: KnowledgeSourceIndexStatus
+  embeddingStatus: KnowledgeSourceEmbeddingStatus
+  disabledReason: string | null
+  workspaceScoped: boolean
+  hiddenByDefault: boolean
+  privacyNote: string | null
+}
+
+export type KnowledgeSourceHealthState = {
+  bySource: Partial<Record<RagSettings["sources"][number], KnowledgeSourceHealth>>
+  sources: KnowledgeSourceHealth[]
+  loading: boolean
+  error: string | null
+  loadedAt: string | null
+}
+
 // Search history item
 export type SearchHistoryItem = {
   id: string
@@ -145,6 +252,12 @@ export type SearchHistoryItem = {
   preset?: RagPresetName
   settingsSnapshot?: Partial<RagSettings>
   keywords?: string[]
+  trustState?: KnowledgeAnswerTrustState
+  trustReasonCodes?: KnowledgeTrustReasonCode[]
+  evidenceOrigin?: EvidenceOrigin
+  sourceStatus?: Record<string, KnowledgeSourceStatus>
+  unsynced?: boolean
+  citationCount?: number
 }
 
 // Thread/conversation for Knowledge QA
@@ -178,6 +291,10 @@ export type KnowledgeQAState = {
   results: RagResult[]
   answer: string | null
   citations: CitationRef[]
+  answerTrustState: KnowledgeAnswerTrustState
+  answerTrustReasonCodes: KnowledgeTrustReasonCode[]
+  answerEvidenceOrigin: EvidenceOrigin | null
+  extensionFailureState: ExtensionKnowledgeFailureState | null
   searchDetails: SearchRuntimeDetails | null
   error: string | null
   queryWarning: string | null
@@ -205,6 +322,7 @@ export type KnowledgeQAState = {
   queryStage: QueryStage
   lastSearchScope: ScopeSnapshot | null
   pinnedSourceFilters: PinnedSourceFilters
+  sourceHealth: KnowledgeSourceHealthState
 }
 
 // Actions for KnowledgeQA
@@ -215,6 +333,8 @@ export type KnowledgeQAActions = {
   cancelSearch: () => void
   clearResults: () => void
   rerunWithTokenLimit: (tokenLimit: number) => Promise<void>
+  retrySync: () => Promise<boolean>
+  setExtensionFailureState: (state: ExtensionKnowledgeFailureState | null) => void
 
   // Thread actions
   createNewThread: (title?: string) => Promise<string>
@@ -244,6 +364,7 @@ export type KnowledgeQAActions = {
   setEvidenceRailTab: (tab: "sources" | "details") => void
   setQueryStage: (stage: QueryStage) => void
   setPinnedSourceFilters: (filters: PinnedSourceFilters) => void
+  refreshSourceHealth: () => Promise<void>
 
   // Citation actions
   persistRagContext: (messageId: string, context: RagContextData) => Promise<boolean>

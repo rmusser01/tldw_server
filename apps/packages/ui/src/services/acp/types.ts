@@ -9,6 +9,53 @@
 // -----------------------------------------------------------------------------
 
 export type ACPAgentType = string
+export type ACPSupportState =
+  | "supported"
+  | "supported_with_caveats"
+  | "experimental"
+  | "documented_unverified"
+  | "unsupported"
+
+export type ACPVerificationLevel =
+  | "documented_only"
+  | "stub_smoke_tested"
+  | "live_e2e_tested"
+  | "sandbox_tested"
+  | "production_supported"
+
+export type ACPSetupHealthStatus = "ok" | "degraded" | "blocked" | "unknown"
+export type ACPEntryPointStrategy =
+  | "native_acp"
+  | "external_acp_adapter"
+  | "documented_candidate"
+  | "custom_template"
+export type ACPProbeState =
+  | "ready_to_probe"
+  | "blocked"
+  | "custom_template"
+  | "documented_only"
+  | "unsupported_backend"
+export type ACPCredentialState = "ready" | "missing" | "delegated" | "unknown"
+
+export interface ACPAgentEntrypointStatus {
+  profile_key: string
+  entrypoint_strategy: ACPEntryPointStrategy
+  probe_state: ACPProbeState
+  acp_command: string
+  acp_args: string[]
+  primary_blocker?: string | null
+  blockers: string[]
+  status_message?: string | null
+  docs_url?: string | null
+  display_command?: string | null
+  display_binary_found?: boolean | null
+  adapter_found?: boolean | null
+  credential_state?: ACPCredentialState
+  adapter_source?: string | null
+  adapter_package?: string | null
+  adapter_version?: string | null
+  runtime_backend?: string | null
+}
 
 export interface ACPAgentInfo {
   type: ACPAgentType
@@ -16,11 +63,87 @@ export interface ACPAgentInfo {
   description: string
   is_configured: boolean
   requires_api_key?: string | null
+  support_state?: ACPSupportState
+  verification_level?: ACPVerificationLevel
+  compatibility_notes?: string
+  compatibility_docs_url?: string | null
+  entrypoint?: ACPAgentEntrypointStatus | null
 }
 
 export interface ACPAgentListResponse {
   agents: ACPAgentInfo[]
   default_agent: ACPAgentType
+}
+
+export interface ACPExecutionHealthSessionSummary {
+  total: number
+  by_status: Record<string, number>
+}
+
+export interface ACPExecutionHealthFailureBuckets {
+  setup_blockers: number
+  runner_session_failures: number
+  reviewer_rejections: number
+  reviewer_failures: number
+  governance_denials: number
+  structured_completion_failures: number
+  sandbox_runtime_errors: number
+  retention_redaction_actions: number
+}
+
+export interface ACPExecutionHealthSetupDimension {
+  status: ACPSetupHealthStatus
+  blockers: string[]
+  evidence_count: number
+}
+
+export interface ACPExecutionHealthSetupSummary {
+  agent: ACPExecutionHealthSetupDimension
+  workspace: ACPExecutionHealthSetupDimension
+  sandbox_runtime: ACPExecutionHealthSetupDimension
+  mcp_injection: ACPExecutionHealthSetupDimension
+  scheduler_trigger_path: ACPExecutionHealthSetupDimension
+}
+
+export interface ACPExecutionHealthAgentSummary {
+  agent_type: string
+  name: string
+  is_configured: boolean
+  support_state: ACPSupportState
+  verification_level: ACPVerificationLevel
+  setup_blocked: boolean
+  primary_blocker?: string | null
+}
+
+export interface ACPExecutionHealthCompatibilitySummary {
+  by_support_state: Record<string, number>
+  documented_unverified_agents: string[]
+  live_certification_required: boolean
+  docs_url: string
+}
+
+export interface ACPExecutionHealthRetentionSummary {
+  session_retention_days: number
+  audit_retention_days: number
+  policy: string
+}
+
+export interface ACPExecutionHealthRedactionSummary {
+  detail_events_artifacts_redacted_views: boolean
+  diagnostics_sanitized: boolean
+  audit_metadata_sanitized: boolean
+}
+
+export interface ACPExecutionHealthSummaryResponse {
+  timestamp: string
+  range_days: number
+  sessions: ACPExecutionHealthSessionSummary
+  failure_buckets: ACPExecutionHealthFailureBuckets
+  setup_health: ACPExecutionHealthSetupSummary
+  agents: ACPExecutionHealthAgentSummary[]
+  compatibility: ACPExecutionHealthCompatibilitySummary
+  retention: ACPExecutionHealthRetentionSummary
+  redaction: ACPExecutionHealthRedactionSummary
 }
 
 // -----------------------------------------------------------------------------
@@ -222,6 +345,27 @@ export interface ACPTokenUsage {
 
 export type ACPBackendSessionStatus = "active" | "closed" | "error"
 
+export interface ACPSessionWorkspaceContext {
+  workspace_id?: string | null
+  workspace_group_id?: string | null
+  scope_snapshot_id?: string | null
+  mcp_server_count: number
+  mcp_server_names: string[]
+  sandbox_session_id?: string | null
+  sandbox_run_id?: string | null
+  policy_snapshot_version?: string | null
+  policy_snapshot_fingerprint?: string | null
+  policy_refresh_error?: string | null
+  agent_type?: string | null
+  runtime_backend?: string | null
+  entrypoint_strategy?: string | null
+  adapter_source?: string | null
+  adapter_package?: string | null
+  adapter_version?: string | null
+  support_state?: string | null
+  verification_level?: string | null
+}
+
 export interface ACPSessionListItem {
   session_id: string
   user_id: number
@@ -238,6 +382,9 @@ export interface ACPSessionListItem {
   workspace_id?: string | null
   workspace_group_id?: string | null
   scope_snapshot_id?: string | null
+  sandbox_session_id?: string | null
+  sandbox_run_id?: string | null
+  workspace_context?: ACPSessionWorkspaceContext | null
   policy_snapshot_version?: string | null
   policy_snapshot_fingerprint?: string | null
   policy_snapshot_refreshed_at?: string | null

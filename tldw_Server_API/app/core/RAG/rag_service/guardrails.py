@@ -104,12 +104,12 @@ def downweight_injection_docs(docs: list[Document], strength: float = 0.5) -> di
                 try:
                     s = float(getattr(d, "score", 0.0) or 0.0)
                 except (TypeError, ValueError):
-                    logger.debug("Failed to parse doc score for injection downweight", exc_info=True)
+                    logger.debug("Failed to parse doc score for injection downweight")
                     s = 0.0
                 d.score = s * max(0.05, min(1.0, float(strength)))
                 affected += 1
         except (AttributeError, TypeError, ValueError):
-            logger.debug("Guardrail processing failed during injection downweight", exc_info=True)
+            logger.debug("Guardrail processing failed during injection downweight")
             continue
     return {"total": total, "affected": affected}
 
@@ -174,7 +174,7 @@ def _extract_numeric_tokens(text: str) -> set[str]:
             unit = _WORD_MULTIPLIERS.get(word.lower(), "")
             toks.append(f"{num}{unit}")
     except (TypeError, re.error):
-        logger.debug("Guardrail numeric word-pair extraction failed", exc_info=True)
+        logger.debug("Guardrail numeric word-pair extraction failed")
     base: set[str] = set()
     expanded: set[str] = set()
     for raw in toks:
@@ -193,8 +193,11 @@ def _extract_numeric_tokens(text: str) -> set[str]:
                 core = canon.replace(",", "").replace("_", "").replace(".", "")
                 if core and core.isdigit():
                     expanded.add(core)
-        except (TypeError, ValueError):
-            logger.debug("Guardrail numeric canonicalization failed", exc_info=True)
+        except (TypeError, ValueError) as numeric_error:
+            logger.debug(
+                "Guardrail numeric canonicalization failed",
+                error_type=type(numeric_error).__name__,
+            )
         # Add expansion for k/m/b to canonical integer string for matching against raw numbers
         try:
             unit = nrm[-1] if nrm and nrm[-1] in {"k", "m", "b", "%"} else ""
@@ -208,9 +211,12 @@ def _extract_numeric_tokens(text: str) -> set[str]:
                     canonical = str(int(round(num * factor)))
                     expanded.add(canonical)
                 except (TypeError, ValueError):
-                    logger.debug("Guardrail numeric expansion failed", exc_info=True)
-        except (TypeError, ValueError):
-            logger.debug("Guardrail numeric expansion setup failed", exc_info=True)
+                    logger.debug("Guardrail numeric expansion failed")
+        except (TypeError, ValueError) as numeric_error:
+            logger.debug(
+                "Guardrail numeric expansion setup failed",
+                error_type=type(numeric_error).__name__,
+            )
     return base | expanded
 
 
@@ -257,7 +263,7 @@ def check_numeric_fidelity(answer: str, docs: list[Document]) -> NumericFidelity
                 factor = {"k": 1_000, "m": 1_000_000, "b": 1_000_000_000}[unit]
                 out.add(str(int(round(num * factor))))
         except (TypeError, ValueError):
-            logger.debug("Guardrail numeric alias expansion failed", exc_info=True)
+            logger.debug("Guardrail numeric alias expansion failed")
         return out
     present = set()
     for n in answer_nums:
@@ -486,7 +492,7 @@ def build_hard_citations(
                             "end": int(cit.get("end", 0)),
                         })
                     except (TypeError, ValueError):
-                        logger.debug("Guardrail citation mapping failed for claim", exc_info=True)
+                        logger.debug("Guardrail citation mapping failed for claim")
                         continue
                 if entry_claim["citations"]:
                     supported += 1
@@ -516,7 +522,7 @@ def build_hard_citations(
                         "end": int(end),
                     })
             except (AttributeError, TypeError, ValueError):
-                logger.debug("Guardrail hard citation mapping failed", exc_info=True)
+                logger.debug("Guardrail hard citation mapping failed")
                 continue
         if entry_sentence["citations"]:
             supported += 1
@@ -540,7 +546,7 @@ def _verify_offsets(doc_text: str, start: int, end: int, target: str) -> bool:
             return re.sub(r"\s+", " ", (x or "").strip())
         return _norm(segment) in {_norm(target), _norm(target[: len(segment)])}
     except (TypeError, ValueError):
-        logger.debug("Guardrail offset verification failed", exc_info=True)
+        logger.debug("Guardrail offset verification failed")
         return False
 
 
@@ -575,7 +581,7 @@ def build_quote_citations(answer: str, docs: list[Document]) -> dict[str, Any]:
                         "verified": bool(verified),
                     })
             except (AttributeError, TypeError, ValueError):
-                logger.debug("Guardrail quote citation mapping failed", exc_info=True)
+                logger.debug("Guardrail quote citation mapping failed")
                 continue
         if entry_quote["citations"]:
             supported += 1
@@ -619,7 +625,7 @@ def apply_content_policy(
     - mode: "redact" (replace matches), "drop" (remove doc), "annotate" (metadata only)
     """
     allowed = {t.strip().lower() for t in (policy_types or [])}
-    redact_token = "[REDACTED]"
+    redact_token = "[REDACTED]"  # nosec B105
     dropped = 0
     affected = 0
     kept: list[Document] = []
@@ -692,7 +698,7 @@ def sanitize_html_allowlist(text: str, allowed_tags: list[str] | None = None, al
         stripper.feed(text)
         return stripper.get_data()
     except (TypeError, ValueError):
-        logger.debug("Guardrail HTML sanitizer failed; falling back to plain text", exc_info=True)
+        logger.debug("Guardrail HTML sanitizer failed; falling back to plain text")
         # On parser failure, return plain text fallback
         return re.sub(r"<[^>]+>", "", text)
 

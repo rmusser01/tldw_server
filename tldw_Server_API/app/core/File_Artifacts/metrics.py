@@ -30,5 +30,5 @@ def register_file_artifacts_metrics() -> None:
 
 try:
     register_file_artifacts_metrics()
-except Exception as exc:  # noqa: BLE001 - optional observability should never block imports
-    logger.debug(f"File artifacts metrics registration skipped: {exc}")
+except Exception:  # noqa: BLE001 - optional observability should never block imports
+    logger.debug("File artifacts metrics registration skipped")

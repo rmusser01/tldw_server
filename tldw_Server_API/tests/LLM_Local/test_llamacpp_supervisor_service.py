@@ -1,0 +1,1029 @@
+from __future__ import annotations
+
+import asyncio
+import gc
+import threading
+from configparser import ConfigParser
+from pathlib import Path
+from typing import Any
+
+import pytest
+from pydantic import ValidationError
+
+from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
+    LlamaCppProfileCreateRequest,
+    LlamaCppProfileUpdateRequest,
+)
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError, ServerError
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
+from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import JsonLlamaCppProfileStore
+from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
+    LlamaCppPortPolicy,
+    LlamaCppProfile,
+    LlamaCppProfileConflictError,
+    LlamaCppProfileMode,
+    LlamaCppRuntime,
+    LlamaCppRuntimeState,
+)
+from tldw_Server_API.app.core.Local_LLM.llamacpp_supervisor_service import LlamaCppSupervisor
+
+
+def make_config(tmp_path: Path) -> LlamaCppConfig:
+    executable = tmp_path / "bin" / "llama-server"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    return LlamaCppConfig(
+        executable_path=executable,
+        models_dir=models_dir,
+        default_host="127.0.0.1",
+        default_port=8080,
+        default_n_gpu_layers=0,
+        default_ctx_size=2048,
+        default_threads=None,
+        port_autoselect=True,
+        port_probe_max=3,
+        allowed_paths=[models_dir],
+        readiness_timeout=0.1,
+        stderr_read_timeout=0.1,
+        log_output_file=None,
+    )
+
+
+def make_model(config: LlamaCppConfig, name: str = "model.gguf") -> Path:
+    model_path = config.models_dir / name
+    model_path.write_text("not really gguf", encoding="utf-8")
+    return model_path
+
+
+def _llamacpp_parser(default_models_dir: Path, **overrides: str) -> ConfigParser:
+    parser = ConfigParser()
+    parser.add_section("LlamaCpp")
+    values = {
+        "enabled": "true",
+        "models_dir": str(default_models_dir),
+        "allowed_paths": "",
+        "registered_model_paths": "",
+        "imported_asset_folders": "",
+    }
+    values.update(overrides)
+    parser["LlamaCpp"] = values
+    return parser
+
+
+@pytest.fixture(autouse=True)
+def configure_inventory_for_supervisor_tests(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(tmp_path / "models"),
+    )
+
+
+def profile(
+    profile_id: str,
+    *,
+    model_path: str,
+    port: int = 8181,
+    enabled: bool = True,
+    port_policy: LlamaCppPortPolicy = LlamaCppPortPolicy.EXPLICIT,
+) -> LlamaCppProfile:
+    return LlamaCppProfile(
+        profile_id=profile_id,
+        name=f"Profile {profile_id}",
+        enabled=enabled,
+        model_id=f"gguf:{profile_id}",
+        model_path=model_path,
+        host="127.0.0.1",
+        port=port,
+        port_policy=port_policy,
+        server_args={"ctx_size": 4096},
+    )
+
+
+class FakeRunner:
+    def __init__(self, profile_id: str, calls: dict[str, int]):
+        self.profile_id = profile_id
+        self.calls = calls
+        self.runtime = LlamaCppRuntime(profile_id=profile_id, state=LlamaCppRuntimeState.DEFINED)
+        self.model_paths: list[Path] = []
+        self.starts: list[LlamaCppProfile] = []
+        self.cleaned = False
+        self.stop_calls = 0
+        self.tail_requests: list[int] = []
+
+    async def start(self, model_path: Path, profile: LlamaCppProfile) -> LlamaCppRuntime:
+        self.calls[self.profile_id] = self.calls.get(self.profile_id, 0) + 1
+        self.model_paths.append(model_path)
+        self.starts.append(profile)
+        await asyncio.sleep(0)
+        resolved_args: list[str] = []
+        if profile.server_args.get("mmproj"):
+            resolved_args = ["llama-server", "--mmproj", str(profile.server_args["mmproj"])]
+        self.runtime = LlamaCppRuntime(
+            profile_id=self.profile_id,
+            state=LlamaCppRuntimeState.RUNNING,
+            pid=1000 + len(self.calls),
+            host=profile.host,
+            port=profile.port,
+            endpoint=f"http://{profile.host}:{profile.port}",
+            model_id=profile.model_id,
+            model_path=str(model_path),
+            resolved_args=resolved_args,
+        )
+        return self.runtime
+
+    async def stop(self) -> LlamaCppRuntime:
+        self.stop_calls += 1
+        self.runtime = self.runtime.model_copy(
+            update={"state": LlamaCppRuntimeState.STOPPED, "pid": None, "message": "Stopped"}
+        )
+        return self.runtime
+
+    def status(self) -> LlamaCppRuntime:
+        return self.runtime
+
+    def tail_logs(self, lines: int) -> dict[str, object]:
+        self.tail_requests.append(lines)
+        return {"lines": [f"{self.profile_id}:{lines}"], "truncated": False, "warnings": []}
+
+    def cleanup_sync(self) -> None:
+        self.cleaned = True
+        self.runtime = self.runtime.model_copy(update={"state": LlamaCppRuntimeState.STOPPED, "pid": None})
+
+
+class StopFailingRunner(FakeRunner):
+    async def stop(self) -> LlamaCppRuntime:
+        self.stop_calls += 1
+        raise RuntimeError(f"stop failed for {self.profile_id}")
+
+
+class FakeRunnerFactory:
+    def __init__(self):
+        self.calls: dict[str, int] = {}
+        self.runners: dict[str, FakeRunner] = {}
+
+    def __call__(self, config: LlamaCppConfig, profile_id: str) -> FakeRunner:
+        runner = FakeRunner(profile_id, self.calls)
+        self.runners[profile_id] = runner
+        return runner
+
+
+class StopFailingRunnerFactory(FakeRunnerFactory):
+    def __call__(self, config: LlamaCppConfig, profile_id: str) -> FakeRunner:
+        if profile_id == "one":
+            runner = StopFailingRunner(profile_id, self.calls)
+        else:
+            runner = FakeRunner(profile_id, self.calls)
+        self.runners[profile_id] = runner
+        return runner
+
+
+class BlockingTailRunner(FakeRunner):
+    def __init__(
+        self,
+        profile_id: str,
+        calls: dict[str, int],
+        tail_started: threading.Event,
+        release_tail: threading.Event,
+    ):
+        super().__init__(profile_id, calls)
+        self.tail_started = tail_started
+        self.release_tail = release_tail
+
+    def tail_logs(self, lines: int) -> dict[str, object]:
+        self.tail_started.set()
+        assert self.release_tail.wait(timeout=2), "tail release timed out"
+        return super().tail_logs(lines)
+
+
+class BlockingTailRunnerFactory(FakeRunnerFactory):
+    def __init__(self):
+        super().__init__()
+        self.tail_started = threading.Event()
+        self.release_tail = threading.Event()
+
+    def __call__(self, config: LlamaCppConfig, profile_id: str) -> BlockingTailRunner:
+        runner = BlockingTailRunner(profile_id, self.calls, self.tail_started, self.release_tail)
+        self.runners[profile_id] = runner
+        return runner
+
+
+class BlockingFakeRunner(FakeRunner):
+    def __init__(
+        self,
+        profile_id: str,
+        calls: dict[str, int],
+        started: asyncio.Event,
+        release: asyncio.Event,
+        started_profiles: list[str],
+    ):
+        super().__init__(profile_id, calls)
+        self.started = started
+        self.release = release
+        self.started_profiles = started_profiles
+
+    async def start(self, model_path: Path, profile: LlamaCppProfile) -> LlamaCppRuntime:
+        self.started_profiles.append(self.profile_id)
+        self.started.set()
+        await self.release.wait()
+        return await super().start(model_path, profile)
+
+
+class BlockingRunnerFactory(FakeRunnerFactory):
+    def __init__(self):
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.started_profiles: list[str] = []
+
+    def __call__(self, config: LlamaCppConfig, profile_id: str) -> BlockingFakeRunner:
+        runner = BlockingFakeRunner(profile_id, self.calls, self.started, self.release, self.started_profiles)
+        self.runners[profile_id] = runner
+        return runner
+
+
+def make_supervisor(tmp_path: Path) -> tuple[LlamaCppSupervisor, LlamaCppConfig, FakeRunnerFactory]:
+    config = make_config(tmp_path)
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    factory = FakeRunnerFactory()
+    supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
+    return supervisor, config, factory
+
+
+def test_runtime_from_last_failure_prefers_persisted_model_path(tmp_path: Path) -> None:
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    resolved_model = make_model(config, "resolved.gguf")
+    failed_profile = LlamaCppProfile(
+        profile_id="model-id-only",
+        name="Model ID Only",
+        model_id="gguf:model-id-only",
+        model_path=None,
+        last_runtime_failure={
+            "state": "failed",
+            "last_error": "boom",
+            "model_path": str(resolved_model),
+            "restart_count": 1,
+        },
+    )
+
+    runtime = supervisor.runtime_from_last_failure(failed_profile)
+
+    assert runtime.state == LlamaCppRuntimeState.FAILED
+    assert runtime.model_path == str(resolved_model)
+
+
+def configure_supervisor_assets(
+    monkeypatch: pytest.MonkeyPatch,
+    config: LlamaCppConfig,
+    *,
+    base_name: str = "llava.gguf",
+    mmproj_name: str = "mmproj-llava.gguf",
+) -> tuple[Path, Path, str, str]:
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_inventory_service
+
+    base_path = make_model(config, base_name)
+    mmproj_path = config.models_dir / mmproj_name
+    mmproj_path.write_text("projector", encoding="utf-8")
+
+    monkeypatch.setattr(
+        llamacpp_inventory_service,
+        "load_comprehensive_config",
+        lambda: _llamacpp_parser(config.models_dir),
+    )
+    return (
+        base_path.resolve(),
+        mmproj_path.resolve(),
+        llamacpp_inventory_service.asset_id_for_path(base_path, "gguf"),
+        llamacpp_inventory_service.asset_id_for_path(mmproj_path, "mmproj"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_supervisor_starts_vision_profile_with_resolved_mmproj(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    base_path, mmproj_path, base_asset_id, mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="vision",
+            name="Vision",
+            mode=LlamaCppProfileMode.VISION,
+            model_id=base_asset_id,
+            mmproj_model_id=mmproj_asset_id,
+            server_args={"ctx_size": 4096},
+        )
+    )
+
+    runtime = await supervisor.start_profile("vision")
+
+    runner = factory.runners["vision"]
+    assert runtime.profile_id == "vision"
+    assert runner.model_paths == [base_path]
+    assert runner.starts[0].server_args["ctx_size"] == 4096
+    assert runner.starts[0].server_args["mmproj"] == str(mmproj_path)
+    assert runtime.resolved_args[-2:] == ["--mmproj", str(mmproj_path)]
+    assert supervisor.store.get("vision").server_args == {"ctx_size": 4096}
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_vision_profile_without_mmproj_before_persisting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    _base_path, _mmproj_path, base_asset_id, _mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
+
+    with pytest.raises(ServerError, match="mmproj"):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id="vision",
+                name="Vision",
+                mode=LlamaCppProfileMode.VISION,
+                model_id=base_asset_id,
+                server_args={"ctx_size": 4096},
+            )
+        )
+
+    assert supervisor.store.get("vision") is None
+    assert "vision" not in factory.runners
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_conflicting_mmproj_selection_before_persisting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    _base_path, _mmproj_path, base_asset_id, mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
+    other_mmproj_path = config.models_dir / "mmproj-other.gguf"
+    other_mmproj_path.write_text("other projector", encoding="utf-8")
+
+    with pytest.raises(ServerError, match="conflicts"):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id="vision",
+                name="Vision",
+                mode=LlamaCppProfileMode.VISION,
+                model_id=base_asset_id,
+                mmproj_model_id=mmproj_asset_id,
+                server_args={"mmproj": str(other_mmproj_path)},
+            )
+        )
+
+    assert supervisor.store.get("vision") is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_path_arg_outside_allowlist_before_persisting(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    grammar_path = tmp_path / "outside" / "grammar.gbnf"
+    grammar_path.parent.mkdir()
+    grammar_path.write_text("root ::= \"ok\"", encoding="utf-8")
+
+    with pytest.raises(ServerError, match="grammar_file"):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id="grammar",
+                name="Grammar",
+                model_path=str(model_path),
+                server_args={"grammar_file": str(grammar_path)},
+            )
+        )
+
+    assert supervisor.store.get("grammar") is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_invalid_core_numeric_arg_before_persisting(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+
+    with pytest.raises(ServerError, match="ctx_size"):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id="bad-core",
+                name="Bad Core",
+                model_path=str(model_path),
+                server_args={"ctx_size": "not-an-int"},
+            )
+        )
+
+    assert supervisor.store.get("bad-core") is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_malformed_lora_scaled_before_persisting(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    lora_path = config.models_dir / "adapter.gguf"
+    lora_path.write_text("adapter", encoding="utf-8")
+
+    with pytest.raises(ServerError, match="lora_scaled"):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id="bad-lora-scaled",
+                name="Bad LoRA",
+                model_path=str(model_path),
+                server_args={"lora_scaled": [str(lora_path)]},
+            )
+        )
+
+    assert supervisor.store.get("bad-lora-scaled") is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_reserved_model_arg_before_persisting_even_when_unvalidated_args_allowed(
+    tmp_path: Path,
+):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    config.allow_unvalidated_args = True
+    model_path = make_model(config)
+    other_model_path = make_model(config, "other.gguf")
+
+    with pytest.raises(ServerError, match="Reserved"):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id="reserved",
+                name="Reserved",
+                model_path=str(model_path),
+                server_args={"model": str(other_model_path)},
+            )
+        )
+
+    assert supervisor.store.get("reserved") is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_invalid_server_args_update_without_persisting(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    outside_model = tmp_path / "outside" / "draft.gguf"
+    outside_model.parent.mkdir()
+    outside_model.write_text("draft", encoding="utf-8")
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+
+    with pytest.raises(ServerError, match="model_draft"):
+        await supervisor.update_profile(
+            "one",
+            LlamaCppProfileUpdateRequest(server_args={"model_draft": str(outside_model)}),
+        )
+
+    assert supervisor.store.get("one").server_args == {}
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_vision_profile_without_mmproj_before_runner_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    _base_path, _mmproj_path, base_asset_id, _mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
+    supervisor.store.upsert(
+        LlamaCppProfile(
+            profile_id="vision",
+            name="Vision",
+            mode=LlamaCppProfileMode.VISION,
+            model_id=base_asset_id,
+            server_args={"ctx_size": 4096},
+        )
+    )
+
+    with pytest.raises(ServerError, match="mmproj"):
+        await supervisor.start_profile("vision")
+
+    assert factory.runners["vision"].starts == []
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_wrong_kind_mmproj_asset_before_runner_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    _base_path, _mmproj_path, base_asset_id, _mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
+    supervisor.store.upsert(
+        LlamaCppProfile(
+            profile_id="vision",
+            name="Vision",
+            mode=LlamaCppProfileMode.VISION,
+            model_id=base_asset_id,
+            mmproj_model_id=base_asset_id,
+        )
+    )
+
+    with pytest.raises(ModelNotFoundError, match="mmproj"):
+        await supervisor.start_profile("vision")
+
+    assert factory.runners["vision"].starts == []
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_manual_mmproj_path_outside_allowlist_before_runner_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    _base_path, _mmproj_path, base_asset_id, _mmproj_asset_id = configure_supervisor_assets(monkeypatch, config)
+    outside = tmp_path / "outside" / "mmproj-other.gguf"
+    outside.parent.mkdir()
+    outside.write_text("outside projector", encoding="utf-8")
+    supervisor.store.upsert(
+        LlamaCppProfile(
+            profile_id="vision",
+            name="Vision",
+            mode=LlamaCppProfileMode.VISION,
+            model_id=base_asset_id,
+            server_args={"mmproj": str(outside)},
+        )
+    )
+
+    with pytest.raises(ServerError, match="outside allowed"):
+        await supervisor.start_profile("vision")
+
+    assert factory.runners["vision"].starts == []
+
+
+@pytest.mark.asyncio
+async def test_supervisor_starts_two_profiles_on_distinct_ports(tmp_path: Path):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    first_model = make_model(config, "one.gguf")
+    second_model = make_model(config, "two.gguf")
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="one",
+            name="One",
+            model_path=str(first_model),
+            port=8181,
+        )
+    )
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="two",
+            name="Two",
+            model_path=str(second_model),
+            port=8182,
+        )
+    )
+
+    await supervisor.start_profile("one")
+    await supervisor.start_profile("two")
+    states = supervisor.list_runtimes()
+
+    assert {state.profile_id for state in states} == {"one", "two"}
+    assert {state.port for state in states} == {8181, 8182}
+    assert factory.calls == {"one": 1, "two": 1}
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_duplicate_enabled_explicit_port(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+
+    with pytest.raises(LlamaCppProfileConflictError):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(profile_id="two", name="Two", model_path=str(model_path), port=8181)
+        )
+
+
+@pytest.mark.asyncio
+async def test_supervisor_serializes_same_profile_start(tmp_path: Path):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+
+    await asyncio.gather(supervisor.start_profile("one"), supervisor.start_profile("one"))
+
+    assert factory.calls["one"] == 1
+    assert supervisor.get_runtime("one").state == LlamaCppRuntimeState.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_supervisor_serializes_autoselect_starts_before_port_probe(tmp_path: Path):
+    config = make_config(tmp_path)
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    factory = BlockingRunnerFactory()
+    supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
+    first_model = make_model(config, "one.gguf")
+    second_model = make_model(config, "two.gguf")
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="one",
+            name="One",
+            model_path=str(first_model),
+            port_policy=LlamaCppPortPolicy.AUTOSELECT,
+        )
+    )
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="two",
+            name="Two",
+            model_path=str(second_model),
+            port_policy=LlamaCppPortPolicy.AUTOSELECT,
+        )
+    )
+
+    first_task = asyncio.create_task(supervisor.start_profile("one"))
+    await factory.started.wait()
+    second_task = asyncio.create_task(supervisor.start_profile("two"))
+    await asyncio.sleep(0)
+
+    assert factory.started_profiles == ["one"]
+
+    factory.release.set()
+    await asyncio.gather(first_task, second_task)
+
+    assert factory.calls == {"one": 1, "two": 1}
+
+
+@pytest.mark.asyncio
+async def test_supervisor_serializes_profile_mutations_with_start(tmp_path: Path):
+    config = make_config(tmp_path)
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    factory = BlockingRunnerFactory()
+    supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+
+    start_task = asyncio.create_task(supervisor.start_profile("one"))
+    await factory.started.wait()
+    update_task = asyncio.create_task(supervisor.update_profile("one", LlamaCppProfileUpdateRequest(name="Updated")))
+    delete_task = asyncio.create_task(supervisor.delete_profile("one"))
+    await asyncio.sleep(0)
+
+    assert update_task.done() is False
+    assert delete_task.done() is False
+
+    factory.release.set()
+    runtime = await start_task
+    updated = await update_task
+    deleted = await delete_task
+
+    assert runtime.state == LlamaCppRuntimeState.RUNNING
+    assert updated.name == "Updated"
+    assert deleted is True
+    assert supervisor.list_profiles() == []
+    assert factory.runners["one"].stop_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejects_null_update_for_non_nullable_profile_fields(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+
+    with pytest.raises(ValidationError):
+        await supervisor.update_profile("one", LlamaCppProfileUpdateRequest(host=None))
+
+    assert supervisor.store.get("one").host == "127.0.0.1"
+
+
+@pytest.mark.asyncio
+async def test_supervisor_delete_running_profile_awaits_stop_before_removing(tmp_path: Path):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+    await supervisor.start_profile("one")
+
+    deleted = await supervisor.delete_profile("one")
+
+    assert deleted is True
+    assert supervisor.list_profiles() == []
+    assert factory.runners["one"].stop_calls == 1
+    assert factory.runners["one"].cleaned is False
+
+
+@pytest.mark.asyncio
+async def test_supervisor_releases_deleted_profile_lock(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+
+    deleted = await supervisor.delete_profile("one")
+    gc.collect()
+
+    assert deleted is True
+    assert "one" not in supervisor._locks
+
+
+@pytest.mark.asyncio
+async def test_supervisor_store_writes_run_off_event_loop(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as supervisor_module
+
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    calls: list[str] = []
+
+    async def fake_to_thread(func: Any, *args: Any, **kwargs: Any) -> Any:
+        calls.append(getattr(func, "__name__", repr(func)))
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(supervisor_module.asyncio, "to_thread", fake_to_thread)
+
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+    await supervisor.delete_profile("one")
+
+    assert "upsert" in calls
+    assert "delete" in calls
+
+
+@pytest.mark.asyncio
+async def test_supervisor_stop_pause_resume_and_cleanup(tmp_path: Path):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+
+    await supervisor.start_profile("one")
+    stopped = await supervisor.stop_profile("one", disable=True)
+    paused = await supervisor.pause_profile("one")
+    resumed = await supervisor.resume_profile("one")
+    await supervisor.start_profile("one")
+    supervisor.cleanup_sync()
+    deleted = await supervisor.delete_profile("one")
+
+    assert stopped.state == LlamaCppRuntimeState.STOPPED
+    assert deleted is True
+    assert supervisor.list_profiles() == []
+    assert paused.state == LlamaCppRuntimeState.PAUSED
+    assert resumed.state == LlamaCppRuntimeState.RUNNING
+    assert factory.calls == {"one": 2}
+    assert factory.runners["one"].cleaned is True
+
+
+@pytest.mark.asyncio
+async def test_supervisor_shutdown_attempts_all_runners_before_reporting_failure(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    factory = StopFailingRunnerFactory()
+    supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
+    first_model = make_model(config, "one.gguf")
+    second_model = make_model(config, "two.gguf")
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(first_model), port=8181)
+    )
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="two", name="Two", model_path=str(second_model), port=8182)
+    )
+    await supervisor.start_profile("one")
+    await supervisor.start_profile("two")
+
+    with pytest.raises(RuntimeError, match="one"):
+        await supervisor.shutdown()
+
+    assert factory.runners["one"].stop_calls == 1
+    assert factory.runners["two"].stop_calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("start_kind", ["model", "path"])
+async def test_supervisor_default_profile_requires_configured_port(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    start_kind: str,
+):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as supervisor_module
+
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    config.default_port = None
+    model_path = make_model(config)
+    monkeypatch.setattr(supervisor_module.llamacpp_inventory_service, "resolve_model_id", lambda _model_id: model_path)
+
+    with pytest.raises(ServerError, match="default port"):
+        if start_kind == "model":
+            await supervisor.ensure_default_profile_from_model("gguf:default", {})
+        else:
+            await supervisor.ensure_default_profile_from_path(model_path, {})
+
+
+@pytest.mark.asyncio
+async def test_supervisor_default_profile_bridge(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as supervisor_module
+
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    monkeypatch.setattr(supervisor_module.llamacpp_inventory_service, "resolve_model_id", lambda _model_id: model_path)
+
+    profile_result = await supervisor.ensure_default_profile_from_model("gguf:default", {"ctx_size": 1024})
+    runtime = await supervisor.start_default_by_model("gguf:default", {"ctx_size": 1024})
+    compat = supervisor.default_status_compat()
+    stopped = await supervisor.stop_default()
+
+    assert profile_result.profile_id == "default"
+    assert runtime.state == LlamaCppRuntimeState.RUNNING
+    assert compat["status"] == "running"
+    assert compat["backend"] == "llamacpp"
+    assert compat["model"] == str(model_path)
+    assert stopped.state == LlamaCppRuntimeState.STOPPED
+
+
+@pytest.mark.asyncio
+async def test_supervisor_default_profile_bridge_accepts_model_path(tmp_path: Path):
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config, "direct.gguf")
+
+    runtime = await supervisor.start_default_by_path(
+        model_path,
+        {"port": 8184, "ctx_size": 1024},
+        model_label="direct.gguf",
+    )
+    profile_result = supervisor.store.get("default")
+
+    assert profile_result is not None
+    assert profile_result.profile_id == "default"
+    assert profile_result.model_id is None
+    assert profile_result.model_path == str(model_path)
+    assert profile_result.port == 8184
+    assert profile_result.server_args == {"port": 8184, "ctx_size": 1024}
+    assert runtime.state == LlamaCppRuntimeState.RUNNING
+    assert runtime.model_path == str(model_path)
+
+
+@pytest.mark.asyncio
+async def test_supervisor_serializes_default_start_profile_updates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as supervisor_module
+
+    config = make_config(tmp_path)
+    first_model = make_model(config, "first.gguf")
+    second_model = make_model(config, "second.gguf")
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    factory = BlockingRunnerFactory()
+    supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
+    model_paths = {"gguf:first": first_model, "gguf:second": second_model}
+    monkeypatch.setattr(
+        supervisor_module.llamacpp_inventory_service,
+        "resolve_model_id",
+        lambda model_id: model_paths[model_id],
+    )
+
+    first_task = asyncio.create_task(supervisor.start_default_by_model("gguf:first", {"port": 8181}))
+    await factory.started.wait()
+    second_task = asyncio.create_task(supervisor.start_default_by_model("gguf:second", {"port": 8182}))
+    await asyncio.sleep(0)
+
+    assert second_task.done() is False
+    assert store.get("default").model_id == "gguf:first"
+
+    factory.release.set()
+    first_runtime = await first_task
+    second_runtime = await second_task
+
+    assert first_runtime.model_id == "gguf:first"
+    assert second_runtime.model_id == "gguf:second"
+    assert store.get("default").model_id == "gguf:second"
+    assert factory.calls == {"default": 2}
+
+
+@pytest.mark.asyncio
+async def test_supervisor_default_start_swaps_running_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as supervisor_module
+
+    supervisor, config, factory = make_supervisor(tmp_path)
+    first_model = make_model(config, "first.gguf")
+    second_model = make_model(config, "second.gguf")
+    model_paths = {"gguf:first": first_model, "gguf:second": second_model}
+    monkeypatch.setattr(
+        supervisor_module.llamacpp_inventory_service,
+        "resolve_model_id",
+        lambda model_id: model_paths[model_id],
+    )
+
+    first_runtime = await supervisor.start_default_by_model("gguf:first", {"port": 8181})
+    second_runtime = await supervisor.start_default_by_model("gguf:second", {"port": 8182})
+
+    assert first_runtime.model_id == "gguf:first"
+    assert second_runtime.model_id == "gguf:second"
+    assert second_runtime.port == 8182
+    assert factory.calls == {"default": 2}
+
+
+@pytest.mark.asyncio
+async def test_supervisor_tail_logs_if_running_uses_runner_without_store_lookup(tmp_path: Path, monkeypatch):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+    await supervisor.start_profile("one")
+
+    def fail_store_get(_profile_id: str) -> None:
+        raise AssertionError("tail_logs_if_running should not read the profile store")
+
+    monkeypatch.setattr(supervisor.store, "get", fail_store_get)
+
+    result = await supervisor.tail_logs_if_running("one", 7)
+
+    assert result == {"lines": ["one:7"], "truncated": False, "warnings": []}
+    assert factory.runners["one"].tail_requests == [7]
+
+
+@pytest.mark.asyncio
+async def test_supervisor_tail_logs_if_running_rejects_stopped_runner(tmp_path: Path):
+    supervisor, config, factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+    await supervisor.start_profile("one")
+    await supervisor.stop_profile("one")
+
+    with pytest.raises(LlamaCppProfileConflictError, match="not running"):
+        await supervisor.tail_logs_if_running("one", 7)
+
+    assert factory.runners["one"].tail_requests == []
+
+
+@pytest.mark.asyncio
+async def test_supervisor_tail_logs_if_running_serializes_stop_until_tail_finishes(tmp_path: Path):
+    config = make_config(tmp_path)
+    store = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    factory = BlockingTailRunnerFactory()
+    supervisor = LlamaCppSupervisor(config=config, store=store, runner_factory=factory)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+    await supervisor.start_profile("one")
+
+    tail_task = asyncio.create_task(supervisor.tail_logs_if_running("one", 7))
+    assert await asyncio.to_thread(factory.tail_started.wait, 2)
+    stop_task = asyncio.create_task(supervisor.stop_profile("one"))
+    await asyncio.sleep(0)
+
+    assert factory.runners["one"].stop_calls == 0
+
+    factory.release_tail.set()
+    tail_result = await tail_task
+    stop_result = await stop_task
+
+    assert tail_result == {"lines": ["one:7"], "truncated": False, "warnings": []}
+    assert stop_result.state == LlamaCppRuntimeState.STOPPED
+    assert factory.runners["one"].stop_calls == 1
+
+
+def test_manager_attaches_supervisor_and_uses_it_for_cleanup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from tldw_Server_API.app.core.Local_LLM import LLM_Inference_Manager as manager_module
+
+    config = make_config(tmp_path)
+    manager_config = type(
+        "ManagerConfig",
+        (),
+        {
+            "app_config": {},
+            "ollama": None,
+            "huggingface": None,
+            "llamafile": None,
+            "llamacpp": config,
+        },
+    )()
+    handler_cleanup_called = False
+    supervisor_cleanup_called = False
+
+    class FakeHandler:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def _cleanup_managed_server_sync(self) -> None:
+            nonlocal handler_cleanup_called
+            handler_cleanup_called = True
+
+    class FakeSupervisor:
+        def cleanup_sync(self) -> None:
+            nonlocal supervisor_cleanup_called
+            supervisor_cleanup_called = True
+
+    monkeypatch.setattr(manager_module, "LlamaCppHandler", FakeHandler)
+    monkeypatch.setattr(manager_module.LlamaCppSupervisor, "from_manager", lambda _manager: FakeSupervisor())
+
+    manager = manager_module.LLMInferenceManager(manager_config)
+    manager.cleanup_on_exit()
+
+    assert manager.llamacpp_supervisor is not None
+    assert supervisor_cleanup_called is True
+    assert handler_cleanup_called is True

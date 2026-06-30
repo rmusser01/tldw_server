@@ -159,7 +159,7 @@ class TestWorldInfoCRUD:
         local = mdb.create_world_info(left, kind="location", name="Local")
         foreign_parent = mdb.create_world_info(right, kind="location", name="Foreign")
 
-        with pytest.raises(ValueError, match="different project"):
+        with pytest.raises(ConflictError, match="different project"):
             mdb.update_world_info(local, {"parent_id": foreign_parent}, expected_version=1)
 
     def test_update_version_conflict(self, mdb):
@@ -464,7 +464,7 @@ class TestPlotEventCRUD:
         plot_line_two = mdb.create_plot_line(pid_two, "Other Quest")
         pe_id = mdb.create_plot_event(pid_one, plot_line_one, "Key moment")
 
-        with pytest.raises(ValueError, match="different project"):
+        with pytest.raises(ConflictError, match="different project"):
             mdb.update_plot_event(pe_id, {"plot_line_id": plot_line_two}, expected_version=1)
 
     def test_update_plot_event_plot_line_change_writes_sync_log(self, mdb):

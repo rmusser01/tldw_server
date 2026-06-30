@@ -497,8 +497,8 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")
 
     async def _get_deck(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         deck_id = args.get("deck_id")
@@ -516,8 +516,8 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")
 
     async def _create_deck(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._create_deck_sync, context, args)
@@ -536,8 +536,8 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")
 
     # Cards
 
@@ -581,8 +581,8 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")
 
     async def _get_card(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         card_uuid = args.get("card_uuid")
@@ -600,8 +600,8 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")
 
     async def _create_card(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._create_card_sync, context, args)
@@ -637,8 +637,8 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")
 
     async def _create_cards_bulk(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._create_cards_bulk_sync, context, args)
@@ -682,8 +682,8 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")
 
     async def _update_card(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._update_card_sync, context, args)
@@ -726,8 +726,8 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")
 
     async def _delete_card(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._delete_card_sync, context, args)
@@ -750,8 +750,8 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")
 
     # Spaced Repetition
 
@@ -777,8 +777,8 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")
 
     # Tags
 
@@ -803,8 +803,8 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")
 
     async def _get_tags(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         return await asyncio.to_thread(self._get_tags_sync, context, args)
@@ -822,8 +822,8 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")
 
     # Export
 
@@ -855,7 +855,20 @@ class FlashcardsModule(BaseModule):
                     limit=100000,
                     offset=0,
                 )
-                apkg_bytes = export_apkg_from_rows(items, include_reverse=include_reverse)
+                if not items:
+                    return {
+                        "format": fmt,
+                        "success": False,
+                        "error": "No flashcards to export",
+                    }
+                try:
+                    apkg_bytes = export_apkg_from_rows(items, include_reverse=include_reverse)
+                except ValueError as exc:
+                    return {
+                        "format": fmt,
+                        "success": False,
+                        "error": str(exc),
+                    }
                 import base64
                 content_b64 = base64.b64encode(apkg_bytes).decode("utf-8")
                 return {
@@ -892,5 +905,5 @@ class FlashcardsModule(BaseModule):
         finally:
             try:
                 db.close_all_connections()
-            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to close DB: {exc}")
+            except _FLASHCARDS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to close Flashcards DB connections; details redacted")

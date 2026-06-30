@@ -1,5 +1,6 @@
 import React, { useEffect } from "react"
 import { useSearchParams } from "react-router-dom"
+import { RouteErrorBoundary } from "@/components/Common/RouteErrorBoundary"
 import OptionLayout from "@/components/Layouts/Layout"
 import { WatchlistsPlaygroundPage } from "@/components/Option/Watchlists/WatchlistsPlaygroundPage"
 import { useWatchlistsStore } from "@/store/watchlists"
@@ -11,6 +12,7 @@ const WATCHLIST_TABS: Set<WatchlistTab> = new Set([
   "jobs",
   "runs",
   "items",
+  "alerts",
   "outputs",
   "templates",
   "settings"
@@ -144,9 +146,11 @@ const OptionWatchlists = () => {
   ])
 
   return (
-    <OptionLayout>
-      <WatchlistsPlaygroundPage />
-    </OptionLayout>
+    <RouteErrorBoundary routeId="watchlists" routeLabel="Watchlists">
+      <OptionLayout>
+        <WatchlistsPlaygroundPage />
+      </OptionLayout>
+    </RouteErrorBoundary>
   )
 }
 

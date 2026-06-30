@@ -126,6 +126,7 @@ def test_collections_postgres_backfills_notification_delivery_columns(
     db = CollectionsDatabase.from_backend(user_id="1", backend=backend)
 
     columns = {row["name"] for row in backend.get_table_info("user_notifications")}
+    assert "snooze_task_id" in columns
     assert "delivery_status" in columns
     assert "delivered_at" in columns
 

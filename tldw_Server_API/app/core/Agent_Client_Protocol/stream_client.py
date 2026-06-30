@@ -14,6 +14,10 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import (
     NotificationHandler,
     RequestHandler,
 )
+from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
+    ACP_DEFAULT_RPC_TIMEOUT_SECONDS,
+    ACP_STREAM_BUFFER_MAX_BYTES,
+)
 
 
 @dataclass
@@ -21,10 +25,14 @@ class ACPStreamClient:
     """ACP client that reads/writes newline-delimited JSON over an abstract byte stream."""
 
     send_bytes: Callable[[bytes], Awaitable[None]]
+    rpc_timeout_sec: float | None = None
+    max_buffer_bytes: int = ACP_STREAM_BUFFER_MAX_BYTES
     _request_handler: RequestHandler | None = None
     _notification_handler: NotificationHandler | None = None
 
     def __post_init__(self) -> None:
+        if self.rpc_timeout_sec is None:
+            self.rpc_timeout_sec = ACP_DEFAULT_RPC_TIMEOUT_SECONDS
         self._pending: dict[str, asyncio.Future] = {}
         self._next_id = 1
         self._write_lock = asyncio.Lock()
@@ -64,10 +72,22 @@ class ACPStreamClient:
             "method": method,
             "params": params,
         }
-        await self._send(payload)
-        resp = await future
+        try:
+            await self._send(payload)
+            if self.rpc_timeout_sec > 0:
+                resp = await asyncio.wait_for(future, timeout=self.rpc_timeout_sec)
+            else:
+                resp = await future
+        except asyncio.TimeoutError as exc:
+            raise ACPResponseError(f"ACP call timed out waiting for {method}", code=-32000) from exc
+        finally:
+            self._pending.pop(str(request_id), None)
         if resp.error:
-            raise ACPResponseError(resp.error.get("message", "ACP error"))
+            raise ACPResponseError(
+                resp.error.get("message", "ACP error"),
+                code=resp.error.get("code"),
+                error=resp.error,
+            )
         return resp
 
     async def notify(self, method: str, params: Any | None = None) -> None:
@@ -90,6 +110,10 @@ class ACPStreamClient:
     async def feed_bytes(self, data: bytes) -> None:
         if not data:
             return
+        if len(self._buffer) + len(data) > self.max_buffer_bytes:
+            self._buffer.clear()
+            self._drain_pending("ACP stream buffer exceeded limit")
+            raise ACPResponseError("ACP stream buffer exceeded limit")
         self._buffer.extend(data)
         while True:
             try:

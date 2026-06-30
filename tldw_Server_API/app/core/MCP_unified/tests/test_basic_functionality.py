@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.MCP_unified import (
     get_rbac_policy,
     UserRole
 )
+from tldw_Server_API.app.core.MCP_unified.modules.base import HealthStatus, ModuleHealth
 from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
 
 
@@ -113,6 +114,172 @@ class TestConfiguration:
         assert len(config.jwt_secret_key.get_secret_value()) >= 32
 
 
+def test_describe_module_surface_groups_enabled_modules_by_risk():
+    """Effective MCP surface should be grouped into user-facing risk tiers."""
+    from tldw_Server_API.app.core.MCP_unified.module_surface import describe_module_surface
+
+    modules = {
+        "media": {"enabled": True, "status": "healthy"},
+        "filesystem": {"enabled": True, "status": "healthy"},
+        "git": {"enabled": True, "status": "healthy"},
+        "web_fetch": {"enabled": True, "status": "healthy"},
+        "web_search": {"enabled": True, "status": "healthy"},
+        "web_research": {"enabled": True, "status": "healthy"},
+        "browser_cdp": {"enabled": True, "status": "healthy"},
+        "run_command": {"enabled": True, "status": "healthy"},
+        "external_federation": {"enabled": False, "status": "disabled"},
+    }
+
+    surface = describe_module_surface(modules)
+
+    assert "read_only" in surface["tiers"]
+    assert "local_files" in surface["tiers"]
+    assert "local_process" in surface["tiers"]
+    assert "external_network" in surface["tiers"]
+    assert "unknown" not in surface["tiers"]
+    assert [module["id"] for module in surface["tiers"]["read_only"]["modules"]] == ["media"]
+    assert [module["id"] for module in surface["tiers"]["local_files"]["modules"]] == ["filesystem"]
+    assert [module["id"] for module in surface["tiers"]["local_process"]["modules"]] == [
+        "browser_cdp",
+        "git",
+        "run_command",
+    ]
+    assert [module["id"] for module in surface["tiers"]["external_network"]["modules"]] == [
+        "web_fetch",
+        "web_research",
+        "web_search",
+    ]
+    assert surface["enabled_count"] == 8
+
+
+def test_describe_module_surface_reports_disabled_available_high_risk_modules():
+    """Disabled high-risk modules should remain visible as explicit opt-ins."""
+    from tldw_Server_API.app.core.MCP_unified.module_surface import describe_module_surface
+
+    surface = describe_module_surface({
+        "media": {"enabled": True, "status": "healthy"},
+        "filesystem": {"enabled": False, "status": "disabled"},
+        "run_command": {"enabled": False, "status": "disabled"},
+        "external_federation": {"enabled": False, "status": "disabled"},
+    })
+
+    assert surface["enabled_count"] == 1
+    assert [m["id"] for m in surface["tiers"]["read_only"]["modules"]] == ["media"]
+    disabled_ids = [m["id"] for m in surface["disabled_available"]]
+    assert disabled_ids == ["external_federation", "filesystem", "run_command"]
+    assert surface["disabled_available_count"] == 3
+    assert all(m["requires_explicit_opt_in"] is True for m in surface["disabled_available"])
+    assert all(m["next_action"] for m in surface["disabled_available"])
+    assert all("your MCP modules config" in m["next_action"] for m in surface["disabled_available"])
+    assert all("Config_Files/mcp_modules.yaml" not in m["next_action"] for m in surface["disabled_available"])
+
+
+def test_describe_module_surface_does_not_advertise_not_loaded_modules_as_opt_ins():
+    """Configured-but-not-loaded modules should not look enabled or operator-disabled."""
+    from tldw_Server_API.app.core.MCP_unified.module_surface import describe_module_surface
+
+    surface = describe_module_surface({
+        "filesystem": {"enabled": True, "status": "not_loaded"},
+    })
+
+    assert surface["enabled_count"] == 0
+    assert surface["disabled_available_count"] == 0
+    assert "local_files" not in surface["tiers"]
+
+
+def test_default_mcp_modules_yaml_disables_local_file_and_process_modules():
+    """Checked-in defaults should not expose local files or host commands."""
+    import yaml
+    from pathlib import Path
+
+    data = yaml.safe_load(Path("tldw_Server_API/Config_Files/mcp_modules.yaml").read_text(encoding="utf-8"))
+    modules = {entry["id"]: entry for entry in data["modules"]}
+
+    assert modules["filesystem"]["enabled"] is False
+    assert modules["run_command"]["enabled"] is False
+    assert modules["codegraph"]["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_filesystem_fallback_requires_explicit_opt_in(monkeypatch, tmp_path):
+    """Missing YAML fallback must not auto-enable filesystem access."""
+    missing_config = tmp_path / "missing-mcp-modules.yaml"
+    monkeypatch.setenv("MCP_MODULES_CONFIG", str(missing_config))
+    monkeypatch.setenv("MCP_MODULES", "")
+    monkeypatch.delenv("MCP_ENABLE_FILESYSTEM_MODULE", raising=False)
+
+    registered = []
+    server = MCPServer()
+
+    async def _register_module(module_id, cls, config):
+        registered.append(module_id)
+
+    monkeypatch.setattr(server.module_registry, "register_module", _register_module)
+
+    await server._register_default_modules()
+
+    assert "filesystem" not in registered
+
+
+@pytest.mark.asyncio
+async def test_filesystem_fallback_registers_with_explicit_env_opt_in(monkeypatch, tmp_path):
+    """The legacy fallback path should remain available with explicit env opt-in."""
+    missing_config = tmp_path / "missing-mcp-modules.yaml"
+    monkeypatch.setenv("MCP_MODULES_CONFIG", str(missing_config))
+    monkeypatch.setenv("MCP_MODULES", "")
+    monkeypatch.setenv("MCP_ENABLE_FILESYSTEM_MODULE", "true")
+
+    registered = []
+    server = MCPServer()
+
+    async def _register_module(module_id, cls, config):
+        registered.append(module_id)
+
+    monkeypatch.setattr(server.module_registry, "register_module", _register_module)
+
+    await server._register_default_modules()
+
+    assert "filesystem" in registered
+
+
+@pytest.mark.asyncio
+async def test_explicit_yaml_enabled_high_risk_modules_still_register(monkeypatch, tmp_path):
+    """Safer defaults must not override an operator's explicit YAML opt-in."""
+    import textwrap
+
+    config_path = tmp_path / "mcp_modules.yaml"
+    config_path.write_text(
+        textwrap.dedent(
+            """
+            modules:
+              - id: filesystem
+                class: tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule
+                enabled: true
+                name: Filesystem
+                version: "1.0.0"
+                department: system
+                settings: {}
+            """
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MCP_MODULES_CONFIG", str(config_path))
+    monkeypatch.setenv("MCP_MODULES", "")
+    monkeypatch.delenv("MCP_ENABLE_FILESYSTEM_MODULE", raising=False)
+
+    registered = []
+    server = MCPServer()
+
+    async def _register_module(module_id, cls, config):
+        registered.append(module_id)
+
+    monkeypatch.setattr(server.module_registry, "register_module", _register_module)
+
+    await server._register_default_modules()
+
+    assert "filesystem" in registered
+
+
 class TestJWTManager:
     """Test JWT authentication manager"""
 
@@ -192,13 +359,69 @@ class TestRBACPolicy:
         assert policy.check_permission(
             "test_user",
             Resource.TOOL,
-            Action.EXECUTE
+            Action.EXECUTE,
+            "search_media"
+        )
+        assert not policy.check_permission(
+            "test_user",
+            Resource.TOOL,
+            Action.EXECUTE,
+            "definitely_missing_tool"
         )
         assert policy.check_permission(
             "test_user",
             Resource.MEDIA,
             Action.READ
         )
+
+
+class TestBaseModule:
+    """Test shared module base behavior."""
+
+    def test_module_config_preserves_positional_settings_argument(self) -> None:
+        """Test the new factory field does not shift legacy positional settings."""
+        config = ModuleConfig(
+            "positional_module",
+            "1.0.0",
+            "",
+            "general",
+            True,
+            30,
+            3,
+            5,
+            60,
+            20,
+            2.0,
+            300,
+            {"mode": "legacy"},
+        )
+
+        assert config.settings == {"mode": "legacy"}
+        assert config.circuit_breaker_factory is None
+
+    def test_module_config_accepts_circuit_breaker_factory(self) -> None:
+        """Test module construction can inject circuit breaker creation."""
+        fake_breaker = object()
+        calls: list[tuple[str, Any]] = []
+
+        def _fake_factory(*, name: str, config: Any) -> object:
+            calls.append((name, config))
+            return fake_breaker
+
+        module = TestModule(
+            ModuleConfig(
+                name="custom_breaker_module",
+                circuit_breaker_factory=_fake_factory,
+            )
+        )
+
+        assert module._circuit_breaker is fake_breaker  # noqa: SLF001
+        assert calls
+        breaker_name, breaker_config = calls[0]
+        assert breaker_name == "mcp_custom_breaker_module"
+        assert breaker_config.failure_threshold == 5
+        assert breaker_config.category == "mcp"
+        assert breaker_config.service == "custom_breaker_module"
 
 
 @pytest.mark.asyncio
@@ -344,6 +567,134 @@ class TestMCPServer:
         assert status["uptime_seconds"] >= 0
 
         await server.shutdown()
+
+    async def test_server_status_includes_module_surface(self, monkeypatch):
+        """Server status should explain enabled module risk tiers, not only counts."""
+        server = MCPServer()
+        server.initialized = True
+
+        async def _check_all_health():
+            return {
+                "media": ModuleHealth(status=HealthStatus.HEALTHY),
+                "filesystem": ModuleHealth(status=HealthStatus.HEALTHY),
+                "run_command": ModuleHealth(status=HealthStatus.DEGRADED),
+            }
+
+        monkeypatch.setattr(server.module_registry, "check_all_health", _check_all_health)
+
+        status = await server.get_status()
+
+        assert status["surface"]["enabled_count"] == 3
+        assert [m["id"] for m in status["surface"]["tiers"]["read_only"]["modules"]] == ["media"]
+        assert [m["id"] for m in status["surface"]["tiers"]["local_files"]["modules"]] == ["filesystem"]
+        assert [m["id"] for m in status["surface"]["tiers"]["local_process"]["modules"]] == ["run_command"]
+
+    async def test_server_status_includes_disabled_available_from_config(self, monkeypatch):
+        """Server status should include configured high-risk modules skipped as disabled."""
+        server = MCPServer()
+        server.initialized = True
+        server._configured_modules_for_status = {
+            "media": {"enabled": True},
+            "filesystem": {"enabled": False},
+            "run_command": {"enabled": False},
+        }
+
+        async def _check_all_health():
+            return {"media": ModuleHealth(status=HealthStatus.HEALTHY)}
+
+        monkeypatch.setattr(server.module_registry, "check_all_health", _check_all_health)
+
+        status = await server.get_status()
+
+        assert status["surface"]["enabled_count"] == 1
+        assert [m["id"] for m in status["surface"]["disabled_available"]] == ["filesystem", "run_command"]
+        assert all(m["requires_explicit_opt_in"] for m in status["surface"]["disabled_available"])
+
+    async def test_server_status_reports_enabled_config_missing_from_health_as_not_loaded(self, monkeypatch):
+        """Configured enabled modules missing health should not appear as enabled surface modules."""
+        server = MCPServer()
+        server.initialized = True
+        server._configured_modules_for_status = {
+            "media": {"enabled": True, "status": "not_loaded"},
+            "filesystem": {"enabled": True, "status": "not_loaded"},
+        }
+
+        async def _check_all_health():
+            return {"media": ModuleHealth(status=HealthStatus.HEALTHY)}
+
+        async def _list_registrations():
+            return []
+
+        monkeypatch.setattr(server.module_registry, "check_all_health", _check_all_health)
+        monkeypatch.setattr(server.module_registry, "list_registrations", _list_registrations)
+
+        status = await server.get_status()
+
+        assert status["surface"]["enabled_count"] == 1
+        assert [m["id"] for m in status["surface"]["tiers"]["read_only"]["modules"]] == ["media"]
+        assert "local_files" not in status["surface"]["tiers"]
+        assert status["surface"]["disabled_available_count"] == 0
+        assert {
+            "id": "filesystem",
+            "status": "not_loaded",
+            "reason": "module_not_loaded",
+            "next_action": "Check module configuration and dependencies, then restart or disable the module.",
+        } in status["problem_modules"]
+
+    async def test_server_status_includes_sanitized_problem_modules(self, monkeypatch):
+        """Server status should expose actionable, canned module problem reasons."""
+        server = MCPServer()
+        server.initialized = True
+
+        async def _check_all_health():
+            return {
+                "media": ModuleHealth(status=HealthStatus.HEALTHY),
+                "broken": ModuleHealth(
+                    status=HealthStatus.UNHEALTHY,
+                    message="Health check failed at /private/authnz.db with api_key=secret-token",
+                ),
+                "degraded": ModuleHealth(
+                    status=HealthStatus.DEGRADED,
+                    message="Slow dependency at /tmp/token-cache with token=secret-token",
+                ),
+            }
+
+        async def _list_registrations():
+            return [
+                {
+                    "module_id": "registration_error",
+                    "status": "error",
+                    "error_message": "Import failed at /private/module.py with api_key=secret-token",
+                }
+            ]
+
+        monkeypatch.setattr(server.module_registry, "check_all_health", _check_all_health)
+        monkeypatch.setattr(server.module_registry, "list_registrations", _list_registrations)
+
+        status = await server.get_status()
+
+        assert status["problem_modules"] == [
+            {
+                "id": "broken",
+                "status": "unhealthy",
+                "reason": "module_unhealthy",
+                "next_action": "Check module configuration and dependencies, then restart or disable the module.",
+            },
+            {
+                "id": "degraded",
+                "status": "degraded",
+                "reason": "module_degraded",
+                "next_action": "Check module configuration and dependencies, then restart or disable the module.",
+            },
+            {
+                "id": "registration_error",
+                "status": "error",
+                "reason": "module_registration_error",
+                "next_action": "Check module configuration and dependencies, then restart or disable the module.",
+            }
+        ]
+        assert "/private/" not in repr(status["problem_modules"])
+        assert "secret-token" not in repr(status["problem_modules"])
 
     async def test_server_metrics(self):
         """Test getting server metrics"""

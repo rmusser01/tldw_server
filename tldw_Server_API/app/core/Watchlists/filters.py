@@ -5,6 +5,16 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import regex as regex_engine
+
+
+_MAX_REGEX_PATTERN_LENGTH = 1000
+_REGEX_TIMEOUT_SECONDS = 0.05
+_REGEX_TIMEOUT_ERROR = getattr(regex_engine, "TimeoutError", TimeoutError)
+_NESTED_REGEX_QUANTIFIER_RE = re.compile(
+    r"\((?:[^()\\]|\\.)*(?:\*|\+|\{\d+(?:,\d*)?\})(?:[^()\\]|\\.)*\)\s*(?:\*|\+|\{\d+(?:,\d*)?\})"
+)
+
 
 def _to_list(val: Any) -> list[str]:
     if val is None:
@@ -108,8 +118,16 @@ def _match_author(value: dict[str, Any], candidate: dict[str, Any]) -> bool:
     return any(n in author for n in names)
 
 
-def _compile_regex(pattern: str, flags: str | None) -> re.Pattern[str] | None:
+def _looks_like_nested_quantifier(pattern: str) -> bool:
+    return bool(_NESTED_REGEX_QUANTIFIER_RE.search(pattern))
+
+
+def _compile_regex(pattern: str, flags: str | None) -> Any | None:
     if not pattern:
+        return None
+    if len(pattern) > _MAX_REGEX_PATTERN_LENGTH:
+        return None
+    if _looks_like_nested_quantifier(pattern):
         return None
     f = 0
     flag_text = flags if isinstance(flags, str) else None
@@ -118,15 +136,22 @@ def _compile_regex(pattern: str, flags: str | None) -> re.Pattern[str] | None:
     if isinstance(flag_text, str):
         flag_text = flag_text.lower()
         if "i" in flag_text:
-            f |= re.IGNORECASE
+            f |= regex_engine.IGNORECASE
         if "m" in flag_text:
-            f |= re.MULTILINE
+            f |= regex_engine.MULTILINE
         if "s" in flag_text:
-            f |= re.DOTALL
+            f |= regex_engine.DOTALL
     try:
-        return re.compile(pattern, f)
-    except (re.error, TypeError, ValueError):
+        return regex_engine.compile(pattern, f)
+    except (regex_engine.error, TypeError, ValueError):
         return None
+
+
+def _safe_regex_search(rx: Any, text: str) -> bool:
+    try:
+        return bool(rx.search(text, timeout=_REGEX_TIMEOUT_SECONDS))
+    except (_REGEX_TIMEOUT_ERROR, TimeoutError, regex_engine.error, TypeError, ValueError):
+        return False
 
 
 def _match_regex(value: dict[str, Any], candidate: dict[str, Any]) -> bool:
@@ -144,17 +169,17 @@ def _match_regex(value: dict[str, Any], candidate: dict[str, Any]) -> bool:
                 hay = str(candidate.get(name) or "")
             except (TypeError, ValueError):
                 continue
-            if rx.search(hay):
+            if _safe_regex_search(rx, hay):
                 return True
         return False
     field = value.get("field")
     if isinstance(field, str) and field:
         hay = str(candidate.get(field) or "")
-        return bool(rx.search(hay))
+        return _safe_regex_search(rx, hay)
     # Search across common fields
     for name in ("title", "summary", "content", "author"):
         hay = str(candidate.get(name) or "")
-        if rx.search(hay):
+        if _safe_regex_search(rx, hay):
             return True
     return False
 

@@ -1,6 +1,16 @@
 # MCP Unified Documentation
 
+> **Current state:** Unified MCP is embedded in TLDW Server today. The standalone package/gateway is planned but not shipped in this tree yet. Use the TLDW Server launch path unless a future release explicitly says the standalone gateway is available.
+
 The MCP Unified stack is the production Model Context Protocol surface that ships with TLDW. Use this directory as the starting point for all current development, deployment, and client-integration work.
+
+## Which Path Should I Use?
+
+| Use case | Current path | Status |
+| --- | --- | --- |
+| Connect MCP clients to TLDW Server | `/api/v1/mcp/status`, `/api/v1/mcp/request`, `/api/v1/mcp/ws` | Supported embedded TLDW surface. |
+| Test a package-local mounted gateway | `/mcp/status`, `/mcp/request`, `/mcp/ws` | Package-local or host-mounted examples only; the embedding app supplies the server process. |
+| Run a separate standalone gateway process | None | Standalone gateway is planned but not shipped; there is no supported `serve` command today. |
 
 ## Available Guides
 
@@ -8,9 +18,11 @@ The MCP Unified stack is the production Model Context Protocol surface that ship
 - `System_Admin_Guide.md` - Installation, configuration, monitoring, and security hardening
 - `User_Guide.md` - HTTP and WebSocket workflows, authentication, troubleshooting
 - `Modules.md` - Reference for creating and managing pluggable MCP modules
+- `CodeGraph.md` - Native CodeGraph module setup, indexing modes, tools, and operations
 - `Governance_Operations.md` - Rollout modes, compatibility guarantees, and runbook for unified governance operations
 - `Documentation_Ingestion_Playbook.md` - Step-by-step workflow for ingesting project docs and exposing them through MCP tools
 - `Client_Snippets.md` - Minimal JS/Python examples for initialize → tools/list → tools/call
+- `Operator_Cheatsheet.md` - Compact command reference for repeat HTTP, WebSocket, batch, session, status, and metrics workflows
 - `Adding_Tools.md` - Step-by-step guide to add new tools (modules) and register them
 - `External_Federation.md` - Enabling and operating external MCP server federation (read + write policy controls)
 - `../../API-related/Tools_API_Documentation.md` - REST facade for listing/executing tools via MCP

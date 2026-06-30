@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core import config as app_config
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest, RequestContext
 
 
@@ -102,6 +103,41 @@ class _GovernanceServiceStub:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_rollout_mode_delegates_to_shared_server_config_resolver(monkeypatch):
+    proto = MCPProtocol()
+    proto.rbac_policy = _AllowAllRBAC()
+    proto.module_registry = _RegistryStub(_ToolModuleStub())
+
+    service = _GovernanceServiceStub(action="allow")
+
+    async def _fake_ensure_service():
+        return service
+
+    proto._ensure_governance_service = _fake_ensure_service  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        app_config,
+        "resolve_governance_rollout_mode",
+        lambda raw_mode=None: "shadow" if raw_mode is None else str(raw_mode),
+    )
+
+    metric_calls: list[dict[str, str]] = []
+    monkeypatch.setattr(
+        proto.metrics,
+        "record_governance_check",
+        lambda **kwargs: metric_calls.append({k: str(v) for k, v in kwargs.items()}),
+    )
+
+    ctx = RequestContext(request_id="gov-config-1", user_id="1", metadata={})
+    result = await proto._handle_tools_call({"name": "stub.echo", "arguments": {"x": 1}}, ctx)
+
+    assert result["tool"] == "stub.echo"
+    assert service.called is True
+    assert metric_calls
+    assert metric_calls[-1]["rollout_mode"] == "shadow"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_non_governance_tool_invokes_preflight():
     proto = MCPProtocol()
     proto.rbac_policy = _AllowAllRBAC()
@@ -184,6 +220,53 @@ async def test_wire_compat_adds_governance_details_in_error_data_only():
     assert resp.error.code == -32001
     assert isinstance(resp.error.data, dict)
     assert "governance" in resp.error.data
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_policy_resolver_runtime_failure_fails_closed_before_governance_preflight():
+    from tldw_Server_API.app.core.MCP_unified.adapters.tldw_policy import (
+        TldwEffectivePolicyResolver,
+    )
+
+    class _FailingHubResolver:
+        async def resolve_for_context(self, *, user_id, metadata):
+            raise RuntimeError("resolver unavailable")
+
+    async def _resolver_factory():
+        return _FailingHubResolver()
+
+    proto = MCPProtocol()
+    proto.rbac_policy = _AllowAllRBAC()
+    proto.module_registry = _RegistryStub(_ToolModuleStub())
+    proto.dependencies.effective_policy_resolver = TldwEffectivePolicyResolver(
+        resolver_factory=_resolver_factory,
+    )
+
+    service = _GovernanceServiceStub(action="allow")
+
+    async def _fake_ensure_service():
+        return service
+
+    proto._ensure_governance_service = _fake_ensure_service  # type: ignore[attr-defined]
+
+    req = MCPRequest(method="tools/call", params={"name": "stub.echo", "arguments": {"x": 1}}, id="policy-fail")
+    ctx = RequestContext(
+        request_id="policy-fail",
+        user_id="1",
+        metadata={
+            "mcp_policy_context_enabled": True,
+            "governance_rollout_mode": "enforce",
+        },
+    )
+
+    resp = await proto.process_request(req, ctx)
+
+    assert resp.error is not None
+    assert resp.error.code == -32001
+    assert "MCP Hub policy" in resp.error.message
+    assert ctx.metadata["_mcp_effective_tool_policy"]["resolution_error"] == "policy_resolution_failed"
+    assert service.called is False
 
 
 @pytest.mark.unit

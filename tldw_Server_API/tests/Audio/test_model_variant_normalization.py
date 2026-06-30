@@ -19,6 +19,18 @@ def test_parakeet_combined_sets_variant_when_no_override():
 
 
 @pytest.mark.unit
+def test_parakeet_canonical_tdt_onnx_alias_sets_variant_when_no_override():
+    m, v = normalize_model_and_variant(
+        raw_model="parakeet-tdt-0.6b-v3-onnx",
+        current_model="parakeet",
+        current_variant="standard",
+        variant_override=None,
+    )
+    assert m == "parakeet"
+    assert v == "onnx"
+
+
+@pytest.mark.unit
 def test_parakeet_override_wins_over_combined_suffix():
     m, v = normalize_model_and_variant(
         raw_model="parakeet-mlx",

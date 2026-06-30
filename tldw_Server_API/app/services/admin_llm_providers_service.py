@@ -50,7 +50,7 @@ async def get_llm_provider_overrides_repo() -> AuthnzLLMProviderOverridesRepo:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to initialize LLM provider overrides repository: {exc}")
+        logger.error("Failed to initialize LLM provider overrides repository")
         raise HTTPException(
             status_code=500,
             detail="Provider overrides infrastructure is not available",
@@ -160,7 +160,7 @@ async def upsert_override(
         try:
             credential_fields = _normalize_credential_fields(provider_norm, payload.credential_fields)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail="Invalid provider credential fields") from exc
 
     if payload.clear_api_key:
         secret_blob = None
@@ -217,7 +217,7 @@ async def upsert_override(
             updated_at=now,
         )
     except Exception as exc:
-        logger.error("Provider override upsert failed for provider={}: {}", provider_norm, exc)
+        logger.error("Failed to store provider override")
         raise HTTPException(status_code=500, detail="Failed to store provider override") from exc
 
     await refresh_llm_provider_overrides()
@@ -233,7 +233,7 @@ async def delete_override(provider: str) -> None:
     try:
         deleted = await repo.delete_override(provider_norm)
     except Exception as exc:
-        logger.error("Provider override delete failed for provider={}: {}", provider_norm, exc)
+        logger.error("Failed to delete provider override")
         raise HTTPException(status_code=500, detail="Failed to delete provider override") from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Provider override not found")
@@ -267,7 +267,7 @@ async def test_provider(
         try:
             credential_fields = _normalize_credential_fields(provider_norm, credential_fields)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail="Invalid provider credential fields") from exc
 
     try:
         model_used = await test_provider_credentials(
@@ -277,7 +277,7 @@ async def test_provider(
             model=model,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail="Provider credential validation failed") from exc
     except ChatAPIError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except Exception as exc:

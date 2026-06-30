@@ -6,6 +6,7 @@ import {
 } from "@/services/companion"
 import { buildPersonaWebSocketUrl } from "@/services/persona-stream"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { downloadBlob } from "@/utils/download-blob"
 
 import type { PersonaGardenTabKey } from "@/utils/persona-garden-route"
 import type { PersonaVoiceDefaults } from "@/hooks/useResolvedPersonaVoiceDefaults"
@@ -38,6 +39,17 @@ type PersonaSessionPreferences = {
 
 type PersonaSessionDetailResponse = {
   preferences?: PersonaSessionPreferences
+  turns?: Array<Record<string, unknown>>
+}
+
+type PersonaSessionExportResponse = {
+  session_id?: string
+  persona_id?: string
+  format?: "json"
+  created_at?: string
+  updated_at?: string
+  turn_count?: number
+  redaction_markers?: string[]
   turns?: Array<Record<string, unknown>>
 }
 
@@ -239,6 +251,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     React.useState(false)
   const [savingCompanionCheckIn, setSavingCompanionCheckIn] =
     React.useState(false)
+  const [transcriptExporting, setTranscriptExporting] = React.useState(false)
   const [companionPrompts, setCompanionPrompts] = React.useState<
     Array<{ prompt_id: string; label: string; prompt_text: string }>
   >([])
@@ -855,6 +868,39 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     setLogs(historyLogs)
   }, [sessionId, setError, setLogs])
 
+  // ── exportSelectedSessionTranscript ──
+  const exportSelectedSessionTranscript = React.useCallback(async () => {
+    const selectedSessionId = String(sessionId || "").trim()
+    if (!selectedSessionId || transcriptExporting) return
+    setTranscriptExporting(true)
+    try {
+      const resp = await tldwClient.fetchWithAuth(
+        `/api/v1/persona/sessions/${encodeURIComponent(
+          selectedSessionId
+        )}/export` as any,
+        { method: "GET" }
+      )
+      if (!resp.ok) {
+        throw new Error(resp.error || "Failed to export transcript")
+      }
+      const payload = (await resp.json()) as PersonaSessionExportResponse
+      const filename = `persona-session-${selectedSessionId}-transcript.json`
+      downloadBlob(
+        new Blob([JSON.stringify(payload, null, 2)], {
+          type: "application/json"
+        }),
+        filename
+      )
+      appendLog("notice", "Transcript export downloaded.")
+    } catch (err: any) {
+      const message = String(err?.message || "Failed to export transcript")
+      setError(message)
+      appendLog("notice", message)
+    } finally {
+      setTranscriptExporting(false)
+    }
+  }, [appendLog, sessionId, setError, transcriptExporting])
+
   // ── confirmPlan / cancelPlan ──
   const confirmPlan = React.useCallback(() => {
     if (!pendingPlan || !sessionId || !wsRef.current || !connected)
@@ -1150,6 +1196,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     setPersonaStateContextProfileDefault,
     updatingPersonaStateContextDefault,
     savingCompanionCheckIn,
+    transcriptExporting,
     companionPrompts,
     canSend,
     canSaveCompanionCheckIn,
@@ -1162,6 +1209,7 @@ export function usePersonaLiveSession(deps: UsePersonaLiveSessionDeps) {
     sendUserMessage,
     sendSetupLiveTestMessage,
     loadSessionHistory,
+    exportSelectedSessionTranscript,
     confirmPlanWithMap,
     cancelPlan,
     handleResumeSessionSelectionChange,

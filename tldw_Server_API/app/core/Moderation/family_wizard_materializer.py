@@ -10,6 +10,9 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB
 
 
+MATERIALIZATION_FAILURE_DETAIL = "Wizard plan materialization failed"
+
+
 def materialize_pending_plans_for_relationship(
     db: GuardianDB,
     relationship_id: str,
@@ -66,14 +69,13 @@ def materialize_pending_plans_for_relationship(
             )
             materialized_count += 1
             policy_ids.append(policy.id)
-        except Exception as exc:
+        except Exception:
             failed_count += 1
-            error_detail = str(exc) or "Unknown materialization error"
-            logger.exception(
-                "Failed to materialize wizard plan {} for relationship {}: {}",
+            error_detail = MATERIALIZATION_FAILURE_DETAIL
+            logger.error(
+                "Failed to materialize wizard plan {} for relationship {}",
                 plan["id"],
                 relationship_id,
-                error_detail,
             )
             db.update_guardrail_plan_draft_status(
                 plan_draft_id=plan["id"],

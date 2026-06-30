@@ -46,6 +46,11 @@ from .base import (
 # LuxTTS Adapter
 
 
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
 class LuxTTSAdapter(TTSAdapter):
     """Adapter for LuxTTS (ZipVoice-based voice cloning)."""
 
@@ -206,7 +211,10 @@ class LuxTTSAdapter(TTSAdapter):
             if asyncio.iscoroutine(register_result):
                 await register_result
         except Exception as registration_error:
-            logger.debug("LuxTTS provider registration failed; continuing", exc_info=registration_error)
+            logger.debug(
+                "LuxTTS provider registration failed; continuing; exception_type={}",
+                _safe_exception_label(registration_error),
+            )
         self._capabilities = await self.get_capabilities()
         self._status = ProviderStatus.AVAILABLE
         self._initialized = True
@@ -354,7 +362,10 @@ class LuxTTSAdapter(TTSAdapter):
                 },
             )
         except Exception as exc:
-            logger.error("LuxTTS generation failed: {}", exc, exc_info=True)
+            logger.error(
+                "LuxTTS generation failed; exception_type={}",
+                _safe_exception_label(exc),
+            )
             raise TTSGenerationError(
                 "LuxTTS generation failed",
                 provider=self.PROVIDER_KEY,
@@ -507,11 +518,14 @@ class LuxTTSAdapter(TTSAdapter):
                     return coerced
         engine = self._engine
         vocos = getattr(engine, "vocos", None) if engine else None
-        if vocos is not None and hasattr(vocos, "return_48k"):
+        if vocos is not None:
             try:
                 return self.DEFAULT_SAMPLE_RATE if vocos.return_48k else self.DEFAULT_PROMPT_SAMPLE_RATE
             except Exception as sample_rate_error:
-                logger.debug("LuxTTS sample-rate probe failed; using fallback", exc_info=sample_rate_error)
+                logger.debug(
+                    "LuxTTS sample-rate probe failed; using fallback; exception_type={}",
+                    _safe_exception_label(sample_rate_error),
+                )
         if return_smooth:
             return self.DEFAULT_PROMPT_SAMPLE_RATE
         return int(self.sample_rate)
@@ -542,7 +556,10 @@ class LuxTTSAdapter(TTSAdapter):
                 if final_bytes:
                     yield final_bytes
             except Exception as exc:
-                logger.error("LuxTTS streaming failed: {}", exc, exc_info=True)
+                logger.error(
+                    "LuxTTS streaming failed; exception_type={}",
+                    _safe_exception_label(exc),
+                )
                 raise TTSGenerationError(
                     "LuxTTS streaming failed",
                     provider=self.PROVIDER_KEY,
@@ -572,7 +589,10 @@ class LuxTTSAdapter(TTSAdapter):
             if hasattr(wav, "numpy"):
                 wav = wav.numpy()
         except Exception as tensor_convert_error:
-            logger.debug("LuxTTS tensor conversion failed; falling back to numpy coercion", exc_info=tensor_convert_error)
+            logger.debug(
+                "LuxTTS tensor conversion failed; falling back to numpy coercion; exception_type={}",
+                _safe_exception_label(tensor_convert_error),
+            )
         audio_np = np.asarray(wav, dtype=np.float32)
         if audio_np.ndim > 1:
             audio_np = np.reshape(audio_np, -1)

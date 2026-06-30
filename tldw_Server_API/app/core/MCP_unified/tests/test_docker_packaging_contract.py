@@ -1,8 +1,10 @@
 from pathlib import Path
 
 
+DOCKER_README = Path("tldw_Server_API/app/core/MCP_unified/docker/README.md")
 DOCKERFILE = Path("tldw_Server_API/app/core/MCP_unified/docker/Dockerfile")
 ENTRYPOINT = Path("tldw_Server_API/app/core/MCP_unified/docker/entrypoint.sh")
+CORE_README = Path("tldw_Server_API/app/core/MCP_unified/README.md")
 
 
 def _ensure(condition: bool, message: str) -> None:
@@ -10,20 +12,54 @@ def _ensure(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def test_mcp_dockerfile_copies_real_entrypoint_and_boots_main_app() -> None:
-    text = DOCKERFILE.read_text(encoding="utf-8")
+def test_mcp_specific_docker_path_is_marked_experimental() -> None:
+    _ensure(DOCKER_README.exists(), "MCP-specific Docker status README is missing")
+    text = DOCKER_README.read_text(encoding="utf-8").lower()
 
     _ensure(
-        "COPY --chown=mcp:mcp tldw_Server_API/app/core/MCP_unified/docker/entrypoint.sh /entrypoint.sh" in text,
-        "Dockerfile does not copy the repo-local MCP entrypoint into the image",
+        "experimental" in text,
+        "MCP-specific Docker README should mark this path experimental",
     )
     _ensure(
-        'CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]' in text,
-        "Dockerfile does not boot the real FastAPI app target",
+        "not the supported standalone gateway" in text,
+        "MCP-specific Docker README should not imply this is the supported standalone gateway",
     )
     _ensure(
-        "mkdir -p /app /data/databases /data/logs /data/cache /data/media /data/transcripts" in text,
-        "Dockerfile does not pre-create all writable /data subdirectories before dropping privileges",
+        "embedded in tldw server today" in text,
+        "MCP-specific Docker README should point users back to the embedded TLDW Server path",
+    )
+
+
+def test_mcp_specific_dockerfile_does_not_claim_production_readiness() -> None:
+    _ensure(DOCKERFILE.exists(), "MCP-specific Dockerfile is missing")
+    text = DOCKERFILE.read_text(encoding="utf-8").lower()
+
+    _ensure(
+        "experimental" in text,
+        "MCP-specific Dockerfile should mark this path experimental",
+    )
+    for stale_phrase in (
+        "optimized for production deployment",
+        "production-ready",
+        "production grade",
+    ):
+        _ensure(
+            stale_phrase not in text,
+            f"MCP-specific Dockerfile should not claim {stale_phrase!r}",
+        )
+
+
+def test_primary_mcp_readme_flags_docker_deployment_as_experimental() -> None:
+    text = CORE_README.read_text(encoding="utf-8").lower()
+    docker_section = text.split("### docker deployment", 1)[1].split("##", 1)[0]
+
+    _ensure(
+        "experimental" in docker_section,
+        "Core MCP README Docker section should warn that the MCP-specific image is experimental",
+    )
+    _ensure(
+        "not the supported standalone gateway" in docker_section,
+        "Core MCP README Docker section should not present this path as the supported standalone gateway",
     )
 
 

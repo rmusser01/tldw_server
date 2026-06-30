@@ -35,6 +35,13 @@ def test_tts_history_cursor_pagination_sanity(test_client, auth_headers, monkeyp
     payload = resp.json()
     assert len(payload["items"]) == 100
     assert payload["next_cursor"]
+    assert payload["pagination"] == {
+        "mode": "cursor",
+        "limit": 100,
+        "cursor": None,
+        "next_cursor": payload["next_cursor"],
+        "has_more": True,
+    }
 
     first_page_ids = {item["id"] for item in payload["items"]}
 
@@ -45,6 +52,13 @@ def test_tts_history_cursor_pagination_sanity(test_client, auth_headers, monkeyp
     assert resp_page2.status_code == status.HTTP_200_OK
     payload_page2 = resp_page2.json()
     assert len(payload_page2["items"]) == 100
+    assert payload_page2["pagination"] == {
+        "mode": "cursor",
+        "limit": 100,
+        "cursor": payload["next_cursor"],
+        "next_cursor": payload_page2["next_cursor"],
+        "has_more": True,
+    }
 
     second_page_ids = {item["id"] for item in payload_page2["items"]}
     assert first_page_ids.isdisjoint(second_page_ids)
@@ -80,3 +94,10 @@ def test_tts_history_include_total_sanity(test_client, auth_headers, monkeypatch
     total_payload = resp_total.json()
     assert len(total_payload["items"]) == 25
     assert int(total_payload["total"]) == total_rows
+    assert total_payload["pagination"] == {
+        "mode": "cursor",
+        "limit": 25,
+        "cursor": None,
+        "next_cursor": total_payload["next_cursor"],
+        "has_more": True,
+    }

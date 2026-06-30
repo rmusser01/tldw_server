@@ -333,4 +333,31 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
       expect(screen.getByPlaceholderText("Title")).toHaveValue("Selected note title")
     })
   })
+
+  it("keeps mobile controls non-overlapping and honors reduced-motion users", async () => {
+    setViewportWidth(375)
+    renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-mobile-open-list-button")).toBeInTheDocument()
+    })
+
+    expect(screen.queryByTestId("notes-create-study-pack-button")).not.toBeInTheDocument()
+    expect(screen.getByTestId("notes-list-region").className).toContain(
+      "motion-reduce:transition-none"
+    )
+  })
+
+  it("keeps the first-draft title field usable on mobile", async () => {
+    setViewportWidth(375)
+    renderPage()
+
+    fireEvent.click(screen.getByTestId("notes-editor-empty-create"))
+
+    const titleInput = await screen.findByRole("textbox", { name: "Note title" })
+    expect(screen.getByTestId("notes-title-row")).toHaveClass("flex-wrap")
+    expect(titleInput).toHaveClass("!min-w-full")
+    expect(titleInput).toHaveClass("sm:!min-w-[18rem]")
+    expect(titleInput).toHaveClass("flex-1")
+  })
 })

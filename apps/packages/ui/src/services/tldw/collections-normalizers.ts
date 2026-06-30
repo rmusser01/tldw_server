@@ -4,6 +4,8 @@ import type {
   ReadingDigestSuggestionStatus
 } from "@/types/collections"
 import type {
+  IngestionSourceDirectoryBrowseResponse,
+  IngestionSourceDirectoryEntry,
   IngestionSourceItem,
   IngestionSourceItemsListResponse,
   IngestionSourceListResponse,
@@ -302,6 +304,32 @@ export const normalizeIngestionSourceItemsListResponse = (
   return {
     items,
     total: toFiniteNumber(payload?.total, items.length)
+  }
+}
+
+export const normalizeIngestionSourceDirectoryEntry = (
+  entry: any
+): IngestionSourceDirectoryEntry => ({
+  name: String(entry?.name ?? ""),
+  path: String(entry?.path ?? ""),
+  is_root: Boolean(entry?.is_root)
+})
+
+export const normalizeIngestionSourceDirectoryBrowseResponse = (
+  payload: any
+): IngestionSourceDirectoryBrowseResponse => {
+  const roots = Array.isArray(payload?.roots)
+    ? payload.roots.map((entry: any) => normalizeIngestionSourceDirectoryEntry(entry))
+    : []
+  const entries = Array.isArray(payload?.entries)
+    ? payload.entries.map((entry: any) => normalizeIngestionSourceDirectoryEntry(entry))
+    : []
+  return {
+    roots,
+    current_path: toOptionalString(payload?.current_path),
+    parent_path: toOptionalString(payload?.parent_path),
+    entries,
+    error: toOptionalString(payload?.error)
   }
 }
 

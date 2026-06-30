@@ -4,7 +4,10 @@ import fs from 'fs'
 
 import { resolveExtensionHeadlessMode } from './extension-common'
 import { resolveExtensionId } from './extension-id'
-import { prioritizeExtensionBuildCandidates } from './extension-paths'
+import {
+  prepareExtensionLaunchPath,
+  prioritizeExtensionBuildCandidates
+} from './extension-paths'
 
 async function waitForStorageSeed(page: Page) {
   await page.waitForFunction(
@@ -30,6 +33,41 @@ async function waitForStorageSeed(page: Page) {
     undefined,
     { timeout: 10000 }
   )
+}
+
+async function seedStorageFromExtensionPage(
+  page: Page,
+  seedConfig?: Record<string, any>
+) {
+  await page.evaluate((cfg) => {
+    return new Promise<void>((resolve) => {
+      if (typeof chrome === 'undefined' || !chrome.storage?.local || !chrome.storage?.sync) {
+        resolve()
+        return
+      }
+
+      const finish = () => {
+        chrome.storage.sync.set({ __e2eSeeded: true }, () => {
+          chrome.storage.local.set({ __e2eSeeded: true }, () => {
+            resolve()
+          })
+        })
+      }
+
+      chrome.storage.local.clear(() => {
+        chrome.storage.sync.clear(() => {
+          if (cfg) {
+            chrome.storage.sync.set(cfg, () => {
+              chrome.storage.local.set(cfg, finish)
+            })
+            return
+          }
+
+          finish()
+        })
+      })
+    })
+  }, seedConfig || null)
 }
 
 function makeTempProfileDirs() {
@@ -204,6 +242,11 @@ export async function launchWithExtension(
   )
   const channel = resolvePlaywrightChannel()
   const headless = resolveExtensionHeadlessMode()
+  const launchExtPath = prepareExtensionLaunchPath(extPath, {
+    deterministicManifestKey: true,
+    preserveDefaultLocaleCatalog: true,
+    rootDir: path.join(userDataDir, 'extension-launch')
+  })
   const context = await chromium.launchPersistentContext(userDataDir, {
     timeout: effectiveLaunchTimeoutMs,
     headless,
@@ -216,8 +259,8 @@ export async function launchWithExtension(
     },
     executablePath: executablePath || undefined,
     args: [
-      `--disable-extensions-except=${extPath}`,
-      `--load-extension=${extPath}`,
+      `--disable-extensions-except=${launchExtPath}`,
+      `--load-extension=${launchExtPath}`,
       '--no-crashpad',
       '--disable-crash-reporter',
       '--crash-dumps-dir=/tmp'
@@ -232,7 +275,6 @@ export async function launchWithExtension(
     Number.isFinite(configuredTargetWait) && configuredTargetWait > 0
       ? configuredTargetWait
       : 30000
-
   // Wait for background targets to appear (service worker or background page)
   const waitForTargets = async () => {
     // Already present?
@@ -257,7 +299,10 @@ export async function launchWithExtension(
     console.log('[E2E_DEBUG] No service worker found after waiting')
   }
 
-  const extensionId = await resolveExtensionId(context, { userDataDir })
+  const extensionId = await resolveExtensionId(context, {
+    extensionPath: launchExtPath,
+    userDataDir
+  })
   const optionsUrl = `chrome-extension://${extensionId}/options.html`
   const sidepanelUrl = `chrome-extension://${extensionId}/sidepanel.html`
 
@@ -367,6 +412,9 @@ export async function launchWithExtension(
   // Ensure the extension is ready before navigating
   await page.waitForTimeout(250)
   await page.goto(optionsUrl)
+  if (!sw) {
+    await seedStorageFromExtensionPage(page, seedConfig)
+  }
   // Wait until storage has been cleared/seeded (sentinel set)
   await waitForStorageSeed(page)
 

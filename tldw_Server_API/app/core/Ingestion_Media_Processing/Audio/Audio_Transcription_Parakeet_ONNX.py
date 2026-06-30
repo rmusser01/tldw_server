@@ -40,6 +40,15 @@ except ImportError:
 
 # Global cache for model and tokenizer
 _onnx_model_cache: dict[str, Any] = {}
+_PARAKEET_ONNX_ALLOW_PATTERNS = [
+    "*.onnx",
+    "**/*.onnx",
+    "*.onnx.data",
+    "**/*.onnx.data",
+    "vocab.txt",
+    "config.json",
+]
+_PARAKEET_ONNX_SILENCE_ABS_THRESHOLD = 1e-6
 
 logger = logger
 
@@ -178,7 +187,10 @@ class ParakeetONNXTokenizer:
             if token_id in self.inv_vocab:
                 token = self.inv_vocab[token_id]
                 # Skip special tokens
-                if token not in ['<pad>', '<s>', '</s>', '<blank>', '<unk>']:
+                if (
+                    token not in ['<pad>', '<s>', '</s>', '<blank>', '<blk>', '<unk>']
+                    and not token.startswith("<|")
+                ):
                     tokens.append(token)
 
         # Join tokens and clean up
@@ -188,6 +200,30 @@ class ParakeetONNXTokenizer:
         # Clean up multiple spaces
         text = ' '.join(text.split())
         return text.strip()
+
+
+class ParakeetOnnxAsrRuntime:
+    """Thin adapter around upstream onnx-asr for Parakeet TDT exports."""
+
+    def __init__(self, upstream_model: Any) -> None:
+        self.upstream_model = upstream_model
+
+    def transcribe(self, audio_data: np.ndarray, sample_rate: int = 16000) -> str:
+        """Transcribe with upstream onnx-asr instead of local TDT decoding."""
+        waveform = np.asarray(audio_data, dtype=np.float32)
+        if waveform.size == 0:
+            return "[No speech detected]"
+        if float(np.max(np.abs(waveform))) <= _PARAKEET_ONNX_SILENCE_ABS_THRESHOLD:
+            return "[No speech detected]"
+        text = self.upstream_model.recognize(
+            waveform,
+            sample_rate=int(sample_rate),
+            channel="mean",
+        )
+        if isinstance(text, list):
+            text = " ".join(str(part).strip() for part in text if str(part).strip())
+        result = str(text).strip()
+        return result if result else "[No speech detected]"
 
 
 def get_mel_features(audio: np.ndarray, sample_rate: int = 16000) -> np.ndarray:
@@ -276,39 +312,237 @@ def _preprocess_audio(audio: np.ndarray, sample_rate: int = 16000) -> np.ndarray
     return features
 
 
-def _prepare_onnx_inputs(session: Any, features: np.ndarray) -> dict[str, np.ndarray]:
+def _onnx_input_name(input_meta: Any) -> str:
+    """Return a stable string input name from ONNX metadata or test doubles."""
+    name = getattr(input_meta, "name", "")
+    if isinstance(name, str):
+        return name
+    mock_name = getattr(input_meta, "_mock_name", "")
+    return str(mock_name or name or "")
+
+
+def _onnx_input_rank(input_meta: Any) -> int | None:
+    """Return the declared ONNX input rank when metadata exposes one."""
+    shape = getattr(input_meta, "shape", None)
+    if isinstance(shape, (list, tuple)):
+        return len(shape)
+    return None
+
+
+def _is_length_input_name(name: str) -> bool:
+    lname = str(name or "").lower()
+    if not lname:
+        return False
+    return (
+        "length" in lname
+        or "lens" in lname
+        or lname.endswith("_len")
+        or lname.endswith("_lens")
+        or lname in {"len", "lens", "lengths"}
+    )
+
+
+def _is_raw_waveform_input(input_meta: Any) -> bool:
+    name = _onnx_input_name(input_meta)
+    lname = name.lower()
+    rank = _onnx_input_rank(input_meta)
+    if _is_length_input_name(name):
+        return False
+    if (
+        lname in {"targets", "target"}
+        or lname.startswith("input_state")
+        or lname.startswith("output_state")
+        or "encoder_output" in lname
+    ):
+        return False
+    if "feature" in lname or "mel" in lname or "encoder" in lname or "processed_signal" in lname:
+        return False
+    if "waveform" in lname or "audio_signal" in lname or "raw_audio" in lname or lname in {"audio", "samples"}:
+        return rank is None or rank <= 2
+    return rank == 2
+
+
+def _is_feature_input(input_meta: Any) -> bool:
+    name = _onnx_input_name(input_meta)
+    lname = name.lower()
+    rank = _onnx_input_rank(input_meta)
+    if _is_length_input_name(name):
+        return False
+    if lname in {"targets", "target"} or lname.startswith("input_state") or lname.startswith("output_state"):
+        return False
+    return (
+        "feature" in lname
+        or "mel" in lname
+        or "encoder" in lname
+        or "processed_signal" in lname
+        or "speech" in lname
+        or rank is not None and rank >= 3
+    )
+
+
+def _prepare_waveform_input(audio_data: np.ndarray) -> np.ndarray:
+    waveform = np.asarray(audio_data, dtype=np.float32)
+    if waveform.ndim > 1:
+        waveform = waveform.reshape(-1)
+    return np.expand_dims(waveform, axis=0)
+
+
+def _prepare_onnx_inputs(
+    session: Any,
+    features: np.ndarray,
+    waveform: Optional[np.ndarray] = None,
+    signal_length: int | None = None,
+) -> dict[str, np.ndarray]:
     """
     Build a best-effort ONNX input map from runtime input names.
 
     Different exported Parakeet variants use different names for the feature
-    tensor (e.g. `input_features`, `audio`, `encoder_outputs`). This helper
-    keeps mapping resilient across those variants and test doubles.
+    or waveform tensor (e.g. `input_features`, `encoder_outputs`, `waveforms`).
+    This helper keeps mapping resilient across those variants and test doubles.
     """
     inputs_meta = list(session.get_inputs() or [])
-    input_names = [getattr(inp, "name", "") for inp in inputs_meta]
+    input_names = [_onnx_input_name(inp) for inp in inputs_meta]
     prepared: dict[str, np.ndarray] = {}
+    explicit_signal_length: int | None = None
+    if signal_length is not None:
+        try:
+            explicit_signal_length = max(0, int(signal_length))
+        except (OverflowError, TypeError, ValueError):
+            explicit_signal_length = None
 
-    feature_name: str | None = None
-    for name in input_names:
-        lname = str(name).lower()
-        if any(token in lname for token in ("audio", "input", "encoder", "feature", "speech", "mel")):
-            feature_name = name
+    signal_name: str | None = None
+    signal_tensor = features
+    signal_length = int(features.shape[1]) if features.ndim >= 2 else int(features.size)
+
+    if waveform is not None:
+        for input_meta in inputs_meta:
+            if _is_raw_waveform_input(input_meta):
+                signal_name = _onnx_input_name(input_meta)
+                signal_tensor = waveform.astype(np.float32, copy=False)
+                signal_length = (
+                    explicit_signal_length
+                    if explicit_signal_length is not None
+                    else int(signal_tensor.shape[-1])
+                )
+                break
+
+    if signal_name is None:
+        for input_meta in inputs_meta:
+            if _is_feature_input(input_meta):
+                signal_name = _onnx_input_name(input_meta)
+                signal_tensor = features
+                signal_length = int(features.shape[1]) if features.ndim >= 2 else int(features.size)
+                break
+
+    if signal_name is None:
+        for input_meta in inputs_meta:
+            name = _onnx_input_name(input_meta)
+            if _is_length_input_name(name):
+                continue
+            signal_name = name
+            if waveform is not None and _onnx_input_rank(input_meta) == 2:
+                signal_tensor = waveform.astype(np.float32, copy=False)
+                signal_length = (
+                    explicit_signal_length
+                    if explicit_signal_length is not None
+                    else int(signal_tensor.shape[-1])
+                )
             break
-    if feature_name is None and input_names:
-        feature_name = input_names[0]
-    if feature_name is not None:
-        prepared[feature_name] = features
+
+    if signal_name is not None:
+        prepared[signal_name] = signal_tensor
 
     for name in input_names:
-        if name == feature_name:
+        if name == signal_name:
             continue
         lname = str(name).lower()
-        if "length" in lname or lname.endswith("_len") or "seq_len" in lname:
-            prepared[name] = np.array([features.shape[1]], dtype=np.int64)
+        if _is_length_input_name(name) or "seq_len" in lname:
+            prepared[name] = np.array([signal_length], dtype=np.int64)
         elif "batch" in lname:
-            prepared[name] = np.array([features.shape[0]], dtype=np.int64)
+            prepared[name] = np.array([signal_tensor.shape[0]], dtype=np.int64)
 
     return prepared
+
+
+def _existing_path(path: Path) -> Path | None:
+    """Return a path only when it exists."""
+    return path if path.exists() else None
+
+
+def _select_graph_path(model_dir: Path, candidates: list[str]) -> Path | None:
+    """Pick the first available ONNX graph from an ordered candidate list."""
+    for candidate in candidates:
+        path = _existing_path(model_dir / candidate)
+        if path is not None:
+            return path
+    return None
+
+
+def _resolve_parakeet_tdt_bundle_paths(model_dir: Path) -> dict[str, Path] | None:
+    """Resolve the multi-graph Parakeet TDT ONNX export layout when present."""
+    preprocessor_path = _select_graph_path(model_dir, ["nemo128.onnx", "nemo80.onnx"])
+    encoder_path = _select_graph_path(model_dir, ["encoder-model.int8.onnx", "encoder-model.onnx"])
+    decoder_joint_path = _select_graph_path(
+        model_dir,
+        ["decoder_joint-model.int8.onnx", "decoder_joint-model.onnx"],
+    )
+    vocab_path = _existing_path(model_dir / "vocab.txt")
+
+    if preprocessor_path and encoder_path and decoder_joint_path and vocab_path:
+        return {
+            "preprocessor": preprocessor_path,
+            "encoder": encoder_path,
+            "decoder_joint": decoder_joint_path,
+            "vocab": vocab_path,
+        }
+    if preprocessor_path and encoder_path and decoder_joint_path:
+        logger.error(
+            "Parakeet ONNX multi-graph export found in {} but vocab.txt is missing; "
+            "cannot decode tokens safely.",
+            model_dir,
+        )
+    return None
+
+
+def _resolve_parakeet_tdt_quantization(model_dir: Path) -> str | None:
+    """Return the preferred onnx-asr quantization suffix for available graph files."""
+    if (
+        (model_dir / "encoder-model.int8.onnx").exists()
+        and (model_dir / "decoder_joint-model.int8.onnx").exists()
+    ):
+        return "int8"
+    return None
+
+
+def _resolve_onnx_asr_load_model() -> Callable[..., Any] | None:
+    """Resolve upstream onnx-asr load_model when installed."""
+    try:
+        import importlib
+
+        onnx_asr = importlib.import_module("onnx_asr")
+    except (ImportError, ModuleNotFoundError, RuntimeError):
+        return None
+    load_model = getattr(onnx_asr, "load_model", None)
+    return load_model if callable(load_model) else None
+
+
+def _has_parakeet_tdt_graphs(model_dir: Path) -> bool:
+    """Return True when a directory has the Parakeet TDT multi-graph ONNX files."""
+    return bool(
+        _select_graph_path(model_dir, ["nemo128.onnx", "nemo80.onnx"])
+        and _select_graph_path(model_dir, ["encoder-model.int8.onnx", "encoder-model.onnx"])
+        and _select_graph_path(model_dir, ["decoder_joint-model.int8.onnx", "decoder_joint-model.onnx"])
+    )
+
+
+def _middle_trimmed_chunk_text(text: str, chunk_duration: float, overlap_duration: float) -> str:
+    """Trim the start of a chunk transcript using the existing middle-merge heuristic."""
+    if chunk_duration <= 0 or overlap_duration <= 0:
+        return text
+    overlap_chars = int(len(text) * overlap_duration / chunk_duration)
+    if overlap_chars <= 0:
+        return text
+    return text[overlap_chars // 2:]
 
 
 def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cpu'):
@@ -369,7 +603,8 @@ def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cp
 
         download_fn = _resolve_snapshot_download()
 
-        if not model_dir.exists() and download_fn:
+        is_existing_local_dir = model_dir.exists() and model_dir.is_dir()
+        if not is_existing_local_dir and download_fn:
             # Download from HuggingFace
             logger.info(f"Downloading ONNX model from HuggingFace: {model_path}")
             cache_dir = Path.home() / '.cache' / 'parakeet_onnx'
@@ -380,14 +615,69 @@ def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cp
             )
             model_dir = cache_dir / f"{model_path.replace('/', '_')}_{revision_token}"
 
-            if not model_dir.exists():
-                # Limit download to ONNX files only to avoid fetching entire repositories
+            # Limit download to model artifacts and required decoding sidecars.
+            # Existing caches may have only the ONNX graphs from older builds, so
+            # call snapshot_download when required sidecars are missing too.
+            if not model_dir.exists() or not (model_dir / "vocab.txt").exists():
                 download_fn(
                     repo_id=model_path,
                     local_dir=str(model_dir),
                     revision=revision,
-                    allow_patterns=["*.onnx", "**/*.onnx"],
+                    allow_patterns=_PARAKEET_ONNX_ALLOW_PATTERNS,
                 )  # nosec B615
+
+        # Set up providers
+        providers = []
+        if device == 'cuda':
+            providers.append('CUDAExecutionProvider')
+        providers.append('CPUExecutionProvider')
+
+        # Create ONNX sessions. Use a fresh import so patched attributes are respected.
+        try:
+            import importlib as _importlib
+            _runtime = _importlib.import_module('onnxruntime')
+        except (ImportError, ModuleNotFoundError, RuntimeError):
+            _runtime = ort
+
+        session_options = _runtime.SessionOptions()
+        session_options.graph_optimization_level = _runtime.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+        bundle_paths = _resolve_parakeet_tdt_bundle_paths(model_dir)
+        if bundle_paths is not None:
+            load_onnx_asr_model = _resolve_onnx_asr_load_model()
+            if load_onnx_asr_model is None:
+                logger.error(
+                    "Parakeet ONNX TDT export found in {} but onnx-asr is not installed. "
+                    "Install with: pip install 'onnx-asr[hub]'",
+                    model_dir,
+                )
+                return None, None
+
+            logger.info(
+                "Loading Parakeet TDT ONNX graph bundle through upstream onnx-asr from: {}",
+                model_dir,
+            )
+            quantization = _resolve_parakeet_tdt_quantization(model_dir)
+            upstream_model = load_onnx_asr_model(
+                "nemo-conformer-tdt",
+                path=model_dir,
+                quantization=quantization,
+                sess_options=session_options,
+                providers=providers,
+                preprocessor_config={"use_numpy_preprocessors": True},
+            )
+            tokenizer = ParakeetONNXTokenizer(bundle_paths["vocab"])
+            session = ParakeetOnnxAsrRuntime(upstream_model)
+            _onnx_model_cache[cache_key] = (session, tokenizer)
+            logger.info("Successfully loaded Parakeet TDT ONNX graph bundle through onnx-asr")
+            return session, tokenizer
+        if _has_parakeet_tdt_graphs(model_dir):
+            logger.error(
+                "Parakeet ONNX TDT graph bundle found in {} but vocab.txt is missing. "
+                "Add vocab.txt beside the ONNX graphs or use the upstream Hugging Face repo id.",
+                model_dir,
+            )
+            return None, None
 
         # Find ONNX files
         onnx_files = list(model_dir.glob("*.onnx"))
@@ -399,23 +689,6 @@ def load_parakeet_onnx_model(model_path: Optional[str] = None, device: str = 'cp
             # Use the first ONNX file (usually encoder.onnx or model.onnx)
             onnx_path = onnx_files[0]
         logger.info(f"Loading ONNX model from: {onnx_path}")
-
-        # Set up providers
-        providers = []
-        if device == 'cuda':
-            providers.append('CUDAExecutionProvider')
-        providers.append('CPUExecutionProvider')
-
-        # Create ONNX session
-        # Use a fresh import so patched attributes are respected
-        try:
-            import importlib as _importlib
-            _runtime = _importlib.import_module('onnxruntime')
-        except (ImportError, ModuleNotFoundError, RuntimeError):
-            _runtime = ort
-
-        session_options = _runtime.SessionOptions()
-        session_options.graph_optimization_level = _runtime.GraphOptimizationLevel.ORT_ENABLE_ALL
 
         session = _runtime.InferenceSession(
             str(onnx_path),
@@ -471,7 +744,8 @@ def transcribe_with_parakeet_onnx(
     try:
         session, tokenizer = load_parakeet_onnx_model(model_path, device)
     except Exception as e:
-        return f"[Error: {str(e)}]"
+        logger.exception(f"Failed to load ONNX model: {e}")
+        return "[Error: Failed to load ONNX model]"
     if session is None or tokenizer is None:
         return "[Error: Failed to load ONNX model]"
 
@@ -489,7 +763,7 @@ def transcribe_with_parakeet_onnx(
                 )
         except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
             logger.exception(f"Failed to load audio file: {e}")
-            return f"[Error: Failed to load audio: {e}]"
+            return "[Error: Failed to load audio]"
 
     # Ensure numpy array
     if not isinstance(audio_data, np.ndarray):
@@ -501,6 +775,48 @@ def transcribe_with_parakeet_onnx(
 
     # Check if we need chunking
     audio_duration = len(audio_data) / sample_rate
+
+    bundle_transcribe = getattr(session, "transcribe", None)
+    session_run = getattr(session, "run", None)
+    if isinstance(session, ParakeetOnnxAsrRuntime) or (
+        callable(bundle_transcribe) and not callable(session_run)
+    ):
+        try:
+            if chunk_duration and audio_duration > chunk_duration:
+                chunk_samples = int(chunk_duration * sample_rate)
+                overlap_samples = int(overlap_duration * sample_rate)
+                stride_samples = max(1, chunk_samples - overlap_samples)
+                transcripts: list[str] = []
+                total_samples = len(audio_data)
+                num_chunks = max(
+                    1,
+                    int(np.ceil(max(1, total_samples - overlap_samples) / stride_samples)),
+                )
+                for i in range(num_chunks):
+                    start = i * stride_samples
+                    end = min(start + chunk_samples, total_samples)
+                    chunk = audio_data[start:end]
+                    text = bundle_transcribe(chunk, sample_rate)
+                    if text and not text.startswith("["):
+                        if merge_algo == "middle" and i > 0 and overlap_samples > 0:
+                            text = _middle_trimmed_chunk_text(
+                                text,
+                                chunk_duration,
+                                overlap_duration,
+                            )
+                        transcripts.append(text)
+                    if chunk_callback:
+                        chunk_callback(i + 1, num_chunks)
+                result = (
+                    merge_with_overlap_removal(transcripts)
+                    if merge_algo == "overlap"
+                    else " ".join(transcripts)
+                )
+                return result.strip() if result.strip() else "[No speech detected]"
+            return bundle_transcribe(audio_data, sample_rate)
+        except Exception as e:
+            logger.exception(f"Parakeet TDT ONNX graph bundle transcription error: {e}")
+            return "[Error: Parakeet ONNX transcription failed]"
 
     if chunk_duration and audio_duration > chunk_duration:
         # Use chunked transcription
@@ -526,11 +842,12 @@ def transcribe_with_parakeet_onnx(
         # Prepare input for ONNX
         # Add batch dimension
         features = np.expand_dims(features, axis=0)
+        waveform = _prepare_waveform_input(audio_data)
 
         output_names = [out.name for out in session.get_outputs()]
 
         # Prepare inputs
-        inputs = _prepare_onnx_inputs(session, features)
+        inputs = _prepare_onnx_inputs(session, features, waveform=waveform)
 
         # Run inference
         outputs = session.run(output_names, inputs)
@@ -561,7 +878,7 @@ def transcribe_with_parakeet_onnx(
 
     except Exception as e:
         logger.exception(f"Transcription error: {e}")
-        return f"[Error: Transcription failed: {e}]"
+        return "[Error: Parakeet ONNX transcription failed]"
 
 
 def transcribe_chunked_onnx(
@@ -607,7 +924,9 @@ def transcribe_chunked_onnx(
         end = min(start + chunk_samples, total_samples)
 
         # Extract chunk
-        chunk = audio_data[start:end]
+        raw_chunk = audio_data[start:end]
+        chunk_length = len(raw_chunk)
+        chunk = raw_chunk
 
         # Pad if needed
         if len(chunk) < chunk_samples:
@@ -622,9 +941,15 @@ def transcribe_chunked_onnx(
 
             # Add batch dimension
             features = np.expand_dims(features, axis=0)
+            waveform = _prepare_waveform_input(chunk)
 
             # Prepare inputs
-            inputs = _prepare_onnx_inputs(session, features)
+            inputs = _prepare_onnx_inputs(
+                session,
+                features,
+                waveform=waveform,
+                signal_length=chunk_length,
+            )
 
             # Run inference
             outputs = session.run(output_names, inputs)
@@ -648,12 +973,11 @@ def transcribe_chunked_onnx(
 
                 if text:
                     if merge_algo == 'middle' and i > 0 and overlap_samples > 0:
-                        # For middle merge, trim overlapping parts
-                        # This is a simplified version - real implementation would
-                        # align tokens at boundaries
-                        overlap_chars = int(len(text) * overlap_duration / chunk_duration)
-                        if overlap_chars > 0:
-                            text = text[overlap_chars // 2:]
+                        text = _middle_trimmed_chunk_text(
+                            text,
+                            chunk_duration,
+                            overlap_duration,
+                        )
 
                     transcripts.append(text)
 

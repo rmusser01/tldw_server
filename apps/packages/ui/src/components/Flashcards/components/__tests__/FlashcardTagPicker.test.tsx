@@ -45,7 +45,7 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
 type HarnessProps = {
   active?: boolean
   initialValue?: string[]
-  onChangeSpy?: ReturnType<typeof vi.fn>
+  onChangeSpy?: (next: string[]) => void
   dataTestId?: string
 }
 

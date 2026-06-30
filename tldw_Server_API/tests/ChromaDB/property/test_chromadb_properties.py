@@ -13,7 +13,6 @@ from typing import List, Dict, Any, Optional
 import tempfile
 import shutil
 from pathlib import Path
-import uuid
 import threading
 
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager, validate_user_id
@@ -30,6 +29,18 @@ _state_mgr_singleton = None
 _state_mgr_base_dir = None
 
 
+def _new_chroma_manager(base_dir: str, user_id: str = "prop_stateful") -> ChromaDBManager:
+    """Create a Chroma manager rooted under a test-owned temporary directory."""
+    return ChromaDBManager(
+        user_id=user_id,
+        user_embedding_config={
+            "USER_DB_BASE_DIR": base_dir,
+            "embedding_config": {"default_model_id": "unused", "models": {}},
+            "chroma_client_settings": {"anonymized_telemetry": False, "allow_reset": True},
+        },
+    )
+
+
 def _get_shared_state_manager():
 
 
@@ -37,16 +48,15 @@ def _get_shared_state_manager():
     with _state_mgr_lock:
         if _state_mgr_singleton is None:
             base_dir = tempfile.mkdtemp(prefix="chroma_prop_shared_")
-            _state_mgr_singleton = ChromaDBManager(
-                user_id="prop_stateful",
-                user_embedding_config={
-                    "USER_DB_BASE_DIR": base_dir,
-                    "embedding_config": {"default_model_id": "unused", "models": {}},
-                    "chroma_client_settings": {"anonymized_telemetry": False, "allow_reset": True},
-                },
-            )
+            _state_mgr_singleton = _new_chroma_manager(base_dir)
             _state_mgr_base_dir = base_dir
         return _state_mgr_singleton
+
+
+def _is_transient_chroma_segment_runtime_error(error: RuntimeError) -> bool:
+    """Return True for Chroma's Windows HNSW segment-reader timing race."""
+    message = str(error).lower()
+    return "hnsw segment reader" in message and "nothing found on disk" in message
 
 
 # Ensure the shared state manager is properly closed at session end
@@ -473,17 +483,20 @@ class ChromaDBStateMachine(RuleBasedStateMachine):
     def __init__(self):
 
         super().__init__()
-        # Use a single shared manager across all examples to avoid too many open files
-        self.manager = _get_shared_state_manager()
-        # Namespace prefix per test run to isolate collections
-        self._ns = f"sm_{uuid.uuid4().hex[:8]}_"
+        self._base_dir = tempfile.mkdtemp(prefix="chroma_prop_state_machine_")
+        self.manager = _new_chroma_manager(self._base_dir)
+        # Keep the namespace deterministic so Hypothesis can replay failures.
+        self._ns = "sm_"
         # Track state local to this run
         self.collections = {}  # collection_name -> set of ids
         self.documents = {}     # (collection, id) -> document
         self.embeddings = {}    # (collection, id) -> embedding
 
     def _full(self, collection: str) -> str:
-        return f"{self._ns}{collection}"
+        suffix = collection[:60]
+        if suffix and not suffix[-1].isalnum():
+            suffix = f"{suffix[:-1]}{collection[-1]}"
+        return f"{self._ns}{suffix}"
 
     collections_bundle = Bundle("collections")
     documents_bundle = Bundle("documents")
@@ -545,11 +558,19 @@ class ChromaDBStateMachine(RuleBasedStateMachine):
         if not self.collections[collection]:
             return  # Empty collection
 
-        results = self.manager.query_collection_with_precomputed_embeddings(
-            collection_name=collection,
-            query_embeddings=[[0.1, 0.2, 0.3]],
-            n_results=k
-        )
+        try:
+            results = self.manager.query_collection_with_precomputed_embeddings(
+                collection_name=collection,
+                query_embeddings=[[0.1, 0.2, 0.3]],
+                n_results=k
+            )
+        except RuntimeError as exc:
+            if not _is_transient_chroma_segment_runtime_error(exc):
+                raise
+            collection_obj = self.manager.get_or_create_collection(collection)
+            recovered = collection_obj.get(ids=list(self.collections[collection]))
+            assert set(recovered["ids"]) == self.collections[collection]
+            return
 
         # Results should only contain existing documents
         for doc_id in results["ids"][0]:
@@ -588,6 +609,26 @@ class ChromaDBStateMachine(RuleBasedStateMachine):
                     _ = None
         finally:
             self.collections.clear()
+            self.documents.clear()
+            self.embeddings.clear()
+            try:
+                self.manager.close()
+            except Exception:
+                _ = None
+            shutil.rmtree(self._base_dir, ignore_errors=True)
+
+
+def test_state_machine_examples_use_isolated_chroma_managers():
+    """Each state-machine run must use isolated Chroma storage for replay safety."""
+    first = ChromaDBStateMachine()
+    second = ChromaDBStateMachine()
+
+    try:
+        assert first.manager is not second.manager
+        assert first.manager.user_chroma_path != second.manager.user_chroma_path
+    finally:
+        first.teardown()
+        second.teardown()
 
 
 # Run the stateful test

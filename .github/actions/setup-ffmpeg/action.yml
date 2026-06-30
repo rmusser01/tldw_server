@@ -1,6 +1,10 @@
 name: "Setup FFmpeg"
 description: "Install FFmpeg across platforms; optionally install PortAudio"
 inputs:
+  install-ffmpeg:
+    description: "Install FFmpeg"
+    required: false
+    default: 'true'
   install-portaudio:
     description: "Also install PortAudio (Linux/macOS)"
     required: false
@@ -9,25 +13,46 @@ runs:
   using: "composite"
   steps:
     - name: Install FFmpeg (Linux)
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && (inputs.install-ffmpeg == 'true' || inputs.install-portaudio == 'true')
       shell: bash
       run: |
-        sudo apt-get update
-        if [ "${{ inputs.install-portaudio }}" = "true" ]; then
-          sudo apt-get install -y ffmpeg portaudio19-dev python3-all-dev
-        else
-          sudo apt-get install -y ffmpeg
+        if [ -d /etc/apt/sources.list.d ]; then
+          grep -rl 'packages.microsoft.com' /etc/apt/sources.list.d | xargs -r sudo rm -f || true
+          grep -rl 'azure.archive.ubuntu.com' /etc/apt/sources.list.d | xargs -r sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' || true
+        fi
+        if [ -f /etc/apt/sources.list ]; then
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
+        fi
+        sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
+        if [ "${{ inputs.install-ffmpeg }}" = "true" ] && [ "${{ inputs.install-portaudio }}" = "true" ]; then
+          sudo apt-get install -y --no-install-recommends ffmpeg portaudio19-dev python3-all-dev
+        elif [ "${{ inputs.install-ffmpeg }}" = "true" ]; then
+          sudo apt-get install -y --no-install-recommends ffmpeg
+        elif [ "${{ inputs.install-portaudio }}" = "true" ]; then
+          sudo apt-get install -y --no-install-recommends portaudio19-dev python3-all-dev
         fi
     - name: Install FFmpeg (macOS)
       if: runner.os == 'macOS'
       shell: bash
       run: |
-        brew install ffmpeg || true
+        if [ "${{ inputs.install-ffmpeg }}" = "true" ]; then
+          brew install ffmpeg || true
+        fi
         if [ "${{ inputs.install-portaudio }}" = "true" ]; then
-          brew install portaudio || true
+          for attempt in 1 2 3; do
+            if brew install portaudio; then
+              break
+            fi
+            if [ "$attempt" = "3" ]; then
+              brew install --build-from-source portaudio
+            else
+              sleep $((attempt * 10))
+            fi
+          done
+          test -f "$(brew --prefix portaudio)/include/portaudio.h"
         fi
     - name: Install FFmpeg (Windows)
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && inputs.install-ffmpeg == 'true'
       shell: bash
       run: |
         choco install ffmpeg -y || choco upgrade ffmpeg -y || true

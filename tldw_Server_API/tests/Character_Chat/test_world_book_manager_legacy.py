@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Character_Chat.world_book_manager import (
     WorldBookEntry,
     BoundedDict,
 )
+from tldw_Server_API.app.core.Character_Chat.constants import MAX_REGEX_MATCH_TIME_MS
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 
@@ -54,6 +55,58 @@ def service(mock_db):
 
 class TestWorldBookService:
     """Test suite for WorldBookService."""
+
+    def test_regex_entry_matches_with_runtime_timeout(self, monkeypatch):
+        import tldw_Server_API.app.core.Character_Chat.world_book_manager as world_book_manager
+
+        observed_timeouts: list[float | None] = []
+
+        class FakePattern:
+            def search(self, _text: str, *, timeout: float | None = None):
+                observed_timeouts.append(timeout)
+                return True
+
+        def fake_safe_compile_regex(_pattern: str, flags: int = 0):
+            assert flags == 0
+            return FakePattern()
+
+        monkeypatch.setattr(world_book_manager, "_safe_compile_regex", fake_safe_compile_regex)
+
+        entry = WorldBookEntry(
+            entry_id=1,
+            world_book_id=1,
+            keywords=["hero"],
+            content="Hero lore",
+            regex_match=True,
+            case_sensitive=True,
+        )
+
+        assert entry.matches("the hero arrives")
+        assert observed_timeouts == [MAX_REGEX_MATCH_TIME_MS / 1000.0]
+
+    def test_regex_entry_timeout_variant_fails_closed(self, monkeypatch):
+        import tldw_Server_API.app.core.Character_Chat.world_book_manager as world_book_manager
+
+        class FakeRegexTimeout(Exception):
+            pass
+
+        class FakePattern:
+            def search(self, _text: str, *, timeout: float | None = None):
+                raise FakeRegexTimeout("timed out")
+
+        monkeypatch.setattr(world_book_manager, "_safe_compile_regex", lambda *_args, **_kwargs: FakePattern())
+        monkeypatch.setattr(world_book_manager, "_REGEX_TIMEOUT_ERROR", FakeRegexTimeout)
+
+        entry = WorldBookEntry(
+            entry_id=1,
+            world_book_id=1,
+            keywords=["hero"],
+            content="Hero lore",
+            regex_match=True,
+            case_sensitive=True,
+        )
+
+        assert entry.matches("the hero arrives") is False
 
     def test_init_creates_tables(self, mock_db):
         """Test that initialization creates necessary tables."""
@@ -455,6 +508,34 @@ class TestWorldBookService:
 
         # High priority should be processed first
         assert "High priority" in result["processed_context"]
+
+    def test_process_context_diagnostics_include_static_or_pinned_hint(self, service):
+        """Diagnostics should expose cache-safe static/pinned classification without raw metadata."""
+        service.get_world_book = MagicMock(
+            return_value={"id": 1, "name": "Test", "token_budget": 500, "enabled": 1}
+        )
+        service._entry_cache = {
+            1: [
+                WorldBookEntry(
+                    entry_id=1,
+                    world_book_id=1,
+                    keywords=["clock"],
+                    content="Clock tower lore",
+                    priority=100,
+                    enabled=True,
+                    metadata={"pinned": True},
+                )
+            ]
+        }
+
+        result = service.process_context(
+            text="clock",
+            world_book_ids=[1],
+            token_budget=1000,
+            include_diagnostics=True,
+        )
+
+        assert result["diagnostics"][0]["static_or_pinned"] is True
 
     def test_process_context_keyword_lookup_skips_non_candidate_literal_entries(self, service):
         """Normalized keyword lookup should avoid scanning unrelated literal entries."""

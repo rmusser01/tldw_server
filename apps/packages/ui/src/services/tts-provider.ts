@@ -2,6 +2,8 @@ import {
   getElevenLabsApiKey,
   getElevenLabsModel,
   getElevenLabsVoiceId,
+  getOpenAITTSModel,
+  getOpenAITTSVoice,
   getRemoveReasoningTagTTS,
   getSpeechPlaybackSpeed,
   getTTSProvider,
@@ -9,6 +11,7 @@ import {
   getTldwTTSResponseFormat,
   getTldwTTSSpeed,
   getTldwTTSVoice,
+  getVoice,
   isSSMLEnabled,
   isSupportedTldwTtsResponseFormat,
   normalizeTldwTtsResponseFormat
@@ -57,19 +60,40 @@ export type TtsSynthesisResult = {
   mimeType: string
 }
 
+export type TtsSynthesizeOptions = {
+  signal?: AbortSignal
+}
+
 export type TtsFormatInfo = {
   requested?: string | null
   resolved: string
   isFallback: boolean
 }
 
+export type TtsCacheSettings = {
+  provider: string
+  model?: string | null
+  voice?: string | null
+  speed?: number | null
+  format?: string | null
+  language?: string | null
+}
+
+export type TtsTextNormalizer = (text: string) => string
+
 export type TtsProviderContext = {
   provider: string
   utterance: string
+  normalizeText: TtsTextNormalizer
   playbackSpeed: number
   supported: boolean
-  synthesize?: (text: string) => Promise<TtsSynthesisResult>
+  browserVoiceName?: string | null
+  synthesize?: (
+    text: string,
+    options?: TtsSynthesizeOptions
+  ) => Promise<TtsSynthesisResult>
   formatInfo?: TtsFormatInfo
+  cacheSettings?: TtsCacheSettings
 }
 
 const SUPPORTED_TTS_PROVIDERS = new Set<TtsProviderKey>(TTS_PROVIDER_VALUES)
@@ -98,11 +122,17 @@ const formatToMimeType = (format: string): string => {
   }
 }
 
-const normalizeUtterance = async (text: string): Promise<string> => {
+const normalizeUtteranceWithSettings = (
+  text: string,
+  {
+    shouldRemoveReasoning,
+    ssmlEnabled
+  }: {
+    shouldRemoveReasoning: boolean
+    ssmlEnabled: boolean
+  }
+): string => {
   let utterance = text
-  const shouldRemoveReasoning = await getRemoveReasoningTagTTS()
-  const ssmlEnabled = await isSSMLEnabled()
-
   if (shouldRemoveReasoning) {
     utterance = removeReasoning(utterance)
   }
@@ -114,6 +144,68 @@ const normalizeUtterance = async (text: string): Promise<string> => {
   return markdownToText(utterance)
 }
 
+export const resolveTtsTextNormalizer = async (): Promise<TtsTextNormalizer> => {
+  const [shouldRemoveReasoning, ssmlEnabled] = await Promise.all([
+    getRemoveReasoningTagTTS(),
+    isSSMLEnabled()
+  ])
+
+  return (text: string) =>
+    normalizeUtteranceWithSettings(text, { shouldRemoveReasoning, ssmlEnabled })
+}
+
+export const applyBrowserSpeechSynthesisVoice = (
+  utterance: SpeechSynthesisUtterance,
+  synthesis: SpeechSynthesis | null | undefined,
+  voiceName?: string | null
+): (() => void) => {
+  const noop = () => undefined
+  const targetVoiceName = String(voiceName || "").trim()
+  if (
+    !targetVoiceName ||
+    !synthesis ||
+    typeof synthesis.getVoices !== "function"
+  ) {
+    return noop
+  }
+
+  let cleanup: () => void = noop
+  let cleanedUp = false
+  const applyVoice = () => {
+    if (cleanedUp) return
+    const selectedVoice = synthesis
+      .getVoices()
+      .find((voice) => voice.name === targetVoiceName)
+    if (selectedVoice) {
+      utterance.voice = selectedVoice
+    }
+  }
+
+  applyVoice()
+  if (utterance.voice) return noop
+
+  if (
+    typeof synthesis.addEventListener !== "function" ||
+    typeof synthesis.removeEventListener !== "function"
+  ) {
+    return noop
+  }
+
+  const handleVoicesChanged = () => {
+    applyVoice()
+    if (utterance.voice) {
+      cleanup()
+    }
+  }
+
+  cleanup = () => {
+    if (cleanedUp) return
+    cleanedUp = true
+    synthesis.removeEventListener("voiceschanged", handleVoicesChanged)
+  }
+  synthesis.addEventListener("voiceschanged", handleVoicesChanged)
+  return cleanup
+}
 
 export const inferTldwProviderFromModel = (
   model?: string | null
@@ -123,25 +215,31 @@ export const resolveTtsProviderContext = async (
   text: string,
   overrides?: TtsProviderOverrides
 ): Promise<TtsProviderContext> => {
-  const provider = overrides?.provider || (await getTTSProvider())
-  const utterance = await normalizeUtterance(text)
+  const rawProvider = overrides?.provider ?? (await getTTSProvider())
+  const provider = String(rawProvider || '').trim().toLowerCase()
+  const normalizeText = await resolveTtsTextNormalizer()
+  const utterance = normalizeText(text)
   const playbackSpeed = await getSpeechPlaybackSpeed()
 
   if (!SUPPORTED_TTS_PROVIDERS.has(provider as TtsProviderKey)) {
     return {
       provider,
       utterance,
+      normalizeText,
       playbackSpeed,
       supported: false
     }
   }
 
   if (provider === "browser") {
+    const browserVoiceName = await getVoice()
     return {
       provider,
       utterance,
+      normalizeText,
       playbackSpeed,
-      supported: true
+      supported: true,
+      browserVoiceName
     }
   }
 
@@ -160,10 +258,20 @@ export const resolveTtsProviderContext = async (
     return {
       provider,
       utterance,
+      normalizeText,
       playbackSpeed,
       supported: true,
-      synthesize: async (segment: string) => ({
-        buffer: await generateSpeech(apiKey, segment, voiceId, modelId, speed),
+      cacheSettings: {
+        provider,
+        model: modelId,
+        voice: voiceId,
+        speed,
+        format: "mp3"
+      },
+      synthesize: async (segment: string, _options?: TtsSynthesizeOptions) => ({
+        buffer: await generateSpeech(apiKey, segment, voiceId, modelId, speed, {
+          signal: _options?.signal
+        }),
         format: "mp3",
         mimeType: "audio/mpeg"
       })
@@ -171,17 +279,32 @@ export const resolveTtsProviderContext = async (
   }
 
   if (provider === "openai") {
+    const baseModel = await getOpenAITTSModel()
+    const baseVoice = await getOpenAITTSVoice()
+    const model = overrides?.openAiModel || baseModel
+    const voice = overrides?.openAiVoice || baseVoice
+    const speed = overrides?.openAiSpeed
+
     return {
       provider,
       utterance,
+      normalizeText,
       playbackSpeed,
       supported: true,
-      synthesize: async (segment: string) => ({
+      cacheSettings: {
+        provider,
+        model,
+        voice,
+        speed,
+        format: "mp3"
+      },
+      synthesize: async (segment: string, _options?: TtsSynthesizeOptions) => ({
         buffer: await generateOpenAITTS({
           text: segment,
-          model: overrides?.openAiModel,
-          voice: overrides?.openAiVoice,
-          speed: overrides?.openAiSpeed
+          model,
+          voice,
+          speed,
+          signal: _options?.signal
         }),
         format: "mp3",
         mimeType: "audio/mpeg"
@@ -214,10 +337,19 @@ export const resolveTtsProviderContext = async (
   return {
     provider,
     utterance,
+    normalizeText,
     playbackSpeed,
     supported: true,
     formatInfo,
-    synthesize: async (segment: string) => ({
+    cacheSettings: {
+      provider,
+      model,
+      voice,
+      speed,
+      format: responseFormat,
+      language
+    },
+    synthesize: async (segment: string, options?: TtsSynthesizeOptions) => ({
       buffer: await tldwClient.synthesizeSpeech(segment, {
         model,
         voice,
@@ -226,7 +358,8 @@ export const resolveTtsProviderContext = async (
         language,
         normalizationOptions,
         extraParams,
-        stream: false
+        stream: false,
+        signal: options?.signal
       }),
       format: responseFormat,
       mimeType

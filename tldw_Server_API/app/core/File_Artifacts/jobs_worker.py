@@ -29,7 +29,11 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.schemas.file_artifacts_schemas import FileCreateOptions
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.exceptions import FileArtifactsJobError
+from tldw_Server_API.app.core.exceptions import (
+    FileArtifactsError,
+    FileArtifactsJobError,
+    FileArtifactsValidationError,
+)
 from tldw_Server_API.app.core.File_Artifacts.file_artifacts_service import FileArtifactsService
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Jobs.worker_utils import coerce_int as _coerce_int
@@ -38,12 +42,38 @@ from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env as 
 FILES_DOMAIN = "files"
 FILES_JOB_TYPE = "file_artifact_export"
 
+_NON_RETRYABLE_FILE_ARTIFACT_CODES = {
+    "unsupported_file_type",
+    "persist_required",
+    "unsupported_export_format",
+    "invalid_export_mode",
+    "invalid_async_mode",
+    "export_size_exceeded",
+    "row_limit_exceeded",
+    "cell_limit_exceeded",
+    "storage_quota_exceeded",
+    "reference_image_invalid",
+    "reference_image_not_found",
+    "reference_image_unsupported_by_backend",
+    "reference_image_unsupported_by_model",
+}
+
 
 def _resolve_user_id(job: dict[str, Any], payload: dict[str, Any]) -> str:
     candidate = payload.get("user_id") or job.get("owner_user_id")
     if candidate is None or str(candidate).strip() == "":
         raise FileArtifactsJobError("missing user_id", retryable=False)
     return str(candidate)
+
+
+def _job_failure_from_exception(exc: Exception) -> FileArtifactsJobError:
+    """Convert export failures into sanitized job errors with retry metadata."""
+    if isinstance(exc, FileArtifactsValidationError):
+        return FileArtifactsJobError(exc.code, retryable=False)
+    if isinstance(exc, FileArtifactsError):
+        retryable = exc.code not in _NON_RETRYABLE_FILE_ARTIFACT_CODES
+        return FileArtifactsJobError(exc.code, retryable=retryable)
+    return FileArtifactsJobError("file_artifact_export_failed", retryable=True)
 
 
 async def _handle_export_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -104,7 +134,7 @@ async def _handle_export_job(job: dict[str, Any]) -> dict[str, Any]:
                 "expires_at": export_info.expires_at.isoformat() if export_info.expires_at else None,
             }
         except Exception as exc:
-            logger.error("file_artifacts worker: export failed file_id={} error={}", file_id, exc)
+            logger.error("file_artifacts worker: export failed error_type={}", type(exc).__name__)
             try:
                 cdb.update_file_artifact_export(
                     file_id,
@@ -118,8 +148,11 @@ async def _handle_export_job(job: dict[str, Any]) -> dict[str, Any]:
                     export_consumed_at=None,
                 )
             except Exception as reset_exc:
-                logger.warning("file_artifacts worker: failed to reset export status for {}: {}", file_id, reset_exc)
-            raise FileArtifactsJobError(str(exc), retryable=False) from exc
+                logger.warning(
+                    "file_artifacts worker: failed to reset export status error_type={}",
+                    type(reset_exc).__name__,
+                )
+            raise _job_failure_from_exception(exc) from exc
 
 
 async def run_file_artifacts_jobs_worker(stop_event: asyncio.Event | None = None) -> None:

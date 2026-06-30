@@ -15,11 +15,28 @@ import {
 } from "lucide-react"
 import { useKnowledgeQA } from "./KnowledgeQAProvider"
 import { cn } from "@/libs/utils"
-import type { ExportFormat, ExportOptions } from "./types"
-import type { RagCitationStyle } from "@/services/rag/unified-rag"
+import type {
+  CitationRef,
+  EvidenceOrigin,
+  ExportFormat,
+  ExportOptions,
+  KnowledgeAnswerTrustState,
+  RagResult,
+  SearchRuntimeDetails,
+} from "./types"
+import type {
+  RagCitationStyle,
+  RagPresetName,
+  RagSettings,
+} from "@/services/rag/unified-rag"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { mapKnowledgeQaExportErrorMessage } from "./errorMessages"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import {
+  buildKnowledgeExportTrustLines,
+  isBlockedAnswerExportTrustState,
+  isUnsupportedDraftTrustState,
+} from "./answerMarkdown"
 
 type ExportDialogProps = {
   open: boolean
@@ -39,6 +56,17 @@ const CITATION_APPROXIMATION_NOTE =
 const SHARE_THREAD_LINKS_ENABLED = true
 const SHARE_THREAD_LINKS_HELP_TEXT =
   "Share links use a dedicated token with read-only access and an expiry window, independent from normal thread permissions. Extension shared-link routing is currently TBD."
+const SENSITIVE_EXPORT_KEY_PATTERN =
+  /(?:api[_-]?key|authorization|bearer|credential|password|secret|token)/i
+
+type ExportContext = {
+  citations?: CitationRef[]
+  settings?: Partial<RagSettings> | null
+  preset?: RagPresetName | string | null
+  searchDetails?: Partial<SearchRuntimeDetails> | null
+  trustState?: KnowledgeAnswerTrustState | null
+  evidenceOrigin?: EvidenceOrigin | null
+}
 
 function getFocusableElements(container: HTMLElement): HTMLElement[] {
   const focusableSelectors = [
@@ -54,7 +82,19 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
 }
 
 export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
-  const { messages, currentThreadId, results, answer, query } = useKnowledgeQA()
+  const {
+    messages,
+    currentThreadId,
+    results,
+    citations,
+    answer,
+    answerTrustState,
+    answerEvidenceOrigin,
+    query,
+    settings,
+    preset,
+    searchDetails,
+  } = useKnowledgeQA()
   const message = useAntdMessage()
   const [options, setOptions] = useState<ExportOptions>(DEFAULT_OPTIONS)
   const [isExporting, setIsExporting] = useState(false)
@@ -62,6 +102,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
   const [exportedContent, setExportedContent] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [unsupportedExportAcknowledged, setUnsupportedExportAcknowledged] =
+    useState(false)
   const [shareLinkCopied, setShareLinkCopied] = useState(false)
   const [isPreparingShareLink, setIsPreparingShareLink] = useState(false)
   const [isRevokingShareLink, setIsRevokingShareLink] = useState(false)
@@ -80,6 +122,19 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
   const wasOpenRef = useRef(open)
   const hasExportableContent =
     query.trim().length > 0 || Boolean(answer) || results.length > 0 || messages.length > 0
+  const hasAnswerContent = typeof answer === "string" && answer.trim().length > 0
+  const exportsAnswerContent = options.format !== "chatbook"
+  const blockedAnswerExport =
+    exportsAnswerContent &&
+    (isBlockedAnswerExportTrustState(answerTrustState) || !hasAnswerContent)
+  const unsupportedDraftExport =
+    exportsAnswerContent &&
+    isUnsupportedDraftTrustState(answerTrustState) &&
+    hasAnswerContent
+  const canSubmitExport =
+    hasExportableContent &&
+    !blockedAnswerExport &&
+    (!unsupportedDraftExport || unsupportedExportAcknowledged)
   const hasServerThread = Boolean(
     currentThreadId && !currentThreadId.startsWith("local-")
   )
@@ -117,13 +172,19 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     setExportedContent(null)
     setExportError(null)
     setCopied(false)
+    setUnsupportedExportAcknowledged(false)
     setActiveShareLink(null)
     setShareLinkCopied(false)
     setIsPreparingShareLink(false)
     setIsRevokingShareLink(false)
   }, [clearCopiedTimeout, clearShareLinkCopiedTimeout, currentThreadId])
 
+  useEffect(() => {
+    setUnsupportedExportAcknowledged(false)
+  }, [answerTrustState, answerEvidenceOrigin, options.format])
+
   const handleExport = useCallback(async () => {
+    if (!canSubmitExport) return
     const requestSessionKey = dialogSessionKey
     setIsExporting(true)
     setExportedContent(null)
@@ -138,7 +199,15 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           answer,
           results,
           messages,
-          options
+          options,
+          {
+            citations,
+            settings,
+            preset,
+            searchDetails,
+            trustState: answerTrustState,
+            evidenceOrigin: answerEvidenceOrigin,
+          }
         )
         if (activeDialogSessionKeyRef.current !== requestSessionKey) {
           return
@@ -151,7 +220,15 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           answer,
           results,
           messages,
-          options
+          options,
+          {
+            citations,
+            settings,
+            preset,
+            searchDetails,
+            trustState: answerTrustState,
+            evidenceOrigin: answerEvidenceOrigin,
+          }
         )
         if (activeDialogSessionKeyRef.current !== requestSessionKey) {
           return
@@ -233,11 +310,18 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     }
   }, [
     dialogSessionKey,
+    canSubmitExport,
     options,
     query,
     answer,
     results,
     messages,
+    citations,
+    settings,
+    preset,
+    searchDetails,
+    answerTrustState,
+    answerEvidenceOrigin,
     currentThreadId,
     onClose,
     message,
@@ -277,7 +361,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
   }, [clearCopiedTimeout, dialogSessionKey, exportedContent])
 
   const handleSaveToNotes = useCallback(async () => {
-    if (!hasExportableContent) return
+    if (!canSubmitExport) return
     const requestSessionKey = dialogSessionKey
 
     setIsSavingNote(true)
@@ -287,7 +371,15 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         answer,
         results,
         messages,
-        { ...options, format: "markdown" }
+        { ...options, format: "markdown" },
+        {
+          citations,
+          settings,
+          preset,
+          searchDetails,
+          trustState: answerTrustState,
+          evidenceOrigin: answerEvidenceOrigin,
+        }
       )
       const trimmedQuery = query.trim()
       const title =
@@ -304,6 +396,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         citation_style: options.citationStyle,
         include_source_excerpts: options.includeSourceExcerpts,
         include_settings_snapshot: options.includeSettingsSnapshot,
+        trust_state: answerTrustState,
+        evidence_origin: answerEvidenceOrigin,
       }
       if (currentThreadId) {
         metadata.thread_id = currentThreadId
@@ -341,12 +435,18 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     }
   }, [
     dialogSessionKey,
-    hasExportableContent,
+    canSubmitExport,
     query,
     answer,
     results,
     messages,
     options,
+    citations,
+    settings,
+    preset,
+    searchDetails,
+    answerTrustState,
+    answerEvidenceOrigin,
     currentThreadId,
     message,
   ])
@@ -721,7 +821,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
               <button
                 type="button"
                 onClick={handleSaveToNotes}
-                disabled={!hasExportableContent || isSavingNote}
+                disabled={!canSubmitExport || isSavingNote}
                 className="px-3 py-1.5 text-xs font-medium rounded-md border border-border hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSavingNote ? "Saving..." : "Save to Notes"}
@@ -764,6 +864,41 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
               </p>
             ) : null}
           </div>
+
+          {blockedAnswerExport ? (
+            <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2">
+              <p className="text-sm font-medium text-danger">
+                This search state cannot be exported as answer content.
+              </p>
+              <p className="mt-1 text-xs text-danger/90">
+                Failed, no-result, or missing-answer states can stay in history,
+                but they are blocked from answer export.
+              </p>
+            </div>
+          ) : unsupportedDraftExport ? (
+            <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2">
+              <p className="text-sm font-medium text-warning">
+                This answer is an unsupported draft.
+              </p>
+              <p className="mt-1 text-xs text-text-muted">
+                The export will label the answer as unsupported because trust or
+                citation evidence is incomplete.
+              </p>
+              <label className="mt-2 flex items-start gap-2 text-xs text-text">
+                <input
+                  type="checkbox"
+                  checked={unsupportedExportAcknowledged}
+                  onChange={(event) =>
+                    setUnsupportedExportAcknowledged(event.target.checked)
+                  }
+                  className="mt-0.5 rounded"
+                />
+                <span>
+                  I understand this unsupported draft will be labeled in the export.
+                </span>
+              </label>
+            </div>
+          ) : null}
 
           {/* Preview / Result */}
           {exportedContent && (
@@ -832,7 +967,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           <button
             type="button"
             onClick={handleExport}
-            disabled={isExporting}
+            disabled={isExporting || !canSubmitExport}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-primary text-white hover:bg-primaryStrong transition-colors disabled:opacity-50"
           >
             {isExporting ? (
@@ -890,22 +1025,113 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+function getSourceTitle(result: RagResult | undefined, index: number): string {
+  return (
+    result?.metadata?.title ||
+    result?.metadata?.source ||
+    `Source ${index + 1}`
+  )
+}
+
+function collectCitationIndexes(
+  citations: CitationRef[] | undefined,
+  answer: string | null
+): number[] {
+  const indexes: number[] = []
+  const seen = new Set<number>()
+  const pushIndex = (value: unknown) => {
+    if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+      return
+    }
+    if (seen.has(value)) return
+    seen.add(value)
+    indexes.push(value)
+  }
+
+  citations?.forEach((citation) => pushIndex(citation.index))
+
+  if (indexes.length === 0 && answer) {
+    for (const match of answer.matchAll(/\[(\d+)\]/g)) {
+      pushIndex(Number(match[1]))
+    }
+  }
+
+  return indexes
+}
+
+function sanitizeExportValue(value: unknown, depth = 0): unknown {
+  if (value == null) return value
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeExportValue(item, depth + 1))
+      .filter((item) => item !== undefined)
+  }
+  if (typeof value === "object" && depth < 5) {
+    const output: Record<string, unknown> = {}
+    Object.entries(value as Record<string, unknown>).forEach(([key, rawValue]) => {
+      if (SENSITIVE_EXPORT_KEY_PATTERN.test(key)) return
+      const sanitized = sanitizeExportValue(rawValue, depth + 1)
+      if (sanitized !== undefined) {
+        output[key] = sanitized
+      }
+    })
+    return output
+  }
+
+  return undefined
+}
+
+function hasSnapshotContent(value: unknown): value is Record<string, unknown> {
+  return (
+    value != null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0
+  )
+}
+
+function buildExportSettingsSnapshot(
+  options: ExportOptions,
+  context?: ExportContext
+): Record<string, unknown> {
+  const snapshot: Record<string, unknown> = {
+    format: options.format,
+    citationStyle: options.citationStyle,
+    includeSourceExcerpts: options.includeSourceExcerpts,
+    exportDate: new Date().toISOString(),
+  }
+
+  if (context?.preset) {
+    snapshot.preset = context.preset
+  }
+
+  const settingsSnapshot = sanitizeExportValue(context?.settings)
+  if (hasSnapshotContent(settingsSnapshot)) {
+    snapshot.settings = settingsSnapshot
+  }
+
+  const searchDetailsSnapshot = sanitizeExportValue(context?.searchDetails)
+  if (hasSnapshotContent(searchDetailsSnapshot)) {
+    snapshot.searchDetails = searchDetailsSnapshot
+  }
+  if (context?.trustState) {
+    snapshot.trustState = context.trustState
+  }
+  if (context?.evidenceOrigin) {
+    snapshot.evidenceOrigin = context.evidenceOrigin
+  }
+
+  return snapshot
+}
+
 // Generate markdown content
 function generateMarkdown(
   query: string,
   answer: string | null,
-  results: Array<{
-    id?: string
-    content?: string
-    text?: string
-    metadata?: {
-      title?: string
-      source?: string
-      url?: string
-      page_number?: number
-    }
-    score?: number
-  }>,
+  results: RagResult[],
   messages: Array<{
     role: string
     content: string
@@ -918,9 +1144,11 @@ function generateMarkdown(
       }>
     }
   }>,
-  options: ExportOptions
+  options: ExportOptions,
+  context?: ExportContext
 ): string {
   const lines: string[] = []
+  const citationIndexes = collectCitationIndexes(context?.citations, answer)
 
   // Header
   lines.push("# Knowledge QA Export")
@@ -934,6 +1162,18 @@ function generateMarkdown(
   lines.push(`> ${query}`)
   lines.push("")
 
+  if (context?.trustState || context?.evidenceOrigin) {
+    lines.push("## Trust and Evidence")
+    lines.push("")
+    lines.push(
+      ...buildKnowledgeExportTrustLines({
+        trustState: context?.trustState ?? null,
+        evidenceOrigin: context?.evidenceOrigin ?? null,
+      })
+    )
+    lines.push("")
+  }
+
   // Answer
   if (answer) {
     lines.push("## Answer")
@@ -942,13 +1182,37 @@ function generateMarkdown(
     lines.push("")
   }
 
+  // Citation mappings
+  if (citationIndexes.length > 0) {
+    lines.push("## Citations")
+    lines.push("")
+    citationIndexes.forEach((citationIndex) => {
+      const sourceIndex = citationIndex - 1
+      const result = results[sourceIndex]
+      const title = getSourceTitle(result, sourceIndex)
+
+      if (!result) {
+        lines.push(`- [${citationIndex}] Source unavailable in exported results.`)
+        return
+      }
+
+      lines.push(`- [${citationIndex}] ${title} maps to Source ${sourceIndex + 1}.`)
+      if (result.metadata?.page_number) {
+        lines.push(`  Page: ${result.metadata.page_number}`)
+      }
+      if (result.metadata?.url) {
+        lines.push(`  URL: ${result.metadata.url}`)
+      }
+    })
+    lines.push("")
+  }
+
   // Sources
   if (results.length > 0) {
     lines.push("## Sources")
     lines.push("")
     results.forEach((result, index) => {
-      const title =
-        result.metadata?.title || result.metadata?.source || `Source ${index + 1}`
+      const title = getSourceTitle(result, index)
       const url = result.metadata?.url
       const score = result.score
       const content = result.content || result.text || ""
@@ -1004,15 +1268,7 @@ function generateMarkdown(
     lines.push("")
     lines.push("```json")
     lines.push(
-      JSON.stringify(
-        {
-          format: options.format,
-          citationStyle: options.citationStyle,
-          exportDate: new Date().toISOString(),
-        },
-        null,
-        2
-      )
+      JSON.stringify(buildExportSettingsSnapshot(options, context), null, 2)
     )
     lines.push("```")
   }

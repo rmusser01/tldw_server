@@ -331,7 +331,7 @@ export const initBackground = async (
     title: browser.i18n.getMessage("contextSaveToNotes") || "Save to Notes",
     contexts: ["selection"]
   })
-  await syncWebClipperContextMenu(saveToClipperMenuId)
+  void syncWebClipperContextMenu(saveToClipperMenuId)
   browser.contextMenus.create({
     id: saveToCompanionMenuId,
     parentId: "tldw-save",
@@ -389,7 +389,7 @@ export const initBackground = async (
   }
 
   if (capabilities.openApiCheck) {
-    await checkOpenApiDrift(storage)
+    void checkOpenApiDrift(storage)
   }
 
   let hasServer = false
@@ -401,7 +401,7 @@ export const initBackground = async (
   }
 
   if (hasServer) {
-    await warmModels(true)
+    void warmModels(true)
   }
   await scheduleModelWarmAlarm(hasServer)
 

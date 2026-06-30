@@ -3,7 +3,7 @@ import { test, expect, assertNoCriticalErrors } from "../utils/fixtures"
 const SETTINGS_PLACEHOLDER_ROUTES = [
   {
     path: "/connectors",
-    title: /Connectors Hub Is Coming Soon/i,
+    title: /^Connectors$/i,
   },
   {
     path: "/config",

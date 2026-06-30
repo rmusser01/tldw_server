@@ -7,6 +7,11 @@ import { BarChart3 } from "lucide-react"
 import { useKnowledgeQA } from "./KnowledgeQAProvider"
 import { cn } from "@/libs/utils"
 import type { RagResult } from "./types"
+import {
+  getEvidenceOrigin,
+  getResultSourceStatus,
+  getResultUnavailableReason,
+} from "./sourceListUtils"
 
 type SearchDetailsPanelProps = {
   className?: string
@@ -17,18 +22,22 @@ type CandidateReasonCategory = {
   className: string
 }
 
-function formatPercent(value: number | null): string {
-  if (value == null || Number.isNaN(value)) return "N/A"
+function isReportedNumber(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value)
+}
+
+function formatPercent(value: number | null | undefined): string {
+  if (!isReportedNumber(value)) return "Not reported"
   return `${Math.round(value * 100)}%`
 }
 
-function formatInteger(value: number | null): string {
-  if (value == null || Number.isNaN(value)) return "N/A"
+function formatInteger(value: number | null | undefined): string {
+  if (!isReportedNumber(value)) return "Not reported"
   return value.toLocaleString()
 }
 
-function formatScorePercent(value: number | null): string {
-  if (value == null || Number.isNaN(value)) return "N/A"
+function formatScorePercent(value: number | null | undefined): string {
+  if (!isReportedNumber(value)) return "Not reported"
   return `${Math.round(value * 100)}%`
 }
 
@@ -38,6 +47,37 @@ function getWeakestIncludedScore(results: RagResult[]): number | null {
     .filter((score): score is number => typeof score === "number" && Number.isFinite(score))
   if (scores.length === 0) return null
   return Math.min(...scores)
+}
+
+function buildEvidenceOriginParts(results: RagResult[]): string[] {
+  if (results.length === 0) return []
+
+  let localCount = 0
+  let webCount = 0
+  let mixedCount = 0
+  let unknownCount = 0
+  let unavailableCount = 0
+
+  for (const result of results) {
+    const origin = getEvidenceOrigin(result)
+    if (origin === "local_library") localCount += 1
+    else if (origin === "web_fallback") webCount += 1
+    else if (origin === "mixed") mixedCount += 1
+    else unknownCount += 1
+
+    const status = getResultSourceStatus(result)
+    if (getResultUnavailableReason(result) || (status && status !== "searched")) {
+      unavailableCount += 1
+    }
+  }
+
+  return [
+    localCount > 0 ? `local library ${localCount}` : null,
+    webCount > 0 ? `web fallback ${webCount}` : null,
+    mixedCount > 0 ? `mixed ${mixedCount}` : null,
+    unknownCount > 0 ? `unknown origin ${unknownCount}` : null,
+    unavailableCount > 0 ? `unavailable ${unavailableCount}` : null,
+  ].filter((value): value is string => Boolean(value))
 }
 
 function formatCandidateScoreContext(
@@ -110,10 +150,11 @@ export function SearchDetailsPanel({ className }: SearchDetailsPanelProps) {
     return null
   }
 
+  const expandedQueries = Array.isArray(searchDetails.expandedQueries)
+    ? searchDetails.expandedQueries
+    : []
   const expansionTerms =
-    searchDetails.expandedQueries.length > 0
-      ? searchDetails.expandedQueries.join(", ")
-      : "None"
+    expandedQueries.length > 0 ? expandedQueries.join(", ") : null
   const alsoConsidered = Array.isArray(searchDetails.alsoConsidered)
     ? searchDetails.alsoConsidered
     : []
@@ -123,14 +164,42 @@ export function SearchDetailsPanel({ className }: SearchDetailsPanelProps) {
   const consideredDocuments =
     searchDetails.documentsConsidered ?? searchDetails.candidatesConsidered
   const retainedPercent =
-    consideredCount != null && consideredCount > 0
+    isReportedNumber(consideredCount) &&
+    consideredCount > 0 &&
+    isReportedNumber(returnedCount)
       ? Math.round((returnedCount / consideredCount) * 100)
       : null
   const claimCount =
     searchDetails.faithfulnessTotalClaims ?? searchDetails.verificationTotalClaims
+  const candidateParts: string[] = []
+  if (isReportedNumber(consideredCount)) {
+    candidateParts.push(formatInteger(consideredCount))
+  }
+  if (isReportedNumber(returnedCount)) {
+    candidateParts.push(`returned ${formatInteger(returnedCount)}`)
+  }
+  if (isReportedNumber(searchDetails.candidatesRejected)) {
+    candidateParts.push(`rejected ${formatInteger(searchDetails.candidatesRejected)}`)
+  }
+  if (retainedPercent != null) {
+    candidateParts.push(`retained ${retainedPercent}%`)
+  }
+  const coverageParts: string[] = []
+  if (isReportedNumber(consideredDocuments)) {
+    coverageParts.push(`considered ${formatInteger(consideredDocuments)} documents`)
+  }
+  if (isReportedNumber(searchDetails.chunksConsidered)) {
+    coverageParts.push(`${formatInteger(searchDetails.chunksConsidered)} chunks scanned`)
+  }
+  if (isReportedNumber(searchDetails.documentsReturned)) {
+    coverageParts.push(`returned ${formatInteger(searchDetails.documentsReturned)} sources`)
+  }
+  const hasRetrievalCounts = candidateParts.length > 0 || coverageParts.length > 0
+  const evidenceOriginParts = buildEvidenceOriginParts(results)
 
   return (
     <details
+      open
       className={cn("rounded-xl border border-border bg-muted/20", className)}
       aria-label="Search details"
     >
@@ -143,27 +212,41 @@ export function SearchDetailsPanel({ className }: SearchDetailsPanelProps) {
       </summary>
 
       <div className="grid gap-2 border-t border-border px-4 py-3 text-sm">
-        <div>
-          <span className="font-medium">Query expansion:</span> {expansionTerms}
-        </div>
+        {expansionTerms ? (
+          <div>
+            <span className="font-medium">Query expansion:</span> {expansionTerms}
+          </div>
+        ) : (
+          <p className="text-text-muted">No query expansion terms were reported.</p>
+        )}
         <div>
           <span className="font-medium">Reranking:</span>{" "}
           {searchDetails.rerankingEnabled
-            ? `Enabled (${searchDetails.rerankingStrategy})`
+            ? searchDetails.rerankingStrategy
+              ? `Enabled (${searchDetails.rerankingStrategy})`
+              : "Enabled"
             : "Disabled"}
         </div>
+        {isReportedNumber(searchDetails.averageRelevance) ? (
+          <div>
+            <span className="font-medium">Average relevance:</span>{" "}
+            {formatPercent(searchDetails.averageRelevance)}
+          </div>
+        ) : null}
         <div>
-          <span className="font-medium">Average relevance:</span>{" "}
-          {formatPercent(searchDetails.averageRelevance)}
-        </div>
-        <div>
-          <span className="font-medium">Web fallback:</span>{" "}
+          <span className="font-medium">Web fallback</span>{" "}
           {searchDetails.webFallbackEnabled
             ? searchDetails.webFallbackTriggered
               ? `Triggered${searchDetails.webFallbackEngine ? ` (${searchDetails.webFallbackEngine})` : ""}`
               : "Enabled (not triggered)"
             : "Disabled"}
         </div>
+        {evidenceOriginParts.length > 0 ? (
+          <div>
+            <span className="font-medium">Evidence origins:</span>{" "}
+            {evidenceOriginParts.join(" • ")}
+          </div>
+        ) : null}
         {searchDetails.whyTheseSources && (
           <div>
             <span className="font-medium">Why these sources:</span>{" "}
@@ -194,27 +277,26 @@ export function SearchDetailsPanel({ className }: SearchDetailsPanelProps) {
               : ""}
           </div>
         )}
-        <div>
-          <span className="font-medium">Candidates considered:</span>{" "}
-          {formatInteger(consideredCount)}
-          {" • "}
-          returned {formatInteger(returnedCount)}
-          {searchDetails.candidatesRejected != null
-            ? ` • rejected ${formatInteger(searchDetails.candidatesRejected)}`
-            : ""}
-          {retainedPercent != null
-            ? ` • retained ${retainedPercent}%`
-            : ""}
-        </div>
-        <div>
-          <span className="font-medium">Search coverage:</span>{" "}
-          considered {formatInteger(consideredDocuments)} documents
-          {searchDetails.chunksConsidered != null
-            ? ` • ${formatInteger(searchDetails.chunksConsidered)} chunks scanned`
-            : ""}
-          {" • "}
-          returned {formatInteger(searchDetails.documentsReturned)} sources
-        </div>
+        {hasRetrievalCounts ? (
+          <>
+            {candidateParts.length > 0 ? (
+              <div>
+                <span className="font-medium">Candidates considered:</span>{" "}
+                {candidateParts.join(" • ")}
+              </div>
+            ) : null}
+            {coverageParts.length > 0 ? (
+              <div>
+                <span className="font-medium">Search coverage:</span>{" "}
+                {coverageParts.join(" • ")}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <p className="text-text-muted">
+            No retrieval counts were reported for this search.
+          </p>
+        )}
         {searchDetails.retrievalLatencyMs != null ? (
           <div>
             <span className="font-medium">Retrieval latency:</span>{" "}
@@ -247,7 +329,11 @@ export function SearchDetailsPanel({ className }: SearchDetailsPanelProps) {
               })}
             </ul>
           </div>
-        ) : null}
+        ) : (
+          <p className="text-text-muted">
+            No closest-miss candidates were reported.
+          </p>
+        )}
       </div>
     </details>
   )

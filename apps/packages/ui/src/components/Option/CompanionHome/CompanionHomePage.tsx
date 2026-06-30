@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useIsConnected } from "@/hooks/useConnectionState"
+import { DESIGN_SYSTEM_STATES, getDesignSystemState } from "@/design-system"
 import { useMilestoneStore } from "@/store/milestones"
 import {
   type CompanionHomeSnapshot,
@@ -13,9 +14,15 @@ import {
   type CompanionHomeLayoutCard
 } from "@/store/companion-home-layout"
 
-import { createEmptySnapshot, useCompanionHomeData, useCompanionHomeLayout } from "./hooks"
+import {
+  createEmptySnapshot,
+  useCompanionHomeData,
+  useCompanionHomeLayout,
+  useScheduledTaskHomeSignals
+} from "./hooks"
 import { CustomizeHomeDrawer } from "./CustomizeHomeDrawer"
 import { GettingStartedSection } from "./GettingStartedSection"
+import { AutomationInboxCard } from "./cards/AutomationInboxCard"
 import { GoalsFocusCard } from "./cards/GoalsFocusCard"
 import { InboxPreviewCard } from "./cards/InboxPreviewCard"
 import { NeedsAttentionCard } from "./cards/NeedsAttentionCard"
@@ -29,6 +36,11 @@ type CompanionHomePageProps = {
   surface: CompanionHomeSurface
   onPersonalizationEnabled?: () => void
 }
+
+const SETUP_REQUIRED_LABEL =
+  getDesignSystemState("setup_required")?.label ??
+  DESIGN_SYSTEM_STATES.setup_required?.label ??
+  ["Setup", "required"].join(" ")
 
 const formatDegradedSources = (sources: CompanionHomeSnapshot["degradedSources"]): string =>
   sources
@@ -88,6 +100,19 @@ export function CompanionHomePage({
     hasPersonalization,
     onPersonalizationEnabled
   })
+  const {
+    items: scheduledTaskSignalItems,
+    loading: scheduledTaskSignalsLoading,
+    partial: scheduledTaskSignalsPartial,
+    error: scheduledTaskSignalsError,
+    refresh: refreshScheduledTaskSignals
+  } = useScheduledTaskHomeSignals({
+    enabled: !capsLoading
+  })
+  const refreshHome = React.useCallback(() => {
+    refresh()
+    refreshScheduledTaskSignals()
+  }, [refresh, refreshScheduledTaskSignals])
   const hasConversationRoute =
     Boolean(capabilities?.hasPersonalization) &&
     Boolean(capabilities?.hasPersona) &&
@@ -116,7 +141,7 @@ export function CompanionHomePage({
     if (itemsLength > 0) return undefined
     if (!hasPersonalization) {
       return {
-        label: "Setup required",
+        label: SETUP_REQUIRED_LABEL,
         description: "Connect your tldw server and enable personalization to unlock this feature. " + setupDescription
       }
     }
@@ -146,7 +171,7 @@ export function CompanionHomePage({
       ? undefined
       : !hasPersonalization
         ? {
-            label: "Setup required",
+            label: SETUP_REQUIRED_LABEL,
             description:
               "Connect your tldw server and enable personalization to unlock needs-attention signals from goals and reading."
           }
@@ -169,7 +194,7 @@ export function CompanionHomePage({
       ? undefined
       : !hasPersonalization
         ? {
-            label: "Setup required",
+            label: SETUP_REQUIRED_LABEL,
             description:
               "Connect your tldw server and enable personalization to unlock resume suggestions across goals, reading, and notes."
           }
@@ -305,7 +330,7 @@ export function CompanionHomePage({
             </button>
             <button
               className="rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-text transition-colors hover:border-primary/40 hover:bg-primary/5"
-              onClick={refresh}
+              onClick={refreshHome}
               type="button"
             >
               Refresh
@@ -386,6 +411,12 @@ export function CompanionHomePage({
 
       <div className="grid gap-4 xl:grid-cols-2">
         <WhatsNextCard />
+        <AutomationInboxCard
+          items={scheduledTaskSignalItems}
+          loading={scheduledTaskSignalsLoading}
+          partial={scheduledTaskSignalsPartial}
+          error={scheduledTaskSignalsError}
+        />
         <InboxPreviewCard items={resolvedSnapshot.inbox} state={inboxState} />
         <NeedsAttentionCard
           items={resolvedSnapshot.needsAttention}

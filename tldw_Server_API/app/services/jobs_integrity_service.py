@@ -34,5 +34,5 @@ async def run_jobs_integrity_sweeper(stop_event: asyncio.Event | None = None) ->
             with contextlib.suppress(Exception):
                 logger.debug(f"Jobs integrity sweep: {stats}")
         except Exception as e:
-            logger.debug(f"Jobs integrity sweep error: {e}")
+            logger.bind(error_type=type(e).__name__).debug("Jobs integrity sweep error")
         await asyncio.sleep(interval)

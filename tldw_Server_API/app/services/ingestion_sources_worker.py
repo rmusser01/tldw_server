@@ -87,6 +87,9 @@ _SINK_ITEM_EXCEPTIONS = tuple(
     )
     if exc is not None
 ) + _NONCRITICAL_EXCEPTIONS
+_SINK_FAILURE_ERROR_LABEL = "ingestion_source_sink_failed"
+_ITEM_FAILURE_ERROR_LABEL = "ingestion_source_item_failed"
+_SYNC_FAILURE_ERROR_LABEL = "ingestion_source_sync_failed"
 
 
 class _AccountTokenPool(Protocol):
@@ -450,7 +453,8 @@ async def _apply_snapshot_changes(
                     "action": "sink_failed",
                     "job_id": str(jid),
                     "sync_status": "degraded_sink_error",
-                    "error": str(exc),
+                    "error": _SINK_FAILURE_ERROR_LABEL,
+                    "error_type": type(exc).__name__,
                     "event_type": event_type,
                 },
             )
@@ -521,7 +525,7 @@ async def _apply_snapshot_changes(
                 "action": "ingestion_failed",
                 "job_id": str(jid),
                 "sync_status": "degraded_ingestion_error",
-                "error": str(failure.get("error") or ""),
+                "error": _ITEM_FAILURE_ERROR_LABEL,
             },
         )
 
@@ -627,7 +631,7 @@ async def _process_sync_job(
             lease_id=lease_id or None,
             completion_token=lease_id or None,
         )
-    except _NONCRITICAL_EXCEPTIONS as exc:
+    except _NONCRITICAL_EXCEPTIONS:
         with contextlib.suppress(_NONCRITICAL_EXCEPTIONS):
             async with pool.transaction() as db:
                 if staged_snapshot:
@@ -637,7 +641,7 @@ async def _process_sync_job(
                         status="failed",
                         summary={
                             "status": "failed",
-                            "error": str(exc),
+                            "error": _SYNC_FAILURE_ERROR_LABEL,
                         },
                     )
                 if staged_artifact:
@@ -645,21 +649,21 @@ async def _process_sync_job(
                         db,
                         artifact_id=int(staged_artifact["id"]),
                         status="failed",
-                        metadata={"error": str(exc)},
+                        metadata={"error": _SYNC_FAILURE_ERROR_LABEL},
                     )
                 await finish_source_sync_job(
                     db,
                     source_id=source_id,
                     job_id=str(jid),
                     outcome="failure",
-                    error=str(exc),
+                    error=_SYNC_FAILURE_ERROR_LABEL,
                 )
                 if staged_snapshot:
                     with contextlib.suppress(_NONCRITICAL_EXCEPTIONS):
                         await prune_archive_source_retention(db, source_id=source_id)
         jm.fail_job(
             jid,
-            error=str(exc),
+            error=_SYNC_FAILURE_ERROR_LABEL,
             retryable=False,
             worker_id=worker_id,
             lease_id=lease_id or None,

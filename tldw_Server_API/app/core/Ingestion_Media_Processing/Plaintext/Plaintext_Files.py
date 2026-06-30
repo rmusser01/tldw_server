@@ -89,7 +89,7 @@ def _read_text(path: Path, base_dir: Optional[Path] = None) -> str:
 def convert_to_plain_text(file_path: Path, base_dir: Optional[Path] = None) -> str:
     """
     Converts various document formats (.docx, .rtf) to plain text.
-    Returns original content for .txt/.md.
+    Returns original content for .txt/.md/.markdown.
     Raises ValueError for unsupported types.
     """
     if base_dir is not None:
@@ -116,7 +116,7 @@ def convert_to_plain_text(file_path: Path, base_dir: Optional[Path] = None) -> s
             except Exception as e_rtf: # Catch other pandoc errors
                 logging.error(f"Pandoc conversion error for {file_path}: {e_rtf}")
                 raise ValueError(f"Failed to convert {extension} with Pandoc: {e_rtf}") from e_rtf
-        elif extension in ['.txt', '.md']:
+        elif extension in ['.txt', '.md', '.markdown']:
             content = _read_text(file_path, base_dir) # Use robust reader
         else:
             raise ValueError(f"Unsupported file type for plain text conversion: {extension}")
@@ -151,7 +151,7 @@ def convert_document_to_text(
     """
     Converts various document formats to plain text and extracts basic metadata.
 
-    Supported input formats: .txt, .md, .html, .htm, .xml, .json, .docx, .rtf
+    Supported input formats: .txt, .md, .markdown, .html, .htm, .xhtml, .xml, .json, .docx, .rtf
     Output format: Plain text (Markdown for HTML/XML for structure).
 
     Returns:
@@ -209,7 +209,7 @@ def convert_document_to_text(
                 else:  # Catch other unexpected errors during RTF conversion
                     logging.error(f"Unexpected Pandoc conversion error for RTF {file_path}: {e_rtf}", exc_info=True)
                     raise ValueError(f"Unexpected RTF conversion error: {str(e_rtf)}") from e_rtf
-        elif extension in ['.txt', '.md']:
+        elif extension in ['.txt', '.md', '.markdown']:
             content = _read_text(file_path, base_dir) # Use robust reader
         elif extension == '.json':
             source_format_used = 'json'
@@ -229,7 +229,7 @@ def convert_document_to_text(
                 content = raw_text
                 raw_metadata = {'json_parse_error': str(e_json)}
                 log_counter("json_conversion_error", labels={"file_path": str(file_path), "error": "JSONDecodeError"})
-        elif extension in ['.html', '.htm']:
+        elif extension in ['.html', '.htm', '.xhtml']:
             source_format_used = 'html'
             h = html2text.HTML2Text()
             h.ignore_links = False # Keep links as text
@@ -347,7 +347,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
 ) -> dict[str, Any]:
     """
     Reads/converts various document formats, chunks (optional), analyses (optional).
-    Handles .txt, .md, .html, .xml, .docx, .rtf (requires pandoc).
+    Handles .txt, .md, .markdown, .html, .htm, .xhtml, .xml, .json, .docx, .rtf (requires pandoc).
     Returns a result dictionary aligned with MediaItemProcessResponse.
     *No DB interaction.*
 
@@ -604,7 +604,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
     except _PLAINTEXT_NONCRITICAL_EXCEPTIONS as e:
         logging.exception(f"Unexpected error processing document {doc_path}: {str(e)}")
         result["status"] = "Error"
-        result["error"] = f"Unexpected processing error: {str(e)}"
+        result["error"] = "Document processing failed"
         log_counter("document_processing_error", labels={"file_path": str(doc_path), "error": type(e).__name__})
 
     # Ensure warnings list is None if empty for cleaner JSON output

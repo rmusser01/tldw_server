@@ -111,11 +111,11 @@ class TestMultiImagePersistence:
             conv_id = chat_db.add_conversation({"character_id": 1, "title": "Multi Image Conversation"})
             img_data_uri_1 = (
                 "data:image/png;base64,"
-                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
             )
             img_data_uri_2 = (
                 "data:image/png;base64,"
-                "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR42mNgYGD4z8DAwMgABBgAFSgC/7IvmV0AAAAASUVORK5CYII="
+                "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFUlEQVR4nGNkaPj/n4GBgYEJRIAwACUZAoKPUI0GAAAAAElFTkSuQmCC"
             )
             message_obj = {
                 "role": "user",

@@ -56,7 +56,14 @@ def _coerce_bool(raw_value: str | None, default: bool = False) -> bool:
 
 def _mineru_command_tokens() -> list[str]:
     raw = os.getenv("MINERU_CMD", "mineru").strip() or "mineru"
-    tokens = shlex.split(raw)
+    tokens = shlex.split(raw, posix=os.name != "nt")
+    if os.name == "nt":
+        tokens = [
+            token[1:-1]
+            if len(token) >= 2 and token[0] == token[-1] and token[0] in {"'", '"'}
+            else token
+            for token in tokens
+        ]
     return tokens or ["mineru"]
 
 

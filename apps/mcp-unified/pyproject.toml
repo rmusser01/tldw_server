@@ -1,0 +1,110 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-unified"
+version = "0.1.1"
+description = "Standalone MCP Unified runtime and gateway package boundary."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "GPL-3.0-only"}
+authors = [
+  { name = "Robert Musser", email = "contact@tldwproject.com" },
+]
+maintainers = [
+  { name = "Robert Musser", email = "contact@tldwproject.com" },
+]
+keywords = ["mcp", "model-context-protocol", "gateway", "agent-tools", "tool-governance"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+  "pydantic>=2.0.0",
+  "loguru>=0.7.0",
+  "PyYAML>=6.0.0",
+  "httpx>=0.24.0",
+  "websockets>=12.0",
+]
+
+[project.urls]
+Homepage = "https://tldwproject.com"
+Repository = "https://github.com/rmusser01/tldw_server"
+Issues = "https://github.com/rmusser01/tldw_server/issues"
+"Source Package" = "https://github.com/rmusser01/tldw_server/tree/dev/apps/mcp-unified"
+"User Guide" = "https://github.com/rmusser01/tldw_server/blob/dev/apps/mcp-unified/USER_GUIDE.md"
+
+[project.optional-dependencies]
+core = [
+  "pydantic>=2.0.0",
+  "loguru>=0.7.0",
+  "PyYAML>=6.0.0",
+]
+fastapi = [
+  "fastapi>=0.136.3",
+  "starlette>=1.0.1",
+]
+sqlite = [
+  "SQLAlchemy>=2.0.29",
+]
+federation = [
+  "pydantic>=2.0.0",
+  "loguru>=0.7.0",
+  "PyYAML>=6.0.0",
+]
+gateway = [
+  "pydantic>=2.0.0",
+  "loguru>=0.7.0",
+  "PyYAML>=6.0.0",
+  "fastapi>=0.136.3",
+  "httpx>=0.24.0",
+  "starlette>=1.0.1",
+  "SQLAlchemy>=2.0.29",
+  "uvicorn[standard]>=0.23.0",
+  "websockets>=12.0",
+]
+dev = [
+  "build>=1.0.0",
+  "setuptools>=61.0",
+  "tomli>=2.0.0; python_version < '3.11'",
+  "pytest>=9.0.3",
+  "pytest-asyncio>=1.3.0",
+  "bandit>=1.7.0",
+]
+
+[project.scripts]
+mcp-unified-gateway = "mcp_unified.gateway.cli:main"
+mcp-unified-smoke = "mcp_unified.smoke.cli:main"
+
+[tool.setuptools]
+include-package-data = false
+license-files = ["LICENSE"]
+packages = [
+  "mcp_unified",
+  "mcp_unified.federation",
+  "mcp_unified.filesystem_locks",
+  "mcp_unified.gateway",
+  "mcp_unified.interfaces",
+  "mcp_unified.policy_grants",
+  "mcp_unified.profiles",
+  "mcp_unified.smoke",
+  "mcp_unified.storage",
+  "mcp_unified.tool_hooks",
+  "mcp_unified.tool_use_reporting",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.package-data]
+mcp_unified = ["py.typed", "README.md", "USER_GUIDE.md"]

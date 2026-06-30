@@ -193,6 +193,7 @@ def test_media_ingest_events_stream_user_scoped(test_client, ingest_jobs_module,
         ev.get("event") == "job"
         and isinstance(ev.get("data"), dict)
         and int(ev["data"].get("job_id") or -1) == job_id
+        and isinstance(ev["data"].get("attrs"), dict)
         for ev in events
     ), f"Missing job event for job_id={job_id}. Seen events: {events!r}"
 

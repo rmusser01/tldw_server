@@ -46,6 +46,11 @@ from .base import (
 # PocketTTS ONNX Adapter
 
 
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
 class PocketTTSOnnxAdapter(TTSAdapter):
     """Adapter for PocketTTS ONNX (voice-cloning, streaming-capable)."""
 
@@ -179,7 +184,10 @@ class PocketTTSOnnxAdapter(TTSAdapter):
             if asyncio.iscoroutine(register_result):
                 await register_result
         except Exception as registration_error:
-            logger.debug("PocketTTS provider registration failed; continuing", exc_info=registration_error)
+            logger.debug(
+                "PocketTTS provider registration failed; continuing; exception_type={}",
+                _safe_exception_label(registration_error),
+            )
         try:
             self.sample_rate = int(getattr(engine, "SAMPLE_RATE", self.sample_rate))
         except Exception:
@@ -336,7 +344,10 @@ class PocketTTSOnnxAdapter(TTSAdapter):
                 model=request.model or "pocket-tts-onnx",
             )
         except Exception as exc:
-            logger.error("PocketTTS generation failed: {}", exc, exc_info=True)
+            logger.error(
+                "PocketTTS generation failed; exception_type={}",
+                _safe_exception_label(exc),
+            )
             raise TTSGenerationError(
                 "PocketTTS generation failed",
                 provider=self.PROVIDER_KEY,
@@ -533,7 +544,10 @@ class PocketTTSOnnxAdapter(TTSAdapter):
                 if final_bytes:
                     yield final_bytes
             except Exception as exc:
-                logger.error("PocketTTS streaming failed: {}", exc, exc_info=True)
+                logger.error(
+                    "PocketTTS streaming failed; exception_type={}",
+                    _safe_exception_label(exc),
+                )
                 raise TTSGenerationError(
                     "PocketTTS streaming failed",
                     provider=self.PROVIDER_KEY,
@@ -556,7 +570,10 @@ class PocketTTSOnnxAdapter(TTSAdapter):
         try:
             audio_np = np.asarray(chunk).astype(np.float32)
         except Exception as exc:
-            logger.warning("PocketTTS stream chunk conversion error: {}", exc)
+            logger.warning(
+                "PocketTTS stream chunk conversion error; exception_type={}",
+                _safe_exception_label(exc),
+            )
             return b""
 
         audio_np = np.squeeze(audio_np)

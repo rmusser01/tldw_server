@@ -15,7 +15,10 @@ from tldw_Server_API.app.api.v1.schemas.items_schemas import (
     ItemsBulkResult,
     ItemsListResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Collections_DB import ContentItemRow
 from tldw_Server_API.app.core.DB_Management.media_db.api import search_media
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
@@ -50,11 +53,22 @@ _ITEMS_NONCRITICAL_EXCEPTIONS = (
 )
 
 
+def _items_pagination(*, total: int, page: int, size: int) -> PagePaginationMeta:
+    total_pages = (total + size - 1) // size if total > 0 else 0
+    return build_page_pagination_meta(
+        page=page,
+        per_page=size,
+        total=total,
+        total_pages=total_pages,
+    )
+
+
 def _domain_from_url(url: str | None) -> str:
     if not url:
         return ""
     try:
         from urllib.parse import urlparse
+
         return urlparse(url).hostname or ""
     except _ITEMS_COERCE_EXCEPTIONS:
         return ""
@@ -86,8 +100,8 @@ async def list_items(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=200),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_media_db_for_user),
-    collections_db = Depends(get_collections_db_for_user),
+    db=Depends(get_media_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
 ):
     must_have_keywords = tags or []
     # Prepare date range
@@ -124,7 +138,7 @@ async def list_items(
             size=size,
         )
     except _ITEMS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"collections items query failed: {e}")
+        logger.error("collections items query failed")
         raise HTTPException(status_code=500, detail="items_query_failed") from e
 
     if coll_total > 0:
@@ -133,10 +147,17 @@ async def list_items(
             total=coll_total,
             page=page,
             size=size,
+            pagination=_items_pagination(total=coll_total, page=page, size=size),
         )
 
     if origin or (status_filter and len(status_filter) > 0) or favorite is not None:
-        return ItemsListResponse(items=[], total=0, page=page, size=size)
+        return ItemsListResponse(
+            items=[],
+            total=0,
+            page=page,
+            size=size,
+            pagination=_items_pagination(total=0, page=page, size=size),
+        )
 
     # Legacy fallback to Media DB when collections layer has no data
     try:
@@ -155,8 +176,10 @@ async def list_items(
             include_trash=False,
             include_deleted=False,
         )
+    except (InputError, DatabaseError) as e:
+        raise map_db_error_to_http(e, default_detail="items_query_failed") from e
     except _ITEMS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"items list failed: {e}")
+        logger.error("items list failed")
         raise HTTPException(status_code=500, detail="items_query_failed") from e
 
     # Build items and apply optional domain filter in-process
@@ -166,15 +189,21 @@ async def list_items(
         if item is not None:
             items.append(item)
 
-    return ItemsListResponse(items=items, total=total, page=page, size=size)
+    return ItemsListResponse(
+        items=items,
+        total=total,
+        page=page,
+        size=size,
+        pagination=_items_pagination(total=total, page=page, size=size),
+    )
 
 
 @router.get("/{item_id}", response_model=Item, summary="Get unified item by ID")
 async def get_item(
     item_id: int = Path(..., ge=1),
     current_user: User = Depends(get_request_user),
-    db = Depends(get_media_db_for_user),
-    collections_db = Depends(get_collections_db_for_user),
+    db=Depends(get_media_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
 ):
     try:
         row = collections_db.get_content_item(item_id)
@@ -182,7 +211,7 @@ async def get_item(
     except KeyError:
         pass
     except _ITEMS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"collections item fetch failed: {e}")
+        logger.error("collections item fetch failed")
         raise HTTPException(status_code=500, detail="item_fetch_failed") from e
 
     try:
@@ -191,7 +220,7 @@ async def get_item(
     except KeyError:
         pass
     except _ITEMS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"collections item fetch by media_id failed: {e}")
+        logger.error("collections item fetch by media_id failed")
         raise HTTPException(status_code=500, detail="item_fetch_failed") from e
 
     try:
@@ -210,8 +239,10 @@ async def get_item(
             include_trash=False,
             include_deleted=False,
         )
+    except (InputError, DatabaseError) as e:
+        raise map_db_error_to_http(e, default_detail="item_fetch_failed") from e
     except _ITEMS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"media item fetch failed: {e}")
+        logger.error("media item fetch failed")
         raise HTTPException(status_code=500, detail="item_fetch_failed") from e
 
     if not rows:
@@ -230,6 +261,7 @@ def _content_item_to_schema(row: ContentItemRow) -> Item:
         if row.metadata_json:
             try:
                 import json as _json
+
                 metadata = _json.loads(row.metadata_json)
             except _ITEMS_COERCE_EXCEPTIONS:
                 metadata = {}
@@ -262,6 +294,7 @@ def _media_row_to_item(row, *, db, domain_filter: str | None) -> Item | None:
             fetch_keywords_for_media,
             get_document_version,
         )
+
         tag_list = fetch_keywords_for_media(db=db, media_id=int(row.get("id")))
     except _ITEMS_NONCRITICAL_EXCEPTIONS:
         tag_list = []
@@ -276,6 +309,7 @@ def _media_row_to_item(row, *, db, domain_filter: str | None) -> Item | None:
             sm = latest.get("safe_metadata")
             if isinstance(sm, str):
                 import json as _json
+
                 try:
                     sm = _json.loads(sm)
                 except _ITEMS_COERCE_EXCEPTIONS:
@@ -309,7 +343,7 @@ def _media_row_to_item(row, *, db, domain_filter: str | None) -> Item | None:
 async def bulk_update_items(
     payload: ItemsBulkRequest,
     current_user: User = Depends(get_request_user),
-    collections_db = Depends(get_collections_db_for_user),
+    collections_db=Depends(get_collections_db_for_user),
 ) -> ItemsBulkResponse:
     item_ids = [int(item_id) for item_id in payload.item_ids or []]
     if not item_ids:
@@ -380,8 +414,8 @@ async def bulk_update_items(
         except HTTPException as exc:
             results.append(ItemsBulkResult(item_id=item_id, success=False, error=str(exc.detail)))
             failed += 1
-        except _ITEMS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"bulk_update_items failed for {item_id}: {exc}")
+        except _ITEMS_NONCRITICAL_EXCEPTIONS:
+            logger.error("bulk_update_items failed")
             results.append(ItemsBulkResult(item_id=item_id, success=False, error="update_failed"))
             failed += 1
 

@@ -594,18 +594,24 @@ class TestChatEndpointSecurity:
     def test_authentication_required(self, test_client, test_db):
         """Test authentication behavior based on auth mode."""
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 
         settings = get_settings()
+        auth_override = app.dependency_overrides.pop(get_request_user, None)
 
-        response = test_client.post(
-            "/api/v1/chat/completions",
-            json={
-                "messages": [{"role": "user", "content": "Test without auth"}],
-                "model": "gpt-4",
-                "api_provider": "openai",
-            },
-            # No auth headers
-        )
+        try:
+            response = test_client.post(
+                "/api/v1/chat/completions",
+                json={
+                    "messages": [{"role": "user", "content": "Test without auth"}],
+                    "model": "gpt-4",
+                    "api_provider": "openai",
+                },
+                # No auth headers
+            )
+        finally:
+            if auth_override is not None:
+                app.dependency_overrides[get_request_user] = auth_override
 
         if settings.AUTH_MODE == "single_user":
             # In single-user mode, authentication is still required (API key/Bearer).

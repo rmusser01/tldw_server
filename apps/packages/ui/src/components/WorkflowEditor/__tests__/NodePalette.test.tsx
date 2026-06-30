@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import NodePalette from "../NodePalette"
 import { useWorkflowEditorStore } from "@/store/workflow-editor"
 import { buildStepRegistry } from "../step-registry"
@@ -31,8 +31,15 @@ describe("NodePalette step-type loading UX", () => {
 
     render(<NodePalette />)
 
-    expect(screen.getByText("Limited node library")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    const title = screen.getByText("Limited node library")
+    expect(title).toBeInTheDocument()
+    const alert = title.closest('[data-ds-component="Alert"]')
+    expect(alert).not.toBeNull()
+    const alertEl = alert as HTMLElement
+    expect(alertEl).toHaveTextContent(
+      "Could not load server step types. Showing fallback steps."
+    )
+    fireEvent.click(within(alertEl).getByRole("button", { name: "Retry" }))
     expect(retryMock).toHaveBeenCalledWith(true)
   })
 

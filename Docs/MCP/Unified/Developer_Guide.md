@@ -185,7 +185,8 @@ Notes for module authors
   - `catalog` (name) and `catalog_id` (numeric) narrow discovery to tools included in a named catalog.
   - Name resolution honors caller context with precedence: team > org > global.
   - When both `catalog` and `catalog_id` are supplied, `catalog_id` takes precedence.
-  - If resolution fails, the server fails open (no catalog filter) while RBAC still gates visibility and execution.
+  - If resolution fails, the server returns an empty list and `_meta.catalog.status=unresolved`.
+  - Use `catalog_fail_open=true` only when a migration or diagnostics flow intentionally needs the RBAC-filtered discovery set despite an unresolved catalog.
   - `canExecute` indicates whether the caller can execute the tool; catalog membership alone does not grant execute rights.
 
 HTTP examples:
@@ -199,6 +200,9 @@ curl -H "X-API-KEY: ..." "http://127.0.0.1:8000/api/v1/mcp/tools?catalog=researc
 
 # List tools by catalog id (takes precedence over name)
 curl -H "X-API-KEY: ..." "http://127.0.0.1:8000/api/v1/mcp/tools?catalog_id=123"
+
+# Diagnose a catalog typo; check _meta.catalog.status in the response
+curl -H "X-API-KEY: ..." "http://127.0.0.1:8000/api/v1/mcp/tools?catalog=research-kti"
 ```
 
 ### Client Libraries
@@ -854,6 +858,22 @@ Rollout and observability:
 Operational details and deployment guidance:
 - `Docs/MCP/Unified/Governance_Operations.md`
 
+## Tool-Call Lifecycle Hooks
+
+Standalone embedders can provide a `tool_call_hook_manager` in `MCPRuntimeDependencies`.
+When omitted, MCP Unified uses `NoopToolCallHookManager`.
+
+Hook ordering:
+- Existing protocol checks run first: context allowlists, RBAC, write-tool policy, schema/validator checks, path scope, external credential grants, approval leases, and governance preflight.
+- `before_tool_call()` runs after those checks and before `PreparedToolCall` is returned.
+- A pre-hook `allow` decision permits execution to continue.
+- A pre-hook `deny` decision maps to the normal authorization error with structured `error.data.governance.hook` metadata.
+- A pre-hook `ask` decision maps to the normal authorization error with structured `error.data.approval` metadata.
+- Pre-hook exceptions fail closed with `tool_hook_unavailable` because pre-hooks are enforcement hooks; hosts that only need observation should use a no-op pre-hook and place observers in `after_tool_call()`.
+- `after_tool_call()` runs after successful or failed module execution with bounded metadata. Its return value is ignored, and hook failures are logged but do not rewrite the tool result.
+
+Hook contexts contain detached sanitized tool arguments, request identity, tool name, module id, write classification, category, argument hash, scope metadata, status, duration, and error type. Post-hook contexts are for observation/audit only; they cannot convert a failed tool call into success.
+
 ## Testing
 
 ### Unit Tests
@@ -1431,6 +1451,12 @@ Complete API documentation is available at:
 | -32000 | Authentication required | Missing or invalid auth |
 | -32001 | Permission denied | Insufficient permissions |
 | -32002 | Rate limit exceeded | Too many requests |
+
+Known JSON-RPC failures may add recovery metadata under `error.data`, for
+example `reason_code` and `next_action`. HTTP convenience endpoints keep their
+existing public body shape: object `detail` payloads may include those fields,
+while string `detail` payloads expose equivalent `X-MCP-Reason-Code` and
+`X-MCP-Next-Action` headers.
 
 ## Resources
 

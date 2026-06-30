@@ -95,3 +95,25 @@ def test_local_directory_media_snapshot_supports_pdf_and_epub(tmp_path, monkeypa
     assert items["report.pdf"]["raw_metadata"]["title"] == "Quarterly Report"
     assert items["book.epub"]["source_format"] == "epub"
     assert items["book.epub"]["raw_metadata"]["title"] == "Book Title"
+
+
+@pytest.mark.unit
+def test_local_directory_snapshot_marks_oversized_file_as_failure(tmp_path, monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Sources.local_directory as local_directory
+
+    allowed_root = tmp_path / "allowed"
+    source_dir = allowed_root / "docs"
+    source_dir.mkdir(parents=True)
+    (source_dir / "too-large.md").write_text("12345", encoding="utf-8")
+
+    monkeypatch.setenv("INGESTION_SOURCE_ALLOWED_ROOTS", str(allowed_root))
+    monkeypatch.setenv("INGESTION_SOURCES_LOCAL_FILE_MAX_BYTES", "4")
+
+    items, failures = local_directory.build_local_directory_snapshot_with_failures(
+        {"path": str(source_dir)},
+        sink_type="notes",
+    )
+
+    assert items == {}
+    assert set(failures) == {"too-large.md"}
+    assert "exceeds local file size limit" in failures["too-large.md"]["error"]

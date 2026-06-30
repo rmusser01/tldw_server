@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from pathlib import Path as PathlibPath
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from fastapi import Path as FastAPIPath
 from loguru import logger
 from pydantic import BaseModel
@@ -14,6 +14,7 @@ from starlette.responses import FileResponse
 
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.outputs_templates import (
     _build_items_context_from_media_ids,
     _select_media_ids_for_run,
@@ -24,11 +25,7 @@ from tldw_Server_API.app.api.v1.schemas.outputs_schemas import (
     OutputListResponse,
     OutputUpdateRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-    resolve_user_id_for_request,
-)
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, resolve_user_id_for_request, User
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
 from tldw_Server_API.app.services.outputs_service import (
@@ -92,7 +89,7 @@ def _normalize_output_storage_path_for_user(
                 retention_until=None,
             )
         except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"outputs: failed to normalize storage_path for {output_id}: {exc}")
+            logger.error("outputs storage_path normalization update failed")
             raise HTTPException(status_code=500, detail="db_update_failed") from exc
     return normalized
 
@@ -135,8 +132,8 @@ async def list_outputs(
                 output_id=r.id,
                 storage_path=r.storage_path,
             )
-        except HTTPException as exc:
-            logger.warning(f"outputs.list: invalid storage path for {r.id}: {exc.detail}")
+        except HTTPException:
+            logger.warning("outputs.list: invalid storage path skipped")
             storage_path = r.storage_path
         items.append(
             OutputArtifact(
@@ -150,7 +147,18 @@ async def list_outputs(
                 workspace_tag=r.workspace_tag,
             )
         )
-    return OutputListResponse(items=items, total=total, page=page, size=limit)
+    return OutputListResponse(
+        items=items,
+        total=total,
+        page=page,
+        size=limit,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.get("/deleted", response_model=OutputListResponse, summary="List only soft-deleted outputs")
@@ -178,8 +186,8 @@ async def list_deleted_outputs(
                 storage_path=r.storage_path,
                 update_db=False,
             )
-        except HTTPException as exc:
-            logger.warning(f"outputs.list_deleted: invalid storage path for {r.id}: {exc.detail}")
+        except HTTPException:
+            logger.warning("outputs.list_deleted: invalid storage path skipped")
             storage_path = r.storage_path
         items.append(
             OutputArtifact(
@@ -193,7 +201,18 @@ async def list_deleted_outputs(
                 workspace_tag=r.workspace_tag,
             )
         )
-    return OutputListResponse(items=items, total=total, page=page, size=limit)
+    return OutputListResponse(
+        items=items,
+        total=total,
+        page=page,
+        size=limit,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.post("", response_model=OutputArtifact, summary="Generate and persist a rendered output artifact")
@@ -260,7 +279,7 @@ async def create_output(
     try:
         rendered = render_output_template(tpl.body, context)
     except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"render failed: {e}")
+        logger.error("outputs render failed")
         raise HTTPException(status_code=422, detail="render_failed") from e
 
     user_id = resolve_user_id_for_request(
@@ -273,7 +292,7 @@ async def create_output(
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
     except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"failed to create outputs dir: {e}")
+        logger.error("outputs directory creation failed")
         raise HTTPException(status_code=500, detail="storage_unavailable") from e
 
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -315,13 +334,13 @@ async def create_output(
             except HTTPException:
                 raise
             except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.error(f"TTS generation failed: {exc}")
+                logger.error("outputs tts generation failed")
                 raise HTTPException(status_code=500, detail="tts_generation_failed") from exc
         else:
             try:
                 path.write_text(rendered_text, encoding="utf-8")
             except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.error(f"failed to write output file: {exc}")
+                logger.error("outputs file write failed")
                 raise HTTPException(status_code=500, detail="write_failed") from exc
 
         meta = dict(base_meta)
@@ -342,11 +361,11 @@ async def create_output(
                 media_item_id=None,
             )
         except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(f"failed to insert output row: {exc}")
+            logger.error("outputs row insert failed")
             try:
                 os.remove(path)
-            except _OUTPUTS_NONCRITICAL_EXCEPTIONS as cleanup_err:
-                logger.warning(f"failed to cleanup output file after DB insert failure: {path} err={cleanup_err}")
+            except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+                logger.warning("outputs insert cleanup file removal failed")
             raise HTTPException(status_code=500, detail="db_insert_failed") from exc
 
         outputs_created.append((row.id, path))
@@ -374,12 +393,12 @@ async def create_output(
             try:
                 if opath.exists():
                     opath.unlink()
-            except _OUTPUTS_NONCRITICAL_EXCEPTIONS as cleanup_err:
-                logger.warning(f"failed to cleanup output file {opath}: {cleanup_err}")
+            except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+                logger.warning("failed to cleanup output file")
             try:
                 cdb.delete_output_artifact(oid, hard=True)
-            except _OUTPUTS_NONCRITICAL_EXCEPTIONS as cleanup_err:
-                logger.warning(f"failed to cleanup output row {oid}: {cleanup_err}")
+            except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+                logger.warning("failed to cleanup output row")
 
     def _resolve_variant_template(template_id: int | None, template_type: str, detail: str):
         if template_id is not None:
@@ -466,7 +485,7 @@ async def create_output(
         raise
     except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
         _cleanup_outputs()
-        logger.error(f"outputs.create failed: {e}")
+        logger.error("outputs.create failed")
         raise HTTPException(status_code=500, detail="output_create_failed") from e
 
     return OutputArtifact(
@@ -501,7 +520,22 @@ async def get_output(
     )
 
 
-@router.get("/{output_id}/download", summary="Download output artifact")
+@router.get(
+    "/{output_id}/download",
+    summary="Download output artifact",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Output artifact file",
+            "content": {
+                "application/octet-stream": {},
+                "audio/mpeg": {},
+                "text/html; charset=utf-8": {},
+                "text/markdown; charset=utf-8": {},
+            },
+        },
+    },
+)
 async def download_output(
     output_id: int = FastAPIPath(..., ge=1),
     current_user: User = Depends(get_request_user),
@@ -541,7 +575,22 @@ async def download_output(
     )
 
 
-@router.get("/download/by-name", summary="Download output artifact by title")
+@router.get(
+    "/download/by-name",
+    summary="Download output artifact by title",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "description": "Output artifact file",
+            "content": {
+                "application/octet-stream": {},
+                "audio/mpeg": {},
+                "text/html; charset=utf-8": {},
+                "text/markdown; charset=utf-8": {},
+            },
+        },
+    },
+)
 async def download_output_by_name(
     title: str,
     format: str | None = None,
@@ -580,7 +629,16 @@ async def download_output_by_name(
     )
 
 
-@router.head("/{output_id}/download", summary="Check output artifact availability")
+@router.head(
+    "/{output_id}/download",
+    summary="Check output artifact availability",
+    response_class=Response,
+    responses={
+        200: {
+            "description": "Output artifact headers only; no response body.",
+        },
+    },
+)
 async def head_download_output(
     output_id: int = FastAPIPath(..., ge=1),
     current_user: User = Depends(get_request_user),
@@ -612,7 +670,6 @@ async def head_download_output(
         "mp3": "audio/mpeg",
     }
     mt = media_types.get(row.format.lower(), "application/octet-stream")
-    from fastapi import Response
     headers = {"Content-Type": mt, "Content-Length": str(path.stat().st_size)}
     return Response(status_code=200, headers=headers)
 
@@ -665,8 +722,8 @@ async def delete_output(
             user_id=str(user_id),
             output_id=int(output_id),
         )
-    except _OUTPUTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"outputs.delete: failed to update tts_history for output {output_id}: {exc}")
+    except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("outputs.delete: failed to update tts_history")
     return {"success": True, "file_deleted": fs_deleted}
 
 
@@ -752,8 +809,8 @@ async def update_output(
             if target_path.resolve() != source_path.resolve() and source_path.exists():
                 try:
                     source_path.unlink()
-                except _OUTPUTS_NONCRITICAL_EXCEPTIONS as _unlink_err:
-                    logger.warning(f"failed to remove old output file {source_path}: {_unlink_err}")
+                except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+                    logger.warning("failed to remove old output file")
             new_path = new_filename
             new_format = payload.format
         except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
@@ -816,8 +873,8 @@ async def purge_outputs(
         for rid, pth in candidate_paths.items():
             ids.add(rid)
             paths[rid] = pth
-    except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"outputs.purge: failed to enumerate purge candidates: {e}")
+    except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+        logger.error("outputs.purge: failed to enumerate purge candidates")
 
     files_deleted = 0
     if payload.delete_files and ids:
@@ -836,16 +893,16 @@ async def purge_outputs(
                     files_deleted += 1
             except HTTPException as e:
                 logger.warning(f"outputs.purge: invalid output path for {rid}: {e.detail}")
-            except _OUTPUTS_NONCRITICAL_EXCEPTIONS as del_err:
-                logger.warning(f"outputs.purge: failed to delete file {pth}: {del_err}")
+            except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+                logger.warning("outputs.purge: failed to delete file")
                 continue
 
     removed = 0
     if ids:
         try:
             removed = delete_outputs_by_ids(cdb=cdb, user_id=cdb.user_id, ids=list(ids))
-        except _OUTPUTS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"outputs.purge: DB delete failed: {e}")
+        except _OUTPUTS_NONCRITICAL_EXCEPTIONS:
+            logger.error("outputs.purge: DB delete failed")
             removed = 0
 
     return {"removed": removed, "files_deleted": files_deleted}

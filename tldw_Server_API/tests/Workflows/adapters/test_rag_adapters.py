@@ -124,10 +124,8 @@ class TestRAGSearchAdapter:
         mock_db_paths = MagicMock()
         mock_db_paths.get_single_user_id.return_value = "test_user"
         mock_db_paths.get_media_db_path.return_value = "/path/to/media.db"
-        monkeypatch.setattr(
-            "tldw_Server_API.app.core.Workflows.adapters.rag.search.DatabasePaths",
-            mock_db_paths,
-        )
+        from tldw_Server_API.app.core.DB_Management import db_path_utils
+        monkeypatch.setattr(db_path_utils, "DatabasePaths", mock_db_paths)
 
         config = {
             "query": "What is artificial intelligence?",
@@ -188,10 +186,8 @@ class TestRAGSearchAdapter:
         mock_db_paths = MagicMock()
         mock_db_paths.get_single_user_id.return_value = "test_user"
         mock_db_paths.get_media_db_path.return_value = "/path/to/media.db"
-        monkeypatch.setattr(
-            "tldw_Server_API.app.core.Workflows.adapters.rag.search.DatabasePaths",
-            mock_db_paths,
-        )
+        from tldw_Server_API.app.core.DB_Management import db_path_utils
+        monkeypatch.setattr(db_path_utils, "DatabasePaths", mock_db_paths)
 
         # Context with variables for template
         context = {**base_context, "topic": "machine learning"}
@@ -216,6 +212,36 @@ class TestRAGSearchAdapter:
         assert result.get("__status__") == "cancelled"
 
     @pytest.mark.asyncio
+    async def test_rag_search_adapter_sanitizes_media_db_path_logs(self, monkeypatch, base_context):
+        """Test Media DB path resolution logs hide backend path details."""
+        from tldw_Server_API.app.core.DB_Management import db_path_utils
+        from tldw_Server_API.app.core.Workflows.adapters.rag import search as search_module
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_rag_search_adapter
+
+        class BrokenDatabasePaths:
+            @staticmethod
+            def get_single_user_id():
+                return "test_user"
+
+            @staticmethod
+            def get_media_db_path(_user_id):
+                raise RuntimeError("media db secret at /private/rag-media.db")
+
+        monkeypatch.setattr(db_path_utils, "DatabasePaths", BrokenDatabasePaths)
+        messages: list[str] = []
+        sink_id = search_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+        try:
+            with pytest.raises(RuntimeError) as exc_info:
+                await run_rag_search_adapter({"query": "test"}, base_context)
+        finally:
+            search_module.logger.remove(sink_id)
+
+        assert str(exc_info.value) == "Failed to resolve Media DB path for workflow search"
+        joined = "\n".join(messages)
+        assert "Failed to resolve Media DB path for workflow search" in joined
+        assert "rag-media.db" not in joined
+
+    @pytest.mark.asyncio
     async def test_rag_search_adapter_passthrough_options(self, monkeypatch, mock_rag_result, base_context):
         """Test RAG search adapter passes through advanced options."""
         from tldw_Server_API.app.core.Workflows.adapters.rag import run_rag_search_adapter
@@ -229,10 +255,8 @@ class TestRAGSearchAdapter:
         mock_db_paths = MagicMock()
         mock_db_paths.get_single_user_id.return_value = "test_user"
         mock_db_paths.get_media_db_path.return_value = "/path/to/media.db"
-        monkeypatch.setattr(
-            "tldw_Server_API.app.core.Workflows.adapters.rag.search.DatabasePaths",
-            mock_db_paths,
-        )
+        from tldw_Server_API.app.core.DB_Management import db_path_utils
+        monkeypatch.setattr(db_path_utils, "DatabasePaths", mock_db_paths)
 
         config = {
             "query": "test",
@@ -342,6 +366,28 @@ class TestWebSearchAdapter:
         assert result["query"] == "test query"
         assert "text" in result
         assert "First result" in result["text"]
+
+    @pytest.mark.asyncio
+    async def test_web_search_adapter_sanitizes_backend_errors(self, monkeypatch, base_context):
+        """Test web search adapter hides backend exception details in fallback errors."""
+        monkeypatch.setenv("TEST_MODE", "0")
+
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_web_search_adapter
+
+        def explode(**_kwargs):
+            raise RuntimeError("web search backend exploded at /private/rag-web-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs.perform_websearch",
+            explode,
+        )
+
+        result = await run_web_search_adapter(
+            {"query": "private topic", "engine": "google"},
+            base_context,
+        )
+
+        assert result == {"error": "web_search_error"}
 
     @pytest.mark.asyncio
     async def test_web_search_adapter_cancelled(self, base_context):
@@ -707,6 +753,139 @@ class TestWebSearchAdapter:
         assert result.get("query_rewrite", {}).get("rewritten") is True
         assert result.get("query_rewrite", {}).get("query_used") == "rewritten compact query"
 
+    @pytest.mark.asyncio
+    async def test_web_search_adapter_sanitizes_query_rewrite_errors(self, monkeypatch, base_context):
+        """Test query rewrite failure metadata hides backend details."""
+        monkeypatch.setenv("TEST_MODE", "0")
+
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_web_search_adapter
+
+        def fake_perform_websearch(**kwargs):
+            return {"results": [], "total_results_found": 0}
+
+        async def fake_run_query_rewrite_adapter(config, context):
+            raise RuntimeError("rewrite token at /private/rag-rewrite-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs.perform_websearch",
+            fake_perform_websearch,
+        )
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.rag.query.run_query_rewrite_adapter",
+            fake_run_query_rewrite_adapter,
+        )
+
+        result = await run_web_search_adapter(
+            {"query": "original query", "engine": "google", "auto_query_rewrite": True},
+            base_context,
+        )
+
+        assert result.get("error") is None
+        assert result.get("query_rewrite", {}).get("error") == "query_rewrite_error"
+        assert "rag-rewrite-cache" not in str(result)
+
+    @pytest.mark.asyncio
+    async def test_web_search_adapter_sanitizes_fetch_and_summary_errors(self, monkeypatch, base_context):
+        """Test fetch and summarization failures hide backend details."""
+        monkeypatch.setenv("TEST_MODE", "0")
+
+        from tldw_Server_API.app.core.Workflows.adapters.rag import search as search_module
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_web_search_adapter
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs.perform_websearch",
+            lambda **_: {
+                "results": [
+                    {"title": "Result 1", "url": "https://example.com/1", "content": "snippet one"},
+                ],
+                "total_results_found": 1,
+            },
+        )
+
+        async def fake_scrape_article(url: str, custom_cookies=None):
+            raise RuntimeError("scrape token at /private/rag-scrape-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_article",
+            fake_scrape_article,
+        )
+
+        def fake_summarize(**kwargs):
+            raise RuntimeError("summary token at /private/rag-summary-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs.summarize",
+            fake_summarize,
+        )
+
+        messages: list[str] = []
+        sink_id = search_module.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+        try:
+            result = await run_web_search_adapter(
+                {
+                    "query": "test query",
+                    "engine": "google",
+                    "fetch_content": True,
+                    "fetch_limit": 1,
+                    "filter_failed_fetches": False,
+                    "summarize": True,
+                },
+                base_context,
+            )
+        finally:
+            search_module.logger.remove(sink_id)
+
+        assert result.get("fetch_content", {}).get("errors") == [
+            {"index": 0, "error": "fetch_failed"}
+        ]
+        assert result.get("summary_error") == "summary_failed"
+        assert "rag-scrape-cache" not in str(result)
+        assert "rag-summary-cache" not in str(result)
+        assert "rag-summary-cache" not in "\n".join(messages)
+
+    @pytest.mark.asyncio
+    async def test_web_search_adapter_sanitizes_provider_errors(self, monkeypatch, base_context):
+        """Test provider failure payloads and logs hide backend details."""
+        monkeypatch.setenv("TEST_MODE", "0")
+
+        from tldw_Server_API.app.core.Workflows.adapters.rag import search as search_module
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_web_search_adapter
+
+        def fake_perform_websearch(**kwargs):
+            raise RuntimeError("provider token at /private/rag-web-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs.perform_websearch",
+            fake_perform_websearch,
+        )
+
+        messages: list[str] = []
+        sink_id = search_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+        try:
+            result = await run_web_search_adapter({"query": "test query", "engine": "google"}, base_context)
+        finally:
+            search_module.logger.remove(sink_id)
+
+        assert result == {"error": "web_search_error"}
+        assert "rag-web-cache" not in "\n".join(messages)
+
+    @pytest.mark.asyncio
+    async def test_web_search_adapter_sanitizes_processing_errors(self, monkeypatch, base_context):
+        """Test provider processing-error payloads hide backend details."""
+        monkeypatch.setenv("TEST_MODE", "0")
+
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_web_search_adapter
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Web_Scraping.WebSearch_APIs.perform_websearch",
+            lambda **_: {"processing_error": "provider token at /private/rag-processing-cache"},
+        )
+
+        result = await run_web_search_adapter({"query": "test query", "engine": "google"}, base_context)
+
+        assert result == {"error": "search_error", "query": "test query"}
+        assert "rag-processing-cache" not in str(result)
+
     def test_truncate_content_by_tokens_respects_budget(self, monkeypatch):
         """Test token truncation helper enforces the requested token budget."""
         from tldw_Server_API.app.core.Workflows.adapters.rag import search as search_module
@@ -784,6 +963,31 @@ class TestRSSFetchAdapter:
         assert result["count"] == 0
 
     @pytest.mark.asyncio
+    async def test_rss_fetch_adapter_sanitizes_backend_errors(self, monkeypatch, base_context):
+        """Test RSS adapter hides backend exception details in fallback errors."""
+        import builtins
+
+        monkeypatch.setenv("TEST_MODE", "0")
+
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_rss_fetch_adapter
+
+        real_import = builtins.__import__
+
+        def fail_urllib_parse_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "urllib.parse":
+                raise RuntimeError("rss backend exploded at /private/rss-cache")
+            return real_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", fail_urllib_parse_import)
+
+        result = await run_rss_fetch_adapter(
+            {"urls": ["https://example.com/feed.xml"]},
+            base_context,
+        )
+
+        assert result == {"error": "rss_error"}
+
+    @pytest.mark.asyncio
     async def test_rss_fetch_adapter_string_urls(self, monkeypatch, base_context):
         """Test RSS fetch adapter with comma-separated URL string."""
         monkeypatch.setenv("TEST_MODE", "1")
@@ -822,6 +1026,29 @@ class TestRSSFetchAdapter:
         result = await run_rss_fetch_adapter(config, base_context)
 
         assert "text" in result
+
+    @pytest.mark.asyncio
+    async def test_rss_fetch_adapter_sanitizes_outer_errors(self, monkeypatch, base_context):
+        """Test RSS outer fallback hides import/backend details."""
+        monkeypatch.setenv("TEST_MODE", "0")
+
+        import builtins
+
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_rss_fetch_adapter
+
+        original_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "urllib.parse" and fromlist == ("urlparse",):
+                raise ImportError("rss import token at /private/rag-rss-cache")
+            return original_import(name, globals, locals, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        result = await run_rss_fetch_adapter({"urls": ["https://example.com/feed.xml"]}, base_context)
+
+        assert result == {"error": "rss_error"}
+        assert "rag-rss-cache" not in str(result)
 
 
 # ---------------------------------------------------------------------------
@@ -920,6 +1147,24 @@ class TestQueryRewriteAdapter:
         assert result.get("__status__") == "cancelled"
 
     @pytest.mark.asyncio
+    async def test_query_rewrite_adapter_sanitizes_backend_errors(self, monkeypatch, base_context):
+        """Test query rewrite failures hide raw backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_query_rewrite_adapter
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            AsyncMock(side_effect=RuntimeError("rewrite backend exploded at /private/rag-cache")),
+        )
+
+        result = await run_query_rewrite_adapter({"query": "What is AI?"}, base_context)
+
+        assert result == {
+            "error": "query_rewrite_error",
+            "original_query": "What is AI?",
+            "rewritten_queries": [],
+        }
+
+    @pytest.mark.asyncio
     async def test_query_rewrite_adapter_different_strategies(self, monkeypatch, base_context):
         """Test query rewrite adapter with different strategies."""
         from tldw_Server_API.app.core.Workflows.adapters.rag import run_query_rewrite_adapter
@@ -990,6 +1235,63 @@ class TestQueryExpandAdapter:
         result = await run_query_expand_adapter(config, context)
 
         assert result.get("__status__") == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_query_expand_adapter_sanitizes_backend_errors(self, monkeypatch, base_context):
+        """Test query expansion failures hide raw backend exception details."""
+        monkeypatch.delenv("TEST_MODE", raising=False)
+
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_query_expand_adapter
+
+        class BrokenHybridExpansion:
+            async def expand(self, _query):
+                raise RuntimeError("query expansion exploded at /private/rag-cache")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.RAG.rag_service.query_expansion.HybridQueryExpansion",
+            BrokenHybridExpansion,
+        )
+
+        result = await run_query_expand_adapter(
+            {"query": "machine learning", "strategies": ["hybrid"]},
+            base_context,
+        )
+
+        assert result == {"error": "query_expand_error"}
+
+    @pytest.mark.asyncio
+    async def test_query_expand_adapter_sanitizes_strategy_failure_logs(self, monkeypatch, base_context):
+        """Test per-strategy query expansion logs hide raw backend exception details."""
+        monkeypatch.delenv("TEST_MODE", raising=False)
+
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_query_expand_adapter
+        from tldw_Server_API.app.core.Workflows.adapters.rag import query as query_module
+
+        class BrokenSynonymExpansion:
+            async def expand(self, _query):
+                raise RuntimeError("strategy backend exploded at /private/rag-strategy.db")
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.RAG.rag_service.query_expansion.SynonymExpansion",
+            BrokenSynonymExpansion,
+        )
+
+        messages: list[str] = []
+        sink_id = query_module.logger.add(lambda message: messages.append(str(message)), level="DEBUG")
+        try:
+            result = await run_query_expand_adapter(
+                {"query": "machine learning", "strategies": ["synonym"]},
+                base_context,
+            )
+        finally:
+            query_module.logger.remove(sink_id)
+
+        assert result["original"] == "machine learning"
+        assert result["variations"] == []
+        joined = "\n".join(messages)
+        assert "Query expansion strategy failed" in joined
+        assert "synonym" not in joined
+        assert "private/rag-strategy.db" not in joined
 
     @pytest.mark.asyncio
     async def test_query_expand_adapter_multiple_strategies(self, monkeypatch, base_context):
@@ -1081,6 +1383,24 @@ class TestHyDEGenerateAdapter:
         result = await run_hyde_generate_adapter(config, context)
 
         assert result.get("__status__") == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_hyde_generate_adapter_sanitizes_backend_errors(self, monkeypatch, base_context):
+        """Test HyDE generation failures hide raw backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_hyde_generate_adapter
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
+            AsyncMock(side_effect=RuntimeError("hyde backend exploded at /private/rag-cache")),
+        )
+
+        result = await run_hyde_generate_adapter({"query": "What is AI?"}, base_context)
+
+        assert result == {
+            "error": "hyde_error",
+            "query": "What is AI?",
+            "hypothetical_documents": [],
+        }
 
     @pytest.mark.asyncio
     async def test_hyde_generate_adapter_multiple_docs(self, monkeypatch, base_context):
@@ -1215,6 +1535,28 @@ class TestSemanticCacheCheckAdapter:
         result = await run_semantic_cache_check_adapter(config, context)
 
         assert result.get("__status__") == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_semantic_cache_check_adapter_sanitizes_backend_errors(
+        self, monkeypatch, base_context
+    ):
+        """Test semantic cache failures hide raw backend exception details."""
+        from tldw_Server_API.app.core.Workflows.adapters.rag import run_semantic_cache_check_adapter
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Workflows.adapters.rag.query._get_semantic_cache_collection",
+            lambda _name: (_ for _ in ()).throw(
+                RuntimeError("semantic cache exploded at /private/rag-cache")
+            ),
+        )
+
+        result = await run_semantic_cache_check_adapter({"query": "test query"}, base_context)
+
+        assert result == {
+            "cache_hit": False,
+            "query": "test query",
+            "error": "semantic_cache_error",
+        }
 
     @pytest.mark.asyncio
     async def test_semantic_cache_check_adapter_chroma_unavailable(self, monkeypatch, base_context):

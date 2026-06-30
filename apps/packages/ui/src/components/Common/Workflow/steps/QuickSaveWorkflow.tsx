@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useEffect, useRef } from "react"
-import { Input, Button, Select, Tag, Alert, Spin, message } from "antd"
+import { Input, Button, Select, Tag, Spin, message } from "antd"
 import { Save, CheckCircle, FolderOpen, Tag as TagIcon, Globe } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import { useWorkflowsStore } from "@/store/workflows"
 import { WizardShell } from "../WizardShell"
 import { QUICK_SAVE_WORKFLOW } from "../workflow-definitions"
@@ -191,24 +192,21 @@ const CaptureStep: React.FC = () => {
     return (
       <div className="space-y-4">
         <Alert
-          type="success"
-          showIcon
-          icon={<CheckCircle className="h-4 w-4" />}
+          variant="success"
           title={
             capturedContent.type === "selection"
               ? t("workflows:quickSave.selectionCaptured", "Selection captured")
               : t("workflows:quickSave.pageCaptured", "Page captured")
           }
-          description={
-            <div className="mt-2">
-              <p className="font-medium">{capturedContent.title}</p>
-              <p className="text-xs text-text-muted flex items-center gap-1 mt-1">
-                <Globe className="h-3 w-3" />
-                {capturedContent.url}
-              </p>
-            </div>
-          }
-        />
+        >
+          <div className="mt-2">
+            <p className="font-medium">{capturedContent.title}</p>
+            <p className="text-xs text-text-muted flex items-center gap-1 mt-1">
+              <Globe className="h-3 w-3" />
+              {capturedContent.url}
+            </p>
+          </div>
+        </Alert>
         <div className="bg-surface rounded-lg p-3">
           <p className="text-sm text-text-muted line-clamp-4">
             {capturedContent.content.slice(0, 300)}

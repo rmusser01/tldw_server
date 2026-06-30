@@ -5,18 +5,19 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import logging
 import sqlite3
+import sys
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseBackend, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 
-logger = logging.getLogger(__name__)
 _MIGRATION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
     LookupError,
@@ -100,7 +101,7 @@ def migrate_sqlite_to_postgres(
 
         insertion_order = _topological_sort(tables)
         logger.debug(
-            "Computed insertion order for SQLite to PostgreSQL migration (%s tables)",
+            "Computed insertion order for SQLite to PostgreSQL migration ({} tables)",
             len(insertion_order),
         )
 
@@ -237,7 +238,7 @@ def migrate_workflows_sqlite_to_postgres(
         run_count = int(result_runs.scalar or 0)
         def_count = int(result_defs.scalar or 0)
         logger.info(
-            'Completed migration of workflows database (%s definitions, %s runs)',
+            'Completed migration of workflows database ({} definitions, {} runs)',
             def_count,
             run_count,
         )
@@ -343,7 +344,7 @@ def _truncate_tables(
             params = (user_id,)
         elif user_id and not has_user_id:
             logger.info(
-                'Skipping truncate for %s (no user_id column) in per-user mode',
+                'Skipping truncate for {} (no user_id column) in per-user mode',
                 table_name,
             )
             continue
@@ -353,7 +354,7 @@ def _truncate_tables(
         try:
             backend.execute(sql, params, connection=pg_conn)
         except _MIGRATION_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive logging
-            logger.warning('Unable to clear table %s: %s', table_name, exc)
+            logger.warning('Unable to clear table {}: {}', table_name, exc)
 
 
 def _copy_table(
@@ -422,7 +423,7 @@ def _copy_table(
         params = converted_params
         backend.execute_many(insert_sql, params, connection=pg_conn)
         total += len(params)
-    logger.info('Copied %s rows into %s', total, meta.name)
+    logger.info('Copied {} rows into {}', total, meta.name)
 
 
 def _sync_sequences(
@@ -444,7 +445,7 @@ def _sync_sequences(
             try:
                 backend.execute(sql, connection=pg_conn)
             except _MIGRATION_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive logging
-                logger.warning('Sequence sync failed for %s.%s: %s', meta.name, column, exc)
+                logger.warning('Sequence sync failed for {}.{}: {}', meta.name, column, exc)
 
 
 def _build_postgres_config_from_args(args: argparse.Namespace) -> DatabaseConfig:
@@ -498,7 +499,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument('--log-level', default='INFO')
 
     args = parser.parse_args(argv)
-    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO))
+    log_level = args.log_level.upper()
+    try:
+        logger.level(log_level)
+    except ValueError:
+        log_level = "INFO"
+    logger.remove()
+    logger.add(sys.stderr, level=log_level)
 
     targets = list(_iter_migration_targets(args))
     if args.workflows_sqlite:
@@ -521,7 +528,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             with contextlib.suppress(_MIGRATION_NONCRITICAL_EXCEPTIONS):
                 _backend.get_pool().close_all()
     except _MIGRATION_NONCRITICAL_EXCEPTIONS as _init_exc:  # pragma: no cover - defensive
-        logger.warning('Could not pre-initialize PostgreSQL schema: %s', _init_exc)
+        logger.warning('Could not pre-initialize PostgreSQL schema: {}', _init_exc)
     for label, path in targets:
         migrate_sqlite_to_postgres(
             path,

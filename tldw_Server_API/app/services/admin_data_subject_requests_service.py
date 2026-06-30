@@ -217,8 +217,12 @@ async def _count_embeddings(user_id: int) -> int:
             for col in collections:
                 try:
                     total += col.count()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(
+                        "Failed to count ChromaDB collection for user {}: {}",
+                        user_id,
+                        exc,
+                    )
             return total
         except Exception as exc:
             logger.debug("Failed to count embeddings for user {}: {}", user_id, exc)
@@ -514,8 +518,12 @@ async def _erase_embeddings(user_id: int) -> int:
         for col in collections:
             try:
                 total_embeddings += col.count()
-            except Exception:
-                pass  # count may fail; still attempt deletion
+            except Exception as exc:
+                logger.debug(
+                    "Failed to count ChromaDB collection before deletion for user {}: {}",
+                    user_id,
+                    exc,
+                )
             try:
                 manager.delete_collection(col.name)
             except Exception as exc:
@@ -599,8 +607,12 @@ async def execute_dsr_erasure(
             results[category] = {"deleted_count": count, "status": "ok"}
         except Exception as exc:
             logger.error("DSR erasure failed for category '{}' user {}: {}", category, user_id, exc)
-            errors[category] = str(exc)
-            results[category] = {"deleted_count": 0, "status": "error", "error": str(exc)}
+            errors[category] = "Erasure handler failed"
+            results[category] = {
+                "deleted_count": 0,
+                "status": "error",
+                "error": "Erasure handler failed",
+            }
 
     # Determine final status
     final_status = "completed" if not errors else "failed"

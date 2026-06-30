@@ -21,10 +21,12 @@ const createBundleFixture = (): WorkspaceExportBundle => ({
     name: "Alpha Research",
     tag: "workspace:alpha-research",
     createdAt: new Date("2026-02-18T09:00:00.000Z"),
+    studyMaterialsPolicy: null,
     snapshot: {
       workspaceName: "Alpha Research",
       workspaceTag: "workspace:alpha-research",
       workspaceCreatedAt: new Date("2026-02-18T09:00:00.000Z"),
+      studyMaterialsPolicy: null,
       sources: [
         {
           id: "source-1",

@@ -87,6 +87,46 @@ describe("TldwApiClient media batch and lifecycle actions", () => {
     })
   })
 
+  it("passes backend-unavailable suppression to single-item keyword updates", async () => {
+    mocks.bgRequest.mockResolvedValue({ media_id: 3, keywords: ["ai"] })
+
+    const client = new TldwApiClient()
+    await client.updateMediaKeywords(
+      3,
+      {
+        keywords: ["ai"],
+        mode: "set"
+      },
+      { suppressBackendUnavailableEvent: true }
+    )
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/media/3/keywords",
+        method: "PATCH",
+        suppressBackendUnavailableEvent: true
+      })
+    )
+  })
+
+  it("passes backend-unavailable suppression to media detail requests", async () => {
+    mocks.bgRequest.mockResolvedValue({ id: 3 })
+
+    const client = new TldwApiClient()
+    await client.getMediaDetails(3, {
+      include_content: false,
+      suppressBackendUnavailableEvent: true
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: expect.stringContaining("/api/v1/media/3?"),
+        method: "GET",
+        suppressBackendUnavailableEvent: true
+      })
+    )
+  })
+
   it("calls soft delete endpoint for media item", async () => {
     mocks.bgRequest.mockResolvedValue(undefined)
 

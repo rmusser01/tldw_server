@@ -87,13 +87,15 @@ class UserProfileOverridesRepo:
         key: str,
         value: Any,
         updated_by: int | None,
+        db_conn: Any | None = None,
     ) -> None:
         """Insert or update a config override."""
         payload = json.dumps(value)
         ts = datetime.now(timezone.utc)
         try:
+            executor = db_conn or self.db_pool
             if getattr(self.db_pool, "pool", None) is not None:
-                await self.db_pool.execute(
+                await executor.execute(
                     """
                     INSERT INTO user_config_overrides (
                         user_id, key, value_json, created_at, updated_at, created_by, updated_by
@@ -112,7 +114,7 @@ class UserProfileOverridesRepo:
                 )
                 return
 
-            await self.db_pool.execute(
+            await executor.execute(
                 """
                 INSERT INTO user_config_overrides (
                     user_id, key, value_json, created_at, updated_at, created_by, updated_by
@@ -136,18 +138,19 @@ class UserProfileOverridesRepo:
             logger.error(f"UserProfileOverridesRepo.upsert_override failed: {exc}")
             raise
 
-    async def delete_override(self, *, user_id: int, key: str) -> None:
+    async def delete_override(self, *, user_id: int, key: str, db_conn: Any | None = None) -> None:
         """Delete a config override."""
         try:
+            executor = db_conn or self.db_pool
             if getattr(self.db_pool, "pool", None) is not None:
-                await self.db_pool.execute(
+                await executor.execute(
                     "DELETE FROM user_config_overrides WHERE user_id = $1 AND key = $2",
                     user_id,
                     key,
                 )
                 return
 
-            await self.db_pool.execute(
+            await executor.execute(
                 "DELETE FROM user_config_overrides WHERE user_id = ? AND key = ?",
                 (user_id, key),
             )
@@ -155,28 +158,51 @@ class UserProfileOverridesRepo:
             logger.error(f"UserProfileOverridesRepo.delete_override failed: {exc}")
             raise
 
-    async def get_latest_update_for_user(self, user_id: int) -> Any | None:
+    async def get_latest_update_for_user(
+        self,
+        user_id: int,
+        *,
+        db_conn: Any | None = None,
+    ) -> Any | None:
         """Return the latest override update timestamp for a user."""
         try:
+            executor = db_conn or self.db_pool
             if getattr(self.db_pool, "pool", None) is not None:
-                row = await self.db_pool.fetchone(
-                    "SELECT MAX(updated_at) AS updated_at FROM user_config_overrides WHERE user_id = $1",
-                    user_id,
-                )
+                if db_conn is not None and hasattr(executor, "fetchrow"):
+                    row = await executor.fetchrow(
+                        "SELECT MAX(updated_at) AS updated_at FROM user_config_overrides WHERE user_id = $1",
+                        user_id,
+                    )
+                    row = dict(row) if row else None
+                else:
+                    row = await executor.fetchone(
+                        "SELECT MAX(updated_at) AS updated_at FROM user_config_overrides WHERE user_id = $1",
+                        user_id,
+                    )
                 return row.get("updated_at") if row else None
 
-            row = await self.db_pool.fetchone(
-                "SELECT MAX(updated_at) AS updated_at FROM user_config_overrides WHERE user_id = ?",
-                (user_id,),
-            )
+            if db_conn is not None:
+                cursor = await executor.execute(
+                    "SELECT MAX(updated_at) AS updated_at FROM user_config_overrides WHERE user_id = ?",
+                    (user_id,),
+                )
+                row = await cursor.fetchone()
+            else:
+                row = await executor.fetchone(
+                    "SELECT MAX(updated_at) AS updated_at FROM user_config_overrides WHERE user_id = ?",
+                    (user_id,),
+                )
             if row is None:
                 return None
             if isinstance(row, dict):
                 return row.get("updated_at")
             try:
-                return row[0]
-            except Exception:
-                return None
+                return row["updated_at"]
+            except (TypeError, KeyError, IndexError):
+                try:
+                    return row[0]
+                except (TypeError, KeyError, IndexError):
+                    return None
         except Exception as exc:
             logger.error(f"UserProfileOverridesRepo.get_latest_update_for_user failed: {exc}")
             raise

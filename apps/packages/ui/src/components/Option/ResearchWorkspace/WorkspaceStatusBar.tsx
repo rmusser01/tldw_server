@@ -2,6 +2,7 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import { Tooltip, Modal, Button } from "antd"
 import { Loader2, Trash2 } from "lucide-react"
+import { getDesignSystemState } from "@/design-system"
 import { useConnectionStore } from "@/store/connection"
 import { deriveConnectionUxState, type ConnectionUxState } from "@/types/connection"
 import { WORKSPACE_STORAGE_KEY } from "@/store/workspace-events"
@@ -14,6 +15,12 @@ type ConnectionTone = {
   dotClass: string
 }
 
+type WorkspaceContextStatus = {
+  label: string
+  detail: string
+  severity: "info" | "warning" | "error"
+}
+
 interface WorkspaceStatusBarProps {
   /** Approximate persisted workspace payload bytes in local storage */
   storageUsedBytes?: number
@@ -21,16 +28,44 @@ interface WorkspaceStatusBarProps {
   storageQuotaBytes?: number
   /** Active operation labels shown in the status bar */
   activeOperations?: string[]
+  /** Non-spinning recovery/status notices shown in the status bar */
+  statusMessages?: string[]
+  /** Optional compact action for status/recovery details */
+  statusAction?: {
+    label: string
+    ariaLabel?: string
+    onClick: () => void
+    disabled?: boolean
+  }
   /** Rollout gate for status/guardrails surfaces */
   statusGuardrailsEnabled?: boolean
+  /** Workspace/server-context state layered on top of raw backend connectivity. */
+  workspaceContextStatus?: WorkspaceContextStatus | null
+  /** Render a denser variant for constrained mobile layouts. */
+  compact?: boolean
 }
 
 const deriveConnectionTone = (
-  connectionState: ReturnType<typeof useConnectionStore.getState>["state"]
+  connectionState: ReturnType<typeof useConnectionStore.getState>["state"],
+  workspaceContextStatus?: WorkspaceContextStatus | null
 ): ConnectionTone => {
   const ux = deriveConnectionUxState(connectionState)
 
   if (ux === "connected_ok") {
+    if (
+      workspaceContextStatus &&
+      workspaceContextStatus.severity !== "info"
+    ) {
+      const isError = workspaceContextStatus.severity === "error"
+      return {
+        label: workspaceContextStatus.label,
+        detail: workspaceContextStatus.detail,
+        description: "",
+        toneClass: isError ? "text-error" : "text-warning",
+        dotClass: isError ? "bg-error" : "bg-warning"
+      }
+    }
+
     return {
       label: "Connected",
       detail: "Connection healthy",
@@ -44,8 +79,10 @@ const deriveConnectionTone = (
     ux === "connected_degraded" ||
     ux === "demo_mode"
   ) {
+    const degradedState = getDesignSystemState("degraded")
+
     return {
-      label: "Degraded",
+      label: degradedState.label,
       detail: "Connection degraded",
       description: "",
       toneClass: "text-warning",
@@ -65,11 +102,15 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
   storageUsedBytes,
   storageQuotaBytes,
   activeOperations = [],
-  statusGuardrailsEnabled = true
+  statusMessages = [],
+  statusAction,
+  statusGuardrailsEnabled = true,
+  workspaceContextStatus = null,
+  compact = false
 }) => {
   const { t } = useTranslation(["playground", "common"])
   const connectionState = useConnectionStore((s) => s.state)
-  const connection = deriveConnectionTone(connectionState)
+  const connection = deriveConnectionTone(connectionState, workspaceContextStatus)
   const connectionUxState: ConnectionUxState = deriveConnectionUxState(connectionState)
   const [storageModalOpen, setStorageModalOpen] = React.useState(false)
   const canRetryConnection =
@@ -134,9 +175,12 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
   return (
     <footer
       data-testid="workspace-status-bar"
-      className="flex h-7 shrink-0 items-center justify-between border-t border-border/60 bg-surface px-3 text-[11px] text-text-muted"
+      aria-label={t("playground:workspace.statusLabel", "Workspace status")}
+      className={`flex shrink-0 items-center justify-between border-t border-border/60 bg-surface text-[11px] text-text-muted ${
+        compact ? "min-h-6 px-2" : "h-7 px-3"
+      }`}
     >
-      <div className="flex items-center gap-3">
+      <div className={`flex min-w-0 items-center ${compact ? "gap-2" : "gap-3"}`}>
         {/* Connection indicator */}
         <Tooltip title={connection.detail}>
           <span
@@ -166,7 +210,9 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
             <button
               type="button"
               data-testid="workspace-statusbar-storage"
-              className="inline-flex items-center gap-1.5 hover:text-text"
+              className={`items-center gap-1.5 hover:text-text ${
+                compact ? "hidden sm:inline-flex" : "inline-flex"
+              }`}
               onClick={() => setStorageModalOpen(true)}
             >
               <span className="relative inline-block h-1.5 w-16 overflow-hidden rounded-full bg-border/60">
@@ -182,13 +228,40 @@ export const WorkspaceStatusBar: React.FC<WorkspaceStatusBarProps> = ({
       </div>
 
       {/* Active operations */}
-      <div className="flex items-center gap-3">
+      <div className={`flex min-w-0 items-center ${compact ? "gap-2" : "gap-3"}`}>
+        {statusMessages.length > 0 && (
+          <div
+            data-testid="workspace-statusbar-notice"
+            role="status"
+            aria-live="polite"
+            className={`flex items-center gap-2 overflow-hidden text-warning ${
+              compact ? "max-w-[38vw]" : "max-w-[42vw]"
+            }`}
+          >
+            {statusMessages.map((message, index) => (
+              <span key={`${message}-${index}`} className="truncate">
+                {message}
+              </span>
+            ))}
+          </div>
+        )}
+        {statusAction && (
+          <button
+            type="button"
+            className="rounded px-1.5 py-0.5 text-[11px] font-medium text-warning transition hover:bg-warning/10 hover:text-warning disabled:cursor-not-allowed disabled:opacity-60"
+            aria-label={statusAction.ariaLabel || statusAction.label}
+            onClick={statusAction.onClick}
+            disabled={statusAction.disabled}
+          >
+            {statusAction.label}
+          </button>
+        )}
         {activeOperations.length > 0 && (
           <div
             data-testid="workspace-statusbar-activity"
             role="status"
             aria-live="polite"
-            className="flex items-center gap-3"
+            className={`flex min-w-0 items-center ${compact ? "gap-1.5" : "gap-3"}`}
           >
             <Loader2 className="h-3 w-3 animate-spin text-primary" />
             {activeOperations.map((op, i) => (

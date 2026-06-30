@@ -16,22 +16,42 @@ import { useNavigate } from "react-router-dom"
 import { setSetting } from "@/services/settings"
 import { DISCUSS_WATCHLIST_PROMPT_SETTING } from "@/services/settings/ui-settings"
 import type { WatchlistChatHandoffPayload } from "@/services/tldw/watchlist-chat-handoff"
-import { downloadWatchlistOutput, downloadWatchlistOutputBinary } from "@/services/watchlists"
-import type { WatchlistOutput } from "@/types/watchlists"
+import {
+  downloadWatchlistOutput,
+  downloadWatchlistOutputBinary,
+  getWatchlistRunAudio
+} from "@/services/watchlists"
+import type { WatchlistOutput, WatchlistRunAudioStatus } from "@/types/watchlists"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   getFocusableActiveElement,
   restoreFocusToElement
 } from "../shared/focus-management"
 import {
+  type AudioArtifactSummary,
   getDeliveryStatusColor,
   getOutputArtifactLabel,
   getOutputFileExtension,
+  getOutputAudioStatusSummary,
   getOutputDeliveryStatuses,
+  getMergedOutputAudioStatusSummary,
   getOutputMimeType,
   getOutputTemplateName,
   getOutputTemplateVersion,
   isAudioOutput
 } from "./outputMetadata"
+import { ReportEvidencePanel } from "./ReportEvidencePanel"
+
+const AUDIO_STATUS_POLL_INTERVAL_MS = 3000
+const AUDIO_STATUS_POLLABLE = new Set(["pending", "queued", "running", "in_progress"])
+const SENSITIVE_AUDIO_ERROR_VALUE_PATTERN =
+  /\b(authorization|x-api-key|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|token|secret|password)\b\s*[:=]\s*("[^"]+"|'[^']+'|[^\s,;)}\]]+)/gi
+const BEARER_AUDIO_ERROR_VALUE_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi
+
+const sanitizeAudioErrorMessage = (error: string): string =>
+  sanitizeServerErrorMessage(error, "Audio generation failed")
+    .replace(BEARER_AUDIO_ERROR_VALUE_PATTERN, "Bearer [REDACTED]")
+    .replace(SENSITIVE_AUDIO_ERROR_VALUE_PATTERN, "$1=[REDACTED]")
 
 interface OutputPreviewDrawerProps {
   output: WatchlistOutput | null | undefined
@@ -61,6 +81,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const audioObjectUrlRef = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<"rendered" | "source">("rendered")
+  const [liveAudioStatus, setLiveAudioStatus] = useState<WatchlistRunAudioStatus | null>(null)
   const outputIsAudio = useMemo(() => isAudioOutput(output), [output])
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
@@ -199,6 +220,83 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
     return getOutputDeliveryStatuses(output?.metadata)
   }, [output?.metadata])
 
+  const metadataAudioSummary = useMemo(() => {
+    return getOutputAudioStatusSummary(output?.metadata)
+  }, [output?.metadata])
+  const audioSummary = useMemo(() => {
+    return getMergedOutputAudioStatusSummary(output?.metadata, liveAudioStatus)
+  }, [liveAudioStatus, output?.metadata])
+  const audioErrorMessage = useMemo(() => {
+    return audioSummary.error ? sanitizeAudioErrorMessage(audioSummary.error) : null
+  }, [audioSummary.error])
+
+  useEffect(() => {
+    let active = true
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+    const runId = output?.run_id
+    const metadataStatus = metadataAudioSummary.status.toLowerCase()
+    const metadataNeedsLiveStatus =
+      AUDIO_STATUS_POLLABLE.has(metadataStatus) ||
+      (metadataStatus === "unknown" && Boolean(metadataAudioSummary.taskId))
+    const shouldFetchLiveStatus =
+      open &&
+      !outputIsAudio &&
+      runId != null &&
+      metadataAudioSummary.requested &&
+      metadataNeedsLiveStatus
+
+    if (!shouldFetchLiveStatus) {
+      setLiveAudioStatus(null)
+      return () => {
+        active = false
+      }
+    }
+
+    setLiveAudioStatus(null)
+
+    const scheduleNextPoll = () => {
+      timeoutId = setTimeout(loadAudioStatus, AUDIO_STATUS_POLL_INTERVAL_MS)
+    }
+
+    const loadAudioStatus = async () => {
+      try {
+        const nextStatus = await getWatchlistRunAudio(runId)
+        if (!active) return
+        setLiveAudioStatus(nextStatus)
+        const normalizedStatus = (nextStatus.status || "").toLowerCase()
+        if (
+          AUDIO_STATUS_POLLABLE.has(normalizedStatus) ||
+          (normalizedStatus === "unknown" && Boolean(nextStatus.task_id))
+        ) {
+          scheduleNextPoll()
+        }
+      } catch (err) {
+        if (!active) return
+        console.warn("Failed to resolve output audio status:", err)
+        if (metadataNeedsLiveStatus) {
+          scheduleNextPoll()
+        }
+      }
+    }
+
+    void loadAudioStatus()
+
+    return () => {
+      active = false
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
+    }
+  }, [
+    metadataAudioSummary.requested,
+    metadataAudioSummary.status,
+    metadataAudioSummary.taskId,
+    open,
+    output?.run_id,
+    outputIsAudio
+  ])
+
   const templateName = useMemo(() => {
     return getOutputTemplateName(output?.metadata)
   }, [output?.metadata])
@@ -209,6 +307,17 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
   const artifactLabel = useMemo(() => {
     return getOutputArtifactLabel(output)
   }, [output])
+  const hasReportEvidenceMetadata = useMemo(() => {
+    const metadata = output?.metadata
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      return false
+    }
+    return (
+      "report_snapshot_path" in metadata ||
+      "report_readiness" in metadata ||
+      "report_schema_version" in metadata
+    )
+  }, [output?.metadata])
 
   // Open in new tab (for HTML)
   const handleOpenInNewTab = () => {
@@ -219,6 +328,90 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
     window.open(url, "_blank")
     // Clean up after a delay
     setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  const renderAudioArtifactGraph = () => {
+    if (!audioSummary.requested) return null
+
+    const renderArtifact = (artifact: AudioArtifactSummary, key: string) => (
+      <div key={key}>
+        <div className="font-medium text-text">{artifact.label}</div>
+        {artifact.displayName ? <div>{artifact.displayName}</div> : null}
+        {artifact.downloadUrl ? (
+          <a
+            href={artifact.downloadUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary hover:underline"
+            aria-label={t("watchlists:outputs.openAudioArtifactAria", "Open {{label}}", {
+              label: artifact.label
+            })}
+          >
+            {t("watchlists:outputs.openAudioArtifact", "Open")}
+          </a>
+        ) : null}
+      </div>
+    )
+
+    return (
+      <div className="space-y-2" data-testid="output-preview-audio-artifacts">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-sm font-medium text-text">
+            {t("watchlists:outputs.audioArtifactsLabel", "Audio artifacts")}
+          </div>
+          <Tag color={audioSummary.statusColor}>{audioSummary.statusLabel}</Tag>
+          {audioSummary.stale && (
+            <Tag color="gold">{t("watchlists:outputs.audioStale", "Stale")}</Tag>
+          )}
+        </div>
+        {audioSummary.supersededBy && (
+          <div className="text-xs text-warning">
+            {t("watchlists:outputs.audioSupersededBy", "Superseded by {{requestId}}", {
+              requestId: audioSummary.supersededBy
+            })}
+          </div>
+        )}
+        {audioSummary.fallbackReason && (
+          <div className="text-xs text-warning">
+            {t("watchlists:outputs.audioFallback", "Fallback: {{reason}}", {
+              reason: audioSummary.fallbackReason
+            })}
+          </div>
+        )}
+        {audioErrorMessage && (
+          <div className="text-xs text-danger">
+            {t("watchlists:outputs.audioError", "Error: {{error}}", {
+              error: audioErrorMessage
+            })}
+          </div>
+        )}
+        {audioSummary.taskId && (
+          <div className="text-xs text-text-muted">
+            {t("watchlists:outputs.audioTaskId", "Task: {{taskId}}", {
+              taskId: audioSummary.taskId
+            })}
+          </div>
+        )}
+        {audioSummary.queueName && (
+          <div className="text-xs text-text-muted">
+            {t("watchlists:outputs.audioQueueName", "Queue: {{queue}}", {
+              queue: audioSummary.queueName
+            })}
+          </div>
+        )}
+        <div className="grid gap-2 text-xs text-text-muted sm:grid-cols-2">
+          {audioSummary.scriptArtifact && (
+            renderArtifact(audioSummary.scriptArtifact, "script")
+          )}
+          {audioSummary.speakerArtifacts.map((artifact, index) => (
+            renderArtifact(artifact, `${artifact.speakerId || artifact.label}-${index}`)
+          ))}
+          {audioSummary.finalArtifact && (
+            renderArtifact(audioSummary.finalArtifact, "final")
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -315,6 +508,7 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
                   </div>
                 </div>
               )}
+              {renderAudioArtifactGraph()}
               {output?.chatbook_path && (
                 <div className="text-xs text-text-muted">
                   Chatbook: {output.chatbook_path}
@@ -325,6 +519,14 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
                   {t("watchlists:outputs.storagePath", "Stored file")}: {output.storage_path}
                 </div>
               )}
+            </div>
+          )}
+          {output && hasReportEvidenceMetadata && (
+            <div className="rounded-lg border border-border bg-surface p-3">
+              <ReportEvidencePanel
+                outputId={output.id}
+                compact
+              />
             </div>
           )}
 
@@ -397,11 +599,20 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
                   </div>
                 </div>
               )}
+              {renderAudioArtifactGraph()}
               {output?.chatbook_path && (
                 <div className="text-xs text-text-muted">
                   Chatbook: {output.chatbook_path}
                 </div>
               )}
+            </div>
+          )}
+          {output && hasReportEvidenceMetadata && (
+            <div className="rounded-lg border border-border bg-surface p-3">
+              <ReportEvidencePanel
+                outputId={output.id}
+                compact
+              />
             </div>
           )}
 
@@ -438,10 +649,21 @@ export const OutputPreviewDrawer: React.FC<OutputPreviewDrawerProps> = ({
           )}
         </div>
       ) : (
-        <Empty
-          description={t("watchlists:outputs.noContent", "No content available")}
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-        />
+        <div className="space-y-4">
+          {renderAudioArtifactGraph()}
+          {output && hasReportEvidenceMetadata && (
+            <div className="rounded-lg border border-border bg-surface p-3">
+              <ReportEvidencePanel
+                outputId={output.id}
+                compact
+              />
+            </div>
+          )}
+          <Empty
+            description={t("watchlists:outputs.noContent", "No content available")}
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          />
+        </div>
       )}
     </Drawer>
   )

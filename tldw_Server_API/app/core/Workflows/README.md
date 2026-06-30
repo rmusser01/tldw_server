@@ -8,14 +8,18 @@ Define, run, and monitor multi‑step workflows. Includes definition/versioning,
   - Create/list/delete workflow definitions; create new immutable versions under a definition.
 - Runs
   - Start runs from a saved definition (`run_mode` async/sync) or ad‑hoc payload; inject per‑run secrets (never persisted) and idempotency keys.
+  - Ad‑hoc runs require the same `workflows` scope as saved-definition runs.
   - Events and artifacts persisted; step run entries tracked with timestamps and status.
 - Step types (initial set)
   - `media_ingest`, `prompt` (templating), `llm`, `rag_search`, `kanban`, `mcp_tool`, `tts`, `webhook`, `delay`, `log`, `wait_for_human`, `wait_for_approval`, `branch`, `map`, `process_media`, `policy_check`, `rss_fetch`, `atom_fetch`, `embed`, `translate`, `stt_transcribe`, `notify`, `diff_change_detector`.
   - Map sub-steps: `map` supports nested types `prompt`, `log`, `delay`, `rag_search`, `media_ingest`, `mcp_tool`, `webhook`, `kanban` only (others are rejected).
 - Scheduling
   - Recurring schedules via Workflows Scheduler (cron/APS); presence gating, concurrency mode (skip/queue), coalesce/misfire behavior, jitter.
+  - Scheduler bootstrap/rescan scans all tenant rows inside each per-user scheduler DB, rather than assuming `tenant_id="default"`.
+  - Manual `run-now` uses the same target resolver as recurring execution, so watchlist-backed schedules route to `watchlist_run` on the `watchlists` queue.
 - Governance
   - RBAC checks on run listing and control; optional virtual keys for scheduled runs; audit events on key lifecycle operations.
+  - Webhook DLQ replay and artifact GC both append workflow evidence events (`webhook_delivery` and `artifact_gc`).
 
 Related Endpoints (file:line)
 - Router (prefix `/api/v1/workflows`): tldw_Server_API/app/api/v1/endpoints/workflows.py:46
@@ -34,6 +38,33 @@ Related Endpoints (file:line)
 Related Schemas
 - tldw_Server_API/app/api/v1/schemas/workflows.py:1 (definitions, runs, events)
 
+## Architecture Notes
+
+### Core Flow
+
+- Endpoint handlers validate definitions or ad-hoc payloads, persist definitions/runs through `DB_Management/Workflows_DB.py`, then either return a queued run or drive the engine for synchronous execution.
+- `engine.py` is the run lifecycle owner: it loads a definition snapshot, executes registered adapters, records step runs/events/artifacts, handles pause/resume for human waits, and checks cancellation cooperatively.
+- Recurring schedules live in `services/workflows_scheduler.py` and `Workflows_Scheduler_DB.py`; they resolve a target and enqueue `workflow_run` or `watchlist_run` into the core Scheduler.
+- `adapters.py` is the integration boundary for Chat/LLM, RAG, media, MCP, TTS, webhook, notification, and knowledge operations. Endpoint code should not call those providers directly for workflow steps.
+
+### State And Data
+
+- Definitions, versions, runs, step runs, events, artifacts, idempotency keys, cancellation flags, and run metadata are workflow DB state.
+- Per-run secrets are held in memory by the engine and expire with the configured TTL; they are intentionally absent from persisted definition, run, and event rows.
+- Events are the audit trail for operators and clients. New adapters should record enough evidence to explain side effects without storing secrets or large provider payloads.
+
+### Security And Operations
+
+- RBAC and token-scope checks happen at the endpoint and scheduler routes, while per-user DB scoping comes from dependency construction.
+- Webhook and MCP steps cross external or tool boundaries; keep timeout, DLQ, retry, artifact, and governance behavior visible in adapter tests.
+- Idempotency keys matter at both saved-run and scheduled-run boundaries. Do not mutate definition snapshots in scheduler handlers.
+
+### Extension Checklist
+
+- New step type: update schema validation, `_validate_definition_payload`, adapter implementation, registry capability metadata, and Workflows tests for sync and async runs.
+- New schedule target: update `workflows_scheduler.py`, Scheduler handler registration, target resolver tests, and run metadata tests.
+- New persisted run field: update SQLite/Postgres workflow schemas, migration tests, API schemas, and event/export behavior if clients consume it.
+
 ## 2. Technical Details of Features
 
 - Engine & adapters
@@ -48,7 +79,7 @@ Related Schemas
   - Endpoints: `/api/v1/scheduler/workflows` provide CRUD + dry-run + run-now.
   - Presence gating, concurrency mode (skip vs queue), jitter, misfire/coalesce, next‑run persistence handled in service.
 - Security & RBAC
-  - Endpoint gates: claim-first dependencies (`require_permissions(...)`) plus token scope (`require_token_scope("workflows", ...)`) on scheduler routes; per‑user scoping for definitions/runs.
+  - Endpoint gates: claim-first dependencies (`RequirePermission(...)`) plus token scope (`TokenScopeGuard("workflows", ...)`) on scheduler routes; per‑user scoping for definitions/runs.
   - Optional minting of short‑lived virtual keys for scheduled runs (env‑gated) in `workflows_scheduler`.
 - Configuration
   - `WORKFLOWS_SCHEDULER_ENABLED`, `WORKFLOWS_SCHEDULER_TZ`, `WORKFLOWS_SCHEDULER_RESCAN_SEC`, `WORKFLOWS_SCHEDULER_DATABASE_URL`, `WORKFLOWS_SCHEDULER_SQLITE_PATH`.
@@ -77,4 +108,4 @@ Related Schemas
   - Use IANA timezones in cron; invalid expressions return 422.
   - Streaming endpoints require proper client handling (SSE); in tests some streaming paths may be skipped.
   - Secrets are in‑memory only; never persisted to DB—expect `None` after engine cleanup.
-  - `stt_transcribe` uses the same STT model parsing as the audio REST API (`parse_transcription_model`), so model strings like `parakeet-mlx`, `parakeet-onnx`, or `qwen2audio-*` route to the expected providers. When `language` is omitted in the step config, the adapter passes `selected_source_lang=None` to `speech_to_text`, allowing the backend to auto-detect language (consistent with `/api/v1/audio/transcriptions`).
+  - `stt_transcribe` uses the same STT model parsing as the audio REST API (`parse_transcription_model`), so model strings like `parakeet-mlx`, `parakeet-tdt-0.6b-v3-onnx`, `parakeet-onnx`, or `qwen2audio-*` route to the expected providers. When `language` is omitted in the step config, the adapter passes `selected_source_lang=None` to `speech_to_text`, allowing the backend to auto-detect language (consistent with `/api/v1/audio/transcriptions`).

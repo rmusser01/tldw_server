@@ -14,6 +14,7 @@ import {
 import type { ToolCall } from "@/types/tool-calls"
 import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
+import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
 
 export interface ChatTldwOptions {
   model: string
@@ -44,6 +45,7 @@ export interface ChatTldwOptions {
   extraHeaders?: Record<string, unknown>
   extraBody?: Record<string, unknown>
   researchContext?: ChatResearchContext
+  chatDebugMetadata?: ChatRequestDebugMetadata
 }
 
 export class ChatTldw {
@@ -69,6 +71,7 @@ export class ChatTldw {
   extraHeaders?: Record<string, unknown>
   extraBody?: Record<string, unknown>
   researchContext?: ChatResearchContext
+  chatDebugMetadata?: ChatRequestDebugMetadata
 
   constructor(options: ChatTldwOptions) {
     // Normalize model id: drop internal prefix like "tldw:" so server receives provider/model
@@ -94,6 +97,7 @@ export class ChatTldw {
     this.extraHeaders = options.extraHeaders
     this.extraBody = options.extraBody
     this.researchContext = options.researchContext
+    this.chatDebugMetadata = options.chatDebugMetadata
   }
 
   /**
@@ -147,6 +151,19 @@ export class ChatTldw {
     }
 
     const handleChunk = (chunk: any) => {
+      const streamedConversationId =
+        typeof chunk?.tldw_conversation_id === "string" &&
+        chunk.tldw_conversation_id.trim().length > 0
+          ? chunk.tldw_conversation_id.trim()
+          : typeof chunk?.conversation_id === "string" &&
+              chunk.conversation_id.trim().length > 0
+            ? chunk.conversation_id.trim()
+            : null
+      if (streamedConversationId) {
+        this.conversationId = streamedConversationId
+        this.saveToDb = true
+      }
+
       const loopEvent = extractChatLoopEvent(chunk)
       if (loopEvent) {
         publishChatLoopEvent(loopEvent)
@@ -184,7 +201,8 @@ export class ChatTldw {
         apiProvider: this.apiProvider,
         extraHeaders: this.extraHeaders,
         extraBody: this.extraBody,
-        researchContext: this.researchContext
+        researchContext: this.researchContext,
+        chatDebugMetadata: this.chatDebugMetadata
       },
       handleChunk
     )
@@ -231,7 +249,7 @@ export class ChatTldw {
     messages: BaseMessage[]
   ): Promise<{ text: string; message: AIMessage }> {
     const tldwMessages = this.convertToTldwMessages(messages)
-    
+
     const response = await tldwChat.sendMessage(tldwMessages, {
       model: this.model,
       temperature: this.temperature,
@@ -253,7 +271,8 @@ export class ChatTldw {
       apiProvider: this.apiProvider,
       extraHeaders: this.extraHeaders,
       extraBody: this.extraBody,
-      researchContext: this.researchContext
+      researchContext: this.researchContext,
+      chatDebugMetadata: this.chatDebugMetadata
     })
 
     return {

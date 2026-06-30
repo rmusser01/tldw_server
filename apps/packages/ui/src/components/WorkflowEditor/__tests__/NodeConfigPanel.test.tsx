@@ -280,7 +280,6 @@ describe("NodeConfigPanel selectors", () => {
             type: "string",
             enum: ["question", "verification_summary", "unsupported_claims"]
           },
-          minItems: 1,
           description: "Canonical top-level bundle fields to load inline"
         },
         save_artifact: { type: "boolean", default: true }
@@ -312,5 +311,47 @@ describe("NodeConfigPanel selectors", () => {
         "Loads selected canonical bundle fields from a completed deep research run and returns null for missing allowed fields"
       )
     ).toBeInTheDocument()
+  })
+
+  it("renders raw config validation errors through the design-system Alert", () => {
+    setupStore(
+      "custom_raw_step",
+      {
+        type: "object",
+        properties: {}
+      },
+      { enabled: true }
+    )
+    useWorkflowEditorStore.setState({
+      stepRegistry: {
+        custom_raw_step: {
+          type: "custom_raw_step" as any,
+          label: "Custom Raw Step",
+          description: "Custom raw step",
+          category: "utility",
+          icon: "MessageSquare",
+          color: "bg-gray-500",
+          inputs: [],
+          outputs: [],
+          configSchema: []
+        }
+      }
+    })
+
+    vi.mocked(useWorkflowDynamicOptions).mockReturnValue({
+      optionsByKey: {},
+      loadingByKey: {}
+    })
+
+    render(<NodeConfigPanel />)
+
+    fireEvent.change(screen.getByPlaceholderText('{"key": "value"}'), {
+      target: { value: "not-json" }
+    })
+
+    const error = screen.getByText(/Unexpected token|not valid JSON/)
+    const alert = error.closest('[data-ds-component="Alert"]')
+    expect(alert).not.toBeNull()
+    expect(alert).toHaveTextContent(/Unexpected token|not valid JSON/)
   })
 })

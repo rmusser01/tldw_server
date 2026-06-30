@@ -9,22 +9,53 @@ ALIAS_MAP: dict[str, str] = {
     "media_db_v2": "media_db",
     "notes": "notes",
     "notes_db": "notes",
+    "chat": "chats",
     "characters": "characters",
+    "character": "characters",
     "character_cards_db": "characters",
     "character_cards": "characters",
     "chats": "chats",
     "chat_history": "chats",
+    "chat_history_db": "chats",
+    "conversation": "chats",
+    "conversations": "chats",
     "kanban": "kanban",
     "kanban_db": "kanban",
+    "task_boards": "kanban",
+    "task_board": "kanban",
+    "tasks": "kanban",
+    "prompt": "prompts",
     "prompts": "prompts",
     "prompts_db": "prompts",
+    "worldbook": "world_books",
+    "worldbooks": "world_books",
+    "world_book": "world_books",
+    "world_books": "world_books",
+    "world_books_db": "world_books",
+    "dictionary": "dictionaries",
+    "dictionaries": "dictionaries",
+    "chat_dictionary": "dictionaries",
+    "chat_dictionaries": "dictionaries",
+    "chat_dictionaries_db": "dictionaries",
     "claims": "claims",
     "claims_db": "claims",
     "sql": "sql",
 }
 
-PUBLIC_SOURCES = frozenset({"media_db", "notes", "characters", "chats", "kanban", "sql"})
-INTERNAL_SOURCES = frozenset(set(PUBLIC_SOURCES) | {"prompts", "claims"})
+PUBLIC_SOURCES = frozenset(
+    {
+        "media_db",
+        "notes",
+        "chats",
+        "characters",
+        "kanban",
+        "prompts",
+        "world_books",
+        "dictionaries",
+        "sql",
+    }
+)
+INTERNAL_SOURCES = frozenset(set(PUBLIC_SOURCES) | {"claims"})
 DEFAULT_SOURCE = "media_db"
 
 

@@ -50,3 +50,12 @@ def test_parse_transcription_model_vibevoice_aliases(
     assert provider == "vibevoice"
     assert model == expected_model
     assert variant is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("model_name", ["parakeet-tdt-0.6b-v3-onnx", "parakeet-onnx"])
+def test_parse_transcription_model_parakeet_onnx_aliases(model_name: str) -> None:
+    provider, model, variant = parse_transcription_model(model_name)
+    assert provider == "parakeet"
+    assert model == "parakeet"
+    assert variant == "onnx"

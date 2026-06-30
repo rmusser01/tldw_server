@@ -9,8 +9,9 @@ Developer-oriented details (architecture, provider matrix, configuration, and te
 ## Features
 
 ### Core Capabilities
-- **Multi-Provider Support**: OpenAI, ElevenLabs, and local adapters (Kokoro, KittenTTS, PocketTTS, LuxTTS, Higgs, Chatterbox, Dia, VibeVoice, VibeVoice Realtime, Qwen3-TTS, IndexTTS2, NeuTTS, Supertonic, Supertonic2, EchoTTS) with a mock adapter for testing.
-- **Voice Cloning**: Voice reference audio accepted by PocketTTS, LuxTTS, Higgs, Chatterbox, Dia, VibeVoice, Qwen3-TTS, NeuTTS, IndexTTS2, and EchoTTS (ElevenLabs supports user voices via API).
+- **Multi-Provider Support**: OpenAI, ElevenLabs, Fish Audio S2, and local adapters (Kokoro, KittenTTS, PocketTTS, LuxTTS, Higgs, Chatterbox, Dia, VibeVoice, VibeVoice Realtime, Qwen3-TTS, IndexTTS2, NeuTTS, Supertonic, Supertonic2, EchoTTS) with a mock adapter for testing.
+- **Managed Sidecars**: OmniVoice runs behind a dedicated loopback sidecar runtime instead of sharing the main server interpreter.
+- **Voice Cloning**: Voice reference audio accepted by Fish Audio S2, PocketTTS, LuxTTS, Higgs, Chatterbox, Dia, VibeVoice, Qwen3-TTS, NeuTTS, IndexTTS2, and EchoTTS (ElevenLabs supports user voices via API).
 - **Streaming Audio**: Real-time chunked streaming across adapters; NeuTTS enables streaming when a quantized (GGUF) backbone is loaded; VibeVoice Realtime uses a WS backend.
 - **Format Support**: Adapter-specific coverage spanning MP3, WAV, OPUS, FLAC, PCM, AAC, and OGG via the shared `AudioFormat` enum.
 - **OpenAI Compatibility**: Drop-in replacement for OpenAI TTS API
@@ -25,12 +26,13 @@ Developer-oriented details (architecture, provider matrix, configuration, and te
 |----------|------|-----------|---------------|--------------|
 | **OpenAI** | Commercial API | EN* | ❌ | Industry standard, HD quality |
 | **ElevenLabs** | Commercial API | 29 | ✅ (Pro/user voices) | Premium quality, emotion control |
+| **Fish Audio S2** | Remote HTTP server | Multi | ✅ (managed refs) | S2 Pro via upstream Fish server, user-scoped reference routing |
 | **Kokoro** | Local ONNX | EN (US/GB) | ❌ | Lightweight, CPU-friendly, offline |
 | **KittenTTS** | Local ONNX | EN | ❌ | Small local ONNX voices, first-use download, pinned HF revisions |
 | **PocketTTS** | Local ONNX | EN | ✅ (reference) | Zero-shot cloning, streaming ONNX |
 | **LuxTTS** | Local PyTorch | EN | ✅ (reference) | 48kHz voice cloning (ZipVoice) |
 | **Higgs** | Local PyTorch | 50+ | ✅ (3-10s) | Music generation, multi-lingual |
-| **Chatterbox** | Local PyTorch | EN | ✅ (5-20s) | Emotion exaggeration control |
+| **Chatterbox** | Local PyTorch | EN, 23 via multilingual | ✅ (5-20s) | Original emotion control, multilingual model, Turbo paralinguistic tags |
 | **Dia** | Local PyTorch | EN | ✅ (dialogue prompts) | Multi-speaker dialogue specialist |
 | **VibeVoice** | Local PyTorch | 12 | ✅ (Any) | Long-form (90min), spontaneous music |
 | **VibeVoice Realtime** | WS adapter | EN | ❌ | Low-latency streaming (requires realtime backend) |
@@ -40,6 +42,7 @@ Developer-oriented details (architecture, provider matrix, configuration, and te
 | **Supertonic** | Local ONNX | Varies (model) | ❌ | User-supplied voice styles |
 | **Supertonic2** | Local ONNX | Varies (model) | ❌ | User-supplied voice styles |
 | **EchoTTS** | Local PyTorch | EN | ✅ (reference) | CUDA-only voice cloning |
+| **OmniVoice** | Local sidecar | EN | ✅ (reference / stored custom voices) | Dedicated managed runtime, default `voice="auto"` when omitted |
 
 \* Current adapter configuration targets English (`tts-1` / `tts-1-hd`). Additional languages depend on OpenAI model availability.
 
@@ -151,6 +154,23 @@ providers:
       interval_silence: 200
 ```
 
+### Chatterbox
+
+Chatterbox exposes the current Resemble AI TTS family through one provider key.
+
+- `chatterbox` and `chatterbox-emotion`: Original English model with emotion-to-exaggeration control.
+- `chatterbox-multilingual`: Multilingual runtime for the upstream 23 language codes.
+- `chatterbox-turbo`: English Turbo runtime with paralinguistic tags such as `[laugh]`, `[cough]`, and `[chuckle]`.
+
+Generation notes:
+
+- Original and Multilingual accept `cfg_weight`, `temperature`, `repetition_penalty`, `min_p`, and `top_p`.
+- Turbo accepts `temperature`, `repetition_penalty`, `top_p`, and `top_k`.
+- Turbo intentionally drops CFG, min-p, emotion, and exaggeration controls; response metadata reports them in `ignored_controls` when the caller sends them.
+- `extra_params.seed` is normalized into the typed `TTSRequest.seed` path for reproducibility where the runtime honors PyTorch seeding.
+- `use_multilingual: true` remains as a legacy compatibility route for non-English `model: "chatterbox"` requests, but new clients should send `model: "chatterbox-multilingual"` explicitly.
+- Chatterbox voice conversion is exposed separately through `POST /api/v1/audio/voice-conversion` with multipart `source_audio` and optional `target_voice` uploads. It is not registered as a `/audio/speech` model id.
+
 ## One-Command Installers
 Run these from the project root to install a single TTS backend (deps + models where applicable):
 
@@ -164,6 +184,10 @@ python Helper_Scripts/TTS_Installers/install_tts_kokoro.py
 python Helper_Scripts/TTS_Installers/install_tts_dia.py
 python Helper_Scripts/TTS_Installers/install_tts_higgs.py
 python Helper_Scripts/TTS_Installers/install_tts_vibevoice.py --variant 1.5B
+
+# OmniVoice sidecar runtime
+python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py \
+  --model-path models/omnivoice_sidecar/models/OmniVoice
 
 # NeuTTS (deps; optional prefetch)
 python Helper_Scripts/TTS_Installers/install_tts_neutts.py --prefetch
@@ -215,15 +239,28 @@ providers:
 
 If you want to prefetch assets during setup instead of waiting for first synthesis, use the setup UI advanced TTS installer and select `kitten_tts`.
 
-Configuration notes (providers.kokoro in tts_providers_config.yaml):
-- model_path: path to ONNX file
-- voices_json / voice_dir: directory with voice profiles
-- device: cpu|cuda|mps
-- sample_rate: default 24000
-- pause_interval_words: insert a pacing tag every N words (default 500)
-- pause_tag: the pacing marker to insert (default "[pause=1.1]")
+### OmniVoice
 
-The adapter preprocesses long inputs and inserts a pause tag at least every `pause_interval_words` tokens to keep delivery natural and avoid very long continuous utterances.
+OmniVoice uses a managed sidecar process with its own virtual environment under `models/omnivoice_sidecar`. It is disabled by default and must be pointed at one local OmniVoice model directory before the provider is enabled; runtime requests do not download model assets.
+
+- Installer: `python Helper_Scripts/TTS_Installers/install_tts_omnivoice_sidecar.py --model-path /absolute/path/to/local/OmniVoice/model`
+- Preferred local source checkout: `../OmniVoice`
+- Runtime layout: `.venv`, `runtime`, and `logs` under `models/omnivoice_sidecar`
+- Native sidecar output: 24 kHz WAV/PCM; public `response_format` conversion happens in the main adapter
+- Supported modes: `auto`, voice design through `extra_params.instruct`, and cloning from direct `voice_reference` or stored `custom:<voice_id>` voices with `extra_params.reference_text`
+- Streaming v1 is buffered rather than incremental because the sidecar exposes request/response synthesis
+- Structured sidecar errors are mapped by the adapter into normal TTS provider failures
+- Provider requests that explicitly resolve to OmniVoice and omit `voice` normalize to `auto`
+- The sidecar supervisor consumes the configured interpreter path so the dedicated installer-created runtime is the one that launches
+
+Configuration notes (`providers.omnivoice` in `tts_providers_config.yaml`):
+- `extra_params.model_path`: required local OmniVoice model directory
+- `extra_params.runtime_path`: sidecar runtime working directory
+- `extra_params.scratch_dir`: managed directory for cloned voice references
+- `extra_params.host` / `extra_params.port`: authenticated loopback sidecar endpoint
+- `sample_rate`: native 24000 Hz sidecar output
+
+See `Docs/STT-TTS/TTS-SETUP-GUIDE.md#omnivoice-setup` for setup commands and backend prerequisites.
 
 ### Voice Management & Cloning
 
@@ -526,8 +563,12 @@ providers:
 
   chatterbox:
     enabled: true
-    model_path: resemble-ai/chatterbox
-    enable_watermark: true
+    variant: standard          # standard, multilingual, or turbo
+    model_path: ResembleAI/chatterbox
+    multilingual_model_path: ResembleAI/chatterbox-multilingual
+    turbo_model_path: ResembleAI/chatterbox-turbo
+    device: auto
+    disable_watermark: true
 
   vibevoice:
     enabled: true
@@ -586,8 +627,8 @@ The registry automatically aliases common, generic keys from your YAML to the pr
   - Aliased to: `dia_model_path`, `dia_device`, `dia_use_safetensors`, `dia_use_bf16`, `dia_sample_rate`, `dia_auto_detect_speakers`, `dia_max_speakers`
 
 - Chatterbox
-  - Generic: `device`, `use_multilingual`, `disable_watermark`, `sample_rate`, `target_latency_ms`
-  - Aliased to: `chatterbox_device`, `chatterbox_use_multilingual`, `chatterbox_disable_watermark`, `chatterbox_target_latency_ms`
+  - Generic: `device`, `variant`, `model_path`, `multilingual_model_path`, `turbo_model_path`, `use_multilingual`, `disable_watermark`, `sample_rate`, `target_latency_ms`, `auto_download`
+  - Aliased to: `chatterbox_device`, `chatterbox_variant`, `chatterbox_use_multilingual`, `chatterbox_disable_watermark`, `chatterbox_target_latency_ms`
 
 - VibeVoice
   - Generic: `device`, `sample_rate`, `variant`, `model_path`, `model_dir`, `cache_dir`, `voices_dir`, `background_music`, `enable_singing`, `use_quantization`, `auto_cleanup`, `auto_download`, `enable_sage`, `attention_type`, `cfg_scale`, `diffusion_steps`, `temperature`, `top_p`, `top_k`, `stream_chunk_size`, `stream_buffer_size`

@@ -24,6 +24,35 @@ def _user(uid: int) -> User:
     return User(id=uid, username=f"user-{uid}", is_active=True, is_admin=False)
 
 
+def _force_docker_preflight_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+    from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+    from tldw_Server_API.app.core.Sandbox.service import SandboxService
+
+    def _preflights(
+        self: SandboxService,
+        *,
+        network_policy: str | None,
+    ) -> dict[RuntimeType, RuntimePreflightResult]:
+        del self, network_policy
+        return {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                reasons=[],
+                execution_mode="mocked",
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        }
+
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", _preflights)
+
+
+@pytest.fixture(autouse=True)
+def _sandbox_upload_docker_preflight(monkeypatch: pytest.MonkeyPatch) -> None:
+    _force_docker_preflight_available(monkeypatch)
+
+
 def _create_session(client: TestClient) -> str:
     """Helper to create a sandbox session and return its ID."""
     body = {

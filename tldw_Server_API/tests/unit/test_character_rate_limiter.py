@@ -89,8 +89,10 @@ def test_character_guardrails_raise():
     with pytest.raises(HTTPException):
         asyncio.run(limiter.check_chat_limit(user_id=1, current_chat_count=1))
 
+    assert asyncio.run(limiter.check_message_limit(chat_id="c1", projected_message_count=1)) is True
+
     with pytest.raises(HTTPException):
-        asyncio.run(limiter.check_message_limit(chat_id="c1", current_message_count=1))
+        asyncio.run(limiter.check_message_limit(chat_id="c1", projected_message_count=2))
 
 
 @pytest.mark.unit

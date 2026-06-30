@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  Alert,
   Button,
   Card,
   Descriptions,
@@ -15,6 +14,7 @@ import {
 import type { ColumnsType } from "antd/es/table"
 import { Clock, RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives/Alert"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   fetchClaimClusters,
@@ -27,7 +27,7 @@ import {
 import type { ClaimCluster, WatchlistJob, WatchlistClusterSubscription } from "@/types/watchlists"
 import { humanizeMilliseconds } from "@/utils/humanize-milliseconds"
 import { formatRelativeTime } from "@/utils/dateFormatters"
-import { WatchlistsHelpTooltip } from "../shared"
+import { useWatchlistsViewport, WatchlistsHelpTooltip } from "../shared"
 import { WATCHLISTS_HELP_DOCS } from "../shared/help-docs"
 import {
   type WatchlistsOnboardingPath,
@@ -38,6 +38,7 @@ import {
 export const SettingsTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
   const showInternalDiagnostics = process.env.NEXT_PUBLIC_WATCHLISTS_SHOW_INTERNAL_DIAGNOSTICS === "true"
+  const { isConstrained } = useWatchlistsViewport()
 
   // Store state
   const settings = useWatchlistsStore((s) => s.settings)
@@ -142,6 +143,9 @@ export const SettingsTab: React.FC = () => {
     return new Set(jobClusters.map((entry) => entry.cluster_id))
   }, [jobClusters])
 
+  const getClusterLabel = (cluster: ClaimCluster): string =>
+    cluster.summary || cluster.canonical_claim_text || `#${cluster.id}`
+
   const handleToggleCluster = async (cluster: ClaimCluster, enabled: boolean) => {
     if (!selectedJobId || clusterUpdates.includes(cluster.id)) return
     setClusterUpdates((prev) => [...prev, cluster.id])
@@ -214,9 +218,7 @@ export const SettingsTab: React.FC = () => {
             "Toggle subscription for {{cluster}}",
             {
               cluster:
-                record.summary ||
-                record.canonical_claim_text ||
-                `#${record.id}`
+                getClusterLabel(record)
             }
           )}
           checkedChildren={t("common:yes", "Yes")}
@@ -238,6 +240,81 @@ export const SettingsTab: React.FC = () => {
     writeWatchlistsOnboardingPath(nextPath)
     message.success(
       t("watchlists:settings.onboarding.saved", "Onboarding mode saved.")
+    )
+  }
+
+  const renderClusterSubscriptions = () => {
+    if (isConstrained) {
+      if (clustersLoading) {
+        return (
+          <div
+            className="space-y-2"
+            data-testid="settings-clusters-constrained-loading"
+          >
+            <Skeleton active paragraph={{ rows: 2 }} title={false} />
+            <Skeleton active paragraph={{ rows: 2 }} title={false} />
+          </div>
+        )
+      }
+
+      return (
+        <div
+          className="space-y-2"
+          data-testid="settings-clusters-constrained-list"
+        >
+          {clusters.map((cluster) => (
+            <div
+              key={cluster.id}
+              className="rounded-md border border-border bg-surface p-3"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="line-clamp-2 text-sm font-medium">
+                    {getClusterLabel(cluster)}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-2 text-xs text-text-muted">
+                    <span>{t("watchlists:settings.clusters.idLabel", "ID {{id}}", { id: cluster.id })}</span>
+                    <span>
+                      {t("watchlists:settings.clusters.columns.members", "Members")}:{" "}
+                      {cluster.member_count ?? "-"}
+                    </span>
+                    <span>
+                      {t("watchlists:settings.clusters.columns.updated", "Updated")}:{" "}
+                      {cluster.updated_at ? formatRelativeTime(cluster.updated_at, t) : "-"}
+                    </span>
+                  </div>
+                </div>
+                <Switch
+                  size="small"
+                  checked={subscribedClusterIds.has(cluster.id)}
+                  onChange={(checked) => handleToggleCluster(cluster, checked)}
+                  disabled={!selectedJobId}
+                  loading={clusterUpdates.includes(cluster.id)}
+                  aria-label={t(
+                    "watchlists:settings.clusters.toggleAria",
+                    "Toggle subscription for {{cluster}}",
+                    { cluster: getClusterLabel(cluster) }
+                  )}
+                  checkedChildren={t("common:yes", "Yes")}
+                  unCheckedChildren={t("common:no", "No")}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    return (
+      <Table
+        data-testid="settings-clusters-table"
+        dataSource={clusters}
+        columns={clusterColumns}
+        rowKey="id"
+        loading={clustersLoading}
+        pagination={{ pageSize: 6 }}
+        size="small"
+      />
     )
   }
 
@@ -289,9 +366,8 @@ export const SettingsTab: React.FC = () => {
             </Descriptions>
             <Alert
               className="mt-4"
+              variant="info"
               title={t("watchlists:settings.ttl.note", "TTL values are configured on the server.")}
-              type="info"
-              showIcon
             />
           </Card>
 
@@ -315,14 +391,13 @@ export const SettingsTab: React.FC = () => {
               </Descriptions>
               <Alert
                 className="mt-4"
-                type="info"
-                showIcon
-              title={t(
-                "watchlists:settings.diagnostics.note",
-                "Internal diagnostics are enabled for this environment."
-              )}
-            />
-          </Card>
+                variant="info"
+                title={t(
+                  "watchlists:settings.diagnostics.note",
+                  "Internal diagnostics are enabled for this environment."
+                )}
+              />
+            </Card>
           )}
 
           <Card
@@ -407,7 +482,7 @@ export const SettingsTab: React.FC = () => {
                   onChange={(value) => setSelectedJobId(value ?? null)}
                   loading={jobsLoading}
                   allowClear
-                  className="w-56"
+                  className={isConstrained ? "w-full" : "w-56"}
                   options={jobs.map((job) => ({ label: job.name, value: job.id }))}
                 />
                 <Input.Search
@@ -416,7 +491,7 @@ export const SettingsTab: React.FC = () => {
                   onChange={(e) => setClusterSearch(e.target.value)}
                   onSearch={loadClusters}
                   allowClear
-                  className="w-64"
+                  className={isConstrained ? "w-full" : "w-64"}
                 />
                 <Button
                   icon={<RefreshCw className="h-4 w-4" />}
@@ -429,8 +504,7 @@ export const SettingsTab: React.FC = () => {
 
               {!selectedJobId && (
                 <Alert
-                  type="info"
-                  showIcon
+                  variant="info"
                   title={t(
                     "watchlists:settings.clusters.selectJob",
                     "Select a monitor to manage cluster subscriptions."
@@ -439,32 +513,25 @@ export const SettingsTab: React.FC = () => {
               )}
 
               {clustersError ? (
-                <Alert type="warning" showIcon title={clustersError} />
+                <Alert variant="warning" title={clustersError} />
               ) : clusters.length === 0 && !clustersLoading ? (
                 <Empty
                   description={t("watchlists:settings.clusters.empty", "No clusters found")}
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                 />
               ) : (
-                <Table
-                  dataSource={clusters}
-                  columns={clusterColumns}
-                  rowKey="id"
-                  loading={clustersLoading}
-                  pagination={{ pageSize: 6 }}
-                  size="small"
-                />
+                renderClusterSubscriptions()
               )}
             </div>
           </Card>
         </div>
       ) : (
         <Alert
+          variant="warning"
           title={t("watchlists:settings.unavailable", "Settings unavailable")}
-          description={t("watchlists:settings.unavailableDesc", "Could not load server settings. Make sure the server is running.")}
-          type="warning"
-          showIcon
-        />
+        >
+          {t("watchlists:settings.unavailableDesc", "Could not load server settings. Make sure the server is running.")}
+        </Alert>
       )}
     </div>
   )

@@ -47,6 +47,20 @@ class RunStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+_VALID_RUN_TRANSITIONS: dict[RunStatus, set[RunStatus]] = {
+    RunStatus.PENDING: {RunStatus.RUNNING, RunStatus.FAILED, RunStatus.CANCELLED},
+    RunStatus.RUNNING: {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED},
+    RunStatus.COMPLETED: set(),
+    RunStatus.FAILED: set(),
+    RunStatus.CANCELLED: set(),
+}
+
+
+def is_valid_run_transition(from_status: RunStatus, to_status: RunStatus) -> bool:
+    """Check if a run status transition is allowed."""
+    return to_status in _VALID_RUN_TRANSITIONS.get(from_status, set())
+
+
 @dataclass
 class ACPWorkspace:
     """A persistent workspace binding a project to a filesystem directory.

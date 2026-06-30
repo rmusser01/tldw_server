@@ -76,6 +76,14 @@ class MediaDbReadLike(MediaDbLike, Protocol):
     ) -> dict[str, Any] | None:
         """Return a media row by integer identifier."""
 
+    def get_media_status_by_id(
+        self,
+        media_id: int,
+        include_deleted: bool = False,
+        include_trash: bool = False,
+    ) -> dict[str, Any] | None:
+        """Return lightweight media readiness fields by integer identifier."""
+
     def get_media_by_uuid(
         self,
         media_uuid: str,

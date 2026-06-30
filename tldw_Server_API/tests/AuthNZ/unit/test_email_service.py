@@ -7,6 +7,7 @@ Tests cover:
 - SMTP error handling
 - Header injection prevention
 """
+import asyncio
 import json
 import pytest
 import os
@@ -120,6 +121,20 @@ class TestMockEmailSending:
         # Check if any files were created
         files = list(tmp_path.glob("*.json"))
         assert len(files) >= 1
+
+    @pytest.mark.asyncio
+    async def test_mock_email_file_names_are_platform_safe(self, email_service, tmp_path):
+        """Mock email file names should avoid characters invalid on Windows."""
+        await email_service.send_email(
+            to_email="recipient@test.com",
+            subject="Test Subject",
+            html_body="<p>Test body</p>",
+        )
+
+        file_names = [path.name for path in tmp_path.iterdir()]
+        assert file_names
+        invalid_chars = set('<>:"/\\|?*')
+        assert all(invalid_chars.isdisjoint(name) for name in file_names)
 
 
 class TestHeaderInjectionPrevention:
@@ -278,3 +293,50 @@ class TestTemplateEmailSending:
         assert "token=[REDACTED]" in email_data["text_body"]
         assert "token=[REDACTED]" in email_data["html_body"]
         assert "body omitted from persisted mock output" in html_body
+
+    @pytest.mark.asyncio
+    async def test_mock_token_bearing_auth_emails_redact_saved_mock_output(
+        self,
+        email_service: EmailService,
+        tmp_path: Path,
+    ) -> None:
+        """All token-bearing auth templates should redact mock output by default."""
+        await email_service.send_password_reset_email(
+            to_email="user@test.com",
+            username="testuser",
+            reset_token="reset-token-secret",
+            ip_address="192.168.1.1",
+            base_url="https://example.com",
+        )
+        await email_service.send_verification_email(
+            to_email="user@test.com",
+            username="testuser",
+            verification_token="verify-token-secret",
+            base_url="https://example.com",
+        )
+        await email_service.send_magic_link_email(
+            to_email="user@test.com",
+            magic_token="magic-token-secret",
+            expires_in_minutes=15,
+            username="testuser",
+            base_url="https://example.com",
+        )
+        await email_service.send_user_invitation_email(
+            to_email="invitee@test.com",
+            invite_token="invite-token-secret",
+            role="user",
+            base_url="https://example.com",
+        )
+
+        saved_bodies: list[str] = []
+        for path in tmp_path.glob("*.json"):
+            email_data = json.loads(await asyncio.to_thread(path.read_text))
+            saved_bodies.append(email_data["text_body"])
+            saved_bodies.append(email_data["html_body"])
+        combined = "\n".join(saved_bodies)
+
+        assert "reset-token-secret" not in combined
+        assert "verify-token-secret" not in combined
+        assert "magic-token-secret" not in combined
+        assert "invite-token-secret" not in combined
+        assert combined.count("token=[REDACTED]") >= 4

@@ -62,6 +62,23 @@ async def test_reserve_idempotency_returns_same_handle():
 
 
 @pytest.mark.asyncio
+async def test_commit_with_same_op_id_does_not_corrupt_reserve_replay():
+    ft = FakeTime(0.0)
+    policies = {"p": {"requests": {"rpm": 5, "burst": 1.0}, "scopes": ["user"]}}
+    rg = MemoryResourceGovernor(policies=policies, time_source=ft)
+    req = RGRequest(entity="user:1", categories={"requests": {"units": 1}}, tags={"policy_id": "p"})
+
+    decision, handle_id = await rg.reserve(req, op_id="shared-op")
+    assert decision.allowed and handle_id
+
+    await rg.commit(handle_id, op_id="shared-op")
+
+    replay_decision, replay_handle = await rg.reserve(req, op_id="shared-op")
+    assert replay_decision.allowed is True
+    assert replay_handle == handle_id
+
+
+@pytest.mark.asyncio
 async def test_concurrency_streams_limit_and_renew_release():
     ft = FakeTime(0.0)
     policies = {"p": {"streams": {"max_concurrent": 1, "ttl_sec": 30}, "scopes": ["global", "user"]}}

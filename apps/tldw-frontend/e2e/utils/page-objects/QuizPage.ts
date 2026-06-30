@@ -101,27 +101,37 @@ export class QuizPage extends BasePage {
 
   /** Take Quiz tab */
   get takeTab(): Locator {
-    return this.page.getByRole("tab", { name: /take/i })
+    return this.page
+      .locator('[data-testid="quiz-tab-take"]')
+      .locator("xpath=ancestor::*[@role='tab'][1]")
   }
 
   /** Generate tab */
   get generateTab(): Locator {
-    return this.page.getByRole("tab", { name: /generate/i })
+    return this.page
+      .locator('[data-testid="quiz-tab-generate"]')
+      .locator("xpath=ancestor::*[@role='tab'][1]")
   }
 
   /** Create tab */
   get createTab(): Locator {
-    return this.page.getByRole("tab", { name: /create|build/i })
+    return this.page
+      .locator('[data-testid="quiz-tab-create"]')
+      .locator("xpath=ancestor::*[@role='tab'][1]")
   }
 
   /** Manage tab */
   get manageTab(): Locator {
-    return this.page.getByRole("tab", { name: /manage/i })
+    return this.page
+      .locator('[data-testid="quiz-tab-manage"]')
+      .locator("xpath=ancestor::*[@role='tab'][1]")
   }
 
   /** Results tab */
   get resultsTab(): Locator {
-    return this.page.getByRole("tab", { name: /results|stats/i })
+    return this.page
+      .locator('[data-testid="quiz-tab-results"]')
+      .locator("xpath=ancestor::*[@role='tab'][1]")
   }
 
   /** Global search input */
@@ -140,7 +150,9 @@ export class QuizPage extends BasePage {
   }
 
   get manageShowWorkspaceQuizzesToggle(): Locator {
-    return this.page.locator('[data-testid="quiz-manage-show-workspace-quizzes"]')
+    return this.page
+      .locator('[data-testid="quiz-manage-show-workspace-quizzes"]')
+      .locator("xpath=ancestor::label[1]")
   }
 
   get manageWorkspaceFilter(): Locator {

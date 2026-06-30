@@ -8,6 +8,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 #
 # Local Imports
+from tldw_Server_API.app.core.TTS.adapters import dia_adapter as dia_module
 from tldw_Server_API.app.core.TTS.adapters.dia_adapter import DiaAdapter
 from tldw_Server_API.app.core.TTS.adapters.base import (
     TTSRequest,
@@ -28,6 +29,17 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import (
 @pytest.mark.asyncio
 class TestDiaAdapterMock:
     """Mock/Unit tests for Dia adapter"""
+
+    @staticmethod
+    def _capture_log_calls(monkeypatch):
+        messages = []
+
+        def capture(message, *args, **kwargs):
+            messages.append(str(message).format(*args))
+
+        monkeypatch.setattr(dia_module.logger, "error", capture)
+        monkeypatch.setattr(dia_module.logger, "warning", capture)
+        return messages
 
     async def test_initialization_configuration(self):
         """Test initialization with configuration"""
@@ -197,6 +209,97 @@ class TestDiaAdapterMock:
         # Test default
         adapter = DiaAdapter({})
         assert adapter.model_path == "nari-labs/dia"
+
+    async def test_torch_unavailable_warning_sanitizes_exception_message(self, monkeypatch):
+        """Torch import failures should not leak raw dependency errors to logs."""
+        marker = "DIA_RAW_MARKER_INIT_TORCH"
+        messages = self._capture_log_calls(monkeypatch)
+        monkeypatch.setattr(dia_module, "_TORCH_IMPORT_ERROR", RuntimeError(marker))
+        monkeypatch.setattr(dia_module, "_get_torch", lambda *, allow_import: None)
+
+        adapter = DiaAdapter({})
+
+        assert await adapter.initialize() is False
+        assert marker not in "\n".join(messages)
+
+    async def test_initialization_failure_log_sanitizes_exception_message(self, monkeypatch):
+        """Initialization logs should not leak raw model load exception details."""
+        marker = "DIA_RAW_MARKER_INIT_FAILURE"
+        messages = self._capture_log_calls(monkeypatch)
+        mock_manager = AsyncMock()
+        monkeypatch.setattr(dia_module, "_get_torch", lambda *, allow_import: MagicMock())
+        monkeypatch.setattr(dia_module, "get_resource_manager", AsyncMock(return_value=mock_manager))
+
+        async def raise_marker(_self):
+            raise ValueError(marker)
+
+        monkeypatch.setattr(DiaAdapter, "_load_dia_model", raise_marker)
+
+        adapter = DiaAdapter({})
+
+        with pytest.raises(TTSProviderInitializationError) as exc_info:
+            await adapter.initialize()
+
+        assert marker in exc_info.value.details["error"]
+        assert marker not in "\n".join(messages)
+
+    async def test_request_validation_log_sanitizes_exception_message(self, monkeypatch):
+        """Validation logs should not leak raw validation exception details."""
+        marker = "DIA_RAW_MARKER_VALIDATION"
+        messages = self._capture_log_calls(monkeypatch)
+        monkeypatch.setattr(
+            dia_module,
+            "validate_tts_request",
+            lambda request, provider: (_ for _ in ()).throw(ValueError(marker)),
+        )
+
+        adapter = DiaAdapter({})
+        request = TTSRequest(text="Test", voice="speaker1", format=AudioFormat.WAV)
+
+        with patch.object(adapter, "ensure_initialized", new=AsyncMock(return_value=True)):
+            with pytest.raises(ValueError, match=marker):
+                await adapter.generate(request)
+
+        assert marker not in "\n".join(messages)
+
+    async def test_generation_error_log_sanitizes_exception_message(self, monkeypatch):
+        """Generation logs should not leak raw generation exception details."""
+        marker = "DIA_RAW_MARKER_GENERATION"
+        messages = self._capture_log_calls(monkeypatch)
+        monkeypatch.setattr(dia_module, "validate_tts_request", lambda request, provider: None)
+
+        adapter = DiaAdapter({})
+        request = TTSRequest(text="Test", voice="speaker1", format=AudioFormat.WAV, stream=False)
+
+        async def raise_marker(_dialogue_parts, _request):
+            raise RuntimeError(marker)
+
+        monkeypatch.setattr(adapter, "_generate_complete_dia", raise_marker)
+
+        with patch.object(adapter, "ensure_initialized", new=AsyncMock(return_value=True)):
+            with pytest.raises(RuntimeError, match=marker):
+                await adapter.generate(request)
+
+        assert marker not in "\n".join(messages)
+
+    async def test_streaming_error_log_sanitizes_exception_message(self, monkeypatch):
+        """Streaming logs should not leak raw streaming exception details."""
+        marker = "DIA_RAW_MARKER_STREAMING"
+        messages = self._capture_log_calls(monkeypatch)
+
+        adapter = DiaAdapter({})
+        adapter.model = MagicMock()
+        adapter.processor = MagicMock(side_effect=ValueError(marker))
+        request = TTSRequest(text="Test", voice="speaker1", format=AudioFormat.WAV)
+
+        with pytest.raises(ValueError, match=marker):
+            async for _chunk in adapter._stream_audio_dia(
+                [{"speaker": "speaker1", "text": "Test", "voice": "speaker1", "nonverbal": []}],
+                request,
+            ):
+                pass
+
+        assert marker not in "\n".join(messages)
 
 #######################################################################################################################
 #

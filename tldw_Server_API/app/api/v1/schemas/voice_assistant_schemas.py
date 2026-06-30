@@ -8,6 +8,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
+
 
 # WebSocket Message Types
 class WSMessageType(str, Enum):
@@ -337,6 +339,7 @@ class VoiceSessionListResponse(BaseModel):
     """Response listing voice sessions."""
     sessions: list[VoiceSessionInfo] = Field(..., description="Active sessions")
     total: int = Field(..., description="Total count")
+    pagination: OffsetPaginationMeta = Field(..., description="Canonical offset pagination metadata")
 
 
 # Analytics Schemas

@@ -10,8 +10,23 @@ import {
 import {
   projectTokenBudget
 } from "../usage-metrics"
-import type { TFunction } from "i18next"
+import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerSubmit"
+import {
+  isChatSubmitSuccess,
+  normalizeChatSubmitResult
+} from "@/hooks/chat/chat-action-utils"
 import type { ChatResearchContext } from "@/services/tldw/TldwApiClient"
+import {
+  buildSidepanelHandoffMessageForModel,
+  type SidepanelChatHandoffPageContext
+} from "@/services/sidepanel-chat-handoff"
+
+type PlaygroundQueueSubmissionArgs = {
+  promptText: string
+  image: string
+  intent: any
+  requestOverrides?: Record<string, unknown>
+}
 
 export type UsePlaygroundSubmitDeps = {
   form: any
@@ -31,19 +46,23 @@ export type UsePlaygroundSubmitDeps = {
   pinnedSourceTokenEstimate: number
   resolvedMaxContext: number
   jsonMode: boolean
+  openUIRequestMode: boolean
   researchContext?: ChatResearchContext
+  importedSidepanelContext?: SidepanelChatHandoffPageContext | null
+  clearImportedSidepanelContext?: () => void
   sendMessage: (args: any) => Promise<any>
+  clearOpenUIRequestMode: () => void
   clearSelectedDocuments: () => void
   clearUploadedFiles: () => void
   textAreaFocus: () => void
   setLastSubmittedContext: (ctx: any) => void
   estimateTokensForText: (text: string) => number
   resolveSubmissionIntent: (message: string) => any
-  queueSubmission: (args: any) => void
+  queueSubmission: (args: PlaygroundQueueSubmissionArgs) => unknown
   validateSelectedChatModelsAvailability: (models: string[]) => boolean
   compareModelsSupportCapability: (models: string[], cap: string) => boolean
   notificationApi: any
-  t: TFunction
+  t: (key: string, defaultValueOrOptions?: any, options?: any) => string
 }
 
 export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
@@ -65,8 +84,12 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     pinnedSourceTokenEstimate,
     resolvedMaxContext,
     jsonMode,
+    openUIRequestMode,
     researchContext,
+    importedSidepanelContext,
+    clearImportedSidepanelContext,
     sendMessage,
+    clearOpenUIRequestMode,
     clearSelectedDocuments,
     clearUploadedFiles,
     textAreaFocus,
@@ -83,6 +106,10 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   const submitFormRef = React.useRef<
     (options?: { ignorePinnedResults?: boolean }) => void
   >(() => undefined)
+
+  // Route through the shared composer dispatch so cross-cutting concerns
+  // (metrics, error handling) have one home if we need them later.
+  const { dispatch } = useComposerSubmit({ sendMessage })
 
   const buildPinnedMessage = React.useCallback(
     (message: string, options?: { ignorePinnedResults?: boolean }) => {
@@ -121,9 +148,39 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         ? nextMessage
         : buildPinnedMessage(nextMessage, options)
       const trimmed = combinedMessage.trim()
-      if (
+      const visiblePrompt =
         !intent.isImageCommand &&
         trimmed.length === 0 &&
+        importedSidepanelContext
+          ? t(
+              "playground:sidepanelHandoff.contextOnlyDraft",
+              "Summarize this page."
+            )
+          : trimmed
+      const messageForModel =
+        !intent.isImageCommand && importedSidepanelContext
+          ? buildSidepanelHandoffMessageForModel(
+              visiblePrompt,
+              importedSidepanelContext
+            )
+          : undefined
+      const requestOverrides = messageForModel
+        ? { messageForModel }
+        : undefined
+      const openUIRequestOverrides =
+        openUIRequestMode && !intent.isImageCommand
+          ? { dynamicUIRequest: { renderer: "openui" } }
+          : undefined
+      const mergedRequestOverrides =
+        requestOverrides || openUIRequestOverrides
+          ? {
+              ...(requestOverrides ?? {}),
+              ...(openUIRequestOverrides ?? {})
+            }
+          : undefined
+      if (
+        !intent.isImageCommand &&
+        visiblePrompt.length === 0 &&
         value.image.length === 0 &&
         selectedDocuments.length === 0 &&
         uploadedFiles.length === 0
@@ -186,11 +243,18 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       }
 
       if (shouldQueueInsteadOfSend) {
-        queueSubmission({
-          promptText: trimmed,
+        const queuedItem = queueSubmission({
+          promptText: visiblePrompt,
           image: value.image,
-          intent
+          intent,
+          ...(mergedRequestOverrides ? { requestOverrides: mergedRequestOverrides } : {})
         })
+        if (queuedItem && messageForModel) {
+          clearImportedSidepanelContext?.()
+        }
+        if (queuedItem && openUIRequestMode) {
+          clearOpenUIRequestMode()
+        }
         return
       }
 
@@ -211,7 +275,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           conversationTokenCount +
           characterContextTokenEstimate +
           pinnedSourceTokenEstimate,
-        draftTokens: estimateTokensForText(trimmed),
+        draftTokens: estimateTokensForText(messageForModel ?? visiblePrompt),
         maxTokens: resolvedMaxContext
       })
       if (projectedForSubmission.isOverLimit || projectedForSubmission.isNearLimit) {
@@ -229,9 +293,10 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         })
       }
       setLastSubmittedContext(currentContextSnapshot)
-      await sendMessage({
+
+      const payload = {
         image: intent.isImageCommand ? "" : value.image,
-        message: trimmed,
+        message: visiblePrompt,
         docs: intent.isImageCommand
           ? []
           : selectedDocuments.map((doc: any) => ({
@@ -256,8 +321,23 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         researchContext:
           intent.isImageCommand || compareModeActive
             ? undefined
-            : researchContext
+            : researchContext,
+        ...(mergedRequestOverrides ? { requestOverrides: mergedRequestOverrides } : {})
+      }
+
+      await dispatch(payload, {
+        afterSend: (result) => {
+          if (
+            messageForModel &&
+            isChatSubmitSuccess(normalizeChatSubmitResult(result as any))
+          ) {
+            clearImportedSidepanelContext?.()
+          }
+        }
       })
+      if (openUIRequestMode) {
+        clearOpenUIRequestMode()
+      }
     })()
   }
 

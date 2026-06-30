@@ -8,6 +8,7 @@ import json
 import os
 import time
 from collections import deque
+from datetime import datetime, timezone
 
 from loguru import logger
 
@@ -95,8 +96,13 @@ def _metrics_observe(name: str, value: float, labels: dict[str, str] | None = No
 # Cursor helpers
 # ---------------------------------------------------------------------------
 
-def _encode_cursor(layer: int, pos: int, last_id: str) -> str:
-    payload = json.dumps({"layer": layer, "pos": pos, "last_id": last_id})
+def _encode_cursor(layer: int, pos: int, last_id: str, neighbor_pos: int = 0) -> str:
+    payload = json.dumps({
+        "layer": layer,
+        "pos": pos,
+        "last_id": last_id,
+        "neighbor_pos": neighbor_pos,
+    })
     return base64.urlsafe_b64encode(payload.encode()).decode()
 
 
@@ -104,9 +110,25 @@ def _decode_cursor(raw: str | None) -> dict | None:
     if not raw:
         return None
     try:
-        return json.loads(base64.urlsafe_b64decode(raw.encode()).decode())
-    except Exception:
-        return None
+        payload = json.loads(base64.urlsafe_b64decode(raw.encode()).decode())
+    except Exception as exc:
+        raise InputError("Invalid graph cursor") from exc
+    if not isinstance(payload, dict):
+        raise InputError("Invalid graph cursor")
+    for field in ("layer", "pos", "last_id"):
+        if field not in payload:
+            raise InputError("Invalid graph cursor")
+    try:
+        payload["layer"] = int(payload["layer"])
+        payload["pos"] = int(payload["pos"])
+        payload["neighbor_pos"] = int(payload.get("neighbor_pos", 0))
+    except (TypeError, ValueError) as exc:
+        raise InputError("Invalid graph cursor") from exc
+    if payload["layer"] < 0 or payload["pos"] < 0 or payload["neighbor_pos"] < 0:
+        raise InputError("Invalid graph cursor")
+    if not isinstance(payload["last_id"], str):
+        raise InputError("Invalid graph cursor")
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -152,10 +174,12 @@ class NoteGraphService:
         user_id: str,
         db: CharactersRAGDB,
         cache: GraphCache | None = None,
+        allow_heavy_limits: bool = False,
     ) -> None:
         self._user_id = user_id
         self._db = db
         self._cache = cache
+        self._allow_heavy_limits = allow_heavy_limits
 
     # ------------------------------------------------------------------
     # Main entry
@@ -165,22 +189,8 @@ class NoteGraphService:
         """Build and return a bounded note graph."""
         t0 = time.monotonic()
 
-        # 1. Resolve effective limits
-        radius_cap_applied = False
-        eff_max_nodes = req.max_nodes or MAX_NODES()
-        eff_max_edges = req.max_edges or MAX_EDGES()
-        eff_max_degree = req.max_degree or MAX_DEGREE()
-
-        if req.radius == 2:
-            if eff_max_nodes > _R2_MAX_NODES:
-                eff_max_nodes = _R2_MAX_NODES
-                radius_cap_applied = True
-            if eff_max_edges > _R2_MAX_EDGES:
-                eff_max_edges = _R2_MAX_EDGES
-                radius_cap_applied = True
-            if eff_max_degree > _R2_MAX_DEGREE:
-                eff_max_degree = _R2_MAX_DEGREE
-                radius_cap_applied = True
+        # 1. Resolve effective limits before any graph expansion work.
+        eff_max_nodes, eff_max_edges, eff_max_degree, radius_cap_applied = self._resolve_effective_limits(req)
 
         # 2. Check cache
         if self._cache is not None:
@@ -197,6 +207,7 @@ class NoteGraphService:
                     "max_nodes": eff_max_nodes,
                     "max_edges": eff_max_edges,
                     "max_degree": eff_max_degree,
+                    "allow_heavy": req.allow_heavy and self._allow_heavy_limits,
                     "cursor": req.cursor,
                 },
             )
@@ -217,10 +228,10 @@ class NoteGraphService:
         )
 
         # 5. Fetch note data
-        note_rows = self._db.get_notes_batch(list(note_ids), include_deleted=True)
+        note_rows = self._db.get_notes_batch(note_ids, include_deleted=True)
         note_map: dict[str, dict] = {r["id"]: r for r in note_rows}
         # Prune IDs that don't actually exist
-        note_ids = set(note_map.keys())
+        note_ids = [nid for nid in note_ids if nid in note_map]
 
         # 5b. Validate center note exists
         if req.center_note_id and req.center_note_id not in note_map:
@@ -229,6 +240,8 @@ class NoteGraphService:
         # 6. Apply time-range filter
         if req.time_range:
             note_ids = self._apply_time_range(note_ids, note_map, req)
+        note_ids = self._order_note_ids(note_ids, note_map)
+        note_id_set = set(note_ids)
 
         # 7. Determine which edge types to compute
         wanted = set(req.edge_types) if req.edge_types else set(EdgeType)
@@ -241,7 +254,7 @@ class NoteGraphService:
         # Manual edges
         if EdgeType.manual in wanted:
             for e in manual_edges:
-                if e["from_note_id"] in note_ids and e["to_note_id"] in note_ids:
+                if e["from_note_id"] in note_id_set and e["to_note_id"] in note_id_set:
                     edges.append(GraphEdge(
                         id=f"e:{e['edge_id']}",
                         source=e["from_note_id"],
@@ -253,7 +266,7 @@ class NoteGraphService:
 
         # Wikilinks + backlinks
         if EdgeType.wikilink in wanted or EdgeType.backlink in wanted:
-            wl_edges, bl_edges = self._compute_wikilink_edges(note_ids, note_map, wanted)
+            wl_edges, bl_edges = self._compute_wikilink_edges(note_ids, note_id_set, note_map, wanted)
             edges.extend(wl_edges)
             edges.extend(bl_edges)
 
@@ -316,6 +329,7 @@ class NoteGraphService:
                         note_node_map[edge.source].primary_source_id = edge.target
 
         # 11. Pruning
+        edges = self._order_edges(edges)
         all_nodes: list[GraphNode] = list(note_node_map.values()) + list(tag_nodes.values()) + list(source_nodes.values())
         all_nodes, edges, truncated, truncated_by = self._apply_pruning(
             all_nodes, edges, eff_max_nodes, eff_max_edges, eff_max_degree,
@@ -327,7 +341,10 @@ class NoteGraphService:
         has_more = False
         if cursor_info and cursor_info.get("has_more"):
             cursor_str = _encode_cursor(
-                cursor_info["layer"], cursor_info["pos"], cursor_info["last_id"],
+                cursor_info["layer"],
+                cursor_info["pos"],
+                cursor_info["last_id"],
+                cursor_info.get("neighbor_pos", 0),
             )
             has_more = True
 
@@ -373,6 +390,43 @@ class NoteGraphService:
         return response
 
     # ------------------------------------------------------------------
+    # Limit resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_effective_limits(self, req: NoteGraphRequest) -> tuple[int, int, int, bool]:
+        """Clamp caller-requested limits before DB traversal begins."""
+        default_max_nodes = MAX_NODES()
+        default_max_edges = MAX_EDGES()
+        default_max_degree = MAX_DEGREE()
+
+        heavy_allowed = bool(req.allow_heavy and self._allow_heavy_limits)
+        hard_max_nodes = default_max_nodes * 2 if heavy_allowed else default_max_nodes
+        hard_max_edges = default_max_edges * 2 if heavy_allowed else default_max_edges
+        hard_max_degree = default_max_degree * 2 if heavy_allowed else default_max_degree
+
+        requested_max_nodes = req.max_nodes if req.max_nodes is not None else default_max_nodes
+        requested_max_edges = req.max_edges if req.max_edges is not None else default_max_edges
+        requested_max_degree = req.max_degree if req.max_degree is not None else default_max_degree
+
+        eff_max_nodes = min(requested_max_nodes, hard_max_nodes)
+        eff_max_edges = min(requested_max_edges, hard_max_edges)
+        eff_max_degree = min(requested_max_degree, hard_max_degree)
+
+        radius_cap_applied = False
+        if req.radius == 2 and not heavy_allowed:
+            if eff_max_nodes > _R2_MAX_NODES:
+                eff_max_nodes = _R2_MAX_NODES
+                radius_cap_applied = True
+            if eff_max_edges > _R2_MAX_EDGES:
+                eff_max_edges = _R2_MAX_EDGES
+                radius_cap_applied = True
+            if eff_max_degree > _R2_MAX_DEGREE:
+                eff_max_degree = _R2_MAX_DEGREE
+                radius_cap_applied = True
+
+        return eff_max_nodes, eff_max_edges, eff_max_degree, radius_cap_applied
+
+    # ------------------------------------------------------------------
     # Seed set
     # ------------------------------------------------------------------
 
@@ -382,26 +436,18 @@ class NoteGraphService:
             return [req.center_note_id]
 
         if req.tag:
-            # Find notes with this tag
-            all_tags = self._db.get_note_tag_edges(
-                self._db.get_all_note_ids_for_graph(include_deleted=True, limit=max_nodes * 2)
+            return self._db.get_note_ids_by_tag_for_graph(
+                req.tag,
+                include_deleted=True,
+                limit=max_nodes,
             )
-            matching = [t["note_id"] for t in all_tags if t["keyword"].lower() == req.tag.lower()]
-            if not matching:
-                return []
-            return list(dict.fromkeys(matching))[:max_nodes]
 
         if req.source:
-            all_ids = self._db.get_all_note_ids_for_graph(include_deleted=True, limit=max_nodes * 2)
-            source_info = self._db.get_note_source_info(all_ids)
-            matching = [
-                s["note_id"] for s in source_info
-                if _source_node_id(s["source"], s.get("external_ref")) == req.source
-                or s["source"] == req.source
-            ]
-            if not matching:
-                return []
-            return list(dict.fromkeys(matching))[:max_nodes]
+            return self._db.get_note_ids_by_source_for_graph(
+                req.source,
+                include_deleted=True,
+                limit=max_nodes,
+            )
 
         # Seedless: full graph if small enough
         total = self._db.count_user_notes(include_deleted=True)
@@ -410,12 +456,12 @@ class NoteGraphService:
         if total <= max_nodes:
             return self._db.get_all_note_ids_for_graph(include_deleted=True, limit=max_nodes)
 
-        if req.allow_heavy:
+        if req.allow_heavy and self._allow_heavy_limits:
             return self._db.get_all_note_ids_for_graph(include_deleted=True, limit=max_nodes)
 
         raise InputError(  # noqa: TRY003
             f"Too many notes ({total}) for seedless graph. "
-            f"Provide center_note_id, tag, or source filter, or set allow_heavy=true."
+            f"Provide center_note_id, tag, or source filter, or request allow_heavy with elevated graph permission."
         )
 
     # ------------------------------------------------------------------
@@ -429,9 +475,10 @@ class NoteGraphService:
         max_nodes: int,
         max_degree: int,
         req: NoteGraphRequest,
-    ) -> tuple[set[str], list[dict], bool, list[str], dict | None]:
+    ) -> tuple[list[str], list[dict], bool, list[str], dict | None]:
         """Layer-by-layer BFS from seeds, collecting note IDs and manual edges."""
         visited: set[str] = set()
+        visited_order: list[str] = []
         all_edges: list[dict] = []
         edge_ids_seen: set[str] = set()
         truncated = False
@@ -445,6 +492,7 @@ class NoteGraphService:
             cur = None
         start_layer = cur["layer"] if cur else 0
         start_pos = cur["pos"] if cur else 0
+        start_neighbor_pos = cur["neighbor_pos"] if cur else 0
 
         frontier: deque[str] = deque()
 
@@ -457,6 +505,7 @@ class NoteGraphService:
                 break
             if sid not in visited:
                 visited.add(sid)
+                visited_order.append(sid)
                 frontier.append(sid)
 
         for layer in range(radius):
@@ -501,6 +550,7 @@ class NoteGraphService:
 
                 # Sort neighbors: deterministic
                 neighbors = sorted(set(neighbors))
+                neighbor_start = start_neighbor_pos if layer == start_layer and idx == start_pos else 0
 
                 # Enforce max_degree per node
                 if len(neighbors) > max_degree:
@@ -509,16 +559,23 @@ class NoteGraphService:
                     if "max_degree" not in truncated_by:
                         truncated_by.append("max_degree")
 
-                for nb in neighbors:
+                for neighbor_idx, nb in enumerate(neighbors[neighbor_start:], start=neighbor_start):
                     if nb in visited:
                         continue
                     if len(visited) >= max_nodes:
                         truncated = True
                         if "max_nodes" not in truncated_by:
                             truncated_by.append("max_nodes")
-                        cursor_info = {"layer": layer, "pos": idx, "last_id": nid, "has_more": True}
+                        cursor_info = {
+                            "layer": layer,
+                            "pos": idx,
+                            "last_id": nid,
+                            "neighbor_pos": neighbor_idx,
+                            "has_more": True,
+                        }
                         break
                     visited.add(nb)
+                    visited_order.append(nb)
                     next_frontier.append(nb)
 
                 if truncated and "max_nodes" in truncated_by:
@@ -526,7 +583,7 @@ class NoteGraphService:
 
             frontier = next_frontier
 
-        return visited, all_edges, truncated, truncated_by, cursor_info
+        return visited_order, all_edges, truncated, truncated_by, cursor_info
 
     # ------------------------------------------------------------------
     # Derived edges
@@ -534,7 +591,8 @@ class NoteGraphService:
 
     def _compute_wikilink_edges(
         self,
-        note_ids: set[str],
+        note_ids: list[str],
+        note_id_set: set[str],
         note_map: dict[str, dict],
         wanted: set[EdgeType],
     ) -> tuple[list[GraphEdge], list[GraphEdge]]:
@@ -553,7 +611,7 @@ class NoteGraphService:
             refs = extract_wikilinks(content)
             for ref in refs:
                 target = ref.target_note_id
-                if target not in note_ids:
+                if target not in note_id_set:
                     continue
                 if target == nid:
                     continue
@@ -587,7 +645,7 @@ class NoteGraphService:
         return wl_edges, bl_edges
 
     def _compute_tag_edges(
-        self, note_ids: set[str],
+        self, note_ids: list[str],
     ) -> tuple[list[GraphEdge], dict[str, GraphNode]]:
         """Compute tag_membership edges and tag nodes."""
         tag_data = self._db.get_note_tag_edges(list(note_ids))
@@ -638,7 +696,7 @@ class NoteGraphService:
         return edges, tag_nodes
 
     def _compute_source_edges(
-        self, note_ids: set[str],
+        self, note_ids: list[str],
     ) -> tuple[list[GraphEdge], dict[str, GraphNode]]:
         """Compute source_membership edges and source nodes."""
         source_data = self._db.get_note_source_info(list(note_ids))
@@ -681,10 +739,10 @@ class NoteGraphService:
 
     def _apply_time_range(
         self,
-        note_ids: set[str],
+        note_ids: list[str],
         note_map: dict[str, dict],
         req: NoteGraphRequest,
-    ) -> set[str]:
+    ) -> list[str]:
         """Filter notes by time range. Maps updated_at → last_modified."""
         tr = req.time_range
         if not tr:
@@ -693,39 +751,64 @@ class NoteGraphService:
         # Map field name
         field = "last_modified" if req.time_range_field == "updated_at" else "created_at"
 
-        filtered: set[str] = set()
+        filtered: list[str] = []
+        start_naive = self._to_utc_naive(tr.start) if tr.start else None
+        end_naive = self._to_utc_naive(tr.end) if tr.end else None
         for nid in note_ids:
             row = note_map.get(nid)
             if not row:
                 continue
             val = row.get(field)
             if val is None:
-                filtered.add(nid)
+                filtered.append(nid)
                 continue
-            # Parse if string
-            if isinstance(val, str):
-                from datetime import datetime
-                try:
-                    ts = datetime.fromisoformat(val.replace("Z", "+00:00"))
-                except (ValueError, TypeError):
-                    filtered.add(nid)
-                    continue
-            else:
-                ts = val
+            ts_naive = self._to_utc_naive(val)
+            if ts_naive is None:
+                filtered.append(nid)
+                continue
 
-            # Make naive for comparison if needed
-            ts_naive = ts.replace(tzinfo=None) if hasattr(ts, "replace") else ts
-
-            if tr.start:
-                start_naive = tr.start.replace(tzinfo=None) if tr.start.tzinfo else tr.start
+            if start_naive:
                 if ts_naive < start_naive:
                     continue
-            if tr.end:
-                end_naive = tr.end.replace(tzinfo=None) if tr.end.tzinfo else tr.end
+            if end_naive:
                 if ts_naive > end_naive:
                     continue
-            filtered.add(nid)
+            filtered.append(nid)
         return filtered
+
+    @staticmethod
+    def _to_utc_naive(value: str | datetime | None) -> datetime | None:
+        """Normalize datetimes to UTC-naive values for consistent comparisons."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                return None
+        if not isinstance(value, datetime):
+            return None
+        if value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+
+    def _order_note_ids(self, note_ids: list[str], note_map: dict[str, dict]) -> list[str]:
+        """Order note IDs by updated timestamp descending, then ID ascending."""
+        def _sort_key(note_id: str) -> tuple[float, str]:
+            row = note_map.get(note_id, {})
+            ts = self._to_utc_naive(row.get("last_modified"))
+            sort_ts = ts.replace(tzinfo=timezone.utc).timestamp() if ts is not None else 0.0
+            return (-sort_ts, note_id)
+
+        return sorted(dict.fromkeys(note_ids), key=_sort_key)
+
+    @staticmethod
+    def _order_edges(edges: list[GraphEdge]) -> list[GraphEdge]:
+        """Order edges deterministically before order-sensitive pruning."""
+        return sorted(
+            edges,
+            key=lambda edge: (edge.type.value, edge.id, edge.source, edge.target),
+        )
 
     # ------------------------------------------------------------------
     # Pruning

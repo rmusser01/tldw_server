@@ -20,13 +20,37 @@ def test_normalize_source_rejects_unknown_source() -> None:
         normalize_source("unknown_source")
 
 
-def test_public_sources_reject_internal_only_sources() -> None:
+def test_public_sources_accept_all_knowledge_qa_surfaces() -> None:
+    assert normalize_sources_public(
+        [
+            "media",
+            "notes_db",
+            "chat_history",
+            "character_cards",
+            "task_boards",
+            "prompts_db",
+            "worldbooks",
+            "chat_dictionaries",
+        ]
+    ) == [
+        "media_db",
+        "notes",
+        "chats",
+        "characters",
+        "kanban",
+        "prompts",
+        "world_books",
+        "dictionaries",
+    ]
+
+
+def test_public_sources_reject_internal_claims_source() -> None:
     with pytest.raises(ValueError):
-        normalize_sources_public(["prompts"])
+        normalize_sources_public(["claims"])
 
 
-def test_internal_sources_allow_internal_only_sources() -> None:
-    assert normalize_sources_internal(["prompts", "claims"]) == ["prompts", "claims"]
+def test_internal_sources_allow_internal_claims_source() -> None:
+    assert normalize_sources_internal(["claims"]) == ["claims"]
 
 
 def test_sources_default_to_media_db() -> None:

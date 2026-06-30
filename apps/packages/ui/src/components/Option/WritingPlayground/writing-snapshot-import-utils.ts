@@ -22,6 +22,8 @@ export type SnapshotImportAction =
       danger: true
     }
 
+export type SnapshotImportInvalidationKey = readonly [string, ...string[]]
+
 export const resolveSnapshotImportAction = (
   mode: SnapshotImportMode,
   labels: SnapshotReplaceConfirmLabels
@@ -41,4 +43,21 @@ export const resolveSnapshotImportAction = (
     type: "open-picker",
     mode: "merge"
   }
+}
+
+export const getSnapshotImportInvalidationKeys = (
+  mode: SnapshotImportMode,
+  activeSessionId: string | null
+): SnapshotImportInvalidationKey[] => {
+  const keys: SnapshotImportInvalidationKey[] = [
+    ["writing-sessions"],
+    ["writing-templates"],
+    ["writing-themes"]
+  ]
+
+  if (mode === "merge" && activeSessionId) {
+    keys.push(["writing-session", activeSessionId])
+  }
+
+  return keys
 }

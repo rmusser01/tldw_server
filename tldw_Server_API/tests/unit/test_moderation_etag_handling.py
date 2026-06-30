@@ -89,6 +89,18 @@ class _StubModerationService:
         return True
 
 
+class _FailingBlocklistModerationService(_StubModerationService):
+    def append_blocklist_line(self, expected_version: str, line: str):
+        self.append_called = True
+        self.last_expected = expected_version
+        return False, {"version": self.version, "error": "moderation storage exploded"}
+
+    def delete_blocklist_index(self, expected_version: str, index: int):
+        self.delete_called = True
+        self.last_expected = expected_version
+        return False, {"version": self.version, "error": "moderation storage exploded"}
+
+
 @pytest.mark.unit
 def test_blocklist_managed_returns_quoted_etag():
     stub = _StubModerationService(version="v1")
@@ -158,6 +170,20 @@ def test_blocklist_append_rejects_invalid_line():
 
 
 @pytest.mark.unit
+def test_blocklist_append_sanitizes_internal_failure_detail():
+    stub = _FailingBlocklistModerationService(version="v8")
+    app = _build_app(stub)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/moderation/blocklist/append",
+            json={"line": "secret"},
+            headers={"If-Match": "\"v8\""},
+        )
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "Failed to append blocklist line"
+
+
+@pytest.mark.unit
 def test_blocklist_update_rejects_invalid_lines():
     stub = _StubModerationService(version="v7", invalid_lines={"bad"})
     app = _build_app(stub)
@@ -181,3 +207,16 @@ def test_blocklist_delete_accepts_quoted_if_match():
     assert resp.status_code == 200
     assert stub.delete_called is True
     assert stub.last_expected == "v5"
+
+
+@pytest.mark.unit
+def test_blocklist_delete_sanitizes_internal_failure_detail():
+    stub = _FailingBlocklistModerationService(version="v9")
+    app = _build_app(stub)
+    with TestClient(app) as client:
+        resp = client.delete(
+            "/api/v1/moderation/blocklist/0",
+            headers={"If-Match": "\"v9\""},
+        )
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "Failed to delete blocklist line"

@@ -16,6 +16,7 @@ the fields) and returns a bound logger for convenience.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -36,6 +37,13 @@ _LOG_CONTEXT_NONCRITICAL_EXCEPTIONS = (
     RuntimeError,
     TypeError,
     ValueError,
+)
+
+_TRACEPARENT_RE = re.compile(
+    r"^00-"
+    r"(?P<trace_id>[0-9a-fA-F]{32})-"
+    r"(?P<span_id>[0-9a-fA-F]{16})-"
+    r"(?P<trace_flags>[0-9a-fA-F]{2})$"
 )
 
 
@@ -95,6 +103,7 @@ def ensure_traceparent(request: Any) -> str:
             or headers.get("TRACEPARENT")
             or ""
         )
+        tp = _clean_traceparent(tp)
         if tp:
             try:
                 request.state.traceparent = tp  # type: ignore[attr-defined]
@@ -103,6 +112,21 @@ def ensure_traceparent(request: Any) -> str:
         return tp
     except _LOG_CONTEXT_NONCRITICAL_EXCEPTIONS:
         return ""
+
+
+def _clean_traceparent(value: Any) -> str:
+    """Validate and normalize an inbound W3C traceparent header value."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    match = _TRACEPARENT_RE.fullmatch(raw)
+    if not match:
+        return ""
+    trace_id = match.group("trace_id")
+    span_id = match.group("span_id")
+    if int(trace_id, 16) == 0 or int(span_id, 16) == 0:
+        return ""
+    return raw.lower()
 
 
 def get_ps_logger(

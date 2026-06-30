@@ -74,6 +74,6 @@ async def run_github_create_issue_adapter(config: dict[str, Any], context: dict[
             else:
                 return {"error": f"github_api_error: {response.status_code} - {response.text}", "created": False}
 
-    except Exception as e:
-        logger.exception(f"GitHub create issue error: {e}")
-        return {"error": str(e), "issue_url": None, "created": False}
+    except Exception:
+        logger.exception("GitHub issue creation failed")
+        return {"error": "GitHub issue creation failed", "issue_url": None, "created": False}

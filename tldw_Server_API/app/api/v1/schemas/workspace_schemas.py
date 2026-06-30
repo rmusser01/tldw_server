@@ -5,8 +5,23 @@ import json
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, ValidationInfo, field_validator, model_validator
 
+from tldw_Server_API.app.core.Workspaces.membership_models import (
+    WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
+    WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
+    normalize_membership_json_object,
+)
+from tldw_Server_API.app.core.Workspaces.runtime_bindings import (
+    normalize_runtime_binding_payload,
+)
+from tldw_Server_API.app.core.Workspaces.eligibility import (
+    WorkspaceEligibilityOperation,
+    WorkspaceEligibilityOperationCategory,
+    WorkspaceEligibilityPermissionState,
+    WorkspaceEligibilityReasonCode,
+    WorkspaceEligibilityRuntimeState,
+)
 
 WORKSPACE_MIGRATION_MAX_MANIFEST_BYTES = 256 * 1024
 WORKSPACE_MIGRATION_MAX_DIAGNOSTICS_BYTES = 64 * 1024
@@ -15,12 +30,70 @@ WORKSPACE_MIGRATION_MAX_CHUNK_BYTES = 2 * 1024 * 1024
 WORKSPACE_MIGRATION_MAX_DECLARED_CHUNKS = 512
 _SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
+WorkspaceProfile = Literal["research", "project"]
+WorkspaceKind = Literal["research_workspace", "project_workspace"]
+WorkspaceAssistantKind = Literal["persona"]
+WorkspacePersonaMemoryMode = Literal["read_only", "read_write"]
+WorkspaceEffectiveAssistantDefaultStatus = Literal["available", "unavailable", "none"]
+WorkspaceEffectiveAssistantDefaultSource = Literal["workspace", "none"]
+WorkspaceAssistantDefaultDegradedReason = Literal[
+    "persona_deleted",
+    "persona_unavailable",
+    "persona_feature_disabled",
+    "permission_denied",
+    "invalid_default",
+    "unsupported_assistant_kind",
+]
+WorkspaceResolutionStatus = Literal["complete", "partial", "failed"]
+WorkspaceAttentionState = Literal[
+    "ready",
+    "setup_pending",
+    "working",
+    "needs_attention",
+    "blocked",
+    "archived",
+]
+WorkspaceProjectRootBackend = Literal["host_local", "sandbox_volume"]
+WorkspaceProjectRootState = Literal[
+    "not_configured",
+    "provisioning",
+    "attached",
+    "unavailable",
+    "missing",
+    "detached",
+    "failed",
+    "cleanup_pending",
+    "archived",
+]
+WorkspaceMembershipResourceType = Literal[
+    "workspace_note",
+    "media",
+    "workspace_source",
+    "workspace_artifact",
+    "chat",
+    "prompt",
+    "workflow",
+    "watchlist",
+    "acp_session",
+    "sandbox_session",
+]
+WorkspaceMembershipRole = Literal[
+    "member",
+    "source",
+    "artifact",
+    "conversation",
+    "runtime",
+    "reference",
+]
+WorkspaceMembershipTransferPolicy = Literal["link", "copy", "promote", "import"]
+
 
 def _json_size_bytes(value: Any) -> int:
     return len(
         json.dumps(
             value,
             ensure_ascii=True,
+            allow_nan=False,
             separators=(",", ":"),
             sort_keys=True,
         ).encode("utf-8")
@@ -47,12 +120,71 @@ class WorkspaceUpsertRequest(BaseModel):
     name: str
     archived: bool = False
     study_materials_policy: Literal["general", "workspace"] = "general"
+    workspace_profile: WorkspaceProfile = "research"
+
+
+class WorkspaceAssistantDefaults(BaseModel):
+    """Persisted default assistant selection for new Workspace-scoped chats."""
+
+    assistant_kind: WorkspaceAssistantKind
+    assistant_id: str = Field(..., min_length=1, max_length=128)
+    persona_memory_mode: WorkspacePersonaMemoryMode = "read_only"
+    voice: None = None
+    style: None = None
+    tool_policy_profile_id: None = None
+
+    @field_validator("voice", "style", "tool_policy_profile_id", mode="before")
+    @classmethod
+    def _deferred_fields_must_be_null(cls, value: Any, info: ValidationInfo) -> None:
+        if value is not None:
+            raise ValueError(f"{info.field_name} must be null")
+        return None
+
+
+class WorkspaceEffectiveAssistantDefault(BaseModel):
+    """Resolved Workspace assistant default exposed to clients with degradation state."""
+
+    status: WorkspaceEffectiveAssistantDefaultStatus
+    source: WorkspaceEffectiveAssistantDefaultSource
+    assistant_kind: WorkspaceAssistantKind | None = None
+    assistant_id: str | None = None
+    label: str | None = None
+    persona_memory_mode: WorkspacePersonaMemoryMode | None = None
+    degraded_reason: WorkspaceAssistantDefaultDegradedReason | None = None
+
+    @model_validator(mode="after")
+    def _validate_status_relations(self) -> "WorkspaceEffectiveAssistantDefault":
+        if self.status == "available":
+            if self.assistant_kind is None or self.assistant_id is None:
+                raise ValueError("available assistant defaults require assistant_kind and assistant_id")
+            if self.degraded_reason is not None:
+                raise ValueError("available assistant defaults must not include degraded_reason")
+            return self
+        if self.status == "unavailable":
+            if self.degraded_reason is None:
+                raise ValueError("unavailable assistant defaults require degraded_reason")
+            return self
+        populated_none_fields = [
+            field_name
+            for field_name in (
+                "assistant_kind",
+                "assistant_id",
+                "label",
+                "persona_memory_mode",
+                "degraded_reason",
+            )
+            if getattr(self, field_name) is not None
+        ]
+        if populated_none_fields:
+            raise ValueError("none assistant defaults must not include assistant or degradation fields")
+        return self
 
 
 class WorkspacePatchRequest(BaseModel):
     name: str | None = None
     archived: bool | None = None
     study_materials_policy: Literal["general", "workspace"] | None = None
+    workspace_profile: WorkspaceProfile | None = None
     banner_title: str | None = None
     banner_subtitle: str | None = None
     banner_color: str | None = None
@@ -60,7 +192,23 @@ class WorkspacePatchRequest(BaseModel):
     audio_model: str | None = None
     audio_voice: str | None = None
     audio_speed: float | None = None
+    assistant_defaults: WorkspaceAssistantDefaults | None = None
+    confirm_read_write_assistant_default: StrictBool | None = None
     version: int = Field(..., description="Current version for optimistic locking")
+
+    @model_validator(mode="after")
+    def _validate_assistant_default_confirmation(self) -> "WorkspacePatchRequest":
+        if self.assistant_defaults is None:
+            if self.confirm_read_write_assistant_default is not None:
+                raise ValueError("confirm_read_write_assistant_default only applies to assistant_defaults")
+            return self
+        if self.assistant_defaults.persona_memory_mode == "read_write":
+            if self.confirm_read_write_assistant_default is not True:
+                raise ValueError("read_write assistant defaults require confirm_read_write_assistant_default=true")
+            return self
+        if self.confirm_read_write_assistant_default is not None:
+            raise ValueError("confirm_read_write_assistant_default only applies to read_write assistant defaults")
+        return self
 
 
 class WorkspaceResponse(BaseModel):
@@ -68,6 +216,7 @@ class WorkspaceResponse(BaseModel):
     name: str | None = None
     archived: bool = False
     study_materials_policy: Literal["general", "workspace"] = "general"
+    workspace_profile: WorkspaceProfile = "research"
     deleted: bool = False
     banner_title: str | None = None
     banner_subtitle: str | None = None
@@ -76,6 +225,8 @@ class WorkspaceResponse(BaseModel):
     audio_model: str | None = None
     audio_voice: str | None = None
     audio_speed: float | None = None
+    assistant_defaults: WorkspaceAssistantDefaults | None = None
+    effective_assistant_default: WorkspaceEffectiveAssistantDefault | None = None
     created_at: str
     last_modified: str
     version: int
@@ -84,6 +235,201 @@ class WorkspaceResponse(BaseModel):
 class WorkspaceListResponse(BaseModel):
     items: list[WorkspaceResponse]
     total: int
+
+
+# --- Membership schemas ---
+
+class WorkspaceMembershipCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resource_type: str = Field(..., min_length=1)
+    resource_id: str = Field(..., min_length=1)
+    role: WorkspaceMembershipRole = "member"
+    label: str | None = Field(default=None, max_length=512)
+    transfer_policy: WorkspaceMembershipTransferPolicy = "link"
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("provenance")
+    @classmethod
+    def _validate_provenance_size(cls, value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return normalize_membership_json_object(
+                value,
+                field_name="provenance",
+                max_bytes=WORKSPACE_MEMBERSHIP_MAX_PROVENANCE_BYTES,
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("metadata")
+    @classmethod
+    def _validate_membership_metadata_size(cls, value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return normalize_membership_json_object(
+                value,
+                field_name="metadata",
+                max_bytes=WORKSPACE_MEMBERSHIP_MAX_METADATA_BYTES,
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+
+
+class WorkspaceMembershipSummaryResponse(BaseModel):
+    title: str | None = None
+    subtitle: str | None = None
+    href: str | None = None
+    updated_at: str | None = None
+    state: str = "available"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkspaceMembershipResponse(BaseModel):
+    workspace_id: str
+    resource_type: WorkspaceMembershipResourceType
+    resource_id: str
+    role: WorkspaceMembershipRole
+    label: str | None = None
+    transfer_policy: WorkspaceMembershipTransferPolicy = "link"
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    summary: WorkspaceMembershipSummaryResponse | None = None
+    created_at: str
+    updated_at: str
+    version: int
+    deleted: bool = False
+
+
+class WorkspaceMembershipListSummary(BaseModel):
+    total: int = 0
+    by_resource_type: dict[str, int] = Field(default_factory=dict)
+    by_role: dict[str, int] = Field(default_factory=dict)
+
+
+class WorkspaceMembershipListResponse(BaseModel):
+    workspace_id: str
+    items: list[WorkspaceMembershipResponse]
+    total: int
+    next_cursor: str | None = None
+    summary: WorkspaceMembershipListSummary = Field(default_factory=WorkspaceMembershipListSummary)
+
+
+class WorkspaceResourceMembershipListResponse(BaseModel):
+    resource_type: WorkspaceMembershipResourceType
+    resource_id: str
+    items: list[WorkspaceMembershipResponse]
+    total: int
+    next_cursor: str | None = None
+    summary: WorkspaceMembershipListSummary = Field(default_factory=WorkspaceMembershipListSummary)
+
+
+class WorkspaceContextMembershipSummary(BaseModel):
+    total: int = 0
+    by_resource_type: dict[str, int] = Field(default_factory=dict)
+    by_role: dict[str, int] = Field(default_factory=dict)
+
+
+# --- Activity/index schemas ---
+
+WorkspaceIndexWarningSeverity = Literal["info", "warning", "error"]
+
+
+class WorkspaceIndexOwnerSurface(BaseModel):
+    label: str
+    href: str
+
+
+class WorkspaceIndexResourceGroup(BaseModel):
+    resource_type: WorkspaceMembershipResourceType
+    count: int = 0
+    owner_surface: WorkspaceIndexOwnerSurface
+    items: list[WorkspaceMembershipResponse] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class WorkspaceActivityEventResponse(BaseModel):
+    workspace_id: str
+    event_id: str
+    event_type: str
+    category: str
+    actor_user_id: str | None = None
+    resource_type: str | None = None
+    resource_id: str | None = None
+    summary: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+    version: int = 1
+
+
+class WorkspaceIndexRuntimeSummary(BaseModel):
+    total: int = 0
+    by_kind: dict[str, int] = Field(default_factory=dict)
+    by_status: dict[str, int] = Field(default_factory=dict)
+    bindings: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class WorkspaceIndexWarning(BaseModel):
+    severity: WorkspaceIndexWarningSeverity = "warning"
+    reason_code: str
+    message: str
+    resource_type: str | None = None
+    resource_id: str | None = None
+    action_href: str | None = None
+
+
+class WorkspaceIndexResponse(BaseModel):
+    workspace_id: str
+    schema_version: int = 1
+    generated_at: str
+    workspace: WorkspaceResponse
+    membership_summary: WorkspaceMembershipListSummary = Field(default_factory=WorkspaceMembershipListSummary)
+    resource_groups: list[WorkspaceIndexResourceGroup] = Field(default_factory=list)
+    runtime_summary: WorkspaceIndexRuntimeSummary = Field(default_factory=WorkspaceIndexRuntimeSummary)
+    warnings: list[WorkspaceIndexWarning] = Field(default_factory=list)
+    recent_activity: list[WorkspaceActivityEventResponse] = Field(default_factory=list)
+    partial_errors: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# --- Eligibility schemas ---
+
+class WorkspaceEligibilityCheckRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: WorkspaceEligibilityOperation
+    resource_type: str = Field(..., min_length=1, max_length=80)
+    resource_id: str = Field(..., min_length=1, max_length=512)
+    active_workspace_id: str | None = Field(default=None, min_length=1, max_length=128)
+    runtime_state: WorkspaceEligibilityRuntimeState
+    permission_state: WorkspaceEligibilityPermissionState
+
+
+class WorkspaceEligibilityRecoveryActionResponse(BaseModel):
+    action: str
+    label: str
+    href: str | None = None
+
+
+class WorkspaceEligibilityMembershipResponse(BaseModel):
+    workspace_id: str
+    resource_type: str
+    resource_id: str
+    role: str = "member"
+    label: str | None = None
+
+
+class WorkspaceEligibilityCheckResponse(BaseModel):
+    allowed: bool
+    reason_code: WorkspaceEligibilityReasonCode
+    message: str
+    operation: WorkspaceEligibilityOperation
+    operation_category: WorkspaceEligibilityOperationCategory
+    active_workspace_id: str | None = None
+    resource_type: str
+    resource_id: str
+    global_visibility_preserved: bool = True
+    recovery_actions: list[WorkspaceEligibilityRecoveryActionResponse] = Field(default_factory=list)
+    membership: WorkspaceEligibilityMembershipResponse | None = None
+    resource_workspace_ids: list[str] = Field(default_factory=list)
 
 
 # --- Source schemas ---
@@ -146,6 +492,7 @@ WorkspaceCapabilityServiceState = Literal[
     "available",
     "private",
     "not_configured",
+    "needs_approval",
     "unknown",
     "blocked",
     "degraded",
@@ -153,8 +500,6 @@ WorkspaceCapabilityServiceState = Literal[
 
 
 class WorkspaceSourceReadiness(BaseModel):
-    """Boolean readiness flags for each source capability used by the UI."""
-
     metadata_ready: bool = False
     text_extracted: bool = False
     fts_ready: bool = False
@@ -165,8 +510,6 @@ class WorkspaceSourceReadiness(BaseModel):
 
 
 class WorkspaceSourceJobStatus(BaseModel):
-    """Public, non-sensitive status summary for the matched source ingestion Job."""
-
     id: int | None = None
     uuid: str | None = None
     status: str | None = None
@@ -177,8 +520,6 @@ class WorkspaceSourceJobStatus(BaseModel):
 
 
 class WorkspaceSourceStatusResponse(BaseModel):
-    """Ingestion, extraction, chunking, and indexing status for one workspace source."""
-
     id: str
     workspace_id: str
     media_id: int | None = None
@@ -192,12 +533,13 @@ class WorkspaceSourceStatusResponse(BaseModel):
     progress_percent: float | None = None
     progress_message: str | None = None
     job: WorkspaceSourceJobStatus | None = None
+    next_action: str | None = None
+    retry_eligible: bool = False
+    stale: bool = False
     updated_at: str = ""
 
 
 class WorkspaceSourceStatusSummary(BaseModel):
-    """Aggregate counts used to drive workspace-level source readiness UI."""
-
     total: int = 0
     selected: int = 0
     queryable: int = 0
@@ -208,37 +550,446 @@ class WorkspaceSourceStatusSummary(BaseModel):
 
 
 class WorkspaceSourceStatusListResponse(BaseModel):
-    """Source status projection response for all sources in one workspace."""
-
     workspace_id: str
     sources: list[WorkspaceSourceStatusResponse]
     summary: WorkspaceSourceStatusSummary
 
 
 class WorkspaceCapabilityService(BaseModel):
-    """Availability state for a workspace-adjacent service or management surface."""
-
     state: WorkspaceCapabilityServiceState
     reason_code: str | None = None
     management_surface: str | None = None
 
 
 class WorkspaceAllowedAction(BaseModel):
-    """Whether the current principal may perform a workspace action."""
-
     allowed: bool
     reason_code: str | None = None
 
 
-class WorkspaceCapabilitiesResponse(BaseModel):
-    """Capability gates for Research Workspace controls for the current principal."""
+class WorkspaceContextPartialError(BaseModel):
+    scope: str = "workspace"
+    code: str = "dependency_resolution_partial"
+    message: str = ""
 
+
+class WorkspaceResolution(BaseModel):
+    status: WorkspaceResolutionStatus = "complete"
+    partial_errors: list[WorkspaceContextPartialError] = Field(default_factory=list)
+
+
+class WorkspaceFileInventory(BaseModel):
+    state: str | None = None
+    indexed_file_count: int | None = None
+    total_file_count: int | None = None
+    updated_at: str | None = None
+    available: bool = False
+
+
+class WorkspaceProjectRoot(BaseModel):
+    state: WorkspaceProjectRootState = "not_configured"
+    root_id: str | None = None
+    backend: WorkspaceProjectRootBackend | None = None
+    display_name: str | None = None
+    path_hint: str | None = None
+    git_state: str | None = None
+    file_inventory_state: str | None = None
+    file_inventory: WorkspaceFileInventory = Field(default_factory=WorkspaceFileInventory)
+    indexing_state: str | None = None
+    sandbox_mount_state: str | None = None
+    mcp_trust_state: str | None = None
+
+
+class WorkspacePrimaryRootAttachRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    backend: WorkspaceProjectRootBackend
+    root_id: str | None = None
+    absolute_root: str | None = None
+    sandbox_volume_id: str | None = None
+    display_name: str | None = Field(default=None, max_length=120)
+    replace_existing: StrictBool = False
+    expected_workspace_version: int | None = Field(default=None, ge=1)
+    strict_sandbox_validation: StrictBool = False
+
+
+class WorkspaceSandboxRootProvisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = Field(default=None, max_length=120)
+    requested_runtime: str | None = Field(default=None, max_length=80)
+    root_id: str | None = Field(default=None, max_length=128)
+    replace_existing: StrictBool = False
+    expected_workspace_version: int | None = Field(default=None, ge=1)
+
+
+WorkspaceFileInventoryState = Literal[
+    "not_started",
+    "queued",
+    "scanning",
+    "current",
+    "partial",
+    "stale",
+    "failed",
+    "disabled",
+]
+WorkspaceFileInventoryEntryKind = Literal["file", "directory", "symlink", "other"]
+
+
+class WorkspaceFileInventoryScanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    force: StrictBool = False
+    expected_root_version: int | None = Field(default=None, ge=1)
+
+
+class WorkspaceFileInventoryJobStatus(BaseModel):
+    id: int | None = None
+    uuid: str | None = None
+    status: str | None = None
+    job_type: str | None = None
+    progress_percent: float | None = None
+    progress_message: str | None = None
+    error_message: str | None = None
+
+
+class WorkspaceFileInventoryCounts(BaseModel):
+    files: int = 0
+    directories: int = 0
+    symlinks: int = 0
+    ignored: int = 0
+    indexing_candidates: int = 0
+    diagnostics: int = 0
+    total_entries: int = 0
+
+
+class WorkspaceFileInventoryDiagnostic(BaseModel):
+    code: str
+    message: str
+    path_hint: str | None = None
+
+
+class WorkspaceFileInventoryStatusResponse(BaseModel):
     workspace_id: str
-    workspace_kind: Literal["research_workspace"]
+    root_id: str | None = None
+    state: WorkspaceFileInventoryState
+    durable_state: str | None = None
+    stale: bool = False
+    last_scan_id: str | None = None
+    last_scan_started_at: str | None = None
+    last_scan_completed_at: str | None = None
+    root_version: int | None = None
+    scan_root_version: int | None = None
+    ignore_policy_fingerprint: str | None = None
+    root_snapshot_token: str | None = None
+    counts: WorkspaceFileInventoryCounts = Field(default_factory=WorkspaceFileInventoryCounts)
+    diagnostics: list[WorkspaceFileInventoryDiagnostic] = Field(default_factory=list)
+    job: WorkspaceFileInventoryJobStatus | None = None
+    updated_at: str | None = None
+
+
+class WorkspaceFileInventoryItemResponse(BaseModel):
+    relative_path: str
+    entry_kind: str
+    size_bytes: int | None = None
+    mtime_ns: int | None = None
+    mode_bits: int | None = None
+    extension: str | None = None
+    mime_hint: str | None = None
+    language_hint: str | None = None
+    ignored: bool = False
+    ignore_reason: str | None = None
+    indexing_candidate: bool = False
+
+
+class WorkspaceFileInventoryItemsResponse(BaseModel):
+    workspace_id: str
+    root_id: str | None = None
+    items: list[WorkspaceFileInventoryItemResponse]
+    next_cursor: str | None = None
+    limit: int
+
+
+class WorkspaceRuntimeBinding(BaseModel):
+    service: str
+    state: WorkspaceCapabilityServiceState
+    reason_code: str | None = None
+    management_surface: str | None = None
+
+
+WorkspaceRuntimeBindingKind = Literal[
+    "repo",
+    "git_worktree",
+    "local_path",
+    "workspace_project_root",
+    "acp_execution_workspace",
+    "acp_session",
+    "acp_run",
+    "sandbox_root",
+    "sandbox_session",
+    "mcp_workspace_set",
+    "remote_runtime",
+]
+WorkspaceRuntimeBindingOwnerDomain = Literal[
+    "workspaces",
+    "acp",
+    "sandbox",
+    "mcp",
+    "jobs",
+    "workflows",
+    "watchlists",
+    "external",
+]
+WorkspaceRuntimeBindingStatus = Literal[
+    "ready",
+    "missing",
+    "inspect-only",
+    "blocked",
+    "provisioning",
+    "unavailable",
+    "detached",
+    "conflict",
+    "runtime-missing",
+    "archived",
+    "unsupported",
+]
+WorkspaceRuntimeBindingPortability = Literal[
+    "reference",
+    "metadata-only",
+    "local-only",
+    "copy",
+]
+
+
+class WorkspaceRuntimeBindingRedactionReport(BaseModel):
+    redacted: bool = False
+    redacted_fields: list[str] = Field(default_factory=list)
+    rejected_fields: list[str] = Field(default_factory=list)
+
+
+class WorkspaceRuntimeBindingDescriptorUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    _normalized_payload: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _persistence_payload: dict[str, Any] = PrivateAttr(default_factory=dict)
+
+    binding_id: str = Field(..., min_length=1, max_length=128)
+    binding_kind: str = Field(..., min_length=1, max_length=80)
+    owner_domain: str = Field(..., min_length=1, max_length=80)
+    locator_ref: str = Field(..., min_length=1, max_length=512)
+    label: str | None = Field(default=None, max_length=512)
+    status: str = Field(..., min_length=1, max_length=80)
+    path_hint: str | None = Field(default=None, max_length=1024)
+    portability: str = Field(..., min_length=1, max_length=80)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_runtime_binding_contract(self) -> "WorkspaceRuntimeBindingDescriptorUpsertRequest":
+        persistence_payload = self.model_dump()
+        try:
+            normalized = normalize_runtime_binding_payload(persistence_payload)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        self.binding_id = normalized["binding_id"]
+        self.binding_kind = normalized["binding_kind"]
+        self.owner_domain = normalized["owner_domain"]
+        self.locator_ref = normalized["locator_ref"]
+        self.label = normalized["label"]
+        self.status = normalized["status"]
+        self.path_hint = normalized["path_hint"]
+        self.portability = normalized["portability"]
+        self.metadata = normalized["metadata"]
+        self._normalized_payload = normalized
+        self._persistence_payload = persistence_payload
+        return self
+
+    def normalized_payload(self) -> dict[str, Any]:
+        """Return the server-normalized runtime binding request fields."""
+        return dict(self._normalized_payload)
+
+    def persistence_payload(self) -> dict[str, Any]:
+        """Return the original validated payload so persistence can derive redactions."""
+        return dict(self._persistence_payload)
+
+
+class WorkspaceRuntimeBindingDescriptorResponse(BaseModel):
+    workspace_id: str
+    binding_id: str
+    binding_kind: WorkspaceRuntimeBindingKind
+    owner_domain: WorkspaceRuntimeBindingOwnerDomain
+    locator_ref: str
+    label: str | None = None
+    status: WorkspaceRuntimeBindingStatus
+    path_hint: str | None = None
+    portability: WorkspaceRuntimeBindingPortability
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    redaction_report: WorkspaceRuntimeBindingRedactionReport = Field(
+        default_factory=WorkspaceRuntimeBindingRedactionReport
+    )
+    created_by_user_id: str | None = None
+    updated_by_user_id: str | None = None
+    created_at: str
+    updated_at: str
+    deleted: bool = False
+    version: int
+
+
+class WorkspaceRuntimeBindingDescriptorListResponse(BaseModel):
+    workspace_id: str
+    items: list[WorkspaceRuntimeBindingDescriptorResponse]
+    total: int
+
+
+WorkspaceOperationStatus = Literal[
+    "queued",
+    "running",
+    "succeeded",
+    "failed",
+    "conflicted",
+    "expired",
+]
+
+
+class WorkspaceOperationResponse(BaseModel):
+    operation_id: str
+    workspace_id: str
+    command: str
+    status: WorkspaceOperationStatus
+    started_at: str
+    updated_at: str
+    retryable: bool = False
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
+    poll_href: str
+
+
+class WorkspaceRootResponse(WorkspaceProjectRoot):
+    workspace_id: str | None = None
+    is_primary: bool = True
+    version: int | None = None
+    updated_at: str | None = None
+
+
+class WorkspaceRootsResponse(BaseModel):
+    workspace_id: str
+    workspace_profile: WorkspaceProfile = "research"
+    primary_root: WorkspaceRootResponse | None = None
+    roots: list[WorkspaceRootResponse] = Field(default_factory=list)
+
+
+class WorkspaceSandboxRootProvisionResponse(BaseModel):
+    workspace_id: str
+    workspace_profile: WorkspaceProfile = "project"
+    operation: WorkspaceOperationResponse
+    primary_root: WorkspaceRootResponse | None = None
+
+
+class WorkspaceCapabilitiesResponse(BaseModel):
+    workspace_id: str
+    workspace_profile: WorkspaceProfile = "research"
+    workspace_kind: WorkspaceKind = "research_workspace"
     access_level: Literal["owner", "editor", "viewer"] = "owner"
+    resolution: WorkspaceResolution = Field(default_factory=WorkspaceResolution)
+    project_root: WorkspaceProjectRoot = Field(default_factory=WorkspaceProjectRoot)
     source_summary: WorkspaceSourceStatusSummary
     workspace_services: dict[str, WorkspaceCapabilityService]
     allowed_actions: dict[str, WorkspaceAllowedAction]
+
+
+class WorkspaceSourcePreviewSummary(BaseModel):
+    available: bool = False
+    detail_href: str | None = None
+    snippet_count: int | None = None
+    total_chars: int | None = None
+    unavailable_reason: str | None = None
+
+
+class WorkspaceContextSource(BaseModel):
+    id: str
+    workspace_id: str
+    media_id: int | None = None
+    title: str
+    source_type: str
+    url: str | None = None
+    position: int = 0
+    selected: bool = True
+    added_at: str
+    version: int
+    state: WorkspaceSourceLifecycleState
+    status_reason: str
+    readiness: WorkspaceSourceReadiness
+    progress_percent: float | None = None
+    progress_message: str | None = None
+    job: WorkspaceSourceJobStatus | None = None
+    updated_at: str = ""
+    preview: WorkspaceSourcePreviewSummary
+
+
+class WorkspaceContextSources(BaseModel):
+    items: list[WorkspaceContextSource]
+    summary: WorkspaceSourceStatusSummary
+
+
+class WorkspaceContextResponse(BaseModel):
+    workspace_id: str
+    workspace_profile: WorkspaceProfile = "research"
+    workspace_kind: WorkspaceKind = "research_workspace"
+    schema_version: int = 2
+    generated_at: str
+    workspace: WorkspaceResponse
+    attention_state: WorkspaceAttentionState = "needs_attention"
+    resolution: WorkspaceResolution = Field(default_factory=WorkspaceResolution)
+    project_root: WorkspaceProjectRoot = Field(default_factory=WorkspaceProjectRoot)
+    sources: WorkspaceContextSources
+    capabilities: WorkspaceCapabilitiesResponse
+    services: dict[str, WorkspaceCapabilityService]
+    allowed_actions: dict[str, WorkspaceAllowedAction]
+    active_jobs: list[WorkspaceSourceJobStatus] = Field(default_factory=list)
+    active_operations: list[WorkspaceOperationResponse] = Field(default_factory=list)
+    memberships: WorkspaceContextMembershipSummary = Field(default_factory=WorkspaceContextMembershipSummary)
+    partial_errors: list[WorkspaceContextPartialError] = Field(default_factory=list)
+
+
+WorkspaceSourcePreviewMode = Literal[
+    "available",
+    "pending",
+    "failed",
+    "missing_media",
+    "empty",
+]
+
+WorkspaceSourcePreviewSnippetKind = Literal["content_excerpt", "chunk"]
+
+
+class WorkspaceSourcePreviewSnippet(BaseModel):
+    id: str
+    source_id: str
+    media_id: int | None = None
+    kind: WorkspaceSourcePreviewSnippetKind
+    text: str
+    start_char: int | None = None
+    end_char: int | None = None
+    chunk_index: int | None = None
+    chunk_uuid: str | None = None
+    chunk_type: str | None = None
+
+
+class WorkspaceSourcePreviewResponse(BaseModel):
+    workspace_id: str
+    source_id: str
+    media_id: int | None = None
+    title: str
+    source_type: str
+    url: str | None = None
+    state: WorkspaceSourceLifecycleState
+    status_reason: str
+    readiness: WorkspaceSourceReadiness
+    content_available: bool
+    preview_mode: WorkspaceSourcePreviewMode
+    unavailable_reason: str | None = None
+    text_preview: str | None = None
+    text_total_chars: int | None = None
+    text_truncated: bool = False
+    snippets: list[WorkspaceSourcePreviewSnippet] = Field(default_factory=list)
+    generated_at: str
 
 
 class StatusResponse(BaseModel):
@@ -267,11 +1018,7 @@ class WorkspaceMigrationCreateRequest(BaseModel):
     idempotency_key: str = Field(..., min_length=1, max_length=160)
     target_workspace_id: str = Field(..., min_length=1, max_length=128)
     target_workspace_name: str = Field(..., min_length=1, max_length=256)
-    source_product: str = Field(
-        default="research-workspace-webui",
-        min_length=1,
-        max_length=128,
-    )
+    source_product: str = Field(default="research-workspace-webui", min_length=1, max_length=128)
     manifest_hash: str
     declared_chunks: list[WorkspaceMigrationChunkDeclaration] = Field(
         default_factory=list,
@@ -382,18 +1129,73 @@ class WorkspaceMigrationResponse(BaseModel):
 
 # --- Artifact schemas ---
 
+WorkspaceArtifactReviewState = Literal[
+    "draft",
+    "reviewing",
+    "accepted",
+    "needs_revision",
+    "rejected",
+    "exported",
+    "assigned",
+    "archived",
+]
+
+WorkspaceArtifactExportFormat = Literal["md", "html", "json"]
+
+
+class WorkspaceArtifactRedaction(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    support_safe: StrictBool = True
+    redacted: StrictBool = False
+    retention_class: str | None = None
+    redacted_fields: list[str] = Field(default_factory=list)
+
+
 class WorkspaceArtifactCreateRequest(BaseModel):
     id: str
     artifact_type: str
     title: str
     status: str = "pending"
     content: str | None = None
+    content_type: str = "text/markdown"
+    preview_text: str | None = None
+    summary: str | None = None
+    review_state: WorkspaceArtifactReviewState = "draft"
+    owner_scope: str = "user"
+    owner_id: str | None = None
+    project_id: str | None = None
+    task_id: str | None = None
+    source_collection_id: str | None = None
+    producer_metadata: dict[str, Any] = Field(default_factory=dict)
+    source_lineage: dict[str, Any] = Field(default_factory=dict)
+    review_metadata: dict[str, Any] = Field(default_factory=dict)
+    version_metadata: dict[str, Any] = Field(default_factory=dict)
+    export_refs: list[dict[str, Any]] = Field(default_factory=list)
+    redaction: WorkspaceArtifactRedaction = Field(default_factory=WorkspaceArtifactRedaction)
+    schema_version: int = 1
 
 
 class WorkspaceArtifactUpdateRequest(BaseModel):
     title: str | None = None
     status: str | None = None
     content: str | None = None
+    content_type: str | None = None
+    preview_text: str | None = None
+    summary: str | None = None
+    review_state: WorkspaceArtifactReviewState | None = None
+    owner_scope: str | None = None
+    owner_id: str | None = None
+    project_id: str | None = None
+    task_id: str | None = None
+    source_collection_id: str | None = None
+    producer_metadata: dict[str, Any] | None = None
+    source_lineage: dict[str, Any] | None = None
+    review_metadata: dict[str, Any] | None = None
+    version_metadata: dict[str, Any] | None = None
+    export_refs: list[dict[str, Any]] | None = None
+    redaction: WorkspaceArtifactRedaction | None = None
+    schema_version: int | None = None
     total_tokens: int | None = None
     total_cost_usd: float | None = None
     completed_at: str | None = None
@@ -407,11 +1209,52 @@ class WorkspaceArtifactResponse(BaseModel):
     title: str
     status: str = "pending"
     content: str | None = None
+    content_type: str = "text/markdown"
+    preview_text: str | None = None
+    summary: str | None = None
+    review_state: WorkspaceArtifactReviewState = "draft"
+    owner_scope: str = "user"
+    owner_id: str | None = None
+    project_id: str | None = None
+    task_id: str | None = None
+    source_collection_id: str | None = None
+    root_artifact_id: str
+    artifact_version_id: str
+    previous_version_id: str | None = None
+    producer_metadata: dict[str, Any] = Field(default_factory=dict)
+    source_lineage: dict[str, Any] = Field(default_factory=dict)
+    review_metadata: dict[str, Any] = Field(default_factory=dict)
+    version_metadata: dict[str, Any] = Field(default_factory=dict)
+    export_refs: list[dict[str, Any]] = Field(default_factory=list)
+    redaction: WorkspaceArtifactRedaction = Field(default_factory=WorkspaceArtifactRedaction)
+    schema_version: int = 1
     total_tokens: int | None = None
     total_cost_usd: float | None = None
     created_at: str
     completed_at: str | None = None
     version: int
+
+
+class WorkspaceArtifactExportRequest(BaseModel):
+    format: WorkspaceArtifactExportFormat
+    artifact_version_id: str | None = Field(
+        default=None,
+        description="Optional artifact version id to export. Defaults to the current artifact version.",
+    )
+
+
+class WorkspaceArtifactExportResponse(BaseModel):
+    workspace_id: str
+    artifact_id: str
+    artifact_version_id: str
+    review_state: WorkspaceArtifactReviewState
+    format: WorkspaceArtifactExportFormat
+    content_type: str
+    content: str
+    bytes: int
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    export_ref: dict[str, Any] = Field(default_factory=dict)
+    generated_at: str
 
 
 # --- Note schemas ---

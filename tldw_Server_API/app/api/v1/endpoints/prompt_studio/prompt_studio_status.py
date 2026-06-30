@@ -373,12 +373,12 @@ async def get_prompt_studio_status(
                     "jobs.stale_processing",
                     float(leases.get("stale_processing", 0)),
                 )
-            except Exception as e:
-                logger.debug(f"Failed to refresh per-type gauges: {e}")
-        except Exception as e:
-            logger.debug(f"Failed to set Prompt Studio gauges: {e}")
+            except Exception:
+                logger.debug("Failed to refresh per-type gauges")
+        except Exception:
+            logger.debug("Failed to set Prompt Studio gauges")
 
         return StandardResponse(success=True, data=data)
-    except Exception as exc:  # noqa: BLE001
-        logger.error(f"Failed to compute Prompt Studio status: {exc}")
-        return StandardResponse(success=False, error=str(exc))
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to compute Prompt Studio status")
+        return StandardResponse(success=False, error="Failed to compute Prompt Studio status")

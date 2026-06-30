@@ -10,7 +10,7 @@ import json
 import os
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from loguru import logger
@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
 
-_SCHEMA_VERSION = 13
+_SCHEMA_VERSION = 16
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS sessions (
@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     workspace_id TEXT,
     workspace_group_id TEXT,
     scope_snapshot_id TEXT,
+    sandbox_session_id TEXT,
+    sandbox_run_id TEXT,
     policy_snapshot_version TEXT,
     policy_snapshot_fingerprint TEXT,
     policy_snapshot_refreshed_at TEXT,
@@ -59,6 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user_status ON sessions(user_id, status)
 CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_created_agent ON sessions(created_at, agent_type);
 CREATE INDEX IF NOT EXISTS idx_sessions_forked ON sessions(forked_from);
+CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id);
 
 CREATE TABLE IF NOT EXISTS session_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,6 +94,18 @@ CREATE TABLE IF NOT EXISTS agent_registry (
     mcp_llm_model TEXT,
     mcp_max_iterations INTEGER NOT NULL DEFAULT 20,
     mcp_refresh_tools INTEGER NOT NULL DEFAULT 0,
+    entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate',
+    acp_command TEXT NOT NULL DEFAULT '',
+    acp_args TEXT NOT NULL DEFAULT '[]',
+    adapter_source TEXT,
+    adapter_package TEXT,
+    adapter_version TEXT,
+    adapter_version_policy TEXT NOT NULL DEFAULT 'unknown',
+    adapter_install_source TEXT NOT NULL DEFAULT 'unknown',
+    adapter_docs_url TEXT,
+    certification_blocker TEXT,
+    credential_policy TEXT NOT NULL DEFAULT 'unknown',
+    runtime_backend TEXT NOT NULL DEFAULT 'acp_downstream',
     source TEXT NOT NULL DEFAULT 'api',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -194,6 +209,8 @@ _ALLOWED_MIGRATION_COLUMNS = {
         "auto_terminate_at_budget": "auto_terminate_at_budget INTEGER NOT NULL DEFAULT 0",
         "budget_exhausted": "budget_exhausted INTEGER NOT NULL DEFAULT 0",
         "ancestry_chain_json": "ancestry_chain_json TEXT",
+        "sandbox_session_id": "sandbox_session_id TEXT",
+        "sandbox_run_id": "sandbox_run_id TEXT",
     },
     "agent_registry": {
         "mcp_orchestration": "mcp_orchestration TEXT NOT NULL DEFAULT 'agent_driven'",
@@ -203,6 +220,18 @@ _ALLOWED_MIGRATION_COLUMNS = {
         "mcp_llm_model": "mcp_llm_model TEXT",
         "mcp_max_iterations": "mcp_max_iterations INTEGER NOT NULL DEFAULT 20",
         "mcp_refresh_tools": "mcp_refresh_tools INTEGER NOT NULL DEFAULT 0",
+        "entrypoint_strategy": "entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate'",
+        "acp_command": "acp_command TEXT NOT NULL DEFAULT ''",
+        "acp_args": "acp_args TEXT NOT NULL DEFAULT '[]'",
+        "adapter_source": "adapter_source TEXT",
+        "adapter_package": "adapter_package TEXT",
+        "adapter_version": "adapter_version TEXT",
+        "adapter_version_policy": "adapter_version_policy TEXT NOT NULL DEFAULT 'unknown'",
+        "adapter_install_source": "adapter_install_source TEXT NOT NULL DEFAULT 'unknown'",
+        "adapter_docs_url": "adapter_docs_url TEXT",
+        "certification_blocker": "certification_blocker TEXT",
+        "credential_policy": "credential_policy TEXT NOT NULL DEFAULT 'unknown'",
+        "runtime_backend": "runtime_backend TEXT NOT NULL DEFAULT 'acp_downstream'",
     },
     "permission_policies": {
         "conditions_json": "conditions_json TEXT",
@@ -321,6 +350,18 @@ class ACPSessionsDB:
                         mcp_llm_model TEXT,
                         mcp_max_iterations INTEGER NOT NULL DEFAULT 20,
                         mcp_refresh_tools INTEGER NOT NULL DEFAULT 0,
+                        entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate',
+                        acp_command TEXT NOT NULL DEFAULT '',
+                        acp_args TEXT NOT NULL DEFAULT '[]',
+                        adapter_source TEXT,
+                        adapter_package TEXT,
+                        adapter_version TEXT,
+                        adapter_version_policy TEXT NOT NULL DEFAULT 'unknown',
+                        adapter_install_source TEXT NOT NULL DEFAULT 'unknown',
+                        adapter_docs_url TEXT,
+                        certification_blocker TEXT,
+                        credential_policy TEXT NOT NULL DEFAULT 'unknown',
+                        runtime_backend TEXT NOT NULL DEFAULT 'acp_downstream',
                         source TEXT NOT NULL DEFAULT 'api',
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
@@ -529,6 +570,96 @@ class ACPSessionsDB:
                 )
             if current_version < 13:
                 _ensure_config_template_unique_index(conn)
+            if current_version < 14:
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "entrypoint_strategy",
+                    "entrypoint_strategy TEXT NOT NULL DEFAULT 'documented_candidate'",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "acp_command",
+                    "acp_command TEXT NOT NULL DEFAULT ''",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "acp_args",
+                    "acp_args TEXT NOT NULL DEFAULT '[]'",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_source",
+                    "adapter_source TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_docs_url",
+                    "adapter_docs_url TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "certification_blocker",
+                    "certification_blocker TEXT",
+                )
+            if current_version < 15:
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_package",
+                    "adapter_package TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_version",
+                    "adapter_version TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_version_policy",
+                    "adapter_version_policy TEXT NOT NULL DEFAULT 'unknown'",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "adapter_install_source",
+                    "adapter_install_source TEXT NOT NULL DEFAULT 'unknown'",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "credential_policy",
+                    "credential_policy TEXT NOT NULL DEFAULT 'unknown'",
+                )
+                _ensure_column(
+                    conn,
+                    "agent_registry",
+                    "runtime_backend",
+                    "runtime_backend TEXT NOT NULL DEFAULT 'acp_downstream'",
+                )
+            if current_version < 16:
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "sandbox_session_id",
+                    "sandbox_session_id TEXT",
+                )
+                _ensure_column(
+                    conn,
+                    "sessions",
+                    "sandbox_run_id",
+                    "sandbox_run_id TEXT",
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_id)"
+                )
             conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
             conn.commit()
             self._initialized = True
@@ -575,6 +706,8 @@ class ACPSessionsDB:
         workspace_id: str | None = None,
         workspace_group_id: str | None = None,
         scope_snapshot_id: str | None = None,
+        sandbox_session_id: str | None = None,
+        sandbox_run_id: str | None = None,
         policy_snapshot_version: str | None = None,
         policy_snapshot_fingerprint: str | None = None,
         policy_snapshot_refreshed_at: str | None = None,
@@ -597,11 +730,12 @@ class ACPSessionsDB:
                 created_at, last_activity_at,
                 tags, mcp_servers,
                 persona_id, workspace_id, workspace_group_id, scope_snapshot_id,
+                sandbox_session_id, sandbox_run_id,
                 policy_snapshot_version, policy_snapshot_fingerprint, policy_snapshot_refreshed_at,
                 policy_summary, policy_provenance_summary, policy_refresh_error,
                 forked_from, needs_bootstrap, model,
                 token_budget, auto_terminate_at_budget
-            ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id, user_id, agent_type, name, cwd,
@@ -609,6 +743,7 @@ class ACPSessionsDB:
                 json.dumps(tags or []),
                 json.dumps(mcp_servers or []),
                 persona_id, workspace_id, workspace_group_id, scope_snapshot_id,
+                sandbox_session_id, sandbox_run_id,
                 policy_snapshot_version,
                 policy_snapshot_fingerprint,
                 policy_snapshot_refreshed_at,
@@ -731,80 +866,60 @@ class ACPSessionsDB:
         user_id: int | None = None,
         status: str | None = None,
         agent_type: str | None = None,
+        workspace_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
         """List sessions with optional filters. Returns (rows, total_count)."""
         conn = self._get_conn()
-        params: list[Any] = []
+        where_clauses: list[str] = []
+        filter_params: list[Any] = []
+        for column, value in (
+            ("user_id", user_id),
+            ("status", status),
+            ("agent_type", agent_type),
+            ("workspace_id", workspace_id),
+        ):
+            if value is None:
+                continue
+            where_clauses.append(f"{column} = ?")
+            filter_params.append(value)
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        # Safe dynamic SQL: column names are fixed above; values remain bound parameters.
+        count_query = f"SELECT COUNT(*) FROM sessions{where_sql}"  # nosec B608
+        rows_query = f"SELECT * FROM sessions{where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?"  # nosec B608
 
-        query_key = (user_id is not None, status is not None, agent_type is not None)
-        match query_key:
-            case (False, False, False):
-                count_query = "SELECT COUNT(*) FROM sessions"
-                rows_query = "SELECT * FROM sessions ORDER BY created_at DESC LIMIT ? OFFSET ?"
-            case (True, False, False):
-                count_query = "SELECT COUNT(*) FROM sessions WHERE user_id = ?"
-                rows_query = (
-                    "SELECT * FROM sessions WHERE user_id = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.append(user_id)
-            case (False, True, False):
-                count_query = "SELECT COUNT(*) FROM sessions WHERE status = ?"
-                rows_query = (
-                    "SELECT * FROM sessions WHERE status = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.append(status)
-            case (False, False, True):
-                count_query = "SELECT COUNT(*) FROM sessions WHERE agent_type = ?"
-                rows_query = (
-                    "SELECT * FROM sessions WHERE agent_type = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.append(agent_type)
-            case (True, True, False):
-                count_query = "SELECT COUNT(*) FROM sessions WHERE user_id = ? AND status = ?"
-                rows_query = (
-                    "SELECT * FROM sessions WHERE user_id = ? AND status = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.extend([user_id, status])
-            case (True, False, True):
-                count_query = "SELECT COUNT(*) FROM sessions WHERE user_id = ? AND agent_type = ?"
-                rows_query = (
-                    "SELECT * FROM sessions WHERE user_id = ? AND agent_type = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.extend([user_id, agent_type])
-            case (False, True, True):
-                count_query = "SELECT COUNT(*) FROM sessions WHERE status = ? AND agent_type = ?"
-                rows_query = (
-                    "SELECT * FROM sessions WHERE status = ? AND agent_type = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.extend([status, agent_type])
-            case _:
-                count_query = (
-                    "SELECT COUNT(*) FROM sessions "
-                    "WHERE user_id = ? AND status = ? AND agent_type = ?"
-                )
-                rows_query = (
-                    "SELECT * FROM sessions "
-                    "WHERE user_id = ? AND status = ? AND agent_type = ? "
-                    "ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                )
-                params.extend([user_id, status, agent_type])
-
-        count_row = conn.execute(count_query, params).fetchone()
+        count_row = conn.execute(count_query, filter_params).fetchone()
         total = count_row[0] if count_row else 0
 
         rows = conn.execute(
             rows_query,
-            params + [limit, offset],
+            filter_params + [limit, offset],
         ).fetchall()
 
+        return [self._row_to_dict(r) for r in rows], total
+
+    def list_sessions_since(
+        self,
+        *,
+        since_iso: str,
+        limit: int = 1000,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List sessions created or active at or after an ISO timestamp."""
+        conn = self._get_conn()
+        count_row = conn.execute(
+            "SELECT COUNT(*) FROM sessions "
+            "WHERE (created_at >= ? OR COALESCE(last_activity_at, '') >= ?)",
+            (since_iso, since_iso),
+        ).fetchone()
+        total = count_row[0] if count_row else 0
+        rows = conn.execute(
+            "SELECT * FROM sessions "
+            "WHERE (created_at >= ? OR COALESCE(last_activity_at, '') >= ?) "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (since_iso, since_iso, limit, offset),
+        ).fetchall()
         return [self._row_to_dict(r) for r in rows], total
 
     def aggregate_metrics_by_agent(self) -> list[dict[str, Any]]:
@@ -1158,6 +1273,55 @@ class ACPSessionsDB:
             results.append(d)
         return results
 
+    def get_messages_for_sessions(
+        self,
+        session_ids: list[str],
+        *,
+        chunk_size: int = 500,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Return ordered messages grouped by session ID for multiple sessions."""
+        if not session_ids:
+            return {}
+
+        conn = self._get_conn()
+        grouped: dict[str, list[dict[str, Any]]] = {
+            session_id: [] for session_id in session_ids
+        }
+        safe_chunk_size = max(1, int(chunk_size))
+        conn.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS temp_acp_message_session_ids "
+            "(session_id TEXT PRIMARY KEY)"
+        )
+
+        for start in range(0, len(session_ids), safe_chunk_size):
+            chunk = session_ids[start:start + safe_chunk_size]
+            conn.execute("DELETE FROM temp_acp_message_session_ids")
+            conn.executemany(
+                "INSERT INTO temp_acp_message_session_ids(session_id) VALUES (?)",
+                [(session_id,) for session_id in chunk],
+            )
+            rows = conn.execute(
+                """
+                SELECT m.session_id, m.role, m.content, m.timestamp, m.raw_data
+                FROM session_messages AS m
+                JOIN temp_acp_message_session_ids AS ids
+                  ON ids.session_id = m.session_id
+                ORDER BY m.session_id, m.message_index
+                """
+            ).fetchall()
+            for row in rows:
+                d = dict(row)
+                session_id = str(d.pop("session_id"))
+                if d.get("raw_data"):
+                    try:
+                        d["raw_data"] = json.loads(d["raw_data"])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                grouped.setdefault(session_id, []).append(d)
+
+        conn.execute("DELETE FROM temp_acp_message_session_ids")
+        return grouped
+
     def update_token_usage(
         self,
         session_id: str,
@@ -1489,6 +1653,47 @@ class ACPSessionsDB:
         logger.info("Evicted {} expired ACP sessions", len(expired_ids))
         return len(expired_ids)
 
+    def purge_retained_sessions(
+        self,
+        *,
+        retention_days: int,
+        now: datetime | None = None,
+    ) -> int:
+        """Hard-delete closed/error sessions older than the retention window.
+
+        Session messages are deleted through the session table's cascade
+        relationship. Active sessions are never hard-deleted by retention; TTL
+        eviction must close them first.
+        """
+        try:
+            retention_days_int = int(retention_days)
+        except (TypeError, ValueError):
+            retention_days_int = 30
+        if retention_days_int < 0:
+            return 0
+
+        now_dt = now or datetime.now(timezone.utc)
+        cutoff = now_dt - timedelta(days=retention_days_int)
+        cutoff_iso = cutoff.isoformat()
+        conn = self._get_conn()
+        with conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM sessions
+                WHERE status IN ('closed', 'error')
+                  AND COALESCE(last_activity_at, created_at) < ?
+                """,
+                (cutoff_iso,),
+            )
+        deleted = cursor.rowcount
+        if deleted:
+            logger.info(
+                "Purged {} retained ACP sessions (retention={}d)",
+                deleted,
+                retention_days_int,
+            )
+        return deleted
+
     # ------------------------------------------------------------------
     # Agent Registry CRUD
     # ------------------------------------------------------------------
@@ -1514,6 +1719,20 @@ class ACPSessionsDB:
         mcp_llm_model = entry_dict.get("mcp_llm_model")
         mcp_max_iterations = int(entry_dict.get("mcp_max_iterations", 20))
         mcp_refresh_tools = int(bool(entry_dict.get("mcp_refresh_tools", 0)))
+        entrypoint_strategy = entry_dict.get("entrypoint_strategy", "documented_candidate")
+        if str(entrypoint_strategy) == "adapter_acp":
+            entrypoint_strategy = "external_acp_adapter"
+        acp_command = entry_dict.get("acp_command", "")
+        acp_args = entry_dict.get("acp_args", "[]")
+        adapter_source = entry_dict.get("adapter_source")
+        adapter_package = entry_dict.get("adapter_package")
+        adapter_version = entry_dict.get("adapter_version")
+        adapter_version_policy = entry_dict.get("adapter_version_policy") or "unknown"
+        adapter_install_source = entry_dict.get("adapter_install_source") or "unknown"
+        adapter_docs_url = entry_dict.get("adapter_docs_url")
+        certification_blocker = entry_dict.get("certification_blocker")
+        credential_policy = entry_dict.get("credential_policy") or "unknown"
+        runtime_backend = entry_dict.get("runtime_backend") or "acp_downstream"
         source = entry_dict.get("source", "api")
 
         conn.execute(
@@ -1523,8 +1742,13 @@ class ACPSessionsDB:
                 requires_api_key, is_default, install_instructions, docs_url,
                 mcp_orchestration, mcp_entry_tool, mcp_structured_response,
                 mcp_llm_provider, mcp_llm_model, mcp_max_iterations, mcp_refresh_tools,
+                entrypoint_strategy, acp_command, acp_args,
+                adapter_source, adapter_package, adapter_version,
+                adapter_version_policy, adapter_install_source,
+                adapter_docs_url, certification_blocker,
+                credential_policy, runtime_backend,
                 source, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_type) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
@@ -1542,6 +1766,18 @@ class ACPSessionsDB:
                 mcp_llm_model = excluded.mcp_llm_model,
                 mcp_max_iterations = excluded.mcp_max_iterations,
                 mcp_refresh_tools = excluded.mcp_refresh_tools,
+                entrypoint_strategy = excluded.entrypoint_strategy,
+                acp_command = excluded.acp_command,
+                acp_args = excluded.acp_args,
+                adapter_source = excluded.adapter_source,
+                adapter_package = excluded.adapter_package,
+                adapter_version = excluded.adapter_version,
+                adapter_version_policy = excluded.adapter_version_policy,
+                adapter_install_source = excluded.adapter_install_source,
+                adapter_docs_url = excluded.adapter_docs_url,
+                certification_blocker = excluded.certification_blocker,
+                credential_policy = excluded.credential_policy,
+                runtime_backend = excluded.runtime_backend,
                 source = excluded.source,
                 updated_at = excluded.updated_at
             """,
@@ -1550,6 +1786,11 @@ class ACPSessionsDB:
                 requires_api_key, is_default, install_instructions, docs_url,
                 mcp_orchestration, mcp_entry_tool, mcp_structured_response,
                 mcp_llm_provider, mcp_llm_model, mcp_max_iterations, mcp_refresh_tools,
+                entrypoint_strategy, acp_command, acp_args,
+                adapter_source, adapter_package, adapter_version,
+                adapter_version_policy, adapter_install_source,
+                adapter_docs_url, certification_blocker,
+                credential_policy, runtime_backend,
                 source, now, now,
             ),
         )

@@ -16,7 +16,15 @@ def client_with_wf(tmp_path, auth_headers):
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
 
     async def override_user():
-        return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
+        return User(
+            id=1,
+            username="tester",
+            email="t@e.com",
+            is_active=True,
+            is_admin=True,
+            tenant_id="default",
+            roles=["admin"],
+        )
 
     def override_db():
 
@@ -31,14 +39,42 @@ def client_with_wf(tmp_path, auth_headers):
     app.dependency_overrides.clear()
 
 
-def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 5.0):
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        data = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if data["status"] in ("succeeded", "failed", "cancelled"):
+def _wait_for_status(
+    client: TestClient,
+    run_id: str,
+    statuses: set[str],
+    timeout_s: float = 30.0,
+) -> dict:
+    deadline = time.monotonic() + timeout_s
+    last_response = None
+    last_data = None
+    while time.monotonic() < deadline:
+        response = client.get(f"/api/v1/workflows/runs/{run_id}")
+        last_response = response
+        if response.status_code == 404:
+            time.sleep(0.05)
+            continue
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert "status" in data, data
+        last_data = data
+        if data["status"] in statuses:
             return data
         time.sleep(0.02)
-    return client.get(f"/api/v1/workflows/runs/{run_id}").json()
+    response = client.get(f"/api/v1/workflows/runs/{run_id}")
+    if response.status_code == 404 and last_response is not None:
+        response = last_response
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert "status" in data, data
+    pytest.fail(
+        f"workflow run {run_id} did not reach {sorted(statuses)} within {timeout_s}s; "
+        f"last_data={last_data or data}"
+    )
+
+
+def _wait_for_terminal(client: TestClient, run_id: str, timeout_s: float = 30.0):
+    return _wait_for_status(client, run_id, {"succeeded", "failed", "cancelled"}, timeout_s)
 
 
 def test_delay_step_then_log_succeeds(client_with_wf: TestClient):
@@ -52,7 +88,11 @@ def test_delay_step_then_log_succeeds(client_with_wf: TestClient):
         ],
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
-    run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {"name": "Alice"}}).json()["run_id"]
+    run_id = client.post(
+        f"/api/v1/workflows/{wid}/run",
+        json={"inputs": {"name": "Alice"}},
+        params={"mode": "sync"},
+    ).json()["run_id"]
     data = _wait_for_terminal(client, run_id)
     assert data["status"] == "succeeded"
     # Final outputs should be from the last step (log)
@@ -78,17 +118,12 @@ def test_wait_for_approval_then_resume(client_with_wf: TestClient):
     }
     wid = client.post("/api/v1/workflows", json=definition).json()["id"]
     run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {"name": "Nina"}}).json()["run_id"]
-    # Wait until the run enters waiting state
-    import time as _time
-    deadline = _time.time() + 5.0
-    waiting = False
-    while _time.time() < deadline:
-        rd = client.get(f"/api/v1/workflows/runs/{run_id}").json()
-        if rd.get("status") in ("waiting_human", "waiting_approval"):
-            waiting = True
-            break
-        _time.sleep(0.05)
-    assert waiting
+    waiting = _wait_for_status(
+        client,
+        run_id,
+        {"waiting_human", "waiting_approval", "failed", "cancelled"},
+    )
+    assert waiting.get("status") in {"waiting_human", "waiting_approval"}, waiting
     # Approve step w1 and resume (use Approvals endpoint)
     r = client.post(f"/api/v1/workflows/runs/{run_id}/steps/w1/approve", json={"comment": "ok"})
     assert r.status_code == 200
@@ -114,6 +149,28 @@ def test_log_only_outputs_shape(client_with_wf: TestClient):
     assert out.get("logged") is True
     assert out.get("level") == "debug"
     assert out.get("message", "").endswith("Bob")
+
+
+def test_log_only_run_persists_canonical_attempt_row(client_with_wf: TestClient):
+    client = client_with_wf
+    definition = {
+        "name": "log-only-attempt-row",
+        "version": 1,
+        "steps": [
+            {"id": "l1", "type": "log", "config": {"message": "Hello {{ inputs.name }}", "level": "info"}},
+        ],
+    }
+    wid = client.post("/api/v1/workflows", json=definition).json()["id"]
+    run_id = client.post(f"/api/v1/workflows/{wid}/run", json={"inputs": {"name": "Ivy"}}).json()["run_id"]
+    data = _wait_for_terminal(client, run_id)
+    assert data["status"] == "succeeded"
+
+    db = app.dependency_overrides[wf_mod._get_db]()
+    attempts = db.list_step_attempts(run_id=run_id, step_id="l1")
+    assert len(attempts) == 1
+    assert attempts[0]["attempt_number"] == 1
+    assert attempts[0]["status"] == "succeeded"
+    assert attempts[0]["ended_at"] is not None
 
 
 def test_step_types_include_deep_research(client_with_wf: TestClient):

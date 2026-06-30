@@ -3,6 +3,7 @@ Integration test (function-level) for embeddings orchestrator SSE behind STREAMS
 direct endpoint invocation to avoid event-loop conflicts with the Redis harness.
 """
 
+import asyncio
 import os
 import json
 import pytest
@@ -70,3 +71,63 @@ def test_embeddings_orchestrator_events_unified_sse(redis_client, monkeypatch):
     finally:
         os.environ.pop("STREAMS_UNIFIED", None)
         os.environ.pop("STREAM_HEARTBEAT_MODE", None)
+
+
+@pytest.mark.asyncio
+async def test_embeddings_orchestrator_events_unified_normal_close_cancels_producer(monkeypatch) -> None:
+    os.environ["STREAMS_UNIFIED"] = "1"
+
+    try:
+        from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as endpoint
+        from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+
+        created_tasks: list[asyncio.Task] = []
+
+        class _FakeSSEStream:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def send_event(self, _event, _payload):
+                return None
+
+            async def error(self, *_args, **_kwargs):
+                return None
+
+            async def iter_sse(self):
+                if False:
+                    yield ""
+                return
+
+        async def _fake_get_redis_client():
+            return object()
+
+        async def _fake_build_snapshot(_client):
+            return {"queues": {}, "stages": {}, "flags": {}, "ts": "now"}
+
+        async def _fake_close(_client):
+            return None
+
+        real_create_task = asyncio.create_task
+
+        def _tracked_create_task(coro):
+            task = real_create_task(coro)
+            created_tasks.append(task)
+            return task
+
+        monkeypatch.setattr(endpoint, "SSEStream", _FakeSSEStream)
+        monkeypatch.setattr(endpoint, "_get_redis_client", _fake_get_redis_client)
+        monkeypatch.setattr(endpoint, "_build_orchestrator_snapshot", _fake_build_snapshot)
+        monkeypatch.setattr(endpoint, "ensure_async_client_closed", _fake_close)
+        monkeypatch.setattr(endpoint.asyncio, "create_task", _tracked_create_task)
+
+        admin = User(id=1, username="admin", email="a@x", is_active=True, is_admin=True)
+        response = await endpoint.orchestrator_events(_current_user=admin)
+        iterator = response.body_iterator
+
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(iterator.__anext__(), timeout=0.2)
+
+        assert len(created_tasks) == 1
+        assert created_tasks[0].cancelled()
+    finally:
+        os.environ.pop("STREAMS_UNIFIED", None)

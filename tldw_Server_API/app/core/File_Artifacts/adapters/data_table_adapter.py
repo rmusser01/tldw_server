@@ -44,6 +44,8 @@ class DataTableAdapter(TableAdapterBase):
         """Export structured table data to JSON bytes."""
         columns = structured.get("columns") or []
         rows = structured.get("rows") or []
+        if self._has_duplicate_columns(columns):
+            raise FileArtifactsValidationError("duplicate_columns")
         try:
             payload = [dict(zip(columns, row, strict=True)) for row in rows]
         except ValueError as exc:

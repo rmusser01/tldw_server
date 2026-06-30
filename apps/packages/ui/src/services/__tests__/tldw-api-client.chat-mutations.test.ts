@@ -30,6 +30,27 @@ describe("TldwApiClient chat mutations", () => {
     vi.clearAllMocks()
   })
 
+  it("creates chats through the backend-canonical trailing-slash endpoint", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      id: "chat-1",
+      title: "Role-play",
+      created_at: "2026-02-18T00:00:00Z",
+      updated_at: "2026-02-18T00:00:00Z",
+      character_id: 42
+    })
+
+    const client = new TldwApiClient()
+    await client.createChat({ character_id: 42 })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chats/",
+        method: "POST",
+        body: expect.objectContaining({ character_id: 42 })
+      })
+    )
+  })
+
   it("retries updateChat once with the latest version after conflict", async () => {
     mocks.bgRequest.mockImplementation(
       async (request: { path?: string; method?: string; body?: unknown }) => {
@@ -123,6 +144,29 @@ describe("TldwApiClient chat mutations", () => {
       mode: "per_turn",
       cross_provider: false
     })
+  })
+
+  it("forwards explicit chat completion timeouts to the request transport", async () => {
+    mocks.bgRequest.mockResolvedValue({ id: "resp-1", object: "chat.completion" })
+
+    const client = new TldwApiClient()
+    await client.createChatCompletion(
+      {
+        model: "auto",
+        messages: [{ role: "user", content: "hello" }]
+      },
+      { timeoutMs: 180_000 }
+    )
+
+    const request = mocks.bgRequest.mock.calls.at(-1)?.[0] as {
+      path?: string
+      method?: string
+      timeoutMs?: number
+    }
+
+    expect(request.path).toBe("/api/v1/chat/completions")
+    expect(request.method).toBe("POST")
+    expect(request.timeoutMs).toBe(180_000)
   })
 
   it("sanitizes leaky background payload fields when creating a chat completion", async () => {

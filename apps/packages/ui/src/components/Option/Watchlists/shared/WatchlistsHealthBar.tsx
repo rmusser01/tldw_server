@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react"
-import { Button, Spin, Tag, Tooltip } from "antd"
+import { Button, Spin, Tooltip } from "antd"
 import {
   AlertTriangle,
   ChevronDown,
@@ -19,6 +19,7 @@ import {
   type WatchlistsOverviewHealthModel
 } from "@/services/watchlists-overview"
 import { formatRelativeTime } from "@/utils/dateFormatters"
+import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 
 const HEALTH_BAR_STORAGE_KEY = "watchlists:health-bar-expanded:v1"
 const HEALTH_BAR_REFRESH_MS = 30_000
@@ -102,7 +103,12 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
   }, [loadData])
 
   const feedsCount = data?.sources.total ?? 0
+  const monitorsTotal = data?.jobs.total ?? 0
   const monitorsActive = data?.jobs.active ?? 0
+  const runningRuns = data?.runs.running ?? 0
+  const pendingRuns = data?.runs.pending ?? 0
+  const failedRuns = data?.runs.failed ?? 0
+  const outputsTotal = data?.outputs.total ?? 0
   const lastCheckedAt = data?.runs.running > 0
     ? t("watchlists:healthBar.runningNow", "running now")
     : data?.jobs.nextRunAt
@@ -110,9 +116,21 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
       : data?.fetchedAt
         ? formatRelativeTime(data.fetchedAt, t)
         : null
-  const unreadArticles = data?.items.unread ?? 0
+  const unreadUpdates = data?.items.unread ?? 0
+  const sourceErrorRuns = data?.runs.sourceErrors ?? 0
+  const zeroItemSourceErrorRuns = data?.runs.zeroItemSourceErrors ?? 0
   const attentionTotal = overviewHealth?.attention?.total ?? 0
   const hasAttention = attentionTotal > 0
+  const hasOperationalData =
+    feedsCount +
+      monitorsTotal +
+      unreadUpdates +
+      runningRuns +
+      pendingRuns +
+      failedRuns +
+      outputsTotal >
+    0
+  const hasNoWatchlistData = Boolean(data) && !hasOperationalData
 
   const summaryParts: string[] = []
   if (feedsCount > 0) {
@@ -127,17 +145,24 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
       })
     )
   }
-  if (lastCheckedAt) {
+  if (failedRuns > 0) {
+    summaryParts.push(
+      t("watchlists:healthBar.runsFailed", "{{count}} failed", {
+        count: failedRuns
+      })
+    )
+  }
+  if (lastCheckedAt && hasOperationalData) {
     summaryParts.push(
       data?.jobs.nextRunAt
         ? t("watchlists:healthBar.nextRun", "Next run {{time}}", { time: lastCheckedAt })
         : t("watchlists:healthBar.lastChecked", "Checked {{time}}", { time: lastCheckedAt })
     )
   }
-  if (unreadArticles > 0) {
+  if (unreadUpdates > 0) {
     summaryParts.push(
-      t("watchlists:healthBar.articlesPending", "{{count}} articles pending", {
-        count: unreadArticles
+      t("watchlists:healthBar.articlesPending", "{{count}} updates pending", {
+        count: unreadUpdates
       })
     )
   }
@@ -182,6 +207,32 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
           {summaryParts.length > 0 ? summaryParts.join(" \u00B7 ") : t("watchlists:healthBar.noData", "No watchlist data yet")}
         </span>
         <div className="flex items-center gap-2">
+          {hasNoWatchlistData && (
+            <>
+              <Button
+                size="small"
+                type="default"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  goToTab("sources")
+                }}
+                data-testid="watchlists-health-setup-feeds"
+              >
+                {t("watchlists:quickActions.sources", "Set up feeds")}
+              </Button>
+              <Button
+                size="small"
+                type="default"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  goToTab("jobs")
+                }}
+                data-testid="watchlists-health-setup-monitors"
+              >
+                {t("watchlists:quickActions.jobs", "Configure monitors")}
+              </Button>
+            </>
+          )}
           {refreshing && <Spin size="small" />}
           <Tooltip title={t("watchlists:healthBar.refresh", "Refresh")}>
             <Button
@@ -267,6 +318,10 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
                     ? t("watchlists:healthBar.runsFailed", "{{count}} failed", {
                         count: data.runs.failed
                       })
+                    : sourceErrorRuns > 0
+                      ? t("watchlists:healthBar.runsSourceErrors", "{{count}} source errors", {
+                          count: sourceErrorRuns
+                        })
                     : t("watchlists:healthBar.runsOk", "OK")
               }
               status={overviewHealth?.statuses.runs}
@@ -275,14 +330,20 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
                   ? t("watchlists:healthBar.runsFailedDetail", "{{count}} recent failures", {
                       count: data.runs.failed
                     })
+                  : zeroItemSourceErrorRuns > 0
+                    ? t(
+                        "watchlists:healthBar.runsZeroItemSourceErrors",
+                        "{{count}} zero-item source-error runs",
+                        { count: zeroItemSourceErrorRuns }
+                      )
                   : undefined
               }
               onClick={() => goToTab("runs")}
             />
-            {/* Articles */}
+            {/* Updates */}
             <HealthCard
               icon={<Newspaper className="h-4 w-4" />}
-              label={t("watchlists:terminology.canonical.articles", "Articles")}
+              label={t("watchlists:terminology.canonical.articles", "Updates")}
               value={String(data.items.unread)}
               detail={t("watchlists:healthBar.articlesUnread", "unread")}
               onClick={() => goToTab("items")}
@@ -293,48 +354,46 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
           {hasAttention && (
             <div className="mt-3 flex flex-wrap gap-2" data-testid="watchlists-health-bar-attention">
               {(overviewHealth?.attention?.sources ?? 0) > 0 && (
-                <Tag
-                  color="warning"
-                  className="cursor-pointer"
+                <AttentionBadgeButton
+                  variant="warning"
                   onClick={() => goToTab("sources")}
                 >
                   {t("watchlists:overview.attention.sources", "Feeds need review ({{count}})", {
                     count: overviewHealth?.attention?.sources ?? 0
                   })}
-                </Tag>
+                </AttentionBadgeButton>
               )}
               {(overviewHealth?.attention?.runs ?? 0) > 0 && (
-                <Tag
-                  color="error"
-                  className="cursor-pointer"
+                <Button
+                  size="small"
+                  danger
                   onClick={() => goToTab("runs")}
+                  data-testid="watchlists-health-open-activity"
                 >
-                  {t("watchlists:overview.attention.runs", "Failed activity runs ({{count}})", {
+                  {t("watchlists:healthBar.openActivityFailures", "Open Activity ({{count}} failed)", {
                     count: overviewHealth?.attention?.runs ?? 0
                   })}
-                </Tag>
+                </Button>
               )}
               {(overviewHealth?.attention?.outputs ?? 0) > 0 && (
-                <Tag
-                  color="warning"
-                  className="cursor-pointer"
+                <AttentionBadgeButton
+                  variant="warning"
                   onClick={() => goToTab("outputs")}
                 >
-                  {t("watchlists:overview.attention.outputs", "Reports with delivery issues ({{count}})", {
+                  {t("watchlists:overview.attention.outputs", "Reports need review ({{count}})", {
                     count: overviewHealth?.attention?.outputs ?? 0
                   })}
-                </Tag>
+                </AttentionBadgeButton>
               )}
               {(overviewHealth?.attention?.jobs ?? 0) > 0 && (
-                <Tag
-                  color="warning"
-                  className="cursor-pointer"
+                <AttentionBadgeButton
+                  variant="warning"
                   onClick={() => goToTab("jobs")}
                 >
                   {t("watchlists:overview.attention.jobs", "Monitors need schedule fixes ({{count}})", {
                     count: overviewHealth?.attention?.jobs ?? 0
                   })}
-                </Tag>
+                </AttentionBadgeButton>
               )}
             </div>
           )}
@@ -343,6 +402,28 @@ export const WatchlistsHealthBar: React.FC<HealthBarProps> = ({ onOpenSettings, 
     </div>
   )
 }
+
+interface AttentionBadgeButtonProps {
+  variant: BadgeVariant
+  children: React.ReactNode
+  onClick: () => void
+}
+
+const AttentionBadgeButton: React.FC<AttentionBadgeButtonProps> = ({
+  variant,
+  children,
+  onClick
+}) => (
+  <button
+    type="button"
+    className="rounded-full border-0 bg-transparent p-0 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+    onClick={onClick}
+  >
+    <Badge variant={variant} className="cursor-pointer">
+      {children}
+    </Badge>
+  </button>
+)
 
 interface HealthCardProps {
   icon: React.ReactNode

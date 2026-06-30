@@ -10,9 +10,21 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 
 @pytest.fixture(autouse=True)
 def _testing_env():
+    keys = (
+        "TESTING",
+        "EMBEDDINGS_DIMENSION_POLICY",
+        "USE_REAL_OPENAI_IN_TESTS",
+    )
+    previous = {key: os.environ.get(key) for key in keys}
     os.environ["TESTING"] = "true"
-    yield
-    os.environ.pop("TESTING", None)
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 @pytest.fixture

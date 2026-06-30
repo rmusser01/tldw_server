@@ -55,6 +55,31 @@ describe("TldwApiClient character persist cache invalidation", () => {
     expect(invalidateSpy).toHaveBeenCalledWith("chat-1")
   })
 
+  it("adds chat scope query params when persisting character completions", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      assistant_message_id: "assistant-server-1",
+      version: 2
+    })
+
+    const client = new TldwApiClient()
+
+    await client.persistCharacterCompletion(
+      "chat-1",
+      {
+        assistant_content: "scoped reply"
+      },
+      {
+        scope: { type: "workspace", workspaceId: "workspace-7" }
+      }
+    )
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chats/chat-1/completions/persist?scope_type=workspace&workspace_id=workspace-7"
+      })
+    )
+  })
+
   it("invalidates cached chat messages when persist reports saved degraded state via top-level detail", async () => {
     const error = Object.assign(new Error("degraded"), {
       status: 503,

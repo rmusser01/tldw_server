@@ -26,6 +26,8 @@ class FakeTime:
     commit_actual=st.integers(min_value=0, max_value=5),
 )
 async def test_tokens_refund_parity_and_steady_no_denials(per_min, first_units, commit_actual):
+    first_units = min(int(first_units), int(per_min))
+
     class _Loader:
         def get_policy(self, pid):
             return {"tokens": {"per_min": int(per_min)}, "scopes": ["global", "user"]}
@@ -38,7 +40,7 @@ async def test_tokens_refund_parity_and_steady_no_denials(per_min, first_units, 
     e = "user:tokp"
 
     # Reserve first batch
-    d1, h1 = await rg.reserve(RGRequest(entity=e, categories={"tokens": {"units": int(first_units)}}, tags={"policy_id": "p"}))
+    d1, h1 = await rg.reserve(RGRequest(entity=e, categories={"tokens": {"units": first_units}}, tags={"policy_id": "p"}))
     assert d1.allowed and h1
 
     # Commit with actual less/equal than reserved (never greater)

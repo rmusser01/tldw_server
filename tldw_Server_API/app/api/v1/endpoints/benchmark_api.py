@@ -88,10 +88,10 @@ async def list_benchmarks():
         )
 
     except Exception as e:
-        logger.error(f"Failed to list benchmarks: {e}")
+        logger.error("Failed to list benchmarks")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list benchmarks: {str(e)}"
+            detail="Failed to list benchmarks"
         ) from e
 
 
@@ -122,10 +122,10 @@ async def get_benchmark_info(benchmark_name: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get benchmark info: {e}")
+        logger.error("Failed to get benchmark info")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get benchmark info: {str(e)}"
+            detail="Failed to get benchmark info"
         ) from e
 
 
@@ -172,10 +172,10 @@ async def get_benchmark_samples(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get benchmark samples: {e}")
+        logger.error("Failed to get benchmark samples")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get samples: {str(e)}"
+            detail="Failed to get samples"
         ) from e
 
 
@@ -264,7 +264,7 @@ async def run_benchmark(
             # Process results
             for item, result in zip(batch, batch_results):
                 if isinstance(result, Exception):
-                    logger.error(f"Evaluation failed for item: {result}")
+                    logger.error("Benchmark item evaluation failed")
                     results.append({
                         "item": item,
                         "score": 0.0,
@@ -334,10 +334,10 @@ async def run_benchmark(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to run benchmark: {e}")
+        logger.error("Failed to run benchmark")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to run benchmark: {str(e)}"
+            detail="Failed to run benchmark"
         ) from e
 
 
@@ -372,8 +372,8 @@ async def evaluate_simpleqa(
         }
 
     except Exception as e:
-        logger.error(f"SimpleQA evaluation failed: {e}")
+        logger.error("SimpleQA evaluation failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Evaluation failed: {str(e)}"
+            detail="Evaluation failed"
         ) from e

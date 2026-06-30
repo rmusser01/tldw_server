@@ -4,12 +4,12 @@ import {
   Table,
   Button,
   Select,
-  Alert,
   Space,
   Collapse,
   Statistic,
   message
 } from "antd"
+import { Alert } from "@/components/ui/primitives"
 import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
@@ -242,10 +242,18 @@ const UsageAnalyticsPage: React.FC = () => {
   // ── Render ──
 
   if (adminGuard === "forbidden") {
-    return <Alert type="error" title="Access Denied" description="You don't have permission to access usage analytics." showIcon />
+    return (
+      <Alert variant="error" title="Access Denied">
+        You don't have permission to access usage analytics.
+      </Alert>
+    )
   }
   if (adminGuard === "notFound") {
-    return <Alert type="warning" title="Not Available" description="Usage analytics is not available on this server." showIcon />
+    return (
+      <Alert variant="warning" title="Not Available">
+        Usage analytics is not available on this server.
+      </Alert>
+    )
   }
 
   return (

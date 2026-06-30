@@ -435,6 +435,14 @@ class TestEvaluationHistoryEndpoint:
         assert "items" in result
         assert "total_count" in result
         assert len(result["items"]) <= 10
+        assert result["pagination"] == {
+            "mode": "offset",
+            "limit": 10,
+            "offset": 0,
+            "total": result["total_count"],
+            "has_more": result["total_count"] > 10,
+            "next_offset": 10 if result["total_count"] > 10 else None,
+        }
 
     @pytest.mark.asyncio
     async def test_history_with_date_filter(self, async_api_client, auth_headers):

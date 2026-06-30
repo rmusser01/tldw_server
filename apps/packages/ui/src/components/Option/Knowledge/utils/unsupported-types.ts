@@ -1,18 +1,6 @@
-export const imageTypes = [
-"image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/gif",
-  "image/webp",
-  "image/svg+xml",
-  "image/bmp",
-  "image/tiff",
-  "image/ico",
-  "image/heic",
-  "image/heif",
-  "image/avif",
-]
+import { IMAGE_ATTACHMENT_MIME_TYPES } from "@/utils/image-utils"
 
+export const imageTypes = Array.from(IMAGE_ATTACHMENT_MIME_TYPES)
 
 export const otherUnsupportedTypes = [
 
@@ -73,4 +61,3 @@ export const unsupportedTypes = [
   ...imageTypes,
   ...otherUnsupportedTypes,
 ]
-

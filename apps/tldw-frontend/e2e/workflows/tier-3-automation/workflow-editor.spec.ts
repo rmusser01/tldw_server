@@ -47,6 +47,17 @@ test.describe("Workflow Editor", () => {
       const saveVisible = await editor.saveButton.isVisible().catch(() => false)
       expect(saveVisible).toBe(true)
 
+      await expect(authedPage.getByTestId("workflow-editor-status-summary")).toBeVisible()
+      await expect(
+        authedPage.getByRole("button", { name: "Import workflow" })
+      ).toBeVisible()
+      await expect(
+        authedPage.getByRole("button", { name: "Export workflow" })
+      ).toBeVisible()
+      await expect(
+        authedPage.getByRole("button", { name: "Open run panel" })
+      ).toBeVisible()
+
       // Status bar should show node/connection counts
       const nodeCountVisible = await editor.nodeCount.isVisible().catch(() => false)
       const connectionCountVisible = await editor.connectionCount.isVisible().catch(() => false)
@@ -147,10 +158,7 @@ test.describe("Workflow Editor", () => {
       await editor.openMoreActions()
 
       // Dropdown menu should appear with New Workflow, Import, Export, Clear Canvas
-      const newWorkflowVisible = await editor.newWorkflowMenuItem.isVisible().catch(() => false)
-      const clearCanvasVisible = await editor.clearCanvasMenuItem.isVisible().catch(() => false)
-
-      expect(newWorkflowVisible || clearCanvasVisible).toBe(true)
+      await expect(editor.newWorkflowMenuItem).toBeVisible({ timeout: 5_000 })
 
       // Close dropdown by pressing Escape
       await authedPage.keyboard.press("Escape")

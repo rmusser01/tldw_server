@@ -295,7 +295,7 @@ def test_legacy_state_wrappers_round_trip_exists_and_processing_flags() -> None:
 
         unprocessed_after = get_unprocessed_media(db)
         media_row = db.execute_query(
-            "SELECT vector_processing, version, client_id FROM Media WHERE id = ?",
+            "SELECT vector_processing, chunking_status, version, client_id FROM Media WHERE id = ?",
             (media_id,),
         ).fetchone()
         sync_row = db.execute_query(
@@ -315,6 +315,7 @@ def test_legacy_state_wrappers_round_trip_exists_and_processing_flags() -> None:
         assert all(row["id"] != media_id for row in unprocessed_after)
         assert media_row is not None
         assert media_row["vector_processing"] == 1
+        assert media_row["chunking_status"] == "completed"
         assert media_row["version"] == 2
         assert media_row["client_id"] == "legacy-state-wrappers"
         assert sync_row is not None

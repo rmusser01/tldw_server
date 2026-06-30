@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 import pytest
 
@@ -10,7 +11,9 @@ from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQu
 
 def _make_sqlite_db() -> CharactersRAGDB:
     db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db.backend_type = BackendType.SQLITE
+    db._backend = SimpleNamespace(backend_type=BackendType.SQLITE)
+    db._uses_shared_content_backend = False
+    db._local = SimpleNamespace(backend_ref=None)
     db.execute_query = MagicMock()
     db._get_current_utc_timestamp_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
     return db

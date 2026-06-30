@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.endpoints import privileges as privileges_endpoint
 from tldw_Server_API.app.main import app as fastapi_app
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
@@ -19,8 +20,18 @@ class InMemoryTrendStore:
     def __init__(self) -> None:
         self.snapshots = []
 
-    async def record_snapshot(self, *, scope, group_by, catalog_version, generated_at, buckets, team_id=None):  # type: ignore[no-untyped-def]
-        self.snapshots.append((scope, group_by, generated_at, buckets, team_id))
+    async def record_snapshot(
+        self,
+        *,
+        scope,
+        group_by,
+        catalog_version,
+        generated_at,
+        buckets,
+        team_id=None,
+        org_id=None,
+    ):  # type: ignore[no-untyped-def]
+        self.snapshots.append((scope, group_by, generated_at, buckets, team_id, org_id))
 
     async def compute_trends(self, *, scope, group_by, bucket_counts, window_start, window_end, team_id=None, org_id=None):  # type: ignore[no-untyped-def]
         trends = []
@@ -313,6 +324,14 @@ def test_get_org_detail_pagination(privilege_test_client: TestClient):
     payload = response.json()
     assert payload["page"] == 1
     assert payload["page_size"] == 5
+    assert payload["pagination"] == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 5,
+        "total": payload["total_items"],
+        "total_pages": (payload["total_items"] + 4) // 5,
+        "has_more": payload["total_items"] > 5,
+    }
     assert payload["items"], "Expected detail items to be present"
     statuses = {item["status"] for item in payload["items"]}
     assert statuses.issubset({"allowed", "blocked"})
@@ -350,8 +369,33 @@ def test_team_detail_filters(privilege_test_client: TestClient):
     assert response.status_code == 200
     payload = response.json()
     assert payload["total_items"] >= 1
+    assert payload["pagination"] == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 5,
+        "total": payload["total_items"],
+        "total_pages": (payload["total_items"] + 4) // 5,
+        "has_more": payload["total_items"] > 5,
+    }
     for item in payload["items"]:
         assert "media" in item["endpoint"]
+
+
+def test_user_detail_includes_canonical_page_pagination(privilege_test_client: TestClient):
+    response = privilege_test_client.get(
+        "/api/v1/privileges/users/user-1",
+        params={"page": 1, "page_size": 5},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pagination"] == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 5,
+        "total": payload["total_items"],
+        "total_pages": (payload["total_items"] + 4) // 5,
+        "has_more": payload["total_items"] > 5,
+    }
 
 
 def test_team_detail_dependency_filter(privilege_test_client: TestClient):
@@ -380,6 +424,14 @@ def test_snapshot_list_filters(privilege_test_client: TestClient):
     assert response.status_code == 200
     payload = response.json()
     assert payload["total_items"] == 1
+    assert payload["pagination"] == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 50,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": False,
+    }
     assert payload["items"][0]["org_id"] == "acme"
     assert payload["items"][0]["target_scope"] == "org"
 
@@ -407,6 +459,14 @@ def test_get_snapshot_detail(privilege_test_client: TestClient):
     payload = response.json()
     assert payload["snapshot_id"] == "snap-2025-01-15-001"
     assert payload["detail"]["total_items"] >= 1
+    assert payload["detail"]["pagination"] == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 500,
+        "total": payload["detail"]["total_items"],
+        "total_pages": 1,
+        "has_more": False,
+    }
     endpoints = {item["endpoint"] for item in payload["detail"]["items"]}
     assert "/api/v1/media/process" in endpoints
     assert payload["target_scope"] == "org"
@@ -447,6 +507,28 @@ def test_create_snapshot_org(privilege_test_client: TestClient):
     payload = response.json()
     assert payload["target_scope"] == "org"
     assert payload["summary"]["users"] >= 1
+
+
+def test_create_snapshot_sync_ids_are_collision_resistant(privilege_test_client: TestClient, monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 1, 1, 12, 0, 0, tzinfo=tz or timezone.utc)
+
+    monkeypatch.setattr(privileges_endpoint, "datetime", FixedDateTime)
+
+    first = privilege_test_client.post(
+        "/api/v1/privileges/snapshots",
+        json={"target_scope": "org", "org_id": "acme"},
+    )
+    second = privilege_test_client.post(
+        "/api/v1/privileges/snapshots",
+        json={"target_scope": "org", "org_id": "acme"},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["snapshot_id"] != second.json()["snapshot_id"]
 
 
 def test_org_requires_admin_claim(privilege_test_client: TestClient):

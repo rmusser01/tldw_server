@@ -20,6 +20,7 @@ import {
   consumeStreamingChunk,
   type StreamingChunk
 } from "@/utils/streaming-chunks"
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import { buildMessageSteeringSnippet } from "@/utils/message-steering"
 import { useStoreMessageOption } from "@/store/option"
 import type { ChatHistory, Message, ToolChoice } from "~/store/option"
@@ -35,8 +36,20 @@ import {
   normalizeImageGenerationVariantBundle,
   type ImageGenerationEventSyncPolicy
 } from "@/utils/image-generation-chat"
+import { OPENUI_SYSTEM_PROMPT } from "@/utils/dynamic-ui-openui-prompt"
+import { buildDynamicUIEnvelope } from "@/utils/dynamic-ui"
+import {
+  chatSubmitFailed,
+  chatSubmitSkipped,
+  chatSubmitSubmitted,
+  type ChatSubmitResult
+} from "@/hooks/chat/chat-action-utils"
+import { isAbortLikeError } from "@/hooks/chat/abort-turn-cleanup"
+import type { DynamicUIRequest } from "@/types/dynamic-ui"
+import type { MessageMetadataExtra } from "@/store/option"
 
 const STREAMING_UPDATE_INTERVAL_MS = 80
+const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
 let didLogPipelineSetHistoryMissing = false
 
 export type ChatModeParamsBase = {
@@ -64,11 +77,14 @@ export type ChatModeParamsBase = {
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
   historyForModel?: ChatHistory
+  messageForModel?: string
   regenerateFromMessage?: Message
   messageSteering?: MessageSteeringFlags
   messageSteeringPrompts?: MessageSteeringPromptTemplates
   imageEventSyncPolicy?: ImageGenerationEventSyncPolicy
   researchContext?: ChatResearchContext
+  dynamicUIRequest?: DynamicUIRequest
+  userMetadataExtra?: MessageMetadataExtra
 }
 
 export type ChatModeContext<TParams extends ChatModeParamsBase> = TParams & {
@@ -148,9 +164,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
   history: ChatHistory,
   signal: AbortSignal,
   params: TParams
-) => {
+): Promise<ChatSubmitResult> => {
   const {
-    selectedModel,
+    selectedModel: rawSelectedModel,
     toolChoice,
     setMessages,
     saveMessageOnSuccess,
@@ -164,7 +180,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     clusterId,
     userMessageType,
     assistantMessageType,
-    modelIdOverride,
+    modelIdOverride: rawModelIdOverride,
     userMessageId,
     assistantMessageId,
     userParentMessageId,
@@ -174,6 +190,13 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     imageEventSyncPolicy,
     conversationId
   } = params
+  const selectedModelSelection =
+    parseProviderQualifiedModelSelection(rawSelectedModel)
+  const selectedModel =
+    selectedModelSelection.modelId || rawSelectedModel
+  const modelIdOverride = rawModelIdOverride
+    ? String(rawModelIdOverride).trim()
+    : undefined
 
   const resolvedAssistantMessageId = assistantMessageId ?? generateID()
   const resolvedUserMessageId =
@@ -201,6 +224,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
   const context: ChatModeContext<TParams> = {
     ...params,
+    selectedModel,
+    modelIdOverride,
     message,
     image,
     isRegenerate,
@@ -301,6 +326,20 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     )
   }
 
+  const applyMetadataExtra = (
+    messageEntry: Message,
+    metadataExtra?: MessageMetadataExtra
+  ): Message => {
+    if (!metadataExtra) return messageEntry
+    return {
+      ...messageEntry,
+      metadataExtra: {
+        ...(messageEntry.metadataExtra ?? {}),
+        ...metadataExtra
+      }
+    }
+  }
+
   const flushStreamingUpdate = () => {
     streamingTimer = null
     lastStreamingUpdateAt = Date.now()
@@ -352,7 +391,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     setMessagesWithTransition((prev) => {
       const assistantStub = mode.buildAssistantMessage!(context)
       if (!isRegenerate) {
-        const userMessageEntry = mode.buildUserMessage!(context)
+        const userMessageEntry = applyMetadataExtra(
+          mode.buildUserMessage!(context),
+          params.userMetadataExtra
+        )
         return [...prev, userMessageEntry, assistantStub]
       }
       return [...prev, assistantStub]
@@ -469,12 +511,19 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         reasoning_time_taken: timetaken,
         saveToDb: preflight.saveToDb ?? false,
         conversationId: preflight.conversationId,
-        imageEventSyncPolicy
+        imageEventSyncPolicy,
+        userMetadataExtra: !isRegenerate ? params.userMetadataExtra : undefined
       })
-      return
+      return chatSubmitSubmitted()
     }
 
     const promptData = await mode.preparePrompt(context)
+    if (params.dynamicUIRequest?.renderer === "openui") {
+      promptData.chatHistory = [
+        { role: "system", content: OPENUI_SYSTEM_PROMPT },
+        ...promptData.chatHistory
+      ]
+    }
     const steeringSnippet = buildMessageSteeringSnippet(
       context.messageSteering || {
         continueAsUser: false,
@@ -580,9 +629,28 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       count++
     }
 
+    if (
+      !signal.aborted &&
+      count === 0 &&
+      fullText.trim().length === 0 &&
+      !isImageGenerationTurn
+    ) {
+      throw new Error(
+        streamTransportInterruptionReason ||
+          "The provider did not return a response."
+      )
+    }
+
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
     const toolCalls = extractToolCalls(generationInfo)
+    if (
+      fullText.trim().length === 0 &&
+      (!Array.isArray(toolCalls) || toolCalls.length === 0) &&
+      !isImageGenerationTurn
+    ) {
+      throw new Error(EMPTY_RESPONSE_ERROR_MESSAGE)
+    }
     applyMcpModuleDisclosureFromToolCalls(toolCalls)
     const finalGenerationInfo = streamTransportInterrupted
       ? {
@@ -597,6 +665,13 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
             "Stream transport interrupted; partial response saved."
         }
       : generationInfo
+    const dynamicUIEnvelope =
+      params.dynamicUIRequest?.renderer === "openui"
+        ? buildDynamicUIEnvelope("openui", fullText)
+        : null
+    const assistantMetadataExtra = dynamicUIEnvelope
+      ? { dynamic_ui: dynamicUIEnvelope }
+      : undefined
     setMessagesWithTransition((prev) =>
       prev.map((msg) =>
         msg.id === generateMessageId
@@ -606,7 +681,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                 sources,
                 generationInfo: finalGenerationInfo,
                 toolCalls,
-                reasoning_time_taken: timetaken
+                reasoning_time_taken: timetaken,
+                ...(assistantMetadataExtra
+                  ? { metadataExtra: assistantMetadataExtra }
+                  : {})
               })
             )
           : msg
@@ -649,14 +727,28 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       reasoning_time_taken: timetaken,
       saveToDb: Boolean(modelClient.saveToDb),
       conversationId: modelClient.conversationId,
-      imageEventSyncPolicy
+      imageEventSyncPolicy,
+      userMetadataExtra: !isRegenerate ? params.userMetadataExtra : undefined,
+      assistantMetadataExtra
     })
+    return chatSubmitSubmitted()
   } catch (e) {
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
-    const assistantContent = buildAssistantErrorContent(fullText, e)
-    const interruptionReason =
-      e instanceof Error && e.message.trim().length > 0
+    const isAbort = signal.aborted || isAbortLikeError(e)
+    const assistantContent = isAbort
+      ? fullText
+      : buildAssistantErrorContent(fullText, e)
+    const assistantErrorDynamicUIEnvelope =
+      params.dynamicUIRequest?.renderer === "openui"
+        ? buildDynamicUIEnvelope("openui", assistantContent)
+        : null
+    const assistantErrorMetadataExtra = assistantErrorDynamicUIEnvelope
+      ? { dynamic_ui: assistantErrorDynamicUIEnvelope }
+      : undefined
+    const interruptionReason = isAbort
+      ? "Request cancelled"
+      : e instanceof Error && e.message.trim().length > 0
         ? e.message
         : "Something went wrong."
     setMessagesWithTransition((prev) =>
@@ -700,12 +792,19 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       documents,
       isContinue: mode.isContinue,
       prompt_content: promptContent,
-      prompt_id: promptId
+      prompt_id: promptId,
+      userMetadataExtra: !isRegenerate ? params.userMetadataExtra : undefined,
+      assistantMetadataExtra: assistantErrorMetadataExtra
     })
+
+    if (isAbort) {
+      return chatSubmitSkipped(interruptionReason)
+    }
 
     if (!errorSave) {
       throw e
     }
+    return chatSubmitFailed(interruptionReason)
   } finally {
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
     setIsProcessing(false)

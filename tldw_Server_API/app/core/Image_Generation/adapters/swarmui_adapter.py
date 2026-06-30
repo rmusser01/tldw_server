@@ -2,27 +2,25 @@
 
 from __future__ import annotations
 
-import base64
-import contextlib
-import io
 from typing import Any
 from urllib.parse import quote, urlparse
 
 from loguru import logger
 
-from tldw_Server_API.app.core.http_client import fetch, fetch_json
+from tldw_Server_API.app.core.http_client import fetch_json
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequest, ImageGenResult
+from tldw_Server_API.app.core.Image_Generation.adapters.image_format_utils import (
+    decode_data_url as decode_shared_data_url,
+    fetch_image_bytes as fetch_shared_image_bytes,
+    validate_and_convert_image_output,
+)
 from tldw_Server_API.app.core.Image_Generation.config import (
     DEFAULT_SWARMUI_BASE_URL,
     DEFAULT_SWARMUI_TIMEOUT_SECONDS,
     get_image_generation_config,
 )
 from tldw_Server_API.app.core.Image_Generation.exceptions import ImageBackendUnavailableError, ImageGenerationError
-
-try:
-    from PIL import Image
-except Exception:  # pragma: no cover - optional dependency guard
-    Image = None  # type: ignore
+from tldw_Server_API.app.core.Image_Generation.request_validation import effective_inline_max_bytes
 
 
 class SwarmUIAdapter:
@@ -50,15 +48,23 @@ class SwarmUIAdapter:
             raise ImageGenerationError("SwarmUI did not return any images")
 
         if image_ref.startswith("data:"):
-            content, content_type = _decode_data_url(image_ref)
-            fmt = _format_from_content_type(content_type)
-            content, content_type = _maybe_convert_format(content, content_type, fmt, output_format)
+            content, content_type = decode_shared_data_url(image_ref, max_bytes=self._max_output_bytes())
+            content, content_type = validate_and_convert_image_output(
+                content,
+                content_type,
+                output_format,
+                max_bytes=self._max_output_bytes(),
+            )
             return ImageGenResult(content=content, content_type=content_type, bytes_len=len(content))
 
         image_url = self._resolve_image_url(base_url, image_ref)
         content, content_type = self._fetch_image_bytes(image_url)
-        fmt = _format_from_content_type(content_type) or _format_from_url(image_ref)
-        content, content_type = _maybe_convert_format(content, content_type, fmt, output_format)
+        content, content_type = validate_and_convert_image_output(
+            content,
+            content_type,
+            output_format,
+            max_bytes=self._max_output_bytes(),
+        )
         return ImageGenResult(content=content, content_type=content_type, bytes_len=len(content))
 
     def _resolve_base_url(self) -> str:
@@ -74,6 +80,9 @@ class SwarmUIAdapter:
         if not token:
             return None
         return {"swarm_token": token}
+
+    def _max_output_bytes(self) -> int:
+        return effective_inline_max_bytes(self._config)
 
     def _ensure_session(self, base_url: str) -> str:
         if self._session_id:
@@ -174,121 +183,45 @@ class SwarmUIAdapter:
     @staticmethod
     def _resolve_image_url(base_url: str, image_ref: str) -> str:
         if image_ref.startswith("http://") or image_ref.startswith("https://"):
+            if not SwarmUIAdapter._same_origin(base_url, image_ref):
+                raise ImageGenerationError("SwarmUI returned off-origin image URL")
             return image_ref
         parsed = urlparse(image_ref)
         if parsed.scheme in {"http", "https"}:
+            if not SwarmUIAdapter._same_origin(base_url, image_ref):
+                raise ImageGenerationError("SwarmUI returned off-origin image URL")
             return image_ref
         path = image_ref.lstrip("/")
         encoded_path = "/".join(quote(part) for part in path.split("/"))
         return f"{base_url.rstrip('/')}/{encoded_path}"
 
+    @staticmethod
+    def _same_origin(base_url: str, target_url: str) -> bool:
+        base = urlparse(base_url)
+        target = urlparse(target_url)
+        return (
+            base.scheme.lower() == target.scheme.lower()
+            and (base.hostname or "").lower() == (target.hostname or "").lower()
+            and SwarmUIAdapter._origin_port(base) == SwarmUIAdapter._origin_port(target)
+        )
+
+    @staticmethod
+    def _origin_port(parsed) -> int | None:
+        if parsed.port is not None:
+            return int(parsed.port)
+        if parsed.scheme.lower() == "https":
+            return 443
+        if parsed.scheme.lower() == "http":
+            return 80
+        return None
+
     def _fetch_image_bytes(self, url: str) -> tuple[bytes, str]:
         try:
-            response = fetch(
-                method="GET",
-                url=url,
+            return fetch_shared_image_bytes(
+                url,
                 cookies=self._cookies(),
                 timeout=self._config.swarmui_timeout_seconds or DEFAULT_SWARMUI_TIMEOUT_SECONDS,
+                max_bytes=self._max_output_bytes(),
             )
         except Exception as exc:
             raise ImageGenerationError(f"SwarmUI image fetch failed: {exc}") from exc
-        try:
-            status = getattr(response, "status_code", None) or response.status_code
-        except Exception:
-            status = None
-        if status and int(status) >= 400:
-            with contextlib.suppress(Exception):
-                response.close()
-            raise ImageGenerationError(f"SwarmUI image fetch failed with status {status}")
-        try:
-            content = response.content
-        except Exception as exc:
-            with contextlib.suppress(Exception):
-                response.close()
-            raise ImageGenerationError(f"SwarmUI image fetch failed: {exc}") from exc
-        content_type = response.headers.get("content-type", "application/octet-stream")
-        with contextlib.suppress(Exception):
-            response.close()
-        return content, content_type.split(";")[0].strip().lower()
-
-
-def _decode_data_url(data_url: str) -> tuple[bytes, str]:
-    header, _, encoded = data_url.partition(",")
-    if not header.startswith("data:"):
-        raise ImageGenerationError("invalid data URL")
-    meta = header[5:]
-    content_type = "application/octet-stream"
-    content_type = meta.split(";", 1)[0] or content_type if ";" in meta else meta or content_type
-    if ";base64" not in header:
-        raise ImageGenerationError("unsupported data URL encoding")
-    try:
-        content = base64.b64decode(encoded)
-    except Exception as exc:
-        raise ImageGenerationError("invalid base64 data") from exc
-    return content, content_type
-
-
-def _format_from_content_type(content_type: str) -> str | None:
-    if not content_type:
-        return None
-    ctype = content_type.split(";", 1)[0].strip().lower()
-    if ctype == "image/png":
-        return "png"
-    if ctype == "image/jpeg":
-        return "jpg"
-    if ctype == "image/webp":
-        return "webp"
-    return None
-
-
-def _format_from_url(url: str) -> str | None:
-    lowered = url.lower()
-    if lowered.endswith(".png"):
-        return "png"
-    if lowered.endswith(".jpg") or lowered.endswith(".jpeg"):
-        return "jpg"
-    if lowered.endswith(".webp"):
-        return "webp"
-    return None
-
-
-def _maybe_convert_format(
-    content: bytes,
-    content_type: str,
-    actual_format: str | None,
-    requested_format: str,
-) -> tuple[bytes, str]:
-    if requested_format == actual_format:
-        return content, content_type
-    if requested_format not in {"png", "jpg"}:
-        raise ImageGenerationError(f"unsupported output format: {requested_format}")
-    # If we don't know the actual format and PNG was requested, keep as-is.
-    if actual_format is None and requested_format == "png":
-        return content, content_type
-    converted = _convert_image_bytes(content, requested_format)
-    return converted, _content_type_for_format(requested_format)
-
-
-def _convert_image_bytes(content: bytes, target_format: str) -> bytes:
-    if Image is None:
-        raise ImageGenerationError("Pillow is required for image format conversion")
-    try:
-        with Image.open(io.BytesIO(content)) as img:
-            if target_format == "jpg" and img.mode not in {"RGB"}:
-                img = img.convert("RGB")
-            buf = io.BytesIO()
-            save_format = "JPEG" if target_format == "jpg" else "PNG"
-            img.save(buf, format=save_format)
-            return buf.getvalue()
-    except Exception as exc:
-        raise ImageGenerationError(f"failed to convert image: {exc}") from exc
-
-
-def _content_type_for_format(fmt: str) -> str:
-    if fmt == "png":
-        return "image/png"
-    if fmt == "jpg":
-        return "image/jpeg"
-    if fmt == "webp":
-        return "image/webp"
-    return "application/octet-stream"

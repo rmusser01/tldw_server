@@ -130,6 +130,47 @@ class TestMimeTypeDetection:
         assert "unsupported" in message.lower() or "no validation rules" in message.lower()
 
     @pytest.mark.unit
+    def test_epub_zip_mime_allowed_only_with_epub_marker(self, tmp_path):
+        """Accept ZIP-detected EPUBs only when the required EPUB marker is present."""
+        epub_path = tmp_path / "book.epub"
+        with zipfile.ZipFile(epub_path, "w") as archive:
+            archive.writestr("mimetype", "application/epub+zip")
+            archive.writestr("META-INF/container.xml", "<container />")
+
+        validator = FileValidator()
+        validator.magic_available = False
+        validator.python_magic_available = False
+        with patch("mimetypes.guess_type", return_value=("application/zip", None)):
+            result = validator.validate_file(
+                epub_path,
+                original_filename=epub_path.name,
+                media_type_key="ebook",
+            )
+
+        assert result.is_valid
+        assert result.detected_mime_type == "application/epub+zip"
+
+    @pytest.mark.unit
+    def test_epub_zip_mime_rejected_without_epub_marker(self, tmp_path):
+        """Reject generic ZIP files even when they are named with an EPUB extension."""
+        epub_path = tmp_path / "not-a-book.epub"
+        with zipfile.ZipFile(epub_path, "w") as archive:
+            archive.writestr("payload.txt", "not an epub")
+
+        validator = FileValidator()
+        validator.magic_available = False
+        validator.python_magic_available = False
+        with patch("mimetypes.guess_type", return_value=("application/zip", None)):
+            result = validator.validate_file(
+                epub_path,
+                original_filename=epub_path.name,
+                media_type_key="ebook",
+            )
+
+        assert not result.is_valid
+        assert any("application/zip" in issue for issue in result.issues)
+
+    @pytest.mark.unit
     def test_mime_validation_without_magic_allows_plaintext(self, tmp_path, monkeypatch):
         """Fallback MIME detection should succeed when puremagic is unavailable."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing import Upload_Sink as sink
@@ -150,6 +191,86 @@ class TestMimeTypeDetection:
         result = validator.validate_file(text_path, media_type_key="document")
         assert result.is_valid
         assert result.issues == []
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("filename", "mime_type", "media_type_key"),
+        [
+            ("notes.markdown", "text/markdown", "document"),
+            ("page.html", "text/html", "document"),
+            ("page.htm", "text/html", "document"),
+            ("page.xhtml", "application/xhtml+xml", "document"),
+            ("feed.xml", "application/xml", "document"),
+            ("data.json", "application/json", "document"),
+            ("clip.ogg", "application/ogg", "audio"),
+            ("movie.avi", "video/avi", "video"),
+        ],
+    )
+    def test_quick_ingest_advertised_file_types_validate_with_common_mimes(
+        self,
+        tmp_path,
+        filename,
+        mime_type,
+        media_type_key,
+    ):
+        """Quick Ingest advertised file types should pass backend upload validation."""
+        upload_path = tmp_path / filename
+        upload_path.write_bytes(b"quick ingest fixture")
+
+        validator = FileValidator()
+        validator.magic_available = False
+        validator.python_magic_available = False
+
+        with patch("mimetypes.guess_type", return_value=(mime_type, None)):
+            result = validator.validate_file(
+                upload_path,
+                original_filename=filename,
+                media_type_key=media_type_key,
+            )
+
+        assert result.is_valid, result.issues
+
+    @pytest.mark.unit
+    def test_xhtml_validates_when_detected_as_application_xml(self, tmp_path):
+        """XHTML uploads may be detected as XML by MIME sniffing libraries."""
+        upload_path = tmp_path / "page.xhtml"
+        upload_path.write_text(
+            '<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body>ok</body></html>',
+            encoding="utf-8",
+        )
+
+        validator = FileValidator()
+        validator.magic_available = False
+        validator.python_magic_available = False
+
+        with patch("mimetypes.guess_type", return_value=("application/xml", None)):
+            result = validator.validate_file(
+                upload_path,
+                original_filename=upload_path.name,
+                media_type_key="html",
+            )
+
+        assert result.is_valid, result.issues
+
+    @pytest.mark.unit
+    def test_legacy_doc_not_advertised_as_supported_document_upload(self, tmp_path):
+        """Legacy binary .doc should be rejected until a real parser/converter exists."""
+        doc_path = tmp_path / "legacy.doc"
+        doc_path.write_bytes(b"legacy word fixture")
+
+        validator = FileValidator()
+        validator.magic_available = False
+        validator.python_magic_available = False
+
+        with patch("mimetypes.guess_type", return_value=("application/msword", None)):
+            result = validator.validate_file(
+                doc_path,
+                original_filename=doc_path.name,
+                media_type_key="document",
+            )
+
+        assert not result.is_valid
+        assert any("not allowed" in issue.lower() for issue in result.issues)
 
 # ========================================================================
 # File Size Validation Tests

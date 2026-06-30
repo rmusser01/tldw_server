@@ -19,6 +19,18 @@ const state = {
     answerPreview?: string
     pinned?: boolean
     conversationId?: string
+    evidenceOrigin?: "local_library" | "web_fallback" | "mixed" | "unknown_origin"
+    citationCount?: number
+    unsynced?: boolean
+    sourceStatus?: Record<string, { status: string; count: number; reason?: string }>
+    trustState?:
+      | "cited_answer"
+      | "uncited_degraded_answer"
+      | "no_answer_insufficient_evidence"
+      | "no_results"
+      | "failed_search"
+      | "unsynced_local_result"
+      | "unknown_trust"
   }>,
   setHistorySidebarOpen: vi.fn(),
   restoreFromHistory: vi.fn(),
@@ -168,6 +180,101 @@ describe("HistorySidebar responsive layout", () => {
     const deleteButton = await screen.findByLabelText("Delete from history")
     expect(deleteButton.className).toContain("opacity-100")
     expect(deleteButton.className).not.toContain("group-hover:opacity-100")
+  })
+
+  it("shows compact trust labels for history items with trust state", async () => {
+    state.searchHistory = [
+      {
+        id: "h-trust",
+        query: "Trust-labeled query",
+        timestamp: new Date().toISOString(),
+        keywords: ["__knowledge_QA__"],
+        sourcesCount: 2,
+        hasAnswer: true,
+        trustState: "uncited_degraded_answer",
+      },
+    ]
+
+    render(<HistorySidebar />)
+
+    expect(await screen.findByText("Uncited answer")).toBeInTheDocument()
+  })
+
+  it("shows compact status labels for all Knowledge QA trust outcomes", async () => {
+    state.searchHistory = [
+      {
+        id: "h-cited",
+        query: "Cited query",
+        timestamp: new Date().toISOString(),
+        keywords: ["__knowledge_QA__"],
+        sourcesCount: 2,
+        hasAnswer: true,
+        trustState: "cited_answer",
+        evidenceOrigin: "local_library",
+        citationCount: 2,
+      },
+      {
+        id: "h-degraded",
+        query: "Degraded query",
+        timestamp: new Date().toISOString(),
+        keywords: ["__knowledge_QA__"],
+        sourcesCount: 1,
+        hasAnswer: true,
+        trustState: "uncited_degraded_answer",
+      },
+      {
+        id: "h-unknown",
+        query: "Unknown query",
+        timestamp: new Date().toISOString(),
+        keywords: ["__knowledge_QA__"],
+        sourcesCount: 1,
+        hasAnswer: true,
+        trustState: "unknown_trust",
+      },
+      {
+        id: "h-no-results",
+        query: "No results query",
+        timestamp: new Date().toISOString(),
+        keywords: ["__knowledge_QA__"],
+        sourcesCount: 0,
+        hasAnswer: false,
+        trustState: "no_results",
+      },
+      {
+        id: "h-failed",
+        query: "Failed query",
+        timestamp: new Date().toISOString(),
+        keywords: ["__knowledge_QA__"],
+        sourcesCount: 0,
+        hasAnswer: false,
+        trustState: "failed_search",
+      },
+      {
+        id: "h-unsynced",
+        query: "Unsynced query",
+        timestamp: new Date().toISOString(),
+        keywords: ["__knowledge_QA__"],
+        sourcesCount: 1,
+        hasAnswer: true,
+        trustState: "unsynced_local_result",
+        unsynced: true,
+        sourceStatus: {
+          notes: { status: "error", count: 0 },
+        },
+      },
+    ]
+
+    render(<HistorySidebar />)
+
+    expect(await screen.findByText("Cited answer")).toBeInTheDocument()
+    expect(screen.getByText("Local library")).toBeInTheDocument()
+    expect(screen.getByText("2 citations")).toBeInTheDocument()
+    expect(screen.getByText("Uncited answer")).toBeInTheDocument()
+    expect(screen.getByText("Trust unknown")).toBeInTheDocument()
+    expect(screen.getByText("No results")).toBeInTheDocument()
+    expect(screen.getByText("Failed search")).toBeInTheDocument()
+    expect(screen.getByText("Unsynced local result")).toBeInTheDocument()
+    expect(screen.getByText("1 source issue")).toBeInTheDocument()
   })
 
   it("marks the active history thread with aria-current", async () => {

@@ -6,8 +6,8 @@ No hardcoded secrets allowed.
 """
 
 import json
-import os
 import secrets
+import sys
 from functools import lru_cache
 from ipaddress import ip_address, ip_network
 from typing import Any, Optional
@@ -22,7 +22,7 @@ except (ImportError, AttributeError):  # v1 fallback
 from loguru import logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from .environment import env_flag_enabled, is_explicit_pytest_runtime, is_test_mode
 
 _MCP_CONFIG_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
@@ -33,6 +33,43 @@ _MCP_CONFIG_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
+_MCP_LOGGER_HANDLER_IDS: set[int] = set()
+
+
+def _remove_mcp_logger_handlers() -> None:
+    """Remove only handlers installed by MCP logging configuration."""
+    for handler_id in list(_MCP_LOGGER_HANDLER_IDS):
+        try:
+            logger.remove(handler_id)
+        except (RuntimeError, ValueError):
+            pass
+        finally:
+            _MCP_LOGGER_HANDLER_IDS.discard(handler_id)
+
+_CONFIG_WARNINGS: list[dict[str, str]] = []
+
+
+def _reset_config_warnings() -> None:
+    """Clear warnings for the next config load."""
+    _CONFIG_WARNINGS.clear()
+
+
+def _add_config_warning(*, code: str, message: str, next_action: str) -> None:
+    """Record one sanitized config warning, de-duplicated by code."""
+    if any(warning.get("code") == code for warning in _CONFIG_WARNINGS):
+        return
+    _CONFIG_WARNINGS.append(
+        {
+            "code": code,
+            "message": message,
+            "next_action": next_action,
+        }
+    )
+
+
+def get_config_warnings() -> list[dict[str, str]]:
+    """Return sanitized warnings from the most recent MCP config load."""
+    return [dict(warning) for warning in _CONFIG_WARNINGS]
 
 
 def _default_ws_allowed_origins() -> list[str]:
@@ -379,9 +416,16 @@ class MCPConfig(BaseSettings):
             try:
                 import json as _json
                 data = _json.loads(v)
-                return data if isinstance(data, dict) else {}
+                if isinstance(data, dict):
+                    return data
             except (TypeError, ValueError, json.JSONDecodeError):
-                return {}
+                pass
+            _add_config_warning(
+                code="invalid_tool_category_map",
+                message="MCP_TOOL_CATEGORY_MAP must be a JSON object; using an empty category map.",
+                next_action='Provide valid JSON such as {"tool.name":"category"} or remove MCP_TOOL_CATEGORY_MAP.',
+            )
+            return {}
         return v
 
     def get_redis_connection_params(self) -> Optional[dict[str, Any]]:
@@ -424,8 +468,8 @@ class MCPConfig(BaseSettings):
         """
         try:
             # Optional opt-out to inherit global logger configuration
-            import os as _os
             if env_flag_enabled("MCP_INHERIT_GLOBAL_LOGGER"):
+                _remove_mcp_logger_handlers()
                 return
         except _MCP_CONFIG_NONCRITICAL_EXCEPTIONS:
             pass
@@ -437,22 +481,20 @@ class MCPConfig(BaseSettings):
             "{name}:{function}:{line} - {message}"
         )
 
-        try:
-            logger.remove()  # Reset to avoid duplicate/default handlers
-        except (RuntimeError, ValueError):
-            pass
+        _remove_mcp_logger_handlers()
 
         # Console logging (safe format, no color)
-        logger.add(
-            sink=os.sys.stderr,
+        handler_id = logger.add(
+            sink=sys.stderr,
             format=_fmt_template,
             level=self.log_level,
             colorize=False,
         )
+        _MCP_LOGGER_HANDLER_IDS.add(handler_id)
 
         # File logging if configured (safe format)
         if self.log_file:
-            logger.add(
+            handler_id = logger.add(
                 sink=self.log_file,
                 format=_fmt_template,
                 level=self.log_level,
@@ -460,10 +502,11 @@ class MCPConfig(BaseSettings):
                 retention=self.log_retention,
                 compression="zip",
             )
+            _MCP_LOGGER_HANDLER_IDS.add(handler_id)
 
         # Audit logging if enabled (plain format)
         if self.audit_enabled:
-            logger.add(
+            handler_id = logger.add(
                 sink=self.audit_log_file,
                 format="{time:YYYY-MM-DD HH:mm:ss.SSS} | AUDIT | {message}",
                 level="INFO",
@@ -472,12 +515,14 @@ class MCPConfig(BaseSettings):
                 retention="90 days",
                 compression="zip",
             )
+            _MCP_LOGGER_HANDLER_IDS.add(handler_id)
 
 
 @lru_cache
 def get_config() -> MCPConfig:
     """Get cached configuration instance"""
     try:
+        _reset_config_warnings()
         config = MCPConfig()
         config.configure_logging()
         # Load tool category map from YAML file if provided
@@ -487,19 +532,39 @@ def get_config() -> MCPConfig:
 
                 import yaml as _yaml
                 if _os.path.exists(config.tool_category_map_file):
-                    with open(config.tool_category_map_file) as f:
+                    with open(config.tool_category_map_file, encoding="utf-8") as f:
                         data = _yaml.safe_load(f) or {}
                     if isinstance(data, dict):
                         # Expect top-level mapping { tool_name: category }
                         for k, v in data.items():
                             if isinstance(k, str) and isinstance(v, str):
                                 config.tool_category_map[k] = v
+                    else:
+                        _add_config_warning(
+                            code="invalid_tool_category_map_file",
+                            message="MCP_TOOL_CATEGORY_MAP_FILE must contain a top-level mapping; ignoring the file.",
+                            next_action="Provide a YAML mapping of tool names to categories or remove MCP_TOOL_CATEGORY_MAP_FILE.",
+                        )
+                else:
+                    _add_config_warning(
+                        code="missing_tool_category_map_file",
+                        message="MCP_TOOL_CATEGORY_MAP_FILE does not point to a readable file; ignoring the file.",
+                        next_action="Fix the file path or remove MCP_TOOL_CATEGORY_MAP_FILE.",
+                    )
         except _MCP_CONFIG_NONCRITICAL_EXCEPTIONS as _e:
-            logger.warning(f"Failed to load tool category map file: {_e}")
+            _add_config_warning(
+                code="invalid_tool_category_map_file",
+                message="Failed to load MCP_TOOL_CATEGORY_MAP_FILE; ignoring the file.",
+                next_action="Check that the YAML file is readable and contains a mapping of tool names to categories.",
+            )
+            logger.warning("Failed to load tool category map file: {}", _e.__class__.__name__)
         logger.info("MCP configuration loaded successfully")
         return config
     except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
+        logger.error(
+            "Failed to load configuration ({})",
+            type(e).__name__,
+        )
         raise
 
 
@@ -511,7 +576,7 @@ def validate_config() -> bool:
         try:
             test_mode = (
                 is_test_mode()
-                or bool(os.getenv("PYTEST_CURRENT_TEST"))
+                or is_explicit_pytest_runtime()
             )
         except _MCP_CONFIG_NONCRITICAL_EXCEPTIONS:
             test_mode = False
@@ -580,5 +645,8 @@ def validate_config() -> bool:
         return True
 
     except _MCP_CONFIG_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Configuration validation failed: {e}")
+        logger.error(
+            "Configuration validation failed ({})",
+            type(e).__name__,
+        )
         return False

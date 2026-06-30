@@ -8,7 +8,7 @@ executables by patching the internal duration/processing helpers.
 from datetime import datetime
 from pathlib import Path
 from typing import List
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -22,6 +22,47 @@ from tldw_Server_API.app.core.TTS.voice_manager import (
     VOICE_RATE_LIMITS,
     VoiceReferenceMetadata,
 )
+
+
+def test_chatterbox_provider_requirements_use_upstream_reference_sample_rate():
+    """Chatterbox voice references should be normalized to the upstream 24 kHz rate."""
+    reqs = PROVIDER_REQUIREMENTS.get("chatterbox")
+
+    assert reqs is not None
+    assert reqs["sample_rate"] == 24000
+
+
+@pytest.mark.asyncio
+async def test_process_for_provider_resamples_wav_when_sample_rate_differs(tmp_path, monkeypatch):
+    """Same-format voice uploads still need conversion when sample rate differs."""
+    manager = VoiceManager()
+    input_path = tmp_path / "source.wav"
+    output_path = tmp_path / "processed.wav"
+    input_path.write_bytes(b"not-a-real-wav")
+
+    async def fake_sample_rate(path: Path) -> int:  # type: ignore[override]
+        assert path == input_path
+        return 16000
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    create_process = AsyncMock(return_value=FakeProc())
+    copy_file = MagicMock()
+    monkeypatch.setattr(manager, "_get_audio_sample_rate", fake_sample_rate, raising=False)
+    monkeypatch.setattr(voice_manager_module.asyncio, "create_subprocess_exec", create_process)
+    monkeypatch.setattr(voice_manager_module.shutil, "copy2", copy_file)
+
+    result = await manager._process_for_provider(input_path, output_path, "chatterbox")
+
+    assert result == output_path
+    create_process.assert_awaited_once()
+    cmd = create_process.await_args.args
+    assert cmd[cmd.index("-ar") + 1] == "24000"
+    copy_file.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -317,6 +358,75 @@ async def test_encode_voice_reference_stores_artifacts(tmp_path, monkeypatch):
     )
     assert cached.cached is True
     assert cached.ref_codes_len == 3
+
+
+@pytest.mark.asyncio
+async def test_encode_voice_reference_for_omnivoice_is_metadata_only(tmp_path, monkeypatch):
+    manager = VoiceManager()
+
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+
+    voices_root = tmp_path / "voices"
+
+    def _fake_user_db_base_dir(*, allow_legacy_alias: bool = False):
+        return tmp_path
+
+    def _fake_user_voices_dir(user_id):
+        voices_root.mkdir(parents=True, exist_ok=True)
+        (voices_root / "uploads").mkdir(parents=True, exist_ok=True)
+        (voices_root / "processed").mkdir(parents=True, exist_ok=True)
+        (voices_root / "temp").mkdir(parents=True, exist_ok=True)
+        (voices_root / "metadata").mkdir(parents=True, exist_ok=True)
+        return voices_root
+
+    monkeypatch.setattr(DatabasePaths, "get_user_db_base_dir", _fake_user_db_base_dir, raising=True)
+    monkeypatch.setattr(DatabasePaths, "get_user_voices_dir", _fake_user_voices_dir, raising=True)
+
+    voice_id = "voice-omnivoice"
+    processed_path = voices_root / "processed" / f"{voice_id}.wav"
+    processed_path.parent.mkdir(parents=True, exist_ok=True)
+    processed_path.write_bytes(b"RIFF" + b"\x00" * 1000)
+
+    voice_info = VoiceInfo(
+        voice_id=voice_id,
+        name="omnivoice-voice",
+        description=None,
+        file_path=str(processed_path.relative_to(voices_root)),
+        format="wav",
+        duration=4.0,
+        sample_rate=24000,
+        size_bytes=processed_path.stat().st_size,
+        provider="omnivoice",
+        created_at=datetime.utcnow(),
+        file_hash="",
+    )
+
+    await manager.registry.register_voice(user_id=1, voice_info=voice_info)
+
+    result = await manager.encode_voice_reference(
+        user_id=1,
+        voice_id=voice_id,
+        provider="omnivoice",
+        reference_text="Stored transcript",
+    )
+
+    assert result.cached is False
+    assert result.ref_codes_len is None
+    assert result.reference_text == "Stored transcript"
+
+    metadata = await manager.load_reference_metadata(user_id=1, voice_id=voice_id)
+    assert metadata is not None
+    assert metadata.provider_artifacts["omnivoice"]["reference_text"] == "Stored transcript"
+
+    cached = await manager.encode_voice_reference(
+        user_id=1,
+        voice_id=voice_id,
+        provider="omnivoice",
+    )
+
+    assert cached.cached is True
+    assert cached.ref_codes_len is None
+    assert cached.reference_text == "Stored transcript"
 
 
 @pytest.mark.asyncio

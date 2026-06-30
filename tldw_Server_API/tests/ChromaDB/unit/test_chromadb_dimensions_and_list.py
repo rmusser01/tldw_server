@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from unittest.mock import MagicMock
+from chromadb.errors import InternalError
 
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
 from unittest.mock import patch
@@ -19,7 +20,7 @@ def _make_manager_with_mock(mock_client, tmp_path):
     return mgr
 
 
-def test_dimension_metadata_mismatch_recreates_collection(tmp_path):
+def test_dimension_metadata_mismatch_rejects_without_deleting_collection(tmp_path):
 
 
     mock_client = MagicMock()
@@ -38,20 +39,22 @@ def test_dimension_metadata_mismatch_recreates_collection(tmp_path):
     ids = ["1", "2"]
     metas = [{"source": "t1"}, {"source": "t2"}]
 
-    mgr.store_in_chroma("dim_meta", texts, embeddings, ids, metas, embedding_model_id_for_dim_check="text-embedding-3-large")
+    with pytest.raises(ValueError, match="Embedding dimension mismatch"):
+        mgr.store_in_chroma(
+            "dim_meta",
+            texts,
+            embeddings,
+            ids,
+            metas,
+            embedding_model_id_for_dim_check="text-embedding-3-large",
+        )
 
-    # Expect deletion and recreation with new dimension metadata
-    mock_client.delete_collection.assert_called_with(name="dim_meta")
-    mock_client.create_collection.assert_called()
-    args, kwargs = mock_client.create_collection.call_args
-    assert kwargs.get("name") == "dim_meta"
-    assert kwargs.get("metadata")["embedding_dimension"] == 512
-    assert kwargs.get("metadata")["source_model_id"] == "text-embedding-3-large"
-    # Upsert invoked on the (current) collection
-    assert mock_coll.upsert.called
+    mock_client.delete_collection.assert_not_called()
+    mock_client.create_collection.assert_not_called()
+    mock_coll.upsert.assert_not_called()
 
 
-def test_dimension_sample_mismatch_recreates_collection(tmp_path):
+def test_dimension_sample_mismatch_rejects_without_deleting_collection(tmp_path):
 
 
     mock_client = MagicMock()
@@ -72,16 +75,77 @@ def test_dimension_sample_mismatch_recreates_collection(tmp_path):
     ids = ["id-x"]
     metas = [{"source": "unit"}]
 
-    mgr.store_in_chroma("dim_sample", texts, embeddings, ids, metas, embedding_model_id_for_dim_check="text-embedding-3-large")
+    with pytest.raises(ValueError, match="Embedding dimension mismatch"):
+        mgr.store_in_chroma(
+            "dim_sample",
+            texts,
+            embeddings,
+            ids,
+            metas,
+            embedding_model_id_for_dim_check="text-embedding-3-large",
+        )
 
-    # Expect recreation due to sampled dim mismatch
-    mock_client.delete_collection.assert_called_with(name="dim_sample")
-    mock_client.create_collection.assert_called()
-    args, kwargs = mock_client.create_collection.call_args
-    assert kwargs.get("name") == "dim_sample"
-    assert kwargs.get("metadata")["embedding_dimension"] == 256
-    assert kwargs.get("metadata")["source_model_id"] == "text-embedding-3-large"
-    assert mock_coll.upsert.called
+    mock_client.delete_collection.assert_not_called()
+    mock_client.create_collection.assert_not_called()
+    mock_coll.upsert.assert_not_called()
+
+
+def test_persistent_client_init_failure_fails_closed_by_default(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    def _raise_persistent_client(**_kwargs):
+        raise ValueError("persistent init failed")
+
+    monkeypatch.setattr(cdl.chromadb, "PersistentClient", _raise_persistent_client)
+    user_cfg = {
+        "USER_DB_BASE_DIR": str(tmp_path),
+        "embedding_config": {"default_model_id": "unused", "models": {}},
+        "chroma_client_settings": {"backend": "persistent"},
+    }
+
+    with pytest.raises(RuntimeError, match="ChromaDB client initialization failed"):
+        ChromaDBManager(user_id="fail_closed", user_embedding_config=user_cfg)
+
+
+def test_string_false_does_not_enable_in_memory_stub(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    def _raise_persistent_client(**_kwargs):
+        raise ValueError("persistent init attempted")
+
+    monkeypatch.setattr(cdl.chromadb, "PersistentClient", _raise_persistent_client)
+    user_cfg = {
+        "USER_DB_BASE_DIR": str(tmp_path),
+        "embedding_config": {"default_model_id": "unused", "models": {}},
+        "chroma_client_settings": {
+            "backend": "persistent",
+            "use_in_memory_stub": "false",
+            "allow_stub_fallback": False,
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="ChromaDB client initialization failed"):
+        ChromaDBManager(user_id="string_false_stub", user_embedding_config=user_cfg)
+
+
+def test_string_false_does_not_enable_stub_fallback(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    def _raise_persistent_client(**_kwargs):
+        raise ValueError("persistent init failed")
+
+    monkeypatch.setattr(cdl.chromadb, "PersistentClient", _raise_persistent_client)
+    user_cfg = {
+        "USER_DB_BASE_DIR": str(tmp_path),
+        "embedding_config": {"default_model_id": "unused", "models": {}},
+        "chroma_client_settings": {
+            "backend": "persistent",
+            "allow_stub_fallback": "false",
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="ChromaDB client initialization failed"):
+        ChromaDBManager(user_id="string_false_fallback", user_embedding_config=user_cfg)
 
 
 def test_list_collections_propagates(mock_chroma_client, tmp_path):
@@ -104,6 +168,138 @@ def test_delete_collection_calls_client(mock_chroma_client, tmp_path):
     mgr = _make_manager_with_mock(mock_chroma_client, tmp_path)
     mgr.delete_collection("to_delete")
     mock_chroma_client.delete_collection.assert_called_with(name="to_delete")
+
+
+def test_precomputed_query_retries_transient_hnsw_segment_error(mock_chroma_client, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    first_collection = MagicMock()
+    first_collection.name = "retry_collection"
+    first_collection.query.side_effect = InternalError(
+        "Error executing plan: Internal error: Error creating hnsw segment reader: Nothing found on disk"
+    )
+    retry_collection = MagicMock()
+    retry_collection.name = "retry_collection"
+    retry_result = {"ids": [["doc_1"]], "documents": [["hello"]], "metadatas": [[{"i": 1}]], "distances": [[0.0]]}
+    retry_collection.query.return_value = retry_result
+    mock_chroma_client.get_or_create_collection.side_effect = [first_collection, retry_collection]
+    monkeypatch.setattr(cdl.time, "sleep", lambda _seconds: None)
+
+    mgr = _make_manager_with_mock(mock_chroma_client, tmp_path)
+
+    result = mgr.query_collection_with_precomputed_embeddings(
+        collection_name="retry_collection",
+        query_embeddings=[[0.1, 0.2, 0.3]],
+    )
+
+    assert result == retry_result
+    assert mock_chroma_client.get_or_create_collection.call_count == 2
+    first_collection.query.assert_called_once()
+    retry_collection.query.assert_called_once()
+
+
+def test_precomputed_query_retries_repeated_transient_hnsw_segment_errors(mock_chroma_client, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    transient_error = InternalError(
+        "Error executing plan: Internal error: Error creating hnsw segment reader: Nothing found on disk"
+    )
+    first_collection = MagicMock()
+    first_collection.name = "retry_collection"
+    first_collection.query.side_effect = transient_error
+    second_collection = MagicMock()
+    second_collection.name = "retry_collection"
+    second_collection.query.side_effect = transient_error
+    third_collection = MagicMock()
+    third_collection.name = "retry_collection"
+    retry_result = {"ids": [["doc_1"]], "documents": [["hello"]], "metadatas": [[{"i": 1}]], "distances": [[0.0]]}
+    third_collection.query.return_value = retry_result
+    mock_chroma_client.get_or_create_collection.side_effect = [
+        first_collection,
+        second_collection,
+        third_collection,
+    ]
+    monkeypatch.setattr(cdl.time, "sleep", lambda _seconds: None)
+
+    mgr = _make_manager_with_mock(mock_chroma_client, tmp_path)
+
+    result = mgr.query_collection_with_precomputed_embeddings(
+        collection_name="retry_collection",
+        query_embeddings=[[0.1, 0.2, 0.3]],
+    )
+
+    assert result == retry_result
+    assert mock_chroma_client.get_or_create_collection.call_count == 3
+    first_collection.query.assert_called_once()
+    second_collection.query.assert_called_once()
+    third_collection.query.assert_called_once()
+
+
+def test_precomputed_query_survives_extended_transient_hnsw_segment_race(mock_chroma_client, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    transient_error = InternalError(
+        "Error executing plan: Internal error: Error creating hnsw segment reader: Nothing found on disk"
+    )
+    retry_result = {"ids": [["doc_1"]], "documents": [["hello"]], "metadatas": [[{"i": 1}]], "distances": [[0.0]]}
+    collections = []
+    for index in range(6):
+        collection = MagicMock()
+        collection.name = "retry_collection"
+        if index < 5:
+            collection.query.side_effect = transient_error
+        else:
+            collection.query.return_value = retry_result
+        collections.append(collection)
+
+    mock_chroma_client.get_or_create_collection.side_effect = collections
+    monkeypatch.setattr(cdl.time, "sleep", lambda _seconds: None)
+
+    mgr = _make_manager_with_mock(mock_chroma_client, tmp_path)
+
+    result = mgr.query_collection_with_precomputed_embeddings(
+        collection_name="retry_collection",
+        query_embeddings=[[0.1, 0.2, 0.3]],
+    )
+
+    assert result == retry_result
+    assert mock_chroma_client.get_or_create_collection.call_count == 6
+
+
+def test_store_retries_transient_hnsw_segment_error(mock_chroma_client, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    first_collection = MagicMock()
+    first_collection.name = "retry_store_collection"
+    first_collection.metadata = {}
+    first_collection.count.return_value = 0
+    first_collection.upsert.side_effect = InternalError(
+        "Error executing plan: Internal error: Error creating hnsw segment reader: Nothing found on disk"
+    )
+    retry_collection = MagicMock()
+    retry_collection.name = "retry_store_collection"
+    mock_chroma_client.get_or_create_collection.side_effect = [first_collection, retry_collection]
+    monkeypatch.setattr(cdl.time, "sleep", lambda _seconds: None)
+
+    mgr = _make_manager_with_mock(mock_chroma_client, tmp_path)
+
+    result = mgr.store_in_chroma(
+        collection_name="retry_store_collection",
+        texts=["hello"],
+        embeddings=[[0.1, 0.2, 0.3]],
+        ids=["doc_1"],
+        metadatas=[{"i": 1}],
+    )
+
+    assert result is retry_collection
+    assert mock_chroma_client.get_or_create_collection.call_count == 2
+    first_collection.upsert.assert_called_once()
+    retry_collection.upsert.assert_called_once_with(
+        documents=["hello"],
+        embeddings=[[0.1, 0.2, 0.3]],
+        ids=["doc_1"],
+        metadatas=[{"i": 1}],
+    )
 
 
 @pytest.mark.unit
@@ -210,6 +406,50 @@ def test_vector_search_passes_user_app_config(temp_chroma_path, monkeypatch):
     assert captured["kwargs"]["user_app_config"] == user_cfg
     assert "user_embedding_config" not in captured["kwargs"]
     mgr.close()
+
+
+@pytest.mark.unit
+def test_vector_search_log_omits_query_text(mock_chroma_client, tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Embeddings import ChromaDB_Library as cdl
+
+    logged_info: list[str] = []
+
+    class _Logger:
+        def info(self, message):
+            logged_info.append(str(message))
+
+        def debug(self, *_args, **_kwargs):
+            return None
+
+        def warning(self, *_args, **_kwargs):
+            return None
+
+        def error(self, *_args, **_kwargs):
+            return None
+
+    mock_coll = MagicMock()
+    mock_coll.name = "secret_collection"
+    mock_coll.query.return_value = {
+        "ids": [["doc-1"]],
+        "documents": [["stored doc"]],
+        "metadatas": [[{"source": "unit"}]],
+        "distances": [[0.1]],
+    }
+    mock_chroma_client.get_or_create_collection.return_value = mock_coll
+
+    monkeypatch.setattr(cdl, "logger", _Logger())
+    monkeypatch.setattr(cdl, "create_embedding", lambda text, user_app_config, model_id_override: [0.1, 0.2, 0.3])
+
+    mgr = _make_manager_with_mock(mock_chroma_client, tmp_path)
+    mgr.vector_search(
+        query="secret customer query text",
+        collection_name="secret_collection",
+        k=1,
+        embedding_model_id_override="manual",
+    )
+
+    assert logged_info
+    assert all("secret customer query text" not in message for message in logged_info)
 
 
 @pytest.mark.unit

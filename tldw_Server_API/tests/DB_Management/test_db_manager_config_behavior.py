@@ -10,6 +10,10 @@ from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, Da
 from tldw_Server_API.app.core.DB_Management.media_db.runtime import session as media_db_session
 
 
+_ORIGINAL_CONTENT_CONFIG = DB_Manager.single_user_config
+_ORIGINAL_CONTENT_BACKEND_ENV = os.environ.get("TLDW_CONTENT_DB_BACKEND")
+
+
 def _cfg_with(database_type: str = "sqlite", backup_path: str | None = None) -> ConfigParser:
     cfg = ConfigParser()
     cfg.add_section("Database")
@@ -19,10 +23,20 @@ def _cfg_with(database_type: str = "sqlite", backup_path: str | None = None) -> 
     return cfg
 
 
+def _restore_content_backend_defaults() -> None:
+    if _ORIGINAL_CONTENT_BACKEND_ENV is None:
+        os.environ.pop("TLDW_CONTENT_DB_BACKEND", None)
+    else:
+        os.environ["TLDW_CONTENT_DB_BACKEND"] = _ORIGINAL_CONTENT_BACKEND_ENV
+    DB_Manager.reset_content_backend(config=_ORIGINAL_CONTENT_CONFIG, reload=False)
+
+
 @pytest.fixture(autouse=True)
 def _reset_backend_registry():
+    _restore_content_backend_defaults()
     backend_factory.reset_backend_registry(mode="hard")
     yield
+    _restore_content_backend_defaults()
     backend_factory.reset_backend_registry(mode="hard")
 
 

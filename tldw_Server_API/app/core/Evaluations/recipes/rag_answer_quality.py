@@ -198,6 +198,7 @@ class RAGAnswerQualityRecipe(RecipeDefinition):
         }
         prompts = self._normalize_prompt_mapping(run_config.get("prompts"))
         judge_config = self._normalize_mapping(run_config.get("judge_config"), field_name="run_config.judge_config")
+        candidate_api_keys = self._normalize_candidate_api_keys(run_config.get("candidate_api_keys"))
         execution_policy = self._normalize_mapping(
             run_config.get("execution_policy"),
             field_name="run_config.execution_policy",
@@ -206,6 +207,8 @@ class RAGAnswerQualityRecipe(RecipeDefinition):
             normalized["prompts"] = prompts
         if judge_config:
             normalized["judge_config"] = judge_config
+        if candidate_api_keys:
+            normalized["candidate_api_keys"] = candidate_api_keys
         if execution_policy:
             normalized["execution_policy"] = execution_policy
 
@@ -550,6 +553,17 @@ class RAGAnswerQualityRecipe(RecipeDefinition):
             str(key): str(prompt)
             for key, prompt in prompts.items()
             if str(key).strip() and str(prompt).strip()
+        }
+
+    def _normalize_candidate_api_keys(self, value: Any) -> dict[str, str]:
+        candidate_api_keys = self._normalize_mapping(
+            value,
+            field_name="run_config.candidate_api_keys",
+        )
+        return {
+            str(provider).strip(): str(api_key).strip()
+            for provider, api_key in candidate_api_keys.items()
+            if str(provider).strip() and str(api_key).strip()
         }
 
     def _normalize_live_retrieval_config(self, run_config: Mapping[str, Any]) -> dict[str, Any]:

@@ -3592,6 +3592,9 @@ class ChatDictionaryService:
                     # Validate pattern
                     test_entry = ChatDictionaryEntry(pattern, replacement)
                     is_regex = True if entry_type == "regex" else bool(test_entry.is_regex)
+                    if is_regex and not _is_compiled_regex(test_entry.key):
+                        test_entry.is_regex = True
+                        test_entry._compile_regex_pattern(test_entry.key_pattern_str)
                     timed_effects_json = json.dumps(timed_effects)
                     conn.execute(
                         """
@@ -3643,6 +3646,8 @@ class ChatDictionaryService:
 
             return _BulkAddResult(added_count)
 
+        except re.error:
+            raise
         except _CHAT_DICTIONARY_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error adding bulk entries: {e}")
             raise CharactersRAGDBError(f"Error adding bulk entries: {e}") from e

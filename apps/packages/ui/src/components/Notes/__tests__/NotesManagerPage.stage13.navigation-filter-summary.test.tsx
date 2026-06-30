@@ -199,6 +199,19 @@ const buildSearchResponse = (path: string) => {
       pagination: { total_items: 4, total_pages: 1 }
     }
   }
+  if (tokens.includes("captured")) {
+    return {
+      items: [
+        {
+          id: "capture-1",
+          title: "Captured page note",
+          content: "Saved from extension",
+          keywords: ["captured"]
+        }
+      ],
+      pagination: { total_items: 1, total_pages: 1 }
+    }
+  }
   return { items: [], pagination: { total_items: 0, total_pages: 1 } }
 }
 
@@ -304,4 +317,25 @@ describe("NotesManagerPage stage 13 navigation filter summary", () => {
     )
     expect(screen.getByLabelText("Clear active note filters")).toBeInTheDocument()
   }, 12000)
+
+  it("opens an Inbox view backed by the durable captured tag", async () => {
+    renderPage()
+
+    fireEvent.click(screen.getByRole("button", { name: "Inbox" }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-active-filter-summary")).toHaveTextContent(
+        "Showing 1 of 1 notes"
+      )
+    })
+
+    expect(screen.getByTestId("notes-active-filter-summary-details")).toHaveTextContent(
+      "View: Inbox"
+    )
+    const searchCall = mockBgRequest.mock.calls.find(([request]) => {
+      const path = String((request as { path?: string }).path || "")
+      return path.startsWith("/api/v1/notes/search/?") && path.includes("tokens=captured")
+    })
+    expect(searchCall).toBeTruthy()
+  })
 })

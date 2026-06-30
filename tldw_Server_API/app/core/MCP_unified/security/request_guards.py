@@ -10,8 +10,8 @@ from fastapi import HTTPException, Request
 from loguru import logger
 from starlette.requests import ClientDisconnect
 
-from tldw_Server_API.app.core.testing import is_test_mode
 from ..config import get_config
+from ..environment import is_test_mode
 from .ip_filter import enforce_ip_allowlist as _enforce_ip_allowlist
 from .ip_filter import get_ip_access_controller
 

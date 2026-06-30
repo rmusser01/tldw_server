@@ -49,7 +49,7 @@ export type CharacterEditorFormProps = {
   setShowSystemPromptExample: React.Dispatch<React.SetStateAction<boolean>>
   markModeDirty: (mode: CharacterFormMode) => void
   popularTags: Array<{ tag: string; count: number }>
-  tagOptionsWithCounts: Array<{ value: string; label: string }>
+  tagOptionsWithCounts: Array<{ value: string; label: React.ReactNode }>
   characterFolderOptions: CharacterFolderOption[]
   characterFolderOptionsLoading: boolean
   showAdvanced: boolean

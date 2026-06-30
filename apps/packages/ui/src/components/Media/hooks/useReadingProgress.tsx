@@ -5,6 +5,7 @@ import {
 } from '@/utils/media-navigation-target'
 import { applyMediaNavigationTarget } from '@/utils/media-navigation-target-actions'
 import { useMediaReadingProgress } from '@/hooks/useMediaReadingProgress'
+import { getDesignSystemState } from '@/design-system'
 import type { MediaResultItem } from '../types'
 
 const normalizeComparableText = (value: string): string =>
@@ -270,7 +271,9 @@ export function useReadingProgress(deps: UseReadingProgressDeps) {
 
     lastContentSelectionAnnouncementKeyRef.current = announcementKey
     const statusPrefix = isDetailLoading
-      ? t('review:mediaPage.contentAnnouncementLoading', { defaultValue: 'Loading' })
+      ? t('review:mediaPage.contentAnnouncementLoading', {
+          defaultValue: getDesignSystemState('loading').label
+        })
       : t('review:mediaPage.contentAnnouncementShowing', { defaultValue: 'Showing' })
     setContentSelectionAnnouncement(`${statusPrefix} ${selectedMediaAnnouncementLabel}`)
   }, [isDetailLoading, selectedMediaAnnouncementLabel, selectedMediaId, t])

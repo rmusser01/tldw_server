@@ -2,12 +2,10 @@ import { useQuery } from "@tanstack/react-query"
 import {
   Drawer,
   Skeleton,
-  Tag,
   Progress,
   Descriptions,
   Timeline,
-  Statistic,
-  Alert
+  Statistic
 } from "antd"
 import {
   Sparkles,
@@ -27,6 +25,11 @@ import {
   type Optimization,
   type OptimizationIteration
 } from "@/services/prompt-studio"
+import {
+  Alert as DsAlert,
+  Badge,
+  type BadgeVariant
+} from "@/components/ui/primitives"
 
 type OptimizationProgressPanelProps = {
   open: boolean
@@ -76,42 +79,58 @@ export const OptimizationProgressPanel: React.FC<
   const iterations: OptimizationIteration[] =
     (iterationsResponse as any)?.data?.data ?? []
 
-  const getStatusTag = (status?: string) => {
+  const renderStatusBadge = (status?: string) => {
     const statusLower = status?.toLowerCase()
     switch (statusLower) {
       case "completed":
         return (
-          <Tag color="green" icon={<CheckCircle2 className="size-3" />}>
+          <Badge variant="success" size="sm">
+            <CheckCircle2 className="size-3" aria-hidden="true" />
             Completed
-          </Tag>
+          </Badge>
         )
       case "running":
         return (
-          <Tag color="blue" icon={<Loader2 className="size-3 animate-spin" />}>
+          <Badge variant="info" size="sm">
+            <Loader2 className="size-3 animate-spin" aria-hidden="true" />
             Running
-          </Tag>
+          </Badge>
         )
       case "pending":
         return (
-          <Tag color="default" icon={<Clock className="size-3" />}>
+          <Badge variant="secondary" size="sm">
+            <Clock className="size-3" aria-hidden="true" />
             Pending
-          </Tag>
+          </Badge>
         )
       case "failed":
         return (
-          <Tag color="red" icon={<XCircle className="size-3" />}>
+          <Badge variant="danger" size="sm">
+            <XCircle className="size-3" aria-hidden="true" />
             Failed
-          </Tag>
+          </Badge>
         )
       case "cancelled":
         return (
-          <Tag color="orange" icon={<StopCircle className="size-3" />}>
+          <Badge variant="warning" size="sm">
+            <StopCircle className="size-3" aria-hidden="true" />
             Cancelled
-          </Tag>
+          </Badge>
         )
       default:
-        return <Tag>{status}</Tag>
+        return (
+          <Badge variant="secondary" size="sm">
+            {status}
+          </Badge>
+        )
     }
+  }
+
+  const strategyBadgeVariant = (strategy?: string): BadgeVariant => {
+    if (!strategy) return "secondary"
+    if (strategy === "mipro" || strategy === "genetic") return "primary"
+    if (strategy === "bootstrap") return "success"
+    return "secondary"
   }
 
   const getStrategyLabel = (strategy?: string) => {
@@ -180,7 +199,7 @@ export const OptimizationProgressPanel: React.FC<
               <h3 className="font-medium text-lg">
                 {optimization.name || `Optimization #${optimization.id}`}
               </h3>
-              {getStatusTag(optimization.status)}
+              {renderStatusBadge(optimization.status)}
             </div>
             {optimization.description && (
               <p className="text-sm text-text-muted">
@@ -191,26 +210,26 @@ export const OptimizationProgressPanel: React.FC<
 
           {/* Error message if failed */}
           {optimization.error_message && (
-            <Alert
-              type="error"
-              showIcon
+            <DsAlert
+              variant="error"
               title={t("managePrompts.studio.optimizations.error", {
                 defaultValue: "Error"
               })}
-              description={optimization.error_message}
-            />
+            >
+              {optimization.error_message}
+            </DsAlert>
           )}
 
           {/* Cancel reason */}
           {optimization.cancel_reason && (
-            <Alert
-              type="warning"
-              showIcon
+            <DsAlert
+              variant="warning"
               title={t("managePrompts.studio.optimizations.cancelled", {
                 defaultValue: "Cancelled"
               })}
-              description={optimization.cancel_reason}
-            />
+            >
+              {optimization.cancel_reason}
+            </DsAlert>
           )}
 
           {/* Progress */}
@@ -285,9 +304,12 @@ export const OptimizationProgressPanel: React.FC<
             bordered
           >
             <Descriptions.Item label="Strategy">
-              <Tag color="purple">
+              <Badge
+                variant={strategyBadgeVariant(optimization.config?.strategy)}
+                size="sm"
+              >
                 {getStrategyLabel(optimization.config?.strategy)}
-              </Tag>
+              </Badge>
             </Descriptions.Item>
             <Descriptions.Item label="Prompt ID">
               {optimization.prompt_id}
@@ -302,14 +324,14 @@ export const OptimizationProgressPanel: React.FC<
 
           {/* Best prompt info */}
           {optimization.best_prompt_id && (
-            <Alert
-              type="success"
-              showIcon
+            <DsAlert
+              variant="success"
               icon={<CheckCircle2 className="size-4" />}
               title={t("managePrompts.studio.optimizations.bestPromptFound", {
                 defaultValue: "Best prompt found"
               })}
-              description={t(
+            >
+              {t(
                 "managePrompts.studio.optimizations.bestPromptDesc",
                 {
                   defaultValue:
@@ -317,7 +339,7 @@ export const OptimizationProgressPanel: React.FC<
                   promptId: optimization.best_prompt_id
                 }
               )}
-            />
+            </DsAlert>
           )}
 
           {/* Iteration timeline */}

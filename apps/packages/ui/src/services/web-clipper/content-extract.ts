@@ -52,7 +52,9 @@ const buildBookmarkBody = (pageTitle: string, pageUrl: string): string =>
   [pageTitle, pageUrl].filter(Boolean).join("\n")
 
 const getRestrictedPageMessage = (): string =>
-  browser.i18n.getMessage("contextSaveToClipperRestrictedPage") ||
+  (browser.i18n.getMessage as (key: string) => string)(
+    "contextSaveToClipperRestrictedPage"
+  ) ||
   "This page is restricted, so the clipper cannot capture it."
 
 export const isRestrictedClipperPage = (pageUrl: string): boolean => {

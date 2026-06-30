@@ -24,6 +24,7 @@ import {
   getLastThreadMessageId,
   getCompareBranchMessageIds,
   buildHistoryForModel,
+  resolveCompareModelSelection,
   type SaveMessagePayload,
   type ChatModelSettingsStore,
 } from "./chat-action-utils";
@@ -108,6 +109,12 @@ export const useCompareSubmit = (opts: UseCompareSubmitOptions) => {
     resolvedMessageSteering,
   } = opts;
 
+  const applySelectionProviderToSettings = (
+    settings: ChatModelSettingsStore,
+    provider?: string,
+  ): ChatModelSettingsStore =>
+    provider ? { ...settings, apiProvider: provider } : settings;
+
   const buildCompareHistoryTitle = React.useCallback(
     (title: string) => {
       const trimmed =
@@ -176,10 +183,11 @@ export const useCompareSubmit = (opts: UseCompareSubmitOptions) => {
     const baseHistory = history;
     const userMessageId = generateID();
     const assistantMessageId = generateID();
+    const modelSelection = resolveCompareModelSelection(modelId);
     const userParentMessageId = getLastThreadMessageId(
       baseMessages,
       clusterId,
-      modelId,
+      modelSelection.historyModelKey,
     );
 
     try {
@@ -192,15 +200,19 @@ export const useCompareSubmit = (opts: UseCompareSubmitOptions) => {
       };
       const historyForModel = buildHistoryForModel(
         baseMessages,
-        modelId,
+        modelSelection.historyModelKey,
         buildHistoryFromMessages,
       );
       const perModelOverrides = {
-        selectedModel: modelId,
+        selectedModel: modelSelection.selectedModel,
+        currentChatModelSettings: applySelectionProviderToSettings(
+          enhancedChatModeParams.currentChatModelSettings,
+          modelSelection.provider,
+        ),
         clusterId,
         userMessageType: "compare:perModelUser",
         assistantMessageType: "compare:reply",
-        modelIdOverride: modelId,
+        modelIdOverride: modelSelection.historyModelKey,
         userMessageId,
         assistantMessageId,
         userParentMessageId,
@@ -297,7 +309,12 @@ export const useCompareSubmit = (opts: UseCompareSubmitOptions) => {
       return null;
     }
 
-    const messageIds = getCompareBranchMessageIds(messages, clusterId, modelId);
+    const modelSelection = resolveCompareModelSelection(modelId);
+    const messageIds = getCompareBranchMessageIds(
+      messages,
+      clusterId,
+      modelSelection.historyModelKey,
+    );
     if (messageIds.length === 0) {
       return null;
     }

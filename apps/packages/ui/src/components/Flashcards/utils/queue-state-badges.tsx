@@ -1,34 +1,34 @@
 import React from "react"
-import { Tag } from "antd"
 
+import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 import type { Flashcard } from "@/services/flashcards"
 
 const QUEUE_STATE_META: Record<
   Flashcard["queue_state"],
   {
     label: string
-    color: string
+    variant: BadgeVariant
   }
 > = {
   new: {
     label: "New",
-    color: "blue"
+    variant: "info"
   },
   learning: {
     label: "Learning",
-    color: "gold"
+    variant: "warning"
   },
   review: {
     label: "Review",
-    color: "green"
+    variant: "success"
   },
   relearning: {
     label: "Relearning",
-    color: "orange"
+    variant: "warning"
   },
   suspended: {
     label: "Suspended",
-    color: "red"
+    variant: "danger"
   }
 }
 
@@ -74,9 +74,14 @@ export const FlashcardQueueStateBadge: React.FC<FlashcardQueueStateBadgeProps> =
   const normalizedQueueState = coerceQueueState(card.queue_state)
 
   return (
-    <Tag color={QUEUE_STATE_META[normalizedQueueState].color} data-testid={testId}>
+    <Badge
+      variant={QUEUE_STATE_META[normalizedQueueState].variant}
+      size="sm"
+      dot
+      data-testid={testId}
+    >
       {formatFlashcardQueueStateLabel(normalizedQueueState, card.suspended_reason)}
-    </Tag>
+    </Badge>
   )
 }
 

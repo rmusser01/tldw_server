@@ -447,7 +447,7 @@
     "message": "Click or drag file to upload"
   },
   "analyzeBook_supportedFormats": {
-    "message": "Supports PDF, EPUB, TXT, MD, DOC, DOCX"
+    "message": "Supports PDF, EPUB, TXT, MD, DOCX"
   },
   "analyzeBook_reading": {
     "message": "Reading book file..."

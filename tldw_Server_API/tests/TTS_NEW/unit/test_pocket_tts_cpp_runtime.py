@@ -105,7 +105,7 @@ async def test_pocket_tts_cpp_probe_accepts_only_when_later_stdout_progress_arri
         model_path=Path("/tmp/models"),
         tokenizer_path=Path("/tmp/tokenizer.model"),
         precision="int8",
-        timeout=0.1,
+        timeout=0.4,
         enable_voice_cache=True,
     )
 
@@ -287,6 +287,28 @@ async def test_write_runtime_file_writes_via_atomic_replace(tmp_path, monkeypatc
     assert dst_path == target_path
     assert temp_bytes == b"new-bytes"
     assert old_bytes == b"old-bytes"
+    assert target_path.read_bytes() == b"new-bytes"
+
+
+@pytest.mark.asyncio
+async def test_write_runtime_file_tolerates_directory_fsync_permission_error(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters import pocket_tts_cpp_runtime as runtime_module
+
+    target_path = tmp_path / "voices" / "providers" / "pocket_tts_cpp" / "voice.wav"
+    real_open = runtime_module.os.open
+    directory_open_attempts: list[Path] = []
+
+    def _fake_open(path, flags, *args, **kwargs):
+        if Path(path) == target_path.parent:
+            directory_open_attempts.append(Path(path))
+            raise PermissionError("directory fsync unsupported")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(runtime_module.os, "open", _fake_open, raising=True)
+
+    await runtime_module._write_runtime_file(target_path, b"new-bytes")
+
+    assert directory_open_attempts == [target_path.parent]
     assert target_path.read_bytes() == b"new-bytes"
 
 
@@ -668,6 +690,132 @@ def test_pocket_tts_cpp_prunes_provider_cache_for_ttl_and_oversize_files(tmp_pat
     assert not expired.exists()
     assert not oldest.exists()
     assert newest.exists()
+
+
+def test_pocket_tts_cpp_expired_cache_prune_failure_log_is_sanitized(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters import pocket_tts_cpp_runtime as runtime_module
+    from tldw_Server_API.app.core.TTS.adapters.pocket_tts_cpp_runtime import (
+        prune_materialized_voice_cache,
+    )
+
+    runtime_dir = tmp_path / "voices" / "providers" / "pocket_tts_cpp"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    raw_marker = "POCKETTTS_EXPIRED_SECRET_TOKEN"
+    raw_exception_text = f"expired prune leaked /private/cache/{raw_marker}.wav"
+    expired = runtime_dir / f"expired_{raw_marker}.wav"
+    expired.write_bytes(b"x" * 4)
+    old_time = time.time() - 7200
+    os.utime(expired, (old_time, old_time))
+
+    def _fail_unlink(self, *args, **kwargs):  # noqa: ARG001
+        if self == expired:
+            raise PermissionError(raw_exception_text)
+        return original_unlink(self, *args, **kwargs)
+
+    original_unlink = Path.unlink
+    monkeypatch.setattr(Path, "unlink", _fail_unlink)
+    logged_messages: list[str] = []
+    sink_id = runtime_module.logger.add(
+        lambda message: logged_messages.append(str(message.record["message"])),
+        level="WARNING",
+    )
+    try:
+        removed = prune_materialized_voice_cache(
+            runtime_dir,
+            cache_ttl_hours=1,
+            cache_max_bytes=None,
+        )
+    finally:
+        runtime_module.logger.remove(sink_id)
+
+    rendered = "\n".join(logged_messages)
+    assert removed == []
+    assert expired.exists()
+    assert "Failed pruning expired PocketTTS.cpp cache file" in rendered
+    assert raw_marker not in rendered
+    assert raw_exception_text not in rendered
+    assert "PermissionError" in rendered
+
+
+def test_pocket_tts_cpp_oversized_cache_prune_failure_log_is_sanitized(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters import pocket_tts_cpp_runtime as runtime_module
+    from tldw_Server_API.app.core.TTS.adapters.pocket_tts_cpp_runtime import (
+        prune_materialized_voice_cache,
+    )
+
+    runtime_dir = tmp_path / "voices" / "providers" / "pocket_tts_cpp"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    raw_marker = "POCKETTTS_OVERSIZED_SECRET_TOKEN"
+    raw_exception_text = f"oversized prune leaked /private/cache/{raw_marker}.wav"
+    oversized = runtime_dir / f"oversized_{raw_marker}.wav"
+    oversized.write_bytes(b"x" * 16)
+
+    def _fail_unlink(self, *args, **kwargs):  # noqa: ARG001
+        if self == oversized:
+            raise PermissionError(raw_exception_text)
+        return original_unlink(self, *args, **kwargs)
+
+    original_unlink = Path.unlink
+    monkeypatch.setattr(Path, "unlink", _fail_unlink)
+    logged_messages: list[str] = []
+    sink_id = runtime_module.logger.add(
+        lambda message: logged_messages.append(str(message.record["message"])),
+        level="WARNING",
+    )
+    try:
+        removed = prune_materialized_voice_cache(
+            runtime_dir,
+            cache_ttl_hours=None,
+            cache_max_bytes=8,
+        )
+    finally:
+        runtime_module.logger.remove(sink_id)
+
+    rendered = "\n".join(logged_messages)
+    assert removed == []
+    assert oversized.exists()
+    assert "Failed pruning oversized PocketTTS.cpp cache file" in rendered
+    assert raw_marker not in rendered
+    assert raw_exception_text not in rendered
+    assert "PermissionError" in rendered
+
+
+def test_pocket_tts_cpp_transient_cache_cleanup_failure_log_is_sanitized(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters import pocket_tts_cpp_runtime as runtime_module
+    from tldw_Server_API.app.core.TTS.adapters.pocket_tts_cpp_runtime import (
+        cleanup_transient_voice_reference,
+    )
+
+    runtime_dir = tmp_path / "voices" / "providers" / "pocket_tts_cpp"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    raw_marker = "POCKETTTS_TRANSIENT_SECRET_TOKEN"
+    raw_exception_text = f"transient cleanup leaked /private/cache/{raw_marker}.wav"
+    transient = runtime_dir / f"transient_{raw_marker}.wav"
+    transient.write_bytes(b"x" * 4)
+
+    def _fail_unlink(self, *args, **kwargs):  # noqa: ARG001
+        if self == transient:
+            raise PermissionError(raw_exception_text)
+        return original_unlink(self, *args, **kwargs)
+
+    original_unlink = Path.unlink
+    monkeypatch.setattr(Path, "unlink", _fail_unlink)
+    logged_messages: list[str] = []
+    sink_id = runtime_module.logger.add(
+        lambda message: logged_messages.append(str(message.record["message"])),
+        level="WARNING",
+    )
+    try:
+        cleanup_transient_voice_reference(transient, is_transient=True)
+    finally:
+        runtime_module.logger.remove(sink_id)
+
+    rendered = "\n".join(logged_messages)
+    assert transient.exists()
+    assert "Failed cleaning transient PocketTTS.cpp cache file" in rendered
+    assert raw_marker not in rendered
+    assert raw_exception_text not in rendered
+    assert "PermissionError" in rendered
 
 
 def test_pocket_tts_cpp_prune_keeps_active_registered_voice_path(tmp_path):

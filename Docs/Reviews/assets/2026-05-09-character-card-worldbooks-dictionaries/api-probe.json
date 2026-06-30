@@ -1,0 +1,445 @@
+{
+  "timestamp": "2026-05-09T19:10:47.300Z",
+  "apiBase": "http://127.0.0.1:8000",
+  "entities": {
+    "character": {
+      "name": "Archivist Mira UX 20260509191047",
+      "description": "A careful archive guide for the city of Lumen.",
+      "personality": "Precise, warm, and occasionally asks clarifying questions.",
+      "scenario": "The user is researching the hidden archives of Lumen.",
+      "system_prompt": "You are Archivist Mira. Use known Lumen lore when relevant.",
+      "post_history_instructions": null,
+      "first_message": "Welcome back to the stacks. What fragment should we trace today?",
+      "message_example": null,
+      "creator_notes": null,
+      "alternate_greetings": [],
+      "tags": [
+        "ux-audit",
+        "worldbook",
+        "dictionary"
+      ],
+      "creator": null,
+      "character_version": null,
+      "extensions": {},
+      "image_base64": null,
+      "id": 9,
+      "version": 1,
+      "created_at": "2026-05-09T19:10:47.321000Z",
+      "updated_at": "2026-05-09T19:10:47.321000Z",
+      "last_modified": "2026-05-09T19:10:47.321000Z",
+      "image_present": false
+    },
+    "worldBook": {
+      "name": "Lumen City Field Notes UX 20260509191047",
+      "description": "Lore for Archivist Mira character chat.",
+      "scan_depth": 3,
+      "token_budget": 500,
+      "recursive_scanning": false,
+      "enabled": true,
+      "id": 2,
+      "created_at": "2026-05-09T19:10:47",
+      "last_modified": "2026-05-09T19:10:47",
+      "version": 1,
+      "entry_count": 0
+    },
+    "worldBookEntry": {
+      "keywords": [
+        "Lumen",
+        "Archive"
+      ],
+      "content": "Lumen's hidden archive is called the Echo Vault. Only archivists with silver-thread keys can enter.",
+      "group": null,
+      "appendable": false,
+      "recursive_scanning": false,
+      "priority": 10,
+      "enabled": true,
+      "case_sensitive": false,
+      "regex_match": false,
+      "whole_word_match": true,
+      "metadata": {
+        "audit": "character-card-worldbook-dictionary"
+      },
+      "id": 2,
+      "world_book_id": 2,
+      "created_at": "2026-05-09T19:10:47",
+      "last_modified": "2026-05-09T19:10:47"
+    },
+    "globalChat": {
+      "id": "df744b4f-e680-4483-96fb-9532e84baf13",
+      "scope_type": "global",
+      "workspace_id": null,
+      "character_id": 9,
+      "assistant_kind": "character",
+      "assistant_id": "9",
+      "persona_memory_mode": null,
+      "title": "Mira global lore/dictionary check 20260509191047",
+      "rating": null,
+      "state": "in-progress",
+      "topic_label": null,
+      "cluster_id": null,
+      "source": null,
+      "external_ref": null,
+      "created_at": "2026-05-09T19:10:47.353000Z",
+      "last_modified": "2026-05-09T19:10:47",
+      "message_count": 0,
+      "version": 2,
+      "parent_conversation_id": null,
+      "root_id": "df744b4f-e680-4483-96fb-9532e84baf13",
+      "forked_from_message_id": null,
+      "settings": null
+    },
+    "workspace": {
+      "id": "ux-audit-20260509191047",
+      "name": "Character chat context workspace 20260509191047",
+      "archived": false,
+      "study_materials_policy": "general",
+      "deleted": false,
+      "banner_title": null,
+      "banner_subtitle": null,
+      "banner_color": null,
+      "audio_provider": null,
+      "audio_model": null,
+      "audio_voice": null,
+      "audio_speed": 1,
+      "created_at": "2026-05-09T19:10:47.360Z",
+      "last_modified": "2026-05-09T19:10:47.360Z",
+      "version": 1
+    },
+    "workspaceChat": {
+      "id": "51ec647f-52f6-4a8b-b56c-bdfa7d17ecf1",
+      "scope_type": "workspace",
+      "workspace_id": "ux-audit-20260509191047",
+      "character_id": 9,
+      "assistant_kind": "character",
+      "assistant_id": "9",
+      "persona_memory_mode": null,
+      "title": "Mira workspace lore/dictionary check 20260509191047",
+      "rating": null,
+      "state": "in-progress",
+      "topic_label": null,
+      "cluster_id": null,
+      "source": null,
+      "external_ref": null,
+      "created_at": "2026-05-09T19:10:47.368000Z",
+      "last_modified": "2026-05-09T19:10:47",
+      "message_count": 0,
+      "version": 2,
+      "parent_conversation_id": null,
+      "root_id": "51ec647f-52f6-4a8b-b56c-bdfa7d17ecf1",
+      "forked_from_message_id": null,
+      "settings": null
+    },
+    "dictionary": {
+      "name": "Mira Terminology Normalizer UX 20260509191047",
+      "description": "Normalizes Lumen shorthand for character chat.",
+      "category": "character-chat",
+      "tags": [
+        "ux-audit",
+        "character-chat"
+      ],
+      "included_dictionary_ids": [],
+      "is_active": true,
+      "default_token_budget": 200,
+      "id": 1,
+      "created_at": "2026-05-09T19:10:47",
+      "updated_at": "2026-05-09T19:10:47",
+      "version": 1,
+      "entry_count": 0,
+      "processing_priority": null,
+      "used_by_chat_count": 0,
+      "used_by_active_chat_count": 0,
+      "used_by_chat_refs": []
+    },
+    "dictionaryEntry": {
+      "pattern": "EV",
+      "replacement": "Echo Vault",
+      "probability": 1,
+      "group": "lumen-lore",
+      "timed_effects": {
+        "sticky": 0,
+        "cooldown": 0,
+        "delay": 0
+      },
+      "max_replacements": 0,
+      "id": 1,
+      "dictionary_id": 1,
+      "type": "literal",
+      "enabled": true,
+      "case_sensitive": true,
+      "priority": 1,
+      "usage_count": 0,
+      "last_used_at": null,
+      "created_at": "2026-05-09T19:10:47",
+      "updated_at": "2026-05-09T19:10:47"
+    }
+  },
+  "checks": {
+    "worldBookAttachmentPersisted": true,
+    "worldBookProcessInjectedEchoVault": true,
+    "promptPreviewHasLorebookSection": true,
+    "promptPreviewLorebookInjectedEchoVault": true,
+    "promptPreviewLorebookHasDiagnostics": true,
+    "dictionaryExplicitReplacedEV": true,
+    "dictionaryActiveProcessingReplacedEV": true,
+    "globalChatDictionarySettingsPersisted": true,
+    "workspaceChatDictionarySettingsPersisted": true,
+    "dictionaryUsageIncludesCreatedChat": true,
+    "promptPreviewHasDictionaryDiagnostics": false
+  },
+  "raw": {
+    "worldBookAttachment": {
+      "name": "Lumen City Field Notes UX 20260509191047",
+      "description": "Lore for Archivist Mira character chat.",
+      "scan_depth": 3,
+      "token_budget": 500,
+      "recursive_scanning": false,
+      "enabled": true,
+      "id": 2,
+      "created_at": "2026-05-09T19:10:47",
+      "last_modified": "2026-05-09T19:10:47",
+      "version": 1,
+      "entry_count": 1,
+      "world_book_id": 2,
+      "attachment_enabled": true,
+      "attachment_priority": 1
+    },
+    "globalChatSettingsUpdate": {
+      "conversation_id": "df744b4f-e680-4483-96fb-9532e84baf13",
+      "settings": {
+        "greetingsChecksum": "08a4f995f75d6d3e",
+        "chat_dictionary_ids": [
+          1
+        ],
+        "chat_dictionary_id": 1,
+        "schemaVersion": 2,
+        "updatedAt": "2026-05-09T19:10:47.393673+00:00"
+      },
+      "last_modified": "2026-05-09T19:10:47",
+      "warnings": null
+    },
+    "workspaceChatSettingsUpdate": {
+      "conversation_id": "51ec647f-52f6-4a8b-b56c-bdfa7d17ecf1",
+      "settings": {
+        "greetingsChecksum": "08a4f995f75d6d3e",
+        "chat_dictionary_ids": [
+          1
+        ],
+        "chat_dictionary_id": 1,
+        "schemaVersion": 2,
+        "updatedAt": "2026-05-09T19:10:47.404824+00:00"
+      },
+      "last_modified": "2026-05-09T19:10:47",
+      "warnings": null
+    },
+    "worldBookProcess": {
+      "injected_content": "Lumen's hidden archive is called the Echo Vault. Only archivists with silver-thread keys can enter.",
+      "entries_matched": 1,
+      "tokens_used": 15,
+      "books_used": 1,
+      "entry_ids": [
+        2
+      ],
+      "token_budget": 500,
+      "budget_exhausted": false,
+      "skipped_entries_due_to_budget": 0,
+      "diagnostics": [
+        {
+          "entry_id": 2,
+          "world_book_id": 2,
+          "activation_reason": "keyword_match",
+          "keyword": "Lumen",
+          "token_cost": 15,
+          "priority": 10,
+          "regex_match": false,
+          "content_preview": "Lumen's hidden archive is called the Echo Vault. Only archivists with silver-thread keys can enter.",
+          "depth_level": 0
+        }
+      ]
+    },
+    "promptPreview": {
+      "chat_id": "df744b4f-e680-4483-96fb-9532e84baf13",
+      "character_id": 9,
+      "character_name": "Archivist Mira UX 20260509191047",
+      "sections": [
+        {
+          "name": "preset",
+          "content": "You are Archivist Mira UX 20260509191047.\nA careful archive guide for the city of Lumen.\nPrecise, warm, and occasionally asks clarifying questions.\nThe user is researching the hidden archives of Lumen.\nYou are Archivist Mira. Use known Lumen lore when relevant.",
+          "tokens_estimated": 65,
+          "tokens_effective": 65,
+          "budget": 180,
+          "truncated": false
+        },
+        {
+          "name": "author_note",
+          "content": "",
+          "tokens_estimated": 0,
+          "tokens_effective": 0,
+          "budget": 240,
+          "truncated": false
+        },
+        {
+          "name": "message_steering",
+          "content": "",
+          "tokens_estimated": 0,
+          "tokens_effective": 0,
+          "budget": 120,
+          "truncated": false
+        },
+        {
+          "name": "greeting",
+          "content": "Welcome back to the stacks. What fragment should we trace today?",
+          "tokens_estimated": 16,
+          "tokens_effective": 16,
+          "budget": 120,
+          "truncated": false
+        },
+        {
+          "name": "lorebook",
+          "content": "World info:\nLumen's hidden archive is called the Echo Vault. Only archivists with silver-thread keys can enter.",
+          "tokens_estimated": 27,
+          "tokens_effective": 27,
+          "budget": 420,
+          "truncated": false,
+          "diagnostics": [
+            {
+              "entry_id": 2,
+              "world_book_id": 2,
+              "activation_reason": "keyword_match",
+              "keyword": "Lumen",
+              "token_cost": 15,
+              "priority": 10,
+              "regex_match": false,
+              "appendable": false,
+              "content_preview": "Lumen's hidden archive is called the Echo Vault. Only archivists with silver-thread keys can enter.",
+              "depth_level": 0
+            }
+          ]
+        }
+      ],
+      "total_supplemental_tokens": 108,
+      "total_supplemental_effective_tokens": 108,
+      "supplemental_budget": 1200,
+      "budget_status": "ok",
+      "message_tokens_estimated": 0,
+      "message_count": 0,
+      "warnings": null,
+      "conflicts": null,
+      "examples": [
+        "Preset sets temperature=0.7; later section sets temperature=0.2 -> effective temperature=0.2.",
+        "Preset directive \"Speak tersely\"; later directive \"Be verbose\" -> later directive replaces earlier.",
+        "Appendable source blocks concatenate only when both sides are appendable."
+      ]
+    },
+    "dictionaryProcessExplicit": {
+      "original_text": "Ask Mira about EV access in Lumen.",
+      "processed_text": "Ask Mira about Echo Vault access in Lumen.",
+      "replacements": 1,
+      "iterations": 2,
+      "entries_used": [
+        1
+      ],
+      "token_budget_exceeded": false,
+      "token_budget_used": 200,
+      "processing_time_ms": 0.2949237823486328
+    },
+    "dictionaryProcessByActiveDictionaries": {
+      "original_text": "Ask Mira about EV access in Lumen.",
+      "processed_text": "Ask Mira about Echo Vault access in Lumen.",
+      "replacements": 1,
+      "iterations": 2,
+      "entries_used": [
+        1
+      ],
+      "token_budget_exceeded": false,
+      "token_budget_used": 200,
+      "processing_time_ms": 0.1659393310546875
+    },
+    "characterWorldBooksReload": [
+      {
+        "name": "Lumen City Field Notes UX 20260509191047",
+        "description": "Lore for Archivist Mira character chat.",
+        "scan_depth": 3,
+        "token_budget": 500,
+        "recursive_scanning": false,
+        "enabled": true,
+        "id": 2,
+        "created_at": "2026-05-09T19:10:47",
+        "last_modified": "2026-05-09T19:10:47",
+        "version": 1,
+        "entry_count": 1,
+        "world_book_id": 2,
+        "attachment_enabled": true,
+        "attachment_priority": 1
+      }
+    ],
+    "globalChatSettingsReload": {
+      "conversation_id": "df744b4f-e680-4483-96fb-9532e84baf13",
+      "settings": {
+        "greetingsChecksum": "08a4f995f75d6d3e",
+        "chat_dictionary_ids": [
+          1
+        ],
+        "chat_dictionary_id": 1,
+        "schemaVersion": 2,
+        "updatedAt": "2026-05-09T19:10:47.393673+00:00"
+      },
+      "last_modified": "2026-05-09T19:10:47",
+      "warnings": null
+    },
+    "workspaceChatSettingsReload": {
+      "conversation_id": "51ec647f-52f6-4a8b-b56c-bdfa7d17ecf1",
+      "settings": {
+        "greetingsChecksum": "08a4f995f75d6d3e",
+        "chat_dictionary_ids": [
+          1
+        ],
+        "chat_dictionary_id": 1,
+        "schemaVersion": 2,
+        "updatedAt": "2026-05-09T19:10:47.404824+00:00"
+      },
+      "last_modified": "2026-05-09T19:10:47",
+      "warnings": null
+    },
+    "dictionaryListWithUsage": {
+      "dictionaries": [
+        {
+          "name": "Mira Terminology Normalizer UX 20260509191047",
+          "description": "Normalizes Lumen shorthand for character chat.",
+          "category": "character-chat",
+          "tags": [
+            "ux-audit",
+            "character-chat"
+          ],
+          "included_dictionary_ids": [],
+          "is_active": true,
+          "default_token_budget": 200,
+          "id": 1,
+          "created_at": "2026-05-09T19:10:47",
+          "updated_at": "2026-05-09T19:10:47",
+          "version": 1,
+          "entry_count": 1,
+          "processing_priority": 1,
+          "used_by_chat_count": 2,
+          "used_by_active_chat_count": 2,
+          "used_by_chat_refs": [
+            {
+              "chat_id": "df744b4f-e680-4483-96fb-9532e84baf13",
+              "title": "Mira global lore/dictionary check 20260509191047",
+              "state": "in-progress",
+              "last_modified": "2026-05-09T19:10:47"
+            },
+            {
+              "chat_id": "51ec647f-52f6-4a8b-b56c-bdfa7d17ecf1",
+              "title": "Mira workspace lore/dictionary check 20260509191047",
+              "state": "in-progress",
+              "last_modified": "2026-05-09T19:10:47"
+            }
+          ]
+        }
+      ],
+      "total": 1,
+      "active_count": 1,
+      "inactive_count": 0
+    }
+  }
+}

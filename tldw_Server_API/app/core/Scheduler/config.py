@@ -26,6 +26,13 @@ _SCHEDULER_CONFIG_NONCRITICAL_EXCEPTIONS = (
 )
 
 
+def _contains_traversal_marker(path_value: str) -> bool:
+    """Return True when a path string includes traversal or home-expansion segments."""
+
+    normalized = path_value.replace("\\", "/")
+    return any(part == ".." or part.startswith("~") for part in normalized.split("/"))
+
+
 def _default_scheduler_db_url() -> str:
     """Compute a sensible default DB URL under the shared Databases folder.
 
@@ -294,7 +301,7 @@ class SchedulerConfig:
             raise ValueError(f"Base path cannot be a symlink: {self.base_path}")
 
         # Detect and prevent directory traversal attempts
-        if '..' in original_base or '~' in original_base:
+        if _contains_traversal_marker(original_base):
             raise ValueError(f"Directory traversal detected in base_path: {original_base}")
 
         # Do not resolve symlinks here to preserve detection
@@ -329,7 +336,7 @@ class SchedulerConfig:
             db_path = self.database_url.replace('sqlite:///', '')
             if db_path and db_path != ':memory:':
                 db_path_obj = Path(db_path)
-                if '..' in str(db_path_obj) or '~' in str(db_path_obj):
+                if _contains_traversal_marker(str(db_path_obj)):
                     raise ValueError(f"Directory traversal detected in database path: {db_path}")
 
     def _validate(self):

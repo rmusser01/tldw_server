@@ -16,12 +16,11 @@ import hashlib
 import hmac
 import os
 import secrets
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
 
-from defusedxml import ElementTree as DET
+from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 from loguru import logger
 
@@ -208,7 +207,7 @@ def parse_push_items(xml_bytes: bytes) -> list[dict[str, Any]]:
     """
     try:
         text = xml_bytes.decode("utf-8", errors="replace")
-        root = DET.fromstring(text)
+        root = ET.fromstring(text)
     except _WEBSUB_NONCRITICAL_EXCEPTIONS:
         return []
 

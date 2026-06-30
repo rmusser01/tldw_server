@@ -9,8 +9,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, require_token_scope
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     check_evaluation_rate_limit,
@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     get_eval_request_user,
     verify_api_key,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.embeddings_abtest_schemas import (
     ArmSummary,
     EmbeddingsABTestCreateRequest,
@@ -30,7 +31,6 @@ from tldw_Server_API.app.api.v1.schemas.embeddings_abtest_schemas import (
     EmbeddingsABTestStatusResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Evaluations.audit_adapter import (
     log_evaluation_created,
     log_run_started,
@@ -104,7 +104,7 @@ def _abtest_status_response(test_id: str, row: dict[str, object] | None) -> Embe
 @abtest_router.post(
     "/embeddings/abtest",
     response_model=EmbeddingsABTestCreateResponse,
-    dependencies=[Depends(require_token_scope("workflows", require_if_present=True, endpoint_id="evals.embeddings_abtest.create"))],
+    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="evals.embeddings_abtest.create"))],
 )
 async def create_embeddings_abtest(
     payload: EmbeddingsABTestCreateRequest,
@@ -177,7 +177,7 @@ async def run_embeddings_abtest(
     payload: EmbeddingsABTestRunRequest,
     user_ctx: str = Depends(verify_api_key),
     _: None = Depends(check_evaluation_rate_limit),
-    __: None = Depends(require_token_scope("workflows", require_if_present=True, require_schedule_match=False, allow_admin_bypass=True, endpoint_id="evals.embeddings_abtest.run", count_as="run")),
+    __: None = Depends(TokenScopeGuard("workflows", require_if_present=True, require_schedule_match=False, allow_admin_bypass=True, endpoint_id="evals.embeddings_abtest.run", count_as="run")),
     media_db = Depends(get_media_db_for_user),
     principal: AuthPrincipal = Depends(get_auth_principal),  # noqa: B008
     current_user: User = Depends(get_eval_request_user),  # noqa: B008
@@ -250,7 +250,7 @@ async def run_embeddings_abtest(
         except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS as _e:
             run_error = _e
             with contextlib.suppress(_EMB_ABTEST_NONCRITICAL_EXCEPTIONS):
-                logger.warning(f"A/B test synchronous run failed: {_e}")
+                logger.warning("A/B test synchronous run failed")
         try:
             if idempotency_key:
                 db.record_idempotency("emb_abtest_run", idempotency_key, test_id, identity.created_by)
@@ -299,7 +299,7 @@ async def run_embeddings_abtest(
             target_model="embeddings_abtest",
         )
     except _EMB_ABTEST_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"Failed to enqueue A/B test job {test_id}: {exc}")
+        logger.error("Failed to enqueue A/B test job")
         raise HTTPException(status_code=500, detail="Failed to enqueue A/B test job") from exc
 
     logger.info(f"A/B test enqueued via Jobs: {test_id}")
@@ -458,6 +458,12 @@ async def get_embeddings_abtest_results(
         page=page,
         page_size=page_size,
         total=total,
+        pagination=build_page_pagination_meta(
+            page=page,
+            per_page=page_size,
+            total=total,
+            total_pages=(total + page_size - 1) // page_size,
+        ),
     )
 
 

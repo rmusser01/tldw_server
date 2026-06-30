@@ -10,24 +10,139 @@ and this project adheres to Some kind of Versioning
 
 ### Added
 
-- **Writing Suite Phases 2-4** — Expanded the writing stack beyond the initial manuscript editor with structured planning, review, and workflow surfaces. (PRs #999, #1001, #1002)
-- **Persona Buddy Track-a-Plan Backend** — Added backend support for persona-guided plan tracking. (PR #949)
-- **Persona-Routed Onboarding** — Added onboarding flows that route users through persona-aware setup paths. (PR #1000)
-- **Mission Control Home and Storage Quotas** — Added Mission Control home surfaces and storage quota visibility. (PR #1004)
-- **Browser Web Clipper** — Added the browser clipping workflow for capturing web content into tldw_server. (PR #1005)
-- **Study Suggestions Engine** — Added study suggestion generation and related handoff flows. (PR #1014)
-- **Sandbox and ACP Improvements** — Expanded sandbox handling and ACP integration hardening. (PR #1023)
-- **Hunyuan GGUF llama.cpp OCR Runtime** — Added runtime-family selection and llama.cpp-backed GGUF orchestration for Hunyuan OCR across remote, managed, and CLI modes so deployments can choose native compatibility or local GGUF execution without changing ingestion callers. (PR #1103)
-
 ### Changed
-
-- **Theme System Expansion** — Expanded shared theme handling across the UI. (PR #1021)
-- **GHCR Release Documentation** — Updated container release and GHCR publishing guidance. (PR #1003)
 
 ### Fixed
 
-- **FTUE Follow-Through** — Addressed first-time-user experience follow-up issues across onboarding and handoff flows. (PR #1009)
-- **UX Audit Remediation** — Fixed UX audit findings across affected surfaces. (PR #1039)
+### Removed
+
+
+## [0.1.32] - 2026-06-28
+
+> Rollup coverage: this entry covers the 1,175 PR-numbered merge/squash
+> commits present on `dev` after the `0.1.31` changelog push
+> (`42d9c31b0b`, 2026-04-19) through PR #2544. That includes older
+> backfilled branch merges (#861, #961, #971, #1072), the main
+> post-release branch sequence from PR #1101 onward, and the 254 merged
+> `dev` PRs from #2256 through #2544 added during this release-prep pass.
+
+### Added
+
+- **Sandbox, MCP Gateway, And Native CodeGraph Expansion** — Added the
+  VZ Linux real-execution stack, helper lifecycle management, operator image
+  store, runtime capability inventories, network-policy admission metadata,
+  cleanup/recovery contracts, native CodeGraph extractors and indexing modes,
+  and the staged MCP Unified package/gateway/external-runtime architecture with
+  profile presets, catalog loading, stdio transports, CLI support, admin
+  configuration, standalone extras, and release-readiness gates.
+- **Research, Knowledge, And Study Workflow Expansion** — Added the Chat
+  Workspace WebUI, research-workspace service capabilities and migration
+  status flows, Deep Research literature launch and bundle import/return
+  handoffs, flashcards extension capture/generation/review/template workflows,
+  flashcard hierarchy/dashboard/session-history surfaces, notes folder/source
+  closeouts, quick-ingest validation/offline-progress/result handoffs, and
+  study-suggestion product-state coverage.
+- **Onboarding, Provider, And Runtime Admin Surfaces** — Added public
+  onboarding profile helpers, local-model/confidence/recovery flows,
+  setup-readiness closeouts, `llama.cpp` admin configuration and model
+  inventory diagnostics, provider-key settings, persona/character-card
+  documentation, companion-home shortcuts, and ACP/Codex workspace diagnostics.
+- **MCP, Workspace, And Skills Operations Expansion** — Added MCP filesystem
+  edit/diff/glob/grep parity slices, permission-rule parsing and simulation,
+  approval leases, session path grants, web fetch/search/research tools with
+  caching/rate limits/citation metadata, tool-call hooks/reporting, prompt
+  catalog support, notebook-safe tools, workspace container/runtime/membership
+  contracts, server-backed Skills search/filter/dry-render/import review
+  flows, seed overwrite confirmation, and version-aware Skills deletion.
+- **Research, Scheduled Tasks, And Study Workflow Follow-Through** — Added
+  scheduled-task API and frontend shells, results inbox/home surfacing,
+  Research Workspace UAT certification and remediation, Deep Research
+  literature/import/return handoffs, Notes task-backed to-do lists, Mermaid
+  chat and artifact rendering, Chatterbox upstream parity, Audio Studio media
+  ticket transport, and Writing Playground manuscript annotations.
+- **Release, Packaging, And Local CI Tooling** — Added full-suite PR shard
+  fanout, local CI runner targets and pre-push wiring, MCP Unified RC artifact
+  and publish-readiness flows, MCP Unified trusted-publishing setup, backend
+  PyPI artifact guards, and release package-content checks.
+
+### Changed
+
+- **Backend Architecture And API Contract Modularization** — Continued the
+  router-group, dependency, response-envelope, pagination, storage-route,
+  API-versioning, OpenAPI-contract, ChaChaNotes/persona delegation, worker
+  lifecycle, and job/scheduler registration migrations so large modules now
+  rely more heavily on explicit route groups, typed helpers, lifecycle
+  inventories, and smaller package boundaries.
+- **Design-System And WebUI UX Migration** — Migrated chat, playground,
+  prompt studio, evaluations, flashcards, dictionaries, integrations, workflow
+  editor, data tables, provider keys, monitoring/admin, and research-workspace
+  states toward the shared design-system alert/status primitives, while
+  rebaselining chat rails, sticky composer behavior, sidebar tools, first-run
+  readiness, and visual QA expectations.
+- Expanded ACP release-signoff evidence for permission denial, reconnect, and
+  recovery paths with deterministic frontend hook coverage and a readiness
+  addendum that separates automated evidence from live downstream-agent caveats.
+- ACP release notes now explicitly limit downstream-agent support to
+  protocol/runner validation unless operators configure and verify a real
+  downstream ACP stdio agent plus required provider credentials. Binary
+  detection for tools such as Claude Code or Codex is not, by itself, a
+  live-agent create/prompt/cancel verification. (Issue #1504)
+- Clarified the ACP release posture for retention and transcript redaction:
+  session detail, events, and artifacts are authenticated operator
+  drill-through surfaces rather than redacted transcript views; diagnostics and
+  audit metadata are sanitized, but automatic transcript/artifact hard-delete
+  retention is not yet a release-certified claim.
+- **Design-System, Admin, And Product-State Migration** — Continued moving
+  onboarding, Knowledge QA, Skills Manager, Scheduled Tasks, quiz, prompt
+  studio, monitoring/admin, data-ops, billing, org/team, and study-suggestion
+  surfaces onto shared design-system alert/status patterns with refreshed
+  visual QA and state-label coverage.
+- **Sandbox, ACP, And MCP Policy Evidence** — Expanded VZ Linux host evidence,
+  disposable image-store clone flows, prepared-host/recovery/failure drill
+  packets, operator-status ingestion, ACP support-safe summaries, custom-profile
+  evidence contracts, live-agent caveat documentation, and conservative
+  downstream-agent support guardrails.
+- **Release Process And Documentation Posture** — Backfilled architecture,
+  ADR, README diagram, resource-governance/security/database, MCP/ACP, and
+  product-state tracker documentation so the release train has auditable
+  implementation and operational context.
+
+### Fixed
+
+- **CI, Dependency, And Type-Check Reliability** — Hardened the PR validation
+  stack with coverage-ratchet baselines, SBOM and package-build fixes,
+  action/dependency updates, Playwright/browser gate stabilization, frontend
+  TypeScript baseline reductions, full-suite flake remediation, pre-commit and
+  CodeQL follow-ups, and targeted e2e-smoke/watchlists/playground route fixes.
+- **Security, Auth, And Runtime Safety Hardening** — Tightened auth dependency
+  aliases, permission guards, onboarding secret handling, provider URL
+  validation, API-key/log redaction, MCP catalog validation, sandbox helper
+  trust boundaries, SSRF/network-policy handling, Starlette CVE pins, and
+  clear-text E2E auth CodeQL suppressions for test-only browser storage sinks.
+- **Product Workflow Stabilization** — Fixed research-workspace migration and
+  source readiness issues, flashcard import/review/re-rate handoffs, quick
+  ingest routing and estimate behavior, chat response failure copy and
+  persistent error banners, notes remediation follow-ups, Deep Research bundle
+  import hardening, and duplicate workspace route registrations after the
+  dev/main integration correction for PR #1982.
+- **Backend Module Review Hardening** — Addressed review findings across ACP,
+  agent orchestration, audit, AuthNZ, audio/audiobook, billing, chat,
+  Chatbooks, Collections, Data Tables, Evaluations, External Sources,
+  Flashcards, Governance, Ingestion, Infrastructure, LLM calls, Local LLM,
+  Logging, Meetings, Metrics, Monitoring, Notes, Persona, PrivilegeMaps, RAG,
+  Research, Reminders, Resource Governance, Sandbox, Scheduler, Security,
+  Setup, Sharing, Slides, Storage, Streaming, StudyPacks, Sync, Telegram, TTS,
+  Usage, Utils, Watchlists, WebClipper, and legacy WebSearch paths.
+- **Frontend And UAT Reliability** — Stabilized chat, media, character modal,
+  Knowledge QA, Mermaid artifact, Notes first-time UX, flashcard setup/review,
+  Quick Ingest file-type handling, Docker WebUI auth bootstrap, WebUI auth
+  persistence/recovery, MCP Hub setup recovery, and Research Workspace UAT
+  follow-up flows.
+- **Packaging, CI, And Runtime Compatibility** — Fixed PR shard coverage and
+  stability issues, MCP standalone/TestPyPI artifact contents, MCP snapshot
+  schema warnings, Search_and_Research package marker casing, Parakeet ONNX
+  graph bundle loading, invalid PGVector metadata order handling, trailing slash
+  media redirects, and package/runtime dependency readiness for release.
 
 ### Removed
 

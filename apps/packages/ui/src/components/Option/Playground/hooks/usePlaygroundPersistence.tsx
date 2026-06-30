@@ -1,8 +1,19 @@
 import React from "react"
-import { Button, Modal } from "antd"
+import { Modal } from "antd"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { usePersistenceMode } from "@/hooks/playground"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import type { Character } from "@/types/character"
+import {
+  characterToAssistantSelection,
+  type AssistantSelectionMode
+} from "@/types/assistant-selection"
+import {
+  WEBUI_CHARACTER_CHAT_SOURCE,
+  WEBUI_CHAT_SOURCE,
+  buildCharacterChatSessionTitle
+} from "@/utils/character-chat-session"
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -15,14 +26,23 @@ export interface UsePlaygroundPersistenceDeps {
   setTemporaryChat: (value: boolean) => void
   serverChatId: string | null
   setServerChatId: (id: string) => void
+  historyId: string | null
   serverChatState: string | null
   setServerChatState: (state: string) => void
   serverChatSource: string | null
   setServerChatSource: (source: string | null) => void
-  setServerChatVersion: (version: string | null) => void
+  setServerChatVersion: (version: number | null) => void
+  setServerChatCharacterId: (id: string | number | null) => void
+  setServerChatAssistantKind: (kind: "character" | "persona" | null) => void
+  setServerChatAssistantId: (id: string | number | null) => void
+  setServerChatPersonaMemoryMode: (
+    mode: "read_only" | "read_write" | null
+  ) => void
   history: Array<{ role: string; content?: string; image?: string }>
   clearChat: () => void
   selectedCharacter: Character | null
+  selectedAssistantMode: AssistantSelectionMode | null
+  assistantOverlayActive: boolean
   serverPersistenceHintSeen: boolean
   setServerPersistenceHintSeen: (value: boolean) => void
   invalidateServerChatHistory: () => void
@@ -34,6 +54,51 @@ export interface UsePlaygroundPersistenceDeps {
     success: (opts: Record<string, any>) => void
   }
   t: (key: string, defaultValueOrOptions?: any, options?: any) => string
+}
+
+const persistTrackedCharacterPlaygroundSession = async ({
+  chatId,
+  historyId,
+  character
+}: {
+  chatId: string
+  historyId: string | null
+  character: Character
+}) => {
+  const selection = characterToAssistantSelection(
+    character as Character & Record<string, unknown>
+  )
+  if (!selection) return
+
+  const trackedSelection = {
+    ...selection,
+    metadata: {
+      ...(selection.metadata ?? {}),
+      selectionMode: "tracked" as const
+    }
+  }
+
+  try {
+    const config = await tldwClient.getConfig().catch(() => null)
+    const scopeKey = buildChatSurfaceScopeKeyFromConfig(config)
+    usePlaygroundSessionStore.getState().saveSession({
+      historyId,
+      serverChatId: chatId,
+      trackedAssistantSelection: trackedSelection,
+      trackedAssistantKind: "character",
+      trackedAssistantId: trackedSelection.id,
+      trackedCharacterId: trackedSelection.id,
+      trackedAssistantDisplayName: trackedSelection.name ?? null,
+      trackedAssistantAvatarUrl: trackedSelection.avatar_url ?? null,
+      serverChatPersonaMemoryMode: null,
+      scopeKey
+    })
+  } catch (error) {
+    console.warn(
+      "[usePlaygroundPersistence] Failed to persist tracked character session",
+      error
+    )
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -48,18 +113,24 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     setTemporaryChat,
     serverChatId,
     setServerChatId,
+    historyId,
     serverChatState,
     setServerChatState,
     serverChatSource,
     setServerChatSource,
     setServerChatVersion,
+    setServerChatCharacterId,
+    setServerChatAssistantKind,
+    setServerChatAssistantId,
+    setServerChatPersonaMemoryMode,
     history,
     clearChat,
     selectedCharacter,
+    selectedAssistantMode,
+    assistantOverlayActive,
     serverPersistenceHintSeen,
     setServerPersistenceHintSeen,
     invalidateServerChatHistory,
-    navigate,
     notificationApi,
     t
   } = deps
@@ -69,6 +140,8 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
   const serverSaveInFlightRef = React.useRef(false)
   const historyRef = React.useRef(history)
   const selectedCharacterRef = React.useRef(selectedCharacter)
+  const selectedAssistantModeRef = React.useRef(selectedAssistantMode)
+  const assistantOverlayActiveRef = React.useRef(assistantOverlayActive)
   const serverChatStateRef = React.useRef(serverChatState)
   const serverChatSourceRef = React.useRef(serverChatSource)
   const serverPersistenceHintSeenRef = React.useRef(serverPersistenceHintSeen)
@@ -80,6 +153,14 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
   React.useEffect(() => {
     selectedCharacterRef.current = selectedCharacter
   }, [selectedCharacter])
+
+  React.useEffect(() => {
+    selectedAssistantModeRef.current = selectedAssistantMode
+  }, [selectedAssistantMode])
+
+  React.useEffect(() => {
+    assistantOverlayActiveRef.current = assistantOverlayActive
+  }, [assistantOverlayActive])
 
   React.useEffect(() => {
     serverChatStateRef.current = serverChatState
@@ -214,106 +295,88 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       }
       await tldwClient.initialize()
       const firstUser = snapshot.find((m) => m.role === "user")
-      const fallbackTitle = t(
-        "playground:composer.persistence.serverDefaultTitle",
-        "Extension chat"
-      )
-      const titleSource =
-        typeof firstUser?.content === "string" &&
-        firstUser.content.trim().length > 0
-          ? firstUser.content.trim()
-          : fallbackTitle
+      const isOverlaySelection =
+        assistantOverlayActiveRef.current ||
+        selectedAssistantModeRef.current === "overlay"
+      const selectedAssistantMode = selectedAssistantModeRef.current
+      const shouldPersistTrackedCharacter =
+        !isOverlaySelection && selectedAssistantMode === "tracked"
+      const trackedCharacterSnapshot =
+        shouldPersistTrackedCharacter && selectedCharacterRef.current?.id != null
+          ? selectedCharacterRef.current
+          : null
+      let characterId: string | number | null = shouldPersistTrackedCharacter
+        ? ((trackedCharacterSnapshot as any)?.id ?? null)
+        : null
+      const selectedCharacterName =
+        shouldPersistTrackedCharacter &&
+        typeof trackedCharacterSnapshot?.name === "string"
+          ? trackedCharacterSnapshot.name.trim()
+          : ""
+      const explicitSource =
+        serverChatSourceRef.current &&
+        serverChatSourceRef.current.trim().length > 0
+          ? serverChatSourceRef.current.trim()
+          : null
+      const isCharacterPersistence = Boolean(characterId)
       const title =
-        titleSource.length > 80 ? `${titleSource.slice(0, 77)}…` : titleSource
-
-      let characterId: string | number | null =
-        (selectedCharacterRef.current as any)?.id ?? null
-
-      if (!characterId) {
-        const DEFAULT_NAME = "Helpful AI Assistant"
-        const normalizeName = (value: unknown) =>
-          String(value || "").trim().toLowerCase()
-        const findByName = (list: any[]) =>
-          (list || []).find(
-            (c: any) => normalizeName(c?.name) === normalizeName(DEFAULT_NAME)
-          )
-        const findDefaultCharacter = async () => {
-          try {
-            const results = await tldwClient.searchCharacters(DEFAULT_NAME, {
-              limit: 50
+        isCharacterPersistence && selectedCharacterName
+          ? buildCharacterChatSessionTitle({
+              characterName: selectedCharacterName,
+              firstUserMessage: firstUser?.content,
+              fallbackTitle: String(
+                t(
+                  "playground:composer.persistence.characterFallbackTitle",
+                  "{{name}} role-play",
+                  { name: selectedCharacterName }
+                )
+              )
             })
-            const match = findByName(results)
-            if (match) return match
-          } catch {}
-          try {
-            const results = await tldwClient.listCharacters({ limit: 200 })
-            const match = findByName(results)
-            if (match) return match
-          } catch {}
-          return null
-        }
-        try {
-          let target = await findDefaultCharacter()
-          if (!target) {
-            try {
-              target = await tldwClient.createCharacter({
-                name: DEFAULT_NAME
-              })
-            } catch (error: any) {
-              if (error?.status === 409) {
-                target = await findDefaultCharacter()
-              } else {
-                throw error
-              }
-            }
-          }
-          characterId =
-            target && typeof target.id !== "undefined" ? target.id : null
-        } catch {
-          characterId = null
-        }
-      }
+          : (() => {
+              const fallbackTitle =
+                explicitSource === "extension"
+                  ? t(
+                      "playground:composer.persistence.serverDefaultTitle",
+                      "Extension chat"
+                    )
+                  : t(
+                      "playground:composer.persistence.serverWebUiDefaultTitle",
+                      "WebUI chat"
+                    )
+              const titleSource =
+                typeof firstUser?.content === "string" &&
+                firstUser.content.trim().length > 0
+                  ? firstUser.content.trim()
+                  : fallbackTitle
+              return titleSource.length > 80
+                ? `${titleSource.slice(0, 77)}…`
+                : titleSource
+            })()
 
-      if (characterId == null) {
+      if (selectedAssistantMode === "tracked" && characterId == null) {
         notificationApi.error({
           key: "playground-server-character-required",
           message: t("error"),
           description: t(
             "playground:composer.persistence.serverCharacterRequired",
-            "Unable to find or create a default assistant character on the server. Try again from the Characters page."
-          ),
-          btn: (
-            <Button
-              type="primary"
-              size="small"
-              title={t(
-                "playground:composer.persistence.serverCharacterCta",
-                "Open Characters workspace"
-              ) as string}
-              onClick={() => {
-                navigate("/characters?from=server-chat-persistence-error")
-              }}>
-              {t(
-                "playground:composer.persistence.serverCharacterCta",
-                "Open Characters workspace"
-              )}
-            </Button>
+            "Unable to save this tracked character chat because the selected character is missing. Re-select the character and try again."
           ),
           duration: 6
         })
         return
       }
 
-      const created = await tldwClient.createChat({
+      const createPayload = {
         title,
-        character_id: characterId,
+        ...(characterId != null ? { character_id: characterId } : {}),
         state: serverChatStateRef.current || "in-progress",
         source:
-          serverChatSourceRef.current &&
-          serverChatSourceRef.current.trim().length > 0
-            ? serverChatSourceRef.current.trim()
-            : undefined
-      })
+          explicitSource ||
+          (isCharacterPersistence
+            ? WEBUI_CHARACTER_CHAT_SOURCE
+            : WEBUI_CHAT_SOURCE)
+      }
+      const created = await tldwClient.createChat(createPayload)
       const rawId = (created as any)?.id ?? (created as any)?.chat_id ?? created
       const cid = rawId != null ? String(rawId) : ""
       if (!cid) {
@@ -330,6 +393,17 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
         (created as any)?.source ?? serverChatSourceRef.current ?? null
       )
       setServerChatVersion((created as any)?.version ?? null)
+      if (isCharacterPersistence && trackedCharacterSnapshot) {
+        setServerChatCharacterId(characterId)
+        setServerChatAssistantKind("character")
+        setServerChatAssistantId(characterId)
+        setServerChatPersonaMemoryMode(null)
+        await persistTrackedCharacterPlaygroundSession({
+          chatId: cid,
+          historyId,
+          character: trackedCharacterSnapshot
+        })
+      }
       invalidateServerChatHistory()
 
       for (const msg of snapshot) {
@@ -348,22 +422,6 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       }
 
       if (!serverPersistenceHintSeenRef.current) {
-        notificationApi.success({
-          message: t(
-            "playground:composer.persistence.serverSavedTitle",
-            "Chat now saved on server"
-          ),
-          description:
-            t(
-              "playground:composer.persistence.serverSaved",
-              "Future messages in this chat will sync to your tldw server."
-            ) +
-            " " +
-            t(
-              "playground:composer.persistence.serverBenefits",
-              "This keeps a durable record in server history so you can reopen the conversation later, access it from other browsers, and run server-side analytics over your chats."
-            )
-        })
         serverPersistenceHintSeenRef.current = true
         setServerPersistenceHintSeen(true)
         setShowServerPersistenceHint(true)
@@ -383,12 +441,16 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     temporaryChat,
     serverChatId,
     setServerChatId,
-    navigate,
+    historyId,
     setServerPersistenceHintSeen,
     t,
     setServerChatState,
     setServerChatSource,
-    setServerChatVersion
+    setServerChatVersion,
+    setServerChatCharacterId,
+    setServerChatAssistantKind,
+    setServerChatAssistantId,
+    setServerChatPersonaMemoryMode
   ])
 
   // Auto-save to server

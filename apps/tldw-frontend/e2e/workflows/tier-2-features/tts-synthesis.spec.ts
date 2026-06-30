@@ -1,7 +1,7 @@
 /**
  * TTS Synthesis E2E Tests (Tier 2)
  *
- * Tests the TTS Playground page (/tts) lifecycle:
+ * Tests the Text to Speech route (/tts) lifecycle:
  * - Page loads with expected elements (heading, subtitle, text input, playback toolbar)
  * - Play button fires POST /api/v1/audio/speech when text is present
  *
@@ -30,7 +30,7 @@ test.describe("TTS Synthesis", () => {
   // =========================================================================
 
   test.describe("Page Load", () => {
-    test("should render the TTS Playground page with expected elements", async ({
+    test("should render the Text to Speech route with expected elements", async ({
       authedPage,
       diagnostics,
     }) => {

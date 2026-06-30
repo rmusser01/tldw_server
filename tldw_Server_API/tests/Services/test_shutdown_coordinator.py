@@ -4,8 +4,9 @@ import asyncio
 import importlib
 import sys
 import types
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+from typing import Callable
 
 import pytest
 
@@ -15,7 +16,6 @@ from tldw_Server_API.app.services.shutdown_models import (
     ShutdownPhase,
     ShutdownPolicy,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -60,23 +60,12 @@ def test_build_legacy_shutdown_plan_includes_known_legacy_components() -> None:
     app = _App()
     plan = build_legacy_shutdown_plan(
         app,
-        LegacyShutdownContext(
-            usage_task=object(),
-            authnz_scheduler_started=True,
-        ),
+        LegacyShutdownContext(),
     )
 
-    assert [component.name for component in plan] == [
-        "lifecycle_gate",
-        "usage_aggregator",
-        "authnz_scheduler",
-    ]
+    assert [component.name for component in plan] == ["lifecycle_gate"]
     assert plan[0].phase == ShutdownPhase.TRANSITION
     assert plan[0].policy == ShutdownPolicy.DEV_FAST
-    assert plan[1].phase == ShutdownPhase.RESOURCES
-    assert plan[1].policy == ShutdownPolicy.BEST_EFFORT
-    assert plan[2].phase == ShutdownPhase.FINALIZERS
-    assert plan[2].policy == ShutdownPolicy.PROD_DRAIN
 
 
 def test_build_legacy_shutdown_plan_records_visibility_on_app_state() -> None:
@@ -104,7 +93,7 @@ def test_build_legacy_shutdown_plan_records_visibility_on_app_state() -> None:
     assert plan[0].name == "lifecycle_gate"
 
 
-def test_build_legacy_shutdown_plan_orders_migrated_components_usage_before_storage() -> None:
+def test_build_legacy_shutdown_plan_omits_removed_usage_stop_components() -> None:
     from tldw_Server_API.app.services.shutdown_legacy_adapters import (
         LegacyShutdownContext,
         build_legacy_shutdown_plan,
@@ -115,28 +104,11 @@ def test_build_legacy_shutdown_plan_orders_migrated_components_usage_before_stor
 
     plan = build_legacy_shutdown_plan(
         _App(),
-        LegacyShutdownContext(
-            chatbooks_cleanup_task=object(),
-            storage_cleanup_service=object(),
-            usage_task=object(),
-            llm_usage_task=object(),
-        ),
+        LegacyShutdownContext(),
     )
 
-    assert [component.name for component in plan] == [
-        "lifecycle_gate",
-        "chatbooks_cleanup",
-        "usage_aggregator",
-        "llm_usage_aggregator",
-        "storage_cleanup_service",
-    ]
-    assert [component.phase for component in plan] == [
-        ShutdownPhase.TRANSITION,
-        ShutdownPhase.WORKERS,
-        ShutdownPhase.RESOURCES,
-        ShutdownPhase.RESOURCES,
-        ShutdownPhase.FINALIZERS,
-    ]
+    assert [component.name for component in plan] == ["lifecycle_gate"]
+    assert [component.phase for component in plan] == [ShutdownPhase.TRANSITION]
 
 
 def test_shutdown_legacy_adapters_import_is_lazy_for_optional_stop_helpers(
@@ -148,16 +120,6 @@ def test_shutdown_legacy_adapters_import_is_lazy_for_optional_stop_helpers(
         sys.modules,
         "tldw_Server_API.app.core.AuthNZ.scheduler",
         types.ModuleType("tldw_Server_API.app.core.AuthNZ.scheduler"),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "tldw_Server_API.app.services.usage_aggregator",
-        types.ModuleType("tldw_Server_API.app.services.usage_aggregator"),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "tldw_Server_API.app.services.llm_usage_aggregator",
-        types.ModuleType("tldw_Server_API.app.services.llm_usage_aggregator"),
     )
     monkeypatch.setitem(
         sys.modules,
@@ -173,19 +135,10 @@ def test_shutdown_legacy_adapters_import_is_lazy_for_optional_stop_helpers(
 
     plan = module.build_legacy_shutdown_plan(
         _App(),
-        LegacyShutdownContext(
-            usage_task=object(),
-            llm_usage_task=object(),
-            authnz_scheduler_started=True,
-        ),
+        LegacyShutdownContext(),
     )
 
-    assert [component.name for component in plan] == [
-        "lifecycle_gate",
-        "usage_aggregator",
-        "llm_usage_aggregator",
-        "authnz_scheduler",
-    ]
+    assert [component.name for component in plan] == ["lifecycle_gate"]
 
 
 def test_get_legacy_shutdown_suppressed_component_names_uses_summary_results() -> None:
@@ -248,17 +201,6 @@ def test_get_legacy_shutdown_suppressed_component_names_uses_summary_results() -
                 duration_ms=0,
                 timeout_ms=0,
             ),
-            "authnz_scheduler": ShutdownComponentSummary(
-                name="authnz_scheduler",
-                phase=ShutdownPhase.FINALIZERS,
-                policy=ShutdownPolicy.PROD_DRAIN,
-                result="failed",
-                started_at=0.0,
-                finished_at=0.0,
-                duration_ms=0,
-                timeout_ms=0,
-                error="boom",
-            ),
         },
     )
 
@@ -266,19 +208,13 @@ def test_get_legacy_shutdown_suppressed_component_names_uses_summary_results() -
 
 
 @pytest.mark.asyncio
-async def test_register_legacy_shutdown_components_keeps_authnz_in_inventory_but_not_in_migrated_set() -> None:
+async def test_register_legacy_shutdown_components_default_omits_removed_usage_components() -> None:
     from tldw_Server_API.app.services.shutdown_legacy_adapters import (
         register_legacy_shutdown_components,
     )
 
     events: list[str] = []
     plan = [
-        component("chatbooks_cleanup", phase=ShutdownPhase.WORKERS, stop=lambda: events.append("chatbooks")),
-        component(
-            "storage_cleanup_service",
-            phase=ShutdownPhase.FINALIZERS,
-            stop=lambda: events.append("storage"),
-        ),
         component(
             "usage_aggregator",
             phase=ShutdownPhase.RESOURCES,
@@ -304,27 +240,13 @@ async def test_register_legacy_shutdown_components_keeps_authnz_in_inventory_but
 
     summary = await coordinator.shutdown()
 
-    assert [component.name for component in registered] == [
-        "chatbooks_cleanup",
-        "usage_aggregator",
-        "llm_usage_aggregator",
-        "storage_cleanup_service",
-    ]
-    assert [component.phase for component in registered] == [
-        ShutdownPhase.WORKERS,
-        ShutdownPhase.RESOURCES,
-        ShutdownPhase.RESOURCES,
-        ShutdownPhase.FINALIZERS,
-    ]
+    assert registered == []
     assert plan[-1].phase == ShutdownPhase.FINALIZERS
-    assert sorted(events) == ["chatbooks", "llm", "storage", "usage"]
+    assert events == []
     assert summary.phases[ShutdownPhase.PRODUCERS].component_names == []
-    assert summary.phases[ShutdownPhase.WORKERS].component_names == ["chatbooks_cleanup"]
-    assert summary.phases[ShutdownPhase.RESOURCES].component_names == [
-        "usage_aggregator",
-        "llm_usage_aggregator",
-    ]
-    assert summary.phases[ShutdownPhase.FINALIZERS].component_names == ["storage_cleanup_service"]
+    assert summary.phases[ShutdownPhase.WORKERS].component_names == []
+    assert summary.phases[ShutdownPhase.RESOURCES].component_names == []
+    assert summary.phases[ShutdownPhase.FINALIZERS].component_names == []
 
 
 def test_register_legacy_shutdown_components_skips_effective_transition_overrides() -> None:

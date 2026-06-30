@@ -6,10 +6,11 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import slack as slack_endpoint
+from tldw_Server_API.app.api.v1.endpoints import slack_support
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 
 
@@ -206,6 +207,28 @@ def test_slack_oauth_callback_rejects_invalid_state(slack_oauth_client: tuple[Te
     assert response.json()["detail"] == "Invalid or expired OAuth state"
 
 
+def test_slack_oauth_callback_sanitizes_provider_error(
+    slack_oauth_client: tuple[TestClient, _FakeOAuthStateRepo, _FakeUserSecretRepo],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _, _ = slack_oauth_client
+
+    async def _failed_token_exchange(*, token_url: str, form_data: dict) -> dict:
+        assert token_url == "https://slack.test/api/oauth.v2.access"
+        assert form_data["client_id"] == "C123"
+        return {"ok": False, "error": "invalid_code"}
+
+    monkeypatch.setattr(slack_endpoint, "_slack_oauth_token_exchange", _failed_token_exchange)
+
+    start = client.post("/api/v1/slack/oauth/start")
+    state = _extract_state_from_auth_url(start.json()["auth_url"])
+
+    response = client.get("/api/v1/slack/oauth/callback", params={"code": "bad-code", "state": state})
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Slack OAuth token exchange failed"
+
+
 def test_slack_admin_toggle_and_delete(slack_oauth_client: tuple[TestClient, _FakeOAuthStateRepo, _FakeUserSecretRepo]) -> None:
     client, _, _ = slack_oauth_client
     start = client.post("/api/v1/slack/oauth/start")
@@ -228,3 +251,29 @@ def test_slack_admin_toggle_and_delete(slack_oauth_client: tuple[TestClient, _Fa
     listed_after_delete = client.get("/api/v1/slack/admin/installations")
     assert listed_after_delete.status_code == 200
     assert listed_after_delete.json()["installations"] == []
+
+
+@pytest.mark.asyncio
+async def test_slack_oauth_token_exchange_sanitizes_provider_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeResponse:
+        status_code = 400
+
+        def json(self) -> dict[str, str]:
+            return {"error": "invalid_client"}
+
+        async def aclose(self) -> None:
+            return None
+
+    async def _fake_http_afetch(**_kwargs):
+        return _FakeResponse()
+
+    monkeypatch.setattr(slack_support, "_http_afetch", _fake_http_afetch)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await slack_endpoint._slack_oauth_token_exchange(
+            token_url="https://slack.test/api/oauth.v2.access",
+            form_data={"code": "bad-code"},
+        )
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == "Slack OAuth token exchange failed"

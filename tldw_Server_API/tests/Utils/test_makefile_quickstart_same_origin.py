@@ -25,13 +25,18 @@ def _target_block(makefile_text: str, target: str) -> str:
     return match.group(0)
 
 
-def test_makefile_quickstart_still_delegates_to_webui_default() -> None:
-    """make quickstart should still resolve to the WebUI Docker target."""
+def test_makefile_quickstart_still_starts_webui_default() -> None:
+    """make quickstart should still resolve to the Docker WebUI path."""
     text = _read("Makefile")
     quickstart = _target_block(text, "quickstart")
     _require(
-        "quickstart-docker-webui" in quickstart,
-        "quickstart should delegate to quickstart-docker-webui",
+        "setup-docker-single start-docker-single verify-docker-single" in quickstart,
+        "quickstart should depend on setup/start/verify Docker single-user targets",
+    )
+    start_docker_single = _target_block(text, "start-docker-single")
+    _require(
+        "$(DOCKER_WEBUI_COMPOSE)" in start_docker_single,
+        "quickstart's start-docker-single path should include the WebUI compose overlay",
     )
 
 

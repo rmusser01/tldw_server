@@ -64,6 +64,11 @@ class _FakeTTSService:
         return {}
 
 
+class _FailingTTSHealthService:
+    def get_status(self):
+        raise RuntimeError("TTS health backend leaked /private/tts-health.json")
+
+
 class _FakeConfigManager:
     def __init__(self, provider_configs):
         self._provider_configs = dict(provider_configs)
@@ -79,6 +84,23 @@ class _FakeCircuitManager:
     def get_all_status(self, detailed=False):
         assert detailed is True
         return dict(self._statuses)
+
+
+@pytest.mark.asyncio
+async def test_tts_health_error_log_is_sanitized(monkeypatch):
+    fake_logger = MagicMock()
+    monkeypatch.setattr(audio_health, "logger", fake_logger)
+    monkeypatch.setattr(audio_health, "ensure_request_id", lambda _request: "req-test")
+
+    health = await audio_health.get_tts_health(
+        request=MagicMock(),
+        tts_service=_FailingTTSHealthService(),
+    )
+
+    assert health["status"] == "error"
+    assert health["message"] == "TTS health check failed"
+    assert health["request_id"] == "req-test"
+    fake_logger.exception.assert_called_once_with("Error getting TTS health")
 
 
 @pytest.mark.asyncio
@@ -100,6 +122,16 @@ async def test_kokoro_health_marks_pytorch_runtime_missing_pipeline_as_unhealthy
 
     monkeypatch.setattr(adapter_registry, "get_tts_factory", _fake_get_tts_factory)
     monkeypatch.setattr(importlib.util, "find_spec", _fake_find_spec)
+    monkeypatch.setattr(
+        audio_health,
+        "get_tts_config_manager",
+        lambda: _FakeConfigManager(
+            {
+                "kokoro": SimpleNamespace(enabled=True, api_key=None),
+                "openai": SimpleNamespace(enabled=True, api_key="sk-test"),
+            }
+        ),
+    )
 
     health = await audio_health.get_tts_health(
         request=MagicMock(),

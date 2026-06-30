@@ -7,19 +7,21 @@ This document summarizes the background services in `tldw_server`, their respons
 - Core workers: Chatbooks Jobs worker, Jobs metrics gauges worker, Claims rebuild worker
 - Aggregators: API request usage aggregator, LLM usage aggregator
 - Quotas: User storage quota service (filesystem + DB)
+- Lifecycle helpers: focused `startup_*.py`, `shutdown_*.py`, and `lifespan_*.py` modules extracted from the FastAPI lifespan
 - Web scraping: Enhanced scraping service (Playwright-based) with compatibility fallback behavior
 - Placeholders (non-production): document/ebook/podcast/XML processors
 - Ephemeral storage: process-local in-memory store with TTL and capacity limits
 
 ## Startup/Shutdown
 
-The app starts/stops service loops in `tldw_Server_API/app/main.py` (lifespan):
-- Chatbooks Core Jobs worker (if enabled): `tldw_Server_API/app/services/core_jobs_worker.py`
-- Jobs metrics gauges loop: `tldw_Server_API/app/services/jobs_metrics_service.py`
-- Claims rebuild loop (optional): `tldw_Server_API/app/core/Claims_Extraction/claims_rebuild_service.py`
-- Usage aggregators: `tldw_Server_API/app/services/usage_aggregator.py` and `llm_usage_aggregator.py`
+`tldw_Server_API/app/main.py` remains the FastAPI entry point, but startup and shutdown orchestration is now delegated to lifecycle service modules:
 
-Each loop supports graceful stop via an `asyncio.Event` and is gated by env flags.
+- `tldw_Server_API/app/services/lifespan_startup_sequence.py` runs the startup sequence.
+- `tldw_Server_API/app/services/lifespan_shutdown_sequence.py` runs the shutdown sequence.
+- `tldw_Server_API/app/services/lifespan_worker_runtime_state.py` carries task, stop-event, scheduler, and resource handles from startup into shutdown.
+- Focused `startup_*.py` and `shutdown_*.py` helpers own individual lifecycle slices such as auth initialization, validation, worker bootstrap, worker late-stop handling, coordinated shutdown, and resource cleanup.
+
+Background loops should support graceful stop via an `asyncio.Event` where possible. Startup helpers should return or register task/stop-event handles, and shutdown helpers should set stop events, wait with bounded timeouts, cancel as fallback, and clear stale handles. See `tldw_Server_API/app/services/README.md` for the package-level lifecycle service pattern and checklist.
 
 ## Services
 
@@ -107,4 +109,4 @@ Each loop supports graceful stop via an `asyncio.Event` and is gated by env flag
 
 ---
 
-For implementation details, see the service files referenced above and the startup wiring in `tldw_Server_API/app/main.py`.
+For implementation details, see the service files referenced above, the package README at `tldw_Server_API/app/services/README.md`, and the startup/shutdown wiring in `tldw_Server_API/app/main.py`.

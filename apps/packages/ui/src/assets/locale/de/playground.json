@@ -168,6 +168,7 @@
     "providerChangeHelper": "Öffnen Sie unten die Anbieter-Auswahl, um zwischen Browser, tldw, OpenAI oder Supersonic zu wechseln.",
     "changeProvider": "Anbieter wechseln",
     "title": "TTS-Playground",
+    "routeTitle": "Text-zu-Sprache",
     "subtitle": "Text-to-Speech ausprobieren und Anbieter, Modelle und Stimmen anpassen.",
     "currentProvider": "Aktueller Anbieter",
     "settingsIntro": "Passen Sie Ihren TTS-Anbieter, Ihr Modell und Ihre Stimme an. Diese Einstellungen werden verwendet, wenn Sie Audio aus Chat oder Medien abspielen.",

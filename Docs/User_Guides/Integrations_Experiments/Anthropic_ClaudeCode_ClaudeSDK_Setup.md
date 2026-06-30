@@ -2,13 +2,13 @@
 
 This guide is the Anthropic equivalent of first-time provider setup for `tldw_server`, with focus on Claude Code and Claude SDK workflows.
 
-## Support Status (As of February 19, 2026)
+## Support Status (As of June 17, 2026)
 
 Currently supported:
 
 - Anthropic via API key (`ANTHROPIC_API_KEY`) for server-side model calls
 - Anthropic BYOK API-key storage in multi-user mode
-- Claude Code through ACP (`agent_type=claude_code`) using `ANTHROPIC_API_KEY`
+- Claude Code through ACP is supported with caveats through the pinned external `@agentclientprotocol/claude-agent-acp@0.40.0` adapter on the verified macOS host runner profile. Sandbox, artifact-producing workflows, non-empty MCP injection, reviewer-loop behavior, and other host profiles remain unverified.
 
 Not yet supported:
 
@@ -80,16 +80,31 @@ Use this when users operate Claude Code sessions through the ACP UI.
 - ACP routes enabled in `config.txt` (`enable = tools, jobs, acp`)
 - `tldw-agent` configured
 - Claude Code installed and executable as `claude`
-- `ANTHROPIC_API_KEY` exported in the runner environment
+- pinned `@agentclientprotocol/claude-agent-acp@0.40.0` installed and executable as `claude-agent-acp`
+- Claude Code or adapter provider/login state configured in the runner environment
 
 `~/.tldw-agent/config.yaml` example:
 
 ```yaml
-agent:
-  command: "claude"
-  args: ["code"]
-  env:
-    ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+agents:
+  default: claude_code
+  agents:
+    - type: claude_code
+      name: Claude Code
+      command: claude
+      args: []
+      env:
+        - TERM=xterm-256color
+        - HOME=${TLDW_ACP_HOST_HOME}
+      entrypoint_strategy: external_acp_adapter
+      acp_command: claude-agent-acp
+      acp_args: []
+      adapter_source: agentclientprotocol/claude-agent-acp
+      adapter_docs_url: https://github.com/agentclientprotocol/claude-agent-acp
+      adapter_package: "@agentclientprotocol/claude-agent-acp"
+      adapter_version: "0.40.0"
+      credential_policy: delegated_to_adapter
+      runtime_backend: acp_downstream
 ```
 
 Validate:
@@ -98,7 +113,7 @@ Validate:
 curl -s http://127.0.0.1:8000/api/v1/acp/agents -H "X-API-KEY: <api-key>"
 ```
 
-You should see `claude_code` listed and configured when the key is present.
+You should see `claude_code` listed with `supported_with_caveats` support on the verified macOS host profile. Runtime status can still block on missing `claude`, missing `claude-agent-acp`, or missing/failed Claude Code or adapter auth in the same environment used by `tldw_server` and the runner.
 
 ## Path C: Claude SDK in Custom Agent Mode
 
@@ -118,8 +133,8 @@ Use this when Claude Code is not your desired runtime and you want SDK-managed b
 
 ### Claude agent shows unconfigured
 
-- Check `ANTHROPIC_API_KEY` in the same environment used by `tldw_server`/runner.
-- Confirm agent command works directly: `claude code --help`.
+- Check Claude Code or adapter provider/login state in the same environment used by `tldw_server`/runner.
+- Confirm both commands work directly: `claude --version` and `claude-agent-acp --help`.
 
 ### `403 Provider not allowed for BYOK`
 

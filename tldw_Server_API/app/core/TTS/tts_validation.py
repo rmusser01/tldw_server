@@ -4,6 +4,7 @@
 # Imports
 import base64
 import html
+import math
 import re
 import unicodedata
 from typing import Any, Optional, Union
@@ -13,6 +14,11 @@ from typing import Any, Optional, Union
 from loguru import logger
 
 from .adapters.base import AudioFormat, TTSRequest
+from .chatterbox_catalog import (
+    CHATTERBOX_LANGUAGE_CODES,
+    ChatterboxModelFamily,
+    resolve_chatterbox_model_family,
+)
 
 #
 # Local Imports
@@ -32,6 +38,40 @@ from .voice_manager import PROVIDER_REQUIREMENTS
 #######################################################################################################################
 #
 # Provider Limits
+
+OMNIVOICE_GENERATION_PARAM_RANGES = {
+    "num_step": (int, 1, 128),
+    "guidance_scale": (float, 0.0, 30.0),
+    "denoise": (bool, None, None),
+    "t_shift": (float, None, None),
+    "position_temperature": (float, 0.0, 10.0),
+    "class_temperature": (float, 0.0, 10.0),
+    "layer_penalty_factor": (float, 0.0, 10.0),
+    "duration": (float, 0.0, None),
+    "speed": (float, 0.0, 4.0),
+    "postprocess_output": (bool, None, None),
+    "preprocess_prompt": (bool, None, None),
+    "audio_chunk_duration": (float, 0.0, None),
+    "audio_chunk_threshold": (float, 0.0, None),
+}
+OMNIVOICE_INSTRUCT_KEYS = ("instruct", "voice_design", "voice_description")
+OMNIVOICE_LANGUAGE_KEYS = ("language_id", "language")
+OMNIVOICE_SUPPORTED_NON_GENERATION_KEYS = {
+    "mode",
+    "omnivoice_mode",
+    "reference_text",
+    "ref_text",
+    "voice_reference_text",
+    "target_sample_rate",
+    "sample_rate",
+    "reference_duration_min",
+    "request_id",
+    "correlation_id",
+    *OMNIVOICE_INSTRUCT_KEYS,
+    *OMNIVOICE_LANGUAGE_KEYS,
+}
+OMNIVOICE_TRUE_VALUES = {"1", "true", "t", "yes", "y", "on"}
+OMNIVOICE_FALSE_VALUES = {"0", "false", "f", "no", "n", "off"}
 
 
 class ProviderLimits:
@@ -76,7 +116,7 @@ class ProviderLimits:
         },
         "chatterbox": {
             "max_text_length": 10000,
-            "valid_formats": {"wav", "mp3"},
+            "valid_formats": {"wav", "mp3", "opus", "flac", "pcm"},
             "min_speed": 0.5,
             "max_speed": 2.0
         },
@@ -149,6 +189,17 @@ class ProviderLimits:
             "valid_formats": {"mp3", "opus", "aac", "wav", "pcm"},
             "min_speed": 0.25,
             "max_speed": 4.0
+        },
+        "omnivoice": {
+            "max_text_length": 5000,
+            "languages": ["en"],
+            "valid_formats": {"mp3", "opus", "aac", "flac", "wav", "pcm"},
+            "min_speed": 0.25,
+            "max_speed": 4.0,
+        },
+        "fish_s2": {
+            "max_text_length": 5000,
+            "valid_formats": {"wav", "mp3", "opus", "pcm"},
         }
     }
 
@@ -252,6 +303,8 @@ class TTSInputValidator:
         "echo_tts": 768,
         "lux_tts": 5000,
         "qwen3_tts": 5000,
+        "omnivoice": 5000,
+        "fish_s2": 5000,
         "default": 5000,
     }
 
@@ -295,7 +348,7 @@ class TTSInputValidator:
         "kokoro": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.OPUS},
         "higgs": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.FLAC},
         "dia": {AudioFormat.MP3, AudioFormat.WAV},
-        "chatterbox": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.OPUS},
+        "chatterbox": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.OPUS, AudioFormat.FLAC, AudioFormat.PCM},
         "vibevoice": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.FLAC, AudioFormat.OPUS},
         "vibevoice_realtime": {AudioFormat.PCM, AudioFormat.WAV, AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.FLAC},
         "neutts": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.OPUS, AudioFormat.FLAC, AudioFormat.PCM},
@@ -308,6 +361,8 @@ class TTSInputValidator:
         "echo_tts": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.FLAC, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.PCM},
         "lux_tts": {AudioFormat.MP3, AudioFormat.WAV, AudioFormat.FLAC, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.PCM},
         "qwen3_tts": {AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.WAV, AudioFormat.PCM},
+        "omnivoice": {AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.AAC, AudioFormat.FLAC, AudioFormat.WAV, AudioFormat.PCM},
+        "fish_s2": {AudioFormat.WAV, AudioFormat.MP3, AudioFormat.OPUS, AudioFormat.PCM},
     }
 
     # Voice reference file validation
@@ -561,7 +616,10 @@ class TTSInputValidator:
                 if isinstance(extra_language, str) and extra_language.strip():
                     language = extra_language.strip()
             if language:
-                self._validate_language(language, provider)
+                if provider == "chatterbox":
+                    self._validate_chatterbox_language(language, request)
+                else:
+                    self._validate_language(language, provider)
 
             # Validate voice
             if request.voice:
@@ -654,6 +712,37 @@ class TTSInputValidator:
                     and isinstance(extras, dict)
                     and extras.get("pocket_tts_cpp_voice_path")
                 )
+            elif provider == "omnivoice":
+                voice = (request.voice or "").strip()
+                is_clone_voice = voice.lower() == "clone"
+                is_custom_voice = voice.startswith("custom:")
+                ref_text = None
+                if isinstance(extras, dict):
+                    ref_text = (
+                        extras.get("reference_text")
+                        or extras.get("ref_text")
+                        or extras.get("voice_reference_text")
+                    )
+                clone_requested = bool(request.voice_reference) or is_clone_voice or is_custom_voice
+                if is_clone_voice and not request.voice_reference:
+                    raise TTSInvalidVoiceReferenceError(
+                        "OmniVoice clone requests require voice_reference",
+                        provider=provider,
+                    )
+                if is_custom_voice and not request.voice_reference:
+                    raise TTSInvalidVoiceReferenceError(
+                        "OmniVoice custom: voices require a resolved voice_reference before provider validation",
+                        provider=provider,
+                    )
+                if clone_requested and not (isinstance(ref_text, str) and ref_text.strip()):
+                    raise TTSInvalidInputError(
+                        "OmniVoice cloning requires reference_text",
+                        provider=provider,
+                    )
+                duration_limits = PROVIDER_REQUIREMENTS.get("omnivoice", {}).get("duration", {})
+                if min_duration is None:
+                    min_duration = self._coerce_float(duration_limits.get("min"))
+                max_duration = self._coerce_float(duration_limits.get("max"))
 
             # Validate parameters (provider-aware)
             self._validate_parameters(request, provider)
@@ -678,7 +767,7 @@ class TTSInputValidator:
         except TTSValidationError as e:
             return False, str(e)
         except Exception as e:
-            logger.error(f"Unexpected validation error: {e}")
+            logger.error(f"Unexpected validation error; exception_type={type(e).__name__}")
             return False, f"Validation failed: {str(e)}"
 
     def _validate_text(self, text: str, provider: Optional[str] = None):
@@ -729,6 +818,8 @@ class TTSInputValidator:
 
     def _validate_language(self, language: str, provider: Optional[str] = None):
         """Validate language code"""
+        if provider == "omnivoice":
+            return
         if provider and provider in self.SUPPORTED_LANGUAGES:
             if language not in self.SUPPORTED_LANGUAGES[provider]:
                 supported = list(self.SUPPORTED_LANGUAGES[provider])
@@ -737,6 +828,40 @@ class TTSInputValidator:
                     provider=provider,
                     details={"requested_language": language, "supported_languages": supported}
                 )
+
+    def _validate_chatterbox_language(self, language: str, request: TTSRequest) -> None:
+        """Validate Chatterbox language support by selected model family."""
+        extras = request.extra_params if isinstance(request.extra_params, dict) else {}
+        model_hint = getattr(request, "model", None) or extras.get("model")
+        config_variant = (
+            extras.get("chatterbox_variant")
+            or extras.get("model_family")
+            or extras.get("variant")
+            or self._get_provider_setting("chatterbox", "variant")
+        )
+        use_multilingual = parse_bool(
+            extras.get("use_multilingual", self._get_provider_setting("chatterbox", "use_multilingual")),
+            default=False,
+        )
+        family = resolve_chatterbox_model_family(
+            model_hint,
+            language=language,
+            config_variant=config_variant,
+            use_multilingual=use_multilingual,
+        )
+        supported = CHATTERBOX_LANGUAGE_CODES if family is ChatterboxModelFamily.MULTILINGUAL else {"en"}
+        normalized_language = (language or "").strip().casefold()
+        if normalized_language not in supported:
+            supported_list = sorted(supported)
+            raise TTSUnsupportedLanguageError(
+                f"Language '{language}' not supported by chatterbox {family.value}. Supported: {supported_list}",
+                provider="chatterbox",
+                details={
+                    "requested_language": language,
+                    "supported_languages": supported_list,
+                    "model_family": family.value,
+                }
+            )
 
     def _validate_voice(self, voice: str, provider: Optional[str] = None):
         """Validate voice selection"""
@@ -886,6 +1011,150 @@ class TTSInputValidator:
             voice_clone_prompt = extras.get("voice_clone_prompt")
             if voice_clone_prompt is not None:
                 self._validate_voice_clone_prompt(voice_clone_prompt, provider)
+
+            if provider == "omnivoice":
+                reference_text = (
+                    extras.get("reference_text")
+                    or extras.get("ref_text")
+                    or extras.get("voice_reference_text")
+                )
+                if reference_text is not None:
+                    if not isinstance(reference_text, str) or not reference_text.strip():
+                        raise TTSInvalidInputError("reference_text must be a non-empty string")
+
+                mode = extras.get("omnivoice_mode", extras.get("mode"))
+                if mode is not None:
+                    if not isinstance(mode, str):
+                        raise TTSInvalidInputError("OmniVoice mode must be a string")
+                    if mode.strip().lower() not in {"auto", "design", "clone"}:
+                        raise TTSInvalidInputError("OmniVoice mode must be 'auto', 'design', or 'clone'")
+                self._validate_omnivoice_extra_params(request, extras)
+
+    def _validate_omnivoice_extra_params(self, request: TTSRequest, extras: dict[str, Any]) -> None:
+        instruct_values: list[str] = []
+        for key in OMNIVOICE_INSTRUCT_KEYS:
+            value = extras.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                raise TTSInvalidInputError(f"OmniVoice {key} must be a string")
+            stripped = value.strip()
+            if stripped:
+                instruct_values.append(stripped)
+        if len(set(instruct_values)) > 1:
+            raise TTSInvalidInputError("Conflicting OmniVoice instruct aliases provided")
+        design_requested = bool(instruct_values)
+
+        language_values: list[str] = []
+        for key in OMNIVOICE_LANGUAGE_KEYS:
+            value = extras.get(key)
+            if value is None:
+                continue
+            stripped = str(value).strip()
+            if stripped:
+                language_values.append(stripped.lower())
+        request_language = getattr(request, "language", None)
+        if request_language is not None:
+            stripped = str(request_language).strip()
+            if stripped and stripped.lower() != "en":
+                language_values.append(stripped.lower())
+        if len(set(language_values)) > 1:
+            raise TTSInvalidInputError("Conflicting OmniVoice language aliases provided")
+
+        mode = extras.get("omnivoice_mode", extras.get("mode"))
+        normalized_mode = None
+        if mode is not None:
+            if not isinstance(mode, str):
+                raise TTSInvalidInputError("OmniVoice mode must be a string")
+            normalized_mode = mode.strip().lower()
+            if normalized_mode not in {"auto", "design", "clone"}:
+                raise TTSInvalidInputError("OmniVoice mode must be 'auto', 'design', or 'clone'")
+        voice = (request.voice or "").strip().lower()
+        clone_requested = bool(request.voice_reference) or voice == "clone" or voice.startswith("custom:")
+        if normalized_mode == "auto" and (design_requested or clone_requested):
+            raise TTSInvalidInputError("OmniVoice mode=auto conflicts with design or clone inputs")
+        if normalized_mode == "design" and not design_requested:
+            raise TTSInvalidInputError("OmniVoice mode=design requires instruct")
+        if normalized_mode == "design" and clone_requested:
+            raise TTSInvalidInputError("OmniVoice mode=design conflicts with clone inputs")
+        if normalized_mode == "clone" and design_requested:
+            raise TTSInvalidInputError("OmniVoice mode=clone conflicts with instruct")
+        if normalized_mode == "clone" and not clone_requested:
+            raise TTSInvalidInputError("OmniVoice mode=clone requires reference audio")
+
+        for key, value in extras.items():
+            if key in OMNIVOICE_GENERATION_PARAM_RANGES:
+                expected_type, min_value, max_value = OMNIVOICE_GENERATION_PARAM_RANGES[key]
+                self._validate_omnivoice_generation_value(
+                    key,
+                    value,
+                    expected_type,
+                    min_value,
+                    max_value,
+                )
+                continue
+            if key in OMNIVOICE_SUPPORTED_NON_GENERATION_KEYS:
+                continue
+            if key.startswith("omnivoice_"):
+                raise TTSInvalidInputError(f"Unknown OmniVoice generation parameter: {key}")
+
+    def _validate_omnivoice_generation_value(
+        self,
+        key: str,
+        value: Any,
+        expected_type: type,
+        min_value: Optional[float],
+        max_value: Optional[float],
+    ) -> None:
+        try:
+            if expected_type is bool:
+                self._validate_omnivoice_bool_generation_value(key, value)
+                return
+            if expected_type is int:
+                parsed = self._coerce_omnivoice_int_generation_value(key, value)
+            else:
+                parsed = self._coerce_omnivoice_float_generation_value(key, value)
+        except Exception as exc:
+            raise TTSInvalidInputError(f"OmniVoice generation parameter {key} has invalid type") from exc
+        if min_value is not None:
+            if key in {"duration", "speed", "audio_chunk_duration", "audio_chunk_threshold"}:
+                if parsed <= min_value:
+                    raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be greater than {min_value}")
+            elif parsed < min_value:
+                raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be at least {min_value}")
+        if max_value is not None and parsed > max_value:
+            raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be at most {max_value}")
+
+    def _validate_omnivoice_bool_generation_value(self, key: str, value: Any) -> None:
+        if isinstance(value, bool):
+            return
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in OMNIVOICE_TRUE_VALUES or normalized in OMNIVOICE_FALSE_VALUES:
+                return
+        raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be a boolean")
+
+    def _coerce_omnivoice_int_generation_value(self, key: str, value: Any) -> int:
+        if isinstance(value, bool):
+            raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be an integer")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if re.fullmatch(r"[+-]?\d+", stripped):
+                return int(stripped)
+        raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be an integer")
+
+    def _coerce_omnivoice_float_generation_value(self, key: str, value: Any) -> float:
+        if isinstance(value, bool):
+            raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be a finite number")
+        try:
+            parsed = float(value)
+        except Exception as exc:
+            raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be a finite number") from exc
+        if not math.isfinite(parsed):
+            raise TTSInvalidInputError(f"OmniVoice generation parameter {key} must be a finite number")
+        return parsed
 
     def _validate_voice_reference(
         self,

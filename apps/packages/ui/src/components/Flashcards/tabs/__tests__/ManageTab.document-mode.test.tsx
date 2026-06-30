@@ -11,6 +11,7 @@ import {
   useManageQuery,
   useResetFlashcardSchedulingMutation,
   useTagSuggestionsQuery,
+  useUpdateDeckMutation,
   useUpdateFlashcardsBulkMutation,
   useUpdateFlashcardMutation
 } from "../../hooks"
@@ -92,6 +93,7 @@ vi.mock("../../hooks", () => ({
   useManageQuery: vi.fn(),
   useFlashcardDocumentQuery: vi.fn(),
   useTagSuggestionsQuery: vi.fn(),
+  useUpdateDeckMutation: vi.fn(),
   useUpdateFlashcardMutation: vi.fn(),
   useUpdateFlashcardsBulkMutation: vi.fn(),
   useResetFlashcardSchedulingMutation: vi.fn(),
@@ -102,6 +104,7 @@ vi.mock("../../hooks", () => ({
 }))
 
 vi.mock("../../components", () => ({
+  FlashcardMarkdownSnippet: ({ content }: { content: string }) => <div>{content}</div>,
   MarkdownWithBoundary: ({ content }: { content: string }) => <div>{content}</div>,
   FlashcardActionsMenu: ({ onEdit }: { onEdit: () => void }) => (
     <button onClick={onEdit}>Action Edit</button>
@@ -238,6 +241,10 @@ describe("ManageTab document mode", () => {
       mutateAsync: vi.fn(),
       isPending: false
     } as any)
+    vi.mocked(useUpdateDeckMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false
+    } as any)
     vi.mocked(useUpdateFlashcardsBulkMutation).mockReturnValue({
       mutateAsync: vi.fn().mockResolvedValue({
         results: []
@@ -311,7 +318,11 @@ describe("ManageTab document mode", () => {
     fireEvent.click(screen.getByTestId("flashcards-density-toggle-document"))
     fireEvent.click(screen.getByTestId(`flashcards-document-row-select-${sampleCard.uuid}`))
 
-    expect(screen.getByTestId("flashcards-document-truncation-banner")).toBeInTheDocument()
+    const banner = screen.getByTestId("flashcards-document-truncation-banner")
+    expect(banner).toBeInTheDocument()
+    expect(banner).toHaveAttribute("data-ds-component", "Alert")
+    expect(banner).toHaveTextContent("Document results are truncated to the current scan limit.")
+    expect(banner).toHaveTextContent("Refine filters or reduce tags to enable selecting across the full result set.")
     expect(screen.getByTestId("flashcards-select-all-across")).toBeDisabled()
   })
 

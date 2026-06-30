@@ -13,6 +13,12 @@ import { useACPSessionsStore } from "@/store/acp-sessions"
 import type { ACPPermissionTier } from "@/services/acp/types"
 import { ACPPlaygroundHeader } from "./ACPPlaygroundHeader"
 import { ACPChatPanel } from "./ACPChatPanel"
+import {
+  ACPPlaygroundRecovery,
+  normalizeACPHealthSnapshot,
+  shouldShowAcpPlaygroundRecovery,
+  type ACPHealthSnapshot
+} from "./ACPPlaygroundRecovery"
 
 const ACPSessionPanel = React.lazy(() =>
   import("./ACPSessionPanel").then((module) => ({ default: module.ACPSessionPanel }))
@@ -29,6 +35,27 @@ const ACPPermissionModal = React.lazy(() =>
 
 const ACP_LEFT_PANE_KEY = "acp-playground-left-pane"
 const ACP_RIGHT_PANE_KEY = "acp-playground-right-pane"
+const ACP_SESSION_DETAIL_VIEWS = new Set([
+  "session",
+  "diagnostics",
+  "artifacts",
+  "audit",
+  "events"
+])
+
+const readACPPlaygroundSearch = (): string => {
+  if (typeof window === "undefined") return ""
+  if (window.location.search) return window.location.search
+
+  const hash = window.location.hash || ""
+  const queryIndex = hash.indexOf("?")
+  return queryIndex >= 0 ? hash.slice(queryIndex) : ""
+}
+
+const normalizeQueryValue = (value: string | null): string | null => {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
 
 /**
  * ACPPlayground - Agent Client Protocol interface
@@ -80,6 +107,7 @@ export const ACPPlayground: React.FC = () => {
   const upsertSessionsFromServerList = useACPSessionsStore((s) => s.upsertSessionsFromServerList)
   const applySessionDetail = useACPSessionsStore((s) => s.applySessionDetail)
   const applySessionUsage = useACPSessionsStore((s) => s.applySessionUsage)
+  const setActiveSession = useACPSessionsStore((s) => s.setActiveSession)
   const globalError = useACPSessionsStore((s) => s.globalError)
   const setGlobalError = useACPSessionsStore((s) => s.setGlobalError)
   const cleanupExpiredSessions = useACPSessionsStore((s) => s.cleanupExpiredSessions)
@@ -96,7 +124,11 @@ export const ACPPlayground: React.FC = () => {
   // Include the server URL in the query key so changing the ACP server
   // configuration invalidates the cached health status.
   const acpServerUrl = connectionConfig?.serverUrl ?? ""
-  const { data: healthData, isLoading: isHealthLoading } = useQuery({
+  const {
+    data: healthData,
+    isLoading: isHealthLoading,
+    refetch: refetchACPHealth
+  } = useQuery<ACPHealthSnapshot>({
     queryKey: ["acp", "health", acpServerUrl],
     queryFn: async () => {
       try {
@@ -106,9 +138,25 @@ export const ACPPlayground: React.FC = () => {
             headers: buildACPAuthHeaders(connectionConfig),
           }
         )
-        return resp.ok ? await resp.json() : { overall: "unavailable" }
-      } catch {
-        return { overall: "unavailable" }
+        let payload: unknown = null
+        try {
+          payload = await resp.json()
+        } catch {
+          payload = null
+        }
+        return resp.ok
+          ? normalizeACPHealthSnapshot(payload)
+          : normalizeACPHealthSnapshot(payload, {
+              overall: "unavailable",
+              status: resp.status,
+              rawMessage: `ACP health returned HTTP ${resp.status}`
+            })
+      } catch (error) {
+        return normalizeACPHealthSnapshot(null, {
+          overall: "unavailable",
+          rawMessage:
+            error instanceof Error ? error.message : "Failed to reach ACP health"
+        })
       }
     },
     enabled: !!connectionConfig,
@@ -196,6 +244,45 @@ export const ACPPlayground: React.FC = () => {
     cleanupExpiredSessions()
   }, [cleanupExpiredSessions])
 
+  // Honor deep links from Agent Tasks and workspace run history.
+  useEffect(() => {
+    const params = new URLSearchParams(readACPPlaygroundSearch())
+    const requestedSessionId = normalizeQueryValue(params.get("session"))
+    const requestedView = normalizeQueryValue(params.get("view"))?.toLowerCase()
+
+    if (requestedSessionId) {
+      setActiveSession(requestedSessionId)
+    }
+
+    if (!requestedView) {
+      return
+    }
+
+    if (requestedView === "workspace") {
+      setActiveTab("workspace")
+      setRightTab("workspace")
+      setRightPaneOpen(true)
+      return
+    }
+
+    if (requestedView === "tools") {
+      setActiveTab("tools")
+      setRightTab("tools")
+      setRightPaneOpen(true)
+      return
+    }
+
+    if (requestedView === "chat") {
+      setActiveTab("chat")
+      return
+    }
+
+    if (requestedView === "sessions" || ACP_SESSION_DETAIL_VIEWS.has(requestedView)) {
+      setActiveTab("sessions")
+      setLeftPaneOpen(true)
+    }
+  }, [setActiveSession, setLeftPaneOpen, setRightPaneOpen])
+
   // Hydrate persisted ACP sessions from backend when the page loads.
   useEffect(() => {
     if (!restClient) {
@@ -277,9 +364,19 @@ export const ACPPlayground: React.FC = () => {
     }
   }
 
-  const pendingPermissions = activeSession?.pendingPermissions ?? []
+  const pendingPermissions = React.useMemo(
+    () => activeSession?.pendingPermissions ?? [],
+    [activeSession?.pendingPermissions]
+  )
   const hasPendingPermissions = pendingPermissions.length > 0
-  const panelFallback = <div className="py-6" data-testid="acp-panel-loading" />
+  const panelFallback = React.useMemo(
+    () => <div className="py-6" data-testid="acp-panel-loading" />,
+    []
+  )
+  const showAcpRecovery = shouldShowAcpPlaygroundRecovery({
+    healthData,
+    isHealthLoading
+  })
 
   const handleApprovePermission = React.useCallback((requestId: string, batchApproveTier?: ACPPermissionTier) => {
     try {
@@ -309,7 +406,7 @@ export const ACPPlayground: React.FC = () => {
         <ACPSessionPanel {...props} />
       </Suspense>
     ),
-    []
+    [panelFallback]
   )
 
   const renderAcpToolsPanel = React.useCallback(
@@ -318,7 +415,7 @@ export const ACPPlayground: React.FC = () => {
         <ACPToolsPanel {...props} />
       </Suspense>
     ),
-    []
+    [panelFallback]
   )
 
   const renderAcpWorkspacePanel = React.useCallback(
@@ -327,7 +424,7 @@ export const ACPPlayground: React.FC = () => {
         <ACPWorkspacePanel />
       </Suspense>
     ),
-    []
+    [panelFallback]
   )
 
   const renderAcpPermissionModal = React.useCallback(
@@ -406,6 +503,32 @@ export const ACPPlayground: React.FC = () => {
       children: renderAcpWorkspacePanel(),
     },
   ]
+
+  if (showAcpRecovery) {
+    return (
+      <div className="relative flex h-full flex-col bg-bg text-text">
+        <ACPPlaygroundHeader
+          leftPaneOpen={false}
+          rightPaneOpen={false}
+          onToggleLeftPane={handleToggleLeftPane}
+          onToggleRightPane={handleToggleRightPane}
+          hideToggles
+          acpHealthy={acpHealthy}
+          isHealthLoading={isHealthLoading}
+        />
+        <main className="flex min-h-0 flex-1 p-4">
+          <ACPPlaygroundRecovery
+            healthData={healthData}
+            isHealthLoading={isHealthLoading}
+            onRetry={() => {
+              void refetchACPHealth()
+            }}
+            serverUrl={connectionConfig?.serverUrl}
+          />
+        </main>
+      </div>
+    )
+  }
 
   // Mobile layout
   if (isMobile) {

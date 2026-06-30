@@ -398,8 +398,11 @@ export const BoardView = ({
 
   // Save card from detail panel
   const handleSaveCard = useCallback(
-    (cardId: number, data: CardUpdate) => {
-      updateCardMutation.mutate({ cardId, data })
+    async (cardId: number, data: CardUpdate) => {
+      const updatedCard = await updateCardMutation.mutateAsync({ cardId, data })
+      setSelectedCard((current) =>
+        current?.id === updatedCard.id ? updatedCard : current
+      )
     },
     [updateCardMutation]
   )

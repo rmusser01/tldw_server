@@ -5,6 +5,7 @@ import queue
 
 import pytest
 
+from tldw_Server_API.app.core.Infrastructure import pool_metrics as pool_metrics_module
 from tldw_Server_API.app.core.Infrastructure.pool_metrics import collect_pool_metrics
 
 
@@ -42,6 +43,13 @@ class FakeUnknownPool:
     pass
 
 
+class FakeBrokenAsyncpgPool:
+    """Mimics a closed pool whose metric accessors raise."""
+
+    def get_size(self) -> int:
+        raise RuntimeError("pool is closed")
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -74,3 +82,23 @@ class TestCollectPoolMetrics:
         """Even None should not raise -- returns unavailable."""
         metrics = collect_pool_metrics(None)
         assert metrics["available"] is False
+
+    def test_broken_pool_accessor_returns_unavailable(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: list[tuple[tuple[object, ...], dict[str, object]]] = []
+        monkeypatch.setattr(
+            pool_metrics_module.logger,
+            "debug",
+            lambda *args, **kwargs: captured.append((args, kwargs)),
+        )
+
+        metrics = collect_pool_metrics(FakeBrokenAsyncpgPool())
+
+        assert metrics["available"] is False
+        assert metrics["pool_type"] == "FakeBrokenAsyncpgPool"
+        assert metrics["error"] == "RuntimeError"
+        assert captured
+        assert "FakeBrokenAsyncpgPool" in repr(captured)
+        assert "RuntimeError" in repr(captured)

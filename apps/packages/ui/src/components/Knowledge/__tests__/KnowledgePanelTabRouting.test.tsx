@@ -151,6 +151,7 @@ describe("KnowledgePanel tab routing", () => {
       "aria-selected",
       "true"
     )
+    expect(screen.getByText(/Open \/knowledge for the full QA workspace/i)).toBeInTheDocument()
   })
 
   it("maps backward-compat openTab=search to QA Search", () => {

@@ -63,6 +63,10 @@ const OptionProviderKeysSettings = createSettingsRoute(
   () => import("~/components/Option/Settings/ProviderKeysSettings"),
   "ProviderKeysSettings"
 )
+const OptionDataManagementSettings = createSettingsRoute(
+  () => import("~/components/Option/Settings/data-management"),
+  "DataManagementSettings"
+)
 const OptionChatSettings = createSettingsRoute(
   () => import("~/components/Option/Settings/ChatSettings"),
   "ChatSettings"
@@ -114,6 +118,11 @@ export const optionSettingsRoutes: RouteDefinition[] = [
     kind: "options",
     path: "/settings/provider-keys",
     element: <OptionProviderKeysSettings />,
+  },
+  {
+    kind: "options",
+    path: "/settings/data",
+    element: <OptionDataManagementSettings />,
   },
   {
     kind: "options",

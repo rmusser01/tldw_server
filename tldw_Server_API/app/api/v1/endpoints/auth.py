@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from importlib import import_module
 from typing import Any, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 #
 # 3rd-party imports
@@ -26,17 +27,7 @@ from pydantic import BaseModel, EmailStr, Field
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
     get_or_create_audit_service_for_user_id,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    check_auth_rate_limit,
-    get_auth_principal,
-    get_current_active_user,  # compat export used by integration tests
-    get_db_transaction,
-    get_jwt_service_dep,
-    get_password_service_dep,
-    get_rate_limiter_dep,
-    get_registration_service_dep,
-    get_session_manager_dep,
-)
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_auth_rate_limit, get_auth_principal, get_current_active_user, get_db_transaction, get_jwt_service_dep, get_password_service_dep, get_rate_limiter_dep, get_registration_service_dep, get_session_manager_dep, RateLimiter
 from tldw_Server_API.app.api.v1.API_Deps.federation_deps import (
     get_federation_provisioning_service_dep,
     get_identity_provider_repo_dep,
@@ -90,7 +81,6 @@ from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.rate_limiter import RateLimiter
 from tldw_Server_API.app.core.AuthNZ.repos.identity_provider_repo import IdentityProviderRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_profile, get_settings
@@ -216,6 +206,50 @@ async def _resolve_federation_provider(
         slug=normalized_slug,
         owner_scope_type="global",
         owner_scope_id=None,
+    )
+
+
+def _build_federation_redirect_uri(request: Request, provider_slug: str) -> str:
+    """Build the callback redirect URI, replacing request authority with public base when configured."""
+    callback_url = request.url_for("federation_callback", provider_slug=provider_slug)
+    public_web_base_url = str(getattr(get_settings(), "PUBLIC_WEB_BASE_URL", "") or "").strip()
+    if not public_web_base_url:
+        return str(callback_url)
+
+    try:
+        parsed = urlsplit(public_web_base_url)
+        _ = parsed.port
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="PUBLIC_WEB_BASE_URL is invalid",
+        ) from exc
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="PUBLIC_WEB_BASE_URL is invalid",
+        )
+
+    callback_parsed = urlsplit(str(callback_url))
+    base_path = (parsed.path or "").rstrip("/")
+    callback_path = callback_parsed.path or "/"
+    if base_path and base_path != "/" and callback_path != base_path and not callback_path.startswith(f"{base_path}/"):
+        callback_path = f"{base_path}{callback_path}"
+    return urlunsplit(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc,
+            callback_path,
+            callback_parsed.query,
+            "",
+        )
     )
 
 
@@ -386,6 +420,17 @@ async def _issue_multi_user_tokens(
 @router.get(
     "/federation/{provider_slug}/login",
     dependencies=[Depends(check_auth_rate_limit)],
+    responses={
+        status.HTTP_307_TEMPORARY_REDIRECT: {
+            "description": "Redirect to the identity provider authorization URL.",
+            "headers": {
+                "Location": {
+                    "description": "Identity provider authorization URL.",
+                    "schema": {"type": "string"},
+                },
+            },
+        },
+    },
 )
 async def federation_login(
     provider_slug: str,
@@ -424,7 +469,7 @@ async def federation_login(
             detail="Identity provider not found",
         )
 
-    redirect_uri = str(request.url_for("federation_callback", provider_slug=provider_slug))
+    redirect_uri = _build_federation_redirect_uri(request, provider_slug)
     oidc_service = get_oidc_federation_service_dep()
     try:
         auth_request = await oidc_service.build_authorization_request(
@@ -519,12 +564,18 @@ async def federation_callback(
             detail="OIDC state provider mismatch",
         )
 
-    redirect_uri = str(state_record.get("redirect_uri") or "").strip()
+    state_redirect_uri = str(state_record.get("redirect_uri") or "").strip()
     code_verifier = str(state_record.get("code_verifier") or "").strip()
-    if not redirect_uri or not code_verifier:
+    if not state_redirect_uri or not code_verifier:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="OIDC state is incomplete",
+        )
+    redirect_uri = _build_federation_redirect_uri(request, provider_slug)
+    if state_redirect_uri != redirect_uri:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="OIDC state redirect_uri mismatch",
         )
 
     oidc_service = get_oidc_federation_service_dep()
@@ -1985,12 +2036,6 @@ async def list_user_sessions(
 
     except _AUTH_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Failed to list user sessions: {e}")
-        # In test mode, surface the underlying error to aid debugging
-        if _is_test_mode():
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to retrieve sessions: {e}"
-            ) from e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve sessions"

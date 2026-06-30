@@ -1,9 +1,11 @@
 from typing import Optional
 
 import asyncio
+import threading
 import pytest
 
 from tldw_Server_API.app.core.Chat import command_router
+from tldw_Server_API.app.core.Integrations import weather_providers
 
 
 @pytest.fixture(autouse=True)
@@ -72,6 +74,86 @@ async def test_weather_stub(monkeypatch):
     res = await command_router.async_dispatch_command(ctx, "weather", "Boston")
     assert res.ok
     assert "Sunny" in res.content
+
+
+@pytest.mark.unit
+def test_weather_provider_does_not_block_event_loop(monkeypatch):
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+    monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_USER", "100")
+    monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "100")
+
+    provider_thread_ids: list[int] = []
+
+    class SlowClient:
+        def get_current(
+            self,
+            location: Optional[str] = None,
+            lat: float | None = None,
+            lon: float | None = None,
+        ) -> weather_providers.WeatherResult:
+            provider_thread_ids.append(threading.get_ident())
+            return weather_providers.WeatherResult(
+                ok=True,
+                summary=f"Sunny at {location or 'somewhere'}",
+                metadata={"provider": "test", "lat": lat, "lon": lon},
+            )
+
+    monkeypatch.setattr(command_router, "get_weather_client", lambda ctx=None: SlowClient())
+    command_router._acquire_global_bucket("weather")
+    command_router._acquire_bucket("weather-nonblocking-user", "weather")
+
+    async def exercise() -> None:
+        event_loop_thread_id = threading.get_ident()
+        res = await command_router.async_dispatch_command(
+            command_router.CommandContext(user_id="weather-nonblocking-user"),
+            "weather",
+            "Boston",
+        )
+
+        assert provider_thread_ids
+        assert provider_thread_ids[0] != event_loop_thread_id
+        assert res.ok
+        assert "Sunny" in res.content
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.unit
+def test_async_dispatch_awaits_task_returning_handler(monkeypatch):
+    monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
+    monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_USER", "100")
+    monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "100")
+
+    async def build_result() -> command_router.CommandResult:
+        await asyncio.sleep(0)
+        return command_router.CommandResult(
+            ok=True,
+            command="taskresult",
+            content="task result",
+            metadata={},
+        )
+
+    def task_handler(
+        ctx: command_router.CommandContext,
+        args: Optional[str],
+    ) -> asyncio.Task[command_router.CommandResult]:
+        return asyncio.create_task(build_result())
+
+    async def exercise() -> command_router.CommandResult:
+        return await command_router.async_dispatch_command(
+            command_router.CommandContext(user_id="task-awaitable-user"),
+            "taskresult",
+            None,
+        )
+
+    command_router.register_command("taskresult", "task result", task_handler)
+    try:
+        res = asyncio.run(exercise())
+    finally:
+        command_router._registry.pop("taskresult", None)
+
+    assert res.ok
+    assert res.content == "task result"
 
 
 @pytest.mark.unit
@@ -235,6 +317,21 @@ async def test_skill_command_reports_not_found(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_skill_command_reports_context_integrity_block(monkeypatch):
+    async def fake_exec(ctx, skill_name, skill_args):
+        return {"success": False, "error": "context_integrity_blocked"}
+
+    monkeypatch.setattr(command_router, "_execute_skill", fake_exec)
+    ctx = command_router.CommandContext(user_id="u1", auth_user_id=1)
+
+    res = await command_router.async_dispatch_command(ctx, "skill", "blocked-skill x")
+
+    assert not res.ok
+    assert "quarantined pending admin review" in res.content
+    assert res.metadata["error"] == "context_integrity_blocked"
+
+
+@pytest.mark.asyncio
 async def test_skill_command_handles_runtime_resolution_exception(monkeypatch):
     async def fake_resolve(ctx):
         raise Exception("resolver exploded")
@@ -265,6 +362,39 @@ async def test_rbac_enforcement(monkeypatch):
     ctx2 = command_router.CommandContext(user_id="u", auth_user_id=42)
     allowed = await command_router.async_dispatch_command(ctx2, "time", None)
     assert allowed.ok
+
+
+@pytest.mark.asyncio
+async def test_rbac_marked_commands_enforce_permissions_by_default_in_multi_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.delenv("CHAT_COMMANDS_REQUIRE_PERMISSIONS", raising=False)
+    monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "100")
+
+    ctx = command_router.CommandContext(user_id="anon", auth_user_id=None)
+    denied = await command_router.async_dispatch_command(ctx, "time", None)
+
+    assert not denied.ok
+    assert denied.metadata.get("error") == "permission_denied"
+    assert denied.metadata.get("required_permission") == "chat.commands.time"
+
+
+@pytest.mark.asyncio
+async def test_rbac_marked_commands_enforce_permissions_when_auth_mode_ambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AUTH_MODE", raising=False)
+    monkeypatch.delenv("CHAT_COMMANDS_REQUIRE_PERMISSIONS", raising=False)
+    monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "100")
+    monkeypatch.setattr(command_router, "_cfg", lambda: None)
+
+    ctx = command_router.CommandContext(user_id="anon", auth_user_id=None)
+    denied = await command_router.async_dispatch_command(ctx, "time", None)
+
+    assert not denied.ok
+    assert denied.metadata.get("error") == "permission_denied"
+    assert denied.metadata.get("required_permission") == "chat.commands.time"
 
 
 def test_dispatch_command_removed_raises():

@@ -184,7 +184,7 @@ const setupVersionDriftMock = () => {
         last_modified: "2026-02-18T11:10:00.000Z"
       }
     }
-    if (path.startsWith("/api/v1/notes/note-a?expected_version=") && method === "PUT") {
+    if (path === "/api/v1/notes/note-a" && method === "PUT") {
       return {
         id: "note-a",
         title: "Drift note",
@@ -236,7 +236,7 @@ describe("NotesManagerPage stage 9 stale-version warning", () => {
     const putCalled = mockBgRequest.mock.calls.some(([request]) => {
       const path = String(request?.path || "")
       const method = String(request?.method || "GET").toUpperCase()
-      return path.startsWith("/api/v1/notes/note-a?expected_version=") && method === "PUT"
+      return path === "/api/v1/notes/note-a" && method === "PUT"
     })
     expect(putCalled).toBe(false)
   })

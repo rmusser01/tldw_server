@@ -78,19 +78,22 @@ def test_env_vars():
 @pytest.fixture
 def temp_db_path() -> Generator[Path, None, None]:
     """Create a temporary database path."""
-    with tempfile.TemporaryDirectory() as temp_dir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
         db_path = Path(temp_dir) / "test_media.db"
         yield db_path
 
 @pytest.fixture
-def media_database(temp_db_path) -> MediaDatabase:
+def media_database(temp_db_path) -> Generator[MediaDatabase, None, None]:
     """Create a real MediaDatabase instance for testing."""
     db = MediaDatabase(
         db_path=str(temp_db_path),
         client_id="test_client"
     )
     db.initialize_db()
-    return db
+    try:
+        yield db
+    finally:
+        db.close_connection()
 
 @pytest.fixture
 def populated_media_db(media_database) -> MediaDatabase:

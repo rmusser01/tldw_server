@@ -3,25 +3,55 @@ Workspace-bounded filesystem MCP module.
 
 Exposes:
 - fs.list
+- fs.edit
+- fs.lock_acquire
+- fs.lock_release
+- fs.read
 - fs.read_text
+- fs.patch
+- fs.write
 - fs.write_text
+- fs.stat
+- fs.glob
+- fs.grep
 """
 
 from __future__ import annotations
 
 import asyncio
+import errno
+import fnmatch
+import hashlib
 import os
+import re
+import stat as stat_module
+import tempfile
 from contextlib import suppress
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pathspec
 from loguru import logger
+from mcp_unified.filesystem_locks import (
+    FilesystemLockConflict,
+    FilesystemLockManager,
+    FilesystemLockMissing,
+    create_filesystem_lock_manager,
+)
+from mcp_unified.interfaces.file_policy_actions import get_file_policy_action_metadata
+from mcp_unified.interfaces.path_scope import PathScopeCandidate
+from pathspec.patterns.gitwildmatch import GitWildMatchPatternError
 
 from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
     McpHubWorkspaceRootResolver,
 )
 
+from ...tool_observability import build_execution_eval_metadata
 from ..base import BaseModule, ModuleConfig, create_tool_definition
+from .filesystem_diff import FilesystemPatchError, PatchFile, apply_patch_to_text, parse_unified_diff
+from .filesystem_receipts import ReadReceiptError, ReadReceiptManager
+from .notebook_files import apply_cell_edit, parse_notebook_payload, summarize_notebook
 
 
 def _first_nonempty(*values: Any) -> str | None:
@@ -32,18 +62,67 @@ def _first_nonempty(*values: Any) -> str | None:
     return None
 
 
+def _file_policy_metadata(action: str) -> dict[str, str]:
+    """Return non-sensitive descriptor metadata for a file-policy action."""
+
+    metadata = get_file_policy_action_metadata(action)
+    return {
+        "file_policy_action": metadata.action,
+        "file_policy_action_family": metadata.family,
+    }
+
+
 class FilesystemModule(BaseModule):
     """Workspace-scoped text filesystem primitives."""
 
     _DEFAULT_MAX_READ_BYTES = 1_000_000
+    _GREP_TYPE_PATTERNS = {
+        "c": ("**/*.c", "**/*.h"),
+        "cpp": (
+            "**/*.cpp",
+            "**/*.cc",
+            "**/*.cxx",
+            "**/*.hpp",
+            "**/*.hh",
+            "**/*.hxx",
+        ),
+        "cs": ("**/*.cs",),
+        "go": ("**/*.go",),
+        "java": ("**/*.java",),
+        "js": ("**/*.js", "**/*.jsx"),
+        "json": ("**/*.json",),
+        "md": ("**/*.md", "**/*.markdown"),
+        "php": ("**/*.php",),
+        "py": ("**/*.py",),
+        "python": ("**/*.py",),
+        "rb": ("**/*.rb",),
+        "rs": ("**/*.rs",),
+        "rust": ("**/*.rs",),
+        "sh": ("**/*.sh", "**/*.bash", "**/*.zsh"),
+        "ts": ("**/*.ts",),
+        "tsx": ("**/*.tsx",),
+        "txt": ("**/*.txt",),
+        "yaml": ("**/*.yaml", "**/*.yml"),
+        "yml": ("**/*.yml", "**/*.yaml"),
+    }
 
     def __init__(
         self,
         config: ModuleConfig,
         workspace_root_resolver: McpHubWorkspaceRootResolver | Any | None = None,
+        lock_manager: FilesystemLockManager | None = None,
     ) -> None:
         super().__init__(config)
         self._workspace_root_resolver = workspace_root_resolver or McpHubWorkspaceRootResolver()
+        self._read_receipts = ReadReceiptManager(
+            secret=config.settings.get("read_receipt_secret"),
+            ttl_seconds=self._setting_positive_int("read_receipt_ttl_seconds", 1_800),
+        )
+        self._lock_leases = (
+            lock_manager
+            if lock_manager is not None
+            else create_filesystem_lock_manager(config.settings)
+        )
 
     async def on_initialize(self) -> None:
         logger.info(f"Initializing Filesystem module: {self.name}")
@@ -58,6 +137,9 @@ class FilesystemModule(BaseModule):
         shared_fs_metadata = {
             "uses_filesystem": True,
             "path_boundable": True,
+        }
+        shared_path_metadata = {
+            **shared_fs_metadata,
             "path_argument_hints": ["path"],
         }
         list_tool = create_tool_definition(
@@ -72,7 +154,8 @@ class FilesystemModule(BaseModule):
                 "category": "retrieval",
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
-                **shared_fs_metadata,
+                **_file_policy_metadata("read"),
+                **shared_path_metadata,
             },
         )
         list_tool["inputSchema"]["additionalProperties"] = False
@@ -90,33 +173,456 @@ class FilesystemModule(BaseModule):
                 "category": "retrieval",
                 "readOnlyHint": True,
                 "capabilities": ["filesystem.read"],
-                **shared_fs_metadata,
+                "path_scope_action": "read",
+                "legacy_tool": True,
+                "replacement_tool": "fs.read",
+                **_file_policy_metadata("read"),
+                **shared_path_metadata,
             },
         )
         read_text_tool["inputSchema"]["additionalProperties"] = False
 
-        write_text_tool = create_tool_definition(
-            name="fs.write_text",
-            description="Write UTF-8 text content to a file under the active trusted workspace root.",
+        read_tool = create_tool_definition(
+            name="fs.read",
+            description="Read a bounded UTF-8 text file with hash metadata under the active trusted workspace root.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute file path"},
+                    "start_line": {"type": "integer", "minimum": 1, "default": 1},
+                    "max_lines": {"type": "integer", "minimum": 1},
+                    "max_bytes": {"type": "integer", "minimum": 1},
+                    "include_line_numbers": {"type": "boolean", "default": False},
+                    "include_receipt": {"type": "boolean", "default": True},
+                },
+                "required": ["path"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read"],
+                "path_scope_action": "read",
+                **_file_policy_metadata("read"),
+                "eval": {
+                    "task_families": ["filesystem_read"],
+                    "expected_result_kind": "structured_filesystem_read",
+                },
+                **shared_path_metadata,
+            },
+        )
+        read_tool["inputSchema"]["additionalProperties"] = False
+
+        notebook_read_tool = create_tool_definition(
+            name="notebook.read",
+            description="Read bounded Jupyter notebook structure and optional cell source previews.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute .ipynb path"},
+                    "include_source": {"type": "boolean", "default": False},
+                    "cell_ids": {"type": "array", "items": {"type": "string"}},
+                    "max_source_chars": {"type": "integer", "minimum": 1},
+                    "max_total_source_chars": {"type": "integer", "minimum": 1},
+                    "include_receipt": {"type": "boolean", "default": True},
+                },
+                "required": ["path"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read", "notebook.read"],
+                "path_scope_action": "read",
+                **_file_policy_metadata("read"),
+                "eval": {
+                    "task_families": ["notebook_read"],
+                    "expected_result_kind": "structured_notebook_read",
+                    "success_signals": ["avoided_mutation"],
+                },
+                **shared_path_metadata,
+            },
+        )
+        notebook_read_tool["inputSchema"]["additionalProperties"] = False
+
+        edit_tool = create_tool_definition(
+            name="fs.edit",
+            description="Replace exact UTF-8 text inside an existing workspace file after preimage checks.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute file path"},
+                    "old_string": {"type": "string", "description": "Exact literal text to replace"},
+                    "new_string": {"type": "string", "description": "Replacement literal text"},
+                    "expected_sha256": {"type": "string"},
+                    "read_receipt": {"type": "string"},
+                    "lock_lease_id": {"type": "string"},
+                    "replace_all": {"type": "boolean", "default": False},
+                    "dry_run": {"type": "boolean", "default": False},
+                },
+                "required": ["path", "old_string", "new_string"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": True,
+                "capabilities": ["filesystem.edit"],
+                "path_scope_action": "edit",
+                **_file_policy_metadata("edit"),
+                "eval": {
+                    "task_families": ["filesystem_edit"],
+                    "expected_result_kind": "structured_filesystem_edit",
+                    "success_signals": ["completed_requested_mutation"],
+                },
+                **shared_path_metadata,
+            },
+        )
+        edit_tool["inputSchema"]["additionalProperties"] = False
+
+        notebook_edit_tool = create_tool_definition(
+            name="notebook.edit_cell",
+            description="Replace, insert, or delete one Jupyter notebook cell by cell id after preimage checks.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute .ipynb path"},
+                    "mode": {"type": "string", "enum": ["replace", "insert", "delete"]},
+                    "cell_id": {"type": "string", "description": "Existing target cell id"},
+                    "insert_position": {"type": "string", "enum": ["before", "after"]},
+                    "new_cell_id": {"type": "string"},
+                    "cell_type": {"type": "string", "enum": ["code", "markdown", "raw"]},
+                    "source": {"type": "string"},
+                    "expected_sha256": {"type": "string"},
+                    "read_receipt": {"type": "string"},
+                    "lock_lease_id": {"type": "string"},
+                    "dry_run": {"type": "boolean", "default": False},
+                },
+                "required": ["path", "mode", "cell_id"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": True,
+                "capabilities": ["filesystem.edit", "notebook.edit"],
+                "path_scope_action": "edit",
+                **_file_policy_metadata("edit"),
+                "eval": {
+                    "task_families": ["notebook_edit"],
+                    "expected_result_kind": "structured_notebook_edit",
+                    "success_signals": ["completed_requested_mutation"],
+                },
+                **shared_path_metadata,
+            },
+        )
+        notebook_edit_tool["inputSchema"]["additionalProperties"] = False
+
+        lock_acquire_tool = create_tool_definition(
+            name="fs.lock_acquire",
+            description="Acquire or renew an advisory lock lease for one workspace path.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute path"},
+                    "owner": {"type": "string", "description": "Non-secret caller label for diagnostics"},
+                    "ttl_seconds": {"type": "integer", "minimum": 1},
+                    "lease_id": {"type": "string", "description": "Existing lease token to renew"},
+                },
+                "required": ["path", "owner"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": False,
+                "capabilities": ["filesystem.lock"],
+                "path_scope_action": "lock",
+                **_file_policy_metadata("lock"),
+                "eval": {
+                    "task_families": ["filesystem_lock"],
+                    "expected_result_kind": "structured_filesystem_lock",
+                },
+                **shared_path_metadata,
+            },
+        )
+        lock_acquire_tool["inputSchema"]["additionalProperties"] = False
+
+        lock_release_tool = create_tool_definition(
+            name="fs.lock_release",
+            description="Release an advisory lock lease for one workspace path.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute path"},
+                    "lease_id": {"type": "string", "description": "Active lease token to release"},
+                },
+                "required": ["path", "lease_id"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": False,
+                "capabilities": ["filesystem.lock"],
+                "path_scope_action": "lock",
+                **_file_policy_metadata("lock"),
+                "eval": {
+                    "task_families": ["filesystem_lock"],
+                    "expected_result_kind": "structured_filesystem_lock",
+                },
+                **shared_path_metadata,
+            },
+        )
+        lock_release_tool["inputSchema"]["additionalProperties"] = False
+
+        patch_tool = create_tool_definition(
+            name="fs.patch",
+            description="Apply a bounded unified diff to workspace files after preimage checks.",
+            parameters={
+                "properties": {
+                    "diff": {"type": "string", "description": "Unified diff text"},
+                    "expected_sha256_by_path": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "read_receipt_by_path": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "lock_lease_id_by_path": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "create_parent_directories": {"type": "boolean", "default": False},
+                    "allow_create": {"type": "boolean", "default": False},
+                    "dry_run": {"type": "boolean", "default": False},
+                },
+                "required": ["diff"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": True,
+                "capabilities": ["filesystem.edit", "filesystem.write"],
+                "path_scope_candidate_source": "module",
+                **_file_policy_metadata("edit"),
+                "eval": {
+                    "task_families": ["filesystem_edit"],
+                    "expected_result_kind": "structured_filesystem_edit",
+                    "success_signals": ["completed_requested_mutation"],
+                },
+                **shared_fs_metadata,
+            },
+        )
+        patch_tool["inputSchema"]["additionalProperties"] = False
+
+        write_tool = create_tool_definition(
+            name="fs.write",
+            description="Create or replace a whole UTF-8 text file under the active trusted workspace root.",
             parameters={
                 "properties": {
                     "path": {"type": "string", "description": "Workspace-relative or absolute file path"},
                     "content": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["create", "replace"]},
+                    "expected_sha256": {"type": "string"},
+                    "read_receipt": {"type": "string"},
+                    "lock_lease_id": {"type": "string"},
+                    "dry_run": {"type": "boolean", "default": False},
+                },
+                "required": ["path", "content", "mode"],
+            },
+            metadata={
+                "category": "management",
+                "readOnlyHint": False,
+                "write_capable": True,
+                "capabilities": ["filesystem.write"],
+                "path_scope_action": "write",
+                **_file_policy_metadata("write"),
+                "eval": {
+                    "task_families": ["filesystem_write"],
+                    "expected_result_kind": "structured_filesystem_write",
+                    "success_signals": ["completed_requested_mutation"],
+                },
+                **shared_path_metadata,
+            },
+        )
+        write_tool["inputSchema"]["additionalProperties"] = False
+
+        write_text_tool = create_tool_definition(
+            name="fs.write_text",
+            description=(
+                "Create UTF-8 text content under the active trusted workspace root. "
+                "Replacing an existing file requires expected_sha256 or read_receipt."
+            ),
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute file path"},
+                    "content": {"type": "string"},
+                    "expected_sha256": {
+                        "type": "string",
+                        "description": "Required when replacing an existing file unless read_receipt is supplied.",
+                    },
+                    "read_receipt": {
+                        "type": "string",
+                        "description": "Required when replacing an existing file unless expected_sha256 is supplied.",
+                    },
+                    "lock_lease_id": {"type": "string"},
+                    "dry_run": {"type": "boolean", "default": False},
                 },
                 "required": ["path", "content"],
             },
             metadata={
                 "category": "management",
+                "readOnlyHint": False,
+                "write_capable": True,
                 "capabilities": ["filesystem.write"],
-                **shared_fs_metadata,
+                "path_scope_action": "write",
+                "legacy_tool": True,
+                "replacement_tools": ["fs.patch", "fs.write"],
+                **_file_policy_metadata("write"),
+                **shared_path_metadata,
             },
         )
         write_text_tool["inputSchema"]["additionalProperties"] = False
 
-        return [list_tool, read_text_tool, write_text_tool]
+        stat_tool = create_tool_definition(
+            name="fs.stat",
+            description="Return metadata for one path under the active trusted workspace root.",
+            parameters={
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative or absolute path"},
+                    "follow_symlinks": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Follow a symlink after verifying the target remains in workspace scope.",
+                    },
+                },
+                "required": ["path"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read"],
+                **_file_policy_metadata("read"),
+                **shared_path_metadata,
+            },
+        )
+        stat_tool["inputSchema"]["additionalProperties"] = False
+
+        glob_tool = create_tool_definition(
+            name="fs.glob",
+            description="Find workspace paths matching a portable pattern without invoking a shell.",
+            parameters={
+                "properties": {
+                    "pattern": {"type": "string", "description": "Portable pattern using / separators"},
+                    "base_path": {"type": "string", "description": "Workspace-relative base path"},
+                    "include_hidden": {"type": "boolean", "default": False},
+                    "include_files": {"type": "boolean", "default": True},
+                    "include_directories": {"type": "boolean", "default": True},
+                    "follow_symlinks": {"type": "boolean", "default": False},
+                    "case_sensitive": {"type": "boolean", "default": True},
+                    "respect_gitignore": {"type": "boolean", "default": False},
+                    "sort_by": {
+                        "type": "string",
+                        "enum": ["modified_at", "path"],
+                        "default": "modified_at",
+                    },
+                    "limit": {"type": "integer", "minimum": 1},
+                },
+                "required": ["pattern"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read"],
+                **_file_policy_metadata("read"),
+                "eval": {
+                    "task_families": ["filesystem_search"],
+                    "expected_result_kind": "structured_filesystem_glob",
+                    "success_signals": ["avoided_mutation"],
+                },
+                **shared_fs_metadata,
+                "path_argument_hints": ["base_path"],
+            },
+        )
+        glob_tool["inputSchema"]["additionalProperties"] = False
+
+        grep_tool = create_tool_definition(
+            name="fs.grep",
+            description="Search UTF-8 text files under a workspace path without invoking a shell.",
+            parameters={
+                "properties": {
+                    "pattern": {"type": "string"},
+                    "base_path": {"type": "string", "description": "Workspace-relative base path"},
+                    "include": {"type": "array", "items": {"type": "string"}},
+                    "exclude": {"type": "array", "items": {"type": "string"}},
+                    "glob": {"type": "string", "description": "Portable file pattern used to narrow results."},
+                    "type": {"type": "string", "description": "Language/file type alias used to narrow results."},
+                    "output_mode": {
+                        "type": "string",
+                        "enum": ["files_with_matches", "content", "count"],
+                        "default": "files_with_matches",
+                    },
+                    "regex": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Requires the filesystem module grep_allow_regex setting.",
+                    },
+                    "case_sensitive": {"type": "boolean", "default": True},
+                    "include_hidden": {"type": "boolean", "default": False},
+                    "follow_symlinks": {"type": "boolean", "default": False},
+                    "respect_gitignore": {"type": "boolean", "default": True},
+                    "multiline": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Regex-only multiline search for files_with_matches or count output modes.",
+                    },
+                    "limit": {"type": "integer", "minimum": 1},
+                    "max_file_bytes": {"type": "integer", "minimum": 1},
+                },
+                "required": ["pattern"],
+            },
+            metadata={
+                "category": "retrieval",
+                "readOnlyHint": True,
+                "capabilities": ["filesystem.read"],
+                **_file_policy_metadata("read"),
+                "eval": {
+                    "task_families": ["filesystem_search"],
+                    "expected_result_kind": "structured_filesystem_grep",
+                    "success_signals": ["avoided_mutation"],
+                },
+                **shared_fs_metadata,
+                "path_argument_hints": ["base_path"],
+            },
+        )
+        grep_tool["inputSchema"]["additionalProperties"] = False
+
+        return [
+            list_tool,
+            read_tool,
+            notebook_read_tool,
+            edit_tool,
+            notebook_edit_tool,
+            lock_acquire_tool,
+            lock_release_tool,
+            read_text_tool,
+            patch_tool,
+            write_tool,
+            write_text_tool,
+            stat_tool,
+            glob_tool,
+            grep_tool,
+        ]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
-        args = self.sanitize_input(arguments or {})
+        raw_args = arguments or {}
+        if tool_name == "fs.edit":
+            args = {
+                key: value if key in {"old_string", "new_string"} else self.sanitize_input(value)
+                for key, value in raw_args.items()
+            }
+        elif tool_name == "notebook.edit_cell":
+            args = {
+                key: value if key == "source" else self.sanitize_input(value)
+                for key, value in raw_args.items()
+            }
+        elif tool_name == "fs.patch":
+            args = {
+                key: self._sanitize_patch_diff(value) if key == "diff" else self.sanitize_input(value)
+                for key, value in raw_args.items()
+            }
+        else:
+            args = self.sanitize_input(raw_args)
         self.validate_tool_arguments(tool_name, args)
 
         workspace_root = await self._resolve_workspace_root(context)
@@ -138,14 +644,289 @@ class FilesystemModule(BaseModule):
                 "text": read_result["text"],
             }
 
+        if tool_name == "fs.read":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            rel_path = self._to_workspace_relative_path(workspace_root, target)
+            read_result = await asyncio.to_thread(
+                self._read_file,
+                target,
+                start_line=int(args.get("start_line", 1)),
+                max_lines=self._bounded_positive_int(
+                    args.get("max_lines"),
+                    self._setting_positive_int("read_default_max_lines", 2_000),
+                    maximum=self._setting_positive_int("read_max_lines", 20_000),
+                ),
+                max_bytes=self._bounded_positive_int(
+                    args.get("max_bytes"),
+                    self._setting_positive_int("read_default_max_bytes", self._max_read_bytes()),
+                    maximum=self._setting_positive_int("read_max_bytes", self._max_read_bytes()),
+                ),
+                hash_max_file_bytes=self._setting_positive_int("read_hash_max_file_bytes", 5_000_000),
+                include_line_numbers=bool(args.get("include_line_numbers", False)),
+            )
+            result = {"path": rel_path, **read_result}
+            if (
+                bool(args.get("include_receipt", True))
+                and not result.get("truncated")
+                and isinstance(result.get("sha256"), str)
+                and self._read_receipts.enabled
+            ):
+                result["read_receipt"] = self._read_receipts.issue(
+                    path=rel_path,
+                    sha256=str(result["sha256"]),
+                    size=int(result.get("bytes_total") or 0),
+                    workspace_id=self._context_metadata_value(context, "workspace_id"),
+                    session_id=_first_nonempty(
+                        getattr(context, "session_id", None), self._context_metadata_value(context, "session_id")
+                    ),
+                )
+            result["eval"] = build_execution_eval_metadata(
+                tool_name="fs.read",
+                tool_prompt_id="mcp.fs.read.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_read",
+                result_kind="structured_filesystem_read",
+                path_filter_used=True,
+                truncated=bool(result.get("truncated", False)),
+            )
+            return result
+
+        if tool_name == "notebook.read":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return await asyncio.to_thread(
+                self._read_notebook,
+                workspace_root,
+                target,
+                bool(args.get("include_source", False)),
+                self._string_list_argument(args.get("cell_ids")),
+                self._bounded_positive_int(
+                    args.get("max_source_chars"),
+                    self._setting_positive_int("notebook_default_max_source_chars", 4_000),
+                    maximum=self._setting_positive_int("notebook_max_source_chars", 20_000),
+                ),
+                self._bounded_positive_int(
+                    args.get("max_total_source_chars"),
+                    self._setting_positive_int("notebook_default_max_total_source_chars", 20_000),
+                    maximum=self._setting_positive_int("notebook_max_total_source_chars", 100_000),
+                ),
+                self._setting_positive_int("notebook_read_max_bytes", 5_000_000),
+                bool(args.get("include_receipt", True)),
+                context,
+            )
+
+        if tool_name == "fs.lock_acquire":
+            return await asyncio.to_thread(
+                self._acquire_lock_for_path,
+                workspace_root,
+                str(args.get("path")),
+                str(args.get("owner")),
+                self._bounded_lock_ttl(args.get("ttl_seconds")),
+                args.get("lease_id"),
+                context,
+            )
+
+        if tool_name == "fs.lock_release":
+            return await asyncio.to_thread(
+                self._release_lock_for_path,
+                workspace_root,
+                str(args.get("path")),
+                str(args.get("lease_id")),
+            )
+
+        if tool_name == "fs.edit":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return await asyncio.to_thread(
+                self._edit_file,
+                workspace_root,
+                target,
+                str(args.get("old_string")),
+                str(args.get("new_string")),
+                args.get("expected_sha256"),
+                args.get("read_receipt"),
+                args.get("lock_lease_id"),
+                bool(args.get("replace_all", False)),
+                bool(args.get("dry_run", False)),
+                self._setting_positive_int("edit_preimage_max_bytes", 5_000_000),
+                self._setting_positive_int("edit_write_max_bytes", 5_000_000),
+                context,
+            )
+
+        if tool_name == "notebook.edit_cell":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return await asyncio.to_thread(
+                self._edit_notebook_cell,
+                workspace_root,
+                target,
+                str(args.get("mode")),
+                str(args.get("cell_id")),
+                args.get("source"),
+                args.get("cell_type"),
+                args.get("insert_position"),
+                args.get("new_cell_id"),
+                args.get("expected_sha256"),
+                args.get("read_receipt"),
+                args.get("lock_lease_id"),
+                bool(args.get("dry_run", False)),
+                self._setting_positive_int("notebook_preimage_max_bytes", 5_000_000),
+                self._setting_positive_int("notebook_write_max_bytes", 5_000_000),
+                context,
+            )
+
+        if tool_name == "fs.patch":
+            patch_files = self._parse_patch_diff(str(args.get("diff") or ""))
+            return await asyncio.to_thread(
+                self._apply_patch_files,
+                workspace_root,
+                patch_files,
+                self._string_map_argument(args.get("expected_sha256_by_path")),
+                self._string_map_argument(args.get("read_receipt_by_path")),
+                self._string_map_argument(args.get("lock_lease_id_by_path")),
+                bool(args.get("allow_create", False)),
+                bool(args.get("create_parent_directories", False)),
+                bool(args.get("dry_run", False)),
+                self._setting_positive_int("patch_preimage_max_bytes", 5_000_000),
+                self._setting_positive_int("patch_write_max_bytes", 5_000_000),
+                context,
+            )
+
+        if tool_name == "fs.write":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return await asyncio.to_thread(
+                self._write_file,
+                workspace_root,
+                target,
+                str(args.get("content")),
+                str(args.get("mode")),
+                args.get("expected_sha256"),
+                args.get("read_receipt"),
+                args.get("lock_lease_id"),
+                bool(args.get("dry_run", False)),
+                self._setting_positive_int("write_max_bytes", 5_000_000),
+                self._setting_positive_int("write_preimage_max_bytes", 5_000_000),
+                context,
+            )
+
         if tool_name == "fs.write_text":
-            target = self._resolve_workspace_path(workspace_root, str(args.get("path")))
-            content = args.get("content")
-            write_result = await asyncio.to_thread(self._write_text_file, target, str(content))
-            return {
-                "path": self._to_workspace_relative_path(workspace_root, target),
-                "bytes_written": write_result["bytes_written"],
-            }
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            mode = "replace" if target.exists() or target.is_symlink() else "create"
+            if mode == "replace" and not args.get("expected_sha256") and not args.get("read_receipt"):
+                raise ValueError("write_preimage_required")
+            return await asyncio.to_thread(
+                self._write_file,
+                workspace_root,
+                target,
+                str(args.get("content")),
+                mode,
+                args.get("expected_sha256"),
+                args.get("read_receipt"),
+                args.get("lock_lease_id"),
+                bool(args.get("dry_run", False)),
+                self._setting_positive_int("write_max_bytes", 5_000_000),
+                self._setting_positive_int("write_preimage_max_bytes", 5_000_000),
+                context,
+            )
+
+        if tool_name == "fs.stat":
+            target = self._resolve_workspace_path_no_follow(workspace_root, str(args.get("path")))
+            return await asyncio.to_thread(
+                self._stat_path,
+                workspace_root,
+                target,
+                bool(args.get("follow_symlinks", False)),
+            )
+
+        if tool_name == "fs.glob":
+            base_path = str(args.get("base_path") or ".")
+            base = self._resolve_workspace_path(workspace_root, base_path)
+            pattern = self._normalize_portable_pattern(str(args.get("pattern")))
+            self._reject_unsafe_pattern(pattern)
+            limit = self._bounded_positive_int(args.get("limit"), self._setting_positive_int("glob_result_limit", 500))
+            sort_by = str(args.get("sort_by") or "modified_at")
+            return await asyncio.to_thread(
+                self._glob_paths,
+                workspace_root,
+                base,
+                pattern,
+                bool(args.get("include_hidden", False)),
+                bool(args.get("include_files", True)),
+                bool(args.get("include_directories", True)),
+                bool(args.get("follow_symlinks", False)),
+                bool(args.get("case_sensitive", True)),
+                bool(args.get("respect_gitignore", False)),
+                sort_by,
+                limit,
+                self._setting_positive_int("glob_walk_entry_limit", 50_000),
+            )
+
+        if tool_name == "fs.grep":
+            base_path = str(args.get("base_path") or ".")
+            base = self._resolve_workspace_path(workspace_root, base_path)
+            pattern = str(args.get("pattern") or "")
+            regex = bool(args.get("regex", False))
+            case_sensitive = bool(args.get("case_sensitive", True))
+            multiline = bool(args.get("multiline", False))
+            regex_pattern = None
+            if regex:
+                flags = 0 if case_sensitive else re.IGNORECASE
+                if multiline:
+                    flags |= re.DOTALL
+                try:
+                    regex_pattern = re.compile(pattern, flags)
+                except re.error as exc:
+                    raise ValueError(f"invalid regex pattern: {exc}") from exc
+            include = [
+                self._normalize_portable_pattern(str(item))
+                for item in (args.get("include") if args.get("include") is not None else ["*", "**/*"])
+            ]
+            exclude = [
+                self._normalize_portable_pattern(str(item))
+                for item in (args.get("exclude") if args.get("exclude") is not None else [])
+            ]
+            glob_filter = None
+            if args.get("glob") is not None:
+                glob_filter = self._normalize_portable_pattern(str(args.get("glob")))
+                self._reject_unsafe_pattern(glob_filter)
+            type_filter = None
+            if args.get("type") is not None:
+                type_filter = self._grep_type_patterns(str(args.get("type")))
+            for include_pattern in include:
+                self._reject_unsafe_pattern(include_pattern)
+            for exclude_pattern in exclude:
+                self._reject_unsafe_pattern(exclude_pattern)
+            for type_pattern in type_filter or ():
+                self._reject_unsafe_pattern(type_pattern)
+            limit = self._bounded_positive_int(args.get("limit"), self._setting_positive_int("grep_result_limit", 200))
+            max_file_bytes = self._bounded_positive_int(
+                args.get("max_file_bytes"),
+                self._setting_positive_int("grep_max_file_bytes", self._max_read_bytes()),
+            )
+            max_total_bytes = self._setting_positive_int(
+                "grep_max_total_bytes",
+                self._DEFAULT_MAX_READ_BYTES * 10,
+            )
+            return await asyncio.to_thread(
+                self._grep_files,
+                workspace_root,
+                base,
+                pattern,
+                regex_pattern,
+                regex,
+                case_sensitive,
+                include,
+                exclude,
+                glob_filter,
+                type_filter,
+                str(args.get("output_mode") or "files_with_matches"),
+                bool(args.get("include_hidden", False)),
+                bool(args.get("follow_symlinks", False)),
+                bool(args.get("respect_gitignore", True)),
+                multiline,
+                limit,
+                max_file_bytes,
+                max_total_bytes,
+                self._setting_positive_int("grep_max_files", 1_000),
+                self._setting_positive_int("grep_walk_entry_limit", 50_000),
+            )
 
         raise ValueError(f"Unknown tool: {tool_name}")
 
@@ -165,9 +946,32 @@ class FilesystemModule(BaseModule):
             limit = self._DEFAULT_MAX_READ_BYTES
         return max(1, limit)
 
+    def _setting_positive_int(self, name: str, default: int) -> int:
+        raw_limit = self.config.settings.get(name, default)
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            limit = default
+        return max(1, limit)
+
+    def _setting_bool(self, name: str, default: bool = False) -> bool:
+        raw_value = self.config.settings.get(name, default)
+        if isinstance(raw_value, bool):
+            return raw_value
+        if isinstance(raw_value, str):
+            return raw_value.strip().lower() in {"1", "true", "yes", "on", "y"}
+        return bool(raw_value)
+
+    def _bounded_lock_ttl(self, value: Any) -> int:
+        return self._bounded_positive_int(
+            value,
+            self._setting_positive_int("lock_default_ttl_seconds", 300),
+            maximum=self._setting_positive_int("lock_max_ttl_seconds", 3_600),
+        )
+
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         if tool_name == "fs.list":
-            unknown = sorted({key for key in arguments.keys()} - {"path"})
+            unknown = sorted(set(arguments) - {"path"})
             if unknown:
                 raise ValueError(f"unknown arguments: {', '.join(unknown)}")
             path = arguments.get("path")
@@ -176,7 +980,7 @@ class FilesystemModule(BaseModule):
             return
 
         if tool_name == "fs.read_text":
-            unknown = sorted({key for key in arguments.keys()} - {"path"})
+            unknown = sorted(set(arguments) - {"path"})
             if unknown:
                 raise ValueError(f"unknown arguments: {', '.join(unknown)}")
             path = arguments.get("path")
@@ -184,8 +988,245 @@ class FilesystemModule(BaseModule):
                 raise ValueError("path is required")
             return
 
+        if tool_name == "fs.read":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "start_line",
+                    "max_lines",
+                    "max_bytes",
+                    "include_line_numbers",
+                    "include_receipt",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            self._validate_positive_int_argument(arguments, "start_line")
+            self._validate_positive_int_argument(arguments, "max_lines")
+            self._validate_positive_int_argument(arguments, "max_bytes")
+            self._validate_bool_argument(arguments, "include_line_numbers")
+            self._validate_bool_argument(arguments, "include_receipt")
+            return
+
+        if tool_name == "notebook.read":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "include_source",
+                    "cell_ids",
+                    "max_source_chars",
+                    "max_total_source_chars",
+                    "include_receipt",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            self._validate_bool_argument(arguments, "include_source")
+            self._validate_bool_argument(arguments, "include_receipt")
+            self._validate_optional_string_list_argument(arguments, "cell_ids")
+            self._validate_positive_int_argument(arguments, "max_source_chars")
+            self._validate_positive_int_argument(arguments, "max_total_source_chars")
+            return
+
+        if tool_name == "fs.lock_acquire":
+            unknown = sorted(set(arguments) - {"path", "owner", "ttl_seconds", "lease_id"})
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            owner = arguments.get("owner")
+            lease_id = arguments.get("lease_id")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            if not isinstance(owner, str) or not owner.strip():
+                raise ValueError("owner is required")
+            if len(owner.strip()) > 128:
+                raise ValueError("owner is too long")
+            self._validate_positive_int_argument(arguments, "ttl_seconds")
+            if lease_id is not None and (not isinstance(lease_id, str) or not lease_id.strip()):
+                raise ValueError("lease_id must be a string")
+            return
+
+        if tool_name == "fs.lock_release":
+            unknown = sorted(set(arguments) - {"path", "lease_id"})
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            lease_id = arguments.get("lease_id")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            if not isinstance(lease_id, str) or not lease_id.strip():
+                raise ValueError("lease_id is required")
+            return
+
+        if tool_name == "fs.edit":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "old_string",
+                    "new_string",
+                    "expected_sha256",
+                    "read_receipt",
+                    "lock_lease_id",
+                    "replace_all",
+                    "dry_run",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            old_string = arguments.get("old_string")
+            new_string = arguments.get("new_string")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            if not isinstance(old_string, str) or old_string == "":
+                raise ValueError("old_string is required")
+            if not isinstance(new_string, str):
+                raise ValueError("new_string must be a string")
+            for key in ("expected_sha256", "read_receipt"):
+                value = arguments.get(key)
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"{key} must be a string")
+            self._validate_optional_nonempty_string_argument(arguments, "lock_lease_id")
+            self._validate_bool_argument(arguments, "replace_all")
+            self._validate_bool_argument(arguments, "dry_run")
+            return
+
+        if tool_name == "notebook.edit_cell":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "mode",
+                    "cell_id",
+                    "insert_position",
+                    "new_cell_id",
+                    "cell_type",
+                    "source",
+                    "expected_sha256",
+                    "read_receipt",
+                    "lock_lease_id",
+                    "dry_run",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            mode = arguments.get("mode")
+            cell_id = arguments.get("cell_id")
+            source = arguments.get("source")
+            cell_type = arguments.get("cell_type")
+            insert_position = arguments.get("insert_position")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            if not isinstance(mode, str) or not mode.strip():
+                raise ValueError("mode is required")
+            if mode not in {"replace", "insert", "delete"}:
+                raise ValueError("mode must be one of: replace, insert, delete")
+            if not isinstance(cell_id, str) or not cell_id.strip():
+                raise ValueError("cell_id is required")
+            if mode in {"replace", "insert"} and not isinstance(source, str):
+                raise ValueError("source is required")
+            if source is not None and not isinstance(source, str):
+                raise ValueError("source must be a string")
+            if mode == "insert":
+                if insert_position not in {"before", "after"}:
+                    raise ValueError("insert_position is required")
+                if cell_type not in {"code", "markdown", "raw"}:
+                    raise ValueError("cell_type is required" if cell_type is None else "cell_type must be one of: code, markdown, raw")
+            elif insert_position is not None and insert_position not in {"before", "after"}:
+                raise ValueError("insert_position must be one of: before, after")
+            if cell_type is not None and cell_type not in {"code", "markdown", "raw"}:
+                raise ValueError("cell_type must be one of: code, markdown, raw")
+            for key in ("new_cell_id", "lock_lease_id"):
+                self._validate_optional_nonempty_string_argument(arguments, key)
+            for key in ("expected_sha256", "read_receipt"):
+                value = arguments.get(key)
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"{key} must be a string")
+            self._validate_bool_argument(arguments, "dry_run")
+            if not arguments.get("expected_sha256") and not arguments.get("read_receipt"):
+                raise ValueError("edit_preimage_required")
+            return
+
+        if tool_name == "fs.patch":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "diff",
+                    "expected_sha256_by_path",
+                    "read_receipt_by_path",
+                    "lock_lease_id_by_path",
+                    "create_parent_directories",
+                    "allow_create",
+                    "dry_run",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            diff = arguments.get("diff")
+            if not isinstance(diff, str) or not diff.strip():
+                raise ValueError("diff is required")
+            self._validate_optional_string_map_argument(arguments, "expected_sha256_by_path")
+            self._validate_optional_string_map_argument(arguments, "read_receipt_by_path")
+            self._validate_optional_nonempty_string_map_argument(arguments, "lock_lease_id_by_path")
+            self._validate_bool_argument(arguments, "create_parent_directories")
+            self._validate_bool_argument(arguments, "allow_create")
+            self._validate_bool_argument(arguments, "dry_run")
+            return
+
+        if tool_name == "fs.write":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "content",
+                    "mode",
+                    "expected_sha256",
+                    "read_receipt",
+                    "lock_lease_id",
+                    "dry_run",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            content = arguments.get("content")
+            mode = arguments.get("mode")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            if not isinstance(content, str):
+                raise ValueError("content must be a string")
+            if mode not in {"create", "replace"}:
+                raise ValueError("mode must be create or replace")
+            for key in ("expected_sha256", "read_receipt"):
+                value = arguments.get(key)
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"{key} must be a string")
+            self._validate_optional_nonempty_string_argument(arguments, "lock_lease_id")
+            self._validate_bool_argument(arguments, "dry_run")
+            return
+
         if tool_name == "fs.write_text":
-            unknown = sorted({key for key in arguments.keys()} - {"path", "content"})
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "path",
+                    "content",
+                    "expected_sha256",
+                    "read_receipt",
+                    "lock_lease_id",
+                    "dry_run",
+                }
+            )
             if unknown:
                 raise ValueError(f"unknown arguments: {', '.join(unknown)}")
             path = arguments.get("path")
@@ -194,9 +1235,254 @@ class FilesystemModule(BaseModule):
                 raise ValueError("path is required")
             if not isinstance(content, str):
                 raise ValueError("content must be a string")
+            for key in ("expected_sha256", "read_receipt"):
+                value = arguments.get(key)
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"{key} must be a string")
+            self._validate_optional_nonempty_string_argument(arguments, "lock_lease_id")
+            self._validate_bool_argument(arguments, "dry_run")
+            return
+
+        if tool_name == "fs.stat":
+            unknown = sorted(set(arguments) - {"path", "follow_symlinks"})
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            path = arguments.get("path")
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError("path is required")
+            self._validate_bool_argument(arguments, "follow_symlinks")
+            return
+
+        if tool_name == "fs.glob":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "pattern",
+                    "base_path",
+                    "include_hidden",
+                    "include_files",
+                    "include_directories",
+                    "follow_symlinks",
+                    "case_sensitive",
+                    "respect_gitignore",
+                    "sort_by",
+                    "limit",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            pattern = arguments.get("pattern")
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError("pattern is required")
+            base_path = arguments.get("base_path")
+            if base_path is not None and not isinstance(base_path, str):
+                raise ValueError("base_path must be a string")
+            for key in (
+                "include_hidden",
+                "include_files",
+                "include_directories",
+                "follow_symlinks",
+                "case_sensitive",
+                "respect_gitignore",
+            ):
+                self._validate_bool_argument(arguments, key)
+            sort_by = arguments.get("sort_by")
+            if sort_by is not None and sort_by not in {"modified_at", "path"}:
+                raise ValueError("sort_by must be one of: modified_at, path")
+            self._validate_positive_int_argument(arguments, "limit")
+            return
+
+        if tool_name == "fs.grep":
+            unknown = sorted(
+                set(arguments)
+                - {
+                    "pattern",
+                    "base_path",
+                    "include",
+                    "exclude",
+                    "glob",
+                    "type",
+                    "output_mode",
+                    "regex",
+                    "case_sensitive",
+                    "include_hidden",
+                    "follow_symlinks",
+                    "respect_gitignore",
+                    "multiline",
+                    "limit",
+                    "max_file_bytes",
+                }
+            )
+            if unknown:
+                raise ValueError(f"unknown arguments: {', '.join(unknown)}")
+            pattern = arguments.get("pattern")
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError("pattern is required")
+            base_path = arguments.get("base_path")
+            if base_path is not None and not isinstance(base_path, str):
+                raise ValueError("base_path must be a string")
+            include = arguments.get("include")
+            if include is not None and (
+                not isinstance(include, list) or not all(isinstance(item, str) for item in include)
+            ):
+                raise ValueError("include must be a list of strings")
+            exclude = arguments.get("exclude")
+            if exclude is not None and (
+                not isinstance(exclude, list) or not all(isinstance(item, str) for item in exclude)
+            ):
+                raise ValueError("exclude must be a list of strings")
+            glob_filter = arguments.get("glob")
+            if glob_filter is not None and not isinstance(glob_filter, str):
+                raise ValueError("glob must be a string")
+            type_filter = arguments.get("type")
+            if type_filter is not None and not isinstance(type_filter, str):
+                raise ValueError("type must be a string")
+            if isinstance(type_filter, str) and type_filter.strip().lower() not in self._GREP_TYPE_PATTERNS:
+                raise ValueError(f"unsupported grep type: {type_filter}")
+            output_mode = arguments.get("output_mode")
+            if output_mode is not None and output_mode not in {"files_with_matches", "content", "count"}:
+                raise ValueError("output_mode must be one of: files_with_matches, content, count")
+            for key in (
+                "regex",
+                "case_sensitive",
+                "include_hidden",
+                "follow_symlinks",
+                "respect_gitignore",
+                "multiline",
+            ):
+                self._validate_bool_argument(arguments, key)
+            if arguments.get("multiline") is True:
+                if arguments.get("regex") is not True:
+                    raise ValueError("multiline grep requires regex=true")
+                if arguments.get("output_mode") == "content":
+                    raise ValueError("multiline grep does not support content output_mode")
+            self._validate_positive_int_argument(arguments, "limit")
+            self._validate_positive_int_argument(arguments, "max_file_bytes")
+            if arguments.get("regex") is True:
+                if not self._setting_bool("grep_allow_regex", False):
+                    raise ValueError("regex grep is disabled by module configuration")
+                max_pattern_length = self._setting_positive_int("grep_max_pattern_length", 512)
+                if len(pattern) > max_pattern_length:
+                    raise ValueError(f"pattern exceeds grep regex length limit ({len(pattern)} > {max_pattern_length})")
             return
 
         raise ValueError(f"Unknown tool: {tool_name}")
+
+    @staticmethod
+    def _validate_bool_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is not None and not isinstance(value, bool):
+            raise ValueError(f"{key} must be a boolean")
+
+    @staticmethod
+    def _validate_positive_int_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
+            raise ValueError(f"{key} must be a positive integer")
+
+    @staticmethod
+    def _string_list_argument(value: Any) -> list[str] | None:
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            return None
+        return [str(item) for item in value]
+
+    @staticmethod
+    def _validate_optional_string_list_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is None:
+            return
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise ValueError(f"{key} must be a list of strings")
+
+    @staticmethod
+    def _validate_optional_string_map_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is None:
+            return
+        if not isinstance(value, dict) or not all(
+            isinstance(map_key, str) and isinstance(map_value, str) for map_key, map_value in value.items()
+        ):
+            raise ValueError(f"{key} must be an object with string values")
+
+    @staticmethod
+    def _validate_optional_nonempty_string_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is None:
+            return
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{key} must be a non-empty string")
+
+    @staticmethod
+    def _validate_optional_nonempty_string_map_argument(arguments: dict[str, Any], key: str) -> None:
+        value = arguments.get(key)
+        if value is None:
+            return
+        if not isinstance(value, dict) or not all(
+            isinstance(map_key, str) and isinstance(map_value, str) and bool(map_value.strip())
+            for map_key, map_value in value.items()
+        ):
+            raise ValueError(f"{key} must be an object with non-empty string values")
+
+    async def extract_path_scope_candidates(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: Any | None = None,
+    ) -> list[PathScopeCandidate]:
+        """Derive per-file path/action candidates for patch tools before enforcement."""
+
+        del context
+        if tool_name != "fs.patch":
+            return await super().extract_path_scope_candidates(tool_name, arguments, None)
+
+        candidates: list[PathScopeCandidate] = []
+        for patch_file in self._parse_patch_diff(str((arguments or {}).get("diff") or "")):
+            path = patch_file.new_path
+            if path is None:
+                raise ValueError("invalid_patch_path")
+            if patch_file.action == "create":
+                candidates.append(
+                    PathScopeCandidate(
+                        path=path,
+                        action="write",
+                        source="filesystem_diff",
+                        creates_file=True,
+                    )
+                )
+            else:
+                candidates.append(
+                    PathScopeCandidate(
+                        path=path,
+                        action="edit",
+                        source="filesystem_diff",
+                        requires_existing_file=True,
+                    )
+                )
+        return candidates
+
+    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
+        """Sanitize filesystem inputs while allowing portable glob syntax."""
+
+        if _depth > 20:
+            raise ValueError("Input too deeply nested")
+
+        if isinstance(input_data, str):
+            return "".join(ch for ch in input_data if ch >= " " or ch == "\n")
+        if isinstance(input_data, dict):
+            return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
+        if isinstance(input_data, list):
+            return [self.sanitize_input(v, _depth + 1) for v in input_data]
+        return input_data
+
+    @staticmethod
+    def _sanitize_patch_diff(input_data: Any) -> Any:
+        """Sanitize diff text while preserving unified-diff tabs and newlines."""
+
+        if not isinstance(input_data, str):
+            return input_data
+        return "".join(ch for ch in input_data if ch >= " " or ch in {"\n", "\r", "\t"})
 
     async def _resolve_workspace_root(self, context: Any | None) -> Path:
         metadata = getattr(context, "metadata", None)
@@ -234,6 +1520,13 @@ class FilesystemModule(BaseModule):
         return Path(workspace_root_raw).expanduser().resolve(strict=False)
 
     @staticmethod
+    def _context_metadata_value(context: Any | None, key: str) -> str | None:
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+        return _first_nonempty(metadata.get(key))
+
+    @staticmethod
     def _resolve_workspace_path(workspace_root: Path, raw_path: str) -> Path:
         candidate = Path(raw_path).expanduser()
         if not candidate.is_absolute():
@@ -242,6 +1535,596 @@ class FilesystemModule(BaseModule):
         if resolved != workspace_root and workspace_root not in resolved.parents:
             raise PermissionError("path is outside workspace scope")
         return resolved
+
+    @staticmethod
+    def _resolve_workspace_path_no_follow(workspace_root: Path, raw_path: str) -> Path:
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace_root / candidate
+        normalized = Path(os.path.abspath(os.fspath(candidate)))
+        if normalized == workspace_root:
+            return workspace_root
+        parent_resolved = normalized.parent.resolve(strict=False)
+        if parent_resolved != workspace_root and workspace_root not in parent_resolved.parents:
+            raise PermissionError("path is outside workspace scope")
+        return parent_resolved / normalized.name
+
+    @staticmethod
+    def _resolved_path_within_workspace(workspace_root: Path, target: Path) -> Path:
+        resolved = target.resolve(strict=False)
+        if resolved != workspace_root and workspace_root not in resolved.parents:
+            raise PermissionError("path is outside workspace scope")
+        return resolved
+
+    @staticmethod
+    def _bounded_positive_int(value: Any, default: int, *, maximum: int | None = None) -> int:
+        if value is None:
+            limit = max(1, int(default))
+        else:
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ValueError("limit must be a positive integer")
+            limit = value
+        if maximum is not None:
+            limit = min(limit, max(1, int(maximum)))
+        return limit
+
+    @staticmethod
+    def _normalize_portable_pattern(pattern: str) -> str:
+        normalized = pattern.strip().replace("\\", "/")
+        while "//" in normalized and not normalized.startswith("//"):
+            normalized = normalized.replace("//", "/")
+        return normalized
+
+    @staticmethod
+    def _reject_unsafe_pattern(pattern: str) -> None:
+        if not pattern:
+            raise ValueError("unsafe pattern: pattern is required")
+        if pattern.startswith("/") or pattern.startswith("//"):
+            raise ValueError("unsafe pattern: absolute patterns are not allowed")
+        if len(pattern) >= 2 and pattern[1] == ":" and pattern[0].isalpha():
+            raise ValueError("unsafe pattern: drive-qualified patterns are not allowed")
+        if any(part == ".." for part in pattern.split("/")):
+            raise ValueError("unsafe pattern: parent traversal is not allowed")
+        if pattern.count("**/") > 5:
+            raise ValueError("unsafe pattern: too many double-star wildcards")
+
+    @classmethod
+    def _grep_type_patterns(cls, raw_type: str) -> list[str]:
+        """Return glob patterns for a supported grep file type alias."""
+        type_name = raw_type.strip().lower()
+        patterns = cls._GREP_TYPE_PATTERNS.get(type_name)
+        if not patterns:
+            raise ValueError(f"unsupported grep type: {raw_type}")
+        return list(patterns)
+
+    @staticmethod
+    def _load_gitignore_spec(workspace_root: Path) -> pathspec.PathSpec | None:
+        """Load the workspace root .gitignore as a best-effort pathspec."""
+        gitignore_path = workspace_root / ".gitignore"
+        try:
+            gitignore_stat = gitignore_path.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            logger.debug("Unable to stat workspace .gitignore; ignoring it: {}", exc.__class__.__name__)
+            return None
+        if not stat_module.S_ISREG(gitignore_stat.st_mode):
+            if stat_module.S_ISLNK(gitignore_stat.st_mode):
+                logger.debug("Ignoring symlinked workspace .gitignore")
+            return None
+        try:
+            text = gitignore_path.read_bytes().decode("utf-8", errors="replace")
+        except OSError as exc:
+            logger.debug("Unable to read workspace .gitignore; ignoring it: {}", exc.__class__.__name__)
+            return None
+        try:
+            return pathspec.PathSpec.from_lines("gitwildmatch", text.splitlines())
+        except (GitWildMatchPatternError, TypeError, ValueError) as exc:
+            logger.debug("Unable to parse workspace .gitignore; ignoring it: {}", exc.__class__.__name__)
+            return None
+
+    @staticmethod
+    def _is_gitignored(
+        gitignore_spec: pathspec.PathSpec | None,
+        rel_path: str,
+        *,
+        is_directory: bool,
+    ) -> bool:
+        """Return whether a workspace-relative path matches the gitignore spec."""
+        if gitignore_spec is None:
+            return False
+        candidate = f"{rel_path}/" if is_directory and not rel_path.endswith("/") else rel_path
+        return bool(gitignore_spec.match_file(candidate))
+
+    @staticmethod
+    def _portable_pattern_matches(path: str, pattern: str, *, case_sensitive: bool) -> bool:
+        candidate = path if case_sensitive else path.lower()
+        patterns = FilesystemModule._expand_double_star_zero_dir_patterns(
+            pattern if case_sensitive else pattern.lower()
+        )
+        return any(fnmatch.fnmatchcase(candidate, candidate_pattern) for candidate_pattern in patterns)
+
+    @staticmethod
+    def _expand_double_star_zero_dir_patterns(pattern: str) -> set[str]:
+        patterns = {pattern}
+        queue = [pattern]
+        while queue:
+            current = queue.pop()
+            start = current.find("**/")
+            while start != -1:
+                collapsed = f"{current[:start]}{current[start + 3:]}"
+                if collapsed not in patterns:
+                    patterns.add(collapsed)
+                    queue.append(collapsed)
+                start = current.find("**/", start + 1)
+        return patterns
+
+    @staticmethod
+    def _is_hidden_relative_path(path: str) -> bool:
+        return any(part.startswith(".") and part not in {"."} for part in path.split("/"))
+
+    @staticmethod
+    def _stat_path(workspace_root: Path, target: Path, follow_symlinks: bool) -> dict[str, Any]:
+        if not target.exists() and not target.is_symlink():
+            raise FileNotFoundError(f"path not found: {target}")
+
+        if follow_symlinks:
+            stat_target = FilesystemModule._resolved_path_within_workspace(workspace_root, target)
+            stat_result = stat_target.stat()
+            is_symlink = target.is_symlink()
+            target_within_workspace = True
+        else:
+            stat_result = target.lstat()
+            is_symlink = stat_module.S_ISLNK(stat_result.st_mode)
+            target_within_workspace = None
+
+        mode = stat_result.st_mode
+        if is_symlink and not follow_symlinks:
+            entry_type = "symlink"
+        elif stat_module.S_ISDIR(mode):
+            entry_type = "directory"
+        elif stat_module.S_ISREG(mode):
+            entry_type = "file"
+        else:
+            entry_type = "other"
+
+        record: dict[str, Any] = {
+            "path": FilesystemModule._to_workspace_relative_path(workspace_root, target),
+            "name": target.name or ".",
+            "type": entry_type,
+            "size": stat_result.st_size,
+            "modified_at": datetime.fromtimestamp(stat_result.st_mtime, timezone.utc).isoformat(),
+            "mode": stat_module.S_IMODE(mode),
+            "is_symlink": is_symlink,
+        }
+        if target_within_workspace is not None:
+            record["target_within_workspace"] = target_within_workspace
+        return record
+
+    @staticmethod
+    def _glob_paths(
+        workspace_root: Path,
+        base: Path,
+        pattern: str,
+        include_hidden: bool,
+        include_files: bool,
+        include_directories: bool,
+        follow_symlinks: bool,
+        case_sensitive: bool,
+        respect_gitignore: bool,
+        sort_by: str,
+        limit: int,
+        walk_entry_limit: int,
+    ) -> dict[str, Any]:
+        if not base.exists():
+            raise FileNotFoundError(f"path not found: {base}")
+        if not base.is_dir():
+            raise NotADirectoryError(f"path is not a directory: {base}")
+
+        matches: list[tuple[dict[str, Any], float]] = []
+        visited_entries = 0
+        walk_truncated = False
+        seen_dirs: set[Path] = {base.resolve(strict=False)}
+        gitignore_spec = FilesystemModule._load_gitignore_spec(workspace_root) if respect_gitignore else None
+
+        for root, dirnames, filenames in os.walk(base, topdown=True, followlinks=follow_symlinks):
+            current_root = Path(root)
+            dirnames.sort()
+            filenames.sort()
+
+            symlink_dirs: list[str] = []
+            for dirname in list(dirnames):
+                dir_path = current_root / dirname
+                rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, dir_path)
+                if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                    dirnames.remove(dirname)
+                    continue
+                if FilesystemModule._is_gitignored(gitignore_spec, rel_path, is_directory=True):
+                    dirnames.remove(dirname)
+                    continue
+                if dir_path.is_symlink():
+                    resolved_dir = dir_path.resolve(strict=False)
+                    if follow_symlinks:
+                        if resolved_dir != workspace_root and workspace_root not in resolved_dir.parents:
+                            raise PermissionError("path is outside workspace scope")
+                        if resolved_dir in seen_dirs:
+                            dirnames.remove(dirname)
+                            continue
+                        seen_dirs.add(resolved_dir)
+                    else:
+                        dirnames.remove(dirname)
+                        symlink_dirs.append(dirname)
+
+            candidates: list[tuple[Path, str]] = [(current_root / dirname, "directory") for dirname in dirnames]
+            candidates.extend((current_root / dirname, "directory") for dirname in symlink_dirs)
+            candidates.extend((current_root / filename, "file") for filename in filenames)
+
+            for candidate, candidate_kind in candidates:
+                visited_entries += 1
+                if visited_entries > walk_entry_limit:
+                    walk_truncated = True
+                    dirnames.clear()
+                    break
+
+                rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, candidate)
+                if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                    continue
+                if FilesystemModule._is_gitignored(
+                    gitignore_spec,
+                    rel_path,
+                    is_directory=candidate_kind == "directory",
+                ):
+                    continue
+                is_symlink = candidate.is_symlink()
+                if is_symlink:
+                    candidate_type = "symlink"
+                else:
+                    candidate_type = candidate_kind
+
+                include_candidate = (candidate_kind == "file" and include_files) or (
+                    candidate_kind == "directory" and include_directories
+                )
+                if not include_candidate:
+                    continue
+                if not FilesystemModule._portable_pattern_matches(rel_path, pattern, case_sensitive=case_sensitive):
+                    continue
+
+                record: dict[str, Any] = {
+                    "path": rel_path,
+                    "type": candidate_type,
+                }
+                modified_at = 0.0
+                if candidate_kind == "file":
+                    try:
+                        stat_result = candidate.stat(follow_symlinks=False)
+                        record["size"] = stat_result.st_size
+                        modified_at = stat_result.st_mtime
+                    except OSError:
+                        record["size"] = None
+                        record["size_unavailable"] = True
+                else:
+                    try:
+                        modified_at = candidate.lstat().st_mtime
+                    except OSError as exc:
+                        logger.debug(
+                            "Unable to read fs.glob mtime for workspace path {}; using default sort key: {}",
+                            rel_path,
+                            exc.__class__.__name__,
+                        )
+                matches.append((record, modified_at))
+
+            if walk_truncated:
+                break
+
+        if sort_by == "path":
+            matches.sort(key=lambda item: str(item[0].get("path") or ""))
+        else:
+            matches.sort(key=lambda item: (-item[1], str(item[0].get("path") or "")))
+        limited_matches = [record for record, _modified_at in matches[:limit]]
+        remaining_count = max(0, len(matches) - len(limited_matches))
+        truncated = walk_truncated or remaining_count > 0
+        return {
+            "base_path": FilesystemModule._to_workspace_relative_path(workspace_root, base),
+            "pattern": pattern,
+            "matches": limited_matches,
+            "truncated": truncated,
+            "remaining_count": remaining_count,
+            "eval": build_execution_eval_metadata(
+                tool_name="fs.glob",
+                tool_prompt_id="mcp.fs.glob.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_search",
+                result_kind="structured_filesystem_glob",
+                path_filter_used=True,
+                truncated=truncated,
+            ),
+        }
+
+    @staticmethod
+    def _grep_files(
+        workspace_root: Path,
+        base: Path,
+        pattern: str,
+        regex_pattern: re.Pattern[str] | None,
+        regex: bool,
+        case_sensitive: bool,
+        include: list[str],
+        exclude: list[str],
+        glob_filter: str | None,
+        type_filter: list[str] | None,
+        output_mode: str,
+        include_hidden: bool,
+        follow_symlinks: bool,
+        respect_gitignore: bool,
+        multiline: bool,
+        limit: int,
+        max_file_bytes: int,
+        max_total_bytes: int,
+        max_files: int,
+        walk_entry_limit: int,
+    ) -> dict[str, Any]:
+        if not base.exists():
+            raise FileNotFoundError(f"path not found: {base}")
+        if not base.is_dir() and not base.is_file():
+            raise NotADirectoryError(f"path is not a directory or file: {base}")
+
+        content_matches: list[dict[str, Any]] = []
+        matched_file_counts: dict[str, int] = {}
+        remaining_count = 0
+        skipped = {
+            "binary": 0,
+            "decode_error": 0,
+            "too_large": 0,
+            "permission_error": 0,
+            "unsupported_type": 0,
+        }
+        visited_entries = 0
+        walk_truncated = False
+        io_truncated = False
+        file_budget_truncated = False
+        total_bytes_read = 0
+        files_read = 0
+        seen_dirs: set[Path] = {base.resolve(strict=False)}
+        file_candidates: list[tuple[str, Path]] = []
+        gitignore_spec = (
+            FilesystemModule._load_gitignore_spec(workspace_root) if respect_gitignore and base.is_dir() else None
+        )
+
+        def _rel_path_matches_filters(rel_path: str) -> bool:
+            """Return whether a candidate path passes include, glob, type, and exclude filters."""
+            if not any(
+                FilesystemModule._portable_pattern_matches(rel_path, include_pattern, case_sensitive=True)
+                for include_pattern in include
+            ):
+                return False
+            if glob_filter and not FilesystemModule._portable_pattern_matches(
+                rel_path, glob_filter, case_sensitive=True
+            ):
+                return False
+            if type_filter and not any(
+                FilesystemModule._portable_pattern_matches(rel_path, type_pattern, case_sensitive=True)
+                for type_pattern in type_filter
+            ):
+                return False
+            return not any(
+                FilesystemModule._portable_pattern_matches(rel_path, exclude_pattern, case_sensitive=True)
+                for exclude_pattern in exclude
+            )
+
+        if base.is_file():
+            rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, base)
+            if (
+                (include_hidden or not FilesystemModule._is_hidden_relative_path(rel_path))
+                and _rel_path_matches_filters(rel_path)
+            ):
+                file_candidates.append((rel_path, base))
+        else:
+            for root, dirnames, filenames in os.walk(base, topdown=True, followlinks=follow_symlinks):
+                current_root = Path(root)
+                dirnames.sort()
+                filenames.sort()
+
+                for dirname in list(dirnames):
+                    dir_path = current_root / dirname
+                    rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, dir_path)
+                    if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                        dirnames.remove(dirname)
+                        continue
+                    if FilesystemModule._is_gitignored(gitignore_spec, rel_path, is_directory=True):
+                        dirnames.remove(dirname)
+                        continue
+                    if dir_path.is_symlink():
+                        resolved_dir = dir_path.resolve(strict=False)
+                        if follow_symlinks:
+                            if resolved_dir != workspace_root and workspace_root not in resolved_dir.parents:
+                                raise PermissionError("path is outside workspace scope")
+                            if resolved_dir in seen_dirs:
+                                dirnames.remove(dirname)
+                                continue
+                            seen_dirs.add(resolved_dir)
+                        else:
+                            dirnames.remove(dirname)
+                            continue
+                    visited_entries += 1
+                    if visited_entries > walk_entry_limit:
+                        walk_truncated = True
+                        dirnames.clear()
+                        break
+
+                if walk_truncated:
+                    break
+
+                for filename in filenames:
+                    visited_entries += 1
+                    if visited_entries > walk_entry_limit:
+                        walk_truncated = True
+                        dirnames.clear()
+                        break
+
+                    candidate = current_root / filename
+                    rel_path = FilesystemModule._to_workspace_relative_path(workspace_root, candidate)
+                    if not include_hidden and FilesystemModule._is_hidden_relative_path(rel_path):
+                        continue
+                    if FilesystemModule._is_gitignored(gitignore_spec, rel_path, is_directory=False):
+                        continue
+                    if candidate.is_symlink():
+                        if not follow_symlinks:
+                            skipped["unsupported_type"] += 1
+                            continue
+                        resolved_file = candidate.resolve(strict=False)
+                        if resolved_file != workspace_root and workspace_root not in resolved_file.parents:
+                            raise PermissionError("path is outside workspace scope")
+                        read_target = resolved_file
+                    else:
+                        read_target = candidate
+                    if not _rel_path_matches_filters(rel_path):
+                        continue
+                    if not read_target.is_file():
+                        skipped["unsupported_type"] += 1
+                        continue
+                    file_candidates.append((rel_path, read_target))
+
+                if walk_truncated:
+                    break
+
+        for rel_path, read_target in sorted(file_candidates, key=lambda item: item[0]):
+            try:
+                file_size = read_target.stat().st_size
+            except PermissionError:
+                skipped["permission_error"] += 1
+                continue
+            except OSError:
+                skipped["unsupported_type"] += 1
+                continue
+            if file_size > max_file_bytes:
+                skipped["too_large"] += 1
+                continue
+            if files_read >= max_files:
+                file_budget_truncated = True
+                break
+            if total_bytes_read + file_size > max_total_bytes:
+                io_truncated = True
+                break
+            try:
+                payload = read_target.read_bytes()
+            except PermissionError:
+                skipped["permission_error"] += 1
+                continue
+            except OSError:
+                skipped["unsupported_type"] += 1
+                continue
+            files_read += 1
+            total_bytes_read += len(payload)
+            if b"\x00" in payload:
+                skipped["binary"] += 1
+                continue
+            try:
+                text = payload.decode("utf-8")
+            except UnicodeDecodeError:
+                skipped["decode_error"] += 1
+                continue
+
+            if multiline:
+                if regex_pattern is None:
+                    continue
+                if output_mode == "files_with_matches":
+                    if regex_pattern.search(text):
+                        matched_file_counts[rel_path] = 1
+                else:
+                    match_count = sum(1 for _match in regex_pattern.finditer(text))
+                    if match_count:
+                        matched_file_counts[rel_path] = matched_file_counts.get(rel_path, 0) + match_count
+                continue
+
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                match_text = FilesystemModule._line_match_text(
+                    line,
+                    pattern,
+                    regex_pattern,
+                    regex=regex,
+                    case_sensitive=case_sensitive,
+                )
+                if match_text is None:
+                    continue
+                if output_mode == "content":
+                    match_record = {
+                        "path": rel_path,
+                        "line_number": line_number,
+                        "line": line,
+                        "match_text": match_text,
+                    }
+                    if len(content_matches) < limit:
+                        content_matches.append(match_record)
+                    else:
+                        remaining_count += 1
+                else:
+                    matched_file_counts[rel_path] = matched_file_counts.get(rel_path, 0) + 1
+                    if output_mode == "files_with_matches":
+                        break
+
+        if output_mode == "content":
+            matches = sorted(
+                content_matches,
+                key=lambda item: (str(item.get("path") or ""), int(item.get("line_number") or 0)),
+            )
+        else:
+            all_file_matches = [
+                {"path": rel_path, "count": count} if output_mode == "count" else {"path": rel_path}
+                for rel_path, count in sorted(matched_file_counts.items())
+            ]
+            matches = all_file_matches[:limit]
+            remaining_count = max(0, len(all_file_matches) - len(matches))
+        truncation_reasons = []
+        if walk_truncated:
+            truncation_reasons.append("walk_entry_limit")
+        if io_truncated:
+            truncation_reasons.append("io_budget")
+        if file_budget_truncated:
+            truncation_reasons.append("file_budget")
+        if remaining_count > 0:
+            truncation_reasons.append("match_limit")
+        truncated = bool(truncation_reasons)
+        return {
+            "base_path": FilesystemModule._to_workspace_relative_path(workspace_root, base),
+            "output_mode": output_mode,
+            "matches": matches,
+            "truncated": truncated,
+            "remaining_count": remaining_count,
+            "remaining_count_known": not (walk_truncated or io_truncated or file_budget_truncated),
+            "truncation_reasons": truncation_reasons,
+            "skipped": skipped,
+            "eval": build_execution_eval_metadata(
+                tool_name="fs.grep",
+                tool_prompt_id="mcp.fs.grep.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_search",
+                result_kind="structured_filesystem_grep",
+                path_filter_used=True,
+                truncated=truncated,
+            ),
+        }
+
+    @staticmethod
+    def _line_match_text(
+        line: str,
+        pattern: str,
+        regex_pattern: re.Pattern[str] | None,
+        *,
+        regex: bool,
+        case_sensitive: bool,
+    ) -> str | None:
+        if regex:
+            if regex_pattern is None:
+                return None
+            match = regex_pattern.search(line)
+            return match.group(0) if match else None
+
+        haystack = line if case_sensitive else line.lower()
+        needle = pattern if case_sensitive else pattern.lower()
+        index = haystack.find(needle)
+        if index < 0:
+            return None
+        return line[index : index + len(pattern)]
 
     @staticmethod
     def _list_directory(workspace_root: Path, target: Path, entry_limit: int) -> dict[str, Any]:
@@ -292,6 +2175,1037 @@ class FilesystemModule(BaseModule):
         rel_text = relative.as_posix()
         return rel_text if rel_text not in {"", "."} else "."
 
+    def _parse_patch_diff(self, diff_text: str) -> tuple[PatchFile, ...]:
+        try:
+            return parse_unified_diff(
+                diff_text,
+                max_files=self._setting_positive_int("patch_max_files", 20),
+                max_hunks=self._setting_positive_int("patch_max_hunks", 200),
+                max_bytes=self._setting_positive_int("patch_max_diff_bytes", 1_000_000),
+            )
+        except FilesystemPatchError as exc:
+            raise ValueError(exc.reason_code) from exc
+
+    @staticmethod
+    def _string_map_argument(value: Any) -> dict[str, str]:
+        if value is None:
+            return {}
+        return {str(key): str(map_value) for key, map_value in dict(value).items()}
+
+    @staticmethod
+    def _workspace_lock_key(workspace_root: Path) -> str:
+        return str(workspace_root)
+
+    @staticmethod
+    def _context_session_id(context: Any | None) -> str | None:
+        return _first_nonempty(
+            getattr(context, "session_id", None),
+            FilesystemModule._context_metadata_value(context, "session_id"),
+        )
+
+    @staticmethod
+    def _assert_lockable_file_target(target: Path) -> None:
+        if target.is_symlink():
+            raise ValueError("file_not_regular")
+        if target.exists() and not target.is_file():
+            raise ValueError("file_not_regular")
+
+    @staticmethod
+    def _lock_eval_metadata(tool_name: str) -> dict[str, Any]:
+        return build_execution_eval_metadata(
+            tool_name=tool_name,
+            tool_prompt_id=f"mcp.{tool_name}.v1",
+            tool_prompt_version="2026.06.09",
+            action_family="filesystem_lock",
+            result_kind="structured_filesystem_lock",
+            path_filter_used=True,
+            truncated=False,
+        )
+
+    def _acquire_lock_for_path(
+        self,
+        workspace_root: Path,
+        raw_path: str,
+        owner: str,
+        ttl_seconds: int,
+        lease_id: Any,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        target = self._resolve_workspace_path_no_follow(workspace_root, raw_path)
+        return self._acquire_lock(workspace_root, target, owner, ttl_seconds, lease_id, context)
+
+    def _acquire_lock(
+        self,
+        workspace_root: Path,
+        target: Path,
+        owner: str,
+        ttl_seconds: int,
+        lease_id: Any,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        self._assert_lockable_file_target(target)
+        rel_path = self._to_workspace_relative_path(workspace_root, target)
+        try:
+            lease, renewed = self._lock_leases.acquire(
+                workspace_key=self._workspace_lock_key(workspace_root),
+                path=rel_path,
+                owner=owner.strip(),
+                ttl_seconds=ttl_seconds,
+                lease_id=str(lease_id).strip() if isinstance(lease_id, str) and lease_id.strip() else None,
+                workspace_id=self._context_metadata_value(context, "workspace_id"),
+                session_id=self._context_session_id(context),
+            )
+        except FilesystemLockConflict as exc:
+            return {
+                "acquired": False,
+                **exc.lease.conflict_payload(),
+                "eval": self._lock_eval_metadata("fs.lock_acquire"),
+            }
+        except FilesystemLockMissing:
+            return {
+                "acquired": False,
+                "reason_code": "lock_missing",
+                "path": rel_path,
+                "held": False,
+                "eval": self._lock_eval_metadata("fs.lock_acquire"),
+            }
+        return {
+            "acquired": True,
+            "renewed": renewed,
+            **lease.safe_payload(),
+            "eval": self._lock_eval_metadata("fs.lock_acquire"),
+        }
+
+    def _release_lock_for_path(self, workspace_root: Path, raw_path: str, lease_id: str) -> dict[str, Any]:
+        target = self._resolve_workspace_path_no_follow(workspace_root, raw_path)
+        return self._release_lock(workspace_root, target, lease_id)
+
+    def _release_lock(self, workspace_root: Path, target: Path, lease_id: str) -> dict[str, Any]:
+        rel_path = self._to_workspace_relative_path(workspace_root, target)
+        try:
+            released = self._lock_leases.release(
+                workspace_key=self._workspace_lock_key(workspace_root),
+                path=rel_path,
+                lease_id=lease_id.strip(),
+            )
+        except FilesystemLockConflict as exc:
+            return {
+                "released": False,
+                **exc.lease.conflict_payload(),
+                "eval": self._lock_eval_metadata("fs.lock_release"),
+            }
+        if released is None:
+            return {
+                "released": False,
+                "reason_code": "lock_missing",
+                "path": rel_path,
+                "held": False,
+                "eval": self._lock_eval_metadata("fs.lock_release"),
+            }
+        return {
+            "released": True,
+            "path": rel_path,
+            "owner": released.owner,
+            "eval": self._lock_eval_metadata("fs.lock_release"),
+        }
+
+    def _validate_mutation_lock(self, workspace_root: Path, rel_path: str, lease_id: Any) -> None:
+        if lease_id is not None and (not isinstance(lease_id, str) or not lease_id.strip()):
+            raise ValueError("lock_lease_id must be a non-empty string")
+        if lease_id is None:
+            if self._setting_bool("require_lock_for_mutation", False):
+                raise ValueError("lock_required")
+            return
+
+        try:
+            self._lock_leases.validate(
+                workspace_key=self._workspace_lock_key(workspace_root),
+                path=rel_path,
+                lease_id=str(lease_id).strip(),
+            )
+        except FilesystemLockMissing as exc:
+            raise ValueError("lock_missing") from exc
+        except FilesystemLockConflict as exc:
+            raise ValueError("lock_conflict") from exc
+
+    def _apply_patch_files(
+        self,
+        workspace_root: Path,
+        patch_files: tuple[PatchFile, ...],
+        expected_sha256_by_path: dict[str, str],
+        read_receipt_by_path: dict[str, str],
+        lock_lease_id_by_path: dict[str, str],
+        allow_create: bool,
+        create_parent_directories: bool,
+        dry_run: bool,
+        preimage_max_bytes: int,
+        write_max_bytes: int,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        plans = [
+            self._plan_patch_file(
+                workspace_root,
+                patch_file,
+                expected_sha256_by_path,
+                read_receipt_by_path,
+                lock_lease_id_by_path,
+                allow_create,
+                create_parent_directories,
+                preimage_max_bytes,
+                write_max_bytes,
+                context,
+            )
+            for patch_file in patch_files
+        ]
+
+        if not dry_run:
+            written: list[dict[str, Any]] = []
+            try:
+                for plan in plans:
+                    target = plan["_target"]
+                    self._validate_mutation_lock(
+                        workspace_root,
+                        str(plan["result"]["path"]),
+                        plan["_lock_lease_id"],
+                    )
+                    self._assert_preimage_unchanged(
+                        target,
+                        plan["result"].get("sha256_before"),
+                        int(plan["result"].get("bytes_before") or 0),
+                    )
+                    if plan["_create_parent_directories"]:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                    self._atomic_write_text_file(target, str(plan["_text_after"]))
+                    written.append(plan)
+            except Exception as exc:
+                if not written:
+                    raise ValueError(str(exc)) from exc
+                for plan in reversed(written):
+                    target = plan["_target"]
+                    try:
+                        if plan["_existed_before"]:
+                            self._atomic_write_text_file(target, str(plan["_text_before"]))
+                        else:
+                            target.unlink(missing_ok=True)
+                    # Rollback is best effort; preserve the original write failure even if restore fails.
+                    except Exception:  # noqa: BLE001
+                        logger.exception("Failed to roll back partial fs.patch write for {}", target.name)
+                raise ValueError("partial_write_rollback_attempted") from exc
+
+        file_results = []
+        for plan in plans:
+            record = dict(plan["result"])
+            if not dry_run:
+                record["bytes_written"] = record["bytes_after"]
+            file_results.append(record)
+
+        summary = {
+            "files": len(file_results),
+            "hunks": sum(int(item["hunks_applied"]) for item in file_results),
+            "additions": sum(int(item["additions"]) for item in file_results),
+            "deletions": sum(int(item["deletions"]) for item in file_results),
+        }
+        return {
+            "applied": not dry_run,
+            "dry_run": dry_run,
+            "files": file_results,
+            "summary": summary,
+            "eval": build_execution_eval_metadata(
+                tool_name="fs.patch",
+                tool_prompt_id="mcp.fs.patch.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_edit",
+                result_kind="structured_filesystem_edit",
+                path_filter_used=True,
+                truncated=False,
+            ),
+        }
+
+    def _plan_patch_file(
+        self,
+        workspace_root: Path,
+        patch_file: PatchFile,
+        expected_sha256_by_path: dict[str, str],
+        read_receipt_by_path: dict[str, str],
+        lock_lease_id_by_path: dict[str, str],
+        allow_create: bool,
+        create_parent_directories: bool,
+        preimage_max_bytes: int,
+        write_max_bytes: int,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        rel_path = patch_file.new_path
+        if rel_path is None:
+            raise ValueError("invalid_patch_path")
+        target = self._resolve_workspace_path_no_follow(workspace_root, rel_path)
+        response_path = self._to_workspace_relative_path(workspace_root, target)
+        self._validate_mutation_lock(workspace_root, response_path, lock_lease_id_by_path.get(response_path))
+        additions, deletions = self._patch_line_counts(patch_file)
+
+        if patch_file.action == "create":
+            if not allow_create:
+                raise ValueError("patch_create_not_allowed")
+            if target.exists() or target.is_symlink():
+                raise ValueError("patch_create_target_exists")
+            if not target.parent.exists() and not create_parent_directories:
+                raise ValueError("patch_parent_missing")
+            original_text = ""
+            sha256_before = None
+            bytes_before = 0
+            created = True
+            action = "write"
+            text_before = None
+        else:
+            if target.is_symlink():
+                raise ValueError("file_not_regular")
+            if not target.exists():
+                raise FileNotFoundError(f"path not found: {target}")
+            if not target.is_file():
+                raise ValueError("file_not_regular")
+            file_size = target.stat(follow_symlinks=False).st_size
+            if file_size > preimage_max_bytes:
+                raise ValueError("patch_preimage_too_large")
+            payload = target.read_bytes()
+            if b"\x00" in payload:
+                raise ValueError("binary content is not supported by fs.patch")
+            try:
+                original_text = payload.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError("binary content is not supported by fs.patch") from exc
+            sha256_before = hashlib.sha256(payload).hexdigest()
+            bytes_before = len(payload)
+            self._authorize_patch_preimage(
+                response_path,
+                sha256_before,
+                bytes_before,
+                expected_sha256_by_path,
+                read_receipt_by_path,
+                context,
+            )
+            created = False
+            action = "edit"
+            text_before = original_text
+
+        try:
+            text_after = apply_patch_to_text(original_text, patch_file)
+        except FilesystemPatchError as exc:
+            raise ValueError(exc.reason_code) from exc
+        data_after = text_after.encode("utf-8")
+        if len(data_after) > write_max_bytes:
+            raise ValueError("patch_write_too_large")
+
+        return {
+            "_target": target,
+            "_text_after": text_after,
+            "_text_before": text_before,
+            "_existed_before": not created,
+            "_create_parent_directories": create_parent_directories,
+            "_lock_lease_id": lock_lease_id_by_path.get(response_path),
+            "result": {
+                "path": response_path,
+                "action": action,
+                "created": created,
+                "hunks_applied": len(patch_file.hunks),
+                "additions": additions,
+                "deletions": deletions,
+                "bytes_before": bytes_before,
+                "bytes_after": len(data_after),
+                "sha256_before": sha256_before,
+                "sha256_after": hashlib.sha256(data_after).hexdigest(),
+            },
+        }
+
+    def _authorize_patch_preimage(
+        self,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        expected_sha256_by_path: dict[str, str],
+        read_receipt_by_path: dict[str, str],
+        context: Any | None,
+    ) -> None:
+        expected_sha256 = expected_sha256_by_path.get(rel_path)
+        receipt = read_receipt_by_path.get(rel_path)
+        if expected_sha256 is None and receipt is None:
+            raise ValueError("patch_preimage_required")
+        if expected_sha256 is not None and expected_sha256 == sha256_before:
+            return
+        if receipt is not None:
+            self._validate_patch_read_receipt(receipt, rel_path, sha256_before, bytes_before, context)
+            return
+        raise ValueError("patch_preimage_mismatch")
+
+    def _validate_patch_read_receipt(
+        self,
+        receipt: str,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        context: Any | None,
+    ) -> None:
+        try:
+            payload = self._read_receipts.validate(receipt)
+        except ReadReceiptError as exc:
+            raise ValueError(exc.reason_code) from exc
+        if payload.path != rel_path or payload.sha256 != sha256_before or payload.size != bytes_before:
+            raise ValueError("patch_read_receipt_mismatch")
+
+        context_workspace_id = self._context_metadata_value(context, "workspace_id")
+        if payload.workspace_id and payload.workspace_id != context_workspace_id:
+            raise ValueError("patch_read_receipt_mismatch")
+        context_session_id = _first_nonempty(
+            getattr(context, "session_id", None),
+            self._context_metadata_value(context, "session_id"),
+        )
+        if payload.session_id and payload.session_id != context_session_id:
+            raise ValueError("patch_read_receipt_mismatch")
+
+    @staticmethod
+    def _patch_line_counts(patch_file: PatchFile) -> tuple[int, int]:
+        additions = 0
+        deletions = 0
+        for hunk in patch_file.hunks:
+            for line in hunk.lines:
+                if line.kind == "add":
+                    additions += 1
+                elif line.kind == "remove":
+                    deletions += 1
+        return additions, deletions
+
+    @staticmethod
+    def _assert_preimage_unchanged(target: Path, expected_sha256: str | None, expected_size: int) -> None:
+        """Recheck the authorized file preimage immediately before committing writes."""
+
+        if expected_sha256 is None:
+            if expected_size == 0 and (target.exists() or target.is_symlink()):
+                raise ValueError("preimage_changed_during_commit")
+            return
+        if target.is_symlink() or not target.exists() or not target.is_file():
+            raise ValueError("preimage_changed_during_commit")
+        payload = target.read_bytes()
+        if len(payload) != expected_size or hashlib.sha256(payload).hexdigest() != expected_sha256:
+            raise ValueError("preimage_changed_during_commit")
+
+    @staticmethod
+    def _atomic_write_text_file(target: Path, text: str) -> None:
+        """Atomically replace a text file while preserving existing file mode."""
+
+        existing_mode: int | None = None
+        if target.exists() and not target.is_symlink():
+            existing_mode = stat_module.S_IMODE(target.stat(follow_symlinks=False).st_mode)
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                if existing_mode is not None:
+                    os.fchmod(handle.fileno(), existing_mode)
+                handle.write(text.encode("utf-8"))
+            os.replace(tmp_path, target)
+        finally:
+            with suppress(OSError):
+                if tmp_path.exists():
+                    tmp_path.unlink()
+
+    @staticmethod
+    def _read_existing_regular_file_no_follow(target: Path, *, max_bytes: int) -> tuple[bytes, os.stat_result]:
+        """Read a regular file through a descriptor opened without following symlinks when supported.
+
+        The helper performs the size check both before and after reading so a file
+        that grows between `fstat()` and `read()` cannot bypass the configured
+        preimage limit. Platforms without `O_NOFOLLOW` fall back to opening the
+        file and then rejecting paths that still identify as symlinks.
+        """
+
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+
+        try:
+            fd = os.open(target, flags)
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                raise ValueError("file_not_regular") from exc
+            raise
+
+        try:
+            if not hasattr(os, "O_NOFOLLOW") and target.is_symlink():
+                raise ValueError("file_not_regular")
+            file_stat = os.fstat(fd)
+            if not stat_module.S_ISREG(file_stat.st_mode):
+                raise ValueError("file_not_regular")
+            if file_stat.st_size > max_bytes:
+                raise ValueError("edit_preimage_too_large")
+
+            chunks: list[bytes] = []
+            remaining = max_bytes + 1
+            while remaining > 0:
+                chunk = os.read(fd, min(remaining, 1024 * 1024))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            payload = b"".join(chunks)
+            if len(payload) > max_bytes:
+                raise ValueError("edit_preimage_too_large")
+            return payload, file_stat
+        finally:
+            os.close(fd)
+
+    @classmethod
+    def _assert_edit_preimage_unchanged_no_follow(
+        cls,
+        target: Path,
+        expected_sha256: str,
+        expected_size: int,
+        expected_stat: os.stat_result,
+    ) -> None:
+        """Recheck an edit target using no-follow descriptor reads before committing."""
+
+        try:
+            payload, current_stat = cls._read_existing_regular_file_no_follow(target, max_bytes=expected_size)
+        except (OSError, ValueError) as exc:
+            raise ValueError("preimage_changed_during_commit") from exc
+        if (
+            current_stat.st_dev != expected_stat.st_dev
+            or current_stat.st_ino != expected_stat.st_ino
+            or current_stat.st_size != expected_size
+            or len(payload) != expected_size
+            or hashlib.sha256(payload).hexdigest() != expected_sha256
+        ):
+            raise ValueError("preimage_changed_during_commit")
+
+    def _read_notebook(
+        self,
+        workspace_root: Path,
+        target: Path,
+        include_source: bool,
+        cell_ids: list[str] | None,
+        max_source_chars: int,
+        max_total_source_chars: int,
+        max_bytes: int,
+        include_receipt: bool,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        """Read a notebook structure summary without exposing full notebook JSON."""
+
+        if target.suffix.lower() != ".ipynb":
+            raise ValueError("notebook_path_required")
+        try:
+            payload, _file_stat = self._read_existing_regular_file_no_follow(target, max_bytes=max_bytes)
+        except ValueError as exc:
+            if str(exc) == "edit_preimage_too_large":
+                raise ValueError("notebook_too_large") from exc
+            raise
+        parsed = parse_notebook_payload(payload, max_bytes=max_bytes)
+        rel_path = self._to_workspace_relative_path(workspace_root, target)
+        result = {
+            "path": rel_path,
+            **summarize_notebook(
+                parsed,
+                include_source=include_source,
+                cell_ids=cell_ids,
+                max_source_chars=max_source_chars,
+                max_total_source_chars=max_total_source_chars,
+            ),
+        }
+        if include_receipt and self._read_receipts.enabled:
+            result["read_receipt"] = self._read_receipts.issue(
+                path=rel_path,
+                sha256=parsed.sha256,
+                size=parsed.size,
+                workspace_id=self._context_metadata_value(context, "workspace_id"),
+                session_id=_first_nonempty(
+                    getattr(context, "session_id", None),
+                    self._context_metadata_value(context, "session_id"),
+                ),
+            )
+        result["eval"] = build_execution_eval_metadata(
+            tool_name="notebook.read",
+            tool_prompt_id="mcp.notebook.read.v1",
+            tool_prompt_version="2026.06.27",
+            action_family="notebook_read",
+            result_kind="structured_notebook_read",
+            path_filter_used=True,
+            truncated=bool(result.get("source_preview_truncated", False)),
+        )
+        return result
+
+    def _edit_notebook_cell(
+        self,
+        workspace_root: Path,
+        target: Path,
+        mode: str,
+        cell_id: str,
+        source: Any,
+        cell_type: Any,
+        insert_position: Any,
+        new_cell_id: Any,
+        expected_sha256: Any,
+        read_receipt: Any,
+        lock_lease_id: Any,
+        dry_run: bool,
+        preimage_max_bytes: int,
+        write_max_bytes: int,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        """Apply one preimage-protected notebook cell edit."""
+
+        if target.suffix.lower() != ".ipynb":
+            raise ValueError("notebook_path_required")
+        rel_path = self._to_workspace_relative_path(workspace_root, target)
+        self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
+        try:
+            payload, file_stat = self._read_existing_regular_file_no_follow(target, max_bytes=preimage_max_bytes)
+        except ValueError as exc:
+            if str(exc) == "edit_preimage_too_large":
+                raise ValueError("notebook_too_large") from exc
+            raise
+        parsed = parse_notebook_payload(payload, max_bytes=preimage_max_bytes)
+        self._authorize_edit_preimage(
+            rel_path,
+            parsed.sha256,
+            parsed.size,
+            expected_sha256,
+            read_receipt,
+            context,
+        )
+        edit_result = apply_cell_edit(
+            parsed,
+            mode=mode,
+            cell_id=cell_id,
+            source=source,
+            cell_type=cell_type,
+            insert_position=insert_position,
+            new_cell_id=new_cell_id,
+        )
+        if edit_result.bytes_after > write_max_bytes:
+            raise ValueError("notebook_write_too_large")
+
+        if not dry_run:
+            self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
+            self._assert_edit_preimage_unchanged_no_follow(target, parsed.sha256, parsed.size, file_stat)
+            self._atomic_write_text_file(target, edit_result.data.decode("utf-8"))
+
+        result: dict[str, Any] = {
+            "path": rel_path,
+            "edited": not dry_run,
+            "dry_run": dry_run,
+            "bytes_before": parsed.size,
+            "bytes_after": edit_result.bytes_after,
+            "sha256_before": parsed.sha256,
+            "sha256_after": edit_result.sha256_after,
+            **edit_result.summary,
+            "eval": build_execution_eval_metadata(
+                tool_name="notebook.edit_cell",
+                tool_prompt_id="mcp.notebook.edit_cell.v1",
+                tool_prompt_version="2026.06.27",
+                action_family="notebook_edit",
+                result_kind="structured_notebook_edit",
+                path_filter_used=True,
+                truncated=False,
+            ),
+        }
+        if not dry_run:
+            result["bytes_written"] = edit_result.bytes_after
+        return result
+
+    @staticmethod
+    def _find_overlapping_matches(text: str, old_string: str) -> list[int]:
+        """Return every match start for exact edit uniqueness checks, including overlaps."""
+
+        matches: list[int] = []
+        index = text.find(old_string)
+        while index != -1:
+            matches.append(index)
+            index = text.find(old_string, index + 1)
+        return matches
+
+    def _edit_file(
+        self,
+        workspace_root: Path,
+        target: Path,
+        old_string: str,
+        new_string: str,
+        expected_sha256: Any,
+        read_receipt: Any,
+        lock_lease_id: Any,
+        replace_all: bool,
+        dry_run: bool,
+        preimage_max_bytes: int,
+        write_max_bytes: int,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        """Apply a bounded exact string replacement to an existing UTF-8 file.
+
+        The operation rejects binary payloads, requires an explicit expected hash
+        or read receipt, rejects ambiguous matches unless `replace_all` is set,
+        and performs a no-follow preimage recheck immediately before the atomic
+        replacement. Returned metadata intentionally excludes raw file content.
+        """
+
+        if "\x00" in old_string or "\x00" in new_string:
+            raise ValueError("binary content is not supported by fs.edit")
+
+        rel_path = self._to_workspace_relative_path(workspace_root, target)
+        self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
+        payload, file_stat = self._read_existing_regular_file_no_follow(target, max_bytes=preimage_max_bytes)
+        if b"\x00" in payload:
+            raise ValueError("binary content is not supported by fs.edit")
+        try:
+            text_before = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("binary content is not supported by fs.edit") from exc
+
+        sha256_before = hashlib.sha256(payload).hexdigest()
+        bytes_before = len(payload)
+        self._authorize_edit_preimage(
+            rel_path,
+            sha256_before,
+            bytes_before,
+            expected_sha256,
+            read_receipt,
+            context,
+        )
+
+        match_positions = self._find_overlapping_matches(text_before, old_string)
+        matches = len(match_positions)
+        if matches == 0:
+            raise ValueError("edit_old_string_not_found")
+        if matches > 1 and not replace_all:
+            raise ValueError("edit_old_string_not_unique")
+        has_overlapping_matches = any(
+            next_position < position + len(old_string)
+            for position, next_position in zip(match_positions, match_positions[1:], strict=False)
+        )
+        if has_overlapping_matches:
+            raise ValueError("edit_old_string_overlaps")
+
+        replacements = matches if replace_all else 1
+        text_after = text_before.replace(old_string, new_string) if replace_all else text_before.replace(
+            old_string,
+            new_string,
+            1,
+        )
+        data_after = text_after.encode("utf-8")
+        if len(data_after) > write_max_bytes:
+            raise ValueError("edit_write_too_large")
+
+        sha256_after = hashlib.sha256(data_after).hexdigest()
+        if not dry_run:
+            self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
+            self._assert_edit_preimage_unchanged_no_follow(target, sha256_before, bytes_before, file_stat)
+            FilesystemModule._atomic_write_text_file(target, text_after)
+
+        result: dict[str, Any] = {
+            "path": rel_path,
+            "edited": not dry_run,
+            "dry_run": dry_run,
+            "replacements": replacements,
+            "bytes_before": bytes_before,
+            "bytes_after": len(data_after),
+            "sha256_before": sha256_before,
+            "sha256_after": sha256_after,
+            "eval": build_execution_eval_metadata(
+                tool_name="fs.edit",
+                tool_prompt_id="mcp.fs.edit.v1",
+                tool_prompt_version="2026.06.08",
+                action_family="filesystem_edit",
+                result_kind="structured_filesystem_edit",
+                path_filter_used=True,
+                truncated=False,
+            ),
+        }
+        if not dry_run:
+            result["bytes_written"] = len(data_after)
+        return result
+
+    def _authorize_edit_preimage(
+        self,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        expected_sha256: Any,
+        read_receipt: Any,
+        context: Any | None,
+    ) -> None:
+        """Authorize an edit preimage using either an expected hash or a read receipt.
+
+        If the caller supplies `expected_sha256`, it is treated as the stricter
+        assertion and must match the current preimage even when a valid receipt
+        is also supplied.
+        """
+
+        has_expected = isinstance(expected_sha256, str) and bool(expected_sha256)
+        has_receipt = isinstance(read_receipt, str) and bool(read_receipt)
+        if not has_expected and not has_receipt:
+            raise ValueError("edit_preimage_required")
+        if has_expected:
+            if str(expected_sha256) != sha256_before:
+                raise ValueError("edit_preimage_mismatch")
+            return
+        if has_receipt:
+            self._validate_edit_read_receipt(str(read_receipt), rel_path, sha256_before, bytes_before, context)
+            return
+
+    def _validate_edit_read_receipt(
+        self,
+        receipt: str,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        context: Any | None,
+    ) -> None:
+        """Validate that a read receipt still describes the current edit preimage."""
+
+        try:
+            payload = self._read_receipts.validate(receipt)
+        except ReadReceiptError as exc:
+            raise ValueError(exc.reason_code) from exc
+        if payload.path != rel_path or payload.sha256 != sha256_before or payload.size != bytes_before:
+            raise ValueError("edit_read_receipt_mismatch")
+
+        context_workspace_id = self._context_metadata_value(context, "workspace_id")
+        if payload.workspace_id and payload.workspace_id != context_workspace_id:
+            raise ValueError("edit_read_receipt_mismatch")
+        context_session_id = _first_nonempty(
+            getattr(context, "session_id", None),
+            self._context_metadata_value(context, "session_id"),
+        )
+        if payload.session_id and payload.session_id != context_session_id:
+            raise ValueError("edit_read_receipt_mismatch")
+
+    def _write_file(
+        self,
+        workspace_root: Path,
+        target: Path,
+        content: str,
+        mode: str,
+        expected_sha256: Any,
+        read_receipt: Any,
+        lock_lease_id: Any,
+        dry_run: bool,
+        write_max_bytes: int,
+        preimage_max_bytes: int,
+        context: Any | None,
+    ) -> dict[str, Any]:
+        if "\x00" in content:
+            raise ValueError("binary content is not supported by fs.write")
+        data_after = content.encode("utf-8")
+        if len(data_after) > write_max_bytes:
+            raise ValueError("write_content_too_large")
+
+        rel_path = self._to_workspace_relative_path(workspace_root, target)
+        self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
+        created = mode == "create"
+        sha256_before = None
+        bytes_before = 0
+
+        if mode == "create":
+            if target.exists() or target.is_symlink():
+                raise ValueError("write_target_exists")
+        else:
+            if target.is_symlink():
+                raise ValueError("file_not_regular")
+            if not target.exists():
+                raise FileNotFoundError(f"path not found: {target}")
+            if not target.is_file():
+                raise ValueError("file_not_regular")
+            file_size = target.stat(follow_symlinks=False).st_size
+            if file_size > preimage_max_bytes:
+                raise ValueError("write_preimage_too_large")
+            payload = target.read_bytes()
+            if b"\x00" in payload:
+                raise ValueError("binary content is not supported by fs.write")
+            try:
+                payload.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError("binary content is not supported by fs.write") from exc
+            sha256_before = hashlib.sha256(payload).hexdigest()
+            bytes_before = len(payload)
+            self._authorize_write_preimage(
+                rel_path,
+                sha256_before,
+                bytes_before,
+                expected_sha256,
+                read_receipt,
+                context,
+            )
+
+        sha256_after = hashlib.sha256(data_after).hexdigest()
+        if not dry_run:
+            self._validate_mutation_lock(workspace_root, rel_path, lock_lease_id)
+            self._assert_preimage_unchanged(target, sha256_before, bytes_before)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self._atomic_write_text_file(target, content)
+
+        result: dict[str, Any] = {
+            "path": rel_path,
+            "mode": mode,
+            "written": not dry_run,
+            "dry_run": dry_run,
+            "created": created,
+            "bytes_before": bytes_before,
+            "bytes_after": len(data_after),
+            "sha256_before": sha256_before,
+            "sha256_after": sha256_after,
+            "eval": build_execution_eval_metadata(
+                tool_name="fs.write",
+                tool_prompt_id="mcp.fs.write.v1",
+                tool_prompt_version="2026.06.04",
+                action_family="filesystem_write",
+                result_kind="structured_filesystem_write",
+                path_filter_used=True,
+                truncated=False,
+            ),
+        }
+        if not dry_run:
+            result["bytes_written"] = len(data_after)
+        return result
+
+    def _authorize_write_preimage(
+        self,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        expected_sha256: Any,
+        read_receipt: Any,
+        context: Any | None,
+    ) -> None:
+        has_expected = isinstance(expected_sha256, str) and bool(expected_sha256)
+        has_receipt = isinstance(read_receipt, str) and bool(read_receipt)
+        if not has_expected and not has_receipt:
+            raise ValueError("write_preimage_required")
+        if has_expected and str(expected_sha256) == sha256_before:
+            return
+        if has_receipt:
+            self._validate_write_read_receipt(str(read_receipt), rel_path, sha256_before, bytes_before, context)
+            return
+        raise ValueError("write_preimage_mismatch")
+
+    def _validate_write_read_receipt(
+        self,
+        receipt: str,
+        rel_path: str,
+        sha256_before: str,
+        bytes_before: int,
+        context: Any | None,
+    ) -> None:
+        try:
+            payload = self._read_receipts.validate(receipt)
+        except ReadReceiptError as exc:
+            raise ValueError(exc.reason_code) from exc
+        if payload.path != rel_path or payload.sha256 != sha256_before or payload.size != bytes_before:
+            raise ValueError("write_read_receipt_mismatch")
+
+        context_workspace_id = self._context_metadata_value(context, "workspace_id")
+        if payload.workspace_id and payload.workspace_id != context_workspace_id:
+            raise ValueError("write_read_receipt_mismatch")
+        context_session_id = _first_nonempty(
+            getattr(context, "session_id", None),
+            self._context_metadata_value(context, "session_id"),
+        )
+        if payload.session_id and payload.session_id != context_session_id:
+            raise ValueError("write_read_receipt_mismatch")
+
+    @staticmethod
+    def _read_file(
+        target: Path,
+        *,
+        start_line: int,
+        max_lines: int,
+        max_bytes: int,
+        hash_max_file_bytes: int,
+        include_line_numbers: bool,
+    ) -> dict[str, Any]:
+        if target.is_symlink():
+            raise ValueError(f"path is not a regular file: {target}")
+        if not target.exists():
+            raise FileNotFoundError(f"path not found: {target}")
+        if not target.is_file():
+            raise ValueError(f"path is not a file: {target}")
+
+        file_size = target.stat(follow_symlinks=False).st_size
+        can_hash = file_size <= hash_max_file_bytes
+        if can_hash:
+            payload = target.read_bytes()
+            output_payload = payload[:max_bytes]
+        else:
+            with target.open("rb") as handle:
+                output_payload = handle.read(max_bytes)
+            payload = output_payload
+        if b"\x00" in payload:
+            raise ValueError("binary content is not supported by fs.read")
+
+        byte_truncated = file_size > len(output_payload)
+        if can_hash:
+            full_text = FilesystemModule._decode_utf8_text(payload, allow_prefix=False)
+        else:
+            full_text = None
+        text = FilesystemModule._decode_utf8_text(output_payload, allow_prefix=byte_truncated)
+        newline_style = FilesystemModule._detect_newline_style(output_payload)
+        all_lines = text.splitlines(keepends=True)
+        line_count_total = (
+            len((full_text if full_text is not None else text).splitlines())
+            if full_text is not None or not byte_truncated
+            else None
+        )
+        start_index = max(0, start_line - 1)
+        selected_lines = all_lines[start_index : start_index + max_lines]
+        line_truncated = start_index + max_lines < len(all_lines)
+        selected_content = "".join(selected_lines)
+        content = (
+            FilesystemModule._numbered_lines(selected_lines, start_line) if include_line_numbers else selected_content
+        )
+        end_line = start_line + len(selected_lines) - 1 if selected_lines else start_line - 1
+
+        result: dict[str, Any] = {
+            "content": content,
+            "start_line": start_line,
+            "end_line": end_line,
+            "line_count_total": line_count_total,
+            "bytes_read": len(selected_content.encode("utf-8")),
+            "bytes_total": file_size,
+            "newline_style": newline_style,
+            "truncated": bool(byte_truncated or line_truncated),
+        }
+        if byte_truncated:
+            result["truncation_reason"] = "max_bytes"
+        elif line_truncated:
+            result["truncation_reason"] = "max_lines"
+        if can_hash:
+            result["sha256"] = hashlib.sha256(payload).hexdigest()
+        else:
+            result["hash_omitted_reason"] = "hash_omitted_file_too_large"
+        return result
+
+    @staticmethod
+    def _decode_utf8_text(payload: bytes, *, allow_prefix: bool) -> str:
+        try:
+            return payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            if allow_prefix and exc.reason == "unexpected end of data":
+                return payload[: exc.start].decode("utf-8")
+            raise ValueError("binary content is not supported by fs.read") from exc
+
+    @staticmethod
+    def _numbered_lines(lines: list[str], start_line: int) -> str:
+        return "".join(f"{line_number}\t{line}" for line_number, line in enumerate(lines, start=start_line))
+
+    @staticmethod
+    def _detect_newline_style(payload: bytes) -> str:
+        crlf = payload.count(b"\r\n")
+        without_crlf = payload.replace(b"\r\n", b"")
+        lf = without_crlf.count(b"\n")
+        cr = without_crlf.count(b"\r")
+        styles = sum(1 for count in (crlf, lf, cr) if count > 0)
+        if styles > 1:
+            return "mixed"
+        if crlf:
+            return "crlf"
+        if cr:
+            return "cr"
+        return "lf"
+
     @staticmethod
     def _read_text_file(target: Path, max_read_bytes: int) -> dict[str, Any]:
         if not target.exists():
@@ -301,9 +3215,7 @@ class FilesystemModule(BaseModule):
 
         file_size = target.stat().st_size
         if file_size > max_read_bytes:
-            raise ValueError(
-                f"file exceeds fs.read_text limit ({file_size} bytes > {max_read_bytes} bytes)"
-            )
+            raise ValueError(f"file exceeds fs.read_text limit ({file_size} bytes > {max_read_bytes} bytes)")
 
         payload = target.read_bytes()
         if b"\x00" in payload:
@@ -313,10 +3225,3 @@ class FilesystemModule(BaseModule):
         except UnicodeDecodeError as exc:
             raise ValueError("binary content is not supported by fs.read_text") from exc
         return {"text": text}
-
-    @staticmethod
-    def _write_text_file(target: Path, content: str) -> dict[str, Any]:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        data = content.encode("utf-8")
-        target.write_bytes(data)
-        return {"bytes_written": len(data)}

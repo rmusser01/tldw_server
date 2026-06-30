@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
+const antdMocks = vi.hoisted(() => ({
+  confirm: vi.fn()
+}))
+
 vi.mock("antd", () => ({
+  Modal: { confirm: antdMocks.confirm },
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
 
@@ -45,6 +51,18 @@ function makeBlocklist() {
     loading: false,
     loadRaw: vi.fn().mockResolvedValue(undefined),
     saveRaw: vi.fn().mockResolvedValue(undefined),
+    saveRawText: vi.fn().mockResolvedValue(undefined),
+    previewRawReplace: vi.fn().mockResolvedValue({
+      previousText: "",
+      nextText: "",
+      addedCount: 0,
+      removedCount: 0,
+      changedCount: 0,
+      lint: { items: [], valid_count: 0, invalid_count: 0 }
+    }),
+    confirmRawReplace: vi.fn().mockResolvedValue(undefined),
+    cancelRawReplace: vi.fn(),
+    undoRawReplace: vi.fn().mockResolvedValue(undefined),
     lintRaw: vi.fn().mockResolvedValue(undefined),
     loadManaged: vi.fn().mockResolvedValue(undefined),
     appendManaged: vi.fn().mockResolvedValue(undefined),
@@ -166,5 +184,78 @@ describe("AdvancedPanel", () => {
     expect(screen.getByLabelText("max_replacements_per_pattern")).toHaveValue("1000")
     expect(screen.getByLabelText("match_window_chars")).toHaveValue("4096")
     expect(screen.getByLabelText("blocklist_write_debounce_ms")).toHaveValue("0")
+  })
+
+  it("previews blocklist uploads and only replaces after confirmation", async () => {
+    const blocklist = makeBlocklist()
+    blocklist.previewRawReplace.mockResolvedValue({
+      previousText: "old",
+      nextText: "new rule\n# note",
+      addedCount: 2,
+      removedCount: 1,
+      changedCount: 3,
+      lint: { items: [{ index: 0, line: "new rule", ok: true }], valid_count: 2, invalid_count: 0 }
+    })
+
+    render(
+      <AdvancedPanel
+        settings={makeSettings() as any}
+        blocklist={blocklist as any}
+        overrides={makeOverrides() as any}
+        messageApi={messageApi}
+      />
+    )
+
+    const file = new File(["new rule\n# note"], "blocklist.txt", { type: "text/plain" })
+    await userEvent.upload(screen.getByTestId("blocklist-file-input"), file)
+
+    await waitFor(() => {
+      expect(blocklist.previewRawReplace).toHaveBeenCalledWith("new rule\n# note")
+    })
+    expect(blocklist.saveRawText).not.toHaveBeenCalled()
+    expect(blocklist.confirmRawReplace).not.toHaveBeenCalled()
+
+    const onOk = antdMocks.confirm.mock.calls.at(-1)?.[0]?.onOk
+    await onOk()
+
+    expect(blocklist.confirmRawReplace).toHaveBeenCalledTimes(1)
+  })
+
+  it("blocks blocklist upload confirmation when lint preview is invalid", async () => {
+    const blocklist = makeBlocklist()
+    blocklist.previewRawReplace.mockResolvedValue({
+      previousText: "",
+      nextText: "/[bad/",
+      addedCount: 1,
+      removedCount: 0,
+      changedCount: 1,
+      lint: {
+        items: [{ index: 0, line: "/[bad/", ok: false, pattern_type: "regex", error: "invalid regex" }],
+        valid_count: 0,
+        invalid_count: 1
+      }
+    })
+
+    render(
+      <AdvancedPanel
+        settings={makeSettings() as any}
+        blocklist={blocklist as any}
+        overrides={makeOverrides() as any}
+        messageApi={messageApi}
+      />
+    )
+
+    const file = new File(["/[bad/"], "blocklist.txt", { type: "text/plain" })
+    await userEvent.upload(screen.getByTestId("blocklist-file-input"), file)
+
+    await waitFor(() => {
+      expect(antdMocks.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Confirm blocklist upload",
+          okButtonProps: expect.objectContaining({ disabled: true })
+        })
+      )
+    })
+    expect(blocklist.confirmRawReplace).not.toHaveBeenCalled()
   })
 })

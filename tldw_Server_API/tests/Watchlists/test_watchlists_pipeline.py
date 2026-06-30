@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 from contextlib import contextmanager
@@ -6,10 +7,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from tldw_Server_API.app.core.Watchlists import pipeline
+from tldw_Server_API.app.core.Watchlists import fetchers
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Watchlists.audio_briefing_workflow import AudioBriefingTriggerResult
 from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
 
 
@@ -90,6 +93,159 @@ async def test_pipeline_happy_path_test_mode():
     assert run.status == "succeeded"
     stats = json.loads(run.stats_json or "{}") if run.stats_json else {}
     assert stats.get("items_found", 0) >= 3
+
+
+def test_watchlists_recoverable_exceptions_do_not_include_cancelled_error():
+    assert asyncio.CancelledError not in pipeline._WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS
+    assert asyncio.CancelledError not in fetchers._WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS
+
+
+@pytest.mark.asyncio
+async def test_run_watchlist_job_passes_tenant_id_to_rss_history_fetcher(monkeypatch):
+    user_id = 901
+    db = WatchlistsDatabase.for_user(user_id)
+    source = db.create_source(
+        name="Tenant Feed",
+        url="https://example.com/tenant-feed.xml",
+        source_type="rss",
+        active=True,
+        settings_json=json.dumps({"limit": 1}),
+        tags=[],
+        group_ids=[],
+    )
+    job = db.create_job(
+        name="Tenant Feed Job",
+        description=None,
+        scope_json=json.dumps({"sources": [int(source.id)]}),
+        schedule_expr=None,
+        schedule_timezone="UTC",
+        active=True,
+        max_concurrency=None,
+        per_host_delay_ms=None,
+        retry_policy_json=None,
+        output_prefs_json=None,
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setenv("TEST_MODE", "0")
+
+    async def fake_fetch_rss_feed_history(*args, tenant_id="default", **kwargs):
+        captured["tenant_id"] = tenant_id
+        return {"status": 304, "items": [], "etag": None, "last_modified": None}
+
+    monkeypatch.setattr(pipeline, "fetch_rss_feed_history", fake_fetch_rss_feed_history)
+
+    result = await run_watchlist_job(user_id, int(job.id), tenant_id="tenant-acme")
+
+    assert result["run_id"] > 0
+    assert captured["tenant_id"] == "tenant-acme"
+
+
+@pytest.mark.asyncio
+async def test_run_watchlist_job_passes_tenant_id_to_site_scrape_rules_fetcher(monkeypatch):
+    user_id = 902
+    db = WatchlistsDatabase.for_user(user_id)
+    source = db.create_source(
+        name="Tenant Site",
+        url="https://example.com/blog",
+        source_type="site",
+        active=True,
+        settings_json=json.dumps(
+            {
+                "scrape_rules": {
+                    "list_url": "https://example.com/blog",
+                    "limit": 1,
+                    "skip_article_fetch": True,
+                }
+            }
+        ),
+        tags=[],
+        group_ids=[],
+    )
+    job = db.create_job(
+        name="Tenant Site Job",
+        description=None,
+        scope_json=json.dumps({"sources": [int(source.id)]}),
+        schedule_expr=None,
+        schedule_timezone="UTC",
+        active=True,
+        max_concurrency=None,
+        per_host_delay_ms=None,
+        retry_policy_json=None,
+        output_prefs_json=None,
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setenv("TEST_MODE", "0")
+
+    async def fake_fetch_site_items_with_rules(*args, tenant_id="default", **kwargs):
+        captured["tenant_id"] = tenant_id
+        return [
+            {
+                "title": "Stub",
+                "url": "https://example.com/blog/stub",
+                "summary": "Stub summary",
+                "content": "Stub content",
+            }
+        ]
+
+    monkeypatch.setattr(pipeline, "fetch_site_items_with_rules", fake_fetch_site_items_with_rules)
+
+    result = await run_watchlist_job(user_id, int(job.id), tenant_id="tenant-site")
+
+    assert result["run_id"] > 0
+    assert captured["tenant_id"] == "tenant-site"
+
+
+@pytest.mark.asyncio
+async def test_run_watchlist_job_skips_malformed_source_scope_ids():
+    user_id = 903
+    db = WatchlistsDatabase.for_user(user_id)
+    job = db.create_job(
+        name="Malformed Scope Job",
+        description=None,
+        scope_json=json.dumps({"sources": ["not-an-int"]}),
+        schedule_expr=None,
+        schedule_timezone="UTC",
+        active=True,
+        max_concurrency=None,
+        per_host_delay_ms=None,
+        retry_policy_json=None,
+        output_prefs_json=None,
+    )
+
+    result = await run_watchlist_job(user_id, int(job.id))
+
+    assert result["items_found"] == 0
+    runs, _ = db.list_runs_for_job(int(job.id), limit=1, offset=0)
+    assert runs[0].status == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_run_watchlist_job_marks_run_failed_when_scope_resolution_raises(monkeypatch):
+    user_id = 904
+    db = WatchlistsDatabase.for_user(user_id)
+    job = db.create_job(
+        name="Scope Failure Job",
+        description=None,
+        scope_json=json.dumps({}),
+        schedule_expr=None,
+        schedule_timezone="UTC",
+        active=True,
+        max_concurrency=None,
+        per_host_delay_ms=None,
+        retry_policy_json=None,
+        output_prefs_json=None,
+    )
+
+    def fail_select_sources(*args, **kwargs):
+        raise RuntimeError("scope boom")
+
+    monkeypatch.setattr(pipeline, "_select_sources_for_scope", fail_select_sources)
+
+    with pytest.raises(RuntimeError, match="scope boom"):
+        await run_watchlist_job(user_id, int(job.id))
+
+    runs, _ = db.list_runs_for_job(int(job.id), limit=1, offset=0)
+    assert runs[0].status == "failed"
 
 
 @pytest.mark.asyncio
@@ -616,22 +772,50 @@ async def test_pipeline_persists_post_run_audio_and_output_stats():
         ),
     )
 
+    def create_auto_output_artifact(**kwargs):
+        return kwargs["collections_db"].create_output_artifact(
+            type_="briefing_markdown",
+            title="Auto Output",
+            format_="md",
+            storage_path="auto-output.md",
+            metadata_json=json.dumps(
+                {
+                    "origin": "watchlists",
+                    "generation_mode": "auto_output",
+                    "run_id": kwargs["run"].id,
+                    "job_id": kwargs["job"].id,
+                }
+            ),
+            job_id=kwargs["job"].id,
+            run_id=kwargs["run"].id,
+        ).id
+
     with (
         patch(
             "tldw_Server_API.app.core.Watchlists.pipeline._maybe_auto_generate_output",
-            new=AsyncMock(return_value=9876),
+            new=AsyncMock(side_effect=create_auto_output_artifact),
         ),
         patch(
             "tldw_Server_API.app.core.Watchlists.audio_briefing_workflow.trigger_audio_briefing",
-            new=AsyncMock(return_value="task_stage2"),
+            new=AsyncMock(return_value=AudioBriefingTriggerResult(status="submitted", task_id="task_stage2")),
         ),
     ):
         result = await run_watchlist_job(user_id, job.id)
 
-    assert result.get("auto_output_id") == 9876
+    auto_output_id = int(result["auto_output_id"])
     assert result.get("audio_briefing_task_id") == "task_stage2"
+    assert result.get("audio_briefing_status") == "queued"
 
     persisted_run = db.get_run(int(result["run_id"]))
     persisted_stats = json.loads(persisted_run.stats_json or "{}")
-    assert persisted_stats.get("auto_output_id") == 9876
+    assert persisted_stats.get("auto_output_id") == auto_output_id
     assert persisted_stats.get("audio_briefing_task_id") == "task_stage2"
+    assert persisted_stats.get("audio_briefing_status") == "queued"
+
+    output_row = CollectionsDatabase.for_user(user_id).get_output_artifact(auto_output_id)
+    output_metadata = json.loads(output_row.metadata_json or "{}")
+    assert output_metadata["origin"] == "watchlists"
+    assert output_metadata["generation_mode"] == "auto_output"
+    assert output_metadata["audio_briefing_requested"] is True
+    assert output_metadata["audio_briefing_status"] == "queued"
+    assert output_metadata["audio_briefing_task_id"] == "task_stage2"

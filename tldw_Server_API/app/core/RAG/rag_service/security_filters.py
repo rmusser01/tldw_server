@@ -210,7 +210,7 @@ class PIIDetector:
                 checksum += digit
             return (checksum + digits[-1]) % 10 == 0
         except Exception as e:
-            logger.debug(f"Luhn checksum validation failed: value={card_number}, error={e}")
+            logger.debug(f"Luhn checksum validation failed: {type(e).__name__}")
             return False
 
     def _get_confidence(self, pii_type: PIIType, text: str) -> float:
@@ -412,8 +412,17 @@ class AccessController:
         self.user_permissions = {}
         self.document_acls = {}
         self.role_permissions = {
-            "admin": [SensitivityLevel.RESTRICTED],
-            "manager": [SensitivityLevel.CONFIDENTIAL, SensitivityLevel.INTERNAL],
+            "admin": [
+                SensitivityLevel.PUBLIC,
+                SensitivityLevel.INTERNAL,
+                SensitivityLevel.CONFIDENTIAL,
+                SensitivityLevel.RESTRICTED,
+            ],
+            "manager": [
+                SensitivityLevel.PUBLIC,
+                SensitivityLevel.INTERNAL,
+                SensitivityLevel.CONFIDENTIAL,
+            ],
             "employee": [SensitivityLevel.INTERNAL, SensitivityLevel.PUBLIC],
             "guest": [SensitivityLevel.PUBLIC]
         }
@@ -668,7 +677,7 @@ class SecurityAuditor:
             self._delete_old_records()
 
         except Exception as e:
-            logger.error(f"Error checking rotation: {e}")
+            logger.error(f"Error checking rotation: {type(e).__name__}")
 
     def _rotate_by_size(self):
         """Rotate audit log when size limit exceeded."""
@@ -724,7 +733,7 @@ class SecurityAuditor:
                 logger.debug("gzip not available, archive not compressed")
 
         except Exception as e:
-            logger.error(f"Error rotating audit log: {e}")
+            logger.error(f"Error rotating audit log: {type(e).__name__}")
 
     def _delete_old_records(self):
         """Delete records older than max_age_days."""
@@ -743,7 +752,7 @@ class SecurityAuditor:
                     logger.info(f"Deleted {deleted_count} old audit records")
 
         except Exception as e:
-            logger.error(f"Error deleting old records: {e}")
+            logger.error(f"Error deleting old records: {type(e).__name__}")
 
 
 class SecurityFilters:
@@ -772,6 +781,22 @@ class SecurityFilters:
         self.access_controller = AccessController() if enable_access_control else None
         self.auditor = SecurityAuditor(audit_db_path) if enable_audit_logging else None
 
+    @staticmethod
+    def _query_hash(query: str) -> str:
+        """Return a stable audit identifier for query text without storing the text."""
+        return hashlib.sha256(query.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+    @staticmethod
+    def _safe_pii_match_for_audit(match: PIIMatch) -> dict[str, Any]:
+        """Serialize a PII match without the matched text."""
+        return {
+            "type": match.pii_type.value,
+            "start": match.start,
+            "end": match.end,
+            "length": max(0, match.end - match.start),
+            "confidence": match.confidence,
+        }
+
     def process_query(
         self,
         query: str,
@@ -790,12 +815,15 @@ class SecurityFilters:
             Tuple of (processed_query, security_metadata)
         """
         metadata: dict[str, Any] = {
-            "original_query": query,
+            "query_hash": self._query_hash(query),
+            "query_length": len(query),
             "user_id": user_id,
             "pii_detected": [],
+            "pii_counts": {},
             "sensitivity": None
         }
         pii_detected: list[dict[str, Any]] = []
+        pii_matches: list[PIIMatch] = []
         sensitivity: SensitivityLevel = SensitivityLevel.PUBLIC
 
         processed_query = query
@@ -803,11 +831,17 @@ class SecurityFilters:
         # Detect PII
         if self.pii_detector:
             pii_matches = self.pii_detector.detect_pii(query)
-            pii_detected = [match.to_dict() for match in pii_matches]
+            pii_detected = [self._safe_pii_match_for_audit(match) for match in pii_matches]
             metadata["pii_detected"] = pii_detected
+            pii_counts: dict[str, int] = {}
+            for match in pii_matches:
+                pii_counts[match.pii_type.value] = pii_counts.get(match.pii_type.value, 0) + 1
+            metadata["pii_counts"] = pii_counts
 
             if mask_pii and pii_matches:
                 processed_query = self.pii_detector.mask_pii(query, pii_matches)
+            if pii_matches:
+                metadata["masked_query"] = self.pii_detector.mask_pii(query, pii_matches)
 
         # Classify content
         if self.content_filter:
@@ -821,7 +855,7 @@ class SecurityFilters:
                 action="query",
                 resource="search",
                 sensitivity=sensitivity,
-                pii_detected=[PIIType(m["type"]) for m in pii_detected],
+                pii_detected=[match.pii_type for match in pii_matches],
                 access_granted=True,
                 metadata=metadata
             )

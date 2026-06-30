@@ -8,15 +8,12 @@ from typing import Mapping
 from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.testing import is_truthy
 
+from .exceptions import SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS
 from .models import RunSpec, RuntimeType, SessionSpec, TrustLevel
-from .runtime_capabilities import RuntimePreflightResult
-
-_POLICY_NONCRITICAL_EXCEPTIONS = (
-    AttributeError,
-    OSError,
-    RuntimeError,
-    TypeError,
-    ValueError,
+from .runtime_capabilities import (
+    RuntimePreflightResult,
+    runtime_network_policy_effective_support,
+    runtime_network_policy_metadata,
 )
 
 # Trust-level presets define resource limits and security constraints
@@ -51,6 +48,10 @@ TRUST_PROFILES: dict[TrustLevel, dict] = {
     },
 }
 
+_HOST_LOCAL_RUNTIMES: frozenset[RuntimeType] = frozenset(
+    {RuntimeType.seatbelt, RuntimeType.worktree}
+)
+
 
 @dataclass
 class SandboxPolicyConfig:
@@ -62,6 +63,8 @@ class SandboxPolicyConfig:
     artifact_ttl_hours: int = 24
     max_upload_mb: int = 64
     max_log_bytes: int = 10 * 1024 * 1024
+    max_artifact_file_bytes: int = 64 * 1024 * 1024
+    max_artifact_total_bytes: int = 256 * 1024 * 1024
     pids_limit: int = 256
     max_cpu: float = 4.0
     max_mem_mb: int = 8192
@@ -72,25 +75,28 @@ class SandboxPolicyConfig:
     def from_settings(cls) -> SandboxPolicyConfig:
         try:
             rt_raw = str(getattr(app_settings, "SANDBOX_DEFAULT_RUNTIME", "docker")).strip().lower()
-        except _POLICY_NONCRITICAL_EXCEPTIONS:
+        except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
             rt_raw = "docker"
         try:
             runtime = RuntimeType(rt_raw)
-        except _POLICY_NONCRITICAL_EXCEPTIONS:
+        except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
             runtime = RuntimeType.docker
         try:
             network_default = str(getattr(app_settings, "SANDBOX_NETWORK_DEFAULT", "deny_all")).strip().lower()
-        except _POLICY_NONCRITICAL_EXCEPTIONS:
+        except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
             network_default = "deny_all"
         def _get_int(key: str, dv: int) -> int:
             try:
                 return int(getattr(app_settings, key))  # type: ignore[arg-type]
-            except _POLICY_NONCRITICAL_EXCEPTIONS:
+            except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
                 return dv
+        def _get_positive_int(key: str, dv: int) -> int:
+            value = _get_int(key, dv)
+            return value if value > 0 else dv
         def _get_float(key: str, dv: float) -> float:
             try:
                 return float(getattr(app_settings, key))  # type: ignore[arg-type]
-            except _POLICY_NONCRITICAL_EXCEPTIONS:
+            except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
                 return dv
         def _get_list(key: str, dv: list[str]) -> list[str]:
             try:
@@ -99,7 +105,7 @@ class SandboxPolicyConfig:
                     return [str(x) for x in v]
                 s = str(v)
                 return [t.strip() for t in s.split(',') if t.strip()]
-            except _POLICY_NONCRITICAL_EXCEPTIONS:
+            except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
                 return dv
         def _get_bool(key: str, dv: bool) -> bool:
             try:
@@ -108,7 +114,7 @@ class SandboxPolicyConfig:
                     return v
                 s = str(v).strip().lower()
                 return is_truthy(s)
-            except _POLICY_NONCRITICAL_EXCEPTIONS:
+            except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
                 return dv
         return cls(
             default_runtime=runtime,
@@ -118,6 +124,8 @@ class SandboxPolicyConfig:
             artifact_ttl_hours=_get_int("SANDBOX_ARTIFACT_TTL_HOURS", 24),
             max_upload_mb=_get_int("SANDBOX_MAX_UPLOAD_MB", 64),
             max_log_bytes=_get_int("SANDBOX_MAX_LOG_BYTES", 10 * 1024 * 1024),
+            max_artifact_file_bytes=_get_positive_int("SANDBOX_MAX_ARTIFACT_FILE_BYTES", cls.max_artifact_file_bytes),
+            max_artifact_total_bytes=_get_positive_int("SANDBOX_MAX_ARTIFACT_TOTAL_BYTES", cls.max_artifact_total_bytes),
             pids_limit=_get_int("SANDBOX_PIDS_LIMIT", 256),
             max_cpu=_get_float("SANDBOX_MAX_CPU", 4.0),
             max_mem_mb=_get_int("SANDBOX_MAX_MEM_MB", 8192),
@@ -193,7 +201,7 @@ class SandboxPolicy:
         *,
         runtime_preflights: Mapping[RuntimeType, RuntimePreflightResult] | None = None,
     ) -> None:
-        if runtime == RuntimeType.seatbelt and trust == TrustLevel.untrusted:
+        if runtime in _HOST_LOCAL_RUNTIMES and trust == TrustLevel.untrusted:
             raise SandboxPolicy.PolicyUnsupported(
                 runtime,
                 requirement="untrusted_requires_vm_runtime",
@@ -224,6 +232,65 @@ class SandboxPolicy:
                 requirement=f"trust_level:{trust.value}",
                 reasons=["trust_level_not_supported"],
             )
+
+    @staticmethod
+    def _network_policy_unsupported_reason(network_policy: str) -> str:
+        if network_policy == "allowlist":
+            return "strict_allowlist_not_supported"
+        return "strict_deny_all_not_supported"
+
+    @staticmethod
+    def _network_policy_static_support(
+        runtime: RuntimeType,
+        network_policy: str,
+    ) -> bool:
+        contract = runtime_network_policy_metadata(runtime)
+        mode = (
+            contract.deny_all
+            if network_policy == "deny_all"
+            else contract.allowlist
+        )
+        return mode.support_state == "supported" and mode.strict_enforcement
+
+    @staticmethod
+    def _require_network_policy_supported(
+        runtime: RuntimeType,
+        network_policy: str | None,
+        runtime_preflight: RuntimePreflightResult | None = None,
+    ) -> str:
+        requested_policy = (
+            str(network_policy or "deny_all").strip().lower() or "deny_all"
+        )
+        if requested_policy not in {"deny_all", "allowlist"}:
+            raise SandboxPolicy.PolicyUnsupported(
+                runtime,
+                requirement=requested_policy,
+                reasons=["unsupported_network_policy"],
+            )
+
+        if runtime_preflight is None:
+            supported = SandboxPolicy._network_policy_static_support(
+                runtime,
+                requested_policy,
+            )
+        else:
+            effective_support = runtime_network_policy_effective_support(
+                runtime,
+                runtime_preflight.enforcement_ready,
+            )
+            supported = effective_support.get(requested_policy, False)
+
+        if not supported:
+            raise SandboxPolicy.PolicyUnsupported(
+                runtime,
+                requirement=requested_policy,
+                reasons=[
+                    SandboxPolicy._network_policy_unsupported_reason(
+                        requested_policy
+                    )
+                ],
+            )
+        return requested_policy
 
     def select_runtime(
         self,
@@ -272,8 +339,20 @@ class SandboxPolicy:
         )
         profile = TRUST_PROFILES.get(trust, TRUST_PROFILES[TrustLevel.standard])
 
-        if not spec.network_policy:
-            spec.network_policy = profile.get("network_policy", self.cfg.network_default)
+        if not str(spec.network_policy or "").strip():
+            spec.network_policy = profile.get(
+                "network_policy",
+                self.cfg.network_default,
+            )
+        spec.network_policy = self._require_network_policy_supported(
+            spec.runtime,
+            spec.network_policy,
+            runtime_preflight=(
+                runtime_preflights.get(spec.runtime)
+                if runtime_preflights is not None
+                else None
+            ),
+        )
 
         # Apply trust-level resource limits (more restrictive of trust profile and global policy)
         profile_max_cpu = float(profile.get("max_cpu", self.cfg.max_cpu))
@@ -290,19 +369,19 @@ class SandboxPolicy:
                 spec.cpu_limit = effective_max_cpu
             elif spec.cpu_limit > effective_max_cpu:
                 spec.cpu_limit = float(effective_max_cpu)
-        except _POLICY_NONCRITICAL_EXCEPTIONS:
+        except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
             pass
         try:
             if spec.memory_mb is None:
                 spec.memory_mb = effective_max_mem
             elif spec.memory_mb > effective_max_mem:
                 spec.memory_mb = int(effective_max_mem)
-        except _POLICY_NONCRITICAL_EXCEPTIONS:
+        except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
             pass
         try:
             if spec.timeout_sec > profile_max_timeout:
                 spec.timeout_sec = profile_max_timeout
-        except _POLICY_NONCRITICAL_EXCEPTIONS:
+        except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
             pass
 
         return spec
@@ -331,8 +410,20 @@ class SandboxPolicy:
         )
         profile = TRUST_PROFILES.get(trust, TRUST_PROFILES[TrustLevel.standard])
 
-        if not spec.network_policy:
-            spec.network_policy = profile.get("network_policy", self.cfg.network_default)
+        if not str(spec.network_policy or "").strip():
+            spec.network_policy = profile.get(
+                "network_policy",
+                self.cfg.network_default,
+            )
+        spec.network_policy = self._require_network_policy_supported(
+            spec.runtime,
+            spec.network_policy,
+            runtime_preflight=(
+                runtime_preflights.get(spec.runtime)
+                if runtime_preflights is not None
+                else None
+            ),
+        )
 
         # Apply trust-level resource limits (more restrictive of trust profile and global policy)
         profile_max_cpu = float(profile.get("max_cpu", self.cfg.max_cpu))
@@ -349,19 +440,19 @@ class SandboxPolicy:
                 spec.cpu = effective_max_cpu
             elif spec.cpu > effective_max_cpu:
                 spec.cpu = float(effective_max_cpu)
-        except _POLICY_NONCRITICAL_EXCEPTIONS:
+        except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
             pass
         try:
             if spec.memory_mb is None:
                 spec.memory_mb = effective_max_mem
             elif spec.memory_mb > effective_max_mem:
                 spec.memory_mb = int(effective_max_mem)
-        except _POLICY_NONCRITICAL_EXCEPTIONS:
+        except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
             pass
         try:
             if spec.timeout_sec > profile_max_timeout:
                 spec.timeout_sec = profile_max_timeout
-        except _POLICY_NONCRITICAL_EXCEPTIONS:
+        except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
             pass
 
         return spec
@@ -376,19 +467,19 @@ def _canonical_policy_dict(cfg: SandboxPolicyConfig) -> dict:
     try:
         # Runner security toggles (booleans for determinism)
         docker_seccomp_enabled = bool(getattr(app_settings, "SANDBOX_DOCKER_SECCOMP", None))
-    except _POLICY_NONCRITICAL_EXCEPTIONS:
+    except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
         docker_seccomp_enabled = False
     try:
         docker_apparmor_enabled = bool(getattr(app_settings, "SANDBOX_DOCKER_APPARMOR_PROFILE", None))
-    except _POLICY_NONCRITICAL_EXCEPTIONS:
+    except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
         docker_apparmor_enabled = False
     try:
         ul_nofile = int(getattr(app_settings, "SANDBOX_ULIMIT_NOFILE", 1024))
-    except _POLICY_NONCRITICAL_EXCEPTIONS:
+    except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
         ul_nofile = 1024
     try:
         ul_nproc = int(getattr(app_settings, "SANDBOX_ULIMIT_NPROC", 512))
-    except _POLICY_NONCRITICAL_EXCEPTIONS:
+    except SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS:
         ul_nproc = 512
 
     # Normalize supported spec versions list
@@ -405,6 +496,8 @@ def _canonical_policy_dict(cfg: SandboxPolicyConfig) -> dict:
         "artifact_ttl_hours": int(cfg.artifact_ttl_hours),
         "max_upload_mb": int(cfg.max_upload_mb),
         "max_log_bytes": int(cfg.max_log_bytes),
+        "max_artifact_file_bytes": int(cfg.max_artifact_file_bytes),
+        "max_artifact_total_bytes": int(cfg.max_artifact_total_bytes),
         "pids_limit": int(cfg.pids_limit),
         "max_cpu": float(cfg.max_cpu),
         "max_mem_mb": int(cfg.max_mem_mb),

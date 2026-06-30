@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.File_Artifacts.adapters.base import ExportResult, 
 class XlsxAdapter:
     file_type = "xlsx"
     export_formats: ClassVar[set[str]] = {"xlsx"}
+    _INVALID_SHEET_NAME_CHARS: ClassVar[set[str]] = set(r":\/?*[]")
 
     def normalize(self, payload: dict[str, Any]) -> dict[str, Any]:
         if "sheets" not in payload and "columns" in payload and "rows" in payload:
@@ -60,6 +61,14 @@ class XlsxAdapter:
                 issues.append(ValidationIssue(code="sheet_name_required", message="sheet name is required", path=f"sheets[{s_idx}].name"))
             elif len(name) > 31:
                 issues.append(ValidationIssue(code="sheet_name_too_long", message="sheet name must be <= 31 characters", path=f"sheets[{s_idx}].name"))
+            elif not self._INVALID_SHEET_NAME_CHARS.isdisjoint(name):
+                issues.append(
+                    ValidationIssue(
+                        code="sheet_name_invalid",
+                        message="sheet name contains characters Excel does not allow",
+                        path=f"sheets[{s_idx}].name",
+                    )
+                )
             columns = sheet.get("columns")
             rows = sheet.get("rows")
             if not isinstance(columns, list) or not columns:
@@ -98,7 +107,7 @@ class XlsxAdapter:
         try:
             from openpyxl import Workbook
         except Exception as exc:
-            raise FileArtifactsError("xlsx_export_unavailable", detail=str(exc)) from exc
+            raise FileArtifactsError("xlsx_export_unavailable", detail="xlsx export backend unavailable") from exc
 
         sheets = structured.get("sheets") or []
         wb = Workbook()

@@ -29,17 +29,24 @@ import {
   CONTEXT_MENU_CLICK_SETTING
 } from "@/services/action"
 
-export const SystemSettings = () => {
-  const { t } = useTranslation(["settings", "knowledge", "common"])
+export const DataManagementSettings = () => {
+  const { t } = useTranslation(["settings", "common"])
   const queryClient = useQueryClient()
   const { clearChat } = useMessageOption()
-  const { increase, decrease, scale } = useFontSize()
   const notification = useAntdNotification()
-
-  // Two-step reset confirmation state
   const [resetModalOpen, setResetModalOpen] = useState(false)
   const [resetInput, setResetInput] = useState("")
   const [resetting, setResetting] = useState(false)
+  const importInputRef = React.useRef<HTMLInputElement | null>(null)
+  const reloadTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  React.useEffect(() => {
+    return () => {
+      if (reloadTimeoutRef.current) {
+        clearTimeout(reloadTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const handleResetAll = async () => {
     setResetting(true)
@@ -61,10 +68,12 @@ export const SystemSettings = () => {
       notification.success({
         message: t("settings:systemNotifications.resetSuccess", "All data has been reset")
       })
-      // Clear input after successful reset
       setResetInput("")
-      // Reload to ensure clean state after full reset
-      setTimeout(() => {
+      if (reloadTimeoutRef.current) {
+        clearTimeout(reloadTimeoutRef.current)
+      }
+      reloadTimeoutRef.current = setTimeout(() => {
+        reloadTimeoutRef.current = null
         window.location.reload()
       }, 1500)
     } catch (e) {
@@ -77,63 +86,6 @@ export const SystemSettings = () => {
     }
   }
 
-  const quotaFriendlyMessage = t(
-    "settings:storage.quotaFriendlyMessage",
-    "Too many settings writes in a short period; please wait a few seconds and try again."
-  )
-
-  const showStorageError = (error: unknown) => {
-    const msg =
-      error instanceof Error ? error.message : typeof error === "string" ? error : ""
-    const quotaHit =
-      msg?.includes("MAX_WRITE_OPERATIONS_PER_MINUTE") ||
-      msg?.includes("QUOTA_BYTES_PER_ITEM") ||
-      msg?.includes("QUOTA_BYTES")
-
-    notification.error({
-      message: quotaHit
-        ? t("settings:storage.quotaTitle", "Storage limit reached")
-        : t("settings:storage.writeError", "Could not save settings"),
-      description: quotaHit
-        ? quotaFriendlyMessage
-        : t(
-            "settings:storage.writeErrorDescription",
-            "We couldn't save your settings. Please try again shortly."
-          )
-    })
-  }
-
-
-  const [webuiBtnSidePanel, setWebuiBtnSidePanel] = useStorage(
-    "webuiBtnSidePanel",
-    false
-  )
-
-  // Default UI mode: fullscreen (webui) or sidebar (sidePanel)
-  const [uiMode, setUiMode] = useSetting(UI_MODE_SETTING)
-
-  const [actionIconClick, setActionIconClick] = useSetting(
-    ACTION_ICON_CLICK_SETTING
-  )
-
-  const [contextMenuClick, setContextMenuClick] = useSetting(
-    CONTEXT_MENU_CLICK_SETTING
-  )
-  const [chatBackgroundImage, setChatBackgroundImage] = useSetting(
-    CHAT_BACKGROUND_IMAGE_SETTING
-  )
-
-  // Track reload timeout for cancellation
-  const reloadTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  React.useEffect(() => {
-    return () => {
-      if (reloadTimeoutRef.current) {
-        clearTimeout(reloadTimeoutRef.current)
-      }
-    }
-  }, [])
-
   const importDataMutation = useMutation({
     mutationFn: async (file: File) => {
       await importPageAssistData(file)
@@ -143,12 +95,10 @@ export const SystemSettings = () => {
         queryKey: ["fetchChatHistory"]
       })
 
-      // Clear any existing reload timeout
       if (reloadTimeoutRef.current) {
         clearTimeout(reloadTimeoutRef.current)
       }
 
-      // Show notification with cancel option
       const key = `import-reload-${Date.now()}`
       notification.success({
         key,
@@ -211,6 +161,240 @@ export const SystemSettings = () => {
       })
     }
   })
+
+  const syncFirefoxData = useMutation({
+    mutationFn: firefoxSyncDataForPrivateMode,
+    onSuccess: () => {
+      notification.success({
+        message: t(
+          "settings:systemNotifications.syncSuccess",
+          "Firefox data synced successfully, You don't need to do this again"
+        )
+      })
+    },
+    onError: (error) => {
+      notification.error({
+        message: t(
+          "settings:systemNotifications.syncError",
+          "Firefox data sync failed"
+        )
+      })
+    }
+  })
+
+  return (
+    <div>
+      <div className="mb-5">
+        <h2 className="text-base font-semibold leading-7 text-text">
+          {t("settings:dataManagement.title", "Data Management")}
+        </h2>
+        <p className="mt-1 text-xs text-text-muted">
+          {t(
+            "settings:dataManagement.description",
+            "Export, import, sync, or reset local extension and WebUI data."
+          )}
+        </p>
+        <div className="border-b border-border mt-3"></div>
+      </div>
+
+      {isFireFox && !isFireFoxPrivateMode && (
+        <div className="flex flex-col sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
+          <span className="text-text">
+            <BetaTag />
+            {t("generalSettings.systemData.firefoxPrivateModeSync.label", {
+              defaultValue:
+                "Sync Custom Models, Prompts for Firefox Private Windows (Incognito Mode)"
+            })}
+          </span>
+          <button
+            onClick={() => {
+              Modal.confirm({
+                title: t("generalSettings.systemData.firefoxPrivateModeSync.confirmTitle", {
+                  defaultValue: "Sync Firefox Data?"
+                }),
+                content: t("generalSettings.systemData.firefoxPrivateModeSync.confirmContent", {
+                  defaultValue: "This will sync your custom models and prompts to Firefox private mode storage. Continue?"
+                }),
+                okText: t("common:continue", "Continue"),
+                cancelText: t("common:cancel", "Cancel"),
+                onOk: () => {
+                  syncFirefoxData.mutate()
+                }
+              })
+            }}
+            disabled={syncFirefoxData.isPending}
+            className="cursor-pointer rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primaryStrong w-full sm:w-auto">
+            {syncFirefoxData.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              t("generalSettings.systemData.firefoxPrivateModeSync.button", {
+                defaultValue: "Sync Data"
+              })
+            )}
+          </button>
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
+        <span className="text-text">
+          {t("generalSettings.systemData.export.label", { defaultValue: t("generalSettings.system.export.label", { defaultValue: "Export Chat History, Knowledge Base, and Prompts" }) as string })}
+        </span>
+        <button
+          onClick={exportPageAssistData}
+          className="cursor-pointer rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primaryStrong w-full sm:w-auto">
+          {t("generalSettings.systemData.export.button", { defaultValue: t("generalSettings.system.export.button", { defaultValue: "Export Data" }) as string })}
+        </button>
+      </div>
+
+      <div className="flex flex-col sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
+        <span className="text-text">
+          {t("generalSettings.systemData.import.label", { defaultValue: t("generalSettings.system.import.label", { defaultValue: "Import Chat History, Knowledge Base, and Prompts" }) as string })}
+        </span>
+        <button
+          type="button"
+          disabled={importDataMutation.isPending}
+          aria-disabled={importDataMutation.isPending}
+          onClick={() => importInputRef.current?.click()}
+          className="flex w-full cursor-pointer items-center justify-center rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primaryStrong disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto">
+          {importDataMutation.isPending ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            </>
+          ) : (
+            t("generalSettings.systemData.import.button", { defaultValue: t("generalSettings.system.import.button", { defaultValue: "Import Data" }) as string })
+          )}
+        </button>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json"
+          id="import"
+          className="hidden"
+          disabled={importDataMutation.isPending}
+          onChange={(e) => {
+            if (e.target.files && e.target.files[0]) {
+              importDataMutation.mutate(e.target.files[0])
+            }
+          }}
+        />
+      </div>
+
+      <div className="flex flex-col sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
+        <span className="text-text">
+          {t("generalSettings.systemData.deleteChatHistory.label", { defaultValue: t("generalSettings.system.deleteChatHistory.label", { defaultValue: "System Reset" }) as string })}
+        </span>
+
+        <button
+          onClick={() => setResetModalOpen(true)}
+          className="w-full rounded-md bg-danger px-4 py-2 text-white transition-colors hover:bg-danger sm:w-auto">
+          {t("generalSettings.systemData.deleteChatHistory.button", { defaultValue: t("generalSettings.system.deleteChatHistory.button", { defaultValue: "Reset All" }) as string })}
+        </button>
+      </div>
+
+      <Modal
+        open={resetModalOpen}
+        title={t("generalSettings.systemData.deleteChatHistory.modalTitle", { defaultValue: "System Reset" })}
+        onCancel={() => {
+          setResetModalOpen(false)
+          setResetInput("")
+        }}
+        okText={t("common:reset", { defaultValue: "Reset" })}
+        cancelText={t("common:cancel", { defaultValue: "Cancel" })}
+        okButtonProps={{
+          danger: true,
+          disabled: resetInput.trim().toUpperCase() !== "RESET",
+          loading: resetting
+        }}
+        onOk={handleResetAll}
+        centered
+      >
+        <div className="space-y-4">
+          <p className="text-text-muted">
+            {t("generalSettings.systemData.deleteChatHistory.modalWarning", {
+              defaultValue: "This will permanently delete ALL data including:"
+            })}
+          </p>
+          <ul className="list-disc pl-5 text-text-muted text-sm space-y-1">
+            <li>{t("generalSettings.systemData.deleteChatHistory.dataChat", { defaultValue: "Chat history and conversations" })}</li>
+            <li>{t("generalSettings.systemData.deleteChatHistory.dataKnowledge", { defaultValue: "Knowledge base and documents" })}</li>
+            <li>{t("generalSettings.systemData.deleteChatHistory.dataPrompts", { defaultValue: "Custom prompts and models" })}</li>
+            <li>{t("generalSettings.systemData.deleteChatHistory.dataSettings", { defaultValue: "All settings and preferences" })}</li>
+          </ul>
+          <div className="pt-2">
+            <p className="mb-2 text-sm font-medium text-text">
+              {t("generalSettings.systemData.deleteChatHistory.typeToConfirm", {
+                defaultValue: "Type RESET to confirm:"
+              })}
+            </p>
+            <Input
+              value={resetInput}
+              onChange={(e) => setResetInput(e.target.value)}
+              placeholder={t("generalSettings.systemData.deleteChatHistory.placeholder", "RESET")}
+              className="font-mono"
+              autoFocus
+              aria-describedby="reset-hint"
+            />
+            <p id="reset-hint" className="text-xs text-text-subtle mt-1">
+              {t("generalSettings.systemData.deleteChatHistory.caseInsensitiveHint", "Case-insensitive: 'reset', 'RESET', or 'Reset' all work")}
+            </p>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  )
+}
+
+export const SystemSettings = () => {
+  const { t } = useTranslation(["settings", "knowledge", "common"])
+  const { increase, decrease, scale } = useFontSize()
+  const notification = useAntdNotification()
+
+  const quotaFriendlyMessage = t(
+    "settings:storage.quotaFriendlyMessage",
+    "Too many settings writes in a short period; please wait a few seconds and try again."
+  )
+
+  const showStorageError = (error: unknown) => {
+    const msg =
+      error instanceof Error ? error.message : typeof error === "string" ? error : ""
+    const quotaHit =
+      msg?.includes("MAX_WRITE_OPERATIONS_PER_MINUTE") ||
+      msg?.includes("QUOTA_BYTES_PER_ITEM") ||
+      msg?.includes("QUOTA_BYTES")
+
+    notification.error({
+      message: quotaHit
+        ? t("settings:storage.quotaTitle", "Storage limit reached")
+        : t("settings:storage.writeError", "Could not save settings"),
+      description: quotaHit
+        ? quotaFriendlyMessage
+        : t(
+            "settings:storage.writeErrorDescription",
+            "We couldn't save your settings. Please try again shortly."
+          )
+    })
+  }
+
+
+  const [webuiBtnSidePanel, setWebuiBtnSidePanel] = useStorage(
+    "webuiBtnSidePanel",
+    false
+  )
+
+  // Default UI mode: fullscreen (webui) or sidebar (sidePanel)
+  const [uiMode, setUiMode] = useSetting(UI_MODE_SETTING)
+
+  const [actionIconClick, setActionIconClick] = useSetting(
+    ACTION_ICON_CLICK_SETTING
+  )
+
+  const [contextMenuClick, setContextMenuClick] = useSetting(
+    CONTEXT_MENU_CLICK_SETTING
+  )
+  const [chatBackgroundImage, setChatBackgroundImage] = useSetting(
+    CHAT_BACKGROUND_IMAGE_SETTING
+  )
+
   const [codeTheme, setCodeTheme] = useStorage("codeTheme", "auto")
   const sampleCode = `function hello(name: string) {
   console.log('Hello, ' + name)
@@ -248,27 +432,6 @@ export const SystemSettings = () => {
         return themes.dracula
     }
   }
-
-  const syncFirefoxData = useMutation({
-    mutationFn: firefoxSyncDataForPrivateMode,
-    onSuccess: () => {
-      notification.success({
-        message: t(
-          "settings:systemNotifications.syncSuccess",
-          "Firefox data synced successfully, You don't need to do this again"
-        )
-      })
-    },
-    onError: (error) => {
-      console.log(error)
-      notification.error({
-        message: t(
-          "settings:systemNotifications.syncError",
-          "Firefox data sync failed"
-        )
-      })
-    }
-  })
 
   const handleImageUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -478,43 +641,6 @@ export const SystemSettings = () => {
           }}
         />
       </div>
-      {isFireFox && !isFireFoxPrivateMode && (
-        <div className="flex flex-col sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
-          <span className="text-text">
-            <BetaTag />
-            {t("generalSettings.systemData.firefoxPrivateModeSync.label", {
-              defaultValue:
-                "Sync Custom Models, Prompts for Firefox Private Windows (Incognito Mode)"
-            })}
-          </span>
-          <button
-            onClick={() => {
-              Modal.confirm({
-                title: t("generalSettings.systemData.firefoxPrivateModeSync.confirmTitle", {
-                  defaultValue: "Sync Firefox Data?"
-                }),
-                content: t("generalSettings.systemData.firefoxPrivateModeSync.confirmContent", {
-                  defaultValue: "This will sync your custom models and prompts to Firefox private mode storage. Continue?"
-                }),
-                okText: t("common:continue", "Continue"),
-                cancelText: t("common:cancel", "Cancel"),
-                onOk: () => {
-                  syncFirefoxData.mutate()
-                }
-              })
-            }}
-            disabled={syncFirefoxData.isPending}
-            className="cursor-pointer rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primaryStrong w-full sm:w-auto">
-            {syncFirefoxData.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              t("generalSettings.systemData.firefoxPrivateModeSync.button", {
-                defaultValue: "Sync Data"
-              })
-            )}
-          </button>
-        </div>
-      )}
       <div className="flex flex-col sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
         <span className="text-text">
           {t("generalSettings.systemBasics.webuiBtnSidePanel.label", { defaultValue: t("generalSettings.system.webuiBtnSidePanel.label", { defaultValue: "Show Web UI button in Sidebar" }) as string })}
@@ -559,108 +685,6 @@ export const SystemSettings = () => {
           />
         </div>
       </div>
-
-      <div className="flex flex-col sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
-        <span className="text-text">
-          {t("generalSettings.systemData.export.label", { defaultValue: t("generalSettings.system.export.label", { defaultValue: "Export Chat History, Knowledge Base, and Prompts" }) as string })}
-        </span>
-        <button
-          onClick={exportPageAssistData}
-          className="cursor-pointer rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primaryStrong w-full sm:w-auto">
-          {t("generalSettings.systemData.export.button", { defaultValue: t("generalSettings.system.export.button", { defaultValue: "Export Data" }) as string })}
-        </button>
-      </div>
-      <div className="flex flex-col sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
-        <span className="text-text">
-          {t("generalSettings.systemData.import.label", { defaultValue: t("generalSettings.system.import.label", { defaultValue: "Import Chat History, Knowledge Base, and Prompts" }) as string })}
-        </span>
-        <label
-          htmlFor="import"
-          className="flex w-full cursor-pointer items-center justify-center rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primaryStrong sm:w-auto">
-          {importDataMutation.isPending ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            </>
-          ) : (
-            t("generalSettings.systemData.import.button", { defaultValue: t("generalSettings.system.import.button", { defaultValue: "Import Data" }) as string })
-          )}
-        </label>
-        <input
-          type="file"
-          accept=".json"
-          id="import"
-          className="hidden"
-          disabled={importDataMutation.isPending}
-          onChange={(e) => {
-            if (e.target.files && e.target.files[0]) {
-              importDataMutation.mutate(e.target.files[0])
-            }
-          }}
-        />
-      </div>
-
-      <div className="flex flex-col sm:flex-row mb-3 gap-3 sm:gap-0 sm:justify-between sm:items-center">
-        <span className="text-text">
-          {t("generalSettings.systemData.deleteChatHistory.label", { defaultValue: t("generalSettings.system.deleteChatHistory.label", { defaultValue: "System Reset" }) as string })}
-        </span>
-
-        <button
-          onClick={() => setResetModalOpen(true)}
-          className="w-full rounded-md bg-danger px-4 py-2 text-white transition-colors hover:bg-danger sm:w-auto">
-          {t("generalSettings.systemData.deleteChatHistory.button", { defaultValue: t("generalSettings.system.deleteChatHistory.button", { defaultValue: "Reset All" }) as string })}
-        </button>
-      </div>
-
-      {/* Two-step reset confirmation modal */}
-      <Modal
-        open={resetModalOpen}
-        title={t("generalSettings.systemData.deleteChatHistory.modalTitle", { defaultValue: "System Reset" })}
-        onCancel={() => {
-          setResetModalOpen(false)
-          setResetInput("")
-        }}
-        okText={t("common:reset", { defaultValue: "Reset" })}
-        cancelText={t("common:cancel", { defaultValue: "Cancel" })}
-        okButtonProps={{
-          danger: true,
-          disabled: resetInput.trim().toUpperCase() !== "RESET",
-          loading: resetting
-        }}
-        onOk={handleResetAll}
-        centered
-      >
-        <div className="space-y-4">
-          <p className="text-text-muted">
-            {t("generalSettings.systemData.deleteChatHistory.modalWarning", {
-              defaultValue: "This will permanently delete ALL data including:"
-            })}
-          </p>
-          <ul className="list-disc pl-5 text-text-muted text-sm space-y-1">
-            <li>{t("generalSettings.systemData.deleteChatHistory.dataChat", { defaultValue: "Chat history and conversations" })}</li>
-            <li>{t("generalSettings.systemData.deleteChatHistory.dataKnowledge", { defaultValue: "Knowledge base and documents" })}</li>
-            <li>{t("generalSettings.systemData.deleteChatHistory.dataPrompts", { defaultValue: "Custom prompts and models" })}</li>
-            <li>{t("generalSettings.systemData.deleteChatHistory.dataSettings", { defaultValue: "All settings and preferences" })}</li>
-          </ul>
-          <div className="pt-2">
-            <p className="mb-2 text-sm font-medium text-text">
-              {t("generalSettings.systemData.deleteChatHistory.typeToConfirm", {
-                defaultValue: "Type RESET to confirm:"
-              })}
-            </p>
-            <Input
-              value={resetInput}
-              onChange={(e) => setResetInput(e.target.value)}
-              placeholder={t("generalSettings.systemData.deleteChatHistory.placeholder", "RESET")}
-              className="font-mono"
-              autoFocus
-              aria-describedby="reset-hint"
-            />
-            <p id="reset-hint" className="text-xs text-text-subtle mt-1">
-              {t("generalSettings.systemData.deleteChatHistory.caseInsensitiveHint", "Case-insensitive: 'reset', 'RESET', or 'Reset' all work")}
-            </p>
-          </div>
-        </div>
-      </Modal>
     </div>
   )
 }

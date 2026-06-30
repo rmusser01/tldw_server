@@ -166,7 +166,14 @@ describe("study pack query hooks", () => {
     const query = queryClient.getQueryCache().find({
       queryKey: ["flashcards:study-packs:job", 91]
     })
-    const refetchInterval = query?.options.refetchInterval
+    type StudyPackJobQuery = NonNullable<typeof query>
+    const refetchInterval = (
+      query?.options as
+        | {
+            refetchInterval?: (query: StudyPackJobQuery) => number | false
+          }
+        | undefined
+    )?.refetchInterval
 
     expect(typeof refetchInterval).toBe("function")
     expect(refetchInterval?.(query!)).toBe(1500)

@@ -7,12 +7,12 @@ import json
 import time
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from loguru import logger
 from starlette import status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, RequireRole, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_token_scope
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
@@ -23,13 +23,17 @@ from tldw_Server_API.app.core.Audio.error_payloads import _http_error_detail
 from tldw_Server_API.app.core.Audio.tts_service import _raise_for_tts_error
 from tldw_Server_API.app.core.Audio.tts_service import _sanitize_speech_request
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, StorageError
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, TTSAuthenticationError
+from tldw_Server_API.app.core.TTS.tts_exceptions import (
+    TTSError,
+    TTSAuthenticationError,
+    TTSProviderBusyError,
+    TTSProviderNotConfiguredError,
+)
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2, get_tts_service_v2
 from tldw_Server_API.app.core.TTS.utils import (
     build_tts_segments_payload,
@@ -156,6 +160,159 @@ def _append_pcm_response_headers(request_data: OpenAISpeechRequest, headers: dic
     headers["X-Audio-Sample-Rate"] = str(_resolve_pcm_sample_rate(request_data))
 
 
+def _coerce_nonempty_catalog_string(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _build_openai_voice_catalog(voices_by_provider: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    data: list[dict[str, Any]] = []
+    identity_keys = {"id", "voice_id", "name", "language", "lang"}
+    for provider_name, voices in voices_by_provider.items():
+        provider = _coerce_nonempty_catalog_string(provider_name) or "unknown"
+        if not isinstance(voices, list):
+            continue
+        for voice in voices:
+            if not isinstance(voice, dict):
+                continue
+            voice_id = _coerce_nonempty_catalog_string(
+                voice.get("id") or voice.get("voice_id") or voice.get("name")
+            )
+            if voice_id is None:
+                continue
+            entry: dict[str, Any] = {
+                "id": voice_id,
+                "object": "voice",
+                "provider": provider,
+            }
+            name = _coerce_nonempty_catalog_string(voice.get("name"))
+            if name is not None:
+                entry["name"] = name
+            language = _coerce_nonempty_catalog_string(voice.get("language") or voice.get("lang"))
+            if language is not None:
+                entry["language"] = language
+            metadata = {
+                key: value
+                for key, value in voice.items()
+                if key not in identity_keys and value is not None
+            }
+            if metadata:
+                entry["metadata"] = metadata
+            data.append(entry)
+    return {"object": "list", "data": data}
+
+
+_MODEL_INFO_SENSITIVE_KEYS = {
+    "apikey",
+    "apitoken",
+    "authorization",
+    "baseurl",
+    "command",
+    "cwd",
+    "env",
+    "localpath",
+    "modelpath",
+    "password",
+    "path",
+    "privatekey",
+    "repopath",
+    "secret",
+    "stderr",
+    "stdout",
+    "token",
+    "vctargetpath",
+}
+
+
+def _normalize_model_info_key(value: Any) -> str:
+    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+
+def _looks_like_local_path(value: str) -> bool:
+    text = value.strip()
+    if not text:
+        return False
+    if text.startswith(("~", "/Users/", "/home/", "/var/", "/private/", "/opt/")):
+        return True
+    return len(text) >= 3 and text[1:3] in {":\\", ":/"}
+
+
+def _sanitize_model_info_value(value: Any) -> Any:
+    if isinstance(value, str):
+        if _looks_like_local_path(value):
+            return "<redacted-path>"
+        return value
+    if isinstance(value, list):
+        return [_sanitize_model_info_value(item) for item in value]
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            if _normalize_model_info_key(key) in _MODEL_INFO_SENSITIVE_KEYS:
+                continue
+            sanitized[key] = _sanitize_model_info_value(item)
+        return sanitized
+    return value
+
+
+def _find_provider_entry(mapping: Any, provider: str) -> tuple[Optional[str], Optional[Any]]:
+    if not isinstance(mapping, dict):
+        return None, None
+    requested = provider.strip().lower()
+    for key, value in mapping.items():
+        if str(key).strip().lower() == requested:
+            return str(key), value
+    return None, None
+
+
+def _extract_model_ids(capabilities: dict[str, Any], metadata: dict[str, Any]) -> list[str]:
+    candidates = metadata.get("supported_model_ids")
+    if not isinstance(candidates, list):
+        candidates = capabilities.get("models")
+    if not isinstance(candidates, list):
+        return []
+    return [
+        model_id
+        for item in candidates
+        if (model_id := _coerce_nonempty_catalog_string(item)) is not None
+    ]
+
+
+def _build_provider_model_info(
+    *,
+    provider: str,
+    provider_status: Optional[Any],
+    provider_capabilities: Optional[Any],
+) -> dict[str, Any]:
+    status_info = provider_status if isinstance(provider_status, dict) else {}
+    capabilities = provider_capabilities if isinstance(provider_capabilities, dict) else {}
+    sanitized_capabilities = _sanitize_model_info_value(capabilities)
+    if not isinstance(sanitized_capabilities, dict):
+        sanitized_capabilities = {}
+    metadata = sanitized_capabilities.get("metadata") if isinstance(sanitized_capabilities, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    initialized = bool(status_info.get("initialized", False))
+    status_value = _coerce_nonempty_catalog_string(status_info.get("status")) or "unknown"
+    model_info = {
+        "provider": provider,
+        "status": status_value,
+        "initialized": initialized,
+        "loaded": initialized,
+        "failed": bool(status_info.get("failed", False)),
+        "model_ids": _extract_model_ids(sanitized_capabilities, metadata),
+        "model_families": metadata.get("model_families", {}),
+        "voice_conversion": metadata.get("voice_conversion"),
+        "capabilities": sanitized_capabilities,
+        "unload_endpoint": f"/api/v1/audio/tts/providers/{provider}/unload",
+    }
+    if model_info["voice_conversion"] is None:
+        model_info.pop("voice_conversion")
+    return model_info
+
+
 def _tts_history_error_message(exc: Exception) -> str:
     if isinstance(exc, HTTPException):
         detail = exc.detail
@@ -173,7 +330,7 @@ def _tts_history_error_message(exc: Exception) -> str:
     summary="Submit a long-form TTS job",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.speech", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.speech", count_as="call")),
     ],
 )
 async def create_speech_job(
@@ -222,7 +379,7 @@ async def create_speech_job(
     summary="List artifacts for a TTS job",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.speech", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.speech", count_as="call")),
     ],
 )
 async def get_speech_job_artifacts(
@@ -260,12 +417,22 @@ async def get_tts_service() -> TTSServiceV2:
 @router.post(
     "/speech",
     summary="Generates audio from text input.",
+    response_class=Response,
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.speech", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.speech", count_as="call")),
     ],
     responses={
         200: {
+            "description": "Generated speech audio bytes or stream",
+            "content": {
+                "audio/aac": {},
+                "audio/flac": {},
+                "audio/L16": {},
+                "audio/mpeg": {},
+                "audio/opus": {},
+                "audio/wav": {},
+            },
             "headers": {
                 "X-Audio-Sample-Rate": {
                     "description": "Resolved PCM sample rate in Hz (present when response_format=pcm).",
@@ -367,21 +534,21 @@ async def create_speech(
             if ts > 0:
                 voice_to_voice_start = ts
         except (TypeError, ValueError):
-            logger.debug(f"Invalid X-Voice-To-Voice-Start header: {raw_v2v}")
+            logger.debug("Invalid X-Voice-To-Voice-Start header")
     try:
         state_ts = getattr(request.state, "voice_to_voice_start", None)
         if voice_to_voice_start is None and isinstance(state_ts, (int, float)):
             voice_to_voice_start = float(state_ts)
-    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"Failed to read voice_to_voice_start from request.state: {exc}")
+    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Failed to read voice_to_voice_start from request.state")
     try:
         usage_log.log_event(
             "audio.tts",
             tags=[str(request_data.model or ""), str(request_data.voice or "")],
             metadata={"stream": bool(getattr(request_data, "stream", False)), "format": request_data.response_format},
         )
-    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"usage_log audio.tts failed: error={e}")
+    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("usage_log audio.tts failed")
 
     # Determine Content-Type
     content_type = _AUDIO_CONTENT_TYPE_MAP.get(request_data.response_format)
@@ -416,8 +583,8 @@ async def create_speech(
             return
         try:
             text_hash = compute_tts_history_text_hash(request_data.input, history_cfg.get("hash_key"))
-        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("TTS history: failed to compute text hash: {} (request_id={})", exc, request_id)
+        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("TTS history: failed to compute text hash")
             return
         text_length = tts_history_text_length(request_data.input)
         text_value = request_data.input if history_cfg.get("store_text", True) else None
@@ -512,8 +679,8 @@ async def create_speech(
             except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
                 pass
             history_written = True
-        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("TTS history: failed to write record: {} (request_id={})", exc, request_id)
+        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("TTS history: failed to write record request_id={}", request_id)
 
     def _build_speech_iter():
         return tts_service.generate_speech(
@@ -637,8 +804,8 @@ async def create_speech(
             if byok_tts_resolution is not None:
                 try:
                     await byok_tts_resolution.touch_last_used()
-                except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.debug(f"Failed to update BYOK last_used timestamp: {exc}")
+                except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("Failed to update BYOK last_used timestamp")
             status = "success"
             error_message = None
             if stream_failed:
@@ -715,8 +882,8 @@ async def create_speech(
     if byok_tts_resolution is not None:
         try:
             await byok_tts_resolution.touch_last_used()
-        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to update BYOK last_used timestamp: {exc}")
+        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to update BYOK last_used timestamp")
 
     headers = {
         "Content-Disposition": f"attachment; filename=speech.{request_data.response_format}",
@@ -735,8 +902,8 @@ async def create_speech(
             alignment_b64 = base64.urlsafe_b64encode(alignment_json.encode("utf-8")).decode("ascii")
             headers["X-TTS-Alignment"] = alignment_b64
             headers["X-TTS-Alignment-Format"] = "json+base64"
-        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Failed to encode alignment metadata header: {exc}")
+        except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to encode alignment metadata header")
 
     output_id: int | None = None
     artifact_ids: list[Any] | None = None
@@ -766,7 +933,7 @@ async def create_speech(
             _record_tts_history("failed", error_message=_tts_history_error_message(exc))
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=str(exc),
+                detail="Failed to store generated speech audio",
             ) from exc
         except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
             _record_tts_history("failed", error_message=_tts_history_error_message(exc))
@@ -786,7 +953,7 @@ async def create_speech(
     summary="Returns alignment metadata for a TTS request.",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.speech", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.speech", count_as="call")),
     ],
     responses={
         200: {
@@ -858,8 +1025,8 @@ async def create_speech_metadata(
             tags=[str(request_data.model or ""), str(request_data.voice or "")],
             metadata={"stream": bool(getattr(request_data, "stream", False)), "format": request_data.response_format},
         )
-    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"usage_log audio.tts.metadata failed: error={exc}")
+    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("usage_log audio.tts.metadata failed")
 
     if hasattr(request_data, "stream"):
         try:
@@ -956,8 +1123,8 @@ async def create_speech_metadata(
         if byok_tts_resolution is not None:
             try:
                 await byok_tts_resolution.touch_last_used()
-            except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"Failed to update BYOK last_used timestamp: {exc}")
+            except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Failed to update BYOK last_used timestamp")
 
     metadata = getattr(request_data, "_tts_metadata", None)
     alignment_payload = None
@@ -981,7 +1148,7 @@ async def list_tts_providers(request: Request, tts_service: TTSServiceV2 = Depen
 
         return {"providers": capabilities, "voices": voices, "timestamp": datetime.utcnow().isoformat()}
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error listing TTS providers: {e}", exc_info=True)
+        logger.error("Error listing TTS providers")
         request_id = ensure_request_id(request)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -989,10 +1156,96 @@ async def list_tts_providers(request: Request, tts_service: TTSServiceV2 = Depen
         ) from e
 
 
+@router.get(
+    "/tts/providers/{provider}/model-info",
+    summary="Get focused TTS provider model information",
+)
+async def get_tts_provider_model_info(
+    provider: str,
+    request: Request,
+    tts_service: TTSServiceV2 = Depends(get_tts_service),
+):
+    """Return focused status and capability metadata for one TTS provider."""
+    request_id = ensure_request_id(request)
+    provider_key = (provider or "").strip().lower()
+    try:
+        status_data = tts_service.get_status()
+        capabilities = await tts_service.get_capabilities()
+        status_providers = status_data.get("providers", {}) if isinstance(status_data, dict) else {}
+        status_key, provider_status = _find_provider_entry(status_providers, provider_key)
+        caps_key, provider_caps = _find_provider_entry(capabilities, provider_key)
+        resolved_provider = (status_key or caps_key or provider_key).lower()
+        if provider_status is None and provider_caps is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=_http_error_detail(f"Unknown TTS provider '{provider}'", request_id),
+            )
+        return _build_provider_model_info(
+            provider=resolved_provider,
+            provider_status=provider_status,
+            provider_capabilities=provider_caps,
+        )
+    except HTTPException:
+        raise
+    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
+        logger.bind(
+            request_id=request_id,
+            provider=provider_key or "<missing>",
+            error_type=type(e).__name__,
+        ).opt(exception=e).error("Error getting TTS provider model info")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_http_error_detail("Failed to get provider model info", request_id, exc=e),
+        ) from e
+
+
+@router.post(
+    "/tts/providers/{provider}/unload",
+    summary="Unload a cached TTS provider runtime",
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(RequireRole("admin")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.tts_provider_unload", count_as="admin")),
+    ],
+)
+async def unload_tts_provider(
+    provider: str,
+    request: Request,
+    tts_service: TTSServiceV2 = Depends(get_tts_service),
+    _current_user: User = Depends(get_request_user),
+):
+    """Release one cached TTS provider runtime so it can be reloaded on demand."""
+    request_id = ensure_request_id(request)
+    try:
+        result = await tts_service.unload_provider(provider)
+        return JSONResponse(content=result, headers={"X-Request-Id": request_id})
+    except TTSProviderNotConfiguredError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_http_error_detail(f"Unknown TTS provider '{provider}'", request_id, exc=e),
+        ) from e
+    except TTSProviderBusyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_http_error_detail("TTS provider has active requests", request_id, exc=e),
+        ) from e
+    except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
+        logger.bind(
+            request_id=request_id,
+            provider=(provider or "").strip().lower() or "<missing>",
+            error_type=type(e).__name__,
+        ).opt(exception=e).error("Error unloading TTS provider")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=_http_error_detail("Failed to unload TTS provider", request_id, exc=e),
+        ) from e
+
+
 @router.get("/voices/catalog", summary="List available TTS voices across providers")
 async def list_tts_voices(
     request: Request,
     provider: Optional[str] = None,
+    catalog_format: Optional[str] = Query(default=None, alias="format"),
     tts_service: TTSServiceV2 = Depends(get_tts_service),
 ):
     """
@@ -1000,19 +1253,25 @@ async def list_tts_voices(
 
     - If `provider` is specified, returns voices only for that provider.
     - Otherwise returns a mapping of provider name to voice lists.
+    - If `format=openai`, returns a flattened OpenAI-style list object.
     """
     try:
         all_voices = await tts_service.list_voices()
         if provider:
             key = provider.lower()
             if key in all_voices:
-                return {key: all_voices[key]}
+                provider_voices = {key: all_voices[key]}
+                if (catalog_format or "").strip().lower() == "openai":
+                    return _build_openai_voice_catalog(provider_voices)
+                return provider_voices
             raise HTTPException(status_code=404, detail=f"Provider '{provider}' not found or unavailable")
+        if (catalog_format or "").strip().lower() == "openai":
+            return _build_openai_voice_catalog(all_voices)
         return all_voices
     except HTTPException:
         raise
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error listing TTS voices: {e}", exc_info=True)
+        logger.error("Error listing TTS voices")
         request_id = ensure_request_id(request)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1107,7 +1366,7 @@ async def reset_tts_metrics(
     except HTTPException:
         raise
     except _AUDIO_TTS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Error resetting metrics: {e}", exc_info=True)
+        logger.error("Error resetting metrics")
         request_id = ensure_request_id(request)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

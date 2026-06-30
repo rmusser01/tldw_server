@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  getSnapshotImportInvalidationKeys,
   resolveSnapshotImportAction,
   type SnapshotReplaceConfirmLabels
 } from "../writing-snapshot-import-utils"
@@ -12,6 +13,23 @@ const LABELS: SnapshotReplaceConfirmLabels = {
 }
 
 describe("writing snapshot import utils", () => {
+  it("adds the active session detail key for merge imports", () => {
+    expect(getSnapshotImportInvalidationKeys("merge", "session-1")).toEqual([
+      ["writing-sessions"],
+      ["writing-templates"],
+      ["writing-themes"],
+      ["writing-session", "session-1"]
+    ])
+  })
+
+  it("keeps replace imports on collection invalidation only", () => {
+    expect(getSnapshotImportInvalidationKeys("replace", "session-1")).toEqual([
+      ["writing-sessions"],
+      ["writing-templates"],
+      ["writing-themes"]
+    ])
+  })
+
   it("opens picker directly for merge mode", () => {
     expect(resolveSnapshotImportAction("merge", LABELS)).toEqual({
       type: "open-picker",

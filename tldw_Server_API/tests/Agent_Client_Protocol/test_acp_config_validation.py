@@ -11,6 +11,10 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.config import (
     ACPRunnerConfig,
     validate_acp_config,
 )
+from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
+    ACPAgentEntrypointStatus,
+    ACPAgentRegisterRequest,
+)
 
 
 class TestValidateAcpConfig:
@@ -86,3 +90,49 @@ class TestValidateAcpConfig:
         # Should only have the command warning, not a cwd warning
         assert len(warnings) == 1
         assert "not found on PATH" in warnings[0]
+
+
+def test_agent_entrypoint_status_accepts_external_adapter() -> None:
+    status = ACPAgentEntrypointStatus(
+        profile_key="codex",
+        entrypoint_strategy="external_acp_adapter",
+        probe_state="blocked",
+    )
+    assert status.entrypoint_strategy == "external_acp_adapter"
+
+
+def test_agent_entrypoint_status_imports_legacy_adapter_acp_alias() -> None:
+    status = ACPAgentEntrypointStatus(
+        profile_key="codex",
+        entrypoint_strategy="adapter_acp",
+        probe_state="blocked",
+    )
+    assert status.entrypoint_strategy == "external_acp_adapter"
+
+
+def test_register_request_imports_legacy_adapter_acp_alias() -> None:
+    request = ACPAgentRegisterRequest(
+        agent_type="legacy_codex",
+        name="Legacy Codex",
+        entrypoint_strategy="adapter_acp",
+    )
+    assert request.entrypoint_strategy == "external_acp_adapter"
+
+
+def test_static_codex_fallback_uses_external_adapter_and_delegated_credentials(monkeypatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import _get_static_agents
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    agents, _default_agent = _get_static_agents()
+    codex = next(agent for agent in agents if agent.type == "codex")
+
+    assert codex.requires_api_key is None
+    assert codex.entrypoint.entrypoint_strategy == "external_acp_adapter"
+    assert codex.entrypoint.acp_command == "codex-acp"
+    assert codex.entrypoint.credential_state == "delegated"
+    assert codex.entrypoint.primary_blocker in {
+        "adapter_missing",
+        "agent_binary_missing",
+        "live_certification_required",
+    }

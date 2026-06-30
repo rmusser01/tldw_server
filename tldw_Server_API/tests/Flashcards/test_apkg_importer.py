@@ -1,4 +1,6 @@
+import io
 import json
+import zipfile
 from datetime import datetime, timezone
 
 import pytest
@@ -184,3 +186,65 @@ def test_import_rows_from_apkg_bytes_rejects_oversized_total_media():
             max_total_media_bytes=4,
             asset_importer=asset_importer,
         )
+
+
+@pytest.mark.unit
+def test_import_rows_from_apkg_bytes_rejects_unreferenced_oversized_media_before_rows() -> None:
+    rows = [{"deck_name": "ArchiveLimit", "model_type": "basic", "front": "Q", "back": "A"}]
+    apkg = export_apkg_from_rows(rows)
+
+    src = zipfile.ZipFile(io.BytesIO(apkg))
+    hardened = io.BytesIO()
+    with src, zipfile.ZipFile(hardened, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            if info.filename == "media":
+                continue
+            dst.writestr(info, src.read(info.filename))
+        dst.writestr("media", json.dumps({"999": "unused.png"}))
+        dst.writestr("999", b"0123456789")
+
+    with pytest.raises(APKGImportError, match="APKG media exceeds max total size"):
+        import_rows_from_apkg_bytes(
+            hardened.getvalue(),
+            max_notes=100,
+            max_field_length=8192,
+            max_total_media_bytes=4,
+            asset_importer=lambda _content, _mime_type, _original_filename: "unused",
+        )
+
+
+@pytest.mark.unit
+def test_import_rows_from_apkg_bytes_does_not_import_media_for_skipped_row() -> None:
+    rows = [
+        {
+            "deck_name": "SkippedMedia",
+            "model_type": "basic",
+            "front": "Front ![Slide](flashcard-asset://asset-front)",
+            "back": "This answer is intentionally too long",
+        }
+    ]
+
+    def asset_loader(asset_uuid: str) -> dict[str, bytes | str]:
+        return {
+            "content": b"\x89PNG\r\n\x1a\npayload-" + asset_uuid.encode("utf-8"),
+            "mime_type": "image/png",
+            "original_filename": f"{asset_uuid}.png",
+        }
+
+    imported_assets: list[tuple[bytes, str, str]] = []
+
+    def asset_importer(content: bytes, mime_type: str, original_filename: str) -> str:
+        imported_assets.append((content, mime_type, original_filename))
+        return "imported-1"
+
+    apkg = export_apkg_from_rows(rows, asset_loader=asset_loader)
+    parsed, errors = import_rows_from_apkg_bytes(
+        apkg,
+        max_notes=100,
+        max_field_length=12,
+        asset_importer=asset_importer,
+    )
+
+    assert parsed == []
+    assert any("Field too long:" in err.get("error", "") for err in errors)
+    assert imported_assets == []

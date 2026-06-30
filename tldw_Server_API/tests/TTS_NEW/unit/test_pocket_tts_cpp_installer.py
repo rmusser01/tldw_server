@@ -18,7 +18,11 @@ def test_pocket_tts_cpp_installer_builds_separate_runtime_layout():
     from Helper_Scripts.TTS_Installers.install_tts_pocket_tts_cpp import build_runtime_layout
 
     repo_root = Path(__file__).resolve().parents[4]
-    layout = build_runtime_layout(Path("models") / "pocket_tts_cpp", repo_root=repo_root)
+    layout = build_runtime_layout(
+        Path("models") / "pocket_tts_cpp",
+        repo_root=repo_root,
+        platform_name="linux",
+    )
 
     assert layout.binary_path.relative_to(repo_root).as_posix() == "bin/pocket-tts"
     assert layout.tokenizer_path.relative_to(repo_root).as_posix() == "models/pocket_tts_cpp/tokenizer.model"

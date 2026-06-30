@@ -3,17 +3,15 @@
 Provides CRUD endpoints for ACP permission policies and persisted
 permission decisions (the "remember" pattern).
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-)
 from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
 
 router = APIRouter(prefix="/acp/permissions", tags=["acp-permissions"])
@@ -23,13 +21,13 @@ router = APIRouter(prefix="/acp/permissions", tags=["acp-permissions"])
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_acp_db() -> ACPSessionsDB:
     """Return the shared ACPSessionsDB singleton.
 
     Re-uses the same DB instance that the ACP session store already holds.
     """
     from tldw_Server_API.app.services.admin_acp_sessions_service import (
-        ACPSessionStore,
         _store as _module_store,
     )
 
@@ -38,7 +36,7 @@ def _get_acp_db() -> ACPSessionsDB:
         try:
             return _module_store.get_db()
         except Exception:
-            pass
+            return ACPSessionsDB()
 
     # Fallback: instantiate a fresh one (default path)
     return ACPSessionsDB()
@@ -47,6 +45,7 @@ def _get_acp_db() -> ACPSessionsDB:
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
+
 
 class PermissionDecisionCreate(BaseModel):
     tool_pattern: str = Field(..., description="fnmatch pattern for tool names (e.g. 'bash', 'file_*')")
@@ -78,6 +77,7 @@ class PermissionDecisionDeleteResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get(
     "/decisions",

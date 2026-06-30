@@ -99,7 +99,7 @@ class TestBuiltinTemplates:
     """Tests for default template seeding in template_store.py."""
 
     def test_seed_defaults_creates_templates(self, tmp_path, monkeypatch):
-        """Seeding writes the 4 built-in templates to a fresh directory."""
+        """Seeding writes the built-in templates to a fresh directory."""
         import tldw_Server_API.app.core.Watchlists.template_store as ts
 
         monkeypatch.setenv("WATCHLIST_TEMPLATE_DIR", str(tmp_path))
@@ -112,6 +112,8 @@ class TestBuiltinTemplates:
         assert "newsletter_markdown" in names
         assert "mece_markdown" in names
         assert "newsletter_html" in names
+        assert "cti_osint_report_markdown" in names
+        assert "news_briefing_markdown" in names
 
     def test_seed_defaults_does_not_overwrite(self, tmp_path, monkeypatch):
         """If a template already exists, seeding does not overwrite it."""
@@ -181,11 +183,124 @@ class TestBuiltinTemplates:
             "item_count": 2,
         }
 
-        for name in ("briefing_markdown", "newsletter_markdown", "mece_markdown", "newsletter_html"):
+        context["report"] = {
+            "preset": "cti_osint",
+            "readiness": {
+                "state": "warning",
+                "score": 76,
+                "warnings": [
+                    {"code": "single_source", "message": "Only one source is represented."}
+                ],
+            },
+            "source_summary": {"unique_source_count": 2, "missing_source_count": 0},
+            "included_items": [
+                {
+                    "id": 1,
+                    "title": "Article One",
+                    "url": "https://example.com/1",
+                    "source_name": "Vendor Advisory",
+                    "published_at": "2026-02-07T10:00:00Z",
+                    "summary": "Summary of article one.",
+                    "alerts": [
+                        {
+                            "rule_name": "Active exploitation",
+                            "severity": "critical",
+                            "matched_text": "active exploitation",
+                        }
+                    ],
+                }
+            ],
+            "excluded_items": [
+                {"id": 3, "title": "Background item", "reason": "not_queued_for_report"}
+            ],
+            "included_count": 1,
+            "excluded_count": 1,
+            "alert_count": 1,
+        }
+
+        for name in (
+            "briefing_markdown",
+            "newsletter_markdown",
+            "mece_markdown",
+            "newsletter_html",
+            "cti_osint_report_markdown",
+            "news_briefing_markdown",
+        ):
             record = ts.load_template(name)
             rendered = render_output_template(record.content, context)
             assert "Test Briefing" in rendered
             assert len(rendered) > 50
+
+    def test_stage5_report_templates_render_evidence_context(self, tmp_path, monkeypatch):
+        """Stage 5 report templates expose readiness, source, alert, and excluded-trail context."""
+        import tldw_Server_API.app.core.Watchlists.template_store as ts
+        from tldw_Server_API.app.services.outputs_service import render_output_template
+
+        monkeypatch.setenv("WATCHLIST_TEMPLATE_DIR", str(tmp_path))
+        ts._defaults_seeded = False
+
+        context = {
+            "title": "Healthcare ransomware watch",
+            "generated_at": "2026-05-15T12:00:00Z",
+            "job_name": "Ransomware advisory monitor",
+            "run_id": 44,
+            "items": [],
+            "report": {
+                "preset": "cti_osint",
+                "readiness": {
+                    "state": "warning",
+                    "score": 76,
+                    "warnings": [
+                        {
+                            "code": "single_source",
+                            "message": "Only one source is represented.",
+                        }
+                    ],
+                },
+                "source_summary": {"unique_source_count": 2, "missing_source_count": 0},
+                "included_items": [
+                    {
+                        "id": 101,
+                        "title": "Vendor advisory confirms exploitation",
+                        "url": "https://vendor.example/cve",
+                        "source_name": "Vendor Advisory",
+                        "published_at": "2026-05-15T10:00:00Z",
+                        "summary": "Active exploitation against edge devices.",
+                        "alerts": [
+                            {
+                                "rule_name": "Critical CVE",
+                                "severity": "critical",
+                                "matched_text": "CVE-2026-1234",
+                            }
+                        ],
+                    }
+                ],
+                "excluded_items": [
+                    {
+                        "id": 102,
+                        "title": "Background market note",
+                        "reason": "not_queued_for_report",
+                    }
+                ],
+                "included_count": 1,
+                "excluded_count": 1,
+                "alert_count": 1,
+            },
+        }
+
+        cti = render_output_template(ts.load_template("cti_osint_report_markdown").content, context)
+        assert "Report readiness: warning" in cti
+        assert "Critical CVE" in cti
+        assert "Vendor Advisory" in cti
+        assert "Excluded trail" in cti
+        assert "Background market note" in cti
+
+        context["report"]["preset"] = "news_briefing"
+        news = render_output_template(ts.load_template("news_briefing_markdown").content, context)
+        assert "What changed" in news
+        assert "Source diversity" in news
+        assert "Follow-up links" in news
+        assert "Vendor advisory confirms exploitation" in news
 
 
 # ---------------------------------------------------------------------------

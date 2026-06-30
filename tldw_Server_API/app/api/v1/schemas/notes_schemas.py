@@ -7,7 +7,9 @@ from datetime import datetime
 from typing import Any, Literal
 
 # 3rd-party Libraries
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 from .notes_studio import NoteStudioDocumentSummaryResponse
 
@@ -17,6 +19,14 @@ from .notes_studio import NoteStudioDocumentSummaryResponse
 #######################################################################################################################
 #
 # Schemas:
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
+
 
 def _split_keywords(value: Any) -> list[str] | None:
     if value is None:
@@ -149,6 +159,18 @@ class NoteKeywordSyncStatus(BaseModel):
     )
 
 
+class NoteFolderCreate(BaseModel):
+    path: str = Field(..., min_length=1, max_length=500, description="Relative folder path to create or reuse")
+
+    @field_validator("path")
+    @classmethod
+    def validate_path(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Folder path cannot be empty.")
+        return normalized
+
+
 class NoteFolderResponse(BaseModel):
     id: int = Field(..., description="Integer ID of the folder")
     name: str = Field(..., description="Folder display name")
@@ -156,6 +178,12 @@ class NoteFolderResponse(BaseModel):
     parent_id: int | None = Field(default=None, description="Parent folder ID, if any")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class NoteFoldersListResponse(BaseModel):
+    items: list[NoteFolderResponse] = Field(default_factory=list, description="Folder rows")
+    folders: list[NoteFolderResponse] = Field(default_factory=list, description="Alias for items")
+    count: int = Field(default=0, ge=0, description="Number of returned folders")
 
 
 class NoteResponse(NoteBase):
@@ -340,7 +368,14 @@ class KeywordCollectionsListResponse(BaseModel):
     count: int = Field(..., ge=0)
     limit: int = Field(..., ge=1)
     offset: int = Field(..., ge=0)
-    total: int | None = Field(default=None, ge=0)
+    total: int = Field(..., ge=0)
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class CollectionKeywordLinkResponse(BaseModel):
@@ -355,6 +390,17 @@ class CollectionKeywordLinkItem(BaseModel):
 
 class CollectionKeywordLinksResponse(BaseModel):
     links: list[CollectionKeywordLinkItem]
+    count: int = Field(..., ge=0)
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    total: int = Field(..., ge=0)
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ConversationKeywordLinkResponse(BaseModel):
@@ -369,6 +415,17 @@ class ConversationKeywordLinkItem(BaseModel):
 
 class ConversationKeywordLinksResponse(BaseModel):
     links: list[ConversationKeywordLinkItem]
+    count: int = Field(..., ge=0)
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    total: int = Field(..., ge=0)
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 # --- Linking Schemas ---
@@ -385,6 +442,17 @@ class KeywordsForNoteResponse(BaseModel):
 class NotesForKeywordResponse(BaseModel):
     keyword_id: int
     notes: list[NoteResponse]
+    count: int = Field(..., ge=0)
+    limit: int = Field(..., ge=1)
+    offset: int = Field(..., ge=0)
+    total: int = Field(..., ge=0)
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 # --- Attachment Schemas ---
@@ -434,6 +502,13 @@ class NotesListResponse(BaseModel):
     limit: int
     offset: int
     total: int | None = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class NotesExportResponse(BaseModel):
@@ -445,6 +520,7 @@ class NotesExportResponse(BaseModel):
     total: int | None = None
     limit: int | None = None
     offset: int | None = None
+    pagination: OffsetPaginationMeta | None = None
     exported_at: str
 
 

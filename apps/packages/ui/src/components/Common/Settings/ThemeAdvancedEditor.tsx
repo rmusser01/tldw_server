@@ -8,6 +8,7 @@ import type {
   ThemeShape,
   ThemeLayout,
   ThemeComponents,
+  ThemeRgbTokenKey,
 } from "@/themes/types"
 import { getBuiltinPresets } from "@/themes/presets"
 import { applyThemeTokens, clearThemeTokens } from "@/themes/apply-theme"
@@ -26,7 +27,7 @@ import { ColorTokenRow } from "./ColorTokenRow"
 // ---------------------------------------------------------------------------
 
 /** The 17 RGB color token keys rendered via ColorPicker rows. */
-const TOKEN_KEYS: (keyof ThemeColorTokens)[] = [
+const TOKEN_KEYS: ThemeRgbTokenKey[] = [
   "bg", "surface", "surface2", "elevated",
   "primary", "primaryStrong", "accent",
   "success", "warn", "danger", "muted",

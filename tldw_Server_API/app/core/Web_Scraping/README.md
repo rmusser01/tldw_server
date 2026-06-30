@@ -106,7 +106,7 @@
   - Provider quotas and per-request result caps; favor small `result_count` and pagination.
   - Some providers require self-hosted endpoints (Searx) or keys (Tavily). Bing is present in legacy code, but not exposed in the public schema.
   - Playwright requires a browser install; the service gracefully degrades when unavailable.
-- Roadmap/TODOs
+- Follow-up candidates
   - Consolidate duplicate web search logic with `core/WebSearch` and preserve unified tests.
   - Optional on-disk cache for search results and scraping responses to reduce egress and cost.
   - Expand structured relevance output to reduce regex-based parsing.

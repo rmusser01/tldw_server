@@ -35,6 +35,32 @@ CREATE INDEX IF NOT EXISTS idx_acp_audit_ts ON acp_audit_events(created_at);
 """
 
 
+def _normalize_retention_days(value: Any, *, default: int = 30) -> int:
+    """Return a non-negative retention window in days."""
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return max(0, int(default))
+
+
+def _event_timestamp_seconds(event: dict[str, Any]) -> float | None:
+    """Best-effort conversion of an audit event timestamp to epoch seconds."""
+    value = event.get("timestamp")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
 class ACPAuditDB:
     """SQLite-backed audit event store with in-memory hot cache."""
 
@@ -50,7 +76,7 @@ class ACPAuditDB:
                 "..", "..", "..", "Databases", "acp_audit.db",
             )
         self._db_path = os.path.abspath(db_path)
-        self._retention_days = retention_days
+        self._retention_days = _normalize_retention_days(retention_days)
         self._hot_cache: deque[dict[str, Any]] = deque(maxlen=hot_cache_size)
         self._write_buffer: list[dict[str, Any]] = []
         self._buffer_lock = threading.Lock()
@@ -195,19 +221,27 @@ class ACPAuditDB:
             ]
         return [dict(e) for e in self._hot_cache]
 
-    def purge_old_events(self) -> int:
+    def purge_old_events(self, *, now: float | None = None) -> int:
         """Remove events older than retention_days. Returns count deleted."""
         self._ensure_schema()
         conn = self._get_conn()
-        cutoff = time.time() - (self._retention_days * 86400)
-        cursor = conn.execute(
-            "DELETE FROM acp_audit_events WHERE created_at < ?",
-            (cutoff,),
-        )
-        conn.commit()
+        retention_days = _normalize_retention_days(self._retention_days)
+        self._retention_days = retention_days
+        cutoff = (time.time() if now is None else float(now)) - (retention_days * 86400)
+        with conn:
+            cursor = conn.execute(
+                "DELETE FROM acp_audit_events WHERE created_at < ?",
+                (cutoff,),
+            )
         deleted = cursor.rowcount
+        retained_hot_cache = []
+        for event in self._hot_cache:
+            event_timestamp = _event_timestamp_seconds(event)
+            if event_timestamp is None or event_timestamp >= cutoff:
+                retained_hot_cache.append(event)
+        self._hot_cache = deque(retained_hot_cache, maxlen=self._hot_cache.maxlen)
         if deleted:
-            logger.info("Purged {} old ACP audit events (retention={}d)", deleted, self._retention_days)
+            logger.info("Purged {} old ACP audit events (retention={}d)", deleted, retention_days)
         return deleted
 
     def close(self) -> None:
@@ -229,17 +263,41 @@ _audit_db: ACPAuditDB | None = None
 _audit_db_lock = threading.Lock()
 
 
+def _default_audit_retention_days() -> int:
+    """Resolve ACP audit retention from config with a safe default."""
+    raw = os.getenv("ACP_AUDIT_RETENTION_DAYS")
+    if raw:
+        try:
+            return max(0, int(raw))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid ACP_AUDIT_RETENTION_DAYS value {!r}; falling back to 30 days",
+                raw,
+            )
+            return 30
+    try:
+        from tldw_Server_API.app.core.Agent_Client_Protocol.config import load_acp_sandbox_config
+
+        return _normalize_retention_days(load_acp_sandbox_config().audit_retention_days)
+    except Exception as exc:
+        logger.warning("Failed to resolve ACP audit retention from config; falling back to 30 days: {}", exc)
+        return 30
+
+
 def get_acp_audit_db(
     db_path: str | None = None,
-    retention_days: int = 30,
+    retention_days: int | None = None,
 ) -> ACPAuditDB:
     """Get or create the module-level ACPAuditDB singleton."""
     global _audit_db
-    if _audit_db is None:
-        with _audit_db_lock:
-            if _audit_db is None:
-                _audit_db = ACPAuditDB(
-                    db_path=db_path,
-                    retention_days=retention_days,
-                )
+    with _audit_db_lock:
+        if _audit_db is None:
+            _audit_db = ACPAuditDB(
+                db_path=db_path,
+                retention_days=_default_audit_retention_days()
+                if retention_days is None
+                else retention_days,
+            )
+        elif retention_days is not None:
+            _audit_db._retention_days = _normalize_retention_days(retention_days)
     return _audit_db

@@ -81,6 +81,10 @@ describe("KnowledgeQAProvider streaming search", () => {
           diversity: 0.42,
           freshness: null,
         },
+        source_status: {
+          media_db: { status: "searched", count: 1 },
+          prompts: { status: "empty", count: 0, reason: "no_matching_entries" },
+        },
       }
       yield { type: "delta", text: "Hello" }
       await new Promise<void>((resolve) => {
@@ -133,6 +137,10 @@ describe("KnowledgeQAProvider streaming search", () => {
           topicality: 0.88,
           diversity: 0.42,
         }),
+        sourceStatus: {
+          media_db: { status: "searched", count: 1 },
+          prompts: { status: "empty", count: 0, reason: "no_matching_entries" },
+        },
       })
     )
     expect(ragSearchStreamMock).toHaveBeenCalledTimes(1)
@@ -214,6 +222,14 @@ describe("KnowledgeQAProvider streaming search", () => {
         coverage: "75",
       },
       metadata: {
+        source_status: {
+          media_db: { status: "searched", count: 1 },
+          world_books: {
+            status: "unavailable",
+            count: 0,
+            reason: "no_retriever_configured",
+          },
+        },
         web_fallback: {
           triggered: true,
           engine_used: "duckduckgo",
@@ -262,6 +278,14 @@ describe("KnowledgeQAProvider streaming search", () => {
         verificationRate: 0.8,
         verificationCoverage: 0.75,
         verificationReportAvailable: true,
+        sourceStatus: {
+          media_db: { status: "searched", count: 1 },
+          world_books: {
+            status: "unavailable",
+            count: 0,
+            reason: "no_retriever_configured",
+          },
+        },
         candidatesConsidered: 25,
         candidatesReturned: 1,
         candidatesRejected: 24,
@@ -275,6 +299,76 @@ describe("KnowledgeQAProvider streaming search", () => {
         ],
       })
     )
+    expect(trackMetricMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "search_complete",
+        used_streaming: false,
+        has_answer: true,
+      })
+    )
+  })
+
+  it("falls back to non-stream rag search when stream completes without usable evidence", async () => {
+    ragSearchStreamMock.mockImplementation(async function* () {
+      yield {
+        type: "contexts",
+        contexts: [],
+        source_status: {
+          notes: { status: "empty", count: 0, reason: "no_matching_entries" },
+        },
+      }
+    })
+    ragSearchMock.mockResolvedValue({
+      results: [
+        {
+          id: "note-scoped",
+          content: "Scoped note answers must stay inside the selected source.",
+          metadata: {
+            title: "Knowledge QA UAT Scoped Note",
+            source_type: "notes",
+            source_id: "note-scoped",
+          },
+          score: 0.91,
+        },
+      ],
+      generated_answer:
+        "Scoped note answers must stay inside the selected source [1].",
+      metadata: {
+        source_status: {
+          notes: { status: "searched", count: 1 },
+        },
+      },
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => {
+      await latestContext!.selectThread("local-empty-stream-fallback")
+    })
+
+    act(() => {
+      latestContext!.updateSetting("sources", ["notes"])
+      latestContext!.updateSetting("include_note_ids", ["note-scoped"])
+      latestContext!.setQuery("What does the selected note say?")
+    })
+
+    await act(async () => {
+      await latestContext!.search()
+    })
+
+    expect(ragSearchStreamMock).toHaveBeenCalledTimes(1)
+    expect(ragSearchMock).toHaveBeenCalledTimes(1)
+    expect(latestContext!.results).toHaveLength(1)
+    expect(latestContext!.results[0].id).toBe("note-scoped")
+    expect(latestContext!.answer).toBe(
+      "Scoped note answers must stay inside the selected source [1]."
+    )
+    expect(latestContext!.isSearching).toBe(false)
     expect(trackMetricMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "search_complete",
@@ -317,6 +411,62 @@ describe("KnowledgeQAProvider streaming search", () => {
     expect(latestContext!.results).toHaveLength(1)
     expect(latestContext!.answer).toBeNull()
     expect(latestContext!.isSearching).toBe(false)
+  })
+
+  it("removes out-of-scope local results without remapping surviving citation indexes", async () => {
+    ragSearchStreamMock.mockImplementation(async function* () {
+      throw new Error("stream endpoint unavailable")
+    })
+    ragSearchMock.mockResolvedValue({
+      results: [
+        {
+          id: "excluded-doc",
+          content: "Excluded evidence.",
+          metadata: { source_type: "media_db", source_id: "99" },
+          score: 0.92,
+        },
+        {
+          id: "allowed-doc",
+          content: "Allowed evidence.",
+          metadata: { source_type: "media_db", source_id: "42" },
+          score: 0.91,
+        },
+      ],
+      answer: "The excluded claim cites [1], while the scoped claim cites [2].",
+      metadata: {},
+    })
+
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => {
+      await latestContext!.selectThread("local-scope-validation")
+    })
+
+    act(() => {
+      latestContext!.updateSetting("sources", ["media_db"])
+      latestContext!.updateSetting("include_media_ids", [42])
+      latestContext!.updateSetting("enable_web_fallback", false)
+      latestContext!.setQuery("only selected source")
+    })
+
+    await act(async () => {
+      await latestContext!.search()
+    })
+
+    expect(latestContext!.results).toHaveLength(1)
+    expect(latestContext!.results[0].id).toBe("allowed-doc")
+    expect(latestContext!.results[0].metadata?.original_result_index).toBe(1)
+    expect(latestContext!.citations).toEqual([
+      expect.objectContaining({ index: 2, documentId: "allowed-doc" }),
+    ])
+    expect(latestContext!.queryWarning).toBe(
+      "Some returned sources were hidden because they were outside the selected source scope."
+    )
   })
 
   it("surfaces query-length warning when a submitted query exceeds backend limits", async () => {

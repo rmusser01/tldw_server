@@ -1,6 +1,7 @@
 import React from "react"
-import { Alert, Button, Empty, Spin } from "antd"
+import { Button, Empty, Spin } from "antd"
 
+import { Alert } from "@/components/ui/primitives"
 import type { Deck, Flashcard, FlashcardBulkUpdateItem, FlashcardBulkUpdateResponse } from "@/services/flashcards"
 import { FlashcardDocumentRow } from "./FlashcardDocumentRow"
 import type { DocumentQueryFilterContext } from "../utils/document-cache-policy"
@@ -82,13 +83,13 @@ export const FlashcardDocumentView: React.FC<FlashcardDocumentViewProps> = ({
     >
       {isTruncated && (
         <Alert
-          showIcon
-          type="warning"
+          variant="warning"
           className="m-3"
           title="Document results are truncated to the current scan limit."
-          description="Refine filters or reduce tags to enable selecting across the full result set."
           data-testid="flashcards-document-truncation-banner"
-        />
+        >
+          Refine filters or reduce tags to enable selecting across the full result set.
+        </Alert>
       )}
 
       <div className="divide-y divide-border">

@@ -881,6 +881,9 @@ describe("extension entry shell performance contracts", () => {
     )
     expect(documentWorkspacePageSource).toContain('import("./DocumentViewer")')
     expect(documentWorkspacePageSource).toContain(
+      'import("./LeftSidebar/PagesTab")',
+    )
+    expect(documentWorkspacePageSource).toContain(
       'import("./LeftSidebar/ReferencesTab")',
     )
     expect(documentWorkspacePageSource).toContain(
@@ -1346,7 +1349,7 @@ describe("extension entry shell performance contracts", () => {
     expect(studioTabContainerSource).toContain("renderStudioSubTab")
   })
 
-  it("defers secondary research workspace panes behind route-local lazy boundaries", () => {
+  it("defers secondary workspace playground panes behind route-local lazy boundaries", () => {
     expect(researchWorkspaceSource).not.toContain(
       'import { SourcesPane } from "./SourcesPane"',
     )

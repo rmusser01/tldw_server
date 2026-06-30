@@ -3,7 +3,13 @@
     "serverAndAuth": "Server og godkendelse",
     "knowledgeTools": "Videnværktøjer",
     "workspace": "Arbejdsområde",
-    "about": "Om"
+    "about": "Om",
+    "connect": "Forbindelse",
+    "aiModels": "AI og modeller",
+    "experience": "Oplevelse",
+    "knowledgeWorkspace": "Viden og arbejdsområde",
+    "safetyAdmin": "Sikkerhed og administration",
+    "dataManagement": "Datahåndtering"
   },
   "healthNav": "Sundhed",
   "worldBooksNav": "Verdensbøger",
@@ -1659,5 +1665,11 @@
     "subtitle": "Konfigurer standarder, forudindstillinger og adfærd for hurtig import."
   },
   "acpPlaygroundNav": "ACP-legeplads",
-  "skillsNav": "Færdigheder"
+  "skillsNav": "Færdigheder",
+  "providerKeys": {
+    "navTitle": "Udbydernøgler"
+  },
+  "dataManagement": {
+    "navTitle": "Datahåndtering"
+  }
 }

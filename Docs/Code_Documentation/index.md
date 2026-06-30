@@ -39,6 +39,7 @@ Use the links below to jump to common areas, or the sidebar to browse all topics
 
 ## Voice Assistant
 - Voice Assistant Module: VoiceAssistant_Module.md
+- Persona Visual Packs: Persona_Visual_Packs.md
 
 ## Evaluations
 - Evaluations Developer Guide: Evaluations_Developer_Guide.md

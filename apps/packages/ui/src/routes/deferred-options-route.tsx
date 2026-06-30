@@ -5,6 +5,7 @@ import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import { platformConfig } from "@/config/platform"
 import { isRouteEnabledForCapabilities } from "@/routes/route-capabilities"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
+import type { ServerCapabilities } from "@/services/tldw/server-capabilities"
 
 import { RouteNotFoundState } from "./app-route"
 import { isHostedVisibleOptionPath } from "./option-route-visibility"
@@ -12,7 +13,7 @@ import type { RouteDefinition } from "./route-registry"
 
 type DeferredOptionsRouteProps = {
   attemptedRoute: string
-  capabilities: unknown
+  capabilities: ServerCapabilities
   capabilitiesLoading: boolean
   label: string
   description: string

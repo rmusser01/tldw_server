@@ -2,12 +2,21 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import { Popover } from "antd"
 import {
+  BookText,
   Globe,
   MicIcon,
   Search,
+  Sparkles,
   Gauge,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Users
 } from "lucide-react"
+
+export type ComposerToolbarRolePlayActions = {
+  onOpenSystemPrompts?: () => void
+  onOpenGenerationStyle?: () => void
+  onOpenRolePlaySetup?: () => void
+}
 
 export type ComposerToolbarOverflowProps = {
   isProMode: boolean
@@ -27,6 +36,7 @@ export type ComposerToolbarOverflowProps = {
   onDictationToggle: () => void
   temporaryChat: boolean
   onFocusConnectionCard: () => void
+  rolePlayActions?: ComposerToolbarRolePlayActions
 }
 
 /** Overflow menu item for toolbar actions */
@@ -76,7 +86,8 @@ export const ComposerToolbarOverflow = React.memo(function ComposerToolbarOverfl
     voiceChatEnabled,
     onDictationToggle,
     temporaryChat,
-    onFocusConnectionCard
+    onFocusConnectionCard,
+    rolePlayActions
   } = props
 
   const [overflowOpen, setOverflowOpen] = React.useState(false)
@@ -96,6 +107,40 @@ export const ComposerToolbarOverflow = React.memo(function ComposerToolbarOverfl
         active={contextToolsOpen}
       />
     )
+    if (rolePlayActions?.onOpenSystemPrompts) {
+      items.push(
+        <OverflowItem
+          key="system-prompts"
+          icon={<BookText className="w-3.5 h-3.5" />}
+          label={t("playground:templates.button", "System prompts") as string}
+          onClick={rolePlayActions.onOpenSystemPrompts}
+        />
+      )
+    }
+    if (rolePlayActions?.onOpenGenerationStyle) {
+      items.push(
+        <OverflowItem
+          key="generation-style"
+          icon={<Sparkles className="w-3.5 h-3.5" />}
+          label={
+            t("playground:presets.generationStyle", "Generation style") as string
+          }
+          onClick={rolePlayActions.onOpenGenerationStyle}
+        />
+      )
+    }
+    if (rolePlayActions?.onOpenRolePlaySetup) {
+      items.push(
+        <OverflowItem
+          key="role-play-setup"
+          icon={<Users className="w-3.5 h-3.5" />}
+          label={
+            t("playground:composer.rolePlaySetup", "Role-play setup") as string
+          }
+          onClick={rolePlayActions.onOpenRolePlaySetup}
+        />
+      )
+    }
     if (hasWebSearch) {
       items.push(
         <OverflowItem
@@ -146,7 +191,7 @@ export const ComposerToolbarOverflow = React.memo(function ComposerToolbarOverfl
     }
     return items
   }, [
-    contextToolsOpen, onToggleKnowledgePanel, hasWebSearch, webSearch,
+    contextToolsOpen, onToggleKnowledgePanel, rolePlayActions, hasWebSearch, webSearch,
     onToggleWebSearch, hasDictation, speechAvailable,
     speechUsesServer, isServerDictating, isListening, voiceChatEnabled,
     onDictationToggle, onOpenModelSettings, isProMode, temporaryChat,
@@ -169,7 +214,9 @@ export const ComposerToolbarOverflow = React.memo(function ComposerToolbarOverfl
     >
       <button
         type="button"
+        onMouseDown={(event) => event.preventDefault()}
         aria-label={t("common:moreActions", "More options") as string}
+        aria-expanded={overflowOpen}
         className="inline-flex h-9 w-9 items-center justify-center rounded-md text-text-muted transition hover:bg-surface2 hover:text-text"
       >
         <SlidersHorizontal className="h-4 w-4" />

@@ -8,6 +8,7 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
 
 - Capabilities
   - Unified evaluations: model-graded, exact/includes/fuzzy match, GEval, RAG, response quality, propositions, OCR, label_choice, nli_factcheck
+  - Persona dialogue-tree robustness recipe for defensive persona/character red-team suites
   - Datasets and runs: CRUD, pagination, idempotent create/run, run cancellation, history
   - Embeddings A/B testing: create/run tests, status/results, significance, reranker toggles
   - Webhooks: registration, status, test helpers; delivery metrics
@@ -18,25 +19,11 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
   - Output: structured responses (scores/metrics/results); streaming available where applicable
 
 - Related Endpoints (examples)
-  - Router base: /api/v1/evaluations — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:90
-  - CRUD: POST `/api/v1/evaluations` — tldw_Server_API/app/api/v1/endpoints/evaluations_crud.py:29
-  - CRUD: GET `/api/v1/evaluations` — tldw_Server_API/app/api/v1/endpoints/evaluations_crud.py:84
-  - CRUD: GET `/api/v1/evaluations/{eval_id}` — tldw_Server_API/app/api/v1/endpoints/evaluations_crud.py:118
-  - CRUD: PATCH `/api/v1/evaluations/{eval_id}` — tldw_Server_API/app/api/v1/endpoints/evaluations_crud.py:142
-  - CRUD: DELETE `/api/v1/evaluations/{eval_id}` — tldw_Server_API/app/api/v1/endpoints/evaluations_crud.py:160
-  - Runs: POST `/api/v1/evaluations/{eval_id}/runs` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:1035
-  - GEval: POST `/api/v1/evaluations/geval` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:1144
-  - RAG: POST `/api/v1/evaluations/rag` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:1332
-  - Response Quality: POST `/api/v1/evaluations/response-quality` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:1475
-  - Propositions: POST `/api/v1/evaluations/propositions` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:1635
-  - OCR: POST `/api/v1/evaluations/ocr` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:2059
-  - OCR (PDF): POST `/api/v1/evaluations/ocr-pdf` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:2118
-  - Batch: POST `/api/v1/evaluations/batch` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:1781
-  - History: POST `/api/v1/evaluations/history` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:2234
-  - Rate limits: GET `/api/v1/evaluations/rate-limits` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:644
-  - Admin: POST `/api/v1/evaluations/admin/idempotency/cleanup` — tldw_Server_API/app/api/v1/endpoints/evaluations_unified.py:140
-  - Webhooks: POST `/api/v1/evaluations/webhooks` — tldw_Server_API/app/api/v1/endpoints/evaluations_webhooks.py:41
-  - Emb. A/B: POST `/api/v1/evaluations/embeddings/abtest` — tldw_Server_API/app/api/v1/endpoints/evaluations_embeddings_abtest.py:42
+  - Router base: `/api/v1/evaluations` - `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_unified.py`
+  - CRUD: POST/GET/PATCH/DELETE `/api/v1/evaluations...` - `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_crud.py`
+  - Runs and evaluator routes: `/runs`, `/geval`, `/rag`, `/response-quality`, `/propositions`, `/ocr`, `/ocr-pdf`, `/batch`, `/history`, `/rate-limits`, and admin idempotency cleanup - `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_unified.py`
+  - Webhooks: POST `/api/v1/evaluations/webhooks` - `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_webhooks.py`
+  - Emb. A/B: POST `/api/v1/evaluations/embeddings/abtest` - `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_embeddings_abtest.py`
 
 - Related Schemas (key models)
   - Create/Update/Get Evaluation — tldw_Server_API/app/api/v1/schemas/evaluation_schemas_unified.py:239, 257, 264
@@ -54,6 +41,8 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
   - Unified router aggregates CRUD, run management, evaluator-specific routes, webhooks, rate limits, admin ops
   - Service layer: `unified_evaluation_service.py` orchestrates evaluators, DB adapters, and async work
   - Evaluation types map to dedicated evaluators (e.g., `rag_evaluator.py`, `response_quality_evaluator.py`, `ocr_evaluator.py`)
+  - Persona dialogue-tree robustness runs through `recipes/persona_dialogue_tree_robustness.py` and `PersonaRobustnessEval`. It is defensive only: it tests persona drift, prompt injection, unsafe tool plans, privacy/redaction, and grounded refusal behavior.
+  - Recipe execution must use Evaluations run records and the existing Jobs worker path. Persona modules may expose thin convenience wrappers later, but must not create a parallel eval/run/status system.
 
 - Key Components
   - Service & managers: `unified_evaluation_service.py`, `evaluation_manager.py`, `webhook_manager.py`, `user_rate_limiter.py`
@@ -68,7 +57,7 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
 
 - Configuration & AuthNZ
   - Rate limits: `evaluations_auth.check_evaluation_rate_limit`; per-user limits + `GET /rate-limits`
-  - RBAC: `rbac_rate_limit`, `require_token_scope` on sensitive endpoints; admin checks for A/B runs and cleanup
+  - RBAC: `rbac_rate_limit`, `TokenScopeGuard` on sensitive endpoints; admin checks for A/B runs and cleanup
   - Canonical identity: route and Jobs code should derive one `EvaluationIdentity` via `get_evaluation_identity()` / `evaluations_identity_from_user()` and then use:
     - `user_scope` for per-user service binding and DB path selection
     - `created_by` for ownership filters and idempotency rows
@@ -84,12 +73,15 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
 
 - Concurrency & Performance
   - Async evaluators; background tasks for long-running processes (A/B runs)
+  - User-visible persona dialogue-tree recipe runs should use Jobs for status, cancellation, retries, and run history rather than ad-hoc background tasks
   - Batch endpoint parallel mode honors strict fail-fast when `continue_on_error=false` (cancel remaining work and stop scheduling new items)
   - Connection pooling and circuit breakers; streaming where supported
 
 - Error Handling & Security
   - Standardized error responses via `create_error_response`; input sanitization in schemas
   - Webhook delivery tracking, retries, and stats; safe URL handling and secrets
+  - Persona dialogue-tree traces/reports are redacted before persistence. Red-team fixtures are isolated evaluation inputs and must never be written into persona memory, exemplar stores, state docs, or chat history.
+  - LLM judges for persona dialogue-tree work are offline-only by default. They can score or soft-prune candidates, but deterministic policy/safety checks remain the only hard blockers and judges cannot authorize actions.
 
 ## 3. Developer-Related/Relevant Information for Contributors
 
@@ -100,14 +92,16 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
 
 - Extension Points
   - Add a new evaluator: implement in `Evaluations/` and register in service/registry
-  - Add endpoints: extend `evaluations_unified.py` (or split modules) and add schemas
+  - Add endpoints: extend `tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_unified.py` (or split modules under that endpoint package) and add schemas
   - Extend A/B: update `embeddings_abtest_service.py` + schemas; update repository queries
+  - Extend persona dialogue-tree evaluations by adding scenarios to the recipe/harness and keeping target normalization compatible with both persona and character payloads
 
 - Tests (useful suites)
   - Integration/API: `tldw_Server_API/tests/Evaluations/integration/test_api_endpoints.py`
   - Unified/e2e: `tldw_Server_API/tests/Evaluations/test_evaluations_unified.py`, `tldw_Server_API/tests/e2e/test_evaluations_workflow.py`
   - OCR/RAG/Propositions: `tldw_Server_API/tests/Evaluations/test_ocr_metrics.py`, `test_rag_pipeline_runner.py`, `test_proposition_evaluations.py`
   - A/B tests: `tldw_Server_API/tests/Evaluations/test_embeddings_abtest_idempotency.py`, `embeddings_abtest/test_scaffold.py`
+  - Persona dialogue-tree recipe: `tldw_Server_API/tests/Evaluations/test_persona_dialogue_tree_recipe.py`, `test_persona_dialogue_tree_recipe_jobs_worker.py`
   - DB/CRUD (Postgres+SQLite): `tldw_Server_API/tests/Evaluations/test_evaluations_postgres_crud.py`, `tests/DB_Management/test_evaluations_unified_and_crud.py`
 
 - Local Dev Tips
@@ -492,7 +486,7 @@ evaluation:
 
 - **[User Guide](EVALS_USER_GUIDE.md)**: Comprehensive user documentation
 - **[Developer Guide](EVALS_DEVELOPER_GUIDE.md)**: Architecture and extension guide
-- **[API Reference](api_reference.md)**: Complete API documentation
+- **[API Reference](../../../../Docs/API-related/Evaluations_API_Unified_Reference.md)**: Complete API documentation
 
 ## 🧪 Testing
 
@@ -501,7 +495,7 @@ evaluation:
 pytest tests/Evaluations/
 
 # Run specific test
-pytest tests/Evaluations/test_benchmark_utils.py -v
+pytest tests/Evaluations/test_evaluations_benchmarks_api.py -v
 
 # Run with coverage
 pytest tests/Evaluations/ --cov=app.core.Evaluations --cov-report=html
@@ -512,7 +506,7 @@ pytest tests/Evaluations/ -m integration
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md).
+We welcome contributions! Please see our [Contributing Guidelines](../../../../CONTRIBUTING.md).
 
 ### Adding a New Benchmark
 

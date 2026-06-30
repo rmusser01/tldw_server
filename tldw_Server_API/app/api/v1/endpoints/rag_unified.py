@@ -11,23 +11,19 @@ import inspect
 import json
 import os
 import time
-import types
 from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_request_user, rbac_rate_limit, RequirePermission, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    check_rate_limit,
-    get_auth_principal,
-    rbac_rate_limit,
-    require_permissions,
-    require_token_scope,
-)
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 
 # Dependencies
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
@@ -35,6 +31,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
     ImplicitFeedbackEvent,
+    KnowledgeSourceHealthResponse,
     UnifiedBatchRequest,
     UnifiedBatchResponse,
     UnifiedRAGRequest,
@@ -42,21 +39,41 @@ from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import (
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     AgenticConfig,
     agentic_rag_pipeline,
+)
+from tldw_Server_API.app.core.RAG.rag_service.agentic_execution import (
+    build_agentic_execution_context,
 )
 from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
     MultiDatabaseRetriever,
     RetrievalConfig,
 )
 from tldw_Server_API.app.core.RAG.rag_service.generation import generate_streaming_response
-from tldw_Server_API.app.core.RAG.rag_service.profiles import get_profile_kwargs
-from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
-from tldw_Server_API.app.core.config import get_config_value
+from tldw_Server_API.app.core.RAG.rag_service.request_bundle import (
+    ResolvedRequestBundle,
+    build_request_bundle,
+)
+from tldw_Server_API.app.core.RAG.rag_service.request_resolution import (
+    ResolvedRAGRequest,
+    resolve_rag_request,
+)
+from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import (
+    RetrievalPlan,
+    build_retrieval_plan,
+)
+from tldw_Server_API.app.core.RAG.rag_service.response_mapping import (
+    rag_result_from_unified_search_result,
+    rag_result_to_response,
+)
+from tldw_Server_API.app.core.RAG.rag_service.source_health import build_source_health_entries
+from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import stream_rag_events
+from tldw_Server_API.app.core.config import get_config_value, settings
 
 # Unified Pipeline
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
@@ -67,26 +84,6 @@ from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     unified_rag_pipeline,
 )
 
-
-_SEARCH_AGENT_BOOL_DEFAULTS: tuple[tuple[str, str, str], ...] = (
-    ("enable_query_classification", "SEARCH_QUERY_CLASSIFICATION", "search_query_classification"),
-    ("enable_query_reformulation", "SEARCH_QUERY_REFORMULATION", "search_query_reformulation"),
-    ("enable_research_loop", "SEARCH_RESEARCH_LOOP", "search_research_loop"),
-    ("enable_discussion_search", "SEARCH_DISCUSSIONS_ENABLED", "search_discussions_enabled"),
-    ("enable_research_progress", "SEARCH_PROGRESS_STREAMING", "search_progress_streaming"),
-    ("search_url_scraping", "SEARCH_URL_SCRAPING", "search_url_scraping"),
-    ("enable_suggestions", "SEARCH_SUGGESTIONS", "search_suggestions"),
-    ("enable_structured_response", "SEARCH_STRUCTURED_RESPONSE", "search_structured_response"),
-    ("enable_image_search", "SEARCH_IMAGE_SEARCH", "search_image_search"),
-    ("enable_video_search", "SEARCH_VIDEO_SEARCH", "search_video_search"),
-)
-_SEARCH_AGENT_INT_DEFAULTS: tuple[tuple[str, str, str], ...] = (
-    ("research_max_iterations", "SEARCH_MAX_ITERATIONS", "search_max_iterations"),
-    ("research_max_iterations_speed", "SEARCH_MAX_ITERATIONS_SPEED", "search_max_iterations_speed"),
-    ("research_max_iterations_balanced", "SEARCH_MAX_ITERATIONS_BALANCED", "search_max_iterations_balanced"),
-    ("research_max_iterations_quality", "SEARCH_MAX_ITERATIONS_QUALITY", "search_max_iterations_quality"),
-)
-_SEARCH_AGENT_MODE_VALUES = {"speed", "balanced", "quality"}
 _BATCH_ROUND2_DEFAULT_FIELDS = {
     "enable_suggestions",
     "enable_structured_response",
@@ -94,22 +91,68 @@ _BATCH_ROUND2_DEFAULT_FIELDS = {
     "enable_video_search",
 }
 
+_READY_MEDIA_COLLECTION_STATUSES = frozenset({"completed", "skipped_existing"})
+_EMPTY_MEDIA_SCOPE_SENTINEL = -1
 
-def _request_fields_set(request: Any) -> set[str]:
-    """Return fields explicitly provided by the caller."""
-    raw_fields = getattr(request, "model_fields_set", None)
-    if raw_fields is None:
-        raw_fields = getattr(request, "__fields_set__", None)
-    if raw_fields is None:
-        return set()
+
+def _copy_rag_request_with_updates(
+    request: UnifiedRAGRequest,
+    updates: dict[str, Any],
+) -> UnifiedRAGRequest:
+    """Return a copy of a RAG request using the active Pydantic compatibility API."""
+    model_copy = getattr(request, "model_copy", None)
+    if callable(model_copy):
+        return model_copy(update=updates)
+    return request.copy(update=updates)
+
+
+def _ready_media_ids_from_collection(collection: Any) -> list[int]:
+    """Extract ordered, unique ready media IDs from a durable media collection row."""
+    ready_ids: list[int] = []
+    seen: set[int] = set()
+    for item in getattr(collection, "items", []) or []:
+        if getattr(item, "status", None) not in _READY_MEDIA_COLLECTION_STATUSES:
+            continue
+        media_id = getattr(item, "media_id", None)
+        if not isinstance(media_id, int) or media_id <= 0 or media_id in seen:
+            continue
+        ready_ids.append(media_id)
+        seen.add(media_id)
+    return ready_ids
+
+
+def _apply_media_collection_scope(
+    request: UnifiedRAGRequest,
+    collections_db: CollectionsDatabase,
+) -> UnifiedRAGRequest:
+    """Resolve request.collection_id to backend-owned ready media IDs for RAG retrieval."""
+    collection_id = getattr(request, "collection_id", None)
+    if collection_id is None:
+        return request
+
     try:
-        return {str(name) for name in raw_fields}
-    except (TypeError, ValueError):
-        return set()
+        collection = collections_db.get_media_collection(int(collection_id))
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="media_collection_not_found",
+        ) from exc
+    ready_media_ids = _ready_media_ids_from_collection(collection)
+    explicit_media_ids = request.include_media_ids
+    if explicit_media_ids is not None:
+        ready_set = set(ready_media_ids)
+        scoped_media_ids = [
+            int(media_id)
+            for media_id in explicit_media_ids
+            if isinstance(media_id, int) and media_id in ready_set
+        ]
+    else:
+        scoped_media_ids = ready_media_ids
 
+    if not scoped_media_ids:
+        scoped_media_ids = [_EMPTY_MEDIA_SCOPE_SENTINEL]
 
-def _is_truthy_value(raw: Any) -> bool:
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    return _copy_rag_request_with_updates(request, {"include_media_ids": scoped_media_ids})
 
 
 def _search_agent_setting(env_key: str, config_key: str) -> Optional[str]:
@@ -123,170 +166,184 @@ def _search_agent_setting(env_key: str, config_key: str) -> Optional[str]:
         return None
 
 
-def _parse_csv_or_json_list(raw: Any) -> Optional[list[str]]:
-    if raw is None:
-        return None
-    text = str(raw).strip()
-    if not text:
-        return None
-    if text.startswith("["):
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, list):
-                values = [str(item).strip() for item in parsed if str(item).strip()]
-                return values or None
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-    values = [item.strip() for item in text.split(",") if item.strip()]
-    return values or None
-
-
-def _parse_int_or_none(raw: Any) -> Optional[int]:
-    if raw is None:
-        return None
-    try:
-        return int(str(raw).strip())
-    except (TypeError, ValueError):
-        return None
-
-
-def _apply_search_agent_defaults(
-    request: Any,
-    payload: dict[str, Any],
-    *,
-    allowed_fields: Optional[set[str]] = None,
-) -> None:
-    """Apply Search-Agent defaults for fields omitted by the caller."""
-    explicit_fields = _request_fields_set(request)
-
-    for field_name, env_key, cfg_key in _SEARCH_AGENT_BOOL_DEFAULTS:
-        if allowed_fields is not None and field_name not in allowed_fields:
-            continue
-        if field_name in explicit_fields:
-            continue
-        raw_value = _search_agent_setting(env_key, cfg_key)
-        if raw_value is None:
-            continue
-        payload[field_name] = _is_truthy_value(raw_value)
-
-    if (allowed_fields is None or "search_depth_mode" in allowed_fields) and "search_depth_mode" not in explicit_fields:
-        raw_mode = _search_agent_setting("SEARCH_DEFAULT_MODE", "search_default_mode")
-        if raw_mode is not None:
-            mode = str(raw_mode).strip().lower()
-            if mode in _SEARCH_AGENT_MODE_VALUES:
-                payload["search_depth_mode"] = mode
-
-    if (allowed_fields is None or "discussion_platforms" in allowed_fields) and "discussion_platforms" not in explicit_fields:
-        raw_platforms = _search_agent_setting("SEARCH_DISCUSSION_PLATFORMS", "search_discussion_platforms")
-        parsed_platforms = _parse_csv_or_json_list(raw_platforms)
-        if parsed_platforms is not None:
-            payload["discussion_platforms"] = parsed_platforms
-
-    if (allowed_fields is None or "classifier_provider" in allowed_fields) and "classifier_provider" not in explicit_fields:
-        raw_provider = _search_agent_setting("SEARCH_CLASSIFIER_PROVIDER", "search_classifier_provider")
-        if raw_provider is not None and str(raw_provider).strip():
-            payload["classifier_provider"] = str(raw_provider).strip()
-
-    if (allowed_fields is None or "classifier_model" in allowed_fields) and "classifier_model" not in explicit_fields:
-        raw_model = _search_agent_setting("SEARCH_CLASSIFIER_MODEL", "search_classifier_model")
-        if raw_model is not None and str(raw_model).strip():
-            payload["classifier_model"] = str(raw_model).strip()
-
-    for field_name, env_key, cfg_key in _SEARCH_AGENT_INT_DEFAULTS:
-        if allowed_fields is not None and field_name not in allowed_fields:
-            continue
-        if field_name in explicit_fields:
-            continue
-        raw_value = _search_agent_setting(env_key, cfg_key)
-        parsed_value = _parse_int_or_none(raw_value)
-        if parsed_value is None:
-            continue
-        if field_name == "research_max_iterations":
-            if parsed_value > 0:
-                payload[field_name] = parsed_value
-            continue
-        if parsed_value >= 0:
-            payload[field_name] = parsed_value
-
-
-def _apply_rag_profile_defaults(
-    request: Any,
-    payload: dict[str, Any],
-    *,
-    allowed_fields: Optional[set[str]] = None,
-) -> None:
-    """Apply rag_profile defaults for fields omitted by the caller."""
-    profile_name = getattr(request, "rag_profile", None)
-    if not profile_name:
-        return
-
-    explicit_fields = _request_fields_set(request)
-    try:
-        profile_defaults = get_profile_kwargs(profile_name)
-    except ValueError:
-        logger.warning(f"Skipping unknown rag_profile '{profile_name}' while building payload defaults")
-        return
-
-    for field_name, value in profile_defaults.items():
-        if allowed_fields is not None and field_name not in allowed_fields:
-            continue
-        if field_name in explicit_fields:
-            continue
-        payload[field_name] = value
-
-
-def _build_effective_request_payload(
-    request: Any,
-    *,
-    allowed_search_agent_fields: Optional[set[str]] = None,
-    allowed_profile_fields: Optional[set[str]] = None,
-) -> dict[str, Any]:
-    """Resolve effective payload with explicit > profile > search-agent > schema defaults."""
-    payload = model_dump_compat(request)
-    _apply_search_agent_defaults(
-        request,
-        payload,
-        allowed_fields=allowed_search_agent_fields,
-    )
-    _apply_rag_profile_defaults(
-        request,
-        payload,
-        allowed_fields=allowed_profile_fields,
-    )
-    return payload
-
-
 def _build_unified_pipeline_kwargs(
     request: UnifiedRAGRequest,
     db_paths: dict[str, Optional[str]],
     media_db: Any,
     chacha_db: CharactersRAGDB,
     current_user: Optional[User],
+    prompts_db: Optional[PromptsDatabase] = None,
+    resolved_request: Optional[ResolvedRAGRequest] = None,
+    retrieval_plan: Optional[RetrievalPlan] = None,
 ) -> dict[str, Any]:
-    payload = _build_effective_request_payload(request)
+    """Translate a resolved standard request into core pipeline keyword arguments."""
+    if resolved_request is None:
+        resolved_request = resolve_rag_request(
+            request,
+            current_user=current_user,
+            single_user_id_resolver=DatabasePaths.get_single_user_id,
+            search_agent_setting_fn=_search_agent_setting,
+        )
+    if retrieval_plan is None:
+        retrieval_plan = build_retrieval_plan(resolved_request)
+    payload = dict(resolved_request.payload)
+    payload["sources"] = list(retrieval_plan.sources)
     payload["media_db_path"] = db_paths.get("media_db_path")
     payload["notes_db_path"] = db_paths.get("notes_db_path")
     payload["character_db_path"] = db_paths.get("character_db_path")
     payload["kanban_db_path"] = db_paths.get("kanban_db_path")
+    payload["prompts_db_path"] = db_paths.get("prompts_db_path")
     payload["media_db"] = media_db
     payload["chacha_db"] = chacha_db
-    payload["index_namespace"] = request.index_namespace or request.corpus
-    resolved_storage_user_id = _resolve_implicit_feedback_user_id(None, current_user)
-    if resolved_storage_user_id is None:
-        resolved_storage_user_id = _resolve_implicit_feedback_user_id(
-            payload.get("user_id"), current_user
-        )
-    payload["user_id"] = resolved_storage_user_id
-    payload["feedback_user_id"] = (
-        _resolve_implicit_feedback_user_id(payload.get("feedback_user_id"), current_user)
-        or resolved_storage_user_id
-    )
+    if prompts_db is not None:
+        payload["prompts_db"] = prompts_db
+    payload["index_namespace"] = retrieval_plan.index_namespace
+    payload["retrieval_plan"] = retrieval_plan
+    payload["user_id"] = resolved_request.user_id
+    payload["feedback_user_id"] = resolved_request.feedback_user_id
     signature = inspect.signature(unified_rag_pipeline)
     params = list(signature.parameters.values())
     if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
         return payload
     allowed = set(signature.parameters.keys())
     return {k: v for k, v in payload.items() if k in allowed}
+
+
+def _build_batch_pipeline_kwargs(
+    request: UnifiedBatchRequest,
+    db_paths: dict[str, Optional[str]],
+    current_user: Optional[User],
+    resolved_request: Optional[ResolvedRAGRequest] = None,
+    retrieval_plan: Optional[RetrievalPlan] = None,
+) -> dict[str, Any]:
+    """Translate a resolved batch request into shared batch pipeline options."""
+    if resolved_request is None:
+        resolved_request = resolve_rag_request(
+            request,
+            current_user=current_user,
+            single_user_id_resolver=DatabasePaths.get_single_user_id,
+            search_agent_setting_fn=_search_agent_setting,
+            search_agent_allowed_fields=_BATCH_ROUND2_DEFAULT_FIELDS,
+        )
+    if retrieval_plan is None:
+        retrieval_plan = build_retrieval_plan(resolved_request)
+    payload = dict(resolved_request.payload)
+    payload.pop("queries", None)
+    payload.pop("query", None)
+    payload.pop("max_concurrent", None)
+    payload.pop("enable_checkpoint", None)
+    payload["sources"] = list(retrieval_plan.sources)
+    payload.update(db_paths)
+    payload["index_namespace"] = retrieval_plan.index_namespace
+    payload["retrieval_plan"] = retrieval_plan
+    payload["user_id"] = resolved_request.user_id
+    payload["feedback_user_id"] = resolved_request.feedback_user_id
+    return payload
+
+
+def _build_standard_request_bundle(
+    request: UnifiedRAGRequest,
+    *,
+    current_user: Optional[User],
+    db_paths: dict[str, Optional[str]],
+    media_db: Any,
+    chacha_db: CharactersRAGDB,
+    prompts_db: Optional[PromptsDatabase] = None,
+) -> ResolvedRequestBundle:
+    """Resolve a standard request once and attach endpoint-owned pipeline resources."""
+    return build_request_bundle(
+        request=request,
+        current_user=current_user,
+        resolve_request_kwargs={
+            "single_user_id_resolver": DatabasePaths.get_single_user_id,
+            "search_agent_setting_fn": _search_agent_setting,
+        },
+        pipeline_kwargs_builder=lambda *, resolved_request, retrieval_plan: _build_unified_pipeline_kwargs(
+            request=request,
+            db_paths=db_paths,
+            media_db=media_db,
+            chacha_db=chacha_db,
+            prompts_db=prompts_db,
+            current_user=current_user,
+            resolved_request=resolved_request,
+            retrieval_plan=retrieval_plan,
+        ),
+    )
+
+
+def _build_batch_request_bundle(
+    request: UnifiedBatchRequest,
+    *,
+    current_user: Optional[User],
+    db_paths: dict[str, Optional[str]],
+) -> ResolvedRequestBundle:
+    """Resolve a batch request once and attach endpoint-owned pipeline paths."""
+    return build_request_bundle(
+        request=request,
+        current_user=current_user,
+        resolve_request_kwargs={
+            "single_user_id_resolver": DatabasePaths.get_single_user_id,
+            "search_agent_setting_fn": _search_agent_setting,
+            "search_agent_allowed_fields": _BATCH_ROUND2_DEFAULT_FIELDS,
+        },
+        pipeline_kwargs_builder=lambda *, resolved_request, retrieval_plan: _build_batch_pipeline_kwargs(
+            request=request,
+            db_paths=db_paths,
+            current_user=current_user,
+            resolved_request=resolved_request,
+            retrieval_plan=retrieval_plan,
+        ),
+    )
+
+
+def _build_resume_batch_request(
+    checkpoint_config: dict[str, Any],
+    *,
+    remaining_queries: list[str],
+    max_concurrent: int,
+) -> UnifiedBatchRequest:
+    """Rebuild a batch request from persisted checkpoint config and remaining work."""
+    request_payload = dict(checkpoint_config or {})
+    request_payload["queries"] = list(remaining_queries)
+    request_payload["max_concurrent"] = max_concurrent
+    request_payload["enable_checkpoint"] = False
+    return UnifiedBatchRequest(**request_payload)
+
+
+_CHECKPOINT_UNSUPPORTED = object()
+
+
+def _checkpoint_safe_value(value: Any) -> Any:
+    """Return a JSON-persistable checkpoint value or the unsupported sentinel."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        safe: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, (str, int, float, bool)):
+                continue
+            safe_item = _checkpoint_safe_value(item)
+            if safe_item is not _CHECKPOINT_UNSUPPORTED:
+                safe[str(key)] = safe_item
+        return safe
+    if isinstance(value, (list, tuple)):
+        safe_items: list[Any] = []
+        for item in value:
+            safe_item = _checkpoint_safe_value(item)
+            if safe_item is not _CHECKPOINT_UNSUPPORTED:
+                safe_items.append(safe_item)
+        return safe_items
+    return _CHECKPOINT_UNSUPPORTED
+
+
+def _sanitize_checkpoint_config_for_persistence(config: dict[str, Any]) -> dict[str, Any]:
+    """Drop runtime-only objects before persisting batch checkpoint config."""
+    sanitized: dict[str, Any] = {}
+    for key, value in dict(config or {}).items():
+        safe_value = _checkpoint_safe_value(value)
+        if safe_value is not _CHECKPOINT_UNSUPPORTED:
+            sanitized[str(key)] = safe_value
+    return sanitized
 
 
 def _sync_retriever_overrides_to_pipeline() -> None:
@@ -383,34 +440,108 @@ def _resolve_kanban_db_path(current_user: Optional[User], request_user_id: Optio
         return None
 
 
-def _normalize_documents_for_generation(docs: list[Any]) -> list[Document]:
-    normalized: list[Document] = []
-    for doc in docs or []:
-        if isinstance(doc, Document):
-            normalized.append(doc)
+def _resolve_source_health_user_id(current_user: Optional[User], request_user_id: Optional[str] = None) -> Optional[str]:
+    """Resolve a filesystem-safe user directory component without creating storage."""
+    candidates: list[Any] = []
+    if current_user is not None:
+        for attr in ("id", "id_int"):
+            candidates.append(getattr(current_user, attr, None))
+    candidates.append(request_user_id)
+
+    for candidate in candidates:
+        if candidate is None:
             continue
-        if isinstance(doc, dict):
-            metadata = doc.get("metadata") or {}
-            source_val = metadata.get("source")
-            source = DataSource.MEDIA_DB
-            if source_val is not None:
-                try:
-                    source = DataSource(str(source_val))
-                except (ValueError, TypeError):
-                    source = DataSource.MEDIA_DB
-            normalized.append(
-                Document(
-                    id=str(doc.get("id")),
-                    content=str(doc.get("content") or ""),
-                    metadata=metadata if isinstance(metadata, dict) else {},
-                    source=source,
-                    score=float(doc.get("score") or 0.0),
-                )
-            )
-    return normalized
+        raw = str(candidate).strip()
+        if raw.isdigit() and int(raw) > 0:
+            return raw
+    try:
+        fallback = DatabasePaths.get_single_user_id()
+        fallback_raw = str(fallback).strip()
+        if fallback_raw.isdigit() and int(fallback_raw) > 0:
+            return fallback_raw
+    except (RuntimeError, ValueError, OSError, TypeError):
+        logger.debug("Failed to resolve single-user ID for source health path", exc_info=True)
+    return None
+
+
+def _resolve_existing_source_db_paths(
+    current_user: Optional[User],
+    request_user_id: Optional[str] = None,
+) -> dict[str, str]:
+    """Return existing source database paths without creating source storage."""
+    user_id = _resolve_source_health_user_id(current_user, request_user_id)
+    if user_id is None:
+        return {}
+
+    user_dir = DatabasePaths.resolve_user_db_base_dir() / user_id
+    candidates = {
+        "media_db": user_dir / DatabasePaths.MEDIA_DB_NAME,
+        "chacha_db": user_dir / DatabasePaths.CHACHA_DB_NAME,
+        "prompts_db": user_dir / DatabasePaths.PROMPTS_SUBDIR / DatabasePaths.PROMPTS_DB_NAME,
+        "kanban_db": user_dir / DatabasePaths.KANBAN_DB_NAME,
+    }
+    return {
+        source_key: str(path)
+        for source_key, path in candidates.items()
+        if path.is_file()
+    }
+
+
+def _media_db_uses_non_file_storage() -> bool:
+    """Return whether Media DB search is configured for non-file content storage."""
+    backend_mode_hint = (
+        os.getenv("CONTENT_DB_MODE")
+        or os.getenv("TLDW_CONTENT_DB_BACKEND")
+        or str(settings.get("CONTENT_DB_BACKEND", "sqlite"))
+    )
+    return backend_mode_hint.strip().lower() in {"postgres", "postgresql"}
+
+
+def _build_source_health_source_sets(
+    *,
+    existing_paths: dict[str, str],
+    media_backend_uses_non_file_storage: bool = False,
+) -> tuple[set[Any], set[Any]]:
+    """Derive ready and empty source sets without creating source storage."""
+    configured: set[Any] = set()
+    empty: set[Any] = set()
+    if "media_db" in existing_paths or media_backend_uses_non_file_storage:
+        configured.add("media_db")
+    else:
+        empty.add("media_db")
+    if "chacha_db" in existing_paths:
+        configured.update(
+            {
+                "notes",
+                "chats",
+                "characters",
+                "world_books",
+                "dictionaries",
+            }
+        )
+    else:
+        empty.update(
+            {
+                "notes",
+                "chats",
+                "characters",
+                "world_books",
+                "dictionaries",
+            }
+        )
+    if "prompts_db" in existing_paths:
+        configured.add("prompts")
+    else:
+        empty.add("prompts")
+    if "kanban_db" in existing_paths:
+        configured.add("kanban")
+    else:
+        empty.add("kanban")
+    return configured, empty
+
+
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.RAG.rag_service.analytics_system import UnifiedFeedbackSystem
-from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 router = APIRouter(prefix="/api/v1/rag", tags=["rag-unified"])
 
@@ -494,99 +625,6 @@ async def _log_rag_queries_for_org(
         logger.debug("RAG query logging failed; continuing without usage record", exc_info=True)
 
 
-def convert_result_to_response(result: UnifiedSearchResult) -> UnifiedRAGResponse:
-    """Convert internal result to API response.
-
-    Be robust to different document shapes:
-    - dataclass-like objects with attributes (id, content, metadata, score)
-    - wrapper objects with a `.document` attribute that is an object or dict
-    - plain dictionaries (e.g., from caches or patched test doubles)
-    """
-
-    def _extract_field(obj, key, default=None):
-        """Safely extract a field from obj supporting attr, nested .document, or dict."""
-        # Direct attribute
-        if hasattr(obj, key):
-            try:
-                return getattr(obj, key)
-            except Exception as accessor_error:  # noqa: BLE001 - accessor may raise; ignore to continue fallbacks
-                logger.debug(f"RAG attribute access failed for key '{key}'; continuing fallback", exc_info=accessor_error)
-        # Nested `.document` attribute that may itself be an object
-        if hasattr(obj, 'document'):
-            doc_obj = obj.document
-            if isinstance(doc_obj, dict):
-                if key in doc_obj:
-                    return doc_obj.get(key, default)
-            else:
-                if hasattr(doc_obj, key):
-                    try:
-                        return getattr(doc_obj, key)
-                    except Exception as accessor_error:  # noqa: BLE001 - accessor may raise; ignore to continue fallbacks
-                        logger.debug(f"RAG nested attribute access failed for key '{key}'; continuing fallback", exc_info=accessor_error)
-        # Dict access (obj may be a dict)
-        if isinstance(obj, dict):
-            # Direct
-            if key in obj:
-                return obj.get(key, default)
-            # Nested under 'document'
-            doc_dict = obj.get('document') if isinstance(obj.get('document'), dict) else None
-            if doc_dict and key in doc_dict:
-                return doc_dict.get(key, default)
-        return default
-
-    documents = []
-    for doc in (result.documents or []):
-        doc_id = _extract_field(doc, 'id')
-        content = _extract_field(doc, 'content')
-        metadata = _extract_field(doc, 'metadata', {}) or {}
-        score = _extract_field(doc, 'score', 0.0)
-
-        # Ensure types are JSON-serializable
-        if not isinstance(metadata, dict):
-            try:
-                metadata = dict(metadata)  # best effort
-            except (TypeError, ValueError):
-                metadata = {"value": str(metadata)}
-
-        documents.append({
-            "id": doc_id if doc_id is not None else str(_extract_field(doc, 'chunk_id', 'unknown')),
-            "content": content if isinstance(content, str) else (str(content) if content is not None else ""),
-            "metadata": metadata,
-            "score": float(score) if isinstance(score, (int, float)) else 0.0,
-        })
-
-    _meta = result.metadata or {}
-    return UnifiedRAGResponse(
-        documents=documents,
-        query=result.query,
-        expanded_queries=result.expanded_queries,
-        metadata=_meta,
-        timings=result.timings,
-        citations=result.citations,
-        academic_citations=_meta.get("academic_citations", []),
-        chunk_citations=_meta.get("chunk_citations", []),
-        feedback_id=result.feedback_id,
-        generated_answer=result.generated_answer,
-        cache_hit=result.cache_hit,
-        errors=result.errors,
-        security_report=result.security_report,
-        total_time=result.total_time,
-        claims=getattr(result, 'claims', None),
-        factuality=getattr(result, 'factuality', None),
-        retrieval_metrics=_meta.get("retrieval_metrics"),
-        faithfulness=_meta.get("faithfulness"),
-        # Search agent / research fields
-        query_classification=_meta.get("query_classification"),
-        reformulated_query=_meta.get("reformulated_query"),
-        research_summary=_meta.get("research"),
-        # Follow-up suggestions
-        suggestions=_meta.get("suggestions"),
-        # Media search results
-        images=_meta.get("images"),
-        videos=_meta.get("videos"),
-    )
-
-
 # =============== Ablation helper ===============
 try:
     from pydantic import BaseModel, Field
@@ -653,7 +691,7 @@ async def rag_ablate(
     )
     runs.append({
         "label": "baseline",
-        "result": convert_result_to_response(r1)
+        "result": rag_result_to_response(rag_result_from_unified_search_result(r1))
     })
 
     # 2) +rerank
@@ -664,7 +702,7 @@ async def rag_ablate(
     )
     runs.append({
         "label": "+rerank",
-        "result": convert_result_to_response(r2)
+        "result": rag_result_to_response(rag_result_from_unified_search_result(r2))
     })
 
     # 3) agentic
@@ -685,7 +723,7 @@ async def rag_ablate(
     )
     runs.append({
         "label": "agentic",
-        "result": convert_result_to_response(r3)
+        "result": rag_result_to_response(rag_result_from_unified_search_result(r3))
     })
 
     # 4) agentic (strict): tools on, extractive only, small budget
@@ -707,7 +745,7 @@ async def rag_ablate(
     )
     runs.append({
         "label": "agentic_strict",
-        "result": convert_result_to_response(r4)
+        "result": rag_result_to_response(rag_result_from_unified_search_result(r4))
     })
 
     # Compact output for quick comparison
@@ -1109,6 +1147,35 @@ async def list_vlm_backends():
     return {"backends": backends}
 
 
+@router.get(
+    "/source-health",
+    response_model=KnowledgeSourceHealthResponse,
+    summary="Knowledge source health",
+    description="Read-only pre-query source readiness for Knowledge QA.",
+    dependencies=[
+        Depends(check_rate_limit),
+        Depends(rbac_rate_limit("rag.search")),
+        Depends(RequirePermission(MEDIA_READ)),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
+    ],
+)
+async def source_health_endpoint(
+    current_user: User = Depends(get_request_user),
+) -> KnowledgeSourceHealthResponse:
+    """Return safe pre-query readiness for canonical Knowledge QA sources."""
+    existing_paths = await run_in_threadpool(_resolve_existing_source_db_paths, current_user)
+    configured_sources, empty_sources = _build_source_health_source_sets(
+        existing_paths=existing_paths,
+        media_backend_uses_non_file_storage=_media_db_uses_non_file_storage(),
+    )
+    return KnowledgeSourceHealthResponse(
+        sources=build_source_health_entries(
+            configured_sources=configured_sources,
+            empty_sources=empty_sources,
+        )
+    )
+
+
 @router.post(
     "/search",
     response_model=UnifiedRAGResponse,
@@ -1144,8 +1211,8 @@ async def list_vlm_backends():
     dependencies=[
         Depends(check_rate_limit),
         Depends(rbac_rate_limit("rag.search")),
-        Depends(require_permissions(MEDIA_READ)),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
+        Depends(RequirePermission(MEDIA_READ)),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="rag.search", count_as="call")),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
     ]
 )
@@ -1155,7 +1222,9 @@ async def unified_search_endpoint(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_request_user),
     media_db: Any = Depends(get_media_db_for_user),
-    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user)
+    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ):
     """
     Unified RAG search with all features as parameters.
@@ -1165,6 +1234,7 @@ async def unified_search_endpoint(
     is accessible by setting the appropriate parameter.
     """
     try:
+        request = _apply_media_collection_scope(request, collections_db)
         logger.info(f"Unified RAG search: query='{request.query}', user={current_user.username if current_user else 'anonymous'}")
         # Topic monitoring (non-blocking) for query text
         try:
@@ -1199,81 +1269,72 @@ async def unified_search_endpoint(
             "notes_db_path": chacha_db.db_path if chacha_db else None,
             "character_db_path": chacha_db.db_path if chacha_db else None,
             "kanban_db_path": _resolve_kanban_db_path(current_user, request.user_id),
+            "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
         }
+        standard_bundle = _build_standard_request_bundle(
+            request,
+            current_user=current_user,
+            db_paths=db_paths,
+            media_db=media_db,
+            chacha_db=chacha_db,
+            prompts_db=prompts_db,
+        )
+        strategy_value = str(standard_bundle.resolved_request.strategy).strip().lower()
 
         # Branch: agentic strategy builds a synthetic chunk at query time
-        if getattr(request, 'strategy', 'standard') == 'agentic':
-            agentic_cfg = AgenticConfig(
-                top_k_docs=int(getattr(request, 'agentic_top_k_docs', 3) or 3),
-                window_chars=int(getattr(request, 'agentic_window_chars', 1200) or 1200),
-                max_tokens_read=int(getattr(request, 'agentic_max_tokens_read', 6000) or 6000),
-                max_tool_calls=int(getattr(request, 'agentic_max_tool_calls', 8) or 8),
-                extractive_only=bool(getattr(request, 'agentic_extractive_only', True)),
-                quote_spans=bool(getattr(request, 'agentic_quote_spans', True)),
-                enable_tools=bool(getattr(request, 'agentic_enable_tools', False)),
-                use_llm_planner=bool(getattr(request, 'agentic_use_llm_planner', False)),
-                time_budget_sec=(getattr(request, 'agentic_time_budget_sec', None)),
-                cache_ttl_sec=int(getattr(request, 'agentic_cache_ttl_sec', 600) or 600),
-                debug_trace=bool(getattr(request, 'agentic_debug_trace', False) or request.debug_mode),
-                enable_query_decomposition=bool(getattr(request, 'agentic_enable_query_decomposition', False)),
-                subgoal_max=int(getattr(request, 'agentic_subgoal_max', 3) or 3),
-                enable_semantic_within=bool(getattr(request, 'agentic_enable_semantic_within', True)),
-                enable_section_index=bool(getattr(request, 'agentic_enable_section_index', True)),
-                prefer_structural_anchors=bool(getattr(request, 'agentic_prefer_structural_anchors', True)),
-                enable_table_support=bool(getattr(request, 'agentic_enable_table_support', True)),
-                agentic_enable_vlm_late_chunking=bool(getattr(request, 'agentic_enable_vlm_late_chunking', False)),
-                agentic_vlm_backend=getattr(request, 'agentic_vlm_backend', None),
-                agentic_vlm_detect_tables_only=bool(getattr(request, 'agentic_vlm_detect_tables_only', True)),
-                agentic_vlm_max_pages=getattr(request, 'agentic_vlm_max_pages', None),
-                agentic_vlm_late_chunk_top_k_docs=int(getattr(request, 'agentic_vlm_late_chunk_top_k_docs', 2) or 2),
-                agentic_use_provider_embeddings_within=bool(getattr(request, 'agentic_use_provider_embeddings_within', False)),
-                agentic_provider_embedding_model_id=getattr(request, 'agentic_provider_embedding_model_id', None),
-                # new adaptive/metrics knobs
-                adaptive_budgets=bool(getattr(request, 'agentic_adaptive_budgets', True)),
-                coverage_target=float(getattr(request, 'agentic_coverage_target', 0.8) or 0.8),
-                min_corroborating_docs=int(getattr(request, 'agentic_min_corroborating_docs', 2) or 2),
-                max_redundancy=float(getattr(request, 'agentic_max_redundancy', 0.9) or 0.9),
-                enable_metrics=bool(getattr(request, 'agentic_enable_metrics', True)),
+        if strategy_value == 'agentic':
+            resolved_request = standard_bundle.resolved_request
+            retrieval_plan = standard_bundle.retrieval_plan
+            effective_payload, agentic_cfg = build_agentic_execution_context(
+                resolved_request=resolved_request,
+                retrieval_plan=retrieval_plan,
+                payload_override=standard_bundle.resolved_request.payload,
             )
 
             try:
                 result = await agentic_rag_pipeline(
-                    query=request.query,
-                    sources=request.sources,
+                    query=resolved_request.query,
+                    sources=list(retrieval_plan.sources),
                     media_db=media_db,
                     chacha_db=chacha_db,
                     media_db_path=db_paths.get("media_db_path"),
                     notes_db_path=db_paths.get("notes_db_path"),
                     character_db_path=db_paths.get("character_db_path"),
                     kanban_db_path=db_paths.get("kanban_db_path"),
-                    search_mode=request.search_mode,
-                    fts_level=request.fts_level,
-                    hybrid_alpha=request.hybrid_alpha,
-                    top_k=request.top_k,
-                    min_score=request.min_score,
-                    index_namespace=(request.index_namespace or request.corpus),
+                    search_mode=retrieval_plan.search_mode,
+                    fts_level=effective_payload.get("fts_level", request.fts_level),
+                    hybrid_alpha=effective_payload.get("hybrid_alpha", request.hybrid_alpha),
+                    top_k=retrieval_plan.top_k,
+                    min_score=retrieval_plan.min_score,
+                    index_namespace=retrieval_plan.index_namespace,
                     agentic=agentic_cfg,
-                    enable_generation=request.enable_generation,
-                    generation_model=request.generation_model,
-                    generation_provider=request.generation_provider,
-                    generation_prompt=request.generation_prompt,
-                    max_generation_tokens=request.max_generation_tokens,
-                    enable_citations=request.enable_citations,
-                    include_chunk_citations=request.enable_chunk_citations,
-                    debug_mode=request.debug_mode,
+                    enable_generation=bool(effective_payload.get("enable_generation", request.enable_generation)),
+                    generation_model=effective_payload.get("generation_model", request.generation_model),
+                    generation_provider=effective_payload.get("generation_provider", request.generation_provider),
+                    generation_prompt=effective_payload.get("generation_prompt", request.generation_prompt),
+                    max_generation_tokens=int(effective_payload.get("max_generation_tokens", request.max_generation_tokens)),
+                    enable_citations=bool(effective_payload.get("enable_citations", request.enable_citations)),
+                    include_chunk_citations=bool(
+                        effective_payload.get("enable_chunk_citations", request.enable_chunk_citations)
+                    ),
+                    debug_mode=bool(effective_payload.get("debug_mode", request.debug_mode)),
                     # expose verification flags on agentic path
-                    require_hard_citations=bool(getattr(request, 'require_hard_citations', False)),
-                    enable_numeric_fidelity=bool(getattr(request, 'enable_numeric_fidelity', False)),
-                    numeric_fidelity_behavior=str(getattr(request, 'numeric_fidelity_behavior', 'continue')),
-                    enable_claims=bool(getattr(request, 'enable_claims', False)),
-                    claim_verifier=str(getattr(request, 'claim_verifier', 'hybrid')),
-                    claims_top_k=int(getattr(request, 'claims_top_k', 5) or 5),
-                    claims_conf_threshold=float(getattr(request, 'claims_conf_threshold', 0.7) or 0.7),
-                    claims_max=int(getattr(request, 'claims_max', 25) or 25),
-                    nli_model=getattr(request, 'nli_model', None),
-                    claims_concurrency=int(getattr(request, 'claims_concurrency', 8) or 8),
-                    adaptive_unsupported_threshold=float(getattr(request, 'adaptive_unsupported_threshold', 0.15) or 0.15),
-                    low_confidence_behavior=str(getattr(request, 'low_confidence_behavior', 'continue')),
+                    require_hard_citations=bool(effective_payload.get("require_hard_citations", False)),
+                    enable_numeric_fidelity=bool(effective_payload.get("enable_numeric_fidelity", False)),
+                    numeric_fidelity_behavior=str(effective_payload.get("numeric_fidelity_behavior", "continue")),
+                    enable_claims=bool(effective_payload.get("enable_claims", False)),
+                    claim_verifier=str(effective_payload.get("claim_verifier", "hybrid")),
+                    claims_top_k=int(effective_payload.get("claims_top_k", 5) or 5),
+                    claims_conf_threshold=float(effective_payload.get("claims_conf_threshold", 0.7) or 0.7),
+                    claims_max=int(effective_payload.get("claims_max", 25) or 25),
+                    nli_model=effective_payload.get("nli_model", None),
+                    claims_concurrency=int(effective_payload.get("claims_concurrency", 8) or 8),
+                    adaptive_unsupported_threshold=float(
+                        effective_payload.get("adaptive_unsupported_threshold", 0.15) or 0.15
+                    ),
+                    low_confidence_behavior=str(effective_payload.get("low_confidence_behavior", "continue")),
+                    resolved_request=resolved_request,
+                    retrieval_plan=retrieval_plan,
                 )
             except Exception as exc:  # noqa: BLE001 - agentic pipeline fallback must be resilient
                 logger.exception("Agentic RAG pipeline failed: {}", exc)
@@ -1299,18 +1360,12 @@ async def unified_search_endpoint(
                 )
         else:
             # Execute unified pipeline with all parameters from request
-            kwargs = _build_unified_pipeline_kwargs(
-                request=request,
-                db_paths=db_paths,
-                media_db=media_db,
-                chacha_db=chacha_db,
-                current_user=current_user,
-            )
+            kwargs = dict(standard_bundle.pipeline_kwargs)
             _sync_retriever_overrides_to_pipeline()
             result = await unified_rag_pipeline(**kwargs)
 
         # Convert to response format
-        response = convert_result_to_response(result)
+        response = rag_result_to_response(rag_result_from_unified_search_result(result))
 
         # Best-effort RAG query usage logging for billing/analytics.
         await _log_rag_queries_for_org(request_raw, current_user, units=1)
@@ -1326,6 +1381,8 @@ async def unified_search_endpoint(
         if result.errors and request.debug_mode:
             logger.warning(f"Errors during processing: {result.errors}")
 
+    except HTTPException:
+        raise
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.exception("Unified search error: {}", e)
         detail = "Search failed due to an internal error."
@@ -1390,7 +1447,7 @@ async def rag_implicit_feedback(
     response_description="Batch processing results",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
     ]
 )
 async def unified_batch_endpoint(
@@ -1401,7 +1458,8 @@ async def unified_batch_endpoint(
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     media_db: Any = Depends(get_media_db_for_user),
-    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user)
+    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ):
     """
     Batch processing endpoint for multiple queries.
@@ -1442,18 +1500,15 @@ async def unified_batch_endpoint(
             "notes_db_path": chacha_db.db_path if chacha_db else None,
             "character_db_path": chacha_db.db_path if chacha_db else None,
             "kanban_db_path": _resolve_kanban_db_path(current_user, request.user_id),
+            "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
         }
 
-        # Convert request to kwargs, excluding queries (Pydantic compat)
-        kwargs = model_dump_compat(
-            request,
-            exclude={"queries", "max_concurrent", "enable_checkpoint"},
+        batch_bundle = _build_batch_request_bundle(
+            request=request,
+            db_paths=db_paths,
+            current_user=current_user,
         )
-        _apply_search_agent_defaults(
-            request,
-            kwargs,
-            allowed_fields=_BATCH_ROUND2_DEFAULT_FIELDS,
-        )
+        kwargs = dict(batch_bundle.pipeline_kwargs)
         checkpoint_id: Optional[str] = None
         checkpoint_manager = None
         checkpoint_state = None
@@ -1461,7 +1516,7 @@ async def unified_batch_endpoint(
             from tldw_Server_API.app.core.RAG.rag_service.checkpoint import CheckpointManager
 
             checkpoint_manager = CheckpointManager()
-            checkpoint_config = dict(kwargs)
+            checkpoint_config = _sanitize_checkpoint_config_for_persistence(kwargs)
             checkpoint_config["queries"] = list(request.queries)
             checkpoint_config["max_concurrent"] = request.max_concurrent
             checkpoint_state = checkpoint_manager.create(
@@ -1470,18 +1525,6 @@ async def unified_batch_endpoint(
                 config=checkpoint_config,
             )
             checkpoint_id = checkpoint_state.checkpoint_id
-        kwargs.update(db_paths)
-        resolved_storage_user_id = _resolve_implicit_feedback_user_id(None, current_user)
-        if resolved_storage_user_id is None:
-            resolved_storage_user_id = _resolve_implicit_feedback_user_id(
-                kwargs.get("user_id"), current_user
-            )
-        kwargs["user_id"] = resolved_storage_user_id
-        kwargs["feedback_user_id"] = (
-            _resolve_implicit_feedback_user_id(kwargs.get("feedback_user_id"), current_user)
-            or resolved_storage_user_id
-        )
-
         # Process batch
         on_query_done = None
         saved_indices: set[int] = set()
@@ -1531,12 +1574,13 @@ async def unified_batch_endpoint(
             max_concurrent=request.max_concurrent,
             media_db=media_db,
             chacha_db=chacha_db,
+            prompts_db=prompts_db,
             on_query_done=on_query_done,
             **kwargs
         )
 
         # Convert results
-        responses = [convert_result_to_response(r) for r in results]
+        responses = [rag_result_to_response(rag_result_from_unified_search_result(r)) for r in results]
 
         # Count successes and failures
         successful = sum(1 for r in results if not r.errors)
@@ -1607,7 +1651,7 @@ async def unified_batch_endpoint(
     response_description="Search results",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
     ]
 )
@@ -1700,7 +1744,7 @@ async def simple_search_endpoint(
     description="Resume a batch RAG operation from a checkpoint.",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
     ],
 )
 async def resume_batch_endpoint(
@@ -1712,6 +1756,7 @@ async def resume_batch_endpoint(
     principal: AuthPrincipal = Depends(get_auth_principal),
     media_db: Any = Depends(get_media_db_for_user),
     chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ):
     """Resume a batch RAG operation from a previously saved checkpoint."""
     try:
@@ -1767,26 +1812,26 @@ async def resume_batch_endpoint(
                 total_time=0.0,
             )
 
-        # Extract kwargs from checkpoint config
-        kwargs = {k: v for k, v in checkpoint.config.items() if k not in ("queries", "max_concurrent")}
         max_concurrent = checkpoint.config.get("max_concurrent", 5)
 
         db_paths = {
             "media_db_path": media_db.db_path if media_db else None,
             "notes_db_path": chacha_db.db_path if chacha_db else None,
             "character_db_path": chacha_db.db_path if chacha_db else None,
+            "kanban_db_path": _resolve_kanban_db_path(current_user, checkpoint.config.get("user_id")),
+            "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
         }
-        kwargs.update(db_paths)
-        resolved_storage_user_id = _resolve_implicit_feedback_user_id(None, current_user)
-        if resolved_storage_user_id is None:
-            resolved_storage_user_id = _resolve_implicit_feedback_user_id(
-                kwargs.get("user_id"), current_user
-            )
-        kwargs["user_id"] = resolved_storage_user_id
-        kwargs["feedback_user_id"] = (
-            _resolve_implicit_feedback_user_id(kwargs.get("feedback_user_id"), current_user)
-            or resolved_storage_user_id
+        resume_request = _build_resume_batch_request(
+            checkpoint.config,
+            remaining_queries=remaining_queries,
+            max_concurrent=max_concurrent,
         )
+        batch_bundle = _build_batch_request_bundle(
+            request=resume_request,
+            db_paths=db_paths,
+            current_user=current_user,
+        )
+        kwargs = dict(batch_bundle.pipeline_kwargs)
 
         start_time = time.time()
 
@@ -1835,10 +1880,11 @@ async def resume_batch_endpoint(
             query_indices=remaining_indices,
             media_db=media_db,
             chacha_db=chacha_db,
+            prompts_db=prompts_db,
             **kwargs,
         )
 
-        responses = [convert_result_to_response(r) for r in results]
+        responses = [rag_result_to_response(rag_result_from_unified_search_result(r)) for r in results]
         successful = sum(1 for r in results if not r.errors)
         failed = len(results) - successful
         total_time = time.time() - start_time
@@ -1898,354 +1944,90 @@ async def resume_batch_endpoint(
     description="Stream generated answer chunks with optional incremental claim overlay events (NDJSON)",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_permissions(MEDIA_READ)),
+        Depends(RequirePermission(MEDIA_READ)),
         Depends(require_within_limit(LimitCategory.RAG_QUERIES_DAY, 1)),
-    ]
+    ],
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "description": "NDJSON stream of unified RAG search events",
+            "content": {"application/x-ndjson": {}},
+        },
+    },
 )
 async def unified_search_stream_endpoint(
     request_raw: Request,
     request: UnifiedRAGRequest,
     current_user: User = Depends(get_request_user),
     media_db: Any = Depends(get_media_db_for_user),
-    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user)
+    chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    prompts_db: PromptsDatabase = Depends(get_prompts_db_for_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
 ):
     if not request.enable_generation:
         raise HTTPException(status_code=400, detail="enable_generation must be true for streaming.")
+    request = _apply_media_collection_scope(request, collections_db)
 
     # Streaming search counts as a single RAG query.
     await _log_rag_queries_for_org(request_raw, current_user, units=1)
 
-    async def event_stream():
-        try:
-            # Prepare retrieval like the unified pipeline (simplified)
-            effective_payload = _build_effective_request_payload(request)
-            index_namespace = (
-                effective_payload.get("index_namespace")
-                or effective_payload.get("corpus")
-            )
-            db_paths = {}
-            if media_db:
-                db_paths["media_db"] = media_db.db_path
-            if chacha_db:
-                db_paths["notes_db"] = chacha_db.db_path
-                db_paths["character_cards_db"] = chacha_db.db_path
-            kanban_db_path = _resolve_kanban_db_path(current_user, request.user_id)
-            if kanban_db_path:
-                db_paths["kanban_db"] = kanban_db_path
+    shared_db_paths = {
+        "media_db_path": media_db.db_path if media_db else None,
+        "notes_db_path": chacha_db.db_path if chacha_db else None,
+        "character_db_path": chacha_db.db_path if chacha_db else None,
+        "kanban_db_path": None,
+        "prompts_db_path": getattr(prompts_db, "db_path_str", None) if prompts_db else None,
+    }
+    stream_bundle = _build_standard_request_bundle(
+        request,
+        current_user=current_user,
+        db_paths=shared_db_paths,
+        media_db=media_db,
+        chacha_db=chacha_db,
+        prompts_db=prompts_db,
+    )
+    resolved_request = stream_bundle.resolved_request
+    kanban_db_path = _resolve_kanban_db_path(current_user, resolved_request.user_id)
+    stream_pipeline_kwargs = dict(stream_bundle.pipeline_kwargs)
+    stream_pipeline_kwargs["kanban_db_path"] = kanban_db_path
+    stream_pipeline_kwargs["prompts_db_path"] = getattr(prompts_db, "db_path_str", None) if prompts_db else None
+    stream_pipeline_kwargs["prompts_db"] = prompts_db
+    stream_pipeline_kwargs["resolved_request"] = resolved_request
+    stream_pipeline_kwargs["retrieval_plan"] = stream_bundle.retrieval_plan
+    request_defaults = {
+        "claims_concurrency": request.claims_concurrency,
+        "claims_max": request.claims_max,
+        "claims_top_k": request.claims_top_k,
+        "debug_mode": request.debug_mode,
+        "enable_claims": request.enable_claims,
+        "explain_only": getattr(request, "explain_only", False),
+        "fts_level": request.fts_level,
+        "generation_model": request.generation_model,
+        "generation_prompt": request.generation_prompt,
+        "generation_provider": request.generation_provider,
+        "hybrid_alpha": request.hybrid_alpha,
+        "max_generation_tokens": request.max_generation_tokens,
+        "top_k": request.top_k,
+    }
+    stream_context = {
+        **stream_pipeline_kwargs,
+        "build_agentic_execution_context": build_agentic_execution_context,
+        "generate_streaming_response": generate_streaming_response,
+        "request_defaults": request_defaults,
+        "sync_retriever_overrides": _sync_retriever_overrides_to_pipeline,
+    }
 
-            docs = []
+    async def event_generator():
+        async for event in stream_rag_events(
+            resolved_request=resolved_request,
+            retrieval_plan=stream_bundle.retrieval_plan,
+            standard_pipeline=unified_rag_pipeline,
+            agentic_pipeline=agentic_rag_pipeline,
+            extra_context=stream_context,
+        ):
+            yield json.dumps(event) + "\n"
 
-            def _normalize_research_event(event: Any) -> dict[str, Any]:
-                event_type_raw = getattr(event, "event_type", "research_update")
-                event_type = str(event_type_raw) if event_type_raw is not None else "research_update"
-                if not event_type.startswith("research_"):
-                    event_type = f"research_{event_type}"
-                data = getattr(event, "data", {})
-                if not isinstance(data, dict):
-                    data = {"value": data}
-                return {"type": event_type, "data": data}
-
-            async def _run_streaming_retrieval(
-                *,
-                progress_queue: Optional[asyncio.Queue[Any]] = None,
-                done_marker: Any = None,
-            ) -> None:
-                nonlocal docs
-                try:
-                    if db_paths:
-                        _sync_retriever_overrides_to_pipeline()
-                        kwargs = _build_unified_pipeline_kwargs(
-                            request=request,
-                            db_paths={
-                                "media_db_path": media_db.db_path if media_db else None,
-                                "notes_db_path": chacha_db.db_path if chacha_db else None,
-                                "character_db_path": chacha_db.db_path if chacha_db else None,
-                                "kanban_db_path": kanban_db_path,
-                            },
-                            media_db=media_db,
-                            chacha_db=chacha_db,
-                            current_user=current_user,
-                        )
-                        kwargs["enable_generation"] = False
-
-                        if (
-                            progress_queue is not None
-                            and bool(effective_payload.get("enable_research_progress", False))
-                        ):
-                            async def _stream_research_progress(event: Any) -> None:
-                                await progress_queue.put(_normalize_research_event(event))
-
-                            kwargs["research_progress_callback"] = _stream_research_progress
-                            kwargs["enable_research_progress"] = True
-
-                        retrieval_result = await unified_rag_pipeline(**kwargs)
-                        docs = _normalize_documents_for_generation(
-                            getattr(retrieval_result, "documents", []) or []
-                        )
-                except Exception:  # noqa: BLE001 - streaming prefetch should be best-effort
-                    docs = []
-                finally:
-                    if progress_queue is not None and done_marker is not None:
-                        await progress_queue.put(done_marker)
-
-            if bool(effective_payload.get("enable_research_progress", False)) and db_paths:
-                progress_queue: asyncio.Queue[Any] = asyncio.Queue()
-                done_marker = object()
-                retrieval_task = asyncio.create_task(
-                    _run_streaming_retrieval(
-                        progress_queue=progress_queue,
-                        done_marker=done_marker,
-                    )
-                )
-                try:
-                    while True:
-                        queued = await progress_queue.get()
-                        if queued is done_marker:
-                            break
-                        yield json.dumps(queued) + "\n"
-                finally:
-                    if not retrieval_task.done():
-                        retrieval_task.cancel()
-                        try:
-                            await retrieval_task
-                        except asyncio.CancelledError:
-                            pass
-                try:
-                    await retrieval_task
-                except asyncio.CancelledError:
-                    pass
-            else:
-                await _run_streaming_retrieval()
-
-            # If strategy=agentic, assemble ephemeral chunk and emit plan + spans first
-            strategy_value = str(
-                effective_payload.get("strategy", getattr(request, "strategy", "standard"))
-            ).strip().lower()
-            if strategy_value == "agentic":
-                try:
-                    def _payload_bool(name: str, fallback: bool = False) -> bool:
-                        return bool(effective_payload.get(name, getattr(request, name, fallback)))
-
-                    def _payload_int(name: str, fallback: int) -> int:
-                        raw = effective_payload.get(name, getattr(request, name, fallback))
-                        try:
-                            return int(raw)
-                        except (TypeError, ValueError):
-                            return fallback
-
-                    def _payload_float(name: str, fallback: float) -> float:
-                        raw = effective_payload.get(name, getattr(request, name, fallback))
-                        try:
-                            return float(raw)
-                        except (TypeError, ValueError):
-                            return fallback
-
-                    # Run agentic assembly without generation
-                    a_cfg = AgenticConfig(
-                        top_k_docs=max(1, _payload_int("agentic_top_k_docs", 3)),
-                        window_chars=max(200, _payload_int("agentic_window_chars", 1200)),
-                        max_tokens_read=max(500, _payload_int("agentic_max_tokens_read", 6000)),
-                        max_tool_calls=max(1, _payload_int("agentic_max_tool_calls", 8)),
-                        extractive_only=True,
-                        quote_spans=True,
-                        enable_tools=_payload_bool("agentic_enable_tools", False),
-                        use_llm_planner=_payload_bool("agentic_use_llm_planner", False),
-                        time_budget_sec=effective_payload.get(
-                            "agentic_time_budget_sec",
-                            getattr(request, "agentic_time_budget_sec", None),
-                        ),
-                        cache_ttl_sec=max(1, _payload_int("agentic_cache_ttl_sec", 600)),
-                        debug_trace=_payload_bool("agentic_debug_trace", False)
-                        or _payload_bool("debug_mode", getattr(request, "debug_mode", False)),
-                        enable_query_decomposition=_payload_bool("agentic_enable_query_decomposition", False),
-                        subgoal_max=max(1, _payload_int("agentic_subgoal_max", 3)),
-                        enable_semantic_within=_payload_bool("agentic_enable_semantic_within", True),
-                        enable_section_index=_payload_bool("agentic_enable_section_index", True),
-                        prefer_structural_anchors=_payload_bool("agentic_prefer_structural_anchors", True),
-                        enable_table_support=_payload_bool("agentic_enable_table_support", True),
-                        agentic_enable_vlm_late_chunking=_payload_bool("agentic_enable_vlm_late_chunking", False),
-                        agentic_vlm_backend=effective_payload.get(
-                            "agentic_vlm_backend",
-                            getattr(request, "agentic_vlm_backend", None),
-                        ),
-                        agentic_vlm_detect_tables_only=_payload_bool("agentic_vlm_detect_tables_only", True),
-                        agentic_vlm_max_pages=effective_payload.get(
-                            "agentic_vlm_max_pages",
-                            getattr(request, "agentic_vlm_max_pages", None),
-                        ),
-                        agentic_vlm_late_chunk_top_k_docs=max(
-                            1, _payload_int("agentic_vlm_late_chunk_top_k_docs", 2)
-                        ),
-                        agentic_use_provider_embeddings_within=_payload_bool(
-                            "agentic_use_provider_embeddings_within", False
-                        ),
-                        agentic_provider_embedding_model_id=effective_payload.get(
-                            "agentic_provider_embedding_model_id",
-                            getattr(request, "agentic_provider_embedding_model_id", None),
-                        ),
-                    )
-                    ares = await agentic_rag_pipeline(
-                        query=request.query,
-                        sources=effective_payload.get("sources", request.sources),
-                        media_db=media_db,
-                        chacha_db=chacha_db,
-                        media_db_path=(media_db.db_path if media_db else None),
-                        notes_db_path=(chacha_db.db_path if chacha_db else None),
-                        character_db_path=(chacha_db.db_path if chacha_db else None),
-                        kanban_db_path=kanban_db_path,
-                        search_mode=effective_payload.get("search_mode", request.search_mode),
-                        fts_level=effective_payload.get("fts_level", request.fts_level),
-                        hybrid_alpha=_payload_float("hybrid_alpha", request.hybrid_alpha),
-                        top_k=max(1, _payload_int("top_k", request.top_k or 10)),
-                        min_score=_payload_float("min_score", request.min_score or 0.0),
-                        index_namespace=index_namespace,
-                        agentic=a_cfg,
-                        enable_generation=False,
-                        enable_citations=False,
-                        include_chunk_citations=False,
-                        debug_mode=_payload_bool("debug_mode", request.debug_mode),
-                        explain_only=_payload_bool("explain_only", getattr(request, "explain_only", False)),
-                    )
-                    # Emit plan + spans
-                    plan = ares.metadata.get('agentic_metrics', {}) if isinstance(ares.metadata, dict) else {}
-                    yield json.dumps({"type": "plan", "plan": plan}) + "\n"
-                    prov = ares.metadata.get('provenance') if isinstance(ares.metadata, dict) else None
-                    if prov:
-                        yield json.dumps({"type": "spans", "count": len(prov), "provenance": prov[:50]}) + "\n"
-                    # Use synthetic chunk as the sole document for streaming generation
-                    docs = _normalize_documents_for_generation(ares.documents)
-                except Exception as agentic_stream_error:  # noqa: BLE001 - agentic streaming should be best-effort
-                    logger.debug("Agentic streaming prefetch failed; continuing standard stream", exc_info=agentic_stream_error)
-
-            # Emit initial contexts (top-k with minimal fields) + a safe rationale plan (standard path)
-            try:
-                top_k_requested = effective_payload.get("top_k", request.top_k or 10)
-                try:
-                    top_k_limit = min(10, int(top_k_requested))
-                except (TypeError, ValueError):
-                    top_k_limit = min(10, (request.top_k or 10))
-
-                top_contexts = []
-                for doc in (docs or [])[:top_k_limit]:
-                    md = getattr(doc, 'metadata', None) or (doc.get('metadata') if isinstance(doc, dict) else {}) or {}
-                    top_contexts.append({
-                        "id": getattr(doc, 'id', doc.get('id') if isinstance(doc, dict) else None),
-                        "title": (md.get('title') if isinstance(md, dict) else None),
-                        "score": float(getattr(doc, 'score', md.get('score', 0.0) if isinstance(md, dict) else 0.0) or 0.0),
-                        "url": md.get('url') if isinstance(md, dict) else None,
-                        "source": md.get('source') if isinstance(md, dict) else None,
-                    })
-                # Lightweight "why these sources" summary
-                def _safe_float(x):
-                    try:
-                        return float(x)
-                    except (TypeError, ValueError):
-                        return 0.0
-                scores = [_safe_float(getattr(d, 'score', (getattr(d, 'metadata', {}) or {}).get('score', 0.0))) for d in (docs or [])]
-                topicality = 0.0
-                if scores:
-                    smin, smax = min(scores), max(scores)
-                    topicality = (sum((s - smin) / (smax - smin) if smax > smin else 1.0 for s in scores) / len(scores)) if scores else 0.0
-                why = {
-                    "topicality": round(float(topicality), 4),
-                    "diversity": None,  # full computation available in non-streaming pipeline metadata
-                    "freshness": None,
-                }
-                yield json.dumps({"type": "contexts", "contexts": top_contexts, "why": why}) + "\n"
-                # Safe partial rationale (no chain leakage)
-                rationale = {
-                    "plan": [
-                        "Gather top-k contexts",
-                        f"Rerank using strategy={effective_payload.get('reranking_strategy', 'flashrank')}",
-                        "Ground claims from sources",
-                        "Synthesize final answer",
-                    ]
-                }
-                yield json.dumps({"type": "reasoning", **rationale}) + "\n"
-            except Exception as rationale_error:  # noqa: BLE001 - safe rationale should never break stream
-                logger.debug("Streaming rationale payload failed; continuing without rationale", exc_info=rationale_error)
-
-            # Minimal context for generation
-            try:
-                from tldw_Server_API.app.core.config import load_and_log_configs  # type: ignore
-                cfg = load_and_log_configs() or {}
-            except Exception:  # noqa: BLE001 - config load is best-effort in streaming path
-                cfg = {}
-
-            import os as _os
-            request_provider_raw = effective_payload.get("generation_provider")
-            request_provider = request_provider_raw if isinstance(request_provider_raw, str) else None
-            env_provider = _os.getenv("RAG_DEFAULT_LLM_PROVIDER")
-            provider_value = request_provider if request_provider is not None else (
-                env_provider if env_provider is not None else cfg.get("RAG_DEFAULT_LLM_PROVIDER")
-            )
-            provider = (
-                provider_value.strip()
-                if isinstance(provider_value, str) and provider_value.strip()
-                else "openai"
-            )
-
-            model_value_raw = effective_payload.get("generation_model")
-            model_value = model_value_raw if isinstance(model_value_raw, str) else None
-            if not model_value:
-                env_model = _os.getenv("RAG_DEFAULT_LLM_MODEL")
-                model_value = env_model if env_model is not None else cfg.get("RAG_DEFAULT_LLM_MODEL")
-            model = (
-                model_value.strip()
-                if isinstance(model_value, str) and model_value.strip()
-                else "gpt-4o-mini"
-            )
-
-            max_tokens = 500
-            if effective_payload.get("max_generation_tokens") is not None:
-                try:
-                    max_tokens = int(effective_payload.get("max_generation_tokens"))
-                except (TypeError, ValueError):
-                    max_tokens = 500
-
-            generation_config = {
-                "streaming": True,
-                "provider": provider,
-                "model": model,
-                "max_tokens": max_tokens,
-            }
-            prompt_template = effective_payload.get("generation_prompt")
-            if isinstance(prompt_template, str) and prompt_template:
-                generation_config["prompt_template"] = prompt_template
-
-            context = types.SimpleNamespace()
-            context.documents = docs
-            context.query = request.query
-            context.config = {"generation": generation_config}
-            context.metadata = {}
-
-            # Initialize streaming generator with claims overlay enabled per request
-            await generate_streaming_response(
-                context,
-                enable_claims=bool(effective_payload.get("enable_claims", request.enable_claims)),
-                claims_top_k=effective_payload.get("claims_top_k", request.claims_top_k),
-                claims_max=effective_payload.get("claims_max", request.claims_max),
-                claims_concurrency=effective_payload.get("claims_concurrency", request.claims_concurrency),
-            )
-
-            last_overlay = None
-            async for chunk in context.stream_generator:
-                # Emit text chunks as NDJSON
-                yield json.dumps({"type": "delta", "text": chunk}) + "\n"
-                overlay = context.metadata.get("claims_overlay")
-                if overlay and overlay != last_overlay:
-                    yield json.dumps({"type": "claims_overlay", **overlay}) + "\n"
-                    last_overlay = overlay
-
-            # Final payload
-            final_overlay = context.metadata.get("claims_overlay")
-            if final_overlay:
-                yield json.dumps({"type": "final_claims", **final_overlay}) + "\n"
-
-        except Exception:  # noqa: BLE001 - streaming should surface error payload instead of crashing
-            yield json.dumps({"type": "error", "message": "Search failed due to an internal error."}) + "\n"
-
-    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 
 @router.get(
@@ -2262,7 +2044,7 @@ async def unified_search_stream_endpoint(
     - Performance analysis
     """,
     response_description="Full search results with analysis",
-    dependencies=[Depends(check_rate_limit), Depends(require_permissions(MEDIA_READ))]
+    dependencies=[Depends(check_rate_limit), Depends(RequirePermission(MEDIA_READ))]
 )
 async def advanced_search_endpoint(
     request: Request,
@@ -2310,7 +2092,7 @@ async def advanced_search_endpoint(
             **db_paths
         )
 
-        return convert_result_to_response(result)
+        return rag_result_to_response(rag_result_from_unified_search_result(result))
 
     except Exception as e:  # noqa: BLE001 - surface as HTTP 500 with context
         logger.error(f"Advanced search error: {e}")

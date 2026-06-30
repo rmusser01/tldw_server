@@ -1,11 +1,31 @@
 import os
 import re
 import tempfile
-from typing import Optional, Set
 
 import pytest
 
-from tldw_Server_API.app.core.Moderation.moderation_service import ModerationService, ModerationPolicy, PatternRule
+import tldw_Server_API.app.core.Moderation.moderation_service as moderation_service_module
+from tldw_Server_API.app.core.Moderation.moderation_service import ModerationPolicy, ModerationService, PatternRule
+
+
+def _tmp_moderation_config(tmp_path, blocklist_path):
+    return {
+        "moderation": {
+            "enabled": "true",
+            "input_enabled": "true",
+            "output_enabled": "true",
+            "input_action": "block",
+            "output_action": "redact",
+            "redact_replacement": "[REDACTED]",
+            "per_user_overrides": "true",
+            "categories_enabled": "runtime",
+            "pii_enabled": "false",
+            "blocklist_write_debounce_ms": "0",
+            "blocklist_file": str(blocklist_path),
+            "user_overrides_file": str(tmp_path / "moderation_user_overrides.json"),
+            "runtime_overrides_file": str(tmp_path / "moderation_runtime_overrides.json"),
+        }
+    }
 
 
 @pytest.mark.unit
@@ -23,6 +43,37 @@ def test_parse_line_with_categories_suffix_after_action():
     assert action2 == "redact"
     assert repl2 == "[MASK]"
     assert cats2 == {"pii"}
+
+
+@pytest.mark.unit
+def test_service_parser_wrappers_delegate_to_policy_compiler():
+    svc = ModerationService()
+
+    expr, action, repl, cats = svc._parse_rule_line("/leak\\d+/ -> redact:[MASK] #pii")
+
+    assert expr == "/leak\\d+/"
+    assert action == "redact"
+    assert repl == "[MASK]"
+    assert cats == {"pii"}
+
+
+@pytest.mark.unit
+def test_service_parse_rule_line_uses_policy_compiler_instance():
+    svc = ModerationService()
+
+    class FakeCompiler:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def parse_rule_line(self, value: str):
+            self.calls.append(value)
+            return "delegated", "warn", None, {"test"}
+
+    fake = FakeCompiler()
+    svc._policy_compiler = fake
+
+    assert svc._parse_rule_line("raw rule") == ("delegated", "warn", None, {"test"})
+    assert fake.calls == ["raw rule"]
 
 
 @pytest.mark.unit
@@ -167,6 +218,212 @@ def test_invalid_and_dangerous_regex_lines_are_skipped():
 
 
 @pytest.mark.unit
+def test_blocklist_pattern_warnings_sanitize_raw_regex_details(tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    blocklist_path.write_text(
+        "\n".join(
+            [
+                "/(private_secret/ -> block #pii",
+                "/(private_secret+)+$/ -> block #pii",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        rules = svc._load_block_patterns(str(blocklist_path))
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert rules == []
+    assert "Invalid blocklist pattern" in joined
+    assert "Skipped dangerous regex in blocklist" in joined
+    assert "private_secret" not in joined
+    assert "missing )" not in joined
+
+
+@pytest.mark.unit
+def test_blocklist_invalid_action_warning_sanitizes_line_details(tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    blocklist_path.write_text(
+        "private_secret -> exfiltrate:/private/moderation_blocklist.txt #pii\n",
+        encoding="utf-8",
+    )
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        rules = svc._load_block_patterns(str(blocklist_path))
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert rules == []
+    assert "Invalid moderation action in blocklist; skipping line" in joined
+    assert "exfiltrate" not in joined
+    assert "private_secret" not in joined
+    assert "moderation_blocklist.txt" not in joined
+
+
+@pytest.mark.unit
+def test_load_block_patterns_missing_file_logs_path_context(tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "private_moderation_blocklist.txt"
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        rules = svc._load_block_patterns(str(blocklist_path))
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert rules == []
+    assert "Moderation blocklist file not found" in joined
+    assert f"path={blocklist_path}" in joined
+
+
+@pytest.mark.unit
+def test_load_block_patterns_failure_log_preserves_exception_context(monkeypatch, tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    blocklist_path.write_text("secret\n", encoding="utf-8")
+
+    def _raise_load_failure(*_args, **_kwargs):
+        raise OSError("blocklist load failed at /private/moderation_blocklist.txt")
+
+    monkeypatch.setattr(moderation_service_module, "open", _raise_load_failure, raising=False)
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        rules = svc._load_block_patterns(str(blocklist_path))
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert rules == []
+    assert "Failed to load moderation blocklist" in joined
+    assert f"path={blocklist_path}" in joined
+    assert "blocklist load failed" in joined
+    assert "Traceback" in joined
+
+
+@pytest.mark.unit
+def test_load_block_patterns_iterates_blocklist_without_readlines(monkeypatch, tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    blocklist_path.write_text("ignored by monkeypatch\n", encoding="utf-8")
+
+    class IterOnlyBlocklist:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            return iter(["secret -> block #confidential\n"])
+
+        def readlines(self):
+            raise AssertionError("readlines should not be used for compilation")
+
+    monkeypatch.setattr(
+        moderation_service_module,
+        "open",
+        lambda *_args, **_kwargs: IterOnlyBlocklist(),
+        raising=False,
+    )
+
+    rules = svc._load_block_patterns(str(blocklist_path))
+
+    assert len(rules) == 1
+    assert rules[0].regex.search("secret")
+    assert rules[0].categories == {"confidential"}
+
+
+@pytest.mark.unit
+def test_build_block_patterns_sanitizes_builtin_pii_failure_log(monkeypatch):
+    svc = ModerationService()
+    svc._pii_enabled = True
+
+    def _raise_pii_failure():
+        raise RuntimeError("builtin pii load failed at /private/pii-rules.py")
+
+    monkeypatch.setattr(svc, "_load_builtin_pii_rules", _raise_pii_failure)
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        patterns = svc._build_block_patterns(None)
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert patterns == []
+    assert "Failed to load builtin PII rules" in joined
+    assert "builtin pii load failed" not in joined
+    assert "pii-rules.py" not in joined
+
+
+@pytest.mark.unit
+def test_get_blocklist_lines_sanitizes_read_failure_log(monkeypatch, tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    blocklist_path.write_text("secret\n", encoding="utf-8")
+    svc._blocklist_path = str(blocklist_path)
+
+    def _raise_read_failure(*_args, **_kwargs):
+        raise OSError("blocklist read failed at /private/moderation_blocklist.txt")
+
+    monkeypatch.setattr(moderation_service_module, "open", _raise_read_failure, raising=False)
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        lines = svc.get_blocklist_lines()
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert lines == []
+    assert "Failed to read blocklist" in joined
+    assert "blocklist read failed" not in joined
+    assert "moderation_blocklist.txt" not in joined
+
+
+@pytest.mark.unit
+def test_set_blocklist_lines_sanitizes_write_failure_log(monkeypatch, tmp_path):
+    svc = ModerationService()
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    svc._blocklist_path = str(blocklist_path)
+
+    def _raise_write_failure(*_args, **_kwargs):
+        raise OSError("blocklist write failed at /private/moderation_blocklist.txt")
+
+    monkeypatch.setattr(moderation_service_module.os, "replace", _raise_write_failure)
+
+    messages: list[str] = []
+    sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    try:
+        ok = svc.set_blocklist_lines(["secret"])
+    finally:
+        moderation_service_module.logger.remove(sink_id)
+
+    joined = "\n".join(messages)
+    assert ok is False
+    assert "Failed to write blocklist" in joined
+    assert "blocklist write failed" not in joined
+    assert "moderation_blocklist.txt" not in joined
+
+
+@pytest.mark.unit
 def test_lint_warns_on_invalid_regex_flags():
     svc = ModerationService()
     res = svc.lint_blocklist_lines(["/foo/z"])
@@ -174,6 +431,26 @@ def test_lint_warns_on_invalid_regex_flags():
     assert item["ok"] is True
     assert item["pattern_type"] == "literal"
     assert "invalid regex flags" in (item.get("warning") or "")
+
+
+@pytest.mark.unit
+def test_lint_blocklist_lines_keeps_public_response_shape():
+    svc = ModerationService()
+
+    result = svc.lint_blocklist_lines(["/foo/z", "secret -> block #confidential"])
+
+    assert set(result) == {"items", "valid_count", "invalid_count"}
+    invalid = result["items"][0]
+    valid = result["items"][1]
+    assert invalid["line"] == "/foo/z"
+    assert invalid["ok"] is True
+    assert invalid["pattern_type"] == "literal"
+    assert invalid["warning"] == "invalid regex flags; treating as literal"
+    assert valid["line"] == "secret -> block #confidential"
+    assert valid["ok"] is True
+    assert valid["pattern_type"] == "literal"
+    assert valid["sample"] == "secret"
+    assert valid["categories"] == ["confidential"]
 
 
 @pytest.mark.unit
@@ -522,6 +799,45 @@ def test_set_blocklist_lines_empty_writes_empty_file():
             os.unlink(tmp_path)
         except Exception:
             _ = None
+
+
+@pytest.mark.unit
+def test_set_blocklist_lines_recompiles_policy_from_file(monkeypatch, tmp_path):
+    blocklist_path = tmp_path / "moderation_blocklist.txt"
+    blocklist_path.write_text("old-secret -> block #runtime\n", encoding="utf-8")
+    monkeypatch.setattr(
+        moderation_service_module,
+        "load_and_log_configs",
+        lambda: _tmp_moderation_config(tmp_path, blocklist_path),
+    )
+
+    svc = ModerationService()
+
+    old_before, _red_before, _pattern_before, old_cat_before = svc.evaluate_action(
+        "old-secret",
+        svc._global_policy,
+        "input",
+    )
+    assert old_before == "block"
+    assert old_cat_before == "runtime"
+
+    ok = svc.set_blocklist_lines(["new-secret -> block #runtime"])
+
+    assert ok is True
+    assert blocklist_path.read_text(encoding="utf-8") == "new-secret -> block #runtime\n"
+    old_after, _red_old_after, _pattern_old_after, _cat_old_after = svc.evaluate_action(
+        "old-secret",
+        svc._global_policy,
+        "input",
+    )
+    new_after, _red_new_after, _pattern_new_after, new_cat_after = svc.evaluate_action(
+        "new-secret",
+        svc._global_policy,
+        "input",
+    )
+    assert old_after == "pass"
+    assert new_after == "block"
+    assert new_cat_after == "runtime"
 
 
 @pytest.mark.unit

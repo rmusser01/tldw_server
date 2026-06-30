@@ -1,14 +1,18 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
+import type { AddSourceTab } from "@/types/workspace"
 import { AddSourceModal } from "../SourcesPane/AddSourceModal"
 
 const {
   mockWebSearch,
+  mockUploadMedia,
   mockAddMedia,
   mockAddSource,
   mockMessageWarning
 } = vi.hoisted(() => ({
   mockWebSearch: vi.fn(),
+  mockUploadMedia: vi.fn(),
   mockAddMedia: vi.fn(),
   mockAddSource: vi.fn(),
   mockMessageWarning: vi.fn()
@@ -16,7 +20,7 @@ const {
 
 const workspaceStoreState = {
   addSourceModalOpen: true,
-  addSourceModalTab: "search" as const,
+  addSourceModalTab: "search" as AddSourceTab,
   addSourceProcessing: false,
   addSourceError: null as string | null,
   sources: [] as Array<{ mediaId: number }>,
@@ -67,7 +71,7 @@ vi.mock("@/store/workspace", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    uploadMedia: vi.fn(),
+    uploadMedia: mockUploadMedia,
     addMedia: mockAddMedia,
     webSearch: mockWebSearch,
     searchMedia: vi.fn().mockResolvedValue({ results: [] }),
@@ -111,6 +115,10 @@ describe("AddSourceModal Stage 1 error surfaces", () => {
     mockAddMedia
       .mockResolvedValueOnce({ results: [{ media_id: 9001, title: "One" }] })
       .mockRejectedValueOnce(new Error("timeout"))
+    mockUploadMedia.mockResolvedValue({ media_id: 9100, title: "Pasted Source" })
+    workspaceStoreState.setAddSourceError.mockImplementation((error: string | null) => {
+      workspaceStoreState.addSourceError = error
+    })
   })
 
   it("reports partial batch URL ingestion failures with actionable summary", async () => {
@@ -137,5 +145,51 @@ describe("AddSourceModal Stage 1 error surfaces", () => {
         expect.stringContaining("https://example.com/two")
       )
     })
+  })
+
+  it("keeps pasted text editable and gives an auth recovery path when paste upload is denied", async () => {
+    workspaceStoreState.addSourceModalTab = "paste"
+    const authError = new Error("Unauthorized")
+    ;(authError as { status?: number }).status = 401
+    mockUploadMedia.mockRejectedValueOnce(authError)
+
+    const { rerender } = render(<AddSourceModal />)
+
+    fireEvent.change(screen.getByPlaceholderText("Give your content a title"), {
+      target: { value: "Field notes" }
+    })
+    fireEvent.change(screen.getByPlaceholderText("Paste your text content here..."), {
+      target: { value: "Important pasted notes that should stay editable." }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Add Text" }))
+
+    await waitFor(() => {
+      expect(workspaceStoreState.setAddSourceError).toHaveBeenCalledWith(
+        "You need to finish server setup or sign in before adding sources. Your pasted text is still here."
+      )
+    })
+    expect(screen.getByPlaceholderText("Give your content a title")).toHaveValue(
+      "Field notes"
+    )
+    expect(screen.getByPlaceholderText("Paste your text content here...")).toHaveValue(
+      "Important pasted notes that should stay editable."
+    )
+    rerender(<AddSourceModal />)
+    expect(screen.getByRole("button", { name: "Retry after setup" })).toBeInTheDocument()
+  })
+
+  it("shows an auth-specific recovery message instead of a generic media load error", async () => {
+    workspaceStoreState.addSourceModalTab = "existing"
+    const authError = new Error("Missing API key")
+    ;(authError as { status?: number }).status = 401
+    vi.mocked(tldwClient.listMedia).mockRejectedValueOnce(authError)
+
+    render(<AddSourceModal />)
+
+    expect(
+      await screen.findByText(
+        "Sign in or finish server setup to browse your media library."
+      )
+    ).toBeInTheDocument()
   })
 })

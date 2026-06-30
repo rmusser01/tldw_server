@@ -83,10 +83,112 @@ describe("TldwApiClient Wave 5 boundary slices", () => {
     )
   })
 
+  it("serializes listSkills search queries and omits blank search values", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      skills: [],
+      count: 0,
+      total: 0,
+      limit: 10,
+      offset: 0
+    })
+
+    const client = new TldwApiClient()
+    client.resolveApiPath = vi
+      .fn(async () => "/api/v1/skills") as typeof client.resolveApiPath
+
+    await client.listSkills({ q: "long form", limit: 10, offset: 20 })
+    await client.listSkills({ q: "   ", limit: 10 })
+
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        path: "/api/v1/skills?q=long+form&limit=10&offset=20",
+        method: "GET"
+      })
+    )
+    expect(mocks.bgRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        path: "/api/v1/skills?limit=10",
+        method: "GET"
+      })
+    )
+  })
+
+  it("forwards listSkills abort signals to background requests", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      skills: [],
+      count: 0,
+      total: 0,
+      limit: 10,
+      offset: 0
+    })
+
+    const client = new TldwApiClient()
+    client.resolveApiPath = vi
+      .fn(async () => "/api/v1/skills") as typeof client.resolveApiPath
+    const abortController = new AbortController()
+
+    await client.listSkills({
+      q: "research",
+      limit: 10,
+      abortSignal: abortController.signal
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/skills?q=research&limit=10",
+        method: "GET",
+        abortSignal: abortController.signal
+      })
+    )
+  })
+
+  it("serializes listSkills filter and sort params for the backend contract", async () => {
+    mocks.bgRequest.mockResolvedValue({
+      skills: [],
+      count: 0,
+      total: 0,
+      limit: 10,
+      offset: 20
+    })
+
+    const client = new TldwApiClient()
+    client.resolveApiPath = vi
+      .fn(async () => "/api/v1/skills") as typeof client.resolveApiPath
+
+    await client.listSkills({
+      q: " summary ",
+      includeHidden: true,
+      userInvocable: false,
+      hasTools: true,
+      context: "fork",
+      model: " gpt-4o ",
+      sort: "name",
+      order: "desc",
+      limit: 10,
+      offset: 20
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: (
+          "/api/v1/skills?q=summary&include_hidden=true&user_invocable=false"
+          + "&has_tools=true&context=fork&model=gpt-4o&sort=name&order=desc"
+          + "&limit=10&offset=20"
+        ),
+        method: "GET"
+      })
+    )
+  })
+
   it("keeps presentation methods on the mixed presentations domain paths after class cleanup", async () => {
     const client = new TldwApiClient()
     client.ensureConfigForRequest = vi
-      .fn(async () => ({ serverUrl: "http://127.0.0.1:8000" })) as typeof client.ensureConfigForRequest
+      .fn(async () => ({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user" as const
+      })) as unknown as typeof client.ensureConfigForRequest
     client.request = vi
       .fn()
       .mockResolvedValueOnce({
@@ -139,5 +241,26 @@ describe("TldwApiClient Wave 5 boundary slices", () => {
     expect(baseMethodNames).not.toContain("generateSlidesFromMedia")
     expect(baseMethodNames).not.toContain("getPresentation")
     expect(baseMethodNames).not.toContain("exportPresentation")
+  })
+
+  it("unloads TTS providers through the mixed models-audio domain path", async () => {
+    mocks.bgRequest.mockResolvedValue({ provider: "chatterbox", unloaded: true })
+
+    const client = new TldwApiClient()
+    const result = await client.unloadTtsProvider(" chatterbox ")
+
+    expect(result).toEqual({ provider: "chatterbox", unloaded: true })
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/audio/tts/providers/chatterbox/unload",
+      method: "POST"
+    })
+  })
+
+  it("rejects empty TTS provider ids before dispatching client unload requests", async () => {
+    const client = new TldwApiClient()
+
+    await expect(client.unloadTtsProvider("   ")).rejects.toThrow("provider is required")
+
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
   })
 })

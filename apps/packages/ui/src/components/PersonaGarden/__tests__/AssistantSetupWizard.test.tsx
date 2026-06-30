@@ -213,6 +213,39 @@ describe("AssistantSetupWizard", () => {
     expect(screen.getByText("Starter commands selected")).toBeInTheDocument()
   })
 
+  it("renders optional compact visual setup without adding a required setup step", () => {
+    const onOpenVisualSetup = vi.fn()
+
+    render(
+      <AssistantSetupWizard
+        catalog={[{ id: "default_persona", name: "Default Persona" }]}
+        selectedPersonaId="default_persona"
+        currentStep="voice"
+        postSetupTargetTab="profiles"
+        progressItems={[
+          { step: "persona", label: "Choose persona", status: "completed", summary: null },
+          { step: "voice", label: "Voice defaults", status: "current", summary: null }
+        ]}
+        visualSetupContent={
+          <div data-testid="setup-visual-content">
+            <button type="button" onClick={onOpenVisualSetup}>
+              Set up visual buddy
+            </button>
+          </div>
+        }
+        saving={false}
+        error={null}
+        onUsePersona={vi.fn()}
+        onCreatePersona={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId("setup-visual-content")).toBeInTheDocument()
+    expect(screen.queryByTestId("assistant-setup-progress-step-visuals")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /set up visual buddy/i }))
+    expect(onOpenVisualSetup).toHaveBeenCalledTimes(1)
+  })
+
   it("renders injected commands-step content when the wizard reaches starter commands", () => {
     render(
       <AssistantSetupWizard

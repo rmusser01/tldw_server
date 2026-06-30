@@ -3,14 +3,20 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Awaitable
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+    build_offset_pagination_meta,
+)
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
+    EmailDeliveryItem,
+    EmailDeliveryListResponse,
     FeatureFlagItem,
     FeatureFlagsResponse,
     FeatureFlagUpsertRequest,
@@ -54,10 +60,25 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
     create_incident as svc_create_incident,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
+    create_report_schedule as svc_create_report_schedule,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    create_webhook as svc_create_webhook,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
     delete_feature_flag as svc_delete_feature_flag,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     delete_incident as svc_delete_incident,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    delete_report_schedule as svc_delete_report_schedule,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    delete_webhook as svc_delete_webhook,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    get_digest_preference as svc_get_digest_preference,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     get_incident as svc_get_incident,
@@ -66,13 +87,40 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
     get_maintenance_state as svc_get_maintenance_state,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
+    get_uptime_stats as svc_get_uptime_stats,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    list_email_deliveries as svc_list_email_deliveries,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
     list_feature_flags as svc_list_feature_flags,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     list_incidents as svc_list_incidents,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
+    list_report_schedules as svc_list_report_schedules,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    list_webhook_deliveries as svc_list_webhook_deliveries,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    list_webhooks as svc_list_webhooks,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    mark_report_schedule_sent as svc_mark_report_schedule_sent,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
     notify_incident_stakeholders as svc_notify_incident_stakeholders,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    record_health_snapshot as svc_record_health_snapshot,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    send_test_webhook as svc_send_test_webhook,
+)
+from tldw_Server_API.app.services.admin_system_ops_service import (
+    set_digest_preference as svc_set_digest_preference,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     update_incident as svc_update_incident,
@@ -81,45 +129,13 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
     update_maintenance_state as svc_update_maintenance_state,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
-    upsert_feature_flag as svc_upsert_feature_flag,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    create_webhook as svc_create_webhook,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    delete_webhook as svc_delete_webhook,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    list_webhooks as svc_list_webhooks,
+    update_report_schedule as svc_update_report_schedule,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
     update_webhook as svc_update_webhook,
 )
 from tldw_Server_API.app.services.admin_system_ops_service import (
-    list_webhook_deliveries as svc_list_webhook_deliveries,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    send_test_webhook as svc_send_test_webhook,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    get_uptime_stats as svc_get_uptime_stats,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    record_health_snapshot as svc_record_health_snapshot,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    list_email_deliveries as svc_list_email_deliveries,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    create_report_schedule as svc_create_report_schedule,
-    delete_report_schedule as svc_delete_report_schedule,
-    list_report_schedules as svc_list_report_schedules,
-    mark_report_schedule_sent as svc_mark_report_schedule_sent,
-    update_report_schedule as svc_update_report_schedule,
-)
-from tldw_Server_API.app.services.admin_system_ops_service import (
-    get_digest_preference as svc_get_digest_preference,
-    set_digest_preference as svc_set_digest_preference,
+    upsert_feature_flag as svc_upsert_feature_flag,
 )
 
 if TYPE_CHECKING:
@@ -282,7 +298,7 @@ async def update_maintenance_mode(
 
 async def _get_maintenance_rotation_runs_repo(
     pool: DatabasePool = Depends(get_db_pool),
-) -> "AuthnzMaintenanceRotationRunsRepo":
+) -> AuthnzMaintenanceRotationRunsRepo:
     """Build the maintenance rotation runs repository from the shared AuthNZ pool."""
     from tldw_Server_API.app.core.AuthNZ.repos.maintenance_rotation_runs_repo import (
         AuthnzMaintenanceRotationRunsRepo,
@@ -294,7 +310,7 @@ async def _get_maintenance_rotation_runs_repo(
 
 
 async def get_admin_maintenance_rotation_service(
-    repo: "AuthnzMaintenanceRotationRunsRepo" = Depends(_get_maintenance_rotation_runs_repo),
+    repo: AuthnzMaintenanceRotationRunsRepo = Depends(_get_maintenance_rotation_runs_repo),
 ) -> AdminMaintenanceRotationService:
     """Build the maintenance rotation service from the injected repository."""
     return AdminMaintenanceRotationService(repo=repo)
@@ -329,7 +345,7 @@ async def create_maintenance_rotation_run(
     payload: MaintenanceRotationRunCreateRequest,
     request: Request,
     principal: AuthPrincipal = Depends(get_auth_principal),
-    repo: "AuthnzMaintenanceRotationRunsRepo" = Depends(_get_maintenance_rotation_runs_repo),
+    repo: AuthnzMaintenanceRotationRunsRepo = Depends(_get_maintenance_rotation_runs_repo),
     service: AdminMaintenanceRotationService = Depends(get_admin_maintenance_rotation_service),
     enqueue_run: Callable[[dict[str, Any]], Awaitable[str]] = Depends(get_maintenance_rotation_job_enqueuer),
 ) -> MaintenanceRotationRunCreateResponse:
@@ -341,8 +357,8 @@ async def create_maintenance_rotation_run(
     if not maintenance_rotation_worker_enabled():
         raise HTTPException(status_code=503, detail="maintenance_rotation_worker_unavailable")
     _enforce_domain_scope_unified(principal, payload.domain)
-    actor_label = principal.email or principal.username or (
-        str(principal.user_id) if principal.user_id is not None else None
+    actor_label = (
+        principal.email or principal.username or (str(principal.user_id) if principal.user_id is not None else None)
     )
     item = await service.create_run(
         mode=payload.mode,
@@ -359,7 +375,7 @@ async def create_maintenance_rotation_run(
         await enqueue_run(item)
     except _OPS_NONCRITICAL_EXCEPTIONS:
         await repo.mark_failed(item["id"], error_message="enqueue_failed")
-        raise HTTPException(status_code=503, detail="maintenance_rotation_enqueue_failed")
+        raise HTTPException(status_code=503, detail="maintenance_rotation_enqueue_failed") from None
     await _emit_admin_audit_event(
         request,
         principal,
@@ -398,6 +414,12 @@ async def list_maintenance_rotation_runs(
         total=payload["total"],
         limit=payload["limit"],
         offset=payload["offset"],
+        pagination=build_offset_pagination_meta(
+            total=payload["total"],
+            limit=payload["limit"],
+            offset=payload["offset"],
+            count=len(payload["items"]),
+        ),
     )
 
 
@@ -551,6 +573,12 @@ async def list_incidents(
         total=total,
         limit=limit,
         offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(items),
+        ),
     )
 
 
@@ -596,7 +624,11 @@ async def get_incident_sla_metrics(
     """Compute SLA metrics across all incidents."""
     _require_platform_admin(principal)
     incidents, _ = svc_list_incidents(
-        status=None, severity=None, tag=None, limit=10000, offset=0,
+        status=None,
+        severity=None,
+        tag=None,
+        limit=10000,
+        offset=0,
     )
 
     mtta_values: list[float] = []
@@ -869,9 +901,16 @@ async def list_webhooks(
     """List all configured webhooks (secrets redacted)."""
     _require_platform_admin(principal)
     items = svc_list_webhooks()
+    limit = len(items)
     return WebhookListResponse(
         items=[WebhookItem(**item) for item in items],
         total=len(items),
+        pagination=build_offset_pagination_meta(
+            total=len(items),
+            limit=limit,
+            offset=0,
+            count=len(items),
+        ),
     )
 
 
@@ -975,14 +1014,27 @@ async def delete_webhook(
 async def list_webhook_deliveries(
     webhook_id: str,
     limit: int = Query(default=50, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> WebhookDeliveryListResponse:
     """List delivery history for a webhook, newest first."""
     _require_platform_admin(principal)
-    items = svc_list_webhook_deliveries(webhook_id=webhook_id, limit=limit)
+    items, total = svc_list_webhook_deliveries(
+        webhook_id=webhook_id,
+        limit=limit,
+        offset=offset,
+    )
     return WebhookDeliveryListResponse(
         items=[WebhookDeliveryItem(**item) for item in items],
-        total=len(items),
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            limit=limit,
+            offset=offset,
+            count=len(items),
+        ),
     )
 
 
@@ -1113,15 +1165,10 @@ async def get_billing_analytics(
                     converted_trials += 1
 
         subscriber_count = active_count + trialing_count + past_due_count
-        trial_conversion_rate = (
-            round(converted_trials / total_trials_ever * 100, 1)
-            if total_trials_ever > 0
-            else 0.0
-        )
+        trial_conversion_rate = round(converted_trials / total_trials_ever * 100, 1) if total_trials_ever > 0 else 0.0
 
         plan_distribution = [
-            {"plan_name": name, "count": count}
-            for name, count in sorted(plan_counts.items(), key=lambda x: -x[1])
+            {"plan_name": name, "count": count} for name, count in sorted(plan_counts.items(), key=lambda x: -x[1])
         ]
 
         return {
@@ -1135,8 +1182,8 @@ async def get_billing_analytics(
             "trial_conversion_rate_pct": trial_conversion_rate,
         }
 
-    except Exception as exc:
-        logger.warning("billing/analytics: failed to compute metrics: {}", exc)
+    except Exception:
+        logger.warning("billing/analytics: failed to compute metrics")
         return empty_response
 
 
@@ -1177,14 +1224,13 @@ async def get_realtime_stats(
             tokens_today["prompt"] += int(m.get("total_prompt_tokens", 0) or 0)
             tokens_today["completion"] += int(m.get("total_completion_tokens", 0) or 0)
             tokens_today["total"] += int(m.get("total_tokens", 0) or 0)
-    except Exception as exc:
-        logger.debug("Realtime stats: ACP session store unavailable: {}", exc)
+    except Exception:
+        logger.debug("Realtime stats: ACP session store unavailable")
 
     return {
         "active_sessions": active_sessions,
         "tokens_today": tokens_today,
     }
-
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -1203,7 +1249,7 @@ async def reload_llm_pricing_catalog() -> dict:
         reset_pricing_catalog()
         return {"status": "ok"}
     except _OPS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to reload pricing catalog: {e}")
+        logger.error("Failed to reload pricing catalog")
         raise HTTPException(status_code=500, detail="Failed to reload pricing catalog") from e
 
 
@@ -1224,7 +1270,7 @@ async def reload_chat_model_alias_caches() -> dict:
         invalidate_model_alias_caches()
         return {"status": "ok"}
     except _OPS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Failed to reload chat model alias caches: {e}")
+        logger.error("Failed to reload chat model alias caches")
         raise HTTPException(status_code=500, detail="Failed to reload chat model alias caches") from e
 
 
@@ -1268,8 +1314,8 @@ async def get_compliance_posture(
             r = dict(row) if hasattr(row, "keys") or isinstance(row, dict) else {"total": row[0], "mfa_on": row[1]}
             total_users = int(r.get("total") or 0)
             mfa_enabled = int(r.get("mfa_on") or 0)
-    except Exception as exc:
-        logger.warning("compliance/posture: MFA query failed: {}", exc)
+    except Exception:
+        logger.warning("compliance/posture: MFA query failed")
 
     # --- API key rotation compliance (keys older than 180 days need rotation) --
     keys_compliant = 0
@@ -1298,8 +1344,8 @@ async def get_compliance_posture(
             keys_total = int(r.get("total") or 0)
             keys_compliant = int(r.get("compliant") or 0)
             keys_needing_rotation = keys_total - keys_compliant
-    except Exception as exc:
-        logger.warning("compliance/posture: API key rotation query failed: {}", exc)
+    except Exception:
+        logger.warning("compliance/posture: API key rotation query failed")
 
     mfa_pct = round((mfa_enabled / total_users * 100), 1) if total_users > 0 else 0.0
     key_rotation_pct = round((keys_compliant / keys_total * 100), 1) if keys_total > 0 else 0.0
@@ -1346,9 +1392,15 @@ async def _check_dep(
         }
     except asyncio.TimeoutError:
         return {"name": name, "status": "down", "latency_ms": 5000.0, "error": "Timeout", "metadata": {}}
-    except _OPS_NONCRITICAL_EXCEPTIONS as exc:
+    except _OPS_NONCRITICAL_EXCEPTIONS:
         latency = round((time.monotonic() - start) * 1000, 1)
-        return {"name": name, "status": "degraded", "latency_ms": latency, "error": str(exc), "metadata": {}}
+        return {
+            "name": name,
+            "status": "degraded",
+            "latency_ms": latency,
+            "error": f"{name} health check failed",
+            "metadata": {},
+        }
 
 
 async def _check_authnz_database() -> dict[str, Any]:
@@ -1374,8 +1426,8 @@ async def _check_chacha_notes() -> dict[str, Any]:
             "cached_instances": snapshot.get("cached_instances"),
             "init_failures": snapshot.get("init_failures"),
         }
-    except _OPS_NONCRITICAL_EXCEPTIONS as exc:
-        return {"status": "unhealthy", "error": str(exc)}
+    except _OPS_NONCRITICAL_EXCEPTIONS:
+        return {"status": "unhealthy", "error": "ChaChaNotes health check failed"}
 
 
 async def _check_workflows_engine() -> dict[str, Any]:
@@ -1386,8 +1438,8 @@ async def _check_workflows_engine() -> dict[str, Any]:
         sched = WorkflowScheduler.instance()
         qd = sched.queue_depth()
         return {"status": "healthy", "queue_depth": qd}
-    except _OPS_NONCRITICAL_EXCEPTIONS as exc:
-        return {"status": "degraded", "error": str(exc)}
+    except _OPS_NONCRITICAL_EXCEPTIONS:
+        return {"status": "degraded", "error": "Workflows engine health check failed"}
 
 
 async def _check_embeddings_service() -> dict[str, Any]:
@@ -1401,8 +1453,8 @@ async def _check_embeddings_service() -> dict[str, Any]:
         total = len(provider_status)
         overall = "healthy" if healthy == total else ("degraded" if healthy > 0 else "unhealthy")
         return {"status": overall, "providers_healthy": healthy, "providers_total": total}
-    except _OPS_NONCRITICAL_EXCEPTIONS as exc:
-        return {"status": "degraded", "error": str(exc)}
+    except _OPS_NONCRITICAL_EXCEPTIONS:
+        return {"status": "degraded", "error": "Embeddings service health check failed"}
 
 
 async def _check_metrics_registry() -> dict[str, Any]:
@@ -1412,8 +1464,8 @@ async def _check_metrics_registry() -> dict[str, Any]:
 
         reg = get_metrics_registry()
         return {"status": "healthy" if bool(reg) else "degraded"}
-    except _OPS_NONCRITICAL_EXCEPTIONS as exc:
-        return {"status": "degraded", "error": str(exc)}
+    except _OPS_NONCRITICAL_EXCEPTIONS:
+        return {"status": "degraded", "error": "Metrics registry health check failed"}
 
 
 @router.get("/dependencies")
@@ -1464,7 +1516,7 @@ async def get_dependency_uptime(
     try:
         stats = await asyncio.to_thread(svc_get_uptime_stats, name, days)
     except _OPS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_admin_error("Failed to get dependency uptime", exc)
     return stats
 
 
@@ -1473,22 +1525,32 @@ async def get_dependency_uptime(
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-@router.get("/email/deliveries")
+@router.get("/email/deliveries", response_model=EmailDeliveryListResponse)
 async def list_email_deliveries(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     status: str | None = Query(default=None),
     principal: AuthPrincipal = Depends(get_auth_principal),
-) -> dict[str, Any]:
+) -> EmailDeliveryListResponse:
     """List email delivery log entries with optional status filter and pagination."""
     _require_platform_admin(principal)
     try:
-        items, total = await asyncio.to_thread(
-            svc_list_email_deliveries, limit=limit, offset=offset, status=status
-        )
+        items, total = await asyncio.to_thread(svc_list_email_deliveries, limit=limit, offset=offset, status=status)
     except _OPS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"items": items, "total": total, "limit": limit, "offset": offset}
+        _raise_internal_admin_error("Failed to list email deliveries", exc)
+    pagination = build_offset_pagination_meta(
+        total=total,
+        limit=limit,
+        offset=offset,
+        count=len(items),
+    )
+    return EmailDeliveryListResponse(
+        items=[EmailDeliveryItem(**item) for item in items],
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=pagination,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1505,7 +1567,7 @@ async def get_report_schedules(
     try:
         items = await asyncio.to_thread(svc_list_report_schedules)
     except _OPS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_admin_error("Failed to list report schedules", exc)
     return {"items": items, "total": len(items)}
 
 
@@ -1574,9 +1636,7 @@ async def delete_report_schedule(
     """Delete a compliance report schedule."""
     _require_platform_admin(principal)
     try:
-        removed = await asyncio.to_thread(
-            svc_delete_report_schedule, schedule_id=schedule_id
-        )
+        removed = await asyncio.to_thread(svc_delete_report_schedule, schedule_id=schedule_id)
     except ValueError as exc:
         error_key = str(exc)
         if error_key == "not_found":
@@ -1617,6 +1677,7 @@ async def send_report_now(
     report_format = schedule.get("format", "html")
     if report_format == "json":
         import json as _json
+
         report_body = _json.dumps(posture, indent=2)
     else:
         report_body = _build_compliance_html_report(posture)
@@ -1675,9 +1736,7 @@ async def send_report_now(
 
     # Mark as sent
     try:
-        await asyncio.to_thread(
-            svc_mark_report_schedule_sent, schedule_id=schedule_id
-        )
+        await asyncio.to_thread(svc_mark_report_schedule_sent, schedule_id=schedule_id)
     except _OPS_NONCRITICAL_EXCEPTIONS:
         pass
 
@@ -1735,7 +1794,7 @@ async def get_digest_preference(
     try:
         pref = await asyncio.to_thread(svc_get_digest_preference, user_id=user_id)
     except _OPS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_admin_error("Failed to get digest preference", exc)
     if pref is None:
         return {"user_id": user_id, "email": "", "frequency": "off", "enabled": False}
     return pref
@@ -1763,5 +1822,5 @@ async def set_digest_preference(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except _OPS_NONCRITICAL_EXCEPTIONS as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        _raise_internal_admin_error("Failed to set digest preference", exc)
     return pref

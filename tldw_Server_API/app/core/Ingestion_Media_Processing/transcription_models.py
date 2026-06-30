@@ -161,6 +161,11 @@ def get_transcription_models_payload() -> dict[str, Any]:
         ],
         "Parakeet Backends": [
             {
+                "value": "parakeet-tdt-0.6b-v3-onnx",
+                "label": "Parakeet TDT 0.6B V3 ONNX",
+                "description": "Canonical cross-platform ONNX default",
+            },
+            {
                 "value": "parakeet-standard",
                 "label": "Parakeet Standard",
                 "description": "Default CPU backend",
@@ -177,8 +182,8 @@ def get_transcription_models_payload() -> dict[str, Any]:
             },
             {
                 "value": "parakeet-onnx",
-                "label": "Parakeet ONNX",
-                "description": "Cross-platform optimization",
+                "label": "Parakeet ONNX (legacy alias)",
+                "description": "Compatibility alias for the canonical ONNX default",
             },
         ],
         "VibeVoice-ASR": [

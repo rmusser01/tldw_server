@@ -55,8 +55,9 @@ jobs:
       TLDW_E2E_SERVER_URL: http://127.0.0.1:8000
       TLDW_E2E_API_KEY: watchlists-e2e-key-12345
       TLDW_E2E_EXTENSION_LAUNCH_TIMEOUT_MS: "90000"
-      TLDW_E2E_EXTENSION_TARGET_WAIT_MS: "90000"
+      TLDW_E2E_EXTENSION_TARGET_WAIT_MS: "5000"
       TLDW_E2E_EXTENSION_HEADLESS: "0"
+      TLDW_E2E_EXTENSION_MINIMAL_LOCALES: "1"
 
     steps:
       - name: Checkout
@@ -67,7 +68,7 @@ jobs:
       - name: Setup Node.js (LTS)
         uses: actions/setup-node@v6
         with:
-          node-version: "lts/*"
+          node-version: "20"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -84,7 +85,8 @@ jobs:
 
       - name: Install Playwright Chromium
         working-directory: apps/extension
-        run: bunx playwright install --with-deps chromium
+        timeout-minutes: 10
+        run: ../node_modules/.bin/playwright install --with-deps chromium
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -115,7 +117,14 @@ jobs:
       - name: Run Watchlists extension Playwright spec (strict no-skip gate)
         working-directory: apps/extension
         run: |
+          set +e
           xvfb-run -a bun run test:e2e:watchlists:strict
+          status=$?
+          mkdir -p test-results
+          if [ -f .watchlists-e2e-report.json ]; then
+            cp .watchlists-e2e-report.json test-results/watchlists-e2e-report.json
+          fi
+          exit "$status"
 
       - name: Upload watchlists e2e artifacts
         if: always()

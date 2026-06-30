@@ -4,7 +4,7 @@ import SpeechPlaygroundPage from "@/components/Option/Speech/SpeechPlaygroundPag
 const OptionTts = () => {
   return (
     <OptionLayout>
-      <SpeechPlaygroundPage initialMode="listen" />
+      <SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />
     </OptionLayout>
   )
 }

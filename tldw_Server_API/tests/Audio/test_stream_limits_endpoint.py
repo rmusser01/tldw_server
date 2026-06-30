@@ -1,12 +1,57 @@
+from types import SimpleNamespace
+
 import pytest
+from starlette.requests import Request
+
+import tldw_Server_API.app.api.v1.endpoints.audio.audio_streaming as audio_streaming
 
 
 @pytest.mark.unit
-def test_stream_limits_shape(client_user_only):
-    client = client_user_only
-    r = client.get("/api/v1/audio/stream/limits")
-    assert r.status_code == 200
-    data = r.json()
+@pytest.mark.asyncio
+async def test_stream_limits_shape(monkeypatch):
+    async def _get_limits_for_user(user_id: int):
+        _ = user_id
+        return {
+            "daily_minutes": 30.0,
+            "concurrent_streams": 1,
+            "concurrent_jobs": 1,
+            "max_file_size_mb": 25,
+        }
+
+    async def _get_daily_minutes_used(user_id: int):
+        _ = user_id
+        return 5.0
+
+    async def _active_streams_count(user_id: int):
+        _ = user_id
+        return 0
+
+    async def _get_user_tier(user_id: int):
+        _ = user_id
+        return "free"
+
+    monkeypatch.setattr(audio_streaming, "_get_limits_for_user", _get_limits_for_user)
+    monkeypatch.setattr(audio_streaming, "_get_daily_minutes_used", _get_daily_minutes_used)
+    monkeypatch.setattr(audio_streaming, "_active_streams_count", _active_streams_count)
+    monkeypatch.setattr(audio_streaming, "_get_user_tier", _get_user_tier)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/v1/audio/stream/limits",
+        "headers": [],
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("testclient", 12345),
+    }
+
+    async def _receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    data = await audio_streaming.streaming_limits(
+        Request(scope, _receive),
+        current_user=SimpleNamespace(id=1),
+    )
 
     # Top-level shape
     assert isinstance(data, dict)

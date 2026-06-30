@@ -1,7 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react"
-import { useTranslation } from "react-i18next"
 import {
-  Alert,
   Button,
   Card,
   Empty,
@@ -11,9 +9,7 @@ import {
   Spin,
   Tag,
   Tooltip,
-  Badge,
   Form,
-  Collapse,
 } from "antd"
 import {
   FolderPlus,
@@ -27,16 +23,37 @@ import {
   Plus,
   Trash2,
   ChevronRight,
+  Search,
+  ExternalLink,
 } from "lucide-react"
+import { useLocation, useNavigate } from "react-router-dom"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
+import { buildACPAuthHeaders } from "@/services/acp/connection"
+import { buildACPSetupIssues, normalizeACPHealthStatus, type ACPSetupIssue } from "@/services/acp/readiness"
+import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
+import { Alert } from "@/components/ui/primitives/Alert"
+import { Badge as DesignSystemBadge } from "@/components/ui/primitives/Badge"
+import { RecoveryCallout, StatePanel, buildCapabilityState } from "@/components/ui/state"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 // Types matching the backend orchestration API
+type CanonicalWorkspaceLink = {
+  acp_workspace_id?: number | null
+  canonical_workspace_id?: string | null
+  canonical_workspace_source?: string | null
+  link_status?: string | null
+}
+
 type ProjectSummary = {
   id: number
   name: string
   description?: string
+  workspace_id?: number | null
   user_id: number
   created_at: string
+  metadata?: Record<string, unknown>
+  canonical_workspace?: CanonicalWorkspaceLink | null
   task_summary?: {
     total_tasks: number
     status_counts: Record<string, number>
@@ -55,6 +72,8 @@ type TaskItem = {
   max_review_attempts: number
   created_at: string
   updated_at: string
+  metadata?: Record<string, unknown>
+  canonical_workspace?: CanonicalWorkspaceLink | null
   runs?: RunItem[]
 }
 
@@ -68,6 +87,54 @@ type RunItem = {
   error?: string
   started_at: string
   completed_at?: string
+  session?: {
+    session_id: string
+    available?: boolean
+    links?: Record<string, string>
+  } | null
+  history?: {
+    event_count?: number
+    audit_event_count?: number
+    artifact_count?: number
+    diagnostic_count?: number
+    tool_call_count?: number
+    stop_reason?: string | null
+    result?: {
+      preview?: string
+    } | null
+  }
+  failure_context?: {
+    reason_code?: string | null
+    message?: string | null
+    source?: string | null
+    diagnostic_uri?: string | null
+  } | null
+  review_decision?: {
+    available?: boolean
+    approved?: boolean
+    reviewer?: string | null
+    feedback_preview?: string | null
+  } | null
+}
+
+type ReviewItem = {
+  reviewer?: string | null
+  approved?: boolean
+  feedback?: string | null
+  created_at?: string | null
+}
+
+type RunSummaryMode = "full" | "redacted"
+
+type RequestFailure = {
+  status?: number
+  rawMessage?: string
+  error?: unknown
+  path?: string
+}
+
+type TaskDetailItem = TaskItem & {
+  reviews?: ReviewItem[]
 }
 
 const AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE = "Agent orchestration unavailable"
@@ -75,7 +142,11 @@ const AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION =
   "This server does not expose agent orchestration endpoints."
 const AGENT_ORCHESTRATION_UNSUPPORTED_CODE = "AGENT_ORCHESTRATION_UNSUPPORTED"
 const AGENT_ORCHESTRATION_PROJECTS_PATH = "/api/v1/agent-orchestration/projects"
-
+const AGENT_ORCHESTRATION_BASE_PATH = "/api/v1/agent-orchestration"
+const ACP_HEALTH_PATH = "/api/v1/acp/health"
+const CANONICAL_WORKSPACE_SOURCE = "research_workspace"
+const ALL_WORKSPACES_FILTER_VALUE = "__all_workspaces__"
+const LINKED_CANONICAL_WORKSPACE_STATUS = "linked"
 const STATUS_COLORS: Record<string, string> = {
   todo: "default",
   inprogress: "processing",
@@ -92,6 +163,45 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
   triage: <XCircle className="h-3.5 w-3.5" />,
 }
 
+const navigateOptionRoute = (path: string) => {
+  if (typeof window === "undefined") {
+    return
+  }
+  window.location.hash = path
+}
+
+const normalizeWorkspaceFilterId = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null
+  }
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+const readWorkspaceFilterFromSearch = (search: string): string | null => {
+  const params = new URLSearchParams(search)
+  return (
+    normalizeWorkspaceFilterId(params.get("workspace")) ||
+    normalizeWorkspaceFilterId(params.get("workspace_id")) ||
+    normalizeWorkspaceFilterId(params.get("canonical_workspace_id"))
+  )
+}
+
+const getCanonicalWorkspaceId = (
+  projectOrTask: ProjectSummary | TaskItem
+): string | null => {
+  return (
+    normalizeWorkspaceFilterId(projectOrTask.canonical_workspace?.canonical_workspace_id) ||
+    normalizeWorkspaceFilterId(projectOrTask.metadata?.canonical_workspace_id)
+  )
+}
+
+const getCanonicalWorkspaceLinkStatus = (
+  project: ProjectSummary
+): string | null => {
+  return normalizeWorkspaceFilterId(project.canonical_workspace?.link_status)?.toLowerCase() ?? null
+}
+
 const normalizeListPayload = <T,>(payload: unknown, key: string): T[] => {
   if (Array.isArray(payload)) {
     return payload as T[]
@@ -100,6 +210,48 @@ const normalizeListPayload = <T,>(payload: unknown, key: string): T[] => {
     return (payload as Record<string, T[]>)[key]
   }
   return []
+}
+
+const buildProjectsRequestPath = (
+  workspaceFilterId: string | null
+): string => {
+  if (!workspaceFilterId) {
+    return AGENT_ORCHESTRATION_PROJECTS_PATH
+  }
+  const params = new URLSearchParams({
+    canonical_workspace_id: workspaceFilterId,
+    canonical_workspace_source: CANONICAL_WORKSPACE_SOURCE
+  })
+  return `${AGENT_ORCHESTRATION_PROJECTS_PATH}?${params.toString()}`
+}
+
+const buildProjectsRequestUrl = (
+  apiBase: string,
+  workspaceFilterId: string | null
+): string => {
+  if (!workspaceFilterId) {
+    return `${apiBase}/projects`
+  }
+  const params = new URLSearchParams({
+    canonical_workspace_id: workspaceFilterId,
+    canonical_workspace_source: CANONICAL_WORKSPACE_SOURCE
+  })
+  return `${apiBase}/projects?${params.toString()}`
+}
+
+export const buildTaskDetailRequestUrl = (
+  apiBase: string,
+  taskId: number,
+  options?: { runSummaryMode?: RunSummaryMode }
+): string => {
+  const url = `${apiBase}/tasks/${taskId}`
+  if (!options?.runSummaryMode || options.runSummaryMode === "full") {
+    return url
+  }
+  const params = new URLSearchParams({
+    run_summary_mode: options.runSummaryMode
+  })
+  return `${url}?${params.toString()}`
 }
 
 const createUnsupportedError = (): Error & { code: string } =>
@@ -115,12 +267,63 @@ const isUnsupportedError = (error: unknown): boolean =>
       (error as { code?: string }).code === AGENT_ORCHESTRATION_UNSUPPORTED_CODE
   )
 
-const readApiErrorMessage = async (response: Response): Promise<string> => {
-  const payload = await response.json().catch(() => null)
-  if (payload && typeof payload === "object" && typeof (payload as { detail?: unknown }).detail === "string") {
-    return (payload as { detail: string }).detail
+const readJsonOrNull = async (response: Response): Promise<unknown> => {
+  try {
+    return await response.json()
+  } catch {
+    return null
   }
-  return `HTTP ${response.status}`
+}
+
+const messageFromPayload = (payload: unknown): string | undefined => {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return undefined
+  }
+  const record = payload as Record<string, unknown>
+  const candidate = record.detail ?? record.message ?? record.error
+  return typeof candidate === "string" && candidate.trim()
+    ? sanitizeServerErrorMessage(candidate, candidate)
+    : undefined
+}
+
+const failureFromResponse = async (
+  response: Response,
+  fallback: string,
+  path?: string
+): Promise<RequestFailure> => {
+  const payload = await readJsonOrNull(response)
+  return {
+    status: response.status,
+    rawMessage: messageFromPayload(payload) ?? fallback,
+    path
+  }
+}
+
+const failureFromError = (
+  error: unknown,
+  fallback: string,
+  path?: string
+): RequestFailure => {
+  const statusCandidate = error as { status?: unknown; response?: { status?: unknown } }
+  const status =
+    typeof statusCandidate?.status === "number"
+      ? statusCandidate.status
+      : typeof statusCandidate?.response?.status === "number"
+        ? statusCandidate.response.status
+        : undefined
+  const rawMessage = sanitizeServerErrorMessage(error, fallback)
+
+  return {
+    status,
+    rawMessage,
+    error,
+    path
+  }
+}
+
+const readApiErrorMessage = async (response: Response): Promise<string> => {
+  const payload = await readJsonOrNull(response)
+  return messageFromPayload(payload) ?? `HTTP ${response.status}`
 }
 
 const ensureOrchestrationResponse = async (response: Response): Promise<void> => {
@@ -134,8 +337,9 @@ const ensureOrchestrationResponse = async (response: Response): Promise<void> =>
 }
 
 export const AgentTasksPage: React.FC = () => {
-  const { t } = useTranslation(["option", "common"])
   const { config: connectionConfig } = useCanonicalConnectionConfig()
+  const location = useLocation()
+  const navigate = useNavigate()
 
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null)
@@ -144,6 +348,17 @@ export const AgentTasksPage: React.FC = () => {
   const [tasksLoading, setTasksLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isUnsupported, setIsUnsupported] = useState(false)
+  const [setupIssues, setSetupIssues] = useState<ACPSetupIssue[]>([])
+  const [setupLoading, setSetupLoading] = useState(false)
+  const [taskDetail, setTaskDetail] = useState<TaskDetailItem | null>(null)
+  const [taskDetailLoading, setTaskDetailLoading] = useState(false)
+  const [projectsLoadedSuccessfully, setProjectsLoadedSuccessfully] = useState(false)
+  const [projectLoadFailure, setProjectLoadFailure] =
+    useState<RequestFailure | null>(null)
+  const workspaceFilterId = useMemo(
+    () => readWorkspaceFilterFromSearch(location.search),
+    [location.search]
+  )
 
   // Modal states
   const [showProjectModal, setShowProjectModal] = useState(false)
@@ -151,29 +366,42 @@ export const AgentTasksPage: React.FC = () => {
   const [projectForm] = Form.useForm()
   const [taskForm] = Form.useForm()
   const orchestrationSupportRef = React.useRef<boolean | null>(null)
+  const taskDetailRequestRef = React.useRef<AbortController | null>(null)
+  const fetchProjectsRequestIdRef = React.useRef(0)
 
-  const getHeaders = useCallback(async () => {
-    const headers: Record<string, string> = { "Content-Type": "application/json" }
-    if (!connectionConfig) {
-      return headers
+  const buildRequestTransport = useCallback(
+    (path: string) => {
+      if (!connectionConfig) return null
+      return resolveBrowserRequestTransport({
+        config: connectionConfig,
+        path
+      })
+    },
+    [connectionConfig]
+  )
+
+  const getHeaders = useCallback((transport?: { mode?: string } | null) => {
+    if (transport?.mode === "hosted") {
+      return { "Content-Type": "application/json" }
     }
-    if (connectionConfig.authMode === "single-user" && connectionConfig.apiKey) {
-      headers["X-API-KEY"] = connectionConfig.apiKey
-    } else if (connectionConfig.authMode === "multi-user" && connectionConfig.accessToken) {
-      headers.Authorization = `Bearer ${connectionConfig.accessToken}`
-    }
-    if (typeof connectionConfig.orgId === "number") {
-      headers["X-TLDW-Org-Id"] = String(connectionConfig.orgId)
-    }
-    return headers
+    return buildACPAuthHeaders(connectionConfig, { includeContentType: true })
   }, [connectionConfig])
 
+  const buildRequestUrl = useCallback(
+    (path: string) => {
+      return buildRequestTransport(path)?.url ?? null
+    },
+    [buildRequestTransport]
+  )
+
+  const apiTransport = useMemo(
+    () => buildRequestTransport(AGENT_ORCHESTRATION_BASE_PATH),
+    [buildRequestTransport]
+  )
+
   const apiBase = useMemo(
-    () =>
-      connectionConfig
-        ? `${connectionConfig.serverUrl}/api/v1/agent-orchestration`
-        : null,
-    [connectionConfig]
+    () => apiTransport?.url ?? null,
+    [apiTransport]
   )
 
   React.useEffect(() => {
@@ -183,9 +411,24 @@ export const AgentTasksPage: React.FC = () => {
   const markUnsupported = useCallback(() => {
     setIsUnsupported(true)
     setError(null)
+    setProjectLoadFailure(null)
     setProjects([])
+    setProjectsLoadedSuccessfully(false)
     setTasks([])
     setSelectedProjectId(null)
+  }, [])
+
+  const handleCloseTaskDetail = useCallback(() => {
+    taskDetailRequestRef.current?.abort()
+    taskDetailRequestRef.current = null
+    setTaskDetailLoading(false)
+    setTaskDetail(null)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      taskDetailRequestRef.current?.abort()
+    }
   }, [])
 
   const hasOrchestrationSupport = useCallback(async (): Promise<boolean> => {
@@ -194,7 +437,11 @@ export const AgentTasksPage: React.FC = () => {
       return orchestrationSupportRef.current
     }
     try {
-      const res = await fetch(`${connectionConfig.serverUrl}/openapi.json`)
+      const openApiUrl = buildRequestUrl("/openapi.json")
+      if (!openApiUrl) {
+        return true
+      }
+      const res = await fetch(openApiUrl)
       if (!res.ok) {
         return true
       }
@@ -211,41 +458,112 @@ export const AgentTasksPage: React.FC = () => {
     } catch {
       return true
     }
-  }, [connectionConfig])
+  }, [buildRequestUrl, connectionConfig])
+
+  const fetchACPReadiness = useCallback(async () => {
+    if (!connectionConfig) {
+      setSetupIssues([])
+      return
+    }
+    const healthTransport = buildRequestTransport(ACP_HEALTH_PATH)
+    if (!healthTransport) {
+      return
+    }
+    setSetupLoading(true)
+    try {
+      const res = await fetch(healthTransport.url, {
+        headers: getHeaders(healthTransport)
+      })
+      if (!res.ok) {
+        setSetupIssues(buildACPSetupIssues(null, `ACP health returned HTTP ${res.status}`))
+        return
+      }
+      setSetupIssues(buildACPSetupIssues(normalizeACPHealthStatus(await res.json())))
+    } catch (err) {
+      setSetupIssues(
+        buildACPSetupIssues(
+          null,
+          err instanceof Error ? err.message : "Failed to reach ACP health"
+        )
+      )
+    } finally {
+      setSetupLoading(false)
+    }
+  }, [buildRequestTransport, connectionConfig, getHeaders])
 
   const fetchProjects = useCallback(async () => {
     if (!apiBase) return
+    const projectsPath = buildProjectsRequestPath(workspaceFilterId)
+    const requestId = fetchProjectsRequestIdRef.current + 1
+    fetchProjectsRequestIdRef.current = requestId
+    const isLatestRequest = () => fetchProjectsRequestIdRef.current === requestId
     setLoading(true)
     setError(null)
+    setProjectLoadFailure(null)
+    setProjectsLoadedSuccessfully(false)
     try {
       const supported = await hasOrchestrationSupport()
+      if (!isLatestRequest()) return
       if (!supported) {
         markUnsupported()
         return
       }
-      const headers = await getHeaders()
-      const res = await fetch(`${apiBase}/projects`, { headers })
-      await ensureOrchestrationResponse(res)
+      const headers = getHeaders(apiTransport)
+      const res = await fetch(buildProjectsRequestUrl(apiBase, workspaceFilterId), {
+        headers
+      })
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw createUnsupportedError()
+        }
+        const failure = await failureFromResponse(
+          res,
+          `HTTP ${res.status}`,
+          projectsPath
+        )
+        if (!isLatestRequest()) return
+        setIsUnsupported(false)
+        setProjectsLoadedSuccessfully(false)
+        setProjectLoadFailure(failure)
+        return
+      }
       const data = await res.json()
+      if (!isLatestRequest()) return
       setIsUnsupported(false)
+      setProjectLoadFailure(null)
       setProjects(normalizeListPayload<ProjectSummary>(data, "projects"))
+      setProjectsLoadedSuccessfully(true)
     } catch (err) {
+      if (!isLatestRequest()) return
       if (isUnsupportedError(err)) {
         markUnsupported()
       } else {
-        setError(err instanceof Error ? err.message : "Failed to load projects")
+        setIsUnsupported(false)
+        setProjectsLoadedSuccessfully(false)
+        setProjectLoadFailure(
+          failureFromError(err, "Failed to load projects", projectsPath)
+        )
       }
     } finally {
-      setLoading(false)
+      if (isLatestRequest()) {
+        setLoading(false)
+      }
     }
-  }, [apiBase, getHeaders, hasOrchestrationSupport, markUnsupported])
+  }, [
+    apiBase,
+    apiTransport,
+    getHeaders,
+    hasOrchestrationSupport,
+    markUnsupported,
+    workspaceFilterId
+  ])
 
   const fetchTasks = useCallback(
     async (projectId: number) => {
       if (!apiBase) return
       setTasksLoading(true)
       try {
-        const headers = await getHeaders()
+        const headers = getHeaders(apiTransport)
         const res = await fetch(`${apiBase}/projects/${projectId}/tasks`, { headers })
         await ensureOrchestrationResponse(res)
         const data = await res.json()
@@ -261,13 +579,18 @@ export const AgentTasksPage: React.FC = () => {
         setTasksLoading(false)
       }
     },
-    [apiBase, getHeaders, markUnsupported]
+    [apiBase, apiTransport, getHeaders, markUnsupported]
   )
 
   useEffect(() => {
     if (!connectionConfig) return
     void fetchProjects()
   }, [connectionConfig, fetchProjects])
+
+  useEffect(() => {
+    if (!connectionConfig) return
+    void fetchACPReadiness()
+  }, [connectionConfig, fetchACPReadiness])
 
   useEffect(() => {
     if (connectionConfig && selectedProjectId !== null) {
@@ -279,7 +602,7 @@ export const AgentTasksPage: React.FC = () => {
 
   const handleCreateProject = async (values: { name: string; description?: string }) => {
     try {
-      const headers = await getHeaders()
+      const headers = getHeaders(apiTransport)
       const res = await fetch(`${apiBase}/projects`, {
         method: "POST",
         headers,
@@ -307,7 +630,7 @@ export const AgentTasksPage: React.FC = () => {
   }) => {
     if (selectedProjectId === null) return
     try {
-      const headers = await getHeaders()
+      const headers = getHeaders(apiTransport)
       const body = {
         ...values,
         dependency_id: values.dependency_id || undefined,
@@ -333,7 +656,7 @@ export const AgentTasksPage: React.FC = () => {
 
   const handleDispatchRun = async (taskId: number) => {
     try {
-      const headers = await getHeaders()
+      const headers = getHeaders(apiTransport)
       const res = await fetch(`${apiBase}/tasks/${taskId}/run`, {
         method: "POST",
         headers,
@@ -360,7 +683,7 @@ export const AgentTasksPage: React.FC = () => {
 
   const handleSubmitReview = async (taskId: number, approved: boolean) => {
     try {
-      const headers = await getHeaders()
+      const headers = getHeaders(apiTransport)
       const res = await fetch(`${apiBase}/tasks/${taskId}/review`, {
         method: "POST",
         headers,
@@ -379,9 +702,46 @@ export const AgentTasksPage: React.FC = () => {
     }
   }
 
+  const handleInspectTask = async (taskId: number) => {
+    if (!apiBase) return
+    taskDetailRequestRef.current?.abort()
+    const controller = new AbortController()
+    taskDetailRequestRef.current = controller
+    setTaskDetail(null)
+    setTaskDetailLoading(true)
+    setError(null)
+    try {
+      const headers = getHeaders(apiTransport)
+      const res = await fetch(buildTaskDetailRequestUrl(apiBase, taskId), {
+        headers,
+        signal: controller.signal
+      })
+      await ensureOrchestrationResponse(res)
+      const data = await res.json()
+      if (taskDetailRequestRef.current !== controller || controller.signal.aborted) {
+        return
+      }
+      setTaskDetail(data as TaskDetailItem)
+    } catch (err) {
+      if (taskDetailRequestRef.current !== controller || controller.signal.aborted) {
+        return
+      }
+      if (isUnsupportedError(err)) {
+        markUnsupported()
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to load task diagnostics")
+      }
+    } finally {
+      if (taskDetailRequestRef.current === controller) {
+        taskDetailRequestRef.current = null
+        setTaskDetailLoading(false)
+      }
+    }
+  }
+
   const handleDeleteProject = async (projectId: number) => {
     try {
-      const headers = await getHeaders()
+      const headers = getHeaders(apiTransport)
       const res = await fetch(`${apiBase}/projects/${projectId}`, {
         method: "DELETE",
         headers,
@@ -400,20 +760,259 @@ export const AgentTasksPage: React.FC = () => {
     }
   }
 
-  const selectedProject = projects.find((p) => p.id === selectedProjectId)
+  const workspaceOptions = useMemo(() => {
+    const options = new Map<string, string>()
+    if (workspaceFilterId) {
+      options.set(workspaceFilterId, workspaceFilterId)
+    }
+    for (const project of projects) {
+      const canonicalWorkspaceId = getCanonicalWorkspaceId(project)
+      if (canonicalWorkspaceId) {
+        options.set(canonicalWorkspaceId, canonicalWorkspaceId)
+      }
+    }
+    return Array.from(options, ([value, label]) => ({ value, label }))
+  }, [projects, workspaceFilterId])
+
+  const workspaceSelectOptions = useMemo(
+    () => [
+      { value: ALL_WORKSPACES_FILTER_VALUE, label: "All workspaces" },
+      ...workspaceOptions
+    ],
+    [workspaceOptions]
+  )
+
+  const filteredProjects = useMemo(() => {
+    if (!workspaceFilterId) {
+      return projects
+    }
+    return projects.filter(
+      (project) => getCanonicalWorkspaceId(project) === workspaceFilterId
+    )
+  }, [projects, workspaceFilterId])
+
+  const visibleTasks = useMemo(() => {
+    if (!workspaceFilterId) {
+      return tasks
+    }
+    return tasks.filter((task) => {
+      const taskWorkspaceId = getCanonicalWorkspaceId(task)
+      return !taskWorkspaceId || taskWorkspaceId === workspaceFilterId
+    })
+  }, [tasks, workspaceFilterId])
+
+  const workspaceSetupIssues = useMemo<ACPSetupIssue[]>(() => {
+    if (!workspaceFilterId || loading || isUnsupported || !projectsLoadedSuccessfully) {
+      return []
+    }
+
+    const matchingProjects = filteredProjects
+    if (matchingProjects.length === 0) {
+      return [
+        {
+          code: "canonical_workspace_bridge_missing",
+          title: `No ACP execution workspace is linked to ${workspaceFilterId}`,
+          description:
+            "Create an agent task from Research Workspace so the execution root, environment, and MCP readiness can be validated before dispatch."
+        }
+      ]
+    }
+
+    const hasLinkedProject = matchingProjects.some(
+      (project) =>
+        getCanonicalWorkspaceLinkStatus(project) ===
+        LINKED_CANONICAL_WORKSPACE_STATUS
+    )
+    const unlinkedProject = matchingProjects.find((project) => {
+      const status = getCanonicalWorkspaceLinkStatus(project)
+      return status !== null && status !== LINKED_CANONICAL_WORKSPACE_STATUS
+    })
+    if (!hasLinkedProject && unlinkedProject) {
+      const status = getCanonicalWorkspaceLinkStatus(unlinkedProject) || "unknown"
+      return [
+        {
+          code: "canonical_workspace_bridge_unlinked",
+          title: `ACP execution workspace link is ${status}`,
+          description:
+            "Recreate the workspace handoff from Research Workspace so root, environment, and MCP readiness are checked before dispatch."
+        }
+      ]
+    }
+
+    return []
+  }, [
+    filteredProjects,
+    isUnsupported,
+    loading,
+    projectsLoadedSuccessfully,
+    workspaceFilterId
+  ])
+
+  const updateWorkspaceFilter = useCallback(
+    (nextWorkspaceFilterId: string | null) => {
+      const params = new URLSearchParams(location.search)
+      params.delete("workspace")
+      params.delete("workspace_id")
+      params.delete("canonical_workspace_id")
+      if (nextWorkspaceFilterId) {
+        params.set("workspace", nextWorkspaceFilterId)
+      }
+      const search = params.toString()
+      navigate(
+        {
+          pathname: location.pathname,
+          search: search ? `?${search}` : ""
+        },
+        { replace: true }
+      )
+    },
+    [location.pathname, location.search, navigate]
+  )
+
+  useEffect(() => {
+    if (
+      selectedProjectId !== null &&
+      !filteredProjects.some((project) => project.id === selectedProjectId)
+    ) {
+      setSelectedProjectId(null)
+      setTasks([])
+    }
+  }, [filteredProjects, selectedProjectId])
+
+  const selectedProject = filteredProjects.find((p) => p.id === selectedProjectId)
+
+  const unsupportedRecoveryState = useMemo(
+    () =>
+      buildCapabilityState({
+        featureName: "Agent Tasks",
+        capabilityName: "agent orchestration",
+        endpoint: AGENT_ORCHESTRATION_PROJECTS_PATH,
+        method: "GET",
+        serverUrl: connectionConfig?.serverUrl,
+        reason: "unsupported",
+        title: AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE,
+        message: AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION
+      }),
+    [connectionConfig?.serverUrl]
+  )
+
+  const projectLoadRecoveryState = useMemo(
+    () =>
+      projectLoadFailure
+        ? buildCapabilityState({
+            featureName: "Agent tasks",
+            capabilityName: "agent task projects",
+            endpoint: projectLoadFailure.path ?? buildProjectsRequestPath(workspaceFilterId),
+            method: "GET",
+            serverUrl: connectionConfig?.serverUrl,
+            status: projectLoadFailure.status,
+            rawMessage: projectLoadFailure.rawMessage,
+            error: projectLoadFailure.error,
+            title: "Agent tasks could not load",
+            message:
+              "The agent task project list could not be loaded. Try again or open diagnostics."
+          })
+        : null,
+    [connectionConfig?.serverUrl, projectLoadFailure, workspaceFilterId]
+  )
 
   return (
     <div className="space-y-6">
       {isUnsupported && (
-        <Alert
-          type="warning"
+        <RecoveryCallout
+          state={unsupportedRecoveryState.state}
           title={AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE}
-          description={AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION}
-          showIcon
+          message={AGENT_ORCHESTRATION_UNSUPPORTED_DESCRIPTION}
+          diagnostics={unsupportedRecoveryState.diagnostics}
+          data-testid="agent-tasks-unsupported-recovery"
+        >
+          <AgentTasksSetupDescription
+            issues={[
+              {
+                code: "orchestration_routes_missing",
+                title: "Agent task routes are missing",
+                description: "Upgrade or enable the agent orchestration API before creating tasks."
+              }
+            ]}
+          />
+        </RecoveryCallout>
+      )}
+      {!isUnsupported && setupIssues.length > 0 && (
+        <StatePanel
+          state="setup_required"
+          title="ACP setup needs attention"
+          message={
+            setupLoading
+              ? "Checking ACP setup state..."
+              : "Resolve these ACP setup items before dispatching production task runs."
+          }
+          data-testid="agent-tasks-acp-setup-state"
+        >
+          <AgentTasksSetupDescription issues={setupIssues} />
+        </StatePanel>
+      )}
+      {!isUnsupported && workspaceSetupIssues.length > 0 && (
+        <StatePanel
+          state="setup_required"
+          title="Workspace setup needs attention"
+          message="Resolve these workspace setup items before dispatching task runs."
+          data-testid="agent-tasks-workspace-setup-state"
+        >
+          <AgentTasksSetupDescription
+            issues={workspaceSetupIssues}
+            showAgentRegistry={false}
+            showResearchWorkspace
+          />
+        </StatePanel>
+      )}
+      {!isUnsupported && projectLoadRecoveryState && (
+        <RecoveryCallout
+          state={projectLoadRecoveryState.state}
+          title={projectLoadRecoveryState.title}
+          message={projectLoadRecoveryState.message}
+          diagnostics={projectLoadRecoveryState.diagnostics}
+          primaryAction={{
+            label: "Try again",
+            onClick: () => {
+              void fetchProjects()
+            }
+          }}
+          secondaryActions={[
+            {
+              label: "Dismiss",
+              onClick: () => setProjectLoadFailure(null)
+            }
+          ]}
+          data-testid="agent-tasks-projects-load-recovery"
         />
       )}
       {error && (
-        <Alert type="error" title={error} closable onClose={() => setError(null)} />
+        <Alert
+          variant="error"
+          title={error}
+          dismissible
+          onDismiss={() => setError(null)}
+        />
+      )}
+
+      {(workspaceOptions.length > 0 || workspaceFilterId) && (
+        <div className="flex flex-wrap items-center gap-3 border border-border bg-surface px-4 py-3">
+          <span className="text-sm font-medium">Canonical workspace</span>
+          <Select
+            aria-label="Workspace filter"
+            value={workspaceFilterId ?? ALL_WORKSPACES_FILTER_VALUE}
+            options={workspaceSelectOptions}
+            onChange={(value) => {
+              const nextValue = String(value || "")
+              updateWorkspaceFilter(
+                nextValue === ALL_WORKSPACES_FILTER_VALUE
+                  ? null
+                  : normalizeWorkspaceFilterId(nextValue)
+              )
+            }}
+            style={{ minWidth: 240 }}
+          />
+        </div>
       )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -449,9 +1048,13 @@ export const AgentTasksPage: React.FC = () => {
             <div className="flex justify-center py-8">
               <Spin />
             </div>
-          ) : projects.length === 0 ? (
+          ) : filteredProjects.length === 0 ? (
             <Empty
-              description="No projects yet"
+              description={
+                workspaceFilterId
+                  ? "No projects linked to this workspace yet"
+                  : "No projects yet"
+              }
               className="py-8"
             >
               <Button type="primary" onClick={() => setShowProjectModal(true)}>
@@ -460,7 +1063,7 @@ export const AgentTasksPage: React.FC = () => {
             </Empty>
           ) : (
             <div className="divide-y divide-border">
-              {projects.map((project) => (
+              {filteredProjects.map((project) => (
                 <div
                   key={project.id}
                   className={`flex cursor-pointer items-center gap-2 px-4 py-3 transition-colors hover:bg-surface-hover ${
@@ -475,6 +1078,11 @@ export const AgentTasksPage: React.FC = () => {
                   />
                   <div className="min-w-0 flex-1">
                     <div className="font-medium truncate">{project.name}</div>
+                    {getCanonicalWorkspaceId(project) && (
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        Workspace: {getCanonicalWorkspaceId(project)}
+                      </div>
+                    )}
                     {project.task_summary && (
                       <div className="flex gap-1 text-xs text-muted-foreground mt-0.5">
                         <span>{project.task_summary.total_tasks} tasks</span>
@@ -544,7 +1152,7 @@ export const AgentTasksPage: React.FC = () => {
             <div className="flex justify-center py-8">
               <Spin />
             </div>
-          ) : tasks.length === 0 ? (
+          ) : visibleTasks.length === 0 ? (
             <Empty description="No tasks yet" className="py-8">
               <Button type="primary" onClick={() => setShowTaskModal(true)}>
                 Create Task
@@ -552,13 +1160,14 @@ export const AgentTasksPage: React.FC = () => {
             </Empty>
           ) : (
             <div className="space-y-3">
-              {tasks.map((task) => (
+              {visibleTasks.map((task) => (
                 <TaskCard
                   key={task.id}
                   task={task}
-                  allTasks={tasks}
+                  allTasks={visibleTasks}
                   onDispatchRun={handleDispatchRun}
                   onReview={handleSubmitReview}
+                  onInspectTask={handleInspectTask}
                 />
               ))}
             </div>
@@ -622,7 +1231,7 @@ export const AgentTasksPage: React.FC = () => {
             <Select
               placeholder="No dependency"
               allowClear
-              options={tasks.map((t) => ({
+              options={visibleTasks.map((t) => ({
                 value: t.id,
                 label: `#${t.id}: ${t.title}`,
               }))}
@@ -641,6 +1250,225 @@ export const AgentTasksPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Modal
+        title="Task diagnostics"
+        open={Boolean(taskDetail) || taskDetailLoading}
+        onCancel={handleCloseTaskDetail}
+        footer={null}
+        width={820}
+      >
+        {taskDetailLoading ? (
+          <div className="flex justify-center py-8">
+            <Spin />
+          </div>
+        ) : taskDetail ? (
+          <TaskDiagnostics task={taskDetail} />
+        ) : null}
+      </Modal>
+    </div>
+  )
+}
+
+const AgentTasksSetupDescription: React.FC<{
+  body?: string
+  issues: ACPSetupIssue[]
+  showAgentRegistry?: boolean
+  showResearchWorkspace?: boolean
+}> = ({
+  body,
+  issues,
+  showAgentRegistry = true,
+  showResearchWorkspace = false
+}) => (
+  <div className="space-y-3">
+    {body ? <div>{body}</div> : null}
+    <ul className="m-0 space-y-2 pl-4">
+      {issues.map((issue) => (
+        <li key={issue.code}>
+          <div className="font-medium">{issue.title}</div>
+          <div className="text-sm">{issue.description}</div>
+        </li>
+      ))}
+    </ul>
+    <div className="flex flex-wrap gap-2">
+      {showAgentRegistry && (
+        <Button
+          size="small"
+          icon={<ExternalLink className="h-3 w-3" />}
+          onClick={() => navigateOptionRoute("/agents")}
+        >
+          Open Agent Registry
+        </Button>
+      )}
+      {showResearchWorkspace && (
+        <Button
+          size="small"
+          icon={<ExternalLink className="h-3 w-3" />}
+          onClick={() => navigateOptionRoute(RESEARCH_WORKSPACE_PATH)}
+        >
+          Open Research Workspace
+        </Button>
+      )}
+      <Button
+        size="small"
+        icon={<ExternalLink className="h-3 w-3" />}
+        onClick={() => navigateOptionRoute("/acp-playground")}
+      >
+        Open ACP Playground
+      </Button>
+    </div>
+  </div>
+)
+
+const TaskDiagnostics: React.FC<{ task: TaskDetailItem }> = ({ task }) => {
+  const runs = task.runs ?? []
+  const reviews = task.reviews ?? []
+  const runReviewFeedback = new Set(
+    runs
+      .map((run) => run.review_decision?.feedback_preview)
+      .filter((feedback): feedback is string => Boolean(feedback))
+  )
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">Task</div>
+        <div className="text-base font-medium">{task.title}</div>
+        <div className="mt-1 flex flex-wrap gap-2">
+          <Tag color={STATUS_COLORS[task.status] ?? "default"}>{task.status}</Tag>
+          <Tag>#{task.id}</Tag>
+          <Tag>
+            Reviews: {task.review_count}/{task.max_review_attempts}
+          </Tag>
+        </div>
+      </div>
+
+      {runs.length === 0 ? (
+        <Empty description="No runs recorded for this task" />
+      ) : (
+        <div className="space-y-3">
+          {runs.map((run) => (
+            <RunDiagnostics key={run.id} run={run} />
+          ))}
+        </div>
+      )}
+
+      {reviews.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-sm font-medium">Reviews</div>
+          {reviews.map((review, index) => (
+            <div key={`${review.reviewer || "review"}-${index}`} className="rounded border border-border p-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Tag color={review.approved ? "success" : "error"}>
+                  {review.approved ? "Approved" : "Rejected"}
+                </Tag>
+                {review.reviewer && <span>{review.reviewer}</span>}
+              </div>
+              {review.feedback && !runReviewFeedback.has(review.feedback) && (
+                <div className="mt-2 text-muted-foreground">{review.feedback}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const openRunSessionRoute = (run: RunItem, view?: string) => {
+  const sessionId = run.session?.session_id || run.session_id
+  if (!sessionId) return
+  const params = new URLSearchParams({ session: sessionId })
+  if (view) params.set("view", view)
+  navigateOptionRoute(`/acp-playground?${params.toString()}`)
+}
+
+const RunDiagnostics: React.FC<{ run: RunItem }> = ({ run }) => {
+  const sessionId = run.session?.session_id || run.session_id
+  const failureContext = run.failure_context
+  return (
+    <div className="rounded-lg border border-border p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">Run #{run.id}</span>
+          <Tag color={run.status === "completed" ? "success" : run.status === "failed" ? "error" : "processing"}>
+            {run.status}
+          </Tag>
+          {run.agent_type && <Tag>{run.agent_type}</Tag>}
+        </div>
+        {sessionId && <span className="text-xs text-muted-foreground">{sessionId}</span>}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+        <span>{run.history?.event_count ?? 0} events</span>
+        <span>{run.history?.audit_event_count ?? 0} audit</span>
+        <span>{run.history?.artifact_count ?? 0} artifacts</span>
+        <span>{run.history?.diagnostic_count ?? 0} diagnostics</span>
+      </div>
+
+      {failureContext && (
+        <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
+          {failureContext.reason_code && (
+            <div className="font-medium">{failureContext.reason_code}</div>
+          )}
+          {failureContext.message && <div>{failureContext.message}</div>}
+        </div>
+      )}
+
+      {!failureContext?.message && run.error && (
+        <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
+          {run.error}
+        </div>
+      )}
+
+      {run.result_summary && (
+        <div className="mt-3 text-sm">{run.result_summary}</div>
+      )}
+      {run.history?.result?.preview && (
+        <div className="mt-3 text-sm text-muted-foreground">{run.history.result.preview}</div>
+      )}
+      {run.review_decision?.feedback_preview && (
+        <div className="mt-3 text-sm">{run.review_decision.feedback_preview}</div>
+      )}
+
+      {sessionId && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            size="small"
+            icon={<ExternalLink className="h-3 w-3" />}
+            onClick={() => openRunSessionRoute(run)}
+          >
+            Open session
+          </Button>
+          {run.session?.links?.diagnostics && (
+            <Button
+              size="small"
+              icon={<ExternalLink className="h-3 w-3" />}
+              onClick={() => openRunSessionRoute(run, "diagnostics")}
+            >
+              Open diagnostics
+            </Button>
+          )}
+          {run.session?.links?.artifacts && (
+            <Button
+              size="small"
+              icon={<ExternalLink className="h-3 w-3" />}
+              onClick={() => openRunSessionRoute(run, "artifacts")}
+            >
+              Open artifacts
+            </Button>
+          )}
+          {run.session?.links?.audit && (
+            <Button
+              size="small"
+              icon={<ExternalLink className="h-3 w-3" />}
+              onClick={() => openRunSessionRoute(run, "audit")}
+            >
+              Open audit
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -650,7 +1478,8 @@ const TaskCard: React.FC<{
   allTasks: TaskItem[]
   onDispatchRun: (taskId: number) => Promise<void>
   onReview: (taskId: number, approved: boolean) => Promise<void>
-}> = ({ task, allTasks, onDispatchRun, onReview }) => {
+  onInspectTask: (taskId: number) => Promise<void>
+}> = ({ task, allTasks, onDispatchRun, onReview, onInspectTask }) => {
   const depTask = task.dependency_id
     ? allTasks.find((t) => t.id === task.dependency_id)
     : null
@@ -687,6 +1516,13 @@ const TaskCard: React.FC<{
       </div>
 
       <div className="flex items-center gap-2">
+        <Button
+          size="small"
+          icon={<Search className="h-3 w-3" />}
+          onClick={() => void onInspectTask(task.id)}
+        >
+          Inspect
+        </Button>
         {task.status === "todo" && (
           <Button
             size="small"
@@ -718,10 +1554,14 @@ const TaskCard: React.FC<{
           </>
         )}
         {task.status === "inprogress" && (
-          <Tag color="processing">Running...</Tag>
+          <DesignSystemBadge variant="info" size="sm">
+            Running...
+          </DesignSystemBadge>
         )}
         {task.status === "triage" && (
-          <Tag color="error">Needs human attention</Tag>
+          <DesignSystemBadge variant="danger" size="sm">
+            Needs human attention
+          </DesignSystemBadge>
         )}
       </div>
     </div>

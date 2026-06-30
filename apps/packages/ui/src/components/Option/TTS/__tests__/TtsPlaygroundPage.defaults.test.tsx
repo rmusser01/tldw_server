@@ -1,12 +1,12 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import TtsPlaygroundPage from "@/components/Option/TTS/TtsPlaygroundPage"
+import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
 
 const DEFAULT_KITTEN_MODEL = "KittenML/kitten-tts-nano-0.8"
-const DEFAULT_KITTEN_VOICE = "Bella"
 
 const ttsSettingsState = vi.hoisted(() => ({
   data: {
@@ -25,6 +25,19 @@ const ttsSettingsState = vi.hoisted(() => ({
   } as Record<string, unknown>
 }))
 
+const providerDataState = vi.hoisted(() => ({
+  hasAudio: true,
+  tldwVoiceCatalog: [
+    { id: "Bella", name: "Bella", language: "en" }
+  ]
+}))
+
+const capabilitiesState = vi.hoisted(() => ({
+  data: {
+    ffmpegAvailable: true
+  }
+}))
+
 vi.mock("@/services/tts", () => ({
   getTTSSettings: vi.fn(async () => ttsSettingsState.data),
   getTTSProvider: vi.fn(async () => "tldw"),
@@ -37,17 +50,16 @@ vi.mock("@/services/tts", () => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, fallback?: string) => fallback || _key
-  })
+  }),
+  Trans: ({ defaults }: { defaults: string }) => <>{defaults}</>
 }))
 
 vi.mock("@/hooks/useTtsProviderData", () => ({
   useTtsProviderData: () => ({
-    hasAudio: true,
+    hasAudio: providerDataState.hasAudio,
     providersInfo: null,
     tldwTtsModels: [],
-    tldwVoiceCatalog: [
-      { id: "Bella", name: "Bella", language: "en" }
-    ],
+    tldwVoiceCatalog: providerDataState.tldwVoiceCatalog,
     elevenLabsData: null,
     elevenLabsLoading: false,
     elevenLabsError: null,
@@ -72,6 +84,12 @@ vi.mock("@/hooks/useTtsPlayground", () => ({
   })
 }))
 
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => ({
+    capabilities: capabilitiesState.data
+  })
+}))
+
 vi.mock("@/components/Option/TTS/TtsProviderCatalog", () => ({
   TtsProviderCatalog: () => <div data-testid="provider-catalog" />
 }))
@@ -86,6 +104,13 @@ vi.mock("@/components/Common/PageShell", () => ({
 
 describe("TtsPlaygroundPage defaults", () => {
   beforeEach(() => {
+    capabilitiesState.data = {
+      ffmpegAvailable: true
+    }
+    providerDataState.hasAudio = true
+    providerDataState.tldwVoiceCatalog = [
+      { id: "Bella", name: "Bella", language: "en" }
+    ]
     ttsSettingsState.data = {
       ttsProvider: "",
       tldwTtsModel: "",
@@ -127,5 +152,135 @@ describe("TtsPlaygroundPage defaults", () => {
     expect(screen.getByText(/Current provider:/).textContent).toContain(
       "tldw Server (Local)"
     )
+  })
+
+  it("renders the Text to Speech page heading", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false
+        }
+      }
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TtsPlaygroundPage />
+      </QueryClientProvider>
+    )
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Text to Speech" })
+    ).toBeInTheDocument()
+  })
+
+  it("renders a single shared setup state when the tldw server has no TTS provider", async () => {
+    providerDataState.hasAudio = false
+    providerDataState.tldwVoiceCatalog = []
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false
+        }
+      }
+    })
+
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <TtsPlaygroundPage />
+      </QueryClientProvider>
+    )
+
+    const statePanel = await screen.findByTestId("tts-no-provider-recovery")
+    expect(statePanel).toHaveAttribute("data-ds-component", "StatePanel")
+    expect(
+      screen.getAllByText("No TTS provider detected on your server")
+    ).toHaveLength(1)
+    expect(screen.getByText(/Open Speech Settings/)).toBeInTheDocument()
+    expect(screen.getByText(/Browser/)).toBeInTheDocument()
+    expect(container.querySelectorAll(".ant-alert")).toHaveLength(0)
+  })
+
+  it("renders the ffmpeg warning with the design-system Alert primitive", async () => {
+    capabilitiesState.data = {
+      ffmpegAvailable: false
+    }
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false
+        }
+      }
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TtsPlaygroundPage />
+      </QueryClientProvider>
+    )
+
+    await screen.findByText("ffmpeg not detected")
+    expectInsideDesignSystemAlert("ffmpeg not detected")
+    expectInsideDesignSystemAlert(
+      "Some audio processing features require ffmpeg. Install it for full functionality."
+    )
+  })
+
+  it("renders ElevenLabs setup guidance with the design-system Alert primitive", async () => {
+    ttsSettingsState.data = {
+      ...ttsSettingsState.data,
+      ttsProvider: "elevenlabs",
+      elevenLabsApiKey: ""
+    }
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false
+        }
+      }
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TtsPlaygroundPage />
+      </QueryClientProvider>
+    )
+
+    await screen.findByText("ElevenLabs needs an API key")
+    expectInsideDesignSystemAlert("ElevenLabs needs an API key")
+    expectInsideDesignSystemAlert(
+      "Add your ElevenLabs API key in Settings to load voices and models."
+    )
+  })
+
+  it("keeps Play disabled when tldw server TTS setup is required", async () => {
+    providerDataState.hasAudio = false
+    providerDataState.tldwVoiceCatalog = []
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false
+        }
+      }
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TtsPlaygroundPage />
+      </QueryClientProvider>
+    )
+
+    await screen.findByTestId("tts-no-provider-recovery")
+
+    fireEvent.change(screen.getByTestId("tts-text-input"), {
+      target: { value: "Generate this with server TTS." }
+    })
+
+    expect(screen.getByTestId("tts-play-button")).toBeDisabled()
+    expect(
+      screen.getByText(
+        /Open Speech Settings or switch to Browser TTS before generating audio\./
+      )
+    ).toBeInTheDocument()
   })
 })

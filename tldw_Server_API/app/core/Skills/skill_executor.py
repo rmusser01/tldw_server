@@ -30,6 +30,7 @@ class SkillExecutionResult:
     model_override: Optional[str] = None
     execution_mode: str = "inline"  # "inline" or "fork"
     fork_output: Optional[str] = None
+    dry_run: bool = False
 
 
 @dataclass
@@ -168,7 +169,7 @@ class SkillExecutor:
             Filtered list of tool definitions
         """
         if not allowed_tools:
-            return all_tools  # No restriction
+            return []
 
         # Extract base tool names from patterns
         allowed_base_names = set()
@@ -287,6 +288,7 @@ class SkillExecutor:
         skill_data: dict[str, Any],
         arguments: str,
         context: Optional[RequestContext] = None,
+        dry_run: bool = False,
     ) -> SkillExecutionResult:
         """
         Execute a skill.
@@ -295,6 +297,7 @@ class SkillExecutor:
             skill_data: The skill data dict (from SkillsService.get_skill)
             arguments: Arguments to pass to the skill
             context: Request context for execution
+            dry_run: If true, render prompt metadata without model/tool execution
 
         Returns:
             SkillExecutionResult with rendered prompt and metadata
@@ -311,6 +314,17 @@ class SkillExecutor:
         # Resolve allowed tools
         available = context.available_tools if context else None
         resolved_tools = self.resolve_allowed_tools(allowed_tools, available)
+
+        if dry_run:
+            return SkillExecutionResult(
+                skill_name=skill_name,
+                rendered_prompt=rendered,
+                allowed_tools=resolved_tools,
+                model_override=model,
+                execution_mode="fork" if execution_context == "fork" else "inline",
+                fork_output=None,
+                dry_run=True,
+            )
 
         if execution_context == "fork":
             return await self._execute_forked(
@@ -346,6 +360,7 @@ class SkillExecutor:
             allowed_tools=allowed_tools,
             model_override=model,
             execution_mode="inline",
+            dry_run=False,
         )
 
     async def _execute_forked(
@@ -400,8 +415,7 @@ class SkillExecutor:
             t for t in tool_defs
             if not isinstance(t, dict) or t.get("canExecute", True)
         ]
-        if allowed_tools:
-            tool_defs = self.filter_tools_for_skill(tool_defs, allowed_tools)
+        tool_defs = self.filter_tools_for_skill(tool_defs, allowed_tools)
         llm_tools = self._normalize_tool_definitions(tool_defs)
 
         system_prompt = (
@@ -434,6 +448,14 @@ class SkillExecutor:
                 final_output = self._extract_response_text(response)
                 break
 
+            if not llm_tools:
+                final_output = (
+                    self._extract_response_text(response)
+                    or "Tool calls were requested but no tools are allowed for this skill."
+                )
+                logger.warning(f"Tool calls requested but no tools are allowed for skill fork '{skill_name}'.")
+                break
+
             if tool_executor is None:
                 final_output = self._extract_response_text(response)
                 logger.warning("Tool calls requested but no executor available for skill fork.")
@@ -456,7 +478,7 @@ class SkillExecutor:
                         client_id=context.client_id if context else None,
                         tool_name=tool_name,
                         arguments=tool_args,
-                        allowed_tools=allowed_tools or None,
+                        allowed_tools=allowed_tools,
                     )
                     result_payload = json.dumps(result, default=str)
                 except ToolExecutionError as e:
@@ -478,6 +500,7 @@ class SkillExecutor:
             model_override=None,
             execution_mode="fork",
             fork_output=final_output,
+            dry_run=False,
         )
 
 

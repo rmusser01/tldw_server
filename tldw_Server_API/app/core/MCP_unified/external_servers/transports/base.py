@@ -2,42 +2,20 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 import inspect
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any, Callable
+
+from mcp_unified.federation.models import (
+    BrokeredExternalCredential,
+    ExternalToolCallResult,
+    ExternalToolDefinition,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+
     from ..config_schema import ExternalMCPServerConfig
-
-
-@dataclass(slots=True)
-class ExternalToolDefinition:
-    """Normalized external tool metadata used by federation logic."""
-
-    name: str
-    description: str = ""
-    input_schema: dict[str, Any] = field(default_factory=lambda: {"type": "object"})
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class ExternalToolCallResult:
-    """Normalized external tool execution result."""
-
-    content: Any
-    is_error: bool = False
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class BrokeredExternalCredential:
-    """Ephemeral per-call auth material resolved outside long-lived adapter state."""
-
-    headers: dict[str, str] = field(default_factory=dict)
-    env: dict[str, str] = field(default_factory=dict)
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class ExternalMCPTransportAdapter(ABC):
@@ -72,7 +50,7 @@ class ExternalMCPTransportAdapter(ABC):
         self,
         tool_name: str,
         arguments: dict[str, Any],
-        context: Optional["RequestContext"] = None,
+        context: RequestContext | None = None,
         runtime_auth: BrokeredExternalCredential | None = None,
     ) -> ExternalToolCallResult:
         """Execute a tool on the external server and normalize the result."""
@@ -88,8 +66,8 @@ def adapter_supports_runtime_auth(adapter: ExternalMCPTransportAdapter) -> bool:
 
 
 def clone_external_server_config(
-    server_config: "ExternalMCPServerConfig",
-) -> "ExternalMCPServerConfig":
+    server_config: ExternalMCPServerConfig,
+) -> ExternalMCPServerConfig:
     """Deep-copy an external server config without mutating long-lived adapter state."""
     if hasattr(server_config, "model_copy"):
         return server_config.model_copy(deep=True)  # type: ignore[attr-defined]
@@ -98,9 +76,9 @@ def clone_external_server_config(
 
 async def call_tool_with_ephemeral_adapter(
     *,
-    server_config: "ExternalMCPServerConfig",
-    adapter_factory: Callable[["ExternalMCPServerConfig"], ExternalMCPTransportAdapter],
-    prepare_config: Callable[["ExternalMCPServerConfig"], None],
+    server_config: ExternalMCPServerConfig,
+    adapter_factory: Callable[[ExternalMCPServerConfig], ExternalMCPTransportAdapter],
+    prepare_config: Callable[[ExternalMCPServerConfig], None],
     tool_name: str,
     arguments: dict[str, Any],
 ) -> ExternalToolCallResult:

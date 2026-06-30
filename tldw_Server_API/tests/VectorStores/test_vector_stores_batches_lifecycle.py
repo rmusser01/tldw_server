@@ -72,3 +72,57 @@ def test_batch_lifecycle_failure(client):
     assert lst_resp.status_code == 200, lst_resp.text
     lst = lst_resp.json()
     assert any(row.get('status')=='failed' for row in lst.get('data', []))
+
+
+@pytest.mark.asyncio
+async def test_list_vector_batches_includes_canonical_overfetch_pagination(monkeypatch) -> None:
+    """List batches should overfetch and expose canonical offset metadata."""
+    from tldw_Server_API.app.api.v1.endpoints import vector_stores_openai as vs_mod
+
+    def _fake_list_batches(*, user_id, status=None, limit=50, offset=0):
+        assert user_id == "1"
+        assert status == "queued"
+        assert limit in {2, 3}
+        assert offset == 0
+        rows = [
+            {"id": "batch-1", "status": "queued"},
+            {"id": "batch-2", "status": "queued"},
+            {"id": "batch-3", "status": "queued"},
+        ]
+        return rows[:limit]
+
+    monkeypatch.setattr(vs_mod, "db_list_batches", _fake_list_batches)
+
+    response = await vs_mod.list_vector_batches(
+        status="queued",
+        limit=2,
+        offset=0,
+        user_id=None,
+        current_user=User(id=1, username="tester", email="e", is_active=True, is_admin=True),
+        principal=AuthPrincipal(
+            kind="user",
+            user_id=1,
+            api_key_id=None,
+            subject=None,
+            token_type="access",
+            jti=None,
+            roles=["admin"],
+            permissions=["*"],
+            is_admin=True,
+            org_ids=[],
+            team_ids=[],
+        ),
+    )
+
+    assert [row["id"] for row in response["data"]] == ["batch-1", "batch-2"]
+    assert response["pagination"] == {
+        "mode": "offset",
+        "limit": 2,
+        "offset": 0,
+        "total": None,
+        "has_more": True,
+        "next_offset": 2,
+        "count": 2,
+    }
+    assert response["has_more"] is True
+    assert response["next_offset"] == 2

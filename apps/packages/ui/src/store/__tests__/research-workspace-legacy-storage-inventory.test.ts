@@ -101,6 +101,20 @@ describe("Research Workspace legacy storage inventory", () => {
     })
   })
 
+  it("classifies reconciliation markers as retained metadata without content authority", () => {
+    const marker = classifyResearchWorkspaceLegacyStorageSurface({
+      kind: "local_storage",
+      key: "tldw:research-workspace:reconciliation:v1:workspace%20one"
+    })
+
+    expect(marker).toMatchObject({
+      classification: "metadata",
+      deletionPolicy: "retain_local",
+      authoritativeForMigration: false,
+      workspaceId: "workspace one"
+    })
+  })
+
   it("exposes one inventory item for every known stable surface id", () => {
     expect(
       RESEARCH_WORKSPACE_LEGACY_STORAGE_INVENTORY.map((item) => item.id)

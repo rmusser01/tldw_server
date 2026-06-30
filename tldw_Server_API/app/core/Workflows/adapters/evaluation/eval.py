@@ -280,9 +280,9 @@ async def run_evaluations_adapter(config: dict[str, Any], context: dict[str, Any
 
         return {"error": f"unknown_action:{action}"}
 
-    except Exception as e:
-        logger.exception(f"Evaluations adapter error: {e}")
-        return {"error": f"evaluations_error:{e}"}
+    except Exception:
+        logger.error("Evaluations adapter error")
+        return {"error": "evaluations_error"}
 
 
 @registry.register(

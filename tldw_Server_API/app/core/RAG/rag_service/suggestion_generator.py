@@ -111,7 +111,7 @@ def _finalize_suggestions(candidates: list[str], query: str, expected: int) -> l
         try:
             cleaned = str(raw).strip()
         except Exception:
-            continue
+            cleaned = ""
         if not cleaned:
             continue
         key = cleaned.lower()
@@ -132,6 +132,13 @@ def _finalize_suggestions(candidates: list[str], query: str, expected: int) -> l
             break
 
     return finalized[:target]
+
+
+def _safe_exception_type(exc: Exception) -> str:
+    """Return a log-safe exception type without exception message/repr details."""
+    exc_type = type(exc).__name__
+    safe_type = re.sub(r"[^A-Za-z0-9_.-]", "_", exc_type).strip("._-")
+    return safe_type or "Exception"
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +238,7 @@ async def generate_suggestions(
             return _finalize_suggestions(suggestions, query, num_suggestions)
 
     except Exception as exc:
-        logger.debug(f"Suggestion generation LLM call failed: {exc!r}")
+        logger.debug(f"Suggestion generation LLM call failed: {_safe_exception_type(exc)}")
 
     # Fallback to heuristic suggestions
     return _finalize_suggestions([], query, num_suggestions)

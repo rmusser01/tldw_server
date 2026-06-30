@@ -3,7 +3,9 @@ from __future__ import annotations
 import inspect
 import sqlite3
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 
 def _iter_database_list_rows(conn: Any) -> Iterable[Any]:
@@ -55,6 +57,34 @@ def configure_sqlite_connection(
 
     if cache_size is not None:
         conn.execute(f"PRAGMA cache_size={int(cache_size)}")
+
+
+def _sqlite_readonly_uri(db_path: Path) -> str:
+    return f"file:{quote(str(db_path), safe='/:')}?mode=ro"
+
+
+def run_sqlite_quick_check(
+    db_path: str | Path,
+    *,
+    timeout_s: float = 1.0,
+    busy_timeout_ms: int = 1000,
+) -> list[str]:
+    path = Path(db_path)
+    if not path.exists():
+        return []
+
+    with sqlite3.connect(_sqlite_readonly_uri(path), uri=True, timeout=timeout_s) as conn:
+        configure_sqlite_connection(
+            conn,
+            use_wal=False,
+            synchronous=None,
+            foreign_keys=False,
+            busy_timeout_ms=busy_timeout_ms,
+            temp_store=None,
+        )
+        rows = conn.execute("PRAGMA quick_check;").fetchall()
+
+    return [str(row[0]).strip() for row in rows if row and str(row[0]).strip()]
 
 
 def begin_immediate_if_needed(conn: Any) -> bool:

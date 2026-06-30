@@ -6,6 +6,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
+
 
 class UserProfileCatalogEntrySchema(BaseModel):
     """Schema for a single user profile catalog entry."""
@@ -259,3 +261,4 @@ class UserProfileBatchResponse(BaseModel):
     page: int = Field(..., description="Current page number")
     limit: int = Field(..., description="Page size")
     pages: int = Field(..., description="Total page count")
+    pagination: PagePaginationMeta

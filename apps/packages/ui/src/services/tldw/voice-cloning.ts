@@ -33,6 +33,55 @@ export type VoiceEncodeResponse = {
   reference_text?: string | null
 }
 
+export type ChatterboxVoiceConversionFormat =
+  | "wav"
+  | "mp3"
+  | "flac"
+  | "ogg"
+  | "opus"
+  | "aac"
+  | "webm"
+  | "pcm"
+  | "ulaw"
+
+export type ChatterboxVoiceConversionOptions = {
+  sourceAudio: File
+  targetVoice?: File
+  targetVoiceId?: string
+  responseFormat?: ChatterboxVoiceConversionFormat
+  stream?: boolean
+  timeoutMs?: number
+}
+
+export type TtsProviderUnloadResponse = {
+  provider: string
+  unloaded: boolean
+}
+
+const CHATTERBOX_VOICE_CONVERSION_FORMATS = new Set<ChatterboxVoiceConversionFormat>([
+  "wav",
+  "mp3",
+  "flac",
+  "ogg",
+  "opus",
+  "aac",
+  "webm",
+  "pcm",
+  "ulaw"
+])
+
+const toArrayBuffer = (value: unknown): ArrayBuffer => {
+  if (value instanceof ArrayBuffer) return value
+  if (value instanceof Uint8Array) {
+    return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength)
+  }
+  if (Array.isArray(value)) return Uint8Array.from(value).buffer
+  if (value && typeof value === "object" && Array.isArray((value as { data?: unknown }).data)) {
+    return Uint8Array.from((value as { data: number[] }).data).buffer
+  }
+  throw new Error("Invalid audio buffer returned from Chatterbox voice conversion.")
+}
+
 export const listCustomVoices = async (): Promise<TldwCustomVoice[]> => {
   const res = await bgRequestClient<{ voices?: TldwCustomVoice[] }>({
     path: "/api/v1/audio/voices",
@@ -83,6 +132,73 @@ export const encodeCustomVoice = async (payload: {
   })
 }
 
+export const convertChatterboxVoice = async (
+  options: ChatterboxVoiceConversionOptions
+): Promise<ArrayBuffer> => {
+  if (!options.sourceAudio) {
+    throw new Error("sourceAudio is required for Chatterbox voice conversion.")
+  }
+  const responseFormat = String(options.responseFormat || "wav")
+    .trim()
+    .toLowerCase() as ChatterboxVoiceConversionFormat
+  if (!CHATTERBOX_VOICE_CONVERSION_FORMATS.has(responseFormat)) {
+    throw new Error(`Unsupported Chatterbox voice conversion response format: ${options.responseFormat}`)
+  }
+
+  const targetVoiceId = String(options.targetVoiceId || "").trim()
+  if (options.targetVoice && targetVoiceId) {
+    throw new Error("Provide either targetVoice or targetVoiceId, not both.")
+  }
+
+  const fields: Record<string, any> = {
+    response_format: responseFormat,
+    stream: Boolean(options.stream)
+  }
+  if (targetVoiceId) fields.target_voice_id = targetVoiceId
+
+  const sourceData = await options.sourceAudio.arrayBuffer()
+  const files = [
+    {
+      fieldName: "source_audio",
+      name: options.sourceAudio.name || "source_audio",
+      type: options.sourceAudio.type || "application/octet-stream",
+      data: sourceData
+    }
+  ]
+  if (options.targetVoice) {
+    const targetData = await options.targetVoice.arrayBuffer()
+    files.push({
+      fieldName: "target_voice",
+      name: options.targetVoice.name || "target_voice",
+      type: options.targetVoice.type || "application/octet-stream",
+      data: targetData
+    })
+  }
+
+  const result = await bgUpload<ArrayBuffer | Uint8Array | number[] | { data?: number[] }>({
+    path: "/api/v1/audio/voice-conversion",
+    method: "POST",
+    fields,
+    files,
+    responseType: "arrayBuffer",
+    timeoutMs: options.timeoutMs
+  })
+
+  return toArrayBuffer(result)
+}
+
+export const unloadTtsProvider = async (provider: string): Promise<TtsProviderUnloadResponse> => {
+  const normalizedProvider = String(provider || "").trim()
+  if (!normalizedProvider) {
+    throw new Error("provider is required to unload a TTS provider.")
+  }
+
+  return await bgRequestClient<TtsProviderUnloadResponse>({
+    path: `/api/v1/audio/tts/providers/${encodeURIComponent(normalizedProvider)}/unload`,
+    method: "POST"
+  })
+}
+
 export const deleteCustomVoice = async (voiceId: string): Promise<void> => {
   await bgRequestClient({
     path: `/api/v1/audio/voices/${encodeURIComponent(voiceId)}`,
@@ -107,7 +223,7 @@ export const VOICE_PROVIDER_REQUIREMENTS: Record<
   chatterbox: {
     formats: [".wav", ".mp3"],
     duration: { min: 5, max: 20 },
-    sample_rate: 22050
+    sample_rate: 24000
   },
   elevenlabs: {
     formats: [".wav", ".mp3"],

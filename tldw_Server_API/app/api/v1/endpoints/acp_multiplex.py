@@ -56,8 +56,8 @@ async def acp_multiplex_ws(
 
     try:
         client = await get_runner_client()
-    except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Multiplex WS runner client unavailable: {}", exc)
+    except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+        logger.warning("Multiplex WS runner client unavailable")
         with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
             await websocket.close(code=4404)
         return
@@ -73,13 +73,8 @@ async def acp_multiplex_ws(
             await _require_session_access(client, session_id=stream_id, user_id=int(user_id))
         except HTTPException:
             return False, "Unknown session or access denied", None
-        except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning(
-                "Multiplex WS {} access check failed for stream {}: {}",
-                connection_id,
-                stream_id,
-                exc,
-            )
+        except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+            logger.warning("Multiplex WS access check failed")
             return False, "Unable to authorize stream", None
 
         persona_id = await _resolve_acp_session_persona_id(
@@ -115,7 +110,7 @@ async def acp_multiplex_ws(
             try:
                 await manager.handle_message(raw)
             except Exception:
-                logger.exception("Multiplex WS {} handler failure", connection_id)
+                logger.exception("Multiplex WS handler failure")
                 with contextlib.suppress(_ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS):
                     await websocket.send_text(
                         MultiplexMessage.error("Internal multiplex error").to_json()

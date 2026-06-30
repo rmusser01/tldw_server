@@ -33,6 +33,7 @@ import {
   QUICK_CHAT_DEFAULT_PROJECT_DOCS_NAMESPACE,
   toQuickChatDocsMediaIdsInputValue
 } from "@/components/Common/QuickChatHelper/docs-rag-profile"
+import { ComposerStyleSettings } from "@/components/Chat/composer/settings/ComposerStyleSettings"
 
 const SELECT_CLASSNAME = "w-[200px]"
 export const ChatSettings = () => {
@@ -95,6 +96,8 @@ export const ChatSettings = () => {
     setAutoCopyResponseToClipboard,
     useMarkdownForUserMessage,
     setUseMarkdownForUserMessage,
+    renderMermaidDiagrams,
+    setRenderMermaidDiagrams,
     chatRichTextMode,
     setChatRichTextMode,
     chatRichTextStylePreset,
@@ -482,6 +485,10 @@ export const ChatSettings = () => {
         <div className="border-b border-border mt-3" />
       </div>
 
+      <ComposerStyleSettings />
+
+      <div className="border-b border-border" />
+
       <SettingRow
         label={t("generalSettings.settings.copilotResumeLastChat.label")}
         {...getResetProps(
@@ -810,6 +817,27 @@ export const ChatSettings = () => {
             checked={useMarkdownForUserMessage}
             onChange={setUseMarkdownForUserMessage}
             aria-label={t("generalSettings.settings.useMarkdownForUserMessage.label")}
+          />
+        }
+      />
+      <SettingRow
+        label={t(
+          "generalSettings.settings.renderMermaidDiagrams.label",
+          "Render Mermaid diagrams"
+        )}
+        {...getResetProps(
+          renderMermaidDiagrams,
+          DEFAULT_CHAT_SETTINGS.renderMermaidDiagrams,
+          setRenderMermaidDiagrams
+        )}
+        control={
+          <Switch
+            checked={renderMermaidDiagrams}
+            onChange={(checked) => setRenderMermaidDiagrams(checked)}
+            aria-label={t(
+              "generalSettings.settings.renderMermaidDiagrams.label",
+              "Render Mermaid diagrams"
+            )}
           />
         }
       />

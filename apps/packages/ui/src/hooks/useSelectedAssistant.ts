@@ -4,7 +4,9 @@ import type { AssistantSelection } from "@/types/assistant-selection"
 import {
   assistantSelectionToCharacter,
   characterToAssistantSelection,
-  normalizeAssistantSelection
+  getAssistantSelectionMode,
+  normalizeAssistantSelection,
+  preserveAssistantSelectionMode
 } from "@/types/assistant-selection"
 import {
   SELECTED_ASSISTANT_STORAGE_KEY,
@@ -32,6 +34,16 @@ const notifySelectedAssistantSubscribers = (value: AssistantSelection | null) =>
 const syncLegacyCharacterSelectionMirror = async (
   selection: AssistantSelection | null
 ) => {
+  if (getAssistantSelectionMode(selection) === "overlay") {
+    await selectedCharacterStorage
+      .remove(SELECTED_CHARACTER_STORAGE_KEY)
+      .catch(() => {})
+    await selectedCharacterSyncStorage
+      .remove(SELECTED_CHARACTER_STORAGE_KEY)
+      .catch(() => {})
+    return
+  }
+
   const legacyCharacter =
     assistantSelectionToCharacter<Record<string, unknown>>(selection)
 
@@ -77,6 +89,9 @@ export const useSelectedAssistant = (
   ]
   const [selectedAssistant, setSelectedAssistant, meta] = storageResult
   const migratedRef = React.useRef(false)
+  const latestSelectedAssistantRef = React.useRef<AssistantSelection | null>(
+    normalizedInitialValue
+  )
   const setRenderValueRef = React.useRef(
     meta?.setRenderValue ?? (() => undefined)
   )
@@ -86,7 +101,14 @@ export const useSelectedAssistant = (
   }, [meta?.setRenderValue])
 
   React.useEffect(() => {
+    latestSelectedAssistantRef.current = normalizeAssistantSelection(
+      parseSelectedAssistantValue(selectedAssistant)
+    )
+  }, [selectedAssistant])
+
+  React.useEffect(() => {
     const subscriber: Subscriber = (value) => {
+      latestSelectedAssistantRef.current = value
       setRenderValueRef.current(value)
     }
     selectedAssistantSubscribers.add(subscriber)
@@ -97,7 +119,23 @@ export const useSelectedAssistant = (
 
   const setSelectedAssistantWithBroadcast = React.useCallback(
     async (next: AssistantSelection | null) => {
-      const normalizedNext = normalizeAssistantSelection(next)
+      const normalizedCurrent = normalizeAssistantSelection(
+        parseSelectedAssistantValue(latestSelectedAssistantRef.current)
+      )
+      const normalizedNext = preserveAssistantSelectionMode(
+        normalizeAssistantSelection(next),
+        normalizedCurrent
+      )
+      if (!normalizedNext) {
+        latestSelectedAssistantRef.current = null
+        await syncLegacyCharacterSelectionMirror(null)
+        await clearAssistantSyncSelection()
+        await setSelectedAssistant(null)
+        notifySelectedAssistantSubscribers(null)
+        return
+      }
+
+      latestSelectedAssistantRef.current = normalizedNext
       await setSelectedAssistant(normalizedNext)
       notifySelectedAssistantSubscribers(normalizedNext)
       await clearAssistantSyncSelection()
@@ -169,8 +207,13 @@ export const useSelectedAssistant = (
     }
   }, [meta?.isLoading, selectedAssistant, setSelectedAssistantWithBroadcast])
 
+  const normalizedSelectedAssistant = React.useMemo(
+    () => normalizeAssistantSelection(parseSelectedAssistantValue(selectedAssistant)),
+    [selectedAssistant]
+  )
+
   return [
-    normalizeAssistantSelection(parseSelectedAssistantValue(selectedAssistant)),
+    normalizedSelectedAssistant,
     setSelectedAssistantWithBroadcast,
     {
       isLoading: meta?.isLoading ?? false,

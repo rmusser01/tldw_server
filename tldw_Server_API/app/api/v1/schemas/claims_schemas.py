@@ -2,7 +2,39 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.pagination import (
+    OffsetPaginationMeta,
+    validate_offset_pagination_aliases,
+)
+
+
+def _default_offset_pagination_aliases(response):
+    return validate_offset_pagination_aliases(response)
+
+
+def _default_offset_pagination_navigation_aliases(response):
+    pagination = getattr(response, "pagination", None)
+    if pagination is None:
+        return response
+    for alias_name, metadata_name in (
+        ("has_more", "has_more"),
+        ("next_offset", "next_offset"),
+    ):
+        if not hasattr(response, alias_name):
+            continue
+        expected = getattr(pagination, metadata_name, None)
+        actual = getattr(response, alias_name, None)
+        if actual is None:
+            setattr(response, alias_name, expected)
+            continue
+        if actual != expected:
+            raise ValueError(
+                f"{alias_name} alias mismatch: {alias_name}={actual} "
+                f"pagination.{metadata_name}={expected}"
+            )
+    return response
 
 
 class ClaimsSettingsResponse(BaseModel):
@@ -166,6 +198,13 @@ class ClaimsSearchResponse(BaseModel):
     results: list[ClaimsSearchResult] = Field(default_factory=list)
     clusters: list[ClaimsSearchClusterResult] | None = None
     orphaned: list[ClaimsSearchResult] | None = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ClaimsClusterLinkCreate(BaseModel):
@@ -307,6 +346,13 @@ class ClaimNotificationsDigestResponse(BaseModel):
     counts_by_target_user: dict[str, int] = Field(default_factory=dict)
     counts_by_review_group: dict[str, int] = Field(default_factory=dict)
     notifications: list[ClaimNotificationResponse] | None = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_navigation_aliases(self)
 
 
 class ClaimReviewRequest(BaseModel):
@@ -440,6 +486,13 @@ class ClaimsAnalyticsExportListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ClaimsAnalyticsPerMediaCount(BaseModel):
@@ -527,6 +580,15 @@ class ClaimsReviewExtractorMetricsResponse(BaseModel):
 
     items: list[ClaimsReviewExtractorMetricsDaily] = Field(default_factory=list)
     total: int
+    limit: int
+    offset: int
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class ClaimsAnalyticsClusterSummary(BaseModel):

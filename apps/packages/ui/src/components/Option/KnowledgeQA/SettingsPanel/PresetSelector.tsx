@@ -3,7 +3,7 @@
  */
 
 import React, { useRef, useCallback, useState } from "react"
-import { Zap, Scale, Brain, Beaker, Settings } from "lucide-react"
+import { Zap, Scale, Brain, Settings } from "lucide-react"
 import { useKnowledgeQA } from "../KnowledgeQAProvider"
 import { cn } from "@/libs/utils"
 import type { RagPresetName } from "@/services/rag/unified-rag"
@@ -33,8 +33,8 @@ const PRESETS: PresetConfig[] = [
   },
   {
     name: "thorough",
-    label: "Thorough",
-    description: "Most thorough - includes fact-checking",
+    label: "Deep",
+    description: "Deep search - more sources and verification",
     icon: Brain,
     color: "text-accent",
   },
@@ -46,15 +46,6 @@ const PRESETS: PresetConfig[] = [
     color: "text-text-muted",
   },
 ]
-
-// Additional "Research" preset for advanced users
-const RESEARCH_PRESET: PresetConfig = {
-  name: "thorough", // Uses thorough as base with modifications
-  label: "Research",
-  description: "Max verification + citations",
-  icon: Beaker,
-  color: "text-success",
-}
 
 export function PresetSelector() {
   const { preset, setPreset } = useKnowledgeQA()

@@ -25,6 +25,7 @@ from tldw_Server_API.app.api.v1.endpoints.kanban._kanban_utils import (
     resolve_limit_offset,
     to_db_timestamp,
 )
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     ActivitiesListResponse,
     ActivityResponse,
@@ -123,7 +124,7 @@ async def create_card(
         logger.info(f"Created card {card['id']} in list {list_id}")
         return CardResponse(**card)
     except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to create card") from e
 @router.get(
     "/lists/{list_id}/cards",
     response_model=CardsListResponse,
@@ -150,7 +151,7 @@ async def get_cards(
         )
         return CardsListResponse(cards=[CardResponse(**c) for c in cards])
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to fetch cards") from e
 
 
 @router.post(
@@ -177,7 +178,7 @@ async def reorder_cards(
         logger.info(f"Reordered {len(ids)} cards in list {list_id}")
         return ReorderResponse(success=True, message="Cards reordered successfully")
     except (NotFoundError, InputError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to reorder cards") from e
 # =============================================================================
 # Individual Card Endpoints (at /cards/{card_id})
 # =============================================================================
@@ -203,7 +204,7 @@ async def get_card(
             )
         return CardWithDetailsResponse(**card)
     except KanbanDBError as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to fetch card") from e
 @router.patch(
     "/cards/{card_id}",
     response_model=CardResponse,
@@ -242,7 +243,7 @@ async def update_card(
         logger.info(f"Updated card {card_id}")
         return CardResponse(**card)
     except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to update card") from e
 # =============================================================================
 # Move and Copy Operations
 # =============================================================================
@@ -273,7 +274,7 @@ async def move_card(
         logger.info(f"Moved card {card_id} to list {move_in.target_list_id}")
         return CardResponse(**card)
     except (NotFoundError, InputError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to move card") from e
 @router.post(
     "/cards/{card_id}/copy",
     response_model=CardResponse,
@@ -306,7 +307,7 @@ async def copy_card(
         logger.info(f"Copied card {card_id} to list {copy_in.target_list_id} as {card['id']}")
         return CardResponse(**card)
     except (NotFoundError, InputError, ConflictError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to copy card") from e
 # =============================================================================
 # Archive Operations
 # =============================================================================
@@ -328,7 +329,7 @@ async def archive_card(
         logger.info(f"Archived card {card_id}")
         return CardResponse(**card)
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to archive card") from e
 @router.post(
     "/cards/{card_id}/unarchive",
     response_model=CardResponse,
@@ -346,7 +347,7 @@ async def unarchive_card(
         logger.info(f"Unarchived card {card_id}")
         return CardResponse(**card)
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to unarchive card") from e
 # =============================================================================
 # Delete Operations
 # =============================================================================
@@ -373,7 +374,7 @@ async def delete_card(
         logger.info(f"Deleted card {card_id}")
         return DetailResponse(detail=f"Card {card_id} deleted successfully")
     except KanbanDBError as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to delete card") from e
 @router.post(
     "/cards/{card_id}/restore",
     response_model=CardResponse,
@@ -391,7 +392,7 @@ async def restore_card(
         logger.info(f"Restored card {card_id}")
         return CardResponse(**card)
     except (NotFoundError, InputError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to restore card") from e
 # =============================================================================
 # Activity Endpoints
 # =============================================================================
@@ -437,7 +438,7 @@ async def get_card_activities(
             )
         )
     except (NotFoundError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to fetch card activities") from e
 # =============================================================================
 # Search Operations
 # =============================================================================
@@ -475,7 +476,7 @@ async def search_cards(
             )
         )
     except (InputError, KanbanDBError) as e:
-        raise _handle_error(e) from e
+        raise map_db_error_to_http(e, default_detail="Failed to search cards") from e
 @router.get(
     "/cards/search",
     response_model=CardSearchResponse,
@@ -549,6 +550,8 @@ async def bulk_move_cards(
             moved_count=result["moved_count"],
             cards=[CardResponse(**c) for c in result["cards"]]
         )
+    except KanbanDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to bulk move cards") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.post(
@@ -573,6 +576,8 @@ async def bulk_archive_cards(
             success=result["success"],
             archived_count=result.get("archived_count", 0)
         )
+    except KanbanDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to bulk archive cards") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.post(
@@ -597,6 +602,8 @@ async def bulk_unarchive_cards(
             success=result["success"],
             unarchived_count=result.get("unarchived_count", 0)
         )
+    except KanbanDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to bulk unarchive cards") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.post(
@@ -621,6 +628,8 @@ async def bulk_delete_cards(
             success=result["success"],
             deleted_count=result["deleted_count"]
         )
+    except KanbanDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to bulk delete cards") from e
     except Exception as e:
         raise _handle_error(e) from e
 @router.post(
@@ -651,6 +660,8 @@ async def bulk_label_cards(
             success=result["success"],
             updated_count=result["updated_count"]
         )
+    except KanbanDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to bulk label cards") from e
     except Exception as e:
         raise _handle_error(e) from e
 # =============================================================================
@@ -719,6 +730,8 @@ async def get_filtered_cards(
                 has_more=(offset + len(cards)) < total
             )
         )
+    except KanbanDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to fetch filtered cards") from e
     except Exception as e:
         raise _handle_error(e) from e
 # =============================================================================
@@ -760,5 +773,7 @@ async def copy_card_with_checklists(
         )
         logger.info(f"Copied card {card_id} to {request.target_list_id} with checklists={request.copy_checklists}")
         return CardResponse(**card)
+    except KanbanDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to copy card") from e
     except Exception as e:
         raise _handle_error(e) from e

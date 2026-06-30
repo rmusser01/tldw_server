@@ -14,8 +14,8 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import build_sqlite_in_clause, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_memberships_for_user
+from tldw_Server_API.app.core.MCP_unified.environment import is_truthy
 from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, RequestContext
-from tldw_Server_API.app.core.testing import is_truthy
 
 from ..base import BaseModule, create_tool_definition
 
@@ -64,7 +64,11 @@ class MCPDiscoveryModule(BaseModule):
                         "catalog_id": {"type": "integer", "description": "Catalog id."},
                         "catalog_strict": {
                             "type": "boolean",
-                            "description": "Return empty tool list when catalog resolution fails.",
+                            "description": "Return empty tool list when catalog resolution fails; wins over fail-open.",
+                        },
+                        "catalog_fail_open": {
+                            "type": "boolean",
+                            "description": "Return the RBAC-filtered tool list when catalog resolution fails unless strict is true.",
                         },
                         "module": {"type": "string", "description": "Single module id filter."},
                         "modules": {
@@ -114,6 +118,14 @@ class MCPDiscoveryModule(BaseModule):
             params["catalog_strict"] = bool(catalog_strict)
         elif isinstance(catalog_strict, str):
             params["catalog_strict"] = is_truthy(catalog_strict)
+
+        catalog_fail_open = args.get("catalog_fail_open")
+        if isinstance(catalog_fail_open, bool):
+            params["catalog_fail_open"] = catalog_fail_open
+        elif isinstance(catalog_fail_open, (int, float)):
+            params["catalog_fail_open"] = bool(catalog_fail_open)
+        elif isinstance(catalog_fail_open, str):
+            params["catalog_fail_open"] = is_truthy(catalog_fail_open)
 
         modules: list[str] = []
         module_single = args.get("module")
@@ -248,8 +260,8 @@ class MCPDiscoveryModule(BaseModule):
                 except (TypeError, ValueError):
                     continue
                 org_ids.add(org_id)
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.debug(f"MCP discovery: org membership lookup failed: {exc}")
+        except (OSError, RuntimeError, TypeError, ValueError):
+            logger.debug("MCP discovery: org membership lookup failed; details redacted")
 
         try:
             pool = await get_db_pool()
@@ -263,8 +275,8 @@ class MCPDiscoveryModule(BaseModule):
                     team_ids.add(int(val))
                 except (TypeError, ValueError):
                     continue
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.debug(f"MCP discovery: team membership lookup failed: {exc}")
+        except (OSError, RuntimeError, TypeError, ValueError):
+            logger.debug("MCP discovery: team membership lookup failed; details redacted")
 
         return org_ids, team_ids
 

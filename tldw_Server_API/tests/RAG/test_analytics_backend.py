@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
+import threading
 from typing import Any, List, Tuple
 from unittest.mock import AsyncMock, MagicMock
 
@@ -207,8 +208,9 @@ def test_record_search_sqlite_writes_row(tmp_path: Path) -> None:
 def test_record_search_postgres_calls_backend_execute() -> None:
 
     analytics = AnalyticsDatabase.__new__(AnalyticsDatabase)
-    analytics.backend_type = BackendType.POSTGRESQL
-    analytics.backend = MagicMock()
+    analytics._local = threading.local()
+    analytics._backend = MagicMock()
+    analytics._backend.backend_type = BackendType.POSTGRESQL
 
     calls: List[Tuple[str, Any]] = []
 

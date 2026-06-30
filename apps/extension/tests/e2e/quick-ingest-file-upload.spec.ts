@@ -4,22 +4,60 @@ import { AddressInfo } from 'node:net'
 import { launchWithBuiltExtension } from './utils/extension-build'
 import { forceConnected, waitForConnectionStore } from './utils/connection'
 
+const ACCEPTED_FILE_FIXTURES = [
+  { name: 'sample.pdf', mimeType: 'application/pdf', body: '%PDF-1.4\n' },
+  { name: 'sample.txt', mimeType: 'text/plain', body: 'plain text' },
+  { name: 'sample.rtf', mimeType: 'application/rtf', body: '{\\rtf1 text}' },
+  {
+    name: 'sample.docx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    body: 'PK\u0003\u0004docx'
+  },
+  { name: 'sample.md', mimeType: 'text/markdown', body: '# Markdown' },
+  { name: 'sample.markdown', mimeType: 'text/markdown', body: '# Markdown' },
+  { name: 'sample.html', mimeType: 'text/html', body: '<p>HTML</p>' },
+  { name: 'sample.htm', mimeType: 'text/html', body: '<p>HTML</p>' },
+  {
+    name: 'sample.xhtml',
+    mimeType: 'application/xhtml+xml',
+    body: '<html xmlns="http://www.w3.org/1999/xhtml"><body>XHTML</body></html>'
+  },
+  { name: 'sample.xml', mimeType: 'application/xml', body: '<root />' },
+  { name: 'sample.json', mimeType: 'application/json', body: '{"ok":true}' },
+  { name: 'sample.epub', mimeType: 'application/epub+zip', body: 'PK\u0003\u0004epub' },
+  { name: 'sample.mp3', mimeType: 'audio/mpeg', body: 'audio' },
+  { name: 'sample.wav', mimeType: 'audio/wav', body: 'audio' },
+  { name: 'sample.m4a', mimeType: 'audio/mp4', body: 'audio' },
+  { name: 'sample.flac', mimeType: 'audio/flac', body: 'audio' },
+  { name: 'sample.aac', mimeType: 'audio/aac', body: 'audio' },
+  { name: 'sample.ogg', mimeType: 'application/ogg', body: 'ogg' },
+  { name: 'sample.mp4', mimeType: 'video/mp4', body: 'video' },
+  { name: 'sample.webm', mimeType: 'video/webm', body: 'video' },
+  { name: 'sample.mkv', mimeType: '', body: 'video' },
+  { name: 'sample.mov', mimeType: 'video/quicktime', body: 'video' },
+  { name: 'sample.avi', mimeType: 'video/avi', body: 'video' }
+]
+
 test.describe('Quick ingest file upload', () => {
   let server: http.Server
   let baseUrl = ''
   let ingestJobSubmitCount = 0
   let ingestJobSubmitBytes = 0
+  const ingestJobSubmitFileNames: string[] = []
   const ingestJobStates = new Map<number, { polls: number; resultId: string }>()
 
-  const readBodyBytes = (req: http.IncomingMessage) =>
-    new Promise<number>((resolve) => {
-      let size = 0
+  const readBody = (req: http.IncomingMessage) =>
+    new Promise<Buffer>((resolve) => {
+      const chunks: Buffer[] = []
       req.on('data', (chunk) => {
-        size += chunk.length
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
       })
-      req.on('end', () => resolve(size))
-      req.on('error', () => resolve(size))
+      req.on('end', () => resolve(Buffer.concat(chunks)))
+      req.on('error', () => resolve(Buffer.concat(chunks)))
     })
+
+  const readBodyBytes = async (req: http.IncomingMessage) =>
+    (await readBody(req)).byteLength
 
   const patchQuickIngestRuntime = async (page: Page, apiBaseUrl: string) =>
     page.evaluate(async ({ resolvedApiBaseUrl }) => {
@@ -321,7 +359,16 @@ test.describe('Quick ingest file upload', () => {
       }
       if (url === '/api/v1/media/ingest/jobs' && method === 'POST') {
         ingestJobSubmitCount += 1
-        ingestJobSubmitBytes += await readBodyBytes(req)
+        const body = await readBody(req)
+        ingestJobSubmitBytes += body.byteLength
+        try {
+          const payload = JSON.parse(body.toString('utf8') || '{}')
+          if (typeof payload?.file_name === 'string') {
+            ingestJobSubmitFileNames.push(payload.file_name)
+          }
+        } catch {
+          // ignore malformed test payloads
+        }
         const jobId = 7000 + ingestJobSubmitCount
         ingestJobStates.set(jobId, {
           polls: 0,
@@ -409,6 +456,100 @@ test.describe('Quick ingest file upload', () => {
 
       expect(ingestJobSubmitCount).toBeGreaterThan(0)
       expect(ingestJobSubmitBytes).toBeGreaterThan(0)
+    } finally {
+      try {
+        await page.evaluate(() => {
+          try {
+            const restore = (window as any).__restoreQuickIngestUploadPatch
+            if (typeof restore === 'function') {
+              restore()
+            }
+            delete (window as any).__restoreQuickIngestUploadPatch
+          } catch {
+            // ignore cleanup failures if page context is gone
+          }
+        })
+      } catch {
+        // ignore cleanup failures if page already closed
+      }
+      await context.close()
+    }
+  })
+
+  test('accepts every advertised upload extension and excludes legacy doc', async () => {
+    const { context, page, optionsUrl } = await launchWithBuiltExtension({
+      seedConfig: {
+        serverUrl: baseUrl,
+        authMode: 'single-user',
+        apiKey: 'test-key'
+      }
+    })
+
+    try {
+      const patched = await patchQuickIngestRuntime(page, baseUrl)
+      if (!patched) {
+        test.skip(true, 'Unable to patch runtime messaging in extension page context.')
+        return
+      }
+
+      const modal = await openQuickIngestModal(page, optionsUrl)
+      const fileInput = page.locator('[data-testid="qi-file-input"]')
+      const accept = (await fileInput.getAttribute('accept')) || ''
+      const acceptEntries = accept
+        .split(',')
+        .map((entry) => entry.trim().toLowerCase())
+        .filter(Boolean)
+
+      for (const fixture of ACCEPTED_FILE_FIXTURES) {
+        const extension = `.${fixture.name.split('.').pop()?.toLowerCase()}`
+        expect(acceptEntries).toContain(extension)
+      }
+      expect(acceptEntries).not.toContain('.doc')
+      expect(acceptEntries).not.toContain('application/msword')
+
+      await page.setInputFiles('[data-testid="qi-file-input"]', {
+        name: 'legacy.doc',
+        mimeType: 'application/msword',
+        buffer: Buffer.from('legacy doc')
+      })
+      await expect(modal.getByText('legacy.doc')).toHaveCount(0)
+
+      const uploadRunId = `accepted-${Date.now()}`
+      const uploadFiles = ACCEPTED_FILE_FIXTURES.map((fixture, index) => {
+        const extension = fixture.name.slice(fixture.name.lastIndexOf('.'))
+        return {
+          name: `${uploadRunId}-${index + 1}${extension}`,
+          mimeType: fixture.mimeType,
+          buffer: Buffer.from(fixture.body)
+        }
+      })
+      const expectedNames = uploadFiles.map((file) => file.name)
+
+      await page.setInputFiles('[data-testid="qi-file-input"]', uploadFiles)
+
+      for (const fileName of expectedNames) {
+        await expect(modal.getByText(fileName)).toBeVisible()
+      }
+
+      const runButton = modal.getByRole('button', {
+        name: /Run quick ingest|Ingest|Process/i
+      }).first()
+      await expect(runButton).toBeEnabled()
+      await runButton.click()
+
+      await expect(
+        modal.getByText(/Quick ingest completed (successfully|with some errors)/i)
+      ).toBeVisible({ timeout: 30_000 })
+
+      await expect
+        .poll(
+          () =>
+            ingestJobSubmitFileNames
+              .filter((fileName) => expectedNames.includes(fileName))
+              .sort(),
+          { timeout: 10_000 }
+        )
+        .toEqual([...expectedNames].sort())
     } finally {
       try {
         await page.evaluate(() => {

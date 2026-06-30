@@ -10,6 +10,23 @@ const deleteSpy = vi.fn()
 const storeState = {
   webhookSecretText: null as string | null
 }
+const webhooksListState = {
+  data: {
+    ok: true,
+    data: [
+      {
+        webhook_id: 17,
+        url: "https://example.com/webhooks/evals",
+        events: ["evaluation.completed"],
+        status: "active",
+        created_at: "2026-03-29T12:00:00Z"
+      }
+    ]
+  },
+  isLoading: false,
+  isError: false,
+  error: null as Error | null
+}
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -42,22 +59,7 @@ vi.mock("../../components", () => ({
 }))
 
 vi.mock("../../hooks/useWebhooks", () => ({
-  useWebhooksList: () => ({
-    data: {
-      ok: true,
-      data: [
-        {
-          webhook_id: 17,
-          url: "https://example.com/webhooks/evals",
-          events: ["evaluation.completed"],
-          status: "active",
-          created_at: "2026-03-29T12:00:00Z"
-        }
-      ]
-    },
-    isLoading: false,
-    isError: false
-  }),
+  useWebhooksList: () => webhooksListState,
   useRegisterWebhook: () => ({
     mutateAsync: vi.fn(),
     isPending: false
@@ -110,6 +112,21 @@ describe("WebhooksTab backend contract", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    webhooksListState.data = {
+      ok: true,
+      data: [
+        {
+          webhook_id: 17,
+          url: "https://example.com/webhooks/evals",
+          events: ["evaluation.completed"],
+          status: "active",
+          created_at: "2026-03-29T12:00:00Z"
+        }
+      ]
+    }
+    webhooksListState.isLoading = false
+    webhooksListState.isError = false
+    webhooksListState.error = null
     vi.spyOn(Modal, "confirm").mockImplementation((config: any) => {
       void config?.onOk?.()
       return {
@@ -133,5 +150,20 @@ describe("WebhooksTab backend contract", () => {
     await waitFor(() => {
       expect(deleteSpy).toHaveBeenCalledWith("https://example.com/webhooks/evals")
     })
+  })
+
+  it("shows endpoint diagnostics while preserving the webhook registration form", () => {
+    webhooksListState.data = { ok: false, error: "HTTP 503" } as any
+    webhooksListState.isError = true
+    webhooksListState.error = new Error("HTTP 503")
+
+    render(<WebhooksTab />)
+
+    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Unable to load webhooks")).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/evaluations/webhooks"
+    )
+    expect(screen.getByRole("button", { name: "Register webhook" })).toBeEnabled()
   })
 })

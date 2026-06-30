@@ -135,6 +135,29 @@ async def test_fallback_url_level_ephemeral_smoke_applies_max_pages_cap(monkeypa
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_fallback_url_level_sanitizes_unexpected_runtime_error(monkeypatch):
+    _force_fallback(monkeypatch)
+
+    async def raise_legacy_scraper_error(*args, **kwargs):
+        raise RuntimeError("legacy scraper leaked /private/web/cache/token")
+
+    monkeypatch.setattr(ws_service.asyncio, "to_thread", raise_legacy_scraper_error, raising=True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ws_service.process_web_scraping_task(
+            **_base_kwargs(
+                scrape_method="URL Level",
+                url_level=2,
+                mode="ephemeral",
+            )
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Legacy web scraping fallback failed"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_fallback_ephemeral_result_retrievable_within_ttl(monkeypatch):
     _force_fallback(monkeypatch)
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 
 import { ChatSidebar } from "../ChatSidebar"
@@ -76,10 +76,22 @@ vi.mock("@/components/Sidepanel/Chat/ModeToggle", () => ({
 describe("ChatSidebar coordinator integration", () => {
   beforeEach(() => {
     useSettingMock.mockReset()
-    useSettingMock
-      .mockReturnValueOnce(["server", vi.fn()])
-      .mockReturnValueOnce([false, vi.fn()])
-      .mockReturnValueOnce([[], vi.fn()])
+    const setCurrentTab = vi.fn()
+    const setShortcutsCollapsed = vi.fn()
+    const setShortcutSelection = vi.fn()
+    useSettingMock.mockImplementation((setting: { key?: string } | string) => {
+      const key = typeof setting === "string" ? setting : setting?.key
+      if (key === "tldw:sidebar:activeTab") {
+        return ["server", setCurrentTab]
+      }
+      if (key === "tldw:sidebar:shortcutsCollapsed") {
+        return [false, setShortcutsCollapsed]
+      }
+      if (key === "tldw:sidebar:shortcutSelection") {
+        return [[], setShortcutSelection]
+      }
+      return [null, vi.fn()]
+    })
 
     useChatSurfaceCoordinatorStore.setState({
       routeId: null,
@@ -99,12 +111,18 @@ describe("ChatSidebar coordinator integration", () => {
     })
   })
 
-  it("marks the server history panel visible when the server tab is expanded", () => {
+  it("marks server history visible only when recent conversations are expanded", () => {
     render(
       <MemoryRouter initialEntries={["/chat"]}>
         <ChatSidebar collapsed={false} />
       </MemoryRouter>
     )
+
+    expect(
+      useChatSurfaceCoordinatorStore.getState().visiblePanels["server-history"]
+    ).toBe(false)
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
 
     expect(
       useChatSurfaceCoordinatorStore.getState().visiblePanels["server-history"]

@@ -29,6 +29,7 @@ from tldw_Server_API.app.api.v1.API_Deps.guardian_deps import (
     get_guardian_db_for_user,
     get_guardian_db_for_user_id,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.guardian_schemas import (
     DetailResponse,
     DissolveRequest,
@@ -42,7 +43,7 @@ from tldw_Server_API.app.api.v1.schemas.guardian_schemas import (
     SupervisionAuditList,
     SupervisionAuditResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB
 from tldw_Server_API.app.core.Moderation.family_wizard_materializer import (
     materialize_pending_plans_for_relationship,
@@ -446,7 +447,14 @@ def get_audit_log(
         )
         for e in entries
     ]
-    return SupervisionAuditList(items=items, total=total)
+    pagination = build_offset_pagination_meta(total=total, limit=limit, offset=offset, count=len(items))
+    return SupervisionAuditList(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=pagination,
+    )
 
 
 # ── Dependent Status ─────────────────────────────────────────

@@ -15,6 +15,28 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 pytestmark = pytest.mark.integration
 
 
+async def _test_generation_adapter(request: dict[str, object], _context: dict[str, object]) -> dict[str, object]:
+    excerpt = str(request.get("excerpt_text") or "").strip()
+    title = str(request.get("derived_title") or "Study Notes")
+    source_note_id = str(request.get("source_note_id") or "").strip()
+    template_type = str(request.get("template_type") or "lined")
+    cue_item = "Recall prompt: What is the key idea?" if template_type == "cornell" else "What is the key idea?"
+    return {
+        "payload": {
+            "meta": {"title": title, "source_note_id": source_note_id},
+            "sections": [
+                {"id": "cue-1", "kind": "cue", "title": "Key Questions", "items": [cue_item]},
+                {"id": "notes-1", "kind": "notes", "title": "Notes", "content": excerpt},
+                {"id": "summary-1", "kind": "summary", "title": "Summary", "content": excerpt},
+            ],
+        }
+    }
+
+
+async def _test_diagram_adapter(_request: dict[str, object], _context: dict[str, object]) -> dict[str, object]:
+    return {"diagram": "graph TD; A-->B", "format": "mermaid"}
+
+
 @pytest.fixture()
 def client_with_notes_studio_db(tmp_path, monkeypatch):
     db_path = tmp_path / "notes_studio_integration.db"
@@ -31,6 +53,17 @@ def client_with_notes_studio_db(tmp_path, monkeypatch):
 
     def override_db_dep():
         return db
+
+    service_cls = notes_endpoint.NotesStudioService
+
+    def _service_factory(*, db):
+        return service_cls(
+            db=db,
+            generation_adapter=_test_generation_adapter,
+            diagram_adapter=_test_diagram_adapter,
+        )
+
+    monkeypatch.setattr(notes_endpoint, "NotesStudioService", _service_factory)
 
     fastapi_app = FastAPI()
     fastapi_app.include_router(notes_endpoint.router, prefix="/api/v1/notes")
@@ -122,7 +155,10 @@ def test_notes_studio_derive_fetch_and_regenerate_flow(client_with_notes_studio_
     assert stale_response.json()["is_stale"] is True
     assert stale_response.json()["stale_reason"] == "companion_content_hash_mismatch"
 
-    regenerate_response = client.post(f"/api/v1/notes/{note_id}/studio/regenerate")
+    regenerate_response = client.post(
+        f"/api/v1/notes/{note_id}/studio/regenerate",
+        json={"expected_version": int(drift_response.json()["version"])},
+    )
     assert regenerate_response.status_code == 200, regenerate_response.text
     regenerated = regenerate_response.json()
     assert regenerated["is_stale"] is False
@@ -180,7 +216,8 @@ def test_notes_studio_regenerate_accepts_current_markdown_override(client_with_n
         },
     )
     assert derive_response.status_code == 201, derive_response.text
-    note_id = derive_response.json()["note"]["id"]
+    derived_note = derive_response.json()["note"]
+    note_id = derived_note["id"]
 
     override_markdown = (
         "# Biology Refined Study Notes\n\n"
@@ -194,7 +231,10 @@ def test_notes_studio_regenerate_accepts_current_markdown_override(client_with_n
 
     regenerate_response = client.post(
         f"/api/v1/notes/{note_id}/studio/regenerate",
-        json={"current_markdown": override_markdown},
+        json={
+            "expected_version": int(derived_note["version"]),
+            "current_markdown": override_markdown,
+        },
     )
     assert regenerate_response.status_code == 200, regenerate_response.text
     regenerated = regenerate_response.json()
@@ -229,11 +269,12 @@ def test_notes_studio_regenerate_treats_empty_current_markdown_as_an_explicit_ov
         },
     )
     assert derive_response.status_code == 201, derive_response.text
-    note_id = derive_response.json()["note"]["id"]
+    derived_note = derive_response.json()["note"]
+    note_id = derived_note["id"]
 
     regenerate_response = client.post(
         f"/api/v1/notes/{note_id}/studio/regenerate",
-        json={"current_markdown": ""},
+        json={"expected_version": int(derived_note["version"]), "current_markdown": ""},
     )
     assert regenerate_response.status_code == 200, regenerate_response.text
     regenerated = regenerate_response.json()
@@ -242,6 +283,69 @@ def test_notes_studio_regenerate_treats_empty_current_markdown_as_an_explicit_ov
     assert regenerated["note"]["title"] == "Biology Study Notes"
     assert regenerated["note"]["content"] == "# Biology Study Notes"
     assert regenerated["studio_document"]["payload_json"]["sections"] == []
+
+
+def test_notes_studio_regenerate_requires_expected_version(client_with_notes_studio_db: TestClient):
+    client = client_with_notes_studio_db
+    source_note_id = _create_source_note(
+        client,
+        title="Biology",
+        content="Cells use mitochondria to produce ATP.",
+    )
+
+    derive_response = client.post(
+        "/api/v1/notes/studio/derive",
+        json={
+            "source_note_id": source_note_id,
+            "excerpt_text": "Cells use mitochondria to produce ATP.",
+            "template_type": "cornell",
+            "handwriting_mode": "accented",
+        },
+    )
+    assert derive_response.status_code == 201, derive_response.text
+    note_id = derive_response.json()["note"]["id"]
+
+    response = client.post(f"/api/v1/notes/{note_id}/studio/regenerate")
+
+    assert response.status_code == 422
+
+
+def test_notes_studio_regenerate_rejects_stale_expected_version(client_with_notes_studio_db: TestClient):
+    client = client_with_notes_studio_db
+    source_note_id = _create_source_note(
+        client,
+        title="Biology",
+        content="Cells use mitochondria to produce ATP.",
+    )
+
+    derive_response = client.post(
+        "/api/v1/notes/studio/derive",
+        json={
+            "source_note_id": source_note_id,
+            "excerpt_text": "Cells use mitochondria to produce ATP.",
+            "template_type": "cornell",
+            "handwriting_mode": "accented",
+        },
+    )
+    assert derive_response.status_code == 201, derive_response.text
+    derived_note = derive_response.json()["note"]
+    note_id = derived_note["id"]
+
+    drift_response = client.patch(
+        f"/api/v1/notes/{note_id}",
+        json={"content": "# Edited elsewhere"},
+    )
+    assert drift_response.status_code == 200, drift_response.text
+
+    response = client.post(
+        f"/api/v1/notes/{note_id}/studio/regenerate",
+        json={
+            "expected_version": int(derived_note["version"]),
+            "current_markdown": "# Stale editor body",
+        },
+    )
+
+    assert response.status_code == 409
 
 
 def test_notes_studio_derive_rolls_back_note_when_sidecar_persistence_fails(
@@ -322,7 +426,10 @@ def test_notes_studio_regenerate_rolls_back_note_update_when_sidecar_upsert_fail
 
     monkeypatch.setattr(db, "upsert_note_studio_document", _raise_sidecar_failure)
 
-    regenerate_response = client.post(f"/api/v1/notes/{note_id}/studio/regenerate")
+    regenerate_response = client.post(
+        f"/api/v1/notes/{note_id}/studio/regenerate",
+        json={"expected_version": int(drift_response.json()["version"])},
+    )
     assert regenerate_response.status_code == 500
     assert regenerate_response.json()["detail"] == "A database error occurred while processing your request for note studio."
 
@@ -395,3 +502,27 @@ def test_notes_studio_rejects_invalid_excerpt_requests(
     )
 
     assert response.status_code == 400
+
+
+def test_notes_studio_derive_rejects_oversized_provider_override(
+    client_with_notes_studio_db: TestClient,
+):
+    client = client_with_notes_studio_db
+    source_note_id = _create_source_note(
+        client,
+        title="Source",
+        content="Useful content for provider validation.",
+    )
+
+    response = client.post(
+        "/api/v1/notes/studio/derive",
+        json={
+            "source_note_id": source_note_id,
+            "excerpt_text": "Useful content for provider validation.",
+            "template_type": "lined",
+            "handwriting_mode": "accented",
+            "provider": "p" * 101,
+        },
+    )
+
+    assert response.status_code == 422

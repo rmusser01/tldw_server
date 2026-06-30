@@ -205,9 +205,9 @@ def get_image_generation_config(*, reload: bool = False) -> ImageGenerationConfi
         enabled_backends = []
 
     inline_max_bytes_raw = _get_config_value(section, "inline_max_bytes")
-    inline_max_bytes = None
+    inline_max_bytes = DEFAULT_INLINE_MAX_BYTES
     if inline_max_bytes_raw is not None:
-        inline_max_bytes = _coerce_int(inline_max_bytes_raw, DEFAULT_INLINE_MAX_BYTES)
+        inline_max_bytes = max(1, _coerce_int(inline_max_bytes_raw, DEFAULT_INLINE_MAX_BYTES))
 
     config = ImageGenerationConfig(
         default_backend=default_backend,

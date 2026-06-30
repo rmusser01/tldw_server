@@ -14,6 +14,10 @@ from tldw_Server_API.app.core.http_client import (
 )
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import split_system_message
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import normalize_payload, validate_payload
+from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
+    apply_billing_prompt_cache_intent,
+    attach_cache_intent_metadata,
+)
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
@@ -560,6 +564,7 @@ class GoogleAdapter(ChatProvider):
         url = f"{self._base_url(request)}/models/{model}:generateContent"
         headers = self._headers(api_key)
         payload = self._build_payload(request)
+        payload, cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
         payload = merge_extra_body(payload, request)
         headers = merge_extra_headers(headers, request)
         try:
@@ -568,7 +573,10 @@ class GoogleAdapter(ChatProvider):
                 resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
-                return self._normalize_to_openai_shape(data)
+                return attach_cache_intent_metadata(
+                    self._normalize_to_openai_shape(data),
+                    cache_intent_diagnostic,
+                )
         except _GOOGLE_ADAPTER_RUNTIME_EXCEPTIONS as e:
             raise self.normalize_error(e) from e
 
@@ -584,6 +592,7 @@ class GoogleAdapter(ChatProvider):
         url = f"{self._base_url(request)}/models/{model}:streamGenerateContent?alt=sse"
         headers = self._headers(api_key)
         payload = self._build_payload(request)
+        payload, _cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
         payload = merge_extra_body(payload, request)
         headers = merge_extra_headers(headers, request)
         try:

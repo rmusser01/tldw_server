@@ -124,13 +124,21 @@ export function writeSessionId(value: unknown): string | null {
 }
 
 function generateSessionId(): string | null {
-  if (typeof crypto === 'undefined') return null;
-  if ('randomUUID' in crypto) {
-    return `${SESSION_PREFIX}${crypto.randomUUID()}`;
+  const webCrypto = typeof globalThis !== 'undefined'
+    ? (globalThis.crypto as
+        | {
+            randomUUID?: () => string
+            getRandomValues?: (array: Uint8Array) => Uint8Array
+          }
+        | undefined)
+    : undefined;
+  if (!webCrypto) return null;
+  if (typeof webCrypto.randomUUID === 'function') {
+    return `${SESSION_PREFIX}${webCrypto.randomUUID()}`;
   }
-  if ('getRandomValues' in crypto) {
+  if (typeof webCrypto.getRandomValues === 'function') {
     const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
+    webCrypto.getRandomValues(bytes);
     const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
     return `${SESSION_PREFIX}${hex}`;
   }

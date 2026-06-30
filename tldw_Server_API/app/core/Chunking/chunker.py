@@ -9,21 +9,23 @@ import hashlib
 import json
 import re
 import threading
-import time
 import unicodedata
 from collections import OrderedDict
 from collections.abc import Generator
 from contextlib import nullcontext, suppress
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional, Union
 
 from loguru import logger
 
-from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
-from .base import ChunkerConfig, ChunkingMethod, ChunkMetadata, ChunkResult
-from .constants import FRONTMATTER_SENTINEL_KEY
+from tldw_Server_API.app.core.testing import is_test_mode
+
+from .base import ChunkerConfig, ChunkingMethod, ChunkResult
+from .error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS as _CHUNKER_NONCRITICAL_EXCEPTIONS
 from .exceptions import ChunkingError, InvalidChunkingMethodError, InvalidInputError
+from .llm_context import _LLM_UNSET
+from .option_utils import _coerce_bool_option
+from .process_text import ProcessTextPipeline, TelemetryHooks
 from .security_logger import get_security_logger
 from .strategies.fixed_size import FixedSizeChunkingStrategy
 from .strategies.rolling_summarize import RollingSummarizeStrategy
@@ -31,28 +33,6 @@ from .strategies.sentences import SentenceChunkingStrategy
 from .strategies.structure_aware import StructureAwareChunkingStrategy
 from .strategies.tokens import TokenChunkingStrategy
 from .strategies.words import WordChunkingStrategy
-
-_CHUNKER_NONCRITICAL_EXCEPTIONS = (
-    AssertionError,
-    AttributeError,
-    ConnectionError,
-    FileNotFoundError,
-    ImportError,
-    IndexError,
-    KeyError,
-    LookupError,
-    OSError,
-    PermissionError,
-    RuntimeError,
-    TimeoutError,
-    TypeError,
-    ValueError,
-    UnicodeDecodeError,
-    json.JSONDecodeError,
-    ChunkingError,
-    InvalidChunkingMethodError,
-    InvalidInputError,
-)
 
 # Metrics / Telemetry (graceful on import failures)
 try:
@@ -94,20 +74,6 @@ except _CHUNKER_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - safety fallback
     MetricDefinition = None  # type: ignore
     MetricType = None  # type: ignore
     _METRICS_AVAILABLE = False
-
-
-_LLM_UNSET = object()
-
-
-def _coerce_bool_option(value: Any, default: bool = False) -> bool:
-    """Normalize loose option values into stable booleans."""
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return is_truthy(value.strip().lower())
-    return bool(value)
 
 def _ensure_chunker_metrics_registered() -> None:
     """Register chunker-specific cache metrics once."""
@@ -207,6 +173,19 @@ def _ensure_chunker_metrics_registered() -> None:
 
 
 _ensure_chunker_metrics_registered()
+
+
+def _process_text_telemetry_hooks() -> TelemetryHooks:
+    """Build telemetry hook adapters for the process-text pipeline."""
+    return TelemetryHooks(
+        increment_counter=increment_counter,
+        observe_histogram=observe_histogram,
+        set_gauge=set_gauge,
+        start_span=start_span,
+        set_span_attribute=set_span_attribute,
+        add_span_event=add_span_event,
+        record_span_exception=record_span_exception,
+    )
 
 
 class LRUCache:
@@ -1860,8 +1839,7 @@ class Chunker:
                 logger.debug(f"{strategy.__class__.__name__} lacks chunk_generator; falling back to chunk()")
                 chunk_iter = iter(strategy.chunk(text, max_size, overlap, **strategy_options))
 
-        for chunk in chunk_iter:
-            yield chunk
+        yield from chunk_iter
 
     def get_available_methods(self) -> list[str]:
         """
@@ -2307,487 +2285,13 @@ class Chunker:
 
         Returns a list of chunks as dicts with consistent metadata fields.
         """
-        overall_start = time.perf_counter()
-        labels = {"component": "chunker", "op": "process_text"}
-        increment_counter("chunker_process_total", labels=labels)
-        if text is None or not isinstance(text, str):
-            raise InvalidInputError(f"Expected string input, got {type(text).__name__}")
-        # Shallow copy of options
-        opts = dict(options or {})
-        if tokenizer_name_or_path and 'tokenizer_name_or_path' not in opts and 'tokenizer_name' not in opts:
-            opts['tokenizer_name_or_path'] = tokenizer_name_or_path
-
-        # Extract and remove frontmatter controls so they are not forwarded downstream
-        frontmatter_enabled_opt = opts.pop("enable_frontmatter_parsing", None)
-        frontmatter_enabled = True if frontmatter_enabled_opt is None else bool(frontmatter_enabled_opt)
-        sentinel_key_raw = opts.pop("frontmatter_sentinel_key", FRONTMATTER_SENTINEL_KEY)
-        sentinel_key = str(sentinel_key_raw or FRONTMATTER_SENTINEL_KEY)
-
-        # Attempt to parse JSON frontmatter when explicitly enabled and sentinel present
-        fm_start = time.perf_counter()
-        json_meta: dict[str, Any] = {}
-        processed_text = text
-        # Offsets emitted by process_text are relative to the original input text.
-        # Track how many leading characters we strip so we can restore offsets later.
-        prefix_offset = 0
-        if frontmatter_enabled:
-            try:
-                stripped = processed_text.lstrip()
-                if stripped.startswith("{"):
-                    decoder = json.JSONDecoder()
-                    try:
-                        parsed_candidate, end_idx = decoder.raw_decode(stripped)
-                    except ValueError:
-                        parsed_candidate = None
-                        end_idx = 0
-                    if (
-                        isinstance(parsed_candidate, dict)
-                        and len(stripped[:end_idx]) <= 1_000_000
-                        and sentinel_key in parsed_candidate
-                        and bool(parsed_candidate.get(sentinel_key))
-                    ):
-                        json_meta = {k: v for k, v in parsed_candidate.items() if k != sentinel_key}
-                        # Account for any leading whitespace trimmed before JSON parsing.
-                        leading_ws = len(processed_text) - len(stripped)
-                        tail = stripped[end_idx:]
-                        tail_trimmed = tail.lstrip("\n\r")
-                        prefix_offset += leading_ws + end_idx + (len(tail) - len(tail_trimmed))
-                        processed_text = tail_trimmed
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                pass
-        observe_histogram("chunker_frontmatter_duration_seconds", time.perf_counter() - fm_start, labels=labels)
-
-        # Recheck size constraints after optional trimming
-        self._enforce_text_size(processed_text, source="process_text")
-
-        # Optional header text extraction (legacy heuristic)
-        hdr_start = time.perf_counter()
-        header_text = ""
-        try:
-            header_re = re.compile(r"^ (This[ ]text[ ]was[ ]transcribed[ ]using (?:[^\n]*\n)*?\n) ", re.MULTILINE | re.VERBOSE)
-            m = header_re.match(processed_text)
-            if m:
-                header_text = m.group(1)
-                tail = processed_text[len(header_text):]
-                tail_trimmed = tail.lstrip()
-                prefix_offset += len(header_text) + (len(tail) - len(tail_trimmed))
-                processed_text = tail_trimmed
-        except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-            pass
-        observe_histogram("chunker_header_extract_seconds", time.perf_counter() - hdr_start, labels=labels)
-
-        # Resolve main parameters
-        requested_method = self._normalize_method_argument(opts.get('method'))
-        method = requested_method or self.config.default_method.value
-
-        max_size_opt = opts.get('max_size')
-        if max_size_opt is None:
-            max_size = self.config.default_max_size
-        else:
-            try:
-                max_size = int(max_size_opt)
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS as exc:
-                raise InvalidInputError(f"Invalid max_size value: {max_size_opt}") from exc
-            if max_size <= 0:
-                raise InvalidInputError(f"max_size must be positive, got {max_size}")
-
-        overlap_opt = opts.get('overlap')
-        if overlap_opt is None:
-            overlap = self.config.default_overlap
-        else:
-            try:
-                overlap = int(overlap_opt)
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS as exc:
-                raise InvalidInputError(f"Invalid overlap value: {overlap_opt}") from exc
-            if overlap < 0:
-                logger.warning(f"Negative overlap ({overlap}) adjusted to 0 in process_text")
-                overlap = 0
-
-        language = opts.get('language')
-        # Support explicit auto/detect override and default autodetect when not provided
-        if (not language) or (isinstance(language, str) and language.strip().lower() in {"auto", "detect"}):
-            # Lightweight language detection by Unicode script ranges
-            try:
-                if re.search(r'[\u3040-\u309f\u30a0-\u30ff]', processed_text):
-                    language = 'ja'       # Hiragana/Katakana (Japanese)
-                elif re.search(r'[\u4e00-\u9fff]', processed_text):
-                    language = 'zh'       # CJK Unified Ideographs (Chinese)
-                elif re.search(r'[\u0e00-\u0e7f]', processed_text):
-                    language = 'th'       # Thai
-                elif re.search(r'[\u0900-\u097f]', processed_text):
-                    language = 'hi'       # Devanagari (Hindi)
-                elif re.search(r'[\u0400-\u04ff]', processed_text):
-                    language = 'ru'       # Cyrillic (Russian)
-                elif re.search(r'[\uac00-\ud7af]', processed_text):
-                    language = 'ko'       # Hangul (Korean)
-                elif re.search(r'[\u0600-\u06ff]', processed_text):
-                    language = 'ar'       # Arabic
-                else:
-                    language = self.config.language
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                language = self.config.language
-
-        method = self._resolve_method(method, language, opts)
-        method_lower = str(method).lower() if method is not None else ''
-        method_option_excludes = {
-            'method',
-            'max_size',
-            'overlap',
-            'language',
-            'hierarchical',
-            'hierarchical_template',
-            'multi_level',
-            'timecode_map',
-            'enable_frontmatter_parsing',
-            'frontmatter_sentinel_key',
-            'adaptive',
-            'base_adaptive_chunk_size',
-            'min_adaptive_chunk_size',
-            'max_adaptive_chunk_size',
-            'adaptive_overlap',
-            'base_overlap',
-            'max_adaptive_overlap',
-            'code_mode',
-            'align_text_to_source',
-        }
-        method_options = {
-            k: v for k, v in opts.items() if k not in method_option_excludes
-        }
-        code_mode_for_method: Optional[str] = None
-        if 'code_mode' in opts:
-            try:
-                cm_val = opts.get('code_mode')
-                if cm_val is not None:
-                    code_mode_for_method = str(cm_val).lower()
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                code_mode_for_method = None
-        elif method_lower == 'code_ast':
-            code_mode_for_method = 'ast'
-        elif method_lower == 'code':
-            code_mode_for_method = 'auto'
-        method_options_for_chunk: dict[str, Any] = dict(method_options)
-        if code_mode_for_method is not None and method_lower in ('code', 'code_ast'):
-            method_options_for_chunk['code_mode'] = code_mode_for_method
-
-        # Adaptive sizing (simple heuristic parity)
-        adaptive = _coerce_bool_option(opts.get('adaptive'), False)
-        if adaptive and method not in ('semantic', 'json', 'xml', 'ebook_chapters', 'rolling_summarize'):
-            try:
-                base_adaptive = int(opts.get('base_adaptive_chunk_size') or max_size)
-                min_adaptive = int(opts.get('min_adaptive_chunk_size') or max_size)
-                max_adaptive_hi = int(opts.get('max_adaptive_chunk_size') or max_size)
-                # Very rough heuristic: scale with document size
-                density = max(0.0, min(3.0, len(processed_text) / 10000.0))
-                scaled = int(base_adaptive * (1.0 + 0.2 * density))
-                max_size = max(min_adaptive, min(max_adaptive_hi, scaled))
-                # Optional adaptive overlap tuned by density
-                if _coerce_bool_option(opts.get('adaptive_overlap'), False):
-                    try:
-                        base_overlap = int(opts.get('base_overlap') or overlap or 0)
-                        max_overlap = int(opts.get('max_adaptive_overlap') or max(0, base_overlap + 100))
-                        # Increase overlap slightly for denser/longer docs; cap to avoid waste
-                        tuned = int(base_overlap + (density * 10))
-                        overlap = max(0, min(max_overlap, tuned))
-                    except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                        pass
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                pass
-
-        # Choose hierarchical vs normal
-        hierarchical = _coerce_bool_option(opts.get('hierarchical'), False)
-        hier_template = opts.get('hierarchical_template') if isinstance(opts.get('hierarchical_template'), dict) else None
-
-        # Set per-call LLM overrides without mutating shared state
-        prev_llm_overrides = getattr(self._thread_local, "llm_overrides", _LLM_UNSET)
-        apply_llm_overrides = (llm_call_func is not None) or (llm_config is not None)
-        if apply_llm_overrides:
-            o_func = llm_call_func if llm_call_func is not None else _LLM_UNSET
-            o_cfg = llm_config if llm_config is not None else _LLM_UNSET
-            self._thread_local.llm_overrides = (o_func, o_cfg)
-
-        # Multi-level paragraph-aware chunking for words/sentences (parity with legacy)
-        multi_level = _coerce_bool_option(opts.get('multi_level'), False) and method in ('words', 'sentences') and not (hierarchical or hier_template)
-
-        norm_chunks: list[dict[str, Any]] = []
-        try:
-            chunk_start = time.perf_counter()
-            if hierarchical or hier_template:
-                raw_chunks = self.chunk_text_hierarchical_flat(
-                    text=processed_text,
-                    method=method,
-                    max_size=max_size,
-                    overlap=overlap,
-                    language=language,
-                    template=hier_template,
-                    method_options=method_options_for_chunk,
-                )
-                # Already dicts with offsets/metadata
-                norm_chunks = raw_chunks
-            elif multi_level:
-                spans = self._compute_paragraph_spans(processed_text, template=None)
-                pidx = 0
-                for (start, end, kind) in spans:
-                    if kind == 'blank':
-                        continue
-                    segment = processed_text[start:end]
-                    if not segment:
-                        continue
-                    try:
-                        align_text_to_source = _coerce_bool_option(opts.get('align_text_to_source'), True)
-                        base_results = self.chunk_text_with_metadata(
-                            segment,
-                            method=method,
-                            max_size=max_size,
-                            overlap=overlap,
-                            language=language,
-                            align_text_to_source=align_text_to_source,
-                            **method_options_for_chunk,
-                        )
-                        use_metadata = True
-                    except ChunkingError:
-                        base_results = self.chunk_text(
-                            segment,
-                            method=method,
-                            max_size=max_size,
-                            overlap=overlap,
-                            language=language,
-                            **method_options_for_chunk,
-                        )
-                        use_metadata = False
-
-                    if use_metadata:
-                        for res in base_results or []:
-                            chunk_text = getattr(res, 'text', '')
-                            metadata_obj = getattr(res, 'metadata', None)
-                            if isinstance(metadata_obj, ChunkMetadata):
-                                md = asdict(metadata_obj)
-                            elif isinstance(metadata_obj, dict):
-                                md = dict(metadata_obj)
-                            else:
-                                md = {}
-
-                            local_start = md.get('start_char')
-                            local_end = md.get('end_char')
-                            global_start = start + local_start if isinstance(local_start, int) else start
-                            if isinstance(local_end, int):
-                                global_end = start + local_end
-                            else:
-                                global_end = global_start + len(chunk_text)
-
-                            md['start_char'] = global_start
-                            md['end_char'] = global_end
-                            md['start_offset'] = global_start
-                            md['end_offset'] = global_end
-                            md['method'] = method
-                            md['language'] = language
-                            md['paragraph_index'] = pidx
-                            md['paragraph_kind'] = kind
-                            md['multi_level'] = True
-
-                            norm_chunks.append({'text': chunk_text, 'metadata': md})
-                    else:
-                        cursor = start
-                        for c in (base_results or []):
-                            txt = c if isinstance(c, str) else (c.get('text') if isinstance(c, dict) else str(c))
-                            pos = processed_text.find(txt, cursor, end)
-                            if pos == -1:
-                                pos = cursor
-                            # Clamp offsets to the paragraph span to avoid runaway positions
-                            if pos < start:
-                                pos = start
-                            elif pos > end:
-                                pos = end
-                            end_pos = pos + len(txt)
-                            if end_pos > end:
-                                end_pos = end
-                            if end_pos < pos:
-                                end_pos = pos
-                            md = {}
-                            if isinstance(c, dict):
-                                md.update(c.get('metadata') or {})
-                            md.update({
-                                'method': method,
-                                'start_offset': pos,
-                                'end_offset': end_pos,
-                                'language': language,
-                                'paragraph_index': pidx,
-                                'paragraph_kind': kind,
-                                'multi_level': True,
-                            })
-                            norm_chunks.append({'text': txt, 'metadata': md})
-                            cursor = min(end, end_pos)
-                    pidx += 1
-            else:
-                base_chunks = self.chunk_text(
-                    processed_text,
-                    method=method,
-                    max_size=max_size,
-                    overlap=overlap,
-                    language=language,
-                    **method_options_for_chunk,
-                )
-                # Normalize and handle JSON-chunk structures
-                for c in (base_chunks or []):
-                    if isinstance(c, dict) and 'json' in c and 'metadata' in c:
-                        try:
-                            txt = json.dumps(c['json'], ensure_ascii=False)
-                        except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                            txt = str(c['json'])
-                        norm_chunks.append({'text': txt, 'metadata': dict(c.get('metadata') or {})})
-                    elif isinstance(c, dict) and 'text' in c:
-                        norm_chunks.append({'text': c['text'], 'metadata': dict(c.get('metadata') or {})})
-                    elif isinstance(c, str):
-                        norm_chunks.append({'text': c, 'metadata': {}})
-                    else:
-                        norm_chunks.append({'text': str(c), 'metadata': {}})
-            observe_histogram("chunker_chunking_duration_seconds", time.perf_counter() - chunk_start, labels=labels)
-        finally:
-            # Restore previous LLM overrides even if chunking fails
-            if apply_llm_overrides:
-                if prev_llm_overrides is _LLM_UNSET:
-                    with suppress(_CHUNKER_NONCRITICAL_EXCEPTIONS):
-                        delattr(self._thread_local, "llm_overrides")
-                else:
-                    self._thread_local.llm_overrides = prev_llm_overrides
-
-        # Normalize offsets back to original input coordinates when we stripped a prefix.
-        if prefix_offset:
-            for item in norm_chunks:
-                if not isinstance(item, dict):
-                    continue
-                md = item.get('metadata')
-                if not isinstance(md, dict):
-                    continue
-                for key in ('start_offset', 'end_offset', 'start_char', 'end_char'):
-                    val = md.get(key)
-                    if isinstance(val, int):
-                        md[key] = val + prefix_offset
-
-        total = len(norm_chunks)
-        out: list[dict[str, Any]] = []
-        norm_start = time.perf_counter()
-        # Optional timecode mapping for media transcripts: offsets are in original input coordinates.
-        time_segments = None
-        try:
-            segs = opts.get('timecode_map')
-            if isinstance(segs, list):
-                # Expect list of {start_offset,end_offset,start_time,end_time}
-                val = []
-                for s in segs:
-                    if not isinstance(s, dict):
-                        continue
-                    so = s.get('start_offset')
-                    eo = s.get('end_offset')
-                    st = s.get('start_time')
-                    et = s.get('end_time')
-                    if isinstance(so, int) and isinstance(eo, int) and (isinstance(st, (int, float)) and isinstance(et, (int, float))):
-                        val.append((so, eo, float(st), float(et)))
-                time_segments = sorted(val, key=lambda x: x[0]) if val else None
-        except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-            time_segments = None
-        for i, item in enumerate(norm_chunks):
-            # Normalize
-            txt = item.get('text') if isinstance(item, dict) else str(item)
-            md = dict(item.get('metadata') or {}) if isinstance(item, dict) else {}
-
-            # Base metadata
-            md.setdefault('chunk_index', i + 1)
-            md.setdefault('total_chunks', total)
-            md.setdefault('chunk_method', method)
-            # Standardized keys while retaining legacy for compatibility
-            md.setdefault('max_size_setting', max_size)
-            md.setdefault('overlap_setting', overlap)
-            md.setdefault('max_size', max_size)
-            md.setdefault('overlap', overlap)
-            md.setdefault('language', language)
-            md.setdefault('adaptive_chunking_used', adaptive)
-            if method_lower in ('code', 'code_ast'):
-                effective_code_mode = code_mode_for_method
-                if effective_code_mode is None:
-                    effective_code_mode = 'ast' if method_lower == 'code_ast' else 'auto'
-                md.setdefault('code_mode_used', effective_code_mode)
-
-            # Relative position using offsets when present
-            try:
-                start = md.get('start_offset')
-                end = md.get('end_offset')
-                if isinstance(start, int) and isinstance(end, int) and end > start:
-                    mid = 0.5 * (float(start) + float(end))
-                    # Offsets are in original input coordinates, so relative_position uses the original length.
-                    rel = mid / max(1.0, float(len(text)))
-                    if time_segments is not None and ('start_time' not in md or 'end_time' not in md):
-                        try:
-                            chunk_start = int(start)
-                            chunk_end = int(end)
-                            chunk_start_time = None
-                            chunk_end_time = None
-                            for (so, eo, st, et) in time_segments:
-                                if chunk_end <= so:
-                                    break
-                                if chunk_start >= eo:
-                                    continue
-                                overlap_start = max(chunk_start, so)
-                                overlap_end = min(chunk_end, eo)
-                                if overlap_end <= overlap_start:
-                                    continue
-                                seg_len = max(1.0, float(eo - so))
-                                seg_duration = float(et - st)
-                                frac_start = (overlap_start - so) / seg_len
-                                frac_end = (overlap_end - so) / seg_len
-                                mapped_start = st + frac_start * seg_duration
-                                mapped_end = st + frac_end * seg_duration
-                                if chunk_start_time is None:
-                                    chunk_start_time = mapped_start
-                                chunk_end_time = mapped_end
-                                if overlap_end >= chunk_end:
-                                    # We covered the chunk end; can stop
-                                    break
-                            if chunk_start_time is not None and 'start_time' not in md:
-                                md['start_time'] = round(chunk_start_time, 3)
-                            if chunk_end_time is not None and 'end_time' not in md:
-                                md['end_time'] = round(chunk_end_time, 3)
-                        except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                            pass
-                else:
-                    rel = (i + 1) / total if total > 0 else 0.0
-            except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                rel = (i + 1) / total if total > 0 else 0.0
-            md.setdefault('relative_position', rel)
-
-            # Document-level metadata if we extracted any
-            if json_meta:
-                md.setdefault('initial_document_json_metadata', json_meta)
-            if header_text:
-                md.setdefault('initial_document_header_text', header_text)
-
-            # Content hash
-            with suppress(_CHUNKER_NONCRITICAL_EXCEPTIONS):
-                md.setdefault('chunk_content_hash', hashlib.md5(txt.encode('utf-8'), usedforsecurity=False).hexdigest())
-
-            # Mark origin
-            md.setdefault('origin', 'unified_chunker')
-
-            out.append({'text': txt, 'metadata': md})
-        observe_histogram("chunker_normalization_seconds", time.perf_counter() - norm_start, labels=labels)
-        # Output metrics
-        total_bytes = sum(len(c['text']) for c in out)
-        set_gauge("chunker_last_chunk_count", float(len(out)), labels=labels)
-        observe_histogram("chunker_output_bytes", float(total_bytes), labels=labels)
-        observe_histogram("chunker_input_bytes", float(len(text)), labels=labels)
-        observe_histogram("chunker_process_total_seconds", time.perf_counter() - overall_start, labels={**labels, "method": method, "hierarchical": str(bool(hierarchical or hier_template)).lower()})
-        try:
-            with start_span("chunker.process_text"):
-                set_span_attribute("chunk.method", method)
-                set_span_attribute("chunk.lang", language)
-                set_span_attribute("chunk.hierarchical", bool(hierarchical or hier_template))
-                set_span_attribute("chunk.multi_level", multi_level)
-                set_span_attribute("chunk.count", len(out))
-                add_span_event("chunker.completed")
-        except _CHUNKER_NONCRITICAL_EXCEPTIONS as e:
-            with suppress(_CHUNKER_NONCRITICAL_EXCEPTIONS):
-                record_span_exception(e, escaped=False)
-
-        return out
+        return ProcessTextPipeline(self, _process_text_telemetry_hooks()).run(
+            text,
+            options,
+            tokenizer_name_or_path=tokenizer_name_or_path,
+            llm_call_func=llm_call_func,
+            llm_config=llm_config,
+        )
 
     # Backwards-compatible alias to tolerate triple-s typo in requests
     def processs_text(self, *args, **kwargs):

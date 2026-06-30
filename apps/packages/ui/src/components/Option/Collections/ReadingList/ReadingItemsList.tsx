@@ -2,7 +2,6 @@ import React, { Suspense, useCallback, useEffect, useMemo, useState } from "reac
 import {
   Button,
   Checkbox,
-  DatePicker,
   Dropdown,
   Empty,
   Input,
@@ -13,14 +12,13 @@ import {
   message
 } from "antd"
 import type { MenuProps } from "antd"
-import type { Dayjs } from "dayjs"
-import dayjs from "dayjs"
 import { Filter, Plus, RefreshCw, Search, Star, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useTldwApiClient } from "@/hooks/useTldwApiClient"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
 import { useCollectionsStore } from "@/store/collections"
 import type { ReadingSavedSearch, ReadingStatus } from "@/types/collections"
+import { formatDateInputValue, parseDateInputValue } from "@/utils/date-input"
 import { normalizeBulkTags, getBulkFailureLines } from "./bulkActions"
 import { ReadingItemCard } from "./ReadingItemCard"
 import { ReadingItemDetail } from "./ReadingItemDetail"
@@ -371,26 +369,25 @@ export const ReadingItemsList: React.FC = () => {
     [setFilterDomain]
   )
 
-  const handleDateRangeChange = useCallback(
-    (dates: null | [Dayjs | null, Dayjs | null]) => {
-      if (!dates) {
-        setFilterDateRange(null, null)
-        return
-      }
-      const [start, end] = dates
-      const from = start ? start.startOf("day").toDate().toISOString() : null
-      const to = end ? end.endOf("day").toDate().toISOString() : null
-      setFilterDateRange(from, to)
+  const handleDateFromChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setFilterDateRange(
+        parseDateInputValue(event.target.value, "start"),
+        filterDateTo
+      )
     },
-    [setFilterDateRange]
+    [filterDateTo, setFilterDateRange]
   )
 
-  const dateRangeValue = useMemo<[Dayjs | null, Dayjs | null]>(() => {
-    return [
-      filterDateFrom ? dayjs(filterDateFrom) : null,
-      filterDateTo ? dayjs(filterDateTo) : null
-    ]
-  }, [filterDateFrom, filterDateTo])
+  const handleDateToChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setFilterDateRange(
+        filterDateFrom,
+        parseDateInputValue(event.target.value, "end")
+      )
+    },
+    [filterDateFrom, setFilterDateRange]
+  )
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!deleteTargetId || deleteTargetType !== "item") return
@@ -952,12 +949,28 @@ export const ReadingItemsList: React.FC = () => {
           allowClear
         />
 
-        <DatePicker.RangePicker
-          value={dateRangeValue}
-          onChange={handleDateRangeChange}
-          size="small"
-          allowClear
-        />
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1 text-xs text-text-muted">
+            {t("collections:reading.dateFrom", "Date from")}
+            <input
+              aria-label={t("collections:reading.dateFrom", "Date from")}
+              type="date"
+              value={formatDateInputValue(filterDateFrom)}
+              onChange={handleDateFromChange}
+              className="h-6 rounded border border-border bg-bg px-2 text-xs text-text"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-xs text-text-muted">
+            {t("collections:reading.dateTo", "Date to")}
+            <input
+              aria-label={t("collections:reading.dateTo", "Date to")}
+              type="date"
+              value={formatDateInputValue(filterDateTo)}
+              onChange={handleDateToChange}
+              className="h-6 rounded border border-border bg-bg px-2 text-xs text-text"
+            />
+          </label>
+        </div>
 
         <div className="ml-auto flex items-center gap-2">
           <span className="text-sm text-text-muted">

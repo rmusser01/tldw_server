@@ -15,6 +15,24 @@ import { buildAssistantErrorContent } from "@/utils/chat-error-message"
 
 let didLogSetHistoryMissing = false
 
+const buildFallbackHistoryTitle = (userMessage: string): string => {
+  const normalized = userMessage.replace(/\s+/g, " ").trim()
+  return normalized.length > 0 ? normalized.slice(0, 80) : "Untitled Chat"
+}
+
+const generateTitleWithFallback = async (
+  selectedModel: string,
+  userMessage: string
+): Promise<string> => {
+  try {
+    const title = await generateTitle(selectedModel, userMessage, userMessage)
+    const trimmed = typeof title === "string" ? title.trim() : ""
+    return trimmed.length > 0 ? trimmed : buildFallbackHistoryTitle(userMessage)
+  } catch {
+    return buildFallbackHistoryTitle(userMessage)
+  }
+}
+
 const resolveHistorySetter = (
   candidate: unknown
 ): ((history: ChatHistory) => void) | null => {
@@ -58,8 +76,12 @@ export const saveMessageOnError = async ({
   assistantMessageId,
   userParentMessageId,
   assistantParentMessageId,
+  generationInfo,
+  userMetadataExtra,
+  assistantMetadataExtra,
   prompt_content,
   prompt_id,
+  reasoning_time_taken,
   isContinue,
   documents = []
 }: {
@@ -87,8 +109,12 @@ export const saveMessageOnError = async ({
   assistantMessageId?: string
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
+  generationInfo?: any
+  userMetadataExtra?: Record<string, unknown>
+  assistantMetadataExtra?: Record<string, unknown>
   prompt_id?: string
   prompt_content?: string
+  reasoning_time_taken?: number
   isContinue?: boolean
   documents?: ChatDocuments
 }) => {
@@ -132,6 +158,9 @@ export const saveMessageOnError = async ({
           clusterId,
           modelId: userModelId,
           parent_message_id: userParentMessageId ?? null,
+          generationInfo,
+          metadataExtra: userMetadataExtra,
+          reasoning_time_taken,
           documents
         })
       }
@@ -153,7 +182,10 @@ export const saveMessageOnError = async ({
           message_type: assistantMessageType ?? message_type,
           clusterId,
           modelId,
-          parent_message_id: assistantParentMessageId ?? null
+          parent_message_id: assistantParentMessageId ?? null,
+          generationInfo,
+          metadataExtra: assistantMetadataExtra,
+          reasoning_time_taken
         })
       }
       await setLastUsedChatModel(historyId, selectedModel)
@@ -166,7 +198,7 @@ export const saveMessageOnError = async ({
 
       return historyId
     } else {
-      const title = await generateTitle(selectedModel, userMessage, userMessage)
+      const title = await generateTitleWithFallback(selectedModel, userMessage)
       const newHistoryId = await saveHistory(title, false, message_source)
       updatePageTitle(title)
       if (!isRegenerating) {
@@ -182,6 +214,9 @@ export const saveMessageOnError = async ({
           clusterId,
           modelId: userModelId,
           parent_message_id: userParentMessageId ?? null,
+          generationInfo,
+          metadataExtra: userMetadataExtra,
+          reasoning_time_taken,
           documents
         })
       }
@@ -198,7 +233,10 @@ export const saveMessageOnError = async ({
         message_type: assistantMessageType ?? message_type,
         clusterId,
         modelId,
-        parent_message_id: assistantParentMessageId ?? null
+        parent_message_id: assistantParentMessageId ?? null,
+        generationInfo,
+        metadataExtra: assistantMetadataExtra,
+        reasoning_time_taken
       })
       setHistoryId(newHistoryId.id)
       await setLastUsedChatModel(newHistoryId.id, selectedModel)
@@ -245,6 +283,9 @@ export const saveMessageOnError = async ({
           clusterId,
           modelId: userModelId,
           parent_message_id: userParentMessageId ?? null,
+          generationInfo,
+          metadataExtra: userMetadataExtra,
+          reasoning_time_taken,
           documents
         })
       }
@@ -261,13 +302,23 @@ export const saveMessageOnError = async ({
         message_type: assistantMessageType ?? message_type,
         clusterId,
         modelId,
-        parent_message_id: assistantParentMessageId ?? null
+        parent_message_id: assistantParentMessageId ?? null,
+        generationInfo,
+        metadataExtra: assistantMetadataExtra,
+        reasoning_time_taken
       })
     } catch {}
+    await setLastUsedChatModel(historyId, selectedModel)
+    if (prompt_id || prompt_content) {
+      await setLastUsedChatSystemPrompt(historyId, {
+        prompt_content,
+        prompt_id
+      })
+    }
     return historyId
   } else {
     // Create new history on error
-    const title = await generateTitle(selectedModel, userMessage, userMessage)
+    const title = await generateTitleWithFallback(selectedModel, userMessage)
     const newHistoryId = await saveHistory(title, false, message_source)
     updatePageTitle(title)
     try {
@@ -284,6 +335,9 @@ export const saveMessageOnError = async ({
           clusterId,
           modelId: userModelId,
           parent_message_id: userParentMessageId ?? null,
+          generationInfo,
+          metadataExtra: userMetadataExtra,
+          reasoning_time_taken,
           documents
         })
       }
@@ -299,10 +353,20 @@ export const saveMessageOnError = async ({
         message_type: assistantMessageType ?? message_type,
         clusterId,
         modelId,
-        parent_message_id: assistantParentMessageId ?? null
+        parent_message_id: assistantParentMessageId ?? null,
+        generationInfo,
+        metadataExtra: assistantMetadataExtra,
+        reasoning_time_taken
       })
     } catch {}
     setHistoryId(newHistoryId.id)
+    await setLastUsedChatModel(newHistoryId.id, selectedModel)
+    if (prompt_id || prompt_content) {
+      await setLastUsedChatSystemPrompt(newHistoryId.id, {
+        prompt_content,
+        prompt_id
+      })
+    }
     return newHistoryId.id
   }
 }
@@ -329,6 +393,8 @@ export const saveMessageOnSuccess = async ({
   userParentMessageId,
   assistantParentMessageId,
   generationInfo,
+  userMetadataExtra,
+  assistantMetadataExtra,
   prompt_id,
   prompt_content,
   reasoning_time_taken = 0,
@@ -359,6 +425,8 @@ export const saveMessageOnSuccess = async ({
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
   generationInfo?: any
+  userMetadataExtra?: Record<string, unknown>
+  assistantMetadataExtra?: Record<string, unknown>
   prompt_id?: string
   prompt_content?: string
   reasoning_time_taken?: number
@@ -380,6 +448,7 @@ export const saveMessageOnSuccess = async ({
         modelId: userModelId,
         parent_message_id: userParentMessageId ?? null,
         generationInfo,
+        metadataExtra: userMetadataExtra,
         reasoning_time_taken,
         documents
       })
@@ -406,6 +475,7 @@ export const saveMessageOnSuccess = async ({
           modelId,
           parent_message_id: assistantParentMessageId ?? null,
           generationInfo,
+          metadataExtra: assistantMetadataExtra,
           reasoning_time_taken
         }
         // historyId,
@@ -451,6 +521,7 @@ export const saveMessageOnSuccess = async ({
         modelId: userModelId,
         parent_message_id: userParentMessageId ?? null,
         generationInfo,
+        metadataExtra: userMetadataExtra,
         reasoning_time_taken,
         documents
       }
@@ -481,6 +552,7 @@ export const saveMessageOnSuccess = async ({
         modelId,
         parent_message_id: assistantParentMessageId ?? null,
         generationInfo,
+        metadataExtra: assistantMetadataExtra,
         reasoning_time_taken
       }
       // newHistoryId.id,

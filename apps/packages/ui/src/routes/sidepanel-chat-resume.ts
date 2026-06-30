@@ -4,8 +4,17 @@ import {
   getRecentChatFromCopilot
 } from "@/db/dexie/helpers"
 import { copilotResumeLastChat } from "@/services/app"
+import {
+  getChatSettingsStorageKey,
+  normalizeChatSettingsRecord,
+  resolveChatSettingsKey
+} from "@/services/chat-settings"
 import type { SidepanelChatSnapshot, SidepanelChatTab } from "@/store/sidepanel-chat-tabs"
 import { createSafeStorage } from "@/utils/safe-storage"
+import {
+  getSidepanelDraftStorageKey,
+  getSidepanelOverlayResumeMarkerKey
+} from "@/utils/sidepanel-overlay-resume"
 import type { ChatHistory, Message as ChatMessage } from "~/store/option"
 
 export type LegacySidepanelChatSnapshot = {
@@ -43,10 +52,31 @@ export const readSidepanelRuntimeTabId = async (): Promise<number | null> => {
   }
 }
 
-const hasRestorableSnapshot = (
+const hasOverlayDraftSettings = async (
+  storage: ReturnType<typeof createSafeStorage>,
   snapshot: SidepanelChatSnapshot | undefined,
   tab: SidepanelChatTab | undefined
-): boolean => {
+): Promise<boolean> => {
+  const chatKey = resolveChatSettingsKey({
+    historyId: snapshot?.historyId ?? tab?.historyId ?? null,
+    serverChatId: snapshot?.serverChatId ?? tab?.serverChatId ?? null
+  })
+  if (chatKey === "scratch") {
+    const draftKey = getSidepanelDraftStorageKey(tab?.id)
+    const resumeMarkerKey = getSidepanelOverlayResumeMarkerKey(draftKey)
+    if (!resumeMarkerKey) return false
+    return Boolean(await storage.get(resumeMarkerKey))
+  }
+  const settingsKey = getChatSettingsStorageKey(chatKey)
+  const storedSettings = await storage.get(settingsKey)
+  return Boolean(normalizeChatSettingsRecord(storedSettings)?.assistantOverlay)
+}
+
+const hasRestorableSnapshot = async (
+  snapshot: SidepanelChatSnapshot | undefined,
+  tab: SidepanelChatTab | undefined,
+  storage: ReturnType<typeof createSafeStorage>
+): Promise<boolean> => {
   if (tab?.historyId || tab?.serverChatId || tab?.serverChatTopic) {
     return true
   }
@@ -55,16 +85,20 @@ const hasRestorableSnapshot = (
     return false
   }
 
-  return Boolean(
+  if (
     snapshot.history.length > 0 ||
-      snapshot.messages.length > 0 ||
-      snapshot.historyId ||
-      snapshot.serverChatId ||
-      snapshot.serverChatTopic ||
-      snapshot.serverChatClusterId ||
-      snapshot.serverChatExternalRef ||
-      snapshot.queuedMessages.length > 0
-  )
+    snapshot.messages.length > 0 ||
+    snapshot.historyId ||
+    snapshot.serverChatId ||
+    snapshot.serverChatTopic ||
+    snapshot.serverChatClusterId ||
+    snapshot.serverChatExternalRef ||
+    snapshot.queuedMessages.length > 0
+  ) {
+    return true
+  }
+
+  return hasOverlayDraftSettings(storage, snapshot, tab)
 }
 
 export const hasResumableSidepanelChat = async (): Promise<boolean> => {
@@ -85,9 +119,11 @@ export const hasResumableSidepanelChat = async (): Promise<boolean> => {
       if (
         candidate &&
         Array.isArray(candidate.tabs) &&
-        candidate.tabs.some((tab) =>
-          hasRestorableSnapshot(candidate.snapshotsById?.[tab.id], tab)
-        )
+        (await Promise.all(
+          candidate.tabs.map((tab) =>
+            hasRestorableSnapshot(candidate.snapshotsById?.[tab.id], tab, storage)
+          )
+        )).some(Boolean)
       ) {
         return true
       }

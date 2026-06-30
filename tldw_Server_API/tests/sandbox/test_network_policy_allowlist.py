@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import subprocess
 from typing import List
 
 import pytest
 
-from tldw_Server_API.app.core.Sandbox.network_policy import expand_allowlist_to_targets, _build_restore_blob
+from tldw_Server_API.app.core.Sandbox.network_policy import (
+    _build_restore_blob,
+    delete_rules_by_label,
+    expand_allowlist_to_targets,
+)
 
 
 def test_expand_allowlist_hostname_and_wildcard_with_fake_resolver():
@@ -40,3 +45,21 @@ def test_build_restore_blob_shapes_rules_with_label():
     assert "-A DOCKER-USER -s 172.18.0.2 -d 1.2.3.0/24 -j ACCEPT" in blob
     assert "-A DOCKER-USER -s 172.18.0.2 -d 9.9.9.9/32 -j ACCEPT" in blob
     assert "-A DOCKER-USER -s 172.18.0.2 -j DROP" in blob
+
+
+def test_delete_rules_by_label_uses_bounded_iptables_probes(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[list[str], int | None]] = []
+
+    def fake_check_output(args: list[str], text: bool = False, timeout: int | None = None):
+        del text
+        calls.append((list(args), timeout))
+        raise subprocess.TimeoutExpired(cmd=args, timeout=timeout or 0)
+
+    monkeypatch.setattr("subprocess.check_output", fake_check_output)
+
+    delete_rules_by_label("tldw-run-timeout-test")
+
+    assert calls == [
+        (["iptables", "-L", "DOCKER-USER", "--line-numbers", "-n", "-v"], 5),
+        (["iptables", "-S", "DOCKER-USER"], 5),
+    ]

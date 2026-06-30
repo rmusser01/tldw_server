@@ -9,6 +9,7 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 from collections import deque
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -18,30 +19,23 @@ from typing import Any, Optional
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
+from tldw_Server_API.app.core.AuthNZ.ip_allowlist import is_single_user_ip_allowed
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
-from tldw_Server_API.app.core.feature_flags import is_mcp_hub_policy_enforcement_enabled
-from tldw_Server_API.app.core.testing import (
-    env_flag_enabled as _env_flag_enabled,
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
-    is_test_mode as _is_test_mode,
-    is_truthy as _is_truthy,
-)
-from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
-from tldw_Server_API.app.services.shutdown_transport_registry import (
-    register_shutdown_transport_family,
-)
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings, is_single_user_profile_mode
 
-from .auth.authnz_rbac import get_rbac_policy
-from .auth.jwt_manager import JWTManager, get_jwt_manager
-from .auth.rate_limiter import RateLimitExceeded, get_rate_limiter
-from .config import get_config, validate_config
-from .modules.registry import get_module_registry
-from .monitoring.metrics import get_metrics_collector
-from .protocol import MCPProtocol, MCPRequest, MCPResponse, RequestContext
+from .auth.rate_limiter import RateLimitExceeded
+from .config import get_config, get_config_warnings, validate_config
+from .interfaces.runtime import MCPRuntimeDependencies, WebSocketStream
+from .jsonrpc_transport import (
+    invalid_request_response,
+    is_jsonrpc_keepalive,
+    mcp_response_to_json,
+    mcp_responses_to_json,
+    parse_error_response,
+    safe_jsonrpc_id,
+)
+from .module_surface import describe_module_surface
+from .protocol import MCPError, MCPProtocol, MCPRequest, MCPResponse, RequestContext, _trusted_compat_claims_metadata
 from .security.ip_filter import get_ip_access_controller
 from .security.request_guards import enforce_client_certificate_headers
 
@@ -66,26 +60,46 @@ _MCP_SERVER_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
     HTTPException,
     WebSocketDisconnect,
-    InvalidTokenError,
-    TokenExpiredError,
     RateLimitExceeded,
 )
+_AUTHNZ_TOKEN_DETECTION_EXCEPTIONS = _MCP_SERVER_NONCRITICAL_EXCEPTIONS
 
 _ENV_PLACEHOLDER_RE = re.compile(r"^\$\{(?P<name>[A-Z0-9_]+)(?::-(?P<default>.*))?\}$")
+_JSONRPC_EXPLICIT_NULL_ID_PREFIX = "__tldw_ws_jsonrpc_explicit_null_id_"
+
+
+def _is_authnz_exception(exc: Exception) -> bool:
+    module = exc.__class__.__module__
+    return module == "tldw_Server_API.app.core.AuthNZ.exceptions" or module.startswith(
+        "tldw_Server_API.app.core.AuthNZ.exceptions."
+    )
 
 
 def _is_authnz_access_token(token: str) -> bool:
-    """Return True when the token verifies as an AuthNZ access token."""
+    """Return True when token is recognized as an MCP AuthNZ access token."""
     try:
-        jwt_service = get_jwt_service()
-        jwt_service.decode_access_token(token)
-        return True
-    except TokenExpiredError:
-        return True
-    except InvalidTokenError:
+        from tldw_Server_API.app.core.MCP_unified.adapters.tldw_runtime import (
+            TldwServerAuthProvider,
+        )
+
+        if TldwServerAuthProvider().is_authnz_access_token(token):
+            return True
+    except _AUTHNZ_TOKEN_DETECTION_EXCEPTIONS:
+        logger.debug("MCP AuthNZ provider token detection unavailable")
+    except Exception as exc:  # noqa: BLE001 - AuthNZ exception types stay behind runtime providers.
+        if not _is_authnz_exception(exc):
+            raise
+        logger.debug("MCP AuthNZ provider token detection failed: {error_type}", error_type=exc.__class__.__name__)
+
+    try:
+        payload = get_jwt_service().decode_access_token(token)
+    except _AUTHNZ_TOKEN_DETECTION_EXCEPTIONS:
         return False
-    except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+    except Exception as exc:  # noqa: BLE001 - AuthNZ exception types stay behind runtime providers.
+        if not _is_authnz_exception(exc):
+            raise
         return False
+    return isinstance(payload, dict) and bool(payload.get("sub"))
 
 
 def _resolve_env_placeholders(value: Any) -> Any:
@@ -104,36 +118,53 @@ def _resolve_env_placeholders(value: Any) -> Any:
     return os.getenv(env_name, default if default is not None else "")
 
 
-def _extract_api_key_permissions(info: Optional[dict[str, Any]]) -> list[str]:
-    """Normalize API key scopes into MCP permissions."""
-    if not info:
-        return []
-    try:
-        from tldw_Server_API.app.core.AuthNZ.api_key_manager import normalize_scope
-    except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-        return []
-
-    raw_scopes = info.get("scopes")
-    if raw_scopes is None:
-        raw_scopes = info.get("scope")
-
-    try:
-        scopes = normalize_scope(raw_scopes)
-    except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-        scopes = set()
-
-    return sorted(scopes) if scopes else []
-
-
 def _normalize_optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
 
 
+def _is_absent_id_jsonrpc_notification(payload: Any) -> bool:
+    """Return True for JSON-RPC notifications that must not emit WS responses."""
+    return (
+        isinstance(payload, dict)
+        and payload.get("jsonrpc") == "2.0"
+        and isinstance(payload.get("method"), str)
+        and "id" not in payload
+    )
+
+
+def _jsonrpc_explicit_null_id_sentinel() -> str:
+    """Return a request-local sentinel for explicit JSON-RPC null ids."""
+    return f"{_JSONRPC_EXPLICIT_NULL_ID_PREFIX}{secrets.token_hex(8)}__"
+
+
+def _replace_explicit_null_jsonrpc_ids(payload: Any, sentinels: set[str]) -> Any:
+    """Preserve explicit JSON-RPC null ids through protocol notification handling."""
+    if isinstance(payload, dict):
+        if payload.get("jsonrpc") == "2.0" and "id" in payload and payload.get("id") is None:
+            request_payload = dict(payload)
+            sentinel = _jsonrpc_explicit_null_id_sentinel()
+            sentinels.add(sentinel)
+            request_payload["id"] = sentinel
+            return request_payload
+        return payload
+    if isinstance(payload, list):
+        return [_replace_explicit_null_jsonrpc_ids(item, sentinels) for item in payload]
+    return payload
+
+
+def _restore_explicit_null_jsonrpc_ids(response: MCPResponse | list[MCPResponse], sentinels: set[str]) -> None:
+    """Restore transport-level explicit null ids before JSON serialization."""
+    responses = response if isinstance(response, list) else [response]
+    for item in responses:
+        if isinstance(item.id, str) and item.id in sentinels:
+            item.id = None
+
+
 class _JWTManagerProxy:
     """Proxy for JWT manager to allow per-server monkeypatching without global side effects."""
 
-    def __init__(self, manager: JWTManager):
+    def __init__(self, manager: Any):
         self._manager = manager
 
     def __getattr__(self, name: str):
@@ -239,13 +270,26 @@ class MCPServer:
     - Metrics collection
     """
 
-    def __init__(self):
+    def __init__(self, dependencies: MCPRuntimeDependencies | None = None):
         self.config = get_config()
-        self.protocol = MCPProtocol()
-        self.module_registry = get_module_registry()
-        self.jwt_manager = _JWTManagerProxy(get_jwt_manager())
-        self.rbac_policy = get_rbac_policy()
-        self.rate_limiter = get_rate_limiter()
+        if dependencies is None:
+            self.protocol = MCPProtocol()
+            self.dependencies = self.protocol.dependencies
+        else:
+            self.dependencies = dependencies
+            self.protocol = MCPProtocol(dependencies=self.dependencies)
+        self.module_registry = self.dependencies.module_registry
+        self.auth_provider = self.dependencies.auth_provider
+        self.lifecycle_guard = self.dependencies.lifecycle_guard
+        self.permission_seeder = self.dependencies.permission_seeder
+        self.module_config_provider = self.dependencies.module_config_provider
+        self.policy_context_provider = self.dependencies.policy_context_provider
+        self.environment_flags_provider = self.dependencies.environment_flags_provider
+        self.websocket_stream_factory = self.dependencies.websocket_stream_factory
+        self.jwt_manager = _JWTManagerProxy(self.auth_provider.get_mcp_jwt_manager())
+        self.rbac_policy = self.dependencies.rbac_policy
+        self.rate_limiter = self.dependencies.rate_limiter
+        self.metrics_collector = self.dependencies.metrics_collector
         self._ws_auth_required_initial = self.config.ws_auth_required
 
         # Connection management
@@ -262,16 +306,221 @@ class MCPServer:
         self._initialize_lock = asyncio.Lock()
         self.startup_time = datetime.now(timezone.utc)
         self.shutdown_event = asyncio.Event()
+        self._configured_modules_for_status: dict[str, dict[str, Any]] = {}
 
         # Background tasks
         self.background_tasks: set[asyncio.Task] = set()
-        register_shutdown_transport_family(
+        self.lifecycle_guard.register_shutdown_transport_family(
             "mcp.websocket",
             active_count=self.get_active_connection_count,
             drain=self.drain_connections,
         )
 
         logger.info("MCP Server created")
+
+    def _resolve_user_db_paths(self, user_id: Optional[str]) -> dict[str, str]:
+        try:
+            return self.dependencies.database_path_resolver.resolve_user_db_paths(user_id)
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            return {}
+
+    def _extract_api_key_permissions(self, info: Optional[dict[str, Any]]) -> list[str]:
+        """Normalize API-key scope payloads through the injected host adapter."""
+        try:
+            return self.auth_provider.normalize_api_key_permissions(info)
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(
+                "MCP API-key permission normalization failed: {}",
+                self._mask_secrets(str(exc)),
+            )
+            return []
+
+    def _policy_context_enabled(self) -> bool:
+        """Return whether host MCP Hub policy metadata should be attached."""
+        try:
+            return bool(self.policy_context_provider.is_policy_context_enabled())
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(
+                "MCP policy-context flag resolution failed: {}",
+                self._mask_secrets(str(exc)),
+            )
+            return False
+
+    def _env_flag_enabled(self, name: str) -> bool:
+        """Return host-normalized boolean state for an environment flag."""
+        try:
+            return bool(self.environment_flags_provider.env_flag_enabled(name))
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(
+                "MCP environment flag resolution failed for {}: {}",
+                name,
+                self._mask_secrets(str(exc)),
+            )
+            return False
+
+    def _is_test_mode(self) -> bool:
+        """Return whether the host reports test mode for MCP behavior gates."""
+        try:
+            return bool(self.environment_flags_provider.is_test_mode())
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            return False
+
+    def _is_explicit_pytest_runtime(self) -> bool:
+        """Return whether the host reports an explicit pytest runtime."""
+        try:
+            return bool(self.environment_flags_provider.is_explicit_pytest_runtime())
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            return False
+
+    def _should_use_single_user_api_key_compat(self) -> bool:
+        """Return whether mounted WS should accept single-user API-key compatibility."""
+        flag = os.getenv("MCP_SINGLE_USER_COMPAT_SHIM", "").strip().lower()
+        if flag in {"0", "false", "off"}:
+            return False
+        try:
+            return bool(is_single_user_profile_mode())
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            logger.debug("MCP WS single-user profile detection failed closed", exc_info=True)
+            return False
+
+    def _single_user_test_key_compat_allowed(self) -> bool:
+        """Return True when SINGLE_USER_TEST_API_KEY may be accepted by mounted WS."""
+        if not self._is_test_mode():
+            return False
+        env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
+        prod_flag = self._env_flag_enabled("tldw_production")
+        is_dev_ctx = bool(getattr(self.config, "debug_mode", False))
+        if self._is_explicit_pytest_runtime():
+            is_dev_ctx = True
+        if env in {"dev", "development", "test", "ci"}:
+            is_dev_ctx = True
+        if prod_flag:
+            is_dev_ctx = False
+        if not is_dev_ctx:
+            logger.error(
+                "TEST_MODE enabled outside dev/test context; refusing SINGLE_USER_TEST_API_KEY",
+                extra={
+                    "audit": True,
+                    "env": env,
+                    "debug_mode": bool(getattr(self.config, "debug_mode", False)),
+                },
+            )
+            return False
+        return True
+
+    def _single_user_compat_auth_via(self, api_key: Optional[str], *, client_ip: Optional[str]) -> Optional[str]:
+        """Return mounted WS single-user compatibility auth source for an API key."""
+        if not api_key or not self._should_use_single_user_api_key_compat():
+            return None
+        try:
+            settings = get_settings()
+            primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
+            test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
+            auth_via: Optional[str] = None
+            if primary_key and secrets.compare_digest(api_key, str(primary_key)):
+                auth_via = "single_user_api_key"
+            elif test_key and self._single_user_test_key_compat_allowed() and secrets.compare_digest(api_key, test_key):
+                auth_via = "single_user_test_api_key"
+            if auth_via is None:
+                return None
+            if not is_single_user_ip_allowed(client_ip, settings):
+                logger.warning(
+                    "Single-user MCP WebSocket API key rejected due to client IP allowlist",
+                    extra={"audit": True, "client_ip": client_ip or "unknown"},
+                )
+                return None
+            return auth_via
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            logger.debug("MCP WS single-user API-key compatibility check failed closed", exc_info=True)
+            return None
+
+    def _is_truthy(self, value: Any) -> bool:
+        """Return host-normalized truthiness, with a neutral local fallback."""
+        try:
+            return bool(self.environment_flags_provider.is_truthy(value))
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            return self._fallback_truthy(value)
+
+    def _is_authnz_access_token(self, token: str) -> bool:
+        """Return whether the injected auth provider recognizes an AuthNZ token."""
+        try:
+            return bool(self.auth_provider.is_authnz_access_token(token))
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(
+                "MCP AuthNZ token detection failed closed: {}",
+                self._mask_secrets(str(exc)),
+            )
+            return False
+
+    @staticmethod
+    def _fallback_truthy(value: Any) -> bool:
+        """Parse common boolean environment values without host imports."""
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+    @staticmethod
+    def _env_flag_explicitly_disabled(name: str) -> bool:
+        """Return True when an env flag is set to a common disabled value."""
+        return os.getenv(name, "").strip().lower() in {"0", "false", "off", "no", "n"}
+
+    @staticmethod
+    def _module_status_entry(module_config: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+        """Return a sanitized status entry for a configured module."""
+        module_id = str(module_config.get("id") or "").strip()
+        if not module_id:
+            return None
+        enabled = bool(module_config.get("enabled", True))
+        return module_id, {
+            "enabled": enabled,
+            "status": "not_loaded" if enabled else "disabled",
+            "name": str(module_config.get("name") or module_id),
+            "department": str(module_config.get("department") or "general"),
+        }
+
+    def _remember_configured_modules_for_status(self, modules: list[Any]) -> None:
+        """Store sanitized configured-module metadata for status reporting."""
+        remembered: dict[str, dict[str, Any]] = {}
+        for module_config in modules:
+            if not isinstance(module_config, dict):
+                continue
+            entry = self._module_status_entry(module_config)
+            if entry is None:
+                continue
+            module_id, payload = entry
+            remembered[module_id] = payload
+        self._configured_modules_for_status = remembered
+
+    def _default_media_db_path(self) -> str:
+        """Return the host-provided default media DB path for module config."""
+        try:
+            return self.module_config_provider.default_media_db_path()
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.warning(
+                "MCP default media DB path resolution failed: {}",
+                self._mask_secrets(str(exc)),
+            )
+            return ""
+
+    def _create_websocket_stream(self, websocket: WebSocket) -> WebSocketStream:
+        """Create the host websocket stream wrapper for an accepted MCP session."""
+        return self.websocket_stream_factory(
+            websocket,
+            heartbeat_interval_s=(
+                float(self.config.ws_ping_interval)
+                if self.config.ws_ping_interval
+                else None
+            ),
+            idle_timeout_s=(
+                float(self.config.ws_idle_timeout_seconds)
+                if self.config.ws_idle_timeout_seconds
+                else None
+            ),
+            close_on_done=True,
+            labels={"component": "mcp", "endpoint": "mcp_ws"},
+        )
 
     def get_active_connection_count(self) -> int:
         return len(self.connections)
@@ -284,7 +533,7 @@ class MCPServer:
         if app is None:
             return True
         try:
-            assert_may_start_work(app, "mcp.websocket")
+            self.lifecycle_guard.assert_may_start_work(app, "mcp.websocket")
             return True
         except HTTPException:
             await websocket.close(code=1013, reason="shutdown_draining")
@@ -310,6 +559,91 @@ class MCPServer:
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
             return text
 
+    @staticmethod
+    def _sanitize_status_reason(status: str, *, source: str = "health") -> str:
+        """Map module problem states to stable public reason codes."""
+        normalized = str(status or "").strip().lower()
+        if source == "registration" and normalized == "error":
+            return "module_registration_error"
+        return {
+            "degraded": "module_degraded",
+            "inactive": "module_inactive",
+            "not_loaded": "module_not_loaded",
+            "unhealthy": "module_unhealthy",
+            "error": "module_error",
+        }.get(normalized, "module_problem")
+
+    def _problem_module_entry(self, module_id: str, status: str, *, source: str = "health") -> dict[str, str]:
+        """Build a user-facing problem module diagnostic."""
+        return {
+            "id": module_id,
+            "status": status,
+            "reason": self._sanitize_status_reason(status, source=source),
+            "next_action": "Check module configuration and dependencies, then restart or disable the module.",
+        }
+
+    async def _problem_modules_from_health(
+        self,
+        health_results: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        """Summarize non-healthy module states for status responses."""
+        problems: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        for module_id, health in health_results.items():
+            status_value = getattr(getattr(health, "status", ""), "value", getattr(health, "status", ""))
+            status = str(status_value or "unknown")
+            seen.add(module_id)
+            if status == "healthy":
+                continue
+            raw_reason = str(getattr(health, "message", "") or "").strip()
+            if raw_reason:
+                logger.debug(
+                    "MCP module {} reported non-healthy status {}: {}",
+                    module_id,
+                    status,
+                    self._mask_secrets(raw_reason),
+                )
+            problems.append(self._problem_module_entry(module_id, status))
+            seen.add(module_id)
+
+        try:
+            registrations = await self.module_registry.list_registrations()
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            registrations = []
+        for registration in registrations:
+            if not isinstance(registration, dict):
+                continue
+            module_id = str(registration.get("module_id") or "").strip()
+            if not module_id or module_id in seen:
+                continue
+            status = str(registration.get("status") or "unknown")
+            if status not in {"degraded", "inactive", "error"}:
+                continue
+            raw_reason = str(registration.get("error_message") or "").strip()
+            if raw_reason:
+                logger.debug(
+                    "MCP module {} registration status {}: {}",
+                    module_id,
+                    status,
+                    self._mask_secrets(raw_reason),
+                )
+            problems.append(self._problem_module_entry(module_id, status, source="registration"))
+            seen.add(module_id)
+
+        for module_id, payload in sorted(self._configured_modules_for_status.items()):
+            if module_id in seen or not isinstance(payload, dict):
+                continue
+            if payload.get("enabled") is not True:
+                continue
+            status = str(payload.get("status") or "not_loaded")
+            if status not in {"not_loaded", "inactive"}:
+                continue
+            problems.append(self._problem_module_entry(module_id, status, source="configuration"))
+            seen.add(module_id)
+
+        return problems
+
     async def initialize(self):
         """Initialize the server and all modules"""
         if self.initialized:
@@ -323,18 +657,14 @@ class MCPServer:
 
             try:
                 # Fail fast on insecure production configurations
-                try:
-                    _test_mode = _is_test_mode() or _is_explicit_pytest_runtime()
-                    if not self.config.debug_mode and not _test_mode:
-                        ok = validate_config()
-                        if not ok:
-                            raise RuntimeError("MCP configuration validation failed; refusing to start in production")
-                except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-                    # If validation fails, propagate to abort startup
-                    raise
+                _test_mode = self._is_test_mode() or self._is_explicit_pytest_runtime()
+                if not self.config.debug_mode and not _test_mode:
+                    ok = validate_config()
+                    if not ok:
+                        raise RuntimeError("MCP configuration validation failed; refusing to start in production")
                 # Warn if demo auth is enabled in a non-debug environment
                 try:
-                    if _env_flag_enabled("MCP_ENABLE_DEMO_AUTH") and not self.config.debug_mode:
+                    if self._env_flag_enabled("MCP_ENABLE_DEMO_AUTH") and not self.config.debug_mode:
                         logger.warning("MCP_ENABLE_DEMO_AUTH is enabled - for development only; DO NOT USE IN PRODUCTION")
                 except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
                     pass
@@ -344,14 +674,14 @@ class MCPServer:
                 # Start metrics collection
                 if self.config.metrics_enabled:
                     try:
-                        await get_metrics_collector().start_collection()
+                        await self.metrics_collector.start_collection()
                     except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
                         logger.warning(f"MCP metrics collector start failed: {self._mask_secrets(str(e))}")
 
                 # Register default modules (will be implemented when migrating modules)
                 await self._register_default_modules()
 
-                # Ensure default tool permissions exist (wildcard)
+                # Ensure default MCP permissions exist.
                 await self._ensure_default_tool_permissions()
 
                 # Start background tasks
@@ -365,25 +695,11 @@ class MCPServer:
                 raise
 
     async def _ensure_default_tool_permissions(self):
-        """Seed wildcard tool permission tools.execute:* if missing."""
+        """Seed MCP startup permissions if missing."""
         try:
-            pool = await get_db_pool()
-            name = 'tools.execute:*'
-            desc = 'Wildcard tool execution'
-            if pool.pool:
-                await pool.execute(
-                    "INSERT INTO permissions (name, description, category) VALUES ($1, $2, $3) ON CONFLICT (name) DO NOTHING",
-                    name, desc, 'tools'
-                )
-            else:
-                row = await pool.fetchone("SELECT 1 FROM permissions WHERE name = ?", name)
-                if not row:
-                    await pool.execute(
-                        "INSERT INTO permissions (name, description, category) VALUES (?, ?, ?)",
-                        name, desc, 'tools'
-                    )
+            await self.permission_seeder.seed_default_tool_permissions()
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Seed wildcard tool permission failed: {self._mask_secrets(str(e))}")
+            logger.debug(f"Seed default MCP permissions failed: {self._mask_secrets(str(e))}")
 
     async def shutdown(self):
         """Gracefully shutdown the server"""
@@ -458,10 +774,10 @@ class MCPServer:
                         logger.warning(f"Invalid MCP_MODULES item format: '{item}'")
 
             # 3) Optional default: enable media module if flag is set and nothing else specified
-            enable_media_flag = _env_flag_enabled("MCP_ENABLE_MEDIA_MODULE")
-            test_mode = _is_test_mode()
+            enable_media_flag = self._env_flag_enabled("MCP_ENABLE_MEDIA_MODULE")
+            test_mode = self._is_test_mode()
             if enable_media_flag and not modules_to_load:
-                default_media_path = str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id()))
+                default_media_path = self._default_media_db_path()
                 modules_to_load.append({
                     "id": "media",
                     "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module:MediaModule",
@@ -478,8 +794,8 @@ class MCPServer:
 
             # 4) Test convenience: default-enable media module when TEST_MODE unless explicitly disabled
             if test_mode and not any(m.get("id") == "media" for m in modules_to_load):
-                if os.getenv("MCP_ENABLE_MEDIA_MODULE", "").strip().lower() not in {"0", "false", "off", "no", "n"}:
-                    default_media_path = str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id()))
+                if not self._env_flag_explicitly_disabled("MCP_ENABLE_MEDIA_MODULE"):
+                    default_media_path = self._default_media_db_path()
                     modules_to_load.append({
                         "id": "media",
                         "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.media_module:MediaModule",
@@ -494,9 +810,9 @@ class MCPServer:
                     })
                     logger.info("TEST_MODE auto-enabled MediaModule for deterministic tool catalogs")
 
-            # 5) Filesystem module is enabled by default for workspace-bounded fs primitives.
-            if os.getenv("MCP_ENABLE_FILESYSTEM_MODULE", "true").strip().lower() not in {"0", "false", "off", "no", "n"}:
-                if not any(m.get("id") == "filesystem" for m in modules_to_load if isinstance(m, dict)):
+            # 5) Filesystem module requires explicit opt-in for workspace-bounded fs primitives.
+            if not any(m.get("id") == "filesystem" for m in modules_to_load if isinstance(m, dict)):
+                if self._env_flag_enabled("MCP_ENABLE_FILESYSTEM_MODULE"):
                     modules_to_load.append({
                         "id": "filesystem",
                         "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule",
@@ -506,10 +822,77 @@ class MCPServer:
                         "department": "management",
                         "settings": {},
                     })
-                    logger.info("MCP filesystem module enabled by default; queuing FilesystemModule for registration")
+                    logger.info("MCP_ENABLE_FILESYSTEM_MODULE=true; queuing FilesystemModule for registration")
+                else:
+                    modules_to_load.append({
+                        "id": "filesystem",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule",
+                        "enabled": False,
+                        "name": "Filesystem",
+                        "version": "1.0.0",
+                        "department": "management",
+                        "settings": {},
+                    })
+                    logger.info("MCP filesystem module available but disabled; set MCP_ENABLE_FILESYSTEM_MODULE=true or enable it in YAML to opt in")
 
-            # 6) Optional: Sandbox module (code interpreter) - disabled by default
-            if _env_flag_enabled("MCP_ENABLE_SANDBOX_MODULE"):
+            # 6) Optional: Git module - disabled by default
+            if self._env_flag_enabled("MCP_ENABLE_GIT_MODULE"):
+                if not any(m.get("id") == "git" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "git",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.git_module:GitModule",
+                        "enabled": True,
+                        "name": "Git",
+                        "version": "1.0.0",
+                        "department": "management",
+                        "settings": {},
+                    })
+                    logger.info("MCP_ENABLE_GIT_MODULE=true; queuing GitModule for registration")
+
+            # 6b) Optional: Web fetch module - disabled by default (external network).
+            if self._env_flag_enabled("MCP_ENABLE_WEB_FETCH_MODULE"):
+                if not any(m.get("id") == "web_fetch" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "web_fetch",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_fetch_module:WebFetchModule",
+                        "enabled": True,
+                        "name": "WebFetch",
+                        "version": "1.0.0",
+                        "department": "research",
+                        "settings": {},
+                    })
+                    logger.info("MCP_ENABLE_WEB_FETCH_MODULE=true; queuing WebFetchModule for registration")
+
+            # 6c) Optional: Web search module - disabled by default (external network).
+            if self._env_flag_enabled("MCP_ENABLE_WEB_SEARCH_MODULE"):
+                if not any(m.get("id") == "web_search" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "web_search",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_search_module:WebSearchModule",
+                        "enabled": True,
+                        "name": "WebSearch",
+                        "version": "1.0.0",
+                        "department": "research",
+                        "settings": {},
+                    })
+                    logger.info("MCP_ENABLE_WEB_SEARCH_MODULE=true; queuing WebSearchModule for registration")
+
+            # 6d) Optional: Web research module - disabled by default (composes search + fetch).
+            if self._env_flag_enabled("MCP_ENABLE_WEB_RESEARCH_MODULE"):
+                if not any(m.get("id") == "web_research" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "web_research",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_research_module:WebResearchModule",
+                        "enabled": True,
+                        "name": "WebResearch",
+                        "version": "1.0.0",
+                        "department": "research",
+                        "settings": {},
+                    })
+                    logger.info("MCP_ENABLE_WEB_RESEARCH_MODULE=true; queuing WebResearchModule for registration")
+
+            # 7) Optional: Sandbox module (code interpreter) - disabled by default
+            if self._env_flag_enabled("MCP_ENABLE_SANDBOX_MODULE"):
                 modules_to_load.append({
                     "id": "sandbox",
                     "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.sandbox_module:SandboxModule",
@@ -520,6 +903,34 @@ class MCPServer:
                     "settings": {},
                 })
                 logger.info("MCP_ENABLE_SANDBOX_MODULE=true; queuing SandboxModule for registration")
+
+            # 8) Optional: Browser CDP module - enabled by explicit flag or configured CDP URL.
+            browser_cdp_url = os.getenv("MCP_BROWSER_CDP_URL", "").strip()
+            browser_cdp_disabled = self._env_flag_explicitly_disabled("MCP_ENABLE_BROWSER_CDP_MODULE")
+            browser_cdp_enabled = self._env_flag_enabled("MCP_ENABLE_BROWSER_CDP_MODULE")
+            if not browser_cdp_disabled and (browser_cdp_enabled or browser_cdp_url):
+                if not any(m.get("id") == "browser_cdp" for m in modules_to_load if isinstance(m, dict)):
+                    modules_to_load.append({
+                        "id": "browser_cdp",
+                        "class": "tldw_Server_API.app.core.MCP_unified.modules.implementations.browser_cdp_module:BrowserCDPModule",
+                        "enabled": True,
+                        "name": "Browser CDP",
+                        "version": "1.0.0",
+                        "department": "browser",
+                        "settings": {
+                            "debugger_url": "${MCP_BROWSER_CDP_URL:-}",
+                            "request_timeout_seconds": "${MCP_BROWSER_CDP_REQUEST_TIMEOUT_SECONDS:-3.0}",
+                            "observation_window_ms": "${MCP_BROWSER_CDP_OBSERVATION_WINDOW_MS:-250}",
+                            "max_observation_window_ms": "${MCP_BROWSER_CDP_MAX_OBSERVATION_WINDOW_MS:-5000}",
+                            "max_events": "${MCP_BROWSER_CDP_MAX_EVENTS:-100}",
+                            "max_snapshot_nodes": "${MCP_BROWSER_CDP_MAX_SNAPSHOT_NODES:-200}",
+                            "screenshot_max_bytes": "${MCP_BROWSER_CDP_SCREENSHOT_MAX_BYTES:-2000000}",
+                            "allow_non_loopback": "${MCP_BROWSER_CDP_ALLOW_NON_LOOPBACK:-false}",
+                        },
+                    })
+                    logger.info("MCP browser CDP module enabled/configured; queuing BrowserCDPModule for registration")
+
+            self._remember_configured_modules_for_status(modules_to_load)
 
             # Register all specified modules
             from .modules.base import ModuleConfig  # Local import to avoid cycles
@@ -558,6 +969,7 @@ class MCPServer:
                         circuit_breaker_backoff_factor=m.get("circuit_breaker_backoff_factor", 2.0),
                         circuit_breaker_max_timeout=m.get("circuit_breaker_max_timeout", 300),
                         settings=_resolve_env_placeholders(m.get("settings", {})),
+                        circuit_breaker_factory=self.dependencies.circuit_breaker_factory,
                     )
                     await self.module_registry.register_module(module_id, cls, mc)
                     logger.info(f"Registered MCP module: {module_id} ({class_ref})")
@@ -613,9 +1025,23 @@ class MCPServer:
                 connection = self.connections[conn_id]
                 await connection.close(code=1001, reason="Connection timeout")
                 del self.connections[conn_id]
+                client_ip = str((connection.metadata or {}).get("client_ip") or "")
+                self._decrement_ip_connection_count(client_ip)
             # Update connection gauge
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                get_metrics_collector().update_connection_count("websocket", len(self.connections))
+                self.metrics_collector.update_connection_count("websocket", len(self.connections))
+
+    def _decrement_ip_connection_count(self, client_ip: str | None) -> None:
+        """Release one reserved per-IP WebSocket slot."""
+        if not client_ip:
+            return
+        try:
+            if client_ip in self._ip_connection_counts and self._ip_connection_counts[client_ip] > 0:
+                self._ip_connection_counts[client_ip] -= 1
+                if self._ip_connection_counts[client_ip] == 0:
+                    del self._ip_connection_counts[client_ip]
+        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+            pass
 
     async def _metrics_collection_loop(self):
         """Periodically collect and log metrics"""
@@ -763,7 +1189,9 @@ class MCPServer:
         resolved_ip = controller.resolve_client_ip(raw_remote_ip, forwarded_for, real_ip)
         # Test harness mapping and bypass: allow WS in pytest/TEST_MODE and map 'testclient' to loopback
         try:
-            _is_test_env = bool(_is_explicit_pytest_runtime() or _is_test_mode())
+            _is_test_env = bool(
+                self._is_explicit_pytest_runtime() or self._is_test_mode()
+            )
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
             _is_test_env = False
         if resolved_ip == "testclient" or resolved_ip is None and _is_test_env:
@@ -843,43 +1271,26 @@ class MCPServer:
             authnz_token_failed = False
             try:
                 # Try AuthNZ JWT first for consistency with HTTP endpoints
-                from starlette.requests import Request as _Request
-
-                from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import verify_jwt_and_fetch_user
-
-                scope = {
-                    "type": "http",
-                    "method": "GET",
-                    "path": "/api/v1/mcp/ws",
-                    "headers": [
-                        (k.encode("latin-1"), v.encode("latin-1"))
-                        for k, v in websocket.headers.items()
-                    ],
-                }
-                try:
-                    client = websocket.client
-                    if isinstance(client, (list, tuple)) and len(client) >= 2:
-                        scope["client"] = (client[0], client[1])
-                    elif client is not None and getattr(client, "host", None) is not None:
-                        scope["client"] = (client.host, getattr(client, "port", 0))
-                except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-                    pass
-
-                req = _Request(scope)
-                user = await verify_jwt_and_fetch_user(req, auth_token)
-                user_id = str(getattr(user, "id", None) or "")
-                ok = bool(user_id)
-                if ok:
+                identity = await self.auth_provider.authenticate_authnz_websocket_token(
+                    auth_token,
+                    websocket=websocket,
+                )
+                if identity is not None and identity.user_id:
+                    user_id = identity.user_id
+                    ok = True
                     logger.info(f"WebSocket authenticated for user (AuthNZ JWT): {user_id}")
-                    roles = list(getattr(user, "roles", []) or [])
-                    perms = list(getattr(user, "permissions", []) or [])
-                    if roles:
-                        metadata["roles"] = roles
-                    if perms:
-                        metadata["permissions"] = perms
+                    if identity.roles:
+                        metadata["roles"] = list(identity.roles)
+                    if identity.permissions:
+                        metadata["permissions"] = list(identity.permissions)
+                elif self._is_authnz_access_token(auth_token):
+                    authnz_token_failed = True
+                    if not api_key:
+                        await websocket.close(code=1008, reason="Authentication failed")
+                        return
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"AuthNZ JWT auth failed: {self._mask_secrets(str(e))}")
-                if _is_authnz_access_token(auth_token):
+                if self._is_authnz_access_token(auth_token):
                     authnz_token_failed = True
                     if not api_key:
                         await websocket.close(code=1008, reason="Authentication failed")
@@ -903,40 +1314,60 @@ class MCPServer:
 
         # API key auth (optional)
         if api_key and not user_id:
-            try:
-                from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
-                mgr = await get_api_key_manager()
-                # Enforce allowed IPs for API keys by forwarding resolved client IP
-                info = await mgr.validate_api_key(api_key, ip_address=client_ip)
-                if info and info.get('user_id'):
-                    user_id = str(info['user_id'])
-                    # Attach org/team context
-                    if info.get('org_id') is not None:
-                        metadata['org_id'] = info.get('org_id')
-                    if info.get('team_id') is not None:
-                        metadata['team_id'] = info.get('team_id')
-                    roles = metadata.setdefault('roles', [])
-                    if 'api_client' not in roles:
-                        roles.append('api_client')
-                    try:
-                        scopes = _extract_api_key_permissions(info)
-                        if scopes:
-                            metadata["api_key_scopes"] = list(scopes)
-                            metadata["auth_via"] = "api_key"
-                            perms = metadata.setdefault('permissions', [])
-                            for scope in scopes:
-                                if scope not in perms:
-                                    perms.append(scope)
-                    except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-                        pass
-                    logger.info(f"WebSocket authenticated via API key for user: {user_id}")
-                else:
+            compat_auth_via = self._single_user_compat_auth_via(api_key, client_ip=client_ip)
+            if compat_auth_via is not None:
+                settings = get_settings()
+                user_id = str(getattr(settings, "SINGLE_USER_FIXED_ID", "1"))
+                metadata.update(
+                    _trusted_compat_claims_metadata(
+                        auth_via=compat_auth_via,
+                        compat_claims_source="mounted_ws",
+                    )
+                )
+                roles = metadata.setdefault("roles", [])
+                if "admin" not in roles:
+                    roles.append("admin")
+                if compat_auth_via == "single_user_test_api_key":
+                    perms = metadata.setdefault("permissions", [])
+                    if "*" not in perms:
+                        perms.append("*")
+                logger.info("WebSocket authenticated via mounted single-user compatibility key")
+            else:
+                try:
+                    # Enforce allowed IPs for API keys by forwarding resolved client IP
+                    info = await self.auth_provider.validate_api_key(
+                        api_key,
+                        ip_address=client_ip,
+                    )
+                    if info and info.get('user_id'):
+                        user_id = str(info['user_id'])
+                        # Attach org/team context
+                        if info.get('org_id') is not None:
+                            metadata['org_id'] = info.get('org_id')
+                        if info.get('team_id') is not None:
+                            metadata['team_id'] = info.get('team_id')
+                        roles = metadata.setdefault('roles', [])
+                        if 'api_client' not in roles:
+                            roles.append('api_client')
+                        try:
+                            scopes = self._extract_api_key_permissions(info)
+                            if scopes:
+                                metadata["api_key_scopes"] = list(scopes)
+                                metadata["auth_via"] = "api_key"
+                                perms = metadata.setdefault('permissions', [])
+                                for scope in scopes:
+                                    if scope not in perms:
+                                        perms.append(scope)
+                        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
+                            pass
+                        logger.info(f"WebSocket authenticated via API key for user: {user_id}")
+                    else:
+                        await websocket.close(code=1008, reason="Authentication failed")
+                        return
+                except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
+                    logger.warning(f"WebSocket API key authentication failed: {self._mask_secrets(str(e))}")
                     await websocket.close(code=1008, reason="Authentication failed")
                     return
-            except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
-                logger.warning(f"WebSocket API key authentication failed: {self._mask_secrets(str(e))}")
-                await websocket.close(code=1008, reason="Authentication failed")
-                return
 
         # Optionally require authentication for WS (production hardening)
         ws_auth_required = self.config.ws_auth_required
@@ -946,7 +1377,7 @@ class MCPServer:
                 import os as _os
                 override = _os.getenv("MCP_WS_AUTH_REQUIRED")
                 if override is not None:
-                    override_val = _is_truthy(override)
+                    override_val = self._is_truthy(override)
                     if self.config.ws_auth_required == self._ws_auth_required_initial:
                         ws_auth_required = override_val
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
@@ -961,6 +1392,7 @@ class MCPServer:
             metadata["workspace_id"] = workspace_key
         if cwd_key:
             metadata["cwd"] = cwd_key
+        metadata["client_ip"] = client_ip
 
         if not await self._guard_websocket_start(websocket):
             return
@@ -990,7 +1422,7 @@ class MCPServer:
                     # Record rejection metric
                     try:
                         bucket = self._ip_bucket(client_ip)
-                        get_metrics_collector().record_ws_rejection("per_ip_cap", bucket)
+                        self.metrics_collector.record_ws_rejection("per_ip_cap", bucket)
                     except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
                         pass
                     await websocket.close(code=1013, reason="Too many connections from IP")
@@ -1015,21 +1447,16 @@ class MCPServer:
             # per-IP count already reserved; nothing to do here
             # Update connection gauge
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                get_metrics_collector().update_connection_count("websocket", len(self.connections))
+                self.metrics_collector.update_connection_count("websocket", len(self.connections))
 
         logger.bind(connection_id=connection_id, user_id=user_id, client_id=client_id, client_ip=client_ip).info(
             f"WebSocket connected: {connection_id} (client={client_id}, user={user_id}, ip={client_ip})"
         )
 
         # Initialize unified WS lifecycle (ping/idle/error) and accept the socket
-        stream: Optional[WebSocketStream] = WebSocketStream(
-            websocket,
-            heartbeat_interval_s=float(self.config.ws_ping_interval) if self.config.ws_ping_interval else None,
-            idle_timeout_s=float(self.config.ws_idle_timeout_seconds) if self.config.ws_idle_timeout_seconds else None,
-            close_on_done=True,
-            labels={"component": "mcp", "endpoint": "mcp_ws"},
-        )
+        stream: Optional[WebSocketStream] = None
         try:
+            stream = self._create_websocket_stream(websocket)
             await stream.start()
             # Handle messages (domain JSON-RPC payloads go through send_json; no event-wrapping)
             await self._handle_websocket_messages(connection, stream)
@@ -1043,7 +1470,7 @@ class MCPServer:
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                 await connection.close(code=1011, reason="Internal error")
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                get_metrics_collector().record_connection_error("websocket", "exception")
+                self.metrics_collector.record_connection_error("websocket", "exception")
         finally:
             # Stop WS background tasks (ping/idle loops) to avoid leaks
             if stream is not None:
@@ -1051,23 +1478,20 @@ class MCPServer:
                     await stream.stop()
             # Remove connection
             async with self.connection_lock:
-                if connection_id in self.connections:
-                    del self.connections[connection_id]
-                # Decrement per-IP count
-                try:
-                    if client_ip in self._ip_connection_counts and self._ip_connection_counts[client_ip] > 0:
-                        self._ip_connection_counts[client_ip] -= 1
-                        if self._ip_connection_counts[client_ip] == 0:
-                            del self._ip_connection_counts[client_ip]
-                except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-                    pass
+                removed = self.connections.pop(connection_id, None)
+                if removed is not None:
+                    self._decrement_ip_connection_count(client_ip)
 
             logger.bind(connection_id=connection_id).info(f"WebSocket cleanup complete: {connection_id}")
             # Update connection gauge
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                get_metrics_collector().update_connection_count("websocket", len(self.connections))
+                self.metrics_collector.update_connection_count("websocket", len(self.connections))
 
-    async def _handle_websocket_messages(self, connection: WebSocketConnection, stream: WebSocketStream):
+    async def _handle_websocket_messages(
+        self,
+        connection: WebSocketConnection,
+        stream: WebSocketStream,
+    ) -> None:
         """Handle incoming WebSocket messages"""
         while True:
             sess: Optional[SessionData] = None
@@ -1078,31 +1502,33 @@ class MCPServer:
                 with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                     stream.mark_activity()
             except json.JSONDecodeError as e:
-                await stream.send_json({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32700,
-                        "message": f"Parse error: {str(e)}"
-                    }
-                })
+                await stream.send_json(mcp_response_to_json(parse_error_response(f"Parse error: {str(e)}")))
                 continue
 
             # Check message size
             message_size = len(json.dumps(data))
             if message_size > self.config.ws_max_message_size:
-                await stream.send_json({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32600,
-                        "message": "Message too large"
-                    },
-                    "id": data.get("id") if isinstance(data, dict) else None
-                })
+                await stream.send_json(
+                    mcp_response_to_json(
+                        invalid_request_response(
+                            "Message too large",
+                            request_id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
+                        )
+                    )
+                )
                 continue
 
-            # Handle ping/pong
-            if isinstance(data, dict) and data.get("type") == "pong":
+            # Exact transport keepalives are consumed by the WebSocket transport.
+            if is_jsonrpc_keepalive(data):
                 continue
+
+            if isinstance(data, dict) and data.get("jsonrpc") != "2.0":
+                await stream.send_json(mcp_response_to_json(invalid_request_response("Invalid request")))
+                continue
+
+            is_notification = _is_absent_id_jsonrpc_notification(data)
+            explicit_null_id_sentinels: set[str] = set()
+            protocol_data = _replace_explicit_null_jsonrpc_ids(data, explicit_null_id_sentinels)
 
             # Per-session rate limit: requests per window
             try:
@@ -1114,16 +1540,16 @@ class MCPServer:
                 while connection.request_times and (now_ts - connection.request_times[0]) > window:
                     connection.request_times.popleft()
                 if len(connection.request_times) > threshold:
-                    await stream.send_json({
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32002,
-                            "message": "Session rate limit exceeded"
-                        },
-                        "id": data.get("id") if isinstance(data, dict) else None
-                    })
+                    await stream.send_json(
+                        mcp_response_to_json(
+                            MCPResponse(
+                                error=MCPError(code=-32002, message="Session rate limit exceeded"),
+                                id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
+                            )
+                        )
+                    )
                     with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                        get_metrics_collector().record_ws_session_closure("session_rate")
+                        self.metrics_collector.record_ws_session_closure("session_rate")
                     # Close with 1013 (try again later), matching prior behavior
                     try:
                         await stream.ws.close(code=1013, reason="Session rate limit exceeded")
@@ -1143,9 +1569,9 @@ class MCPServer:
                     cwd=connection.cwd,
                 )
                 # If this is initialize, capture clientInfo and optional config
-                if isinstance(data, dict) and data.get("method") == "initialize":
+                if isinstance(protocol_data, dict) and protocol_data.get("method") == "initialize":
                     try:
-                        params = data.get("params") or {}
+                        params = protocol_data.get("params") or {}
                         client_info = params.get("clientInfo") or {}
                         if isinstance(client_info, dict):
                             sess.client_info.update(client_info)
@@ -1170,14 +1596,14 @@ class MCPServer:
             except PermissionError:
                 # Session ownership mismatch - return authorization error and close
                 with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                    await stream.send_json({
-                        "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32001,
-                            "message": "Session is bound to a different user"
-                        },
-                        "id": data.get("id") if isinstance(data, dict) else None
-                    })
+                    await stream.send_json(
+                        mcp_response_to_json(
+                            MCPResponse(
+                                error=MCPError(code=-32001, message="Session is bound to a different user"),
+                                id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
+                            )
+                        )
+                    )
                 with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                     await stream.ws.close(code=1008, reason="Session ownership mismatch")
                 break
@@ -1191,7 +1617,7 @@ class MCPServer:
                     context_metadata["workspace_id"] = sess.workspace_id
                 if sess and sess.cwd:
                     context_metadata["cwd"] = sess.cwd
-                context_metadata["mcp_policy_context_enabled"] = is_mcp_hub_policy_enforcement_enabled()
+                context_metadata["mcp_policy_context_enabled"] = self._policy_context_enabled()
                 if sess and sess.safe_config:
                     context_metadata["safe_config"] = dict(sess.safe_config)
                 if sess:
@@ -1199,16 +1625,17 @@ class MCPServer:
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
                 pass
             context = RequestContext(
-                request_id=data.get("id", "unknown") if isinstance(data, dict) else "unknown",
+                request_id=protocol_data.get("id", "unknown") if isinstance(protocol_data, dict) else "unknown",
                 user_id=connection.user_id,
                 client_id=connection.client_id,
                 session_id=connection.session_id,
-                metadata=context_metadata
+                metadata=context_metadata,
+                db_paths=self._resolve_user_db_paths(connection.user_id),
             )
 
             # Process MCP request (supports single, notification, and batch)
             try:
-                response = await self.protocol.process_request(data, context)
+                response = await self.protocol.process_request(protocol_data, context)
                 # Persist seen URIs back into session (if updated by tools)
                 try:
                     if sess and isinstance(context.metadata, dict):
@@ -1223,32 +1650,35 @@ class MCPServer:
                 if response is None:
                     # Notification - no reply
                     continue
-                if isinstance(response, list):
-                    await stream.send_json([r.model_dump() for r in response])
-                else:
-                    await stream.send_json(response.model_dump())
+                if is_notification:
+                    continue
+                _restore_explicit_null_jsonrpc_ids(response, explicit_null_id_sentinels)
+                await stream.send_json(mcp_responses_to_json(response))
             except RateLimitExceeded as e:
-                await stream.send_json({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32002,
-                        "message": f"Rate limit exceeded. Retry after {e.retry_after} seconds",
-                        "data": {
-                            "hint": "Reduce request frequency or wait before retrying."
-                        }
-                    },
-                    "id": data.get("id") if isinstance(data, dict) else None
-                })
+                await stream.send_json(
+                    mcp_response_to_json(
+                        MCPResponse(
+                            error=MCPError(
+                                code=-32002,
+                                message=f"Rate limit exceeded. Retry after {e.retry_after} seconds",
+                                data={
+                                    "hint": "Reduce request frequency or wait before retrying."
+                                },
+                            ),
+                            id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
+                        )
+                    )
+                )
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
                 logger.error(f"Error processing WebSocket message: {self._mask_secrets(str(e))}")
-                await stream.send_json({
-                    "jsonrpc": "2.0",
-                    "error": {
-                        "code": -32603,
-                        "message": "Internal error"
-                    },
-                    "id": data.get("id") if isinstance(data, dict) else None
-                })
+                await stream.send_json(
+                    mcp_response_to_json(
+                        MCPResponse(
+                            error=MCPError(code=-32603, message="Internal error"),
+                            id=safe_jsonrpc_id(data.get("id")) if isinstance(data, dict) else None,
+                        )
+                    )
+                )
 
     def _ip_bucket(self, ip: str) -> str:
         """Return a coarse bucket label for an IP to avoid high-cardinality metrics."""
@@ -1339,7 +1769,8 @@ class MCPServer:
             user_id=user_id,
             client_id=client_id,
             session_id=session_id,
-            metadata=metadata_map
+            metadata=metadata_map,
+            db_paths=self._resolve_user_db_paths(user_id),
         )
 
         # Process request
@@ -1437,7 +1868,8 @@ class MCPServer:
             user_id=user_id,
             client_id=client_id,
             session_id=session_id,
-            metadata=metadata_map
+            metadata=metadata_map,
+            db_paths=self._resolve_user_db_paths(user_id),
         )
 
         # Process batch request
@@ -1490,6 +1922,19 @@ class MCPServer:
 
         # Get module health
         health_results = await self.module_registry.check_all_health()
+        surface_modules = {
+            module_id: dict(payload)
+            for module_id, payload in self._configured_modules_for_status.items()
+            if payload.get("enabled") is False
+        }
+        for module_id, health in health_results.items():
+            entry = dict(surface_modules.get(module_id, {}))
+            entry["enabled"] = True
+            entry["status"] = health.status.value
+            surface_modules[module_id] = entry
+        module_surface = describe_module_surface(surface_modules)
+        problem_modules = await self._problem_modules_from_health(health_results)
+        config_warnings = get_config_warnings()
 
         # Get connection stats
         connection_stats = {
@@ -1508,7 +1953,10 @@ class MCPServer:
                 "healthy": sum(1 for h in health_results.values() if h.is_healthy),
                 "degraded": sum(1 for h in health_results.values() if h.is_operational and not h.is_healthy),
                 "unhealthy": sum(1 for h in health_results.values() if not h.is_operational)
-            }
+            },
+            "surface": module_surface,
+            "problem_modules": problem_modules,
+            "config_warnings": config_warnings,
         }
 
     async def get_metrics(self) -> dict[str, Any]:

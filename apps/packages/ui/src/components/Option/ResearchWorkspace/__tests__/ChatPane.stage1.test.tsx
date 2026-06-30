@@ -2,9 +2,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import { MemoryRouter } from "react-router-dom"
+import { getDesignSystemState } from "@/design-system"
 import { ConnectionPhase } from "@/types/connection"
 import { CHAT_PATH, LOREBOOK_DEBUG_FOCUS } from "@/routes/route-paths"
 import { ChatPane } from "../ChatPane"
+import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
 
 const mockCheckConnectionOnce = vi.fn()
 const mockSaveWorkspaceChatSession = vi.fn()
@@ -21,6 +23,10 @@ const mockSetStreaming = vi.fn()
 const mockSetIsProcessing = vi.fn()
 const mockStopStreamingRequest = vi.fn()
 const mockOnSubmit = vi.fn()
+const mockSetRagMediaIds = vi.fn()
+const mockSetChatMode = vi.fn()
+const mockSetFileRetrievalEnabled = vi.fn()
+const mockSetSelectedModel = vi.fn()
 const mockRegenerateLastMessage = vi.fn()
 const mockDeleteMessage = vi.fn()
 const mockEditMessage = vi.fn()
@@ -31,12 +37,42 @@ const { mockScheduleWorkspaceUndoAction, mockUndoWorkspaceAction } = vi.hoisted(
     mockUndoWorkspaceAction: vi.fn()
   })
 )
+const registryLabels = vi.hoisted(() => ({
+  ready: "Registry Ready",
+  degraded: "Registry Degraded"
+}))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label:
+            key === "ready"
+              ? registryLabels.ready
+              : key === "degraded"
+                ? registryLabels.degraded
+                : state.label
+        }
+      }
+    )
+  }
+})
 
 const connectionStoreState = {
   state: {
     phase: ConnectionPhase.CONNECTED,
     isChecking: false,
-    lastError: null
+    lastError: null,
+    isConnected: true,
+    errorKind: "none" as "none" | "partial",
+    knowledgeStatus: "ready" as const
   },
   checkOnce: mockCheckConnectionOnce
 }
@@ -52,10 +88,34 @@ const workspaceSessions = new Map<
 >()
 
 const workspaceStoreState = {
-  sources: [] as Array<{ id: string; mediaId: number; title: string; type: string }>,
+  sources: [] as Array<{
+    id: string
+    mediaId: number
+    title: string
+    type: string
+    status?: "processing" | "ready" | "error"
+    statusMessage?: string
+    readiness?: {
+      metadata_ready: boolean
+      text_extracted: boolean
+      fts_ready: boolean
+      vector_ready: boolean
+      citation_ready: boolean
+      summary_ready: boolean
+      tool_accessible: boolean
+    }
+    statusDetails?: {
+      lifecycleState?: string
+      statusReason?: string
+    }
+  }>,
+  sourceFolders: [] as Array<{ id: string; parentFolderId: string | null }>,
+  sourceFolderMemberships: [] as Array<{ sourceId: string; folderId: string }>,
+  selectedSourceFolderIds: [] as string[],
   selectedSourceIds: [] as string[],
   getSelectedSources: () => [] as Array<{ id: string; title: string }>,
   getSelectedMediaIds: () => [] as number[],
+  getEffectiveSelectedMediaIds: () => [] as number[],
   setSelectedSourceIds: vi.fn(),
   focusSourceById: mockFocusSourceById,
   focusSourceByMediaId: mockFocusSourceByMediaId,
@@ -92,6 +152,10 @@ const messageOptionState = {
   setHistoryId: mockSetHistoryId,
   serverChatId: null as string | null,
   setServerChatId: mockSetServerChatId
+}
+
+const messageOptionStoreState = {
+  selectedModel: "ollama:gemma3:1b" as string | null
 }
 
 vi.mock("react-i18next", () => ({
@@ -146,17 +210,19 @@ vi.mock("@/store/option", () => ({
       ragAdvancedOptions: Record<string, unknown>
       setRagAdvancedOptions: (opts: Record<string, unknown>) => void
       selectedModel: string | null
+      setSelectedModel: (model: string | null) => void
     }) => unknown
   ) =>
     selector({
-      setRagMediaIds: vi.fn(),
-      setChatMode: vi.fn(),
-      setFileRetrievalEnabled: vi.fn(),
+      setRagMediaIds: mockSetRagMediaIds,
+      setChatMode: mockSetChatMode,
+      setFileRetrievalEnabled: mockSetFileRetrievalEnabled,
       ragTopK: 8,
       setRagTopK: vi.fn(),
       ragAdvancedOptions: {},
       setRagAdvancedOptions: vi.fn(),
-      selectedModel: null
+      selectedModel: messageOptionStoreState.selectedModel,
+      setSelectedModel: mockSetSelectedModel
     })
 }))
 
@@ -189,7 +255,7 @@ vi.mock("@/components/Common/Playground/Message", () => ({
         <button
           type="button"
           aria-label={`delete-message-${currentMessageIndex ?? -1}`}
-          onClick={() => void onDeleteMessage(currentMessageIndex ?? -1)}
+          onClick={() => void onDeleteMessage()}
         >
           Delete
         </button>
@@ -210,7 +276,9 @@ vi.mock("../undo-manager", () => ({
 
 vi.mock("../source-location-copy", () => ({
   getWorkspaceChatNoSourcesHint: () =>
-    "Select sources from the Sources pane, then ask questions."
+    "Select sources from the Sources pane, then ask questions.",
+  getWorkspaceChatSourcesExplainer: () =>
+    "Selected sources keep answers grounded in this workspace."
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -225,10 +293,21 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-function renderChatPane() {
+vi.mock("@/services/tldw-server", () => ({
+  fetchChatModels: vi.fn(async () => [
+    {
+      api_provider: "ollama",
+      id: "ollama:gemma3:1b",
+      label: "gemma3:1b",
+      value: "ollama:gemma3:1b"
+    }
+  ])
+}))
+
+function renderChatPane(props: Record<string, unknown> = {}) {
   return render(
     <MemoryRouter>
-      <ChatPane />
+      <ChatPane {...props} />
     </MemoryRouter>
   )
 }
@@ -253,17 +332,25 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     connectionStoreState.state.phase = ConnectionPhase.CONNECTED
     connectionStoreState.state.isChecking = false
     connectionStoreState.state.lastError = null
+    connectionStoreState.state.isConnected = true
+    connectionStoreState.state.errorKind = "none"
+    connectionStoreState.state.knowledgeStatus = "ready"
 
     workspaceStoreState.workspaceId = "workspace-a"
     workspaceStoreState.workspaceChatReferenceId = "workspace-a"
     workspaceStoreState.sources = []
+    workspaceStoreState.sourceFolders = []
+    workspaceStoreState.sourceFolderMemberships = []
+    workspaceStoreState.selectedSourceFolderIds = []
     workspaceStoreState.selectedSourceIds = []
     workspaceStoreState.getSelectedSources = () => []
     workspaceStoreState.getSelectedMediaIds = () => []
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => []
     mockFocusSourceById.mockReset()
     mockFocusSourceByMediaId.mockReset()
     workspaceStoreState.chatFocusTarget = null
 
+    messageOptionStoreState.selectedModel = "ollama:gemma3:1b"
     messageOptionState.messages = []
     messageOptionState.history = []
     messageOptionState.historyId = null
@@ -272,6 +359,10 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     messageOptionState.isProcessing = false
     mockOnSubmit.mockResolvedValue(undefined)
     mockUseMessageOption.mockReset()
+    mockSetRagMediaIds.mockReset()
+    mockSetChatMode.mockReset()
+    mockSetFileRetrievalEnabled.mockReset()
+    mockSetSelectedModel.mockReset()
 
     mockGetWorkspaceChatSession.mockImplementation((workspaceId: string) => {
       return workspaceSessions.get(workspaceId) ?? null
@@ -289,10 +380,29 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(mockStopStreamingRequest).toHaveBeenCalledTimes(1)
   })
 
+  it("uses the design-system registry label for connected provider status", () => {
+    renderChatPane()
+
+    const selector = screen.getByTestId("model-selector")
+    expect(selector).toHaveTextContent(registryLabels.ready)
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("ready")
+  })
+
+  it("uses the design-system registry label for degraded provider status", () => {
+    connectionStoreState.state.errorKind = "partial"
+
+    renderChatPane()
+
+    const selector = screen.getByTestId("model-selector")
+    expect(selector).toHaveTextContent(registryLabels.degraded)
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("degraded")
+  })
+
   it("submits the composer with Cmd/Ctrl+Enter", async () => {
     renderChatPane()
 
     const textarea = screen.getByPlaceholderText("Type a message...")
+    expect(screen.getByLabelText("Chat message")).toBe(textarea)
     fireEvent.change(textarea, { target: { value: "Shortcut submission" } })
     fireEvent.keyDown(textarea, { key: "Enter", metaKey: true })
 
@@ -304,11 +414,389 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     })
   })
 
+  it("blocks send without a selected model while preserving the draft", () => {
+    messageOptionStoreState.selectedModel = null
+
+    renderChatPane()
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    fireEvent.change(textarea, { target: { value: "Summarize this source" } })
+
+    expect(textarea).not.toBeDisabled()
+    expect(
+      screen.getByText("Select a chat model before sending.")
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Select a chat model" })
+    ).toBeDisabled()
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+    expect(textarea).toHaveValue("Summarize this source")
+  })
+
+  it("puts empty-state prompt chips into the composer and focuses it", async () => {
+    renderChatPane()
+
+    fireEvent.click(screen.getByTestId("workspace-chat-empty-prompt-chip-0"))
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    await waitFor(() => {
+      expect(textarea).toHaveValue("Help me frame a research question on this topic")
+    })
+    expect(textarea).toHaveFocus()
+  })
+
+  it("keeps selected-source RAG context intact when model selection blocks send", () => {
+    messageOptionStoreState.selectedModel = null
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 42,
+        title: "NotebookLM export",
+        type: "pdf",
+        status: "ready"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-1", title: "NotebookLM export" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [42]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
+
+    renderChatPane()
+
+    const ragModeButton = screen.getByRole("button", { name: "RAG mode" })
+    expect(ragModeButton).toBeDisabled()
+    expect(ragModeButton).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(mockSetRagMediaIds).toHaveBeenLastCalledWith([42])
+
+    const textarea = screen.getByPlaceholderText("Ask about your sources...")
+    fireEvent.change(textarea, { target: { value: "What evidence supports this?" } })
+
+    expect(
+      screen.getByRole("button", { name: "Select a chat model" })
+    ).toBeDisabled()
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+    expect(mockSetRagMediaIds).not.toHaveBeenLastCalledWith(null)
+    expect(textarea).toHaveValue("What evidence supports this?")
+  })
+
+  it("labels advanced RAG controls for keyboard and screen-reader users", () => {
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 42,
+        title: "NotebookLM export",
+        type: "pdf",
+        status: "ready"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-1", title: "NotebookLM export" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [42]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
+
+    renderChatPane()
+
+    fireEvent.click(screen.getByRole("button", { name: "Advanced RAG settings" }))
+
+    expect(screen.getByRole("slider", { name: "Top K" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("slider", { name: "Similarity threshold" })
+    ).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Enable reranking" })).toBeInTheDocument()
+  })
+
+  it("keeps selected processing sources visible while grounded mode waits for queryable sources", async () => {
+    workspaceStoreState.sources = [
+      {
+        id: "source-processing",
+        mediaId: 52,
+        title: "Processing Notebook Export",
+        type: "pdf",
+        status: "processing",
+        statusMessage: "Indexing"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-processing"]
+    workspaceStoreState.getSelectedSources = () => []
+    workspaceStoreState.getSelectedMediaIds = () => []
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => []
+
+    renderChatPane()
+
+    expect(screen.getByText("Processing Notebook Export")).toBeInTheDocument()
+    expect(screen.getByText("Processing")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "1 selected source is still indexing. Grounded mode will enable when extraction and indexing finish."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "RAG mode" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "RAG mode" })).toHaveAttribute(
+      "aria-pressed",
+      "false"
+    )
+    expect(mockSetRagMediaIds).toHaveBeenLastCalledWith(null)
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    fireEvent.change(textarea, { target: { value: "Can you help me plan questions?" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() => {
+      expect(mockOnSubmit).toHaveBeenCalledWith({
+        message: "Can you help me plan questions?",
+        image: ""
+      })
+    })
+  })
+
+  it("uses only queryable selected media ids while showing non-queryable selected sources", () => {
+    workspaceStoreState.sources = [
+      {
+        id: "source-ready",
+        mediaId: 42,
+        title: "Queryable Paper",
+        type: "pdf",
+        status: "ready"
+      },
+      {
+        id: "source-processing",
+        mediaId: 52,
+        title: "Processing Notebook Export",
+        type: "pdf",
+        status: "processing"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-ready", "source-processing"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-ready", title: "Queryable Paper" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [42]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
+
+    renderChatPane()
+
+    expect(screen.getByText("Queryable Paper")).toBeInTheDocument()
+    expect(screen.getByText("Processing Notebook Export")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Grounded chat will use 1 queryable source. 1 selected source is still processing or failed."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "RAG mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(mockSetRagMediaIds).toHaveBeenLastCalledWith([42])
+  })
+
+  it("uses partially queryable text-search-ready sources for grounded scope", () => {
+    workspaceStoreState.sources = [
+      {
+        id: "source-partial",
+        mediaId: 72,
+        title: "Partial Text Source",
+        type: "text",
+        status: "processing",
+        statusMessage: "Text search is available while vector indexing continues.",
+        readiness: {
+          metadata_ready: true,
+          text_extracted: true,
+          fts_ready: true,
+          vector_ready: false,
+          citation_ready: false,
+          summary_ready: false,
+          tool_accessible: true
+        },
+        statusDetails: {
+          lifecycleState: "partially_queryable",
+          statusReason: "vector_index_pending"
+        }
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-partial"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-partial", title: "Partial Text Source" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [72]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [72]
+
+    renderChatPane()
+
+    expect(screen.getByText("Partial Text Source")).toBeInTheDocument()
+    expect(screen.queryByText("Processing")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "RAG mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(mockSetRagMediaIds).toHaveBeenLastCalledWith([72])
+  })
+
+  it("keeps selected failed sources visible without enabling grounded mode", () => {
+    workspaceStoreState.sources = [
+      {
+        id: "source-failed",
+        mediaId: 64,
+        title: "Failed Notebook Export",
+        type: "pdf",
+        status: "error",
+        statusMessage: "Extraction failed"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-failed"]
+    workspaceStoreState.getSelectedSources = () => []
+    workspaceStoreState.getSelectedMediaIds = () => []
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => []
+
+    renderChatPane()
+
+    expect(screen.getByText("Failed Notebook Export")).toBeInTheDocument()
+    expect(screen.getByText("Failed")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "1 selected source failed. Retry it from Sources or select another queryable source."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "RAG mode" })).toBeDisabled()
+    expect(mockSetRagMediaIds).toHaveBeenLastCalledWith(null)
+  })
+
+  it("keeps the draft and selected-source RAG context after a recoverable chat failure", async () => {
+    mockOnSubmit.mockResolvedValueOnce({
+      status: "failed",
+      errorMessage: "no_provider_configured"
+    })
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 42,
+        title: "NotebookLM export",
+        type: "pdf",
+        status: "ready"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-1", title: "NotebookLM export" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [42]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
+
+    renderChatPane()
+
+    const textarea = screen.getByPlaceholderText("Ask about your sources...")
+    const draft = "  What evidence supports this?\n"
+    fireEvent.change(textarea, {
+      target: { value: draft }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() => {
+      expect(mockOnSubmit).toHaveBeenCalledWith({
+        message: "What evidence supports this?",
+        image: ""
+      })
+    })
+
+    expect(textarea).toHaveValue(draft)
+    expect(screen.getByRole("button", { name: "RAG mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    expect(mockSetRagMediaIds).not.toHaveBeenLastCalledWith(null)
+    expect(screen.queryByText(/Unable to reach server/)).not.toBeInTheDocument()
+  })
+
+  it("clears an accepted draft optimistically while the chat request is pending", async () => {
+    let resolveSubmit: (value: { status: "submitted" }) => void = () => {}
+    mockOnSubmit.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSubmit = resolve as (value: { status: "submitted" }) => void
+        })
+    )
+
+    renderChatPane()
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    fireEvent.change(textarea, { target: { value: "Run the long request" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() => {
+      expect(mockOnSubmit).toHaveBeenCalledTimes(1)
+    })
+    expect(textarea).toHaveValue("")
+
+    resolveSubmit({ status: "submitted" })
+  })
+
   it("passes workspace scope into the shared chat hook", () => {
     renderChatPane()
 
     expect(mockUseMessageOption).toHaveBeenCalledWith({
       scope: { type: "workspace", workspaceId: "workspace-a" }
+    })
+  })
+
+  it("loads imported workspace chat before autosaving empty local state", () => {
+    workspaceSessions.set("workspace-a", {
+      messages: [
+        {
+          isBot: false,
+          name: "You",
+          message: "Imported chat question",
+          sources: []
+        },
+        {
+          isBot: true,
+          name: "Assistant",
+          message: "Imported chat answer",
+          sources: []
+        }
+      ],
+      history: [
+        { role: "user", content: "Imported chat question" },
+        { role: "assistant", content: "Imported chat answer" }
+      ],
+      historyId: "history-imported",
+      serverChatId: null
+    })
+
+    renderChatPane()
+
+    expect(mockSetMessages).toHaveBeenCalledWith([
+      {
+        isBot: false,
+        name: "You",
+        message: "Imported chat question",
+        sources: []
+      },
+      {
+        isBot: true,
+        name: "Assistant",
+        message: "Imported chat answer",
+        sources: []
+      }
+    ])
+    expect(mockSetHistory).toHaveBeenCalledWith([
+      { role: "user", content: "Imported chat question" },
+      { role: "assistant", content: "Imported chat answer" }
+    ])
+    expect(mockSetHistoryId).toHaveBeenCalledWith("history-imported", {
+      preserveServerChatId: true
+    })
+    expect(mockSetServerChatId).toHaveBeenCalledWith(null)
+    expect(mockSaveWorkspaceChatSession).not.toHaveBeenCalledWith("workspace-a", {
+      messages: [],
+      history: [],
+      historyId: null,
+      serverChatId: null
     })
   })
 
@@ -542,6 +1030,189 @@ describe("ChatPane Stage 1 reliability and controls", () => {
 
     expect(screen.getByRole("textbox")).toBeDisabled()
     expect(screen.getByRole("button", { name: /Server disconnected/i })).toBeDisabled()
+  })
+
+  it("blocks chat from capability health without showing a connection failure", () => {
+    const capabilities = buildUnknownResearchWorkspaceCapabilities()
+    capabilities.capabilities.chat = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "llm_unavailable"
+    }
+
+    renderChatPane({ researchWorkspaceCapabilities: capabilities })
+
+    expect(screen.queryByText(/Unable to reach server/)).not.toBeInTheDocument()
+    expect(
+      screen.getByText("Chat is unavailable while required services are offline.")
+    ).toBeInTheDocument()
+    expect(screen.getByRole("textbox")).toBeDisabled()
+    expect(
+      screen.getByRole("button", { name: /Chat unavailable/i })
+    ).toBeDisabled()
+  })
+
+  it("explains provider-specific chat capability blocks", () => {
+    const capabilities = buildUnknownResearchWorkspaceCapabilities()
+    capabilities.capabilities.chat = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "provider_unavailable"
+    }
+
+    renderChatPane({ researchWorkspaceCapabilities: capabilities })
+
+    expect(
+      screen.getByText(
+        "Chat is unavailable because the model provider is unavailable. Open model settings or retry status."
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByRole("textbox")).toBeDisabled()
+  })
+
+  it("disables grounded mode when chat provider capability is blocked", () => {
+    const capabilities = buildUnknownResearchWorkspaceCapabilities()
+    capabilities.capabilities.chat = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "provider_unavailable"
+    }
+    workspaceStoreState.sources = [
+      {
+        id: "source-1",
+        mediaId: 42,
+        title: "Ready Notebook Export",
+        type: "pdf",
+        status: "ready"
+      }
+    ]
+    workspaceStoreState.selectedSourceIds = ["source-1"]
+    workspaceStoreState.getSelectedSources = () => [
+      { id: "source-1", title: "Ready Notebook Export" }
+    ]
+    workspaceStoreState.getSelectedMediaIds = () => [42]
+    workspaceStoreState.getEffectiveSelectedMediaIds = () => [42]
+
+    renderChatPane({ researchWorkspaceCapabilities: capabilities })
+
+    expect(screen.getByRole("button", { name: "RAG mode" })).toBeDisabled()
+    expect(
+      screen.getByText(
+        "Chat is unavailable because the model provider is unavailable. Open model settings or retry status."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("surfaces workspace service remediation inside the composer", () => {
+    renderChatPane({
+      workspaceCapabilities: {
+        workspace_id: "workspace-a",
+        workspace_kind: "research_workspace",
+        access_level: "owner",
+        source_summary: {
+          total: 1,
+          selected: 1,
+          queryable: 1,
+          partially_queryable: 0,
+          processing: 0,
+          failed: 0,
+          missing: 0
+        },
+        workspace_services: {
+          mcp: {
+            state: "needs_approval",
+            reason_code: "mcp_approval_required",
+            management_surface: "mcp_hub"
+          },
+          provider: {
+            state: "degraded",
+            reason_code: "external_provider_only",
+            management_surface: "model_settings"
+          }
+        },
+        allowed_actions: {}
+      }
+    })
+
+    expect(screen.getByTestId("workspace-capability-remediation")).toHaveTextContent(
+      "Workspace readiness"
+    )
+    expect(screen.getByText("Approve workspace tool use before running MCP actions.")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Open MCP Hub" })).toHaveAttribute(
+      "href",
+      "/mcp-hub?workflow=workspaces&view=workspace-sets&workspace_id=workspace-a&source=research-workspace"
+    )
+  })
+
+  it("refreshes stale capability health before blocking a chat submit", async () => {
+    const staleCapabilities = buildUnknownResearchWorkspaceCapabilities()
+    staleCapabilities.capabilities.chat = {
+      status: "ready",
+      mode: "allow",
+      dependencies: ["llm"]
+    }
+    const refreshedCapabilities = buildUnknownResearchWorkspaceCapabilities()
+    refreshedCapabilities.capabilities.chat = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "llm_unavailable"
+    }
+    const refreshCapabilities = vi.fn(async () => refreshedCapabilities)
+
+    renderChatPane({
+      researchWorkspaceCapabilities: staleCapabilities,
+      researchWorkspaceCapabilitiesStale: true,
+      onRefreshResearchWorkspaceCapabilities: refreshCapabilities
+    })
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    fireEvent.change(textarea, { target: { value: "Check this" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() => {
+      expect(refreshCapabilities).toHaveBeenCalledTimes(1)
+    })
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+  })
+
+  it("lets a stale blocked snapshot refresh before allowing chat submit", async () => {
+    const staleCapabilities = buildUnknownResearchWorkspaceCapabilities()
+    staleCapabilities.capabilities.chat = {
+      status: "unavailable",
+      mode: "block",
+      dependencies: ["llm"],
+      reason_code: "llm_unavailable"
+    }
+    const refreshedCapabilities = buildUnknownResearchWorkspaceCapabilities()
+    refreshedCapabilities.capabilities.chat = {
+      status: "ready",
+      mode: "allow",
+      dependencies: ["llm"]
+    }
+    const refreshCapabilities = vi.fn(async () => refreshedCapabilities)
+
+    renderChatPane({
+      researchWorkspaceCapabilities: staleCapabilities,
+      researchWorkspaceCapabilitiesStale: true,
+      onRefreshResearchWorkspaceCapabilities: refreshCapabilities
+    })
+
+    const textarea = screen.getByPlaceholderText("Type a message...")
+    expect(textarea).not.toBeDisabled()
+    fireEvent.change(textarea, { target: { value: "Check this" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() => {
+      expect(refreshCapabilities).toHaveBeenCalledTimes(1)
+      expect(mockOnSubmit).toHaveBeenCalledWith({
+        message: "Check this",
+        image: ""
+      })
+    })
   })
 
   it("saves previous workspace chat and restores next workspace chat on switch", () => {

@@ -91,4 +91,35 @@ describe("AvailableModelsList", () => {
       screen.queryByText("Unable to load models from server")
     ).not.toBeInTheDocument()
   })
+
+  it("renders metadata load failures through sanitized shared recovery diagnostics", async () => {
+    const rawMessage =
+      "Provider registry failed at /api/v1/llm/models/metadata?token=sk_models_secret /Users/alice/private/models.json"
+    const error = Object.assign(new Error(rawMessage), {
+      status: 503,
+    })
+    mocks.getModelsMetadata.mockRejectedValue(error)
+
+    renderWithQueryClient()
+
+    const recovery = await screen.findByTestId("models-catalog-load-recovery")
+    expect(recovery).toHaveAttribute("data-ds-component", "RecoveryCallout")
+    expect(
+      screen.getByRole("heading", { name: "Unable to load models from server" })
+    ).toBeInTheDocument()
+    expect(screen.getByText("GET")).toBeInTheDocument()
+    expect(screen.getAllByText("[server-endpoint]").length).toBeGreaterThan(0)
+    expect(screen.getByText("503")).toBeInTheDocument()
+    expect(screen.getByText(/Provider registry failed at/)).toHaveTextContent(
+      "[server-endpoint]"
+    )
+    expect(screen.getByText(/Provider registry failed at/)).toHaveTextContent(
+      "[redacted-path]"
+    )
+    expect(screen.queryByText(/\/api\/v1\/llm\/models/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/\/Users\/alice/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/sk_models_secret/)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    expect(screen.queryByText("Request details")).toBeNull()
+  })
 })

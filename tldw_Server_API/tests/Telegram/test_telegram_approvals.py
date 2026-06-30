@@ -196,6 +196,30 @@ class _FakeTelegramRuntimeRepo:
         return dict(row) if row is not None else None
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+
+    def error(self, message: str, *args: object, **kwargs: object) -> None:
+        self.errors.append(message.format(*args, **kwargs) if args or kwargs else message)
+
+
+def _approval_callback_payload(callback_data: str, *, telegram_user_id: int = 202) -> dict[str, object]:
+    return {
+        "callback_query": {
+            "from": {"id": telegram_user_id, "is_bot": False},
+            "data": callback_data,
+        }
+    }
+
+
+def _assert_sanitized_error_log(logger: _LoggerStub, expected: list[str]) -> None:
+    assert logger.errors == expected
+    rendered = "\n".join(logger.errors)
+    assert "exploded" not in rendered
+    assert "/private/" not in rendered
+
+
 def _build_request(*, update_id: int, telegram_user_id: int, callback_data: str) -> Request:
     body = {
         "update_id": update_id,
@@ -225,6 +249,120 @@ def _build_request(*, update_id: int, telegram_user_id: int, callback_data: str)
         return {"type": "http.request", "body": json.dumps(body).encode("utf-8"), "more_body": False}
 
     return Request(scope, _receive)
+
+
+@pytest.mark.asyncio
+async def test_telegram_approval_repo_resolution_failure_log_is_sanitized(monkeypatch):
+    logger = _LoggerStub()
+    monkeypatch.setattr(telegram_support, "logger", logger)
+
+    async def _raise_repo() -> object:
+        raise RuntimeError("telegram approvals repo exploded at /private/telegram-approvals.db")
+
+    async def _unused_service() -> object:
+        raise AssertionError("approval service should not be resolved")
+
+    response = await telegram_support._handle_telegram_approval_callback_query(
+        scope=TelegramScope(scope_type="group", scope_id=88),
+        payload=_approval_callback_payload("tgapp1.repo-token"),
+        runtime_repo=_FakeTelegramRuntimeRepo(),
+        get_telegram_approvals_repo=_raise_repo,
+        get_approval_service=_unused_service,
+    )
+
+    assert response.status_code == 503
+    assert json.loads(response.body)["error"] == "approval_service_unavailable"
+    _assert_sanitized_error_log(logger, ["Failed to resolve Telegram approvals repo"])
+
+
+@pytest.mark.asyncio
+async def test_telegram_approval_service_resolution_failure_log_is_sanitized(monkeypatch):
+    logger = _LoggerStub()
+    monkeypatch.setattr(telegram_support, "logger", logger)
+    repo = _FakeTelegramApprovalsRepo()
+    runtime_repo = _FakeTelegramRuntimeRepo()
+    await runtime_repo.upsert_actor_link(
+        scope_type="group",
+        scope_id=88,
+        telegram_user_id=202,
+        auth_user_id=202,
+    )
+    callback_data = await build_telegram_approval_callback_data(
+        approval_policy_id=17,
+        context_key="user:202|group:88|persona:researcher",
+        conversation_id="conv-1",
+        tool_name="Bash",
+        tool_args={"command": "git status"},
+        scope=TelegramScope(scope_type="group", scope_id=88),
+        initiating_auth_user_id=202,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        repo=repo,
+    )
+
+    async def _get_repo() -> _FakeTelegramApprovalsRepo:
+        return repo
+
+    async def _raise_service() -> object:
+        raise RuntimeError("telegram approval service exploded at /private/telegram-approvals.db")
+
+    response = await telegram_support._handle_telegram_approval_callback_query(
+        scope=TelegramScope(scope_type="group", scope_id=88),
+        payload=_approval_callback_payload(callback_data),
+        runtime_repo=runtime_repo,
+        get_telegram_approvals_repo=_get_repo,
+        get_approval_service=_raise_service,
+    )
+
+    assert response.status_code == 503
+    assert json.loads(response.body)["error"] == "approval_service_unavailable"
+    _assert_sanitized_error_log(logger, ["Failed to resolve Telegram approval service"])
+
+
+@pytest.mark.asyncio
+async def test_telegram_approval_decision_failure_log_is_sanitized(monkeypatch):
+    class _FailingApprovalService:
+        async def record_decision(self, **_kwargs: object) -> dict[str, object]:
+            raise RuntimeError("telegram approval decision exploded at /private/telegram-approvals.db")
+
+    logger = _LoggerStub()
+    monkeypatch.setattr(telegram_support, "logger", logger)
+    repo = _FakeTelegramApprovalsRepo()
+    runtime_repo = _FakeTelegramRuntimeRepo()
+    await runtime_repo.upsert_actor_link(
+        scope_type="group",
+        scope_id=88,
+        telegram_user_id=202,
+        auth_user_id=202,
+    )
+    callback_data = await build_telegram_approval_callback_data(
+        approval_policy_id=17,
+        context_key="user:202|group:88|persona:researcher",
+        conversation_id="conv-1",
+        tool_name="Bash",
+        tool_args={"command": "git status"},
+        scope=TelegramScope(scope_type="group", scope_id=88),
+        initiating_auth_user_id=202,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        repo=repo,
+    )
+
+    async def _get_repo() -> _FakeTelegramApprovalsRepo:
+        return repo
+
+    async def _get_service() -> _FailingApprovalService:
+        return _FailingApprovalService()
+
+    response = await telegram_support._handle_telegram_approval_callback_query(
+        scope=TelegramScope(scope_type="group", scope_id=88),
+        payload=_approval_callback_payload(callback_data),
+        runtime_repo=runtime_repo,
+        get_telegram_approvals_repo=_get_repo,
+        get_approval_service=_get_service,
+    )
+
+    assert response.status_code == 503
+    assert json.loads(response.body)["error"] == "approval_service_unavailable"
+    _assert_sanitized_error_log(logger, ["Failed to persist Telegram approval decision"])
 
 
 @pytest.mark.asyncio

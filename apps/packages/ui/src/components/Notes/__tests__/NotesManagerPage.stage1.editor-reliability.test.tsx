@@ -152,7 +152,14 @@ const updateCalls = () =>
   mockBgRequest.mock.calls.filter(([request]) => {
     const path = String(request?.path || "")
     const method = String(request?.method || "GET").toUpperCase()
-    return path.startsWith("/api/v1/notes/11?expected_version=") && method === "PUT"
+    return path === "/api/v1/notes/11" && method === "PUT"
+  })
+
+const callsFor = (path: string, method: string) =>
+  mockBgRequest.mock.calls.filter(([request]) => {
+    const requestPath = String(request?.path || "")
+    const requestMethod = String(request?.method || "GET").toUpperCase()
+    return requestPath === path && requestMethod === method.toUpperCase()
   })
 
 describe("NotesManagerPage stage 1 editor reliability", () => {
@@ -189,7 +196,7 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
         }
       }
 
-      if (path.startsWith("/api/v1/notes/11?expected_version=") && method === "PUT") {
+      if (path === "/api/v1/notes/11" && method === "PUT") {
         return { id: 11, version: 2 }
       }
 
@@ -244,6 +251,78 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
     })
   })
 
+  it("saves a draft and immediately opens a blank focused draft for repeated capture", async () => {
+    renderPage()
+
+    const titleInput = screen.getByPlaceholderText("Title")
+    const contentInput = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    )
+
+    fireEvent.change(titleInput, {
+      target: { value: "First quick capture" }
+    })
+    fireEvent.change(contentInput, {
+      target: { value: "Capture this and keep moving." }
+    })
+
+    fireEvent.click(screen.getByTestId("notes-save-and-new-button"))
+
+    await waitFor(() => {
+      expect(createCalls()).toHaveLength(1)
+    })
+
+    await waitFor(() => {
+      expect(titleInput).toHaveValue("")
+      expect(contentInput).toHaveValue("")
+    })
+    expect(titleInput).toHaveFocus()
+  })
+
+  it("keeps the current draft in place when save and new fails", async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+
+      if (path.startsWith("/api/v1/notes/?")) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+
+      if (path === "/api/v1/notes/" && method === "POST") {
+        throw new Error("Save failed")
+      }
+
+      return {}
+    })
+
+    renderPage()
+
+    const titleInput = screen.getByPlaceholderText("Title")
+    const contentInput = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    )
+
+    fireEvent.change(titleInput, {
+      target: { value: "Do not lose this" }
+    })
+    fireEvent.change(contentInput, {
+      target: { value: "The save failed, so this text must remain." }
+    })
+
+    fireEvent.click(screen.getByTestId("notes-save-and-new-button"))
+
+    await waitFor(() => {
+      expect(createCalls()).toHaveLength(1)
+      expect(mockMessageError).toHaveBeenCalledWith("Save failed")
+    })
+
+    expect(titleInput).toHaveValue("Do not lose this")
+    expect(contentInput).toHaveValue("The save failed, so this text must remain.")
+  })
+
   it("does not save when Ctrl/Cmd+S is pressed outside the editor region", async () => {
     renderPage()
 
@@ -267,15 +346,150 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
     })
   })
 
-  it("hides the welcome state after starting a new draft", async () => {
+  it("preserves draft content and exposes retry after save failure", async () => {
+    let createAttempts = 0
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+
+      if (path.startsWith("/api/v1/notes/?")) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+
+      if (path === "/api/v1/notes/" && method === "POST") {
+        createAttempts += 1
+        if (createAttempts === 1) {
+          throw new Error("Server temporarily unavailable")
+        }
+        return { id: 11, version: 1 }
+      }
+
+      if (path === "/api/v1/notes/11" && method === "GET") {
+        return {
+          id: 11,
+          title: "Recoverable note",
+          content: "Draft survives failure",
+          metadata: { keywords: [] },
+          version: 1
+        }
+      }
+
+      return {}
+    })
+
+    renderPage()
+
+    const titleInput = screen.getByPlaceholderText("Title")
+    const contentInput = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    )
+
+    fireEvent.change(titleInput, {
+      target: { value: "Recoverable note" }
+    })
+    fireEvent.change(contentInput, {
+      target: { value: "Draft survives failure" }
+    })
+
+    fireEvent.click(screen.getByTestId("notes-save-button"))
+
+    await waitFor(() => {
+      expect(mockMessageError).toHaveBeenCalledWith("Server temporarily unavailable")
+    })
+
+    expect(titleInput).toHaveValue("Recoverable note")
+    expect(contentInput).toHaveValue("Draft survives failure")
+    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "error")
+
+    fireEvent.click(screen.getByTestId("notes-save-retry"))
+
+    await waitFor(() => {
+      expect(createAttempts).toBe(2)
+    })
+    expect(mockMessageSuccess).toHaveBeenCalledWith("Note created")
+  })
+
+  it("shows saving state and blocks duplicate submits while save is in flight", async () => {
+    let resolveCreate: ((value: unknown) => void) | null = null
+    const createPromise = new Promise((resolve) => {
+      resolveCreate = resolve
+    })
+
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+
+      if (path.startsWith("/api/v1/notes/?")) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+
+      if (path === "/api/v1/notes/" && method === "POST") {
+        return createPromise
+      }
+
+      if (path === "/api/v1/notes/11" && method === "GET") {
+        return {
+          id: 11,
+          title: "Slow save",
+          content: "Saving should be visible",
+          metadata: { keywords: [] },
+          version: 1
+        }
+      }
+
+      return {}
+    })
+
+    renderPage()
+
+    fireEvent.change(screen.getByPlaceholderText("Title"), {
+      target: { value: "Slow save" }
+    })
+    fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {
+      target: { value: "Saving should be visible" }
+    })
+
+    const saveButton = screen.getByTestId("notes-save-button")
+    fireEvent.click(saveButton)
+
+    await waitFor(() => {
+      expect(createCalls()).toHaveLength(1)
+    })
+    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "saving")
+
+    fireEvent.click(saveButton)
+    expect(createCalls()).toHaveLength(1)
+
+    resolveCreate?.({ id: 11, version: 1 })
+
+    await waitFor(() => {
+      expect(mockMessageSuccess).toHaveBeenCalledWith("Note created")
+    })
+  })
+
+  it("opens a writable, focused title field after starting a new draft from the empty state", async () => {
     renderPage()
 
     expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("notes-editor-empty-create"))
+    fireEvent.click(screen.getByRole("button", { name: "Create note" }))
 
     await waitFor(() => {
       expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
+    })
+
+    const titleInput = screen.getByRole("textbox", { name: "Note title" })
+    expect(titleInput).toBeEnabled()
+    expect(screen.getByTestId("notes-save-button")).toBeDisabled()
+
+    await waitFor(() => {
+      expect(titleInput).toHaveFocus()
     })
   })
 
@@ -293,6 +507,84 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
       expect(createCalls()).toHaveLength(0)
     })
     expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
+  })
+
+  it("encodes reserved note ids for save refresh requests", async () => {
+    const reservedId = "folder/note?image#1"
+    const rawPath = `/api/v1/notes/${reservedId}`
+    const encodedPath = `/api/v1/notes/${encodeURIComponent(reservedId)}`
+    let detailLoadCount = 0
+
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+
+      if (path.startsWith("/api/v1/notes/?")) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+
+      if (path === "/api/v1/notes/" && method === "POST") {
+        return { id: reservedId }
+      }
+
+      if ((path === rawPath || path === encodedPath) && method === "GET") {
+        detailLoadCount += 1
+        return {
+          id: reservedId,
+          title: "Reserved route note",
+          content: detailLoadCount === 1 ? "Saved first pass" : "Updated reserved route note",
+          metadata: { keywords: [] },
+          ...(detailLoadCount === 1 ? {} : { version: detailLoadCount })
+        }
+      }
+
+      if (path === encodedPath && method === "PUT") {
+        return { id: reservedId }
+      }
+
+      return {}
+    })
+
+    renderPage()
+
+    const titleInput = screen.getByPlaceholderText("Title")
+    const contentInput = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    )
+
+    fireEvent.change(titleInput, {
+      target: { value: "Reserved route note" }
+    })
+    fireEvent.change(contentInput, {
+      target: { value: "Saved first pass" }
+    })
+
+    fireEvent.focus(contentInput)
+    fireEvent.keyDown(contentInput, { key: "s", ctrlKey: true })
+
+    await waitFor(() => {
+      expect(createCalls()).toHaveLength(1)
+    })
+
+    fireEvent.change(contentInput, {
+      target: { value: "Updated reserved route note" }
+    })
+
+    fireEvent.focus(titleInput)
+    fireEvent.keyDown(titleInput, { key: "s", metaKey: true })
+
+    await waitFor(() => {
+      expect(callsFor(encodedPath, "PUT")).toHaveLength(1)
+    })
+
+    expect(callsFor(rawPath, "GET")).toHaveLength(0)
+    expect(callsFor(encodedPath, "GET").length).toBeGreaterThanOrEqual(3)
+    expect(callsFor(encodedPath, "PUT")[0]?.[0]?.headers).toMatchObject({
+      "expected-version": "2"
+    })
   })
 
 })

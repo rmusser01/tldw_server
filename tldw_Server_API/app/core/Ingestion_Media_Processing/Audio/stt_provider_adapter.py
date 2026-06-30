@@ -111,6 +111,7 @@ def parse_transcription_model(model_name: str) -> tuple[str, str, str | None]:
 
 
 _SUPPORTED_PARAKEET_VARIANTS = {"standard", "onnx", "mlx", "cuda"}
+_CANONICAL_PARAKEET_ONNX_MODEL = "parakeet-tdt-0.6b-v3-onnx"
 _STT_PROVIDER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
     LookupError,
@@ -160,6 +161,8 @@ def _normalize_parakeet_variant(raw: str | None) -> str:
 
 def _parakeet_model_name_for_variant(variant: str) -> str:
     normalized = _normalize_parakeet_variant(variant)
+    if normalized == "onnx":
+        return _CANONICAL_PARAKEET_ONNX_MODEL
     return f"parakeet-{normalized}"
 
 

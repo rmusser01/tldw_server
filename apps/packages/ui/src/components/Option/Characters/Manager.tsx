@@ -19,6 +19,7 @@ import {
   useCharacterCrud,
   useCharacterBulkOps
 } from "./hooks"
+import type { CharacterChatIntentBlocker } from "./hooks/useCharacterCrud"
 import { useCharacterGeneration } from "@/hooks/useCharacterGeneration"
 import { useFormDraft } from "@/hooks/useFormDraft"
 import { useCharacterShortcuts } from "@/hooks/useCharacterShortcuts"
@@ -29,6 +30,7 @@ import { useTranslation } from "react-i18next"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { useNavigate } from "react-router-dom"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
+import { useIsConnected } from "@/hooks/useConnectionState"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import {
   DEFAULT_CHARACTER_STORAGE_KEY,
@@ -91,6 +93,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
   const { t } = useTranslation(["settings", "common"])
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const isServerConnected = useIsConnected()
   const notification = useAntdNotification()
   const confirmDanger = useConfirmDanger()
   const [createForm] = Form.useForm()
@@ -260,7 +263,12 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     quickChatModelOptions[0]?.value ||
     null
 
-  const quickChat = useCharacterQuickChat({ t, activeQuickChatModel })
+  const quickChat = useCharacterQuickChat({
+    t,
+    activeQuickChatModel,
+    isServerConnected,
+    availableModels: generationModels ?? []
+  })
   const {
     quickChatCharacter, setQuickChatCharacter,
     quickChatMessages, setQuickChatMessages,
@@ -273,6 +281,13 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     sendQuickChatMessage,
     handlePromoteQuickChat
   } = quickChat
+
+  const [chatIntentBlocker, setChatIntentBlocker] =
+    React.useState<CharacterChatIntentBlocker | null>(null)
+  const clearChatIntentBlocker = React.useCallback(async () => {
+    setChatIntentBlocker(null)
+    await setSelectedCharacter(null)
+  }, [setSelectedCharacter])
 
   const versionHistory = useCharacterVersionHistory({ t, notification, qc, confirmDanger })
   const {
@@ -411,6 +426,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     openEdit ||
     conversationsOpen ||
     generationPreviewOpen ||
+    Boolean(chatIntentBlocker) ||
     Boolean(quickChatCharacter)
   useCharacterShortcuts({
     modalOpen,
@@ -425,6 +441,8 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
         setGenerationPreviewOpen(false)
       } else if (conversationsOpen) {
         setConversationsOpen(false)
+      } else if (chatIntentBlocker) {
+        void clearChatIntentBlocker()
       } else if (quickChatCharacter) {
         void closeQuickChat()
       } else if (openEdit) {
@@ -826,7 +844,10 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     data,
     effectiveDefaultCharacterId,
     defaultCharacterSelection,
-    setDefaultCharacterSelection
+    setDefaultCharacterSelection,
+    activeChatModel: selectedChatModel,
+    availableChatModels: generationModels ?? [],
+    setChatIntentBlocker
   })
   const {
     createCharacter,
@@ -874,6 +895,10 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     conversationsLoadErrorMessageRef,
     restoreCharacter
   } = crud
+  const retryChatIntentBlocker = React.useCallback(async () => {
+    if (!chatIntentBlocker) return
+    await handleChat(chatIntentBlocker.record)
+  }, [chatIntentBlocker, handleChat])
 
   const handleEditWithPrefetch = React.useCallback(
     (record: any, triggerRef?: HTMLButtonElement | null) => {
@@ -967,6 +992,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     openEdit ||
     conversationsOpen ||
     Boolean(quickChatCharacter) ||
+    Boolean(chatIntentBlocker) ||
     generationPreviewOpen ||
     versionHistoryOpen ||
     compareModalOpen ||
@@ -1190,6 +1216,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
         closeQuickChat={closeQuickChat}
         quickChatModelOptions={quickChatModelOptions}
         activeQuickChatModel={activeQuickChatModel}
+        isServerConnected={isServerConnected}
         setQuickChatModelOverride={setQuickChatModelOverride}
         quickChatError={quickChatError}
         quickChatMessages={quickChatMessages}
@@ -1198,6 +1225,10 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
         quickChatSending={quickChatSending}
         sendQuickChatMessage={sendQuickChatMessage}
         handlePromoteQuickChat={handlePromoteQuickChat}
+        // full-chat intent blocker
+        chatIntentBlocker={chatIntentBlocker}
+        clearChatIntentBlocker={clearChatIntentBlocker}
+        retryChatIntentBlocker={retryChatIntentBlocker}
         // conversations
         conversationsOpen={conversationsOpen}
         setConversationsOpen={setConversationsOpen}

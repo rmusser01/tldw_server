@@ -8,6 +8,11 @@ import pytest
 
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.factory import (
+    DatabaseBackendFactory,
+    close_all_backends,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -16,15 +21,21 @@ pytestmark = pytest.mark.unit
 @pytest.fixture()
 def collections_db(monkeypatch: pytest.MonkeyPatch) -> CollectionsDatabase:
     base_dir = Path.cwd() / "Databases" / "test_user_dbs_reminders_notifications"
+    close_all_backends()
     shutil.rmtree(base_dir, ignore_errors=True)
     base_dir.mkdir(parents=True, exist_ok=True)
     prev_base_dir = settings.get("USER_DB_BASE_DIR")
     settings.USER_DB_BASE_DIR = str(base_dir)
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
 
+    db: CollectionsDatabase | None = None
     try:
-        yield CollectionsDatabase.for_user(user_id=778)
+        db = CollectionsDatabase.for_user(user_id=778)
+        yield db
     finally:
+        if db is not None:
+            db.close()
+        close_all_backends()
         if prev_base_dir is not None:
             settings.USER_DB_BASE_DIR = prev_base_dir
         else:
@@ -32,6 +43,7 @@ def collections_db(monkeypatch: pytest.MonkeyPatch) -> CollectionsDatabase:
                 del settings.USER_DB_BASE_DIR
             except AttributeError:
                 pass
+        shutil.rmtree(base_dir, ignore_errors=True)
 
 
 def test_create_and_list_reminder_task(collections_db: CollectionsDatabase) -> None:
@@ -143,6 +155,53 @@ def test_update_notification_delivery_status_returns_boolean(collections_db: Col
 
     missing = collections_db.update_notification_delivery_status(999999, "failed")
     assert missing is False
+
+
+def test_legacy_notifications_backfill_snooze_column_before_index(tmp_path: Path) -> None:
+    close_all_backends()
+    backend = DatabaseBackendFactory.create_backend(
+        DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(tmp_path / "collections.db"))
+    )
+    backend.execute(
+        """
+        CREATE TABLE user_notifications (
+            id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            source_task_id TEXT,
+            source_task_run_id INTEGER,
+            source_job_id TEXT,
+            source_domain TEXT,
+            source_job_type TEXT,
+            link_type TEXT,
+            link_id TEXT,
+            link_url TEXT,
+            dedupe_key TEXT,
+            retention_until TEXT,
+            archived_at TEXT,
+            created_at TEXT NOT NULL,
+            read_at TEXT,
+            dismissed_at TEXT
+        )
+        """,
+        (),
+    )
+
+    try:
+        db = CollectionsDatabase.from_backend(user_id="778", backend=backend)
+
+        columns = {row["name"] for row in backend.get_table_info("user_notifications")}
+        assert "snooze_task_id" in columns
+        assert "delivery_status" in columns
+        assert "delivered_at" in columns
+
+        indexes = {row["name"] for row in backend.execute("PRAGMA index_list(user_notifications)", ()).rows}
+        assert "idx_user_notifications_user_snooze" in indexes
+    finally:
+        close_all_backends()
 
 
 def test_update_notification_delivery_status_can_clear_existing_timestamp(

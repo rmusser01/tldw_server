@@ -1,23 +1,28 @@
 import React from "react"
-import { Moon, Sun } from "lucide-react"
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import {
+  FirstSourceMilestonePrompt,
+  type FirstSourceKind
+} from "@/components/Option/Onboarding/FirstSourceMilestonePrompt"
+import { PostSetupApiRecovery } from "@/components/Option/Onboarding/PostSetupApiRecovery"
+import { UnifiedSetupWizard } from "@/components/Option/Onboarding/UnifiedSetupWizard"
+import {
   useConnectionActions,
-  useConnectionState,
-  useConnectionUxState
+  useConnectionState
 } from "@/hooks/useConnectionState"
-import { ConnectionPhase } from "@/types/connection"
 import { useFocusComposerOnConnect } from "@/hooks/useComposerFocus"
-import { useDarkMode } from "@/hooks/useDarkmode"
+import { usePostOnboardingMediaReadiness } from "@/hooks/usePostOnboardingMediaReadiness"
+import { useSetupOnboarding } from "@/hooks/useSetupOnboarding"
 import OptionLayout from "~/components/Layouts/Layout"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
-
-const LazyOnboardingWizard = React.lazy(() =>
-  import("@/components/Option/Onboarding/OnboardingWizard").then((module) => ({
-    default: module.OnboardingWizard
-  }))
-)
+import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+import {
+  isFirstSourceQuickIngestKind,
+  isFirstSourceOpenDetail,
+  requestQuickIngestOpen
+} from "@/utils/quick-ingest-open"
+import { isSetupStatusRequiringWizard } from "./setup-status"
 
 const LazyCompanionHomeShell = React.lazy(() =>
   import("@/components/Option/CompanionHome").then((module) => ({
@@ -27,14 +32,83 @@ const LazyCompanionHomeShell = React.lazy(() =>
 
 const LazyOptionHostedHome = React.lazy(() => import("./option-hosted-home"))
 
+const FIRST_SOURCE_MILESTONE_DISMISSED_KEY =
+  "tldw:first-source-milestone-dismissed"
+const FIRST_SOURCE_STARTER_QUESTIONS = [
+  "Summarize this source.",
+  "List the key claims.",
+  "What should I remember?"
+] as const
+
+const readFirstSourceDismissed = () => {
+  if (typeof window === "undefined") return false
+  try {
+    return (
+      window.localStorage.getItem(FIRST_SOURCE_MILESTONE_DISMISSED_KEY) === "1"
+    )
+  } catch {
+    return false
+  }
+}
+
+const openFirstSourceQuickIngest = (kind: FirstSourceKind) => {
+  requestQuickIngestOpen(
+    {
+      source: "first_source_milestone",
+      preferredPreset: "quick",
+      firstSource: true,
+      firstSourceKind: kind
+    },
+    { focusTrigger: true }
+  )
+}
+
+const discussFirstSource = (payload: {
+  mediaId: string
+  title: string | null
+  question?: string | null
+}) => {
+  if (typeof window === "undefined") return
+  const detail: {
+    mediaId: string
+    title: string
+    mode: "rag_media"
+    content?: string
+  } = {
+    mediaId: payload.mediaId,
+    title: payload.title || "First source",
+    mode: "rag_media"
+  }
+  const question = payload.question?.trim()
+  if (question) {
+    detail.content = question
+  }
+  window.dispatchEvent(
+    new CustomEvent("tldw:discuss-media", {
+      detail
+    })
+  )
+}
+
 const OptionIndex = () => {
   const hostedMode = isHostedTldwDeployment()
   const { phase } = useConnectionState()
-  const { hasCompletedFirstRun } = useConnectionUxState()
-  const { checkOnce, beginOnboarding, markFirstRunComplete } = useConnectionActions()
-  const { mode, toggleDarkMode } = useDarkMode()
-  const onboardingInitiated = React.useRef(false)
+  const { checkOnce } = useConnectionActions()
+  const {
+    state: firstRunState,
+    metadata: firstRunMetadata,
+    loading: setupLoading,
+    adoptState: adoptFirstRunState
+  } = useSetupOnboarding()
   const [didHydrate, setDidHydrate] = React.useState(false)
+  const [firstSourceDismissed, setFirstSourceDismissed] = React.useState(
+    readFirstSourceDismissed
+  )
+  const [lastFirstSourceKind, setLastFirstSourceKind] =
+    React.useState<FirstSourceKind>("web_url")
+  const quickIngestSession = useQuickIngestSessionStore(
+    (state) => state.session
+  )
 
   React.useEffect(() => {
     if (hostedMode) {
@@ -55,25 +129,14 @@ const OptionIndex = () => {
     }
   }, [checkOnce, hostedMode])
 
-  React.useEffect(() => {
-    if (hostedMode) return
-    if (hasCompletedFirstRun) {
-      void checkOnce()
-    }
-  }, [checkOnce, hasCompletedFirstRun, hostedMode])
-
-  React.useEffect(() => {
-    if (hostedMode) return
-    if (!didHydrate) return
-    if (hasCompletedFirstRun) return
-    if (onboardingInitiated.current) return
-    if (phase !== ConnectionPhase.UNCONFIGURED) return
-
-    onboardingInitiated.current = true
-    void beginOnboarding()
-  }, [beginOnboarding, didHydrate, hasCompletedFirstRun, hostedMode, phase])
-
   useFocusComposerOnConnect(phase ?? null)
+
+  const setupStatus = firstRunState?.status
+  const shouldCheckPostOnboardingMedia =
+    setupStatus === "completed" && !firstSourceDismissed
+  const mediaReadiness = usePostOnboardingMediaReadiness(
+    shouldCheckPostOnboardingMedia
+  )
 
   if (hostedMode) {
     return (
@@ -92,62 +155,130 @@ const OptionIndex = () => {
     )
   }
 
-  // During first-time setup, hide the connection shell entirely and show only
-  // the onboarding wizard (“Welcome — Let’s get you connected”).
-  if (!hasCompletedFirstRun) {
-    const themeToggleLabel =
-      mode === "dark" ? "Switch to light theme" : "Switch to dark theme"
+  if ((setupLoading || !didHydrate) && !firstRunState) {
     return (
       <OptionLayout hideHeader hideSidebar>
-        <div className="mx-auto mb-4 w-full max-w-3xl rounded-lg border border-border bg-surface px-4 py-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h1 className="text-base font-semibold text-text">Home Onboarding</h1>
-              <p className="mt-1 text-xs text-text-muted">
-                Start here to connect your server or try local demo mode.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={toggleDarkMode}
-              aria-label={themeToggleLabel}
-              title={themeToggleLabel}
-              data-testid="chat-header-theme-toggle"
-              className="inline-flex items-center justify-center rounded-md border border-border bg-surface px-2 py-2 text-text-muted transition-colors hover:bg-surface2 hover:text-text"
-            >
-              {mode === "dark" ? (
-                <Sun className="size-4" aria-hidden="true" />
-              ) : (
-                <Moon className="size-4" aria-hidden="true" />
-              )}
-            </button>
-          </div>
-        </div>
-        <React.Suspense
-          fallback={
-            <PageAssistLoader
-              label="Loading setup..."
-              description="Preparing onboarding"
-            />
-          }
-        >
-          <LazyOnboardingWizard
-            onFinish={async () => {
-              try {
-                await markFirstRunComplete()
-              } catch {
-                // ignore markFirstRunComplete failures here; connection state will self-heal on next load
-              }
-              void checkOnce().catch(() => undefined)
-            }}
-          />
-        </React.Suspense>
+        <PageAssistLoader
+          label="Loading setup..."
+          description="Reading first-run readiness from the server"
+        />
+      </OptionLayout>
+    )
+  }
+
+  if (isSetupStatusRequiringWizard(setupStatus)) {
+    return (
+      <OptionLayout hideHeader hideSidebar>
+        <UnifiedSetupWizard
+          initialState={firstRunState}
+          initialMetadata={firstRunMetadata}
+          onStateChange={adoptFirstRunState}
+        />
+      </OptionLayout>
+    )
+  }
+
+  const dismissFirstSourcePrompt = () => {
+    setFirstSourceDismissed(true)
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(FIRST_SOURCE_MILESTONE_DISMISSED_KEY, "1")
+      } catch {
+        // Dismissed tips are best-effort frontend-only state.
+      }
+    }
+  }
+
+  const showFirstSourcePrompt =
+    shouldCheckPostOnboardingMedia && mediaReadiness.status === "ready"
+  const firstSourceOpenDetail = isFirstSourceOpenDetail(
+    quickIngestSession?.openDetail
+  )
+    ? quickIngestSession?.openDetail
+    : null
+  const firstSourceSession = firstSourceOpenDetail
+    ? quickIngestSession
+    : null
+  const firstSourceRunSummary = firstSourceSession?.resultSummary ?? null
+  const firstSourceMediaId =
+    firstSourceRunSummary?.status === "success" &&
+    firstSourceRunSummary.firstMediaId
+      ? firstSourceRunSummary.firstMediaId
+      : null
+  const firstSourceAskReady =
+    Boolean(firstSourceMediaId) && mediaReadiness.status === "ready"
+  const firstSourcePromptStatus =
+    firstSourceSession?.lifecycle === "processing"
+      ? "processing"
+      : firstSourceRunSummary?.status === "error"
+        ? "error"
+        : firstSourceAskReady
+          ? "ready"
+          : "idle"
+
+  if (
+    shouldCheckPostOnboardingMedia &&
+    (mediaReadiness.status === "needs_config" ||
+      mediaReadiness.status === "error")
+  ) {
+    return (
+      <OptionLayout hideHeader hideSidebar>
+        <PostSetupApiRecovery
+          errorMessage={mediaReadiness.errorMessage}
+          onRecover={mediaReadiness.recoverWithApiKey}
+          onRetry={mediaReadiness.retry}
+        />
       </OptionLayout>
     )
   }
 
   return (
     <OptionLayout>
+      {showFirstSourcePrompt ? (
+        <FirstSourceMilestonePrompt
+          readinessStatus={firstSourcePromptStatus}
+          lastSourceLabel={firstSourceRunSummary?.primarySourceLabel}
+          errorMessage={firstSourceRunSummary?.errorMessage}
+          onAddSource={(kind) => {
+            setLastFirstSourceKind(kind)
+            openFirstSourceQuickIngest(kind)
+          }}
+          onRetry={() =>
+            openFirstSourceQuickIngest(
+              firstSourceSession?.firstSourceAddMode ??
+                (isFirstSourceQuickIngestKind(firstSourceOpenDetail?.firstSourceKind)
+                  ? firstSourceOpenDetail.firstSourceKind
+                  : null) ??
+                lastFirstSourceKind
+            )
+          }
+          onAskAboutSource={
+            firstSourceMediaId && firstSourceAskReady
+              ? () =>
+                  discussFirstSource({
+                    mediaId: firstSourceMediaId,
+                    title: firstSourceRunSummary?.primarySourceLabel ?? null
+                  })
+              : undefined
+          }
+          starterQuestions={
+            firstSourceAskReady
+              ? [...FIRST_SOURCE_STARTER_QUESTIONS]
+              : []
+          }
+          onAskStarterQuestion={
+            firstSourceMediaId && firstSourceAskReady
+              ? (question) =>
+                  discussFirstSource({
+                    mediaId: firstSourceMediaId,
+                    title: firstSourceRunSummary?.primarySourceLabel ?? null,
+                    question
+                  })
+              : undefined
+          }
+          onDismiss={dismissFirstSourcePrompt}
+        />
+      ) : null}
       <React.Suspense
         fallback={
           <PageAssistLoader

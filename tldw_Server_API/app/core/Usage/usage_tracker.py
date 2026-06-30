@@ -10,11 +10,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import json
 import os
 import time
 from datetime import date, datetime, timezone
 from sqlite3 import Error as SQLiteError
-from typing import Any
+from typing import Any, Mapping
 
 from loguru import logger
 
@@ -24,6 +25,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.Metrics import increment_counter
 
+from .llm_usage_normalizer import normalize_llm_usage
 from .pricing_catalog import get_pricing_catalog
 
 try:  # pragma: no cover - ledger optional during upgrades/tests
@@ -49,6 +51,11 @@ _tokens_daily_ledger_lock = asyncio.Lock()
 _tokens_legacy_backfill_done: set[str] = set()
 
 
+def _safe_exception_type(exc: BaseException) -> str:
+    """Return a log-safe exception type label without exception details."""
+    return type(exc).__name__
+
+
 async def _get_tokens_daily_ledger() -> ResourceDailyLedger | None:
     global _tokens_daily_ledger
     if ResourceDailyLedger is None or LedgerEntry is None:
@@ -63,8 +70,8 @@ async def _get_tokens_daily_ledger() -> ResourceDailyLedger | None:
             await ledger.initialize()
             _tokens_daily_ledger = ledger
             return ledger
-        except _USAGE_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive
-            logger.debug(f"LLM usage: ResourceDailyLedger init failed; tokens/day caps disabled: {exc}")
+        except _USAGE_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - defensive
+            logger.debug("LLM usage ResourceDailyLedger init failed; tokens/day caps disabled")
             _tokens_daily_ledger = None
             return None
 
@@ -225,15 +232,45 @@ def _apply_pii_settings_to_meta(
     return ip_out, ""
 
 
-def compute_costs(provider: str, model: str, prompt_tokens: int, completion_tokens: int) -> tuple[float, float, float, bool]:
+def compute_costs(
+    provider: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    *,
+    cache_read_input_tokens: int = 0,
+    cache_write_input_tokens: int = 0,
+    billable_input_tokens: int | None = None,
+) -> tuple[float, float, float, bool]:
     """
     Compute (prompt_cost, completion_cost, total_cost, estimated)
     given provider, model and token counts.
     """
     catalog = get_pricing_catalog()
-    in_per_1k, out_per_1k, est = catalog.get_rates(provider, model)
-    prompt_cost = (max(0, prompt_tokens) / 1000.0) * in_per_1k
-    completion_cost = (max(0, completion_tokens) / 1000.0) * out_per_1k
+    rates, est = catalog.get_rate_details(provider, model)
+    in_per_1k = rates["prompt"]
+    out_per_1k = rates["completion"]
+    prompt_total = max(0, int(prompt_tokens or 0))
+    completion_total = max(0, int(completion_tokens or 0))
+    cache_read = min(max(0, int(cache_read_input_tokens or 0)), prompt_total)
+    cache_write = min(max(0, int(cache_write_input_tokens or 0)), max(0, prompt_total - cache_read))
+
+    if "cache_read" not in rates and "cache_write" not in rates:
+        prompt_cost = (prompt_total / 1000.0) * in_per_1k
+    else:
+        if billable_input_tokens is None:
+            normal_input = max(0, prompt_total - cache_read - cache_write)
+        else:
+            max_normal_input = max(0, prompt_total - cache_read - cache_write)
+            normal_input = min(max(0, int(billable_input_tokens or 0)), max_normal_input)
+        cache_read_rate = rates.get("cache_read", in_per_1k)
+        cache_write_rate = rates.get("cache_write", in_per_1k)
+        prompt_cost = (
+            (normal_input / 1000.0) * in_per_1k
+            + (cache_read / 1000.0) * cache_read_rate
+            + (cache_write / 1000.0) * cache_write_rate
+        )
+    completion_cost = (completion_total / 1000.0) * out_per_1k
     total_cost = prompt_cost + completion_cost
     return prompt_cost, completion_cost, total_cost, est
 
@@ -259,6 +296,12 @@ async def log_llm_usage(
     user_agent: str | None = None,
     token_name: str | None = None,
     conversation_id: str | None = None,
+    usage_metadata: Mapping[str, Any] | None = None,
+    choice_count: int | None = None,
+    estimate_source: str | None = None,
+    prompt_fingerprint: str | None = None,
+    prompt_fingerprint_version: str | None = None,
+    world_book_fingerprint: str | None = None,
 ) -> None:
     """
     Insert a single llm_usage_log row. Computes costs if needed.
@@ -272,10 +315,40 @@ async def log_llm_usage(
         pt = int(prompt_tokens or 0)
         ct = int(completion_tokens or 0)
         tt = int(total_tokens) if total_tokens is not None else pt + ct
+        resolved_estimate_source = estimate_source
+        if resolved_estimate_source is None:
+            resolved_estimate_source = "provider_usage" if usage_metadata is not None else "missing_usage"
+        # Normalize provider cache/cost metadata without changing the legacy
+        # prompt/completion/total token columns used by existing callers.
+        normalized_usage = normalize_llm_usage(
+            provider=provider,
+            usage=usage_metadata,
+            prompt_tokens=pt,
+            completion_tokens=ct,
+            total_tokens=tt,
+            choice_count=choice_count,
+            estimate_source=resolved_estimate_source,
+        )
+        raw_usage_metadata_json = None
+        if usage_metadata is not None:
+            raw_usage_metadata_json = json.dumps(
+                dict(normalized_usage.raw_usage_metadata),
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
 
-        p_cost, c_cost, t_cost, est_flag = compute_costs(provider, model, pt, ct)
+        p_cost, c_cost, t_cost, est_flag = compute_costs(
+            provider,
+            model,
+            pt,
+            ct,
+            cache_read_input_tokens=normalized_usage.cache_read_input_tokens,
+            cache_write_input_tokens=normalized_usage.cache_write_input_tokens,
+            billable_input_tokens=normalized_usage.billable_input_tokens,
+        )
         if estimated is None:
-            estimated = est_flag
+            estimated = est_flag or normalized_usage.estimate_source != "provider_usage"
 
         settings = get_settings()
         effective_remote_ip = remote_ip
@@ -298,17 +371,8 @@ async def log_llm_usage(
                 float(t_cost),
                 labels={"provider": str(provider or "unknown"), "model": str(model or "unknown")},
             )
-            # Per-user and per-operation breakdowns
-            if user_id is not None:
-                increment_counter(
-                    "llm_cost_dollars_by_user",
-                    float(t_cost),
-                    labels={
-                        "provider": str(provider or "unknown"),
-                        "model": str(model or "unknown"),
-                        "user_id": str(user_id),
-                    },
-                )
+            # Per-operation breakdowns are low-cardinality enough for metrics;
+            # user-level usage remains available in the durable usage log.
             if operation:
                 increment_counter(
                     "llm_cost_dollars_by_operation",
@@ -325,17 +389,6 @@ async def log_llm_usage(
                     float(pt),
                     labels={"provider": str(provider or "unknown"), "model": str(model or "unknown"), "type": "prompt"},
                 )
-                if user_id is not None:
-                    increment_counter(
-                        "llm_tokens_used_total_by_user",
-                        float(pt),
-                        labels={
-                            "provider": str(provider or "unknown"),
-                            "model": str(model or "unknown"),
-                            "type": "prompt",
-                            "user_id": str(user_id),
-                        },
-                    )
                 if operation:
                     increment_counter(
                         "llm_tokens_used_total_by_operation",
@@ -353,17 +406,6 @@ async def log_llm_usage(
                     float(ct),
                     labels={"provider": str(provider or "unknown"), "model": str(model or "unknown"), "type": "completion"},
                 )
-                if user_id is not None:
-                    increment_counter(
-                        "llm_tokens_used_total_by_user",
-                        float(ct),
-                        labels={
-                            "provider": str(provider or "unknown"),
-                            "model": str(model or "unknown"),
-                            "type": "completion",
-                            "user_id": str(user_id),
-                        },
-                    )
                 if operation:
                     increment_counter(
                         "llm_tokens_used_total_by_operation",
@@ -375,9 +417,11 @@ async def log_llm_usage(
                             "operation": str(operation or ""),
                         },
                     )
-        except _USAGE_NONCRITICAL_EXCEPTIONS:
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
             # Metrics must never impact request flow
-            pass
+            logger.debug(f"LLM usage metrics update skipped/failed; exception_type={_safe_exception_type(exc)}")
 
         db_pool: DatabasePool = await get_db_pool()
         repo = AuthnzUsageRepo(db_pool)
@@ -385,7 +429,8 @@ async def log_llm_usage(
         try:
             if not effective_token_name and key_id is not None:
                 effective_token_name = await repo.get_api_key_name(key_id=int(key_id))
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"LLM usage API key name lookup skipped/failed; exception_type={_safe_exception_type(exc)}")
             effective_token_name = token_name
         await repo.insert_llm_usage_log(
             user_id=user_id,
@@ -409,6 +454,17 @@ async def log_llm_usage(
             user_agent=effective_user_agent,
             token_name=effective_token_name,
             conversation_id=(str(conversation_id).strip() if conversation_id is not None else None),
+            cached_input_tokens=normalized_usage.cached_input_tokens,
+            cache_write_input_tokens=normalized_usage.cache_write_input_tokens,
+            cache_read_input_tokens=normalized_usage.cache_read_input_tokens,
+            billable_input_tokens=normalized_usage.billable_input_tokens,
+            reasoning_tokens=normalized_usage.reasoning_tokens,
+            choice_count=normalized_usage.choice_count,
+            estimate_source=normalized_usage.estimate_source,
+            prompt_fingerprint=prompt_fingerprint,
+            prompt_fingerprint_version=prompt_fingerprint_version,
+            world_book_fingerprint=world_book_fingerprint,
+            raw_usage_metadata_json=raw_usage_metadata_json,
         )
 
         # Shadow-write daily token usage into the shared ResourceDailyLedger so
@@ -445,9 +501,13 @@ async def log_llm_usage(
                             occurred_at=datetime.now(timezone.utc),
                         )
                         await ledger.add(entry)
-        except _USAGE_NONCRITICAL_EXCEPTIONS:
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
             # Ledger writes must never affect request flow
-            pass
-    except _USAGE_NONCRITICAL_EXCEPTIONS as e:
+            logger.debug(f"LLM usage daily ledger write skipped/failed; exception_type={_safe_exception_type(exc)}")
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
         # Never break request processing due to logging errors
-        logger.debug(f"LLM usage logging skipped/failed: {e}")
+        logger.debug(f"LLM usage logging skipped/failed; exception_type={_safe_exception_type(exc)}")

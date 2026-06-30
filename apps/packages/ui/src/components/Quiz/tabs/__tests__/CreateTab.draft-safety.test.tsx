@@ -108,8 +108,9 @@ describe("CreateTab draft safety", () => {
   })
 
   it("shows storage warning when draft autosave cannot write", async () => {
+    const storagePrototype = Object.getPrototypeOf(window.localStorage)
     const setItemSpy = vi
-      .spyOn(Storage.prototype, "setItem")
+      .spyOn(storagePrototype, "setItem")
       .mockImplementation(() => {
         throw new Error("storage unavailable")
       })

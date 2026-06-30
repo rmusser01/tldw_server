@@ -27,10 +27,25 @@ const STREAM_RUNTIME_PING_TIMEOUT_MS = 400
 const STREAM_RUNTIME_HEALTH_TTL_MS = 30_000
 const STREAM_QUEUE_DRAIN_BATCH_LIMIT = 32
 const STREAM_QUEUE_DRAIN_SLICE_MS = 12
+const SAFE_RUNTIME_MESSAGE_TIMEOUT_MS = 3_000
+const UNSAFE_RUNTIME_MESSAGE_TIMEOUT_FLOOR_MS = 5_000
+const DEFAULT_UNSAFE_RUNTIME_MESSAGE_TIMEOUT_MS = 10_000
 const ABSOLUTE_URL_BLOCK_ERROR =
   "Direct stream fallback is allowed only for allowlisted absolute URLs."
 const BACKEND_UNREACHABLE_PATTERN =
   /(networkerror|failed to fetch|network error|load failed|err_connection|could not establish connection|receiving end does not exist)/i
+const WORKSPACE_MIGRATION_CHUNK_PATH_PATTERN =
+  /\/api\/v1\/workspaces\/migrations\/[^/?#]+\/chunks\/[^/?#]+/
+const WORKSPACE_CONTEXT_REFRESH_PATH_PATTERN =
+  /\/api\/v1\/workspaces\/(?!migrations(?:\/|$))[^/?#]+\/(?:context|sources)(?:[?#]|$)/
+const WORKSPACE_UPSERT_RECONCILE_PATH_PATTERN =
+  /\/api\/v1\/workspaces\/(?!migrations(?:[/?#]|$))[^/?#]+(?:[?#]|$)/
+const RESEARCH_WORKSPACE_CHAT_COMMANDS_BOOTSTRAP_PATH_PATTERN =
+  /\/api\/v1\/chat\/commands(?:[?#]|$)/
+const OPTIONAL_AUDIO_VOICE_BOOTSTRAP_PATH_PATTERN =
+  /\/api\/v1\/audio\/voices(?:\/catalog)?(?:[?#]|$)/
+const OPTIONAL_INGESTION_SOURCE_CAPABILITIES_PATH_PATTERN =
+  /\/api\/v1\/ingestion-sources\/capabilities(?:[?#]|$)/
 const errorLogHistory = new Map<string, number>()
 let lastBackendUnreachableEventAt = 0
 let lastStreamRuntimeHealthCheckAt = 0
@@ -42,6 +57,9 @@ const normalizeKnownPathQuirks = <P extends PathOrUrl>(rawPath: P): P => {
     .replace("/api/v1/media/?", "/api/v1/media?")
     .replace("/api/v1/files/?", "/api/v1/files?") as P
 }
+
+const isAudioStudioArtifactMediaPath = (path: string): boolean =>
+  /\/api\/v1\/audio-studio\/projects\/[^/?#]+\/artifacts\/[^/?#]+\/media(?:[?#]|$)/.test(path)
 
 const parseHttpOrigin = (value: unknown): string | null => {
   const raw = String(value || "").trim()
@@ -250,6 +268,33 @@ const isSafeFallbackMethod = (method: unknown): boolean => {
   return methodUpper === "GET" || methodUpper === "HEAD" || methodUpper === "OPTIONS"
 }
 
+const resolveRuntimeMessageTimeoutMs = (
+  method: unknown,
+  override?: number
+): number => {
+  if (isSafeFallbackMethod(method)) return SAFE_RUNTIME_MESSAGE_TIMEOUT_MS
+  const configured = Number(override)
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.max(UNSAFE_RUNTIME_MESSAGE_TIMEOUT_FLOOR_MS, configured)
+  }
+  return DEFAULT_UNSAFE_RUNTIME_MESSAGE_TIMEOUT_MS
+}
+
+const isIdempotentWriteFallbackAllowed = (
+  method: unknown,
+  path: unknown,
+  body: unknown
+): boolean => {
+  if (isSafeFallbackMethod(method)) return false
+  if (String(method || "GET").toUpperCase() !== "POST") return false
+  const normalizedPath = String(path || "")
+    .split("?")[0]
+    .replace(/\/+$/, "")
+  if (normalizedPath !== "/api/v1/web-clipper/save") return false
+  const clipId = (body as { clip_id?: unknown } | null)?.clip_id
+  return typeof clipId === "string" && clipId.trim().length > 0
+}
+
 const isExtensionTransportFailure = (error: unknown): boolean => {
   if (isNoFallbackError(error)) return false
   const message =
@@ -302,6 +347,20 @@ const shouldNotifyBackendUnavailable = (entry: {
   const path = String(entry.path || "")
   // Restrict notifications to API requests only.
   if (!path.includes("/api/")) return false
+  if (WORKSPACE_MIGRATION_CHUNK_PATH_PATTERN.test(path)) return false
+  const method = String(entry.method || "GET").toUpperCase()
+  if (
+    (method === "GET" && WORKSPACE_CONTEXT_REFRESH_PATH_PATTERN.test(path)) ||
+    (method === "GET" &&
+      RESEARCH_WORKSPACE_CHAT_COMMANDS_BOOTSTRAP_PATH_PATTERN.test(path)) ||
+    (method === "GET" &&
+      OPTIONAL_AUDIO_VOICE_BOOTSTRAP_PATH_PATTERN.test(path)) ||
+    (method === "GET" &&
+      OPTIONAL_INGESTION_SOURCE_CAPABILITIES_PATH_PATTERN.test(path)) ||
+    (method === "PUT" && WORKSPACE_UPSERT_RECONCILE_PATH_PATTERN.test(path))
+  ) {
+    return false
+  }
   if (entry.status === 0) return true
   return BACKEND_UNREACHABLE_PATTERN.test(String(entry.error || ""))
 }
@@ -356,9 +415,74 @@ export interface BgRequestInit<
   responseType?: "json" | "text" | "arrayBuffer"
   returnResponse?: boolean
   preferDirect?: boolean
+  suppressBackendUnavailableEvent?: boolean
 }
 
+// In-flight coalescing for idempotent GET requests: when several callers issue
+// the same GET concurrently (a common pattern when many components mount on a
+// page load and each fetches the same resource), share a single network request
+// instead of firing N identical ones. Only concurrent requests are shared — once
+// the promise settles it is removed, so caching/staleness semantics are unchanged.
+const inFlightGetRequests = new Map<string, Promise<unknown>>()
+
 export async function bgRequest<
+  T = any,
+  P extends PathOrUrl = AllowedPath,
+  M extends AllowedMethodFor<P> = AllowedMethodFor<P>
+>(init: BgRequestInit<P, M>): Promise<T> {
+  const method = String(init.method || "GET").toUpperCase()
+  const coalescable =
+    method === "GET" &&
+    !init.body &&
+    !init.abortSignal &&
+    !init.returnResponse &&
+    !init.responseType &&
+    !init.preferDirect &&
+    !init.suppressBackendUnavailableEvent
+  if (!coalescable) {
+    return bgRequestImpl<T, P, M>(init)
+  }
+  // Header keys are case-insensitive and object key order is not meaningful, so
+  // normalize (lowercase + sort) for a stable key. Keep timeoutMs in the key so
+  // GETs with different timeouts are not merged, and preserve the distinction
+  // between "noAuth omitted" and "noAuth: false" (bgRequestImpl uses
+  // hasOwnProperty(noAuth) to decide cross-origin auth suppression).
+  const initHeaders = init.headers as Record<string, string> | undefined
+  const normalizedHeaders = initHeaders
+    ? Object.keys(initHeaders)
+        .sort()
+        .reduce<Record<string, string>>((acc, headerKey) => {
+          acc[headerKey.toLowerCase()] = initHeaders[headerKey]
+          return acc
+        }, {})
+    : null
+  const key = JSON.stringify({
+    p: String(init.path),
+    h: normalizedHeaders,
+    noAuth: Object.prototype.hasOwnProperty.call(init, "noAuth")
+      ? Boolean(init.noAuth)
+      : "__unset__",
+    suppressBackendUnavailableEvent: Boolean(
+      init.suppressBackendUnavailableEvent
+    ),
+    timeoutMs: typeof init.timeoutMs === "number" ? init.timeoutMs : null
+  })
+  const existing = inFlightGetRequests.get(key)
+  if (existing) {
+    return existing as Promise<T>
+  }
+  const promise = bgRequestImpl<T, P, M>(init).finally(() => {
+    // Only clear the entry if it is still the promise we created — defensive in
+    // case the map handling changes to allow overwrites in the future.
+    if (inFlightGetRequests.get(key) === promise) {
+      inFlightGetRequests.delete(key)
+    }
+  })
+  inFlightGetRequests.set(key, promise)
+  return promise as Promise<T>
+}
+
+async function bgRequestImpl<
   T = any,
   P extends PathOrUrl = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
@@ -373,7 +497,8 @@ export async function bgRequest<
     abortSignal,
     responseType,
     returnResponse,
-    preferDirect = false
+    preferDirect = false,
+    suppressBackendUnavailableEvent = false
   } = init
   const path = normalizeKnownPathQuirks(rawPath)
   const isAbsoluteUrl = typeof path === "string" && /^https?:/i.test(path)
@@ -433,7 +558,8 @@ export async function bgRequest<
   const shouldBypassBackground =
     responseType === "arrayBuffer" &&
     typeof path === "string" &&
-    path.includes("/api/v1/audio/")
+    (path.includes("/api/v1/audio/") ||
+      isAudioStudioArtifactMediaPath(path))
   const isArrayBufferLike = (value: unknown): boolean => {
     if (!value) return false
     if (value instanceof ArrayBuffer) return true
@@ -444,10 +570,64 @@ export async function bgRequest<
     if (typeof Blob !== "undefined" && value instanceof Blob) return true
     return false
   }
+  type RuntimeResponsePayload = {
+    ok: boolean
+    error?: string
+    status?: number
+    data?: unknown
+    headers?: Record<string, string>
+  }
+  const requestDirectArrayBufferFallback = async () => {
+    const storage = createSafeStorage()
+    return await tldwRequest(
+      {
+        path,
+        method,
+        headers: resolvedHeaders,
+        body,
+        noAuth: resolvedNoAuth,
+        timeoutMs,
+        abortSignal,
+        responseType
+      },
+      { getConfig: () => storage.get("tldwConfig").catch(() => null) }
+    )
+  }
+  const resolveArrayBufferResponse = async (
+    resp: RuntimeResponsePayload
+  ): Promise<T> => {
+    if (!resp?.ok || responseType !== "arrayBuffer" || isArrayBufferLike(resp.data)) {
+      return (returnResponse ? resp : resp.data) as T
+    }
+
+    const fallback = await requestDirectArrayBufferFallback()
+    if (!fallback) {
+      const error = buildRequestError("Request failed: missing fallback response")
+      throw error
+    }
+    if (!fallback.ok && !returnResponse) {
+      const msg = formatErrorMessage(
+        fallback.error,
+        `Request failed: ${fallback.status}`
+      )
+      const error = buildRequestError(msg, fallback.status, fallback.data)
+      throw error
+    }
+    return (returnResponse ? fallback : fallback.data) as T
+  }
   const hasRuntimeMessage =
     !preferDirect &&
     Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
   const methodIsSafeFallback = isSafeFallbackMethod(method)
+  const allowIdempotentWriteFallback = isIdempotentWriteFallbackAllowed(
+    method,
+    path,
+    body
+  )
+  const runtimeMessageTimeoutMs = resolveRuntimeMessageTimeoutMs(
+    method,
+    Number(timeoutMs)
+  )
 
   // Some binary responses do not survive extension message serialization.
   if (shouldBypassBackground) {
@@ -479,13 +659,15 @@ export async function bgRequest<
           error: msg,
           source: "direct"
         })
-        notifyBackendUnavailable({
-          method: String(method),
-          path: String(path),
-          status: resp?.status,
-          error: msg,
-          source: "direct"
-        })
+        if (!suppressBackendUnavailableEvent) {
+          notifyBackendUnavailable({
+            method: String(method),
+            path: String(path),
+            status: resp?.status,
+            error: msg,
+            source: "direct"
+          })
+        }
       }
       const error = buildRequestError(msg, resp?.status, resp?.data)
       if (!returnResponse) {
@@ -513,10 +695,9 @@ export async function bgRequest<
 
       if (!abortSignal) {
         // Add timeout to extension messaging - if service worker doesn't respond, fall back to direct request
-        const extensionTimeout = 3000 // 3 second timeout for extension messaging
         const messagePromiseNoSignal = browser.runtime.sendMessage(payload)
         const timeoutPromiseNoSignal = new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), extensionTimeout)
+          setTimeout(() => resolve(null), runtimeMessageTimeoutMs)
         )
         const resp = await Promise.race([messagePromiseNoSignal, timeoutPromiseNoSignal]) as { ok: boolean; error?: string; status?: number; data: T } | undefined | null
         if (resp === null) {
@@ -542,48 +723,22 @@ export async function bgRequest<
               error: msg,
               source: "background"
             })
-            notifyBackendUnavailable({
-              method: String(method),
-              path: String(path),
-              status: resp?.status,
-              error: msg,
-              source: "background"
-            })
+            if (!suppressBackendUnavailableEvent) {
+              notifyBackendUnavailable({
+                method: String(method),
+                path: String(path),
+                status: resp?.status,
+                error: msg,
+                source: "background"
+              })
+            }
           }
           const error = buildRequestError(msg, resp?.status, resp?.data)
           if (!returnResponse) {
             throw markNoFallbackError(error)
           }
         }
-        if (!returnResponse && responseType === "arrayBuffer") {
-          const raw = (resp as any)?.data
-          if (!isArrayBufferLike(raw)) {
-            const storage = createSafeStorage()
-            const fallback = await tldwRequest(
-              {
-                path,
-                method,
-                headers: resolvedHeaders,
-                body,
-                noAuth: resolvedNoAuth,
-                timeoutMs,
-                abortSignal,
-                responseType
-              },
-              { getConfig: () => storage.get("tldwConfig").catch(() => null) }
-            )
-            if (!fallback?.ok) {
-              const msg = formatErrorMessage(
-                fallback?.error,
-                `Request failed: ${fallback?.status}`
-              )
-              const error = buildRequestError(msg, fallback?.status, fallback?.data)
-              throw error
-            }
-            return fallback.data as T
-          }
-        }
-        return (returnResponse ? resp : resp.data) as T
+        return await resolveArrayBufferResponse(resp as RuntimeResponsePayload)
       }
 
       if (abortSignal.aborted) {
@@ -595,7 +750,6 @@ export async function bgRequest<
       >
 
       // Add timeout to extension messaging with abort signal support
-      const extensionTimeoutWithSignal = 3000 // 3 second timeout
       const resp = await new Promise<
         { ok: boolean; error?: string; status?: number; data: T } | undefined | null
       >((resolve, reject) => {
@@ -605,7 +759,7 @@ export async function bgRequest<
         const timeoutId = setTimeout(() => {
           abortSignal.removeEventListener('abort', onAbort)
           resolve(null) // timeout - fall through to direct request
-        }, extensionTimeoutWithSignal)
+        }, runtimeMessageTimeoutMs)
         abortSignal.addEventListener('abort', onAbort, { once: true })
         messagePromise
           .then((r) => {
@@ -643,53 +797,31 @@ export async function bgRequest<
             error: msg,
             source: "background"
           })
-          notifyBackendUnavailable({
-            method: String(method),
-            path: String(path),
-            status: resp?.status,
-            error: msg,
-            source: "background"
-          })
+          if (!suppressBackendUnavailableEvent) {
+            notifyBackendUnavailable({
+              method: String(method),
+              path: String(path),
+              status: resp?.status,
+              error: msg,
+              source: "background"
+            })
+          }
         }
         const error = buildRequestError(msg, resp?.status, resp?.data)
         if (!returnResponse) {
           throw markNoFallbackError(error)
         }
       }
-      if (!returnResponse && responseType === "arrayBuffer") {
-        const raw = (resp as any)?.data
-        if (!isArrayBufferLike(raw)) {
-          const storage = createSafeStorage()
-          const fallback = await tldwRequest(
-            {
-              path,
-              method,
-              headers: resolvedHeaders,
-              body,
-              noAuth: resolvedNoAuth,
-              timeoutMs,
-              abortSignal,
-              responseType
-            },
-            { getConfig: () => storage.get("tldwConfig").catch(() => null) }
-          )
-          if (!fallback?.ok) {
-            const msg = formatErrorMessage(
-              fallback?.error,
-              `Request failed: ${fallback?.status}`
-            )
-            const error = buildRequestError(msg, fallback?.status, fallback?.data)
-            throw error
-          }
-          return fallback.data as T
-        }
-      }
-      return (returnResponse ? resp : resp.data) as T
+      return await resolveArrayBufferResponse(resp as RuntimeResponsePayload)
     }
   } catch (e) {
     if (isNoFallbackError(e)) {
-      if (isExtensionTimeoutError(e) && methodIsSafeFallback) {
-        // Safe methods can fall through on timeout because duplicate side-effects are not expected.
+      if (
+        isExtensionTimeoutError(e) &&
+        (methodIsSafeFallback || allowIdempotentWriteFallback)
+      ) {
+        // Safe methods and explicitly idempotent write endpoints can fall
+        // through when extension messaging itself times out.
       } else {
         throw e
       }
@@ -727,13 +859,15 @@ export async function bgRequest<
         error: msg,
         source: "direct"
       })
-      notifyBackendUnavailable({
-        method: String(method),
-        path: String(path),
-        status: resp?.status,
-        error: msg,
-        source: "direct"
-      })
+      if (!suppressBackendUnavailableEvent) {
+        notifyBackendUnavailable({
+          method: String(method),
+          path: String(path),
+          status: resp?.status,
+          error: msg,
+          source: "direct"
+        })
+      }
     }
     const error = buildRequestError(msg, resp?.status, resp?.data)
     if (!returnResponse) {
@@ -1226,17 +1360,26 @@ export async function* bgStream<
   }
 }
 
+export type BgUploadFile = {
+  fieldName?: string
+  name?: string
+  type?: string
+  data: ArrayBuffer | Uint8Array | number[]
+}
+
 export interface BgUploadInit<P extends AllowedPath = AllowedPath, M extends AllowedMethodFor<P> = AllowedMethodFor<P>> {
   path: P
   method?: UpperLower<M>
   // key/value fields to include alongside file in FormData
   fields?: Record<string, any>
   // File payload as raw bytes with metadata (structured-cloneable)
-  file?: { name?: string; type?: string; data: ArrayBuffer | Uint8Array | number[] }
+  file?: Omit<BgUploadFile, "fieldName">
+  files?: BgUploadFile[]
   // Optional override for the multipart file field name
   fileFieldName?: string
   // Optional timeout override for upload requests
   timeoutMs?: number
+  responseType?: "json" | "text" | "arrayBuffer"
   preferDirect?: boolean
 }
 
@@ -1246,8 +1389,10 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
     method = 'POST' as UpperLower<M>,
     fields = {},
     file,
+    files,
     fileFieldName,
     timeoutMs,
+    responseType,
     preferDirect = false
   }: BgUploadInit<P, M>
 ): Promise<T> {
@@ -1262,7 +1407,7 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
       const uploadTimeout = Math.max(5000, resolvedTimeout)
       const uploadPromise = browser.runtime.sendMessage({
         type: 'tldw:upload',
-        payload: { path, method, fields, file, fileFieldName, timeoutMs: resolvedTimeout }
+        payload: { path, method, fields, file, files, fileFieldName, timeoutMs: resolvedTimeout, responseType }
       })
       const uploadTimeoutPromise = new Promise<null>((resolve) =>
         setTimeout(() => resolve(null), uploadTimeout)
@@ -1312,15 +1457,19 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
       formData.append(key, String(value))
     }
   })
-  if (file) {
-    const name = file.name || "file"
-    const type = file.type || "application/octet-stream"
+  const appendFile = (
+    item: BgUploadFile,
+    fieldName: string,
+    { appendLegacyFileAlias = false }: { appendLegacyFileAlias?: boolean } = {}
+  ) => {
+    const name = item.name || "file"
+    const type = item.type || "application/octet-stream"
     const toBytes = (data: ArrayBuffer | Uint8Array | number[]) => {
       if (data instanceof Uint8Array) return data
       if (data instanceof ArrayBuffer) return new Uint8Array(data)
       return Uint8Array.from(data)
     }
-    const bytes = toBytes(file.data)
+    const bytes = toBytes(item.data)
     if (typeof Blob === "undefined") {
       throw new Error("File upload is not supported in this environment.")
     }
@@ -1330,12 +1479,30 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
         ? buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
         : new Uint8Array(bytes).buffer
     const blob = new Blob([slice], { type })
-    formData.append(fileFieldName || "file", blob, name)
+    formData.append(fieldName, blob, name)
+    if (appendLegacyFileAlias && fieldName !== "file") {
+      formData.append("file", blob, name)
+    }
+  }
+  if (Array.isArray(files) && files.length > 0) {
+    files.forEach((item) => {
+      appendFile(item, item.fieldName || "files")
+    })
+  } else if (file) {
+    const legacyFieldName = fileFieldName || "files"
+    appendFile(
+      {
+        ...file,
+        fieldName: legacyFieldName
+      },
+      legacyFieldName,
+      { appendLegacyFileAlias: !fileFieldName }
+    )
   }
 
   const storage = createSafeStorage()
   const resp = await tldwRequest(
-    { path, method, body: formData, timeoutMs },
+    { path, method, body: formData, timeoutMs, responseType },
     { getConfig: () => storage.get("tldwConfig").catch(() => null) }
   )
   if (!resp?.ok) {

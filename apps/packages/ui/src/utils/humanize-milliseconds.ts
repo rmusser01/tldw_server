@@ -1,30 +1,24 @@
-import dayjs from 'dayjs'
-import duration from 'dayjs/plugin/duration'
-
-dayjs.extend(duration)
+const MILLISECONDS_PER_SECOND = 1000
+const MILLISECONDS_PER_MINUTE = 60 * MILLISECONDS_PER_SECOND
+const MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE
+const MILLISECONDS_PER_DAY = 24 * MILLISECONDS_PER_HOUR
 
 export const humanizeMilliseconds = (milliseconds: number): string => {
-    try {
-        const duration = dayjs.duration(milliseconds)
-
-        if (milliseconds < 1000) {
-            return `${milliseconds}ms`
-        }
-
-        if (milliseconds < 60000) {
-            return `${Math.floor(duration.asSeconds())}s`
-        }
-
-        if (milliseconds < 3600000) {
-            return `${Math.floor(duration.asMinutes())}m`
-        }
-
-        if (milliseconds < 86400000) {
-            return `${Math.floor(duration.asHours())}h`
-        }
-
-        return `${Math.floor(duration.asDays())}d`
-    } catch (e) {
+    if (milliseconds < MILLISECONDS_PER_SECOND) {
         return `${milliseconds}ms`
     }
+
+    if (milliseconds < MILLISECONDS_PER_MINUTE) {
+        return `${Math.floor(milliseconds / MILLISECONDS_PER_SECOND)}s`
+    }
+
+    if (milliseconds < MILLISECONDS_PER_HOUR) {
+        return `${Math.floor(milliseconds / MILLISECONDS_PER_MINUTE)}m`
+    }
+
+    if (milliseconds < MILLISECONDS_PER_DAY) {
+        return `${Math.floor(milliseconds / MILLISECONDS_PER_HOUR)}h`
+    }
+
+    return `${Math.floor(milliseconds / MILLISECONDS_PER_DAY)}d`
 }

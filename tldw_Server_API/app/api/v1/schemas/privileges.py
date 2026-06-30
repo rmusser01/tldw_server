@@ -5,6 +5,8 @@ from typing import Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
+
 
 class PrivilegeBucket(BaseModel):
     key: str
@@ -56,6 +58,7 @@ class PrivilegeDetailResponse(BaseModel):
     page: int
     page_size: int
     total_items: int
+    pagination: PagePaginationMeta
     items: list[PrivilegeDetailItem]
     recommended_actions: list[PrivilegeRecommendedAction] | None = None
 
@@ -87,6 +90,7 @@ class PrivilegeSnapshotListResponse(BaseModel):
     page: int
     page_size: int
     total_items: int
+    pagination: PagePaginationMeta
     items: list[PrivilegeSnapshotListItem]
     filters: dict[str, Any] = Field(default_factory=dict)
 
@@ -186,6 +190,7 @@ class PrivilegeSnapshotDetailMatrix(BaseModel):
     page: int
     page_size: int
     total_items: int
+    pagination: PagePaginationMeta
     items: list[PrivilegeSnapshotDetailItem]
 
 

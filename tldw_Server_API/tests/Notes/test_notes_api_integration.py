@@ -133,6 +133,10 @@ def reset_db_mock_calls():
     mock_chacha_db_instance.list_notes.side_effect = None
     mock_chacha_db_instance.search_notes.side_effect = None
     mock_chacha_db_instance.search_notes_with_keywords.side_effect = None
+    mock_chacha_db_instance.count_notes_matching.side_effect = None
+    mock_chacha_db_instance.count_notes_matching.return_value = 0
+    mock_chacha_db_instance.count_notes_matching_keywords.side_effect = None
+    mock_chacha_db_instance.count_notes_matching_keywords.return_value = 0
     mock_chacha_db_instance.add_keyword.side_effect = None
     mock_chacha_db_instance.get_keyword_by_text.side_effect = None
     mock_chacha_db_instance.get_keyword_by_text.return_value = None
@@ -527,6 +531,7 @@ def test_list_notes(client: TestClient):
                                 expected_db_client_id)
     ]
     mock_chacha_db_instance.list_notes.return_value = mock_notes_data
+    mock_chacha_db_instance.count_notes.return_value = len(mock_notes_data)
     response = client.get("/api/v1/notes/?limit=10&offset=0")
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -780,13 +785,17 @@ def test_search_notes(client: TestClient):
             expected_db_client_id
         )
     ]
+    mock_chacha_db_instance.count_notes_matching.return_value = 1
     response = client.get(f"/api/v1/notes/search/?query={query_term}&limit=5")
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert len(data) == 1
-    assert data[0]["title"] == "Important Note"
-    assert data[0]["content"] == "This content is important."
+    assert data["count"] == 1
+    assert data["total"] == 1
+    assert data["pagination"]["total"] == 1
+    assert data["notes"][0]["title"] == "Important Note"
+    assert data["notes"][0]["content"] == "This content is important."
     mock_chacha_db_instance.search_notes.assert_called_once_with(search_term=query_term, limit=5, offset=0)
+    mock_chacha_db_instance.count_notes_matching.assert_called_once_with(query_term)
 
 
 def test_search_notes_without_trailing_slash(client: TestClient):
@@ -798,12 +807,16 @@ def test_search_notes_without_trailing_slash(client: TestClient):
             expected_db_client_id
         )
     ]
+    mock_chacha_db_instance.count_notes_matching.return_value = 1
     response = client.get(f"/api/v1/notes/search?query={query_term}&limit=5")
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert len(data) == 1
-    assert data[0]["id"] == note_id_val
+    assert data["count"] == 1
+    assert data["total"] == 1
+    assert data["pagination"]["total"] == 1
+    assert data["notes"][0]["id"] == note_id_val
     mock_chacha_db_instance.search_notes.assert_called_once_with(search_term=query_term, limit=5, offset=0)
+    mock_chacha_db_instance.count_notes_matching.assert_called_once_with(query_term)
 
 
 def test_search_notes_with_keyword_tokens(client: TestClient):
@@ -815,18 +828,25 @@ def test_search_notes_with_keyword_tokens(client: TestClient):
             expected_db_client_id
         )
     ]
+    mock_chacha_db_instance.count_notes_matching_keywords.return_value = 1
     response = client.get(
         "/api/v1/notes/search/?query=important&tokens=mindmap&tokens=project&limit=5"
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
-    assert len(data) == 1
-    assert data[0]["id"] == note_id_val
+    assert data["count"] == 1
+    assert data["total"] == 1
+    assert data["pagination"]["total"] == 1
+    assert data["notes"][0]["id"] == note_id_val
     mock_chacha_db_instance.search_notes_with_keywords.assert_called_once_with(
         search_term=query_term,
         keyword_tokens=["mindmap", "project"],
         limit=5,
         offset=0
+    )
+    mock_chacha_db_instance.count_notes_matching_keywords.assert_called_once_with(
+        search_term=query_term,
+        keyword_tokens=["mindmap", "project"],
     )
 
 
@@ -845,6 +865,14 @@ def test_export_notes_route_not_shadowed(client: TestClient):
     data = response.json()
     assert data["count"] == 1
     assert data["notes"][0]["id"] == note_id_val
+    assert data["pagination"] == {
+        "mode": "offset",
+        "limit": 1000,
+        "offset": 0,
+        "total": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
     mock_chacha_db_instance.list_notes.assert_called_once_with(limit=1000, offset=0)
 
 
@@ -1131,6 +1159,7 @@ def test_list_keyword_collections_with_keywords(client: TestClient):
         expected_db_client_id,
     )
     mock_chacha_db_instance.list_keyword_collections.return_value = [collection_row]
+    mock_chacha_db_instance.count_keyword_collections.return_value = 1
     mock_chacha_db_instance.get_keywords_for_collection.return_value = [keyword_row]
 
     response = client.get("/api/v1/notes/collections?include_keywords=true")

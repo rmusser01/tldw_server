@@ -5,7 +5,6 @@
 
 import React, { useEffect } from "react"
 import {
-  Alert,
   Button,
   Card,
   Empty,
@@ -30,6 +29,7 @@ import {
 import { useDatasetsList } from "../hooks/useDatasets"
 import { useEvaluationsStore } from "@/store/evaluations"
 import { CopyButton, CreateEvaluationWizard } from "../components"
+import { EvaluationRecoveryCallout } from "../components/EvaluationRecoveryCallout"
 import type { EvaluationSummary } from "@/services/evaluations"
 
 const { Text } = Typography
@@ -42,6 +42,7 @@ export const EvaluationsTab: React.FC = () => {
   // Store state
   const {
     selectedEvalId,
+    setActiveTab,
     setSelectedEvalId,
     setSelectedRunId,
     editingEvalId,
@@ -61,6 +62,7 @@ export const EvaluationsTab: React.FC = () => {
     regenerateEvalIdempotencyKey
   } = useEvaluationsStore((s) => ({
     selectedEvalId: s.selectedEvalId,
+    setActiveTab: s.setActiveTab,
     setSelectedEvalId: s.setSelectedEvalId,
     setSelectedRunId: s.setSelectedRunId,
     editingEvalId: s.editingEvalId,
@@ -81,9 +83,19 @@ export const EvaluationsTab: React.FC = () => {
   }))
 
   // Queries
-  const { data: evalListResp, isLoading: evalsLoading, isError: evalsError } =
+  const {
+    data: evalListResp,
+    isLoading: evalsLoading,
+    isError: evalsError,
+    error: evalsErrorValue
+  } =
     useEvaluationsList({ limit: 20 })
-  const { data: evalDetailResp, isLoading: evalDetailLoading, isError: evalDetailError } =
+  const {
+    data: evalDetailResp,
+    isLoading: evalDetailLoading,
+    isError: evalDetailError,
+    error: evalDetailErrorValue
+  } =
     useEvaluationDetail(selectedEvalId)
   const { data: evalDefaults } = useEvaluationDefaults()
   const { data: datasetListResp, isLoading: datasetsLoading } = useDatasetsList()
@@ -283,23 +295,31 @@ export const EvaluationsTab: React.FC = () => {
             <Spin />
           </div>
         ) : evalsError || evalListResp?.ok === false ? (
-          <Alert
-            type="error"
+          <EvaluationRecoveryCallout
             title={t("evaluations:loadErrorTitle", {
               defaultValue: "Unable to load evaluations"
             })}
-            description={t("evaluations:loadErrorDescription", {
+            message={t("evaluations:loadErrorDescription", {
               defaultValue:
                 "Check your tldw server connection and API credentials, then try again."
             })}
+            endpoint="/api/v1/evaluations"
+            error={evalsErrorValue}
+            response={evalListResp}
           />
         ) : evaluations.length === 0 ? (
           <Empty
             description={t("evaluations:emptyList", {
               defaultValue:
-                "No evaluations yet. Once you create one, it will appear here."
+                "No evaluations yet. Start with Recipes for guided setup, or create a custom evaluation."
             })}
-          />
+          >
+            <Button type="link" onClick={() => setActiveTab("recipes")}>
+              {t("evaluations:openRecipesCta", {
+                defaultValue: "Open Recipes"
+              })}
+            </Button>
+          </Empty>
         ) : (
           <div className="flex flex-col gap-2">
             {evaluations.map((ev: EvaluationSummary) => (
@@ -387,11 +407,13 @@ export const EvaluationsTab: React.FC = () => {
             <Spin />
           </div>
         ) : evalDetailError || evalDetailResp?.ok === false ? (
-          <Alert
-            type="warning"
+          <EvaluationRecoveryCallout
             title={t("evaluations:detailErrorTitle", {
               defaultValue: "Unable to load evaluation details"
             })}
+            endpoint={`/api/v1/evaluations/${selectedEvalId}`}
+            error={evalDetailErrorValue}
+            response={evalDetailResp}
           />
         ) : evalDetail ? (
           <div className="space-y-2 text-xs">

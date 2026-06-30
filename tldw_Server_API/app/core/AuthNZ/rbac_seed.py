@@ -36,10 +36,15 @@ _BASELINE_PERMISSIONS: Sequence[PermissionDef] = (
     ("users.manage_roles", "Manage user roles", "users"),
     ("claims.review", "Review claims", "claims"),
     ("claims.admin", "Administer claims", "claims"),
+    ("moderation.review.read", "Read moderation review items", "moderation"),
+    ("moderation.review.decide", "Decide moderation review items", "moderation"),
+    ("moderation.review.bulk_decide", "Bulk decide moderation review items", "moderation"),
+    ("moderation.audit.read", "Read moderation review audit events", "moderation"),
 )
 
 _MCP_PERMISSIONS: Sequence[PermissionDef] = (
     ("modules.read", "Read MCP modules", "modules"),
+    ("prompts.read", "Read MCP prompts", "prompts"),
     ("tools.execute:*", "Execute any MCP tool", "tools"),
 )
 
@@ -54,14 +59,26 @@ def _build_role_grants(permission_names: Iterable[str], *, include_mcp_permissio
     grants: dict[str, list[str]] = {
         "user": [p for p in ("media.read", "media.create", "sql.read", "sql.target:media_db") if p in base],
         "viewer": [p for p in ("media.read",) if p in base],
-        "reviewer": [p for p in ("media.read", "claims.review") if p in base],
+        "reviewer": [
+            p
+            for p in (
+                "media.read",
+                "claims.review",
+                "moderation.review.read",
+                "moderation.review.decide",
+                "moderation.review.bulk_decide",
+                "moderation.audit.read",
+            )
+            if p in base
+        ],
         "admin": sorted(base),
     }
 
     if include_mcp_permissions:
-        if "modules.read" in base and "modules.read" not in grants["user"]:
-            grants["user"].append("modules.read")
-        for p in ("modules.read", "tools.execute:*"):
+        for p in ("modules.read", "prompts.read"):
+            if p in base and p not in grants["user"]:
+                grants["user"].append(p)
+        for p in ("modules.read", "prompts.read", "tools.execute:*"):
             if p in base and p not in grants["admin"]:
                 grants["admin"].append(p)
     return grants

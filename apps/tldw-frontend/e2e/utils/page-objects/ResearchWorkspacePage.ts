@@ -1,7 +1,15 @@
 /**
  * Page Object for Research Workspace workflow coverage
  */
-import { type Locator, type Page, expect } from "@playwright/test"
+import {
+  type ConsoleMessage,
+  type Locator,
+  type Page,
+  type Request,
+  type Response,
+  type TestInfo,
+  expect
+} from "@playwright/test"
 import { dispatchKeyboardShortcut, waitForConnection } from "../helpers"
 
 type WorkspaceSeedSource = {
@@ -10,6 +18,143 @@ type WorkspaceSeedSource = {
   type?: "pdf" | "video" | "audio" | "website" | "document" | "text"
   status?: "processing" | "ready" | "error"
   url?: string
+}
+
+export type ResearchWorkspaceUatPersona = "beginner-no-key" | "power-api-key"
+
+export type ResearchWorkspaceRouteTiming = {
+  route: "/research-workspace"
+  url: string
+  startedAt: string
+  completedAt: string
+  durationMs: number
+  navigationDurationMs: number | null
+  domContentLoadedMs: number | null
+  loadEventMs: number | null
+}
+
+export type ResearchWorkspaceUatDiagnosticsSnapshot = {
+  console: Array<{
+    type: string
+    text: string
+    location?: {
+      url: string
+      lineNumber: number
+    }
+  }>
+  pageErrors: Array<{
+    message: string
+    stack?: string
+  }>
+  requestFailures: Array<{
+    url: string
+    method: string
+    errorText: string
+  }>
+  failedResponses: Array<{
+    url: string
+    method: string
+    status: number
+  }>
+}
+
+export type ResearchWorkspaceUatEvidence = {
+  label: string
+  persona: ResearchWorkspaceUatPersona
+  url: string
+  title: string
+  capturedAt: string
+  routeTiming: ResearchWorkspaceRouteTiming
+  warmRouteTiming?: ResearchWorkspaceRouteTiming
+  diagnostics: ResearchWorkspaceUatDiagnosticsSnapshot
+}
+
+export type ResearchWorkspaceUatDiagnosticsRecorder = {
+  snapshot: () => ResearchWorkspaceUatDiagnosticsSnapshot
+  dispose: () => void
+}
+
+const cloneDiagnostics = (
+  data: ResearchWorkspaceUatDiagnosticsSnapshot
+): ResearchWorkspaceUatDiagnosticsSnapshot => ({
+  console: [...data.console],
+  pageErrors: [...data.pageErrors],
+  requestFailures: [...data.requestFailures],
+  failedResponses: [...data.failedResponses]
+})
+
+const sanitizeEvidenceLabel = (label: string): string =>
+  label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "research-workspace-uat"
+
+export function startResearchWorkspaceUatDiagnostics(
+  page: Page
+): ResearchWorkspaceUatDiagnosticsRecorder {
+  const data: ResearchWorkspaceUatDiagnosticsSnapshot = {
+    console: [],
+    pageErrors: [],
+    requestFailures: [],
+    failedResponses: []
+  }
+
+  const onConsole = (message: ConsoleMessage) => {
+    const location = message.location()
+    data.console.push({
+      type: message.type(),
+      text: message.text(),
+      location: location.url
+        ? {
+            url: location.url,
+            lineNumber: location.lineNumber
+          }
+        : undefined
+    })
+  }
+
+  const onPageError = (error: Error) => {
+    data.pageErrors.push({
+      message: error.message,
+      stack: error.stack
+    })
+  }
+
+  const onRequestFailed = (request: Request) => {
+    data.requestFailures.push({
+      url: request.url(),
+      method: request.method(),
+      errorText: request.failure()?.errorText || "request failed"
+    })
+  }
+
+  const onResponse = (response: Response) => {
+    if (response.status() < 400) {
+      return
+    }
+    const request = response.request()
+    data.failedResponses.push({
+      url: response.url(),
+      method: request.method(),
+      status: response.status()
+    })
+  }
+
+  page.on("console", onConsole)
+  page.on("pageerror", onPageError)
+  page.on("requestfailed", onRequestFailed)
+  page.on("response", onResponse)
+
+  return {
+    snapshot: () => cloneDiagnostics(data),
+    dispose: () => {
+      page.off("console", onConsole)
+      page.off("pageerror", onPageError)
+      page.off("requestfailed", onRequestFailed)
+      page.off("response", onResponse)
+    }
+  }
 }
 
 export class ResearchWorkspacePage {
@@ -54,9 +199,22 @@ export class ResearchWorkspacePage {
 
   private async disableNextJsPortalPointerInterception(): Promise<void> {
     await this.page.evaluate(() => {
+      const styleId = "tldw-e2e-disable-nextjs-portal-pointer-events"
+      if (!document.getElementById(styleId)) {
+        const style = document.createElement("style")
+        style.id = styleId
+        style.textContent =
+          "nextjs-portal, nextjs-portal * { pointer-events: none !important; }"
+        document.head.appendChild(style)
+      }
+
       const portals = document.querySelectorAll("nextjs-portal")
       portals.forEach((portal) => {
-        ;(portal as HTMLElement).style.pointerEvents = "none"
+        ;(portal as HTMLElement).style.setProperty(
+          "pointer-events",
+          "none",
+          "important"
+        )
       })
     })
   }
@@ -74,11 +232,30 @@ export class ResearchWorkspacePage {
     await this.disableNextJsPortalPointerInterception()
     try {
       await locator.click({ trial: true, timeout: 3_000 })
-    } catch {
+    } catch (error) {
+      if (String(error).includes("nextjs-portal")) {
+        await this.disableNextJsPortalPointerInterception()
+        await locator.evaluate((node) => {
+          ;(node as HTMLElement).click()
+        })
+        return
+      }
+
       await this.disableNextJsPortalPointerInterception()
       await locator.click({ trial: true, timeout: 3_000 })
     }
-    await locator.click()
+    try {
+      await locator.click({ timeout: 3_000 })
+    } catch (error) {
+      if (!String(error).includes("nextjs-portal")) {
+        throw error
+      }
+
+      await this.disableNextJsPortalPointerInterception()
+      await locator.evaluate((node) => {
+        ;(node as HTMLElement).click()
+      })
+    }
   }
 
   async goto(): Promise<void> {
@@ -87,6 +264,76 @@ export class ResearchWorkspacePage {
     })
     await waitForConnection(this.page).catch(() => {})
     await this.disableNextJsPortalPointerInterception()
+  }
+
+  async gotoWithTiming(): Promise<ResearchWorkspaceRouteTiming> {
+    const startedAtMs = Date.now()
+    const startedAt = new Date(startedAtMs).toISOString()
+    await this.goto()
+    const completedAtMs = Date.now()
+    const browserTiming = await this.page
+      .evaluate(() => {
+        const navigationEntry = performance.getEntriesByType("navigation")[0] as
+          | PerformanceNavigationTiming
+          | undefined
+        if (!navigationEntry) {
+          return null
+        }
+        return {
+          navigationDurationMs: Math.round(navigationEntry.duration),
+          domContentLoadedMs: Math.round(navigationEntry.domContentLoadedEventEnd),
+          loadEventMs:
+            navigationEntry.loadEventEnd > 0
+              ? Math.round(navigationEntry.loadEventEnd)
+              : null
+        }
+      })
+      .catch(() => null)
+
+    return {
+      route: "/research-workspace",
+      url: this.page.url(),
+      startedAt,
+      completedAt: new Date(completedAtMs).toISOString(),
+      durationMs: completedAtMs - startedAtMs,
+      navigationDurationMs: browserTiming?.navigationDurationMs ?? null,
+      domContentLoadedMs: browserTiming?.domContentLoadedMs ?? null,
+      loadEventMs: browserTiming?.loadEventMs ?? null
+    }
+  }
+
+  async captureUatEvidence(
+    label: string,
+    testInfo: TestInfo,
+    options: {
+      persona: ResearchWorkspaceUatPersona
+      routeTiming: ResearchWorkspaceRouteTiming
+      warmRouteTiming?: ResearchWorkspaceRouteTiming
+      diagnostics: ResearchWorkspaceUatDiagnosticsSnapshot
+    }
+  ): Promise<ResearchWorkspaceUatEvidence> {
+    const safeLabel = sanitizeEvidenceLabel(label)
+    const evidence: ResearchWorkspaceUatEvidence = {
+      label,
+      persona: options.persona,
+      url: this.page.url(),
+      title: await this.page.title().catch(() => ""),
+      capturedAt: new Date().toISOString(),
+      routeTiming: options.routeTiming,
+      warmRouteTiming: options.warmRouteTiming,
+      diagnostics: options.diagnostics
+    }
+
+    await testInfo.attach(`research-workspace-${safeLabel}.png`, {
+      body: await this.page.screenshot({ fullPage: true }),
+      contentType: "image/png"
+    })
+    await testInfo.attach(`research-workspace-${safeLabel}.json`, {
+      body: JSON.stringify(evidence, null, 2),
+      contentType: "application/json"
+    })
+
+    return evidence
   }
 
   async setStudyMaterialsPolicy(policy: "general" | "workspace"): Promise<void> {

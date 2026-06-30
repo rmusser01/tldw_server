@@ -29,6 +29,26 @@ class _StubManager:
         return self._collection
 
 
+def _stub_manager_for(collection):
+    class _BoundStubManager:
+        def __init__(self, user_id, user_embedding_config):
+            del user_id, user_embedding_config
+            self._collection = collection
+
+        def get_or_create_collection(self, name):  # noqa: D401 - stub for chroma
+            del name
+            return self._collection
+
+    return _BoundStubManager
+
+
+def _restore_setting(settings, key, original):
+    if original is None:
+        settings.pop(key, None)
+    else:
+        settings[key] = original
+
+
 def _seed_claims_db():
 
 
@@ -110,8 +130,8 @@ def test_rebuild_claim_clusters_embeddings(monkeypatch):
                 embeddings[embed_id] = [1.0, 0.0]
 
         stub_collection = _StubCollection(embeddings)
-        monkeypatch.setattr(claims_clustering, "ChromaDBManager", _StubManager)
-        app_settings["EMBEDDING_CONFIG"] = {"_test_collection": stub_collection}
+        monkeypatch.setattr(claims_clustering, "ChromaDBManager", _stub_manager_for(stub_collection))
+        app_settings["EMBEDDING_CONFIG"] = {}
 
         db = MediaDatabase(db_path=db_path, client_id="1")
         db.initialize_db()
@@ -135,10 +155,8 @@ def test_rebuild_claim_clusters_embeddings(monkeypatch):
                 db.close_connection()
             except Exception:
                 _ = None
-        if orig_user_db is not None:
-            app_settings["USER_DB_BASE_DIR"] = orig_user_db
-        if orig_embedding_cfg is not None:
-            app_settings["EMBEDDING_CONFIG"] = orig_embedding_cfg
+        _restore_setting(app_settings, "USER_DB_BASE_DIR", orig_user_db)
+        _restore_setting(app_settings, "EMBEDDING_CONFIG", orig_embedding_cfg)
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
         except Exception:
@@ -164,8 +182,8 @@ def test_rebuild_claim_clusters_embeddings_without_embeddings(monkeypatch):
     db = None
     try:
         stub_collection = _StubCollection({})
-        monkeypatch.setattr(claims_clustering, "ChromaDBManager", _StubManager)
-        app_settings["EMBEDDING_CONFIG"] = {"_test_collection": stub_collection}
+        monkeypatch.setattr(claims_clustering, "ChromaDBManager", _stub_manager_for(stub_collection))
+        app_settings["EMBEDDING_CONFIG"] = {}
 
         db = MediaDatabase(db_path=db_path, client_id="1")
         db.initialize_db()
@@ -186,10 +204,8 @@ def test_rebuild_claim_clusters_embeddings_without_embeddings(monkeypatch):
                 db.close_connection()
             except Exception:
                 _ = None
-        if orig_user_db is not None:
-            app_settings["USER_DB_BASE_DIR"] = orig_user_db
-        if orig_embedding_cfg is not None:
-            app_settings["EMBEDDING_CONFIG"] = orig_embedding_cfg
+        _restore_setting(app_settings, "USER_DB_BASE_DIR", orig_user_db)
+        _restore_setting(app_settings, "EMBEDDING_CONFIG", orig_embedding_cfg)
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
         except Exception:

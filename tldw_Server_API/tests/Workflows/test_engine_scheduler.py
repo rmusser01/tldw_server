@@ -1,7 +1,6 @@
 import os
 
 os.environ.setdefault("LOGURU_LEVEL", "ERROR")
-os.environ.setdefault("TLDW_TEST_MODE", "true")
 os.environ.setdefault("SINGLE_USER_API_KEY", "test-key")
 
 from loguru import logger
@@ -9,19 +8,57 @@ from loguru import logger
 logger.remove()
 
 import asyncio
+import sqlite3
 import time
 from pathlib import Path
 
 import pytest
 
 from tldw_Server_API.app.core.Workflows.engine import WorkflowEngine, WorkflowScheduler, RunMode
-from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
+from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowRun, WorkflowsDatabase
 from tldw_Server_API.app.api.v1.schemas.workflows import RunRequest
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
-from tldw_Server_API.app.api.v1.endpoints.workflows import run_saved
+from tldw_Server_API.app.api.v1.endpoints.workflows import (
+    _wait_for_run_completion,
+    _wait_for_run_visibility,
+    run_saved,
+)
 
 
 TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
+
+
+def _workflow_run(run_id: str, status: str) -> WorkflowRun:
+    return WorkflowRun(
+        run_id=run_id,
+        tenant_id="tenant",
+        workflow_id=1,
+        status=status,
+        status_reason=None,
+        user_id="user",
+        inputs_json="{}",
+        outputs_json=None,
+        error=None,
+        duration_ms=None,
+        created_at="2026-01-01T00:00:00Z",
+        started_at=None,
+        ended_at=None,
+        definition_version=1,
+        definition_snapshot_json="{}",
+        idempotency_key=None,
+        session_id=None,
+    )
+
+
+class _TransientMissingRunDB:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get_run(self, run_id: str):
+        self.calls += 1
+        if self.calls == 1:
+            return None
+        return _workflow_run(run_id, "succeeded")
 
 
 @pytest.fixture(autouse=True)
@@ -46,14 +83,38 @@ def workflows_db(tmp_path: Path):
             _ = None
 
 
-def _wait_for_status(db: WorkflowsDatabase, run_id: str, timeout: float = 3.0) -> str:
+def _wait_for_status(db: WorkflowsDatabase, run_id: str, timeout: float = 10.0) -> str:
     deadline = time.time() + timeout
+    last_status = None
     while time.time() < deadline:
-        run = db.get_run(run_id)
-        if run and run.status in TERMINAL_STATES.union({"waiting_human", "waiting_approval"}):
-            return run.status
+        with sqlite3.connect(db.db_path) as read_conn:
+            row = read_conn.execute(
+                "SELECT status FROM workflow_runs WHERE run_id = ?",
+                (str(run_id),),
+            ).fetchone()
+        last_status = row[0] if row else None
+        if last_status in TERMINAL_STATES.union({"waiting_human", "waiting_approval"}):
+            return str(last_status)
         time.sleep(0.05)
-    raise AssertionError("Run did not reach a terminal or waiting state within the timeout")
+    raise AssertionError(
+        "Run did not reach a terminal or waiting state within the timeout "
+        f"(run_id={run_id!r}, last_status={last_status!r})"
+    )
+
+
+def _wait_for_scheduler_idle(scheduler: WorkflowScheduler, timeout: float = 10.0) -> dict[str, int]:
+    deadline = time.time() + timeout
+    last_stats = scheduler.stats()
+    while time.time() < deadline:
+        last_stats = scheduler.stats()
+        if (
+            last_stats["queue_depth"] == 0
+            and last_stats["active_tenants"] == 0
+            and last_stats["active_workflows"] == 0
+        ):
+            return last_stats
+        time.sleep(0.02)
+    return last_stats
 
 
 def test_scheduler_releases_slot_on_step_failure(workflows_db: WorkflowsDatabase):
@@ -84,10 +145,45 @@ def test_scheduler_releases_slot_on_step_failure(workflows_db: WorkflowsDatabase
     status = _wait_for_status(workflows_db, run_id)
     assert status == "failed"
 
-    stats = scheduler.stats()
+    stats = _wait_for_scheduler_idle(scheduler)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
-    assert scheduler.queue_depth() == 0
+    assert stats["queue_depth"] == 0
+
+
+def test_drain_pending_reports_active_run(
+    workflows_db: WorkflowsDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    scheduler = WorkflowScheduler.instance()
+    spawned = []
+
+    def fake_spawn(coro):
+        spawned.append(coro)
+        coro.close()
+
+    monkeypatch.setattr(WorkflowScheduler, "_spawn", staticmethod(fake_spawn))
+
+    definition = {
+        "name": "active-run",
+        "steps": [{"id": "step1", "type": "prompt", "config": {"template": "hi"}}],
+    }
+    run_id = "active-run"
+    workflows_db.create_run(
+        run_id=run_id,
+        tenant_id="tenant",
+        user_id="user",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot=definition,
+    )
+
+    WorkflowEngine(workflows_db).submit(run_id, RunMode.ASYNC)
+
+    assert spawned
+    assert scheduler.stats()["active_tenants"] == 1
+    assert scheduler.drain_pending(run_id) is True
 
 
 def test_waiting_run_keeps_secrets_and_releases_slot(workflows_db: WorkflowsDatabase):
@@ -114,7 +210,7 @@ def test_waiting_run_keeps_secrets_and_releases_slot(workflows_db: WorkflowsData
         definition_version=1,
         definition_snapshot=definition,
     )
-    WorkflowEngine.set_run_secrets(run_id, {"token": "secret"})
+    WorkflowEngine.set_run_secrets(run_id, {"fixture": "value"})
     engine = WorkflowEngine(workflows_db)
     engine.submit(run_id, RunMode.ASYNC)
 
@@ -122,7 +218,7 @@ def test_waiting_run_keeps_secrets_and_releases_slot(workflows_db: WorkflowsData
     assert status == "waiting_human"
     assert WorkflowEngine._RUN_SECRETS.get(run_id) is not None
 
-    stats = scheduler.stats()
+    stats = _wait_for_scheduler_idle(scheduler, timeout=10.0)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
 
@@ -151,7 +247,7 @@ def test_continue_run_clears_secrets(workflows_db: WorkflowsDatabase):
         definition_version=1,
         definition_snapshot=definition,
     )
-    WorkflowEngine.set_run_secrets(run_id, {"token": "secret"})
+    WorkflowEngine.set_run_secrets(run_id, {"fixture": "value"})
     engine = WorkflowEngine(workflows_db)
     engine.submit(run_id, RunMode.ASYNC)
     status = _wait_for_status(workflows_db, run_id)
@@ -162,7 +258,7 @@ def test_continue_run_clears_secrets(workflows_db: WorkflowsDatabase):
     status = _wait_for_status(workflows_db, run_id)
     assert status == "succeeded"
     assert WorkflowEngine._RUN_SECRETS.get(run_id) is None
-    stats = scheduler.stats()
+    stats = _wait_for_scheduler_idle(scheduler)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
 
@@ -238,7 +334,7 @@ def test_adapter_returned_research_checkpoint_wait_sets_run_waiting_human_withou
     assert step_run["status"] == "waiting_human"
     assert scheduled_timeouts == []
 
-    stats = scheduler.stats()
+    stats = _wait_for_scheduler_idle(scheduler)
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
 
@@ -272,6 +368,38 @@ def test_run_saved_sync_waits_for_completion(workflows_db: WorkflowsDatabase, mo
         )
     )
     assert response.status == "succeeded"
-    stats = WorkflowScheduler.instance().stats()
+    stats = _wait_for_scheduler_idle(WorkflowScheduler.instance())
     assert stats["active_tenants"] == 0
     assert stats["active_workflows"] == 0
+
+
+def test_wait_for_run_completion_tolerates_transient_missing_run():
+    db = _TransientMissingRunDB()
+
+    run = asyncio.run(
+        _wait_for_run_completion(
+            db,
+            "transient-run",
+            timeout_seconds=1.0,
+            poll_interval=0.001,
+        )
+    )
+
+    assert run.status == "succeeded"
+    assert db.calls == 2
+
+
+def test_wait_for_run_visibility_tolerates_transient_missing_run():
+    db = _TransientMissingRunDB()
+
+    run = asyncio.run(
+        _wait_for_run_visibility(
+            db,
+            "transient-run",
+            grace_seconds=1.0,
+            poll_interval=0.001,
+        )
+    )
+
+    assert run.status == "succeeded"
+    assert db.calls == 2

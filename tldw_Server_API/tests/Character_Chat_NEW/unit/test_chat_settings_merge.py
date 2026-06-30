@@ -135,6 +135,37 @@ def test_merge_conversation_settings_preserves_unknown_keys():
 
 
 @pytest.mark.unit
+def test_merge_conversation_settings_preserves_assistant_overlay_payload():
+    server = {
+        "schemaVersion": 2,
+        "updatedAt": "2026-05-22T20:00:00Z",
+        "assistantOverlay": {
+            "kind": "character",
+            "id": "char-1",
+            "name": "Server Overlay",
+            "system_prompt_snapshot": "server snapshot",
+            "updatedAt": "2026-05-22T20:00:00Z",
+        },
+    }
+    incoming = {
+        "schemaVersion": 2,
+        "updatedAt": "2026-05-22T20:00:01Z",
+        "assistantOverlay": {
+            "kind": "persona",
+            "id": "persona-9",
+            "name": "Incoming Overlay",
+            "system_prompt_snapshot": "incoming snapshot",
+            "updatedAt": "2026-05-22T20:00:01Z",
+        },
+    }
+
+    merged = sessions._merge_conversation_settings(server, incoming)
+
+    assert merged["assistantOverlay"] == incoming["assistantOverlay"]
+    assert merged["updatedAt"] == "2026-05-22T20:00:01Z"
+
+
+@pytest.mark.unit
 def test_persist_auto_summary_settings_upsert_does_not_touch_conversation_metadata():
     class _StubDB:
         def __init__(self) -> None:
@@ -200,6 +231,25 @@ def test_convert_db_conversation_to_response_defaults_settings_none():
 
     assert response.id == "chat-2"
     assert response.settings is None
+
+
+@pytest.mark.unit
+def test_convert_db_conversation_to_response_does_not_infer_tracked_identity_from_character_id():
+    conv = {
+        "id": "chat-3",
+        "character_id": 11,
+        "assistant_kind": None,
+        "assistant_id": None,
+        "created_at": datetime.now(timezone.utc),
+        "last_modified": datetime.now(timezone.utc),
+        "version": 1,
+    }
+
+    response = sessions._convert_db_conversation_to_response(conv)
+
+    assert response.character_id == 11
+    assert response.assistant_kind is None
+    assert response.assistant_id is None
 
 
 @pytest.mark.unit

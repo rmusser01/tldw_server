@@ -29,14 +29,12 @@ from tldw_Server_API.app.api.v1.schemas.media_response_models import (
     MediaDetailResponse,
     VersionDetailResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
-    User,
-    get_request_user,
-)
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     check_media_exists,
-    get_full_media_details_rich,
     get_document_version,
+    get_full_media_details_rich,
     list_document_versions,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
@@ -147,9 +145,7 @@ async def list_versions(
             created_at_dt: datetime | None = rv.get("created_at")
             if isinstance(created_at_dt, str):
                 with contextlib.suppress(_MEDIA_VERSIONS_COERCE_EXCEPTIONS):
-                    created_at_dt = datetime.fromisoformat(
-                        created_at_dt.replace("Z", "+00:00")
-                    )
+                    created_at_dt = datetime.fromisoformat(created_at_dt.replace("Z", "+00:00"))
             safe_md = rv.get("safe_metadata")
             if isinstance(safe_md, str):
                 import json as _json
@@ -174,23 +170,19 @@ async def list_versions(
         return versions
     except DatabaseError as exc:
         logger.error(
-            "Database error listing versions for media {}: {}",
+            "Database error listing versions for media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error occurred",
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error occurred",
         ) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error(
-            "Unexpected error listing versions for media {}: {}",
+            "Unexpected error listing versions for media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -244,9 +236,7 @@ async def get_version(
         created_at_dt = version_dict.get("created_at")
         if isinstance(created_at_dt, str):
             with contextlib.suppress(_MEDIA_VERSIONS_COERCE_EXCEPTIONS):
-                created_at_dt = datetime.fromisoformat(
-                    created_at_dt.replace("Z", "+00:00")
-                )
+                created_at_dt = datetime.fromisoformat(created_at_dt.replace("Z", "+00:00"))
         safe_md = version_dict.get("safe_metadata")
         if isinstance(safe_md, str):
             import json as _json
@@ -277,25 +267,21 @@ async def get_version(
         ) from exc
     except DatabaseError as exc:
         logger.error(
-            "Database error getting version {} for media {}: {}",
+            "Database error getting version {} for media {}",
             version_number,
             media_id,
-            exc,
-            exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error occurred",
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error occurred",
         ) from exc
     except HTTPException:
         raise
     except Exception as exc:
         logger.error(
-            "Unexpected error getting version {} for media {}: {}",
+            "Unexpected error getting version {} for media {}",
             version_number,
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -341,6 +327,17 @@ async def create_version(
 
     try:
         import json as _json
+
+        media_exists = check_media_exists(db, media_id=media_id)
+        if not media_exists:
+            logger.warning(
+                "Cannot create version: Media ID {} not found or deleted.",
+                media_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Media not found or deleted",
+            )
 
         with db.transaction():
             safe_metadata_json: str | None = None
@@ -395,34 +392,33 @@ async def create_version(
             media_id,
             exc,
         )
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Media not found or deleted",
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error occurred",
         ) from exc
     except (DatabaseError, ConflictError) as exc:
         logger.error(
-            "Database error creating version for media {}: {}",
+            "Database error creating version for media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error occurred",
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error occurred",
+            conflict_status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            conflict_detail="Database error occurred",
         ) from exc
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - defensive
         logger.error(
-            "Unexpected error creating version for media {}: {}",
+            "Unexpected error creating version for media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during version creation",
         ) from exc
+
 
 @router.delete(
     "/{media_id:int}/versions/{version_number:int}",
@@ -501,9 +497,9 @@ async def delete_version(
             exc,
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Conflict during deletion",
+        raise map_db_error_to_http(
+            exc,
+            conflict_detail="Conflict during deletion",
         ) from exc
     except InputError as exc:
         logger.error(
@@ -513,31 +509,27 @@ async def delete_version(
             exc,
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid input provided",
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error occurred",
         ) from exc
     except DatabaseError as exc:
         logger.error(
-            "Database error deleting version {} for media {}: {}",
+            "Database error deleting version {} for media {}",
             version_number,
             media_id,
-            exc,
-            exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error occurred",
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error occurred",
         ) from exc
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - defensive
         logger.error(
-            "Unexpected error deleting version {} for media {}: {}",
+            "Unexpected error deleting version {} for media {}",
             version_number,
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -614,6 +606,16 @@ async def rollback_version(
                 detail="Media not found after rollback",
             )
         return MediaDetailResponse(**details)
+    except InputError as exc:
+        logger.warning(
+            "Invalid DB input for rollback media {}: {}",
+            media_id,
+            exc,
+        )
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error during rollback",
+        ) from exc
     except ValueError as exc:
         logger.warning(
             "Invalid input for rollback media {}: {}",
@@ -632,31 +634,27 @@ async def rollback_version(
             exc,
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Conflict during rollback",
+        raise map_db_error_to_http(
+            exc,
+            conflict_detail="Conflict during rollback",
         ) from exc
-    except (InputError, DatabaseError) as exc:
+    except DatabaseError as exc:
         logger.error(
-            "Database error rolling back media {} to version {}: {}",
+            "Database error rolling back media {} to version {}",
             media_id,
             target_version_number,
-            exc,
-            exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error during rollback",
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Database error during rollback",
         ) from exc
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - defensive
         logger.error(
-            "Unexpected error rolling back media {} to version {}: {}",
+            "Unexpected error rolling back media {} to version {}",
             media_id,
             target_version_number,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -766,10 +764,8 @@ async def patch_metadata(
         raise
     except Exception as exc:  # pragma: no cover - defensive
         logger.error(
-            "Error patching safe metadata for media {}: {}",
+            "Error patching safe metadata for media {}",
             media_id,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -869,11 +865,9 @@ async def put_version_metadata(
         raise
     except Exception as exc:  # pragma: no cover - defensive
         logger.error(
-            "Error updating metadata for media {} v{}: {}",
+            "Error updating metadata for media {} v{}",
             media_id,
             version_number,
-            exc,
-            exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -919,13 +913,8 @@ async def create_or_update_version_advanced(
                 detail="No active version found for this media.",
             )
 
-        if (
-            not body.new_version
-            and (
-                body.content is not None
-                or body.prompt is not None
-                or body.analysis_content is not None
-            )
+        if not body.new_version and (
+            body.content is not None or body.prompt is not None or body.analysis_content is not None
         ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -964,19 +953,9 @@ async def create_or_update_version_advanced(
             ) from None
 
         if body.new_version:
-            content = (
-                body.content
-                if body.content is not None
-                else (latest.get("content") or "")
-            )
-            prompt = (
-                body.prompt if body.prompt is not None else latest.get("prompt")
-            )
-            analysis = (
-                body.analysis_content
-                if body.analysis_content is not None
-                else latest.get("analysis_content")
-            )
+            content = body.content if body.content is not None else (latest.get("content") or "")
+            prompt = body.prompt if body.prompt is not None else latest.get("prompt")
+            analysis = body.analysis_content if body.analysis_content is not None else latest.get("analysis_content")
             with db.transaction():
                 db.create_document_version(
                     media_id=media_id,

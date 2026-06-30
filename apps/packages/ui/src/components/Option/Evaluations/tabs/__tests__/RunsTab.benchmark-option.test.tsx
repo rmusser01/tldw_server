@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { render, screen } from "@testing-library/react"
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunsTab } from "../RunsTab"
 
 const storeState = {
@@ -26,6 +26,13 @@ const storeState = {
   adhocPayloadText: "{}",
   setAdhocPayloadText: vi.fn(),
   adhocResult: null as any
+}
+
+const runsListState = {
+  data: { data: { data: [] as any[] } },
+  isLoading: false,
+  isError: false,
+  error: null as Error | null
 }
 
 vi.mock("react-i18next", () => ({
@@ -55,11 +62,7 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("../../hooks/useRuns", () => {
   return {
     useRateLimits: () => ({ data: null, isLoading: false, isError: false }),
-    useRunsList: () => ({
-      data: { data: { data: [] } },
-      isLoading: false,
-      isError: false
-    }),
+    useRunsList: () => runsListState,
     useRunDetail: () => ({ data: null, isLoading: false, isError: false }),
     useCreateRun: () => ({ mutateAsync: vi.fn(), isPending: false }),
     useCancelRun: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -146,8 +149,43 @@ describe("RunsTab benchmark run mode", () => {
     })
   })
 
+  beforeEach(() => {
+    vi.clearAllMocks()
+    storeState.selectedEvalId = null
+    storeState.selectedRunId = null
+    storeState.runConfigText = ""
+    storeState.datasetOverrideText = ""
+    storeState.adhocEndpoint = "benchmark-run"
+    storeState.selectedBenchmark = "bullshit_benchmark"
+    storeState.adhocPayloadText = "{}"
+    runsListState.data = { data: { data: [] } }
+    runsListState.isLoading = false
+    runsListState.isError = false
+    runsListState.error = null
+  })
+
   it("shows bullshit_benchmark in benchmark selector when benchmark-run mode is selected", async () => {
     render(<RunsTab />)
     expect(await screen.findByText("bullshit_benchmark")).toBeInTheDocument()
+  })
+
+  it("shows run-list recovery diagnostics without clearing run form input", () => {
+    storeState.selectedEvalId = "eval-1"
+    storeState.runConfigText = '{"temperature":0.2}'
+    runsListState.isError = true
+    runsListState.error = new Error("HTTP 503")
+
+    render(<RunsTab />)
+
+    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Unable to load runs")).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "/api/v1/evaluations/eval-1/runs"
+    )
+    expect(
+      screen
+        .getAllByTestId("json-editor")
+        .some((editor) => (editor as HTMLTextAreaElement).value === '{"temperature":0.2}')
+    ).toBe(true)
   })
 })

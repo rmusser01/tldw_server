@@ -42,6 +42,11 @@ from .base import (
 )
 
 
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
 class NeuTTSAdapter(TTSAdapter):
     """Adapter for NeuTTS provider (Air/Nano)."""
 
@@ -96,7 +101,10 @@ class NeuTTSAdapter(TTSAdapter):
                 if asyncio.iscoroutine(register_result):
                     await register_result
             except Exception as registration_error:
-                logger.debug("NeuTTS provider registration failed; continuing", exc_info=registration_error)
+                logger.debug(
+                    "NeuTTS provider registration failed; continuing; exception_type={}",
+                    _safe_exception_label(registration_error),
+                )
 
             # Detect capabilities from engine flags
             self._is_quantized_model = getattr(self._engine, "_is_quantized_model", False)
@@ -113,7 +121,10 @@ class NeuTTSAdapter(TTSAdapter):
             return True
 
         except ImportError as e:
-            logger.error(f"NeuTTS import error: {e}")
+            logger.error(
+                "NeuTTS import error; exception_type={}",
+                _safe_exception_label(e),
+            )
             raise TTSModelLoadError(
                 "NeuTTS dependencies missing",
                 provider=self.provider_name,
@@ -123,7 +134,10 @@ class NeuTTSAdapter(TTSAdapter):
                 },
             ) from e
         except Exception as e:
-            logger.error(f"NeuTTS initialization failed: {e}")
+            logger.error(
+                "NeuTTS initialization failed; exception_type={}",
+                _safe_exception_label(e),
+            )
             raise TTSModelLoadError(
                 "Failed to initialize NeuTTS",
                 provider=self.provider_name,
@@ -169,7 +183,10 @@ class NeuTTSAdapter(TTSAdapter):
         try:
             validate_tts_request(request, provider="neutts")
         except Exception as e:
-            logger.error(f"NeuTTS request validation failed: {e}")
+            logger.error(
+                "NeuTTS request validation failed; exception_type={}",
+                _safe_exception_label(e),
+            )
             raise
 
         if request.stream:
@@ -261,7 +278,10 @@ class NeuTTSAdapter(TTSAdapter):
         except TTSValidationError:
             raise
         except Exception as e:
-            logger.error(f"NeuTTS generation error: {e}")
+            logger.error(
+                "NeuTTS generation error; exception_type={}",
+                _safe_exception_label(e),
+            )
             raise TTSGenerationError(
                 "NeuTTS generation failed",
                 provider=self.provider_name,
@@ -294,7 +314,10 @@ class NeuTTSAdapter(TTSAdapter):
         try:
             validate_tts_request(request, provider="neutts")
         except Exception as e:
-            logger.error(f"NeuTTS request validation failed: {e}")
+            logger.error(
+                "NeuTTS request validation failed; exception_type={}",
+                _safe_exception_label(e),
+            )
             raise
 
         # Resolve reference inputs
@@ -355,7 +378,10 @@ class NeuTTSAdapter(TTSAdapter):
         except TTSValidationError:
             raise
         except Exception as e:
-            logger.error(f"NeuTTS streaming error: {e}")
+            logger.error(
+                "NeuTTS streaming error; exception_type={}",
+                _safe_exception_label(e),
+            )
             raise TTSGenerationError(
                 "NeuTTS streaming failed",
                 provider=self.provider_name,

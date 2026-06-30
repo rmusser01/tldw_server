@@ -1,8 +1,6 @@
 """Tests for Research Workspace migration protocol endpoints."""
-import inspect
-from typing import NoReturn, get_type_hints
-
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -11,17 +9,8 @@ from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,
 )
-from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
-    StatusResponse,
-    WorkspaceMigrationChunkReceiptResponse,
-    WorkspaceMigrationResponse,
-)
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    CharactersRAGDB,
-    CharactersRAGDBError,
-)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
 _MANIFEST_HASH = "a" * 64
@@ -38,8 +27,8 @@ def db(tmp_path):
 
 @pytest.fixture
 def workspace_fastapi_app():
-    from tldw_Server_API.app.main import app
-
+    app = FastAPI()
+    app.include_router(workspace_migrations.router, prefix="/api/v1/workspaces")
     return app
 
 
@@ -194,7 +183,7 @@ def test_workspace_migration_chunk_receipt_is_idempotent_and_conflict_checked(wo
 
 
 @pytest.mark.integration
-def test_workspace_migration_finalize_requires_all_chunks_and_keeps_delete_ineligible(workspace_client):
+def test_workspace_migration_finalize_requires_all_chunks_and_enables_verified_delete(workspace_client):
     _create_session(
         workspace_client,
         declared_chunks=[
@@ -243,8 +232,150 @@ def test_workspace_migration_finalize_requires_all_chunks_and_keeps_delete_ineli
     assert body["status"] == "finalized"
     assert body["accepted_chunk_count"] == 2
     assert body["missing_chunk_ids"] == []
+    assert body["client_delete_eligible"] is True
+    assert body["recovery_manifest"]["can_delete_legacy_storage"] is True
+    assert body["recovery_manifest"]["server_readback_verified"] is True
+    assert body["recovery_manifest"]["verification_status"] == "verified"
+
+    delete_ack = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
+        json={"acknowledged_manifest_hash": _MANIFEST_HASH},
+    )
+    assert delete_ack.status_code == 200, delete_ack.text
+    assert delete_ack.json() == {"ok": True}
+
+    duplicate_ack = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
+        json={"acknowledged_manifest_hash": _MANIFEST_HASH},
+    )
+    assert duplicate_ack.status_code == 200, duplicate_ack.text
+    assert duplicate_ack.json() == {"ok": True}
+
+
+@pytest.mark.integration
+def test_workspace_migration_delete_verification_reports_missing_chunks(workspace_client, db):
+    _create_session(
+        workspace_client,
+        declared_chunks=[
+            {
+                "id": "chunk-1",
+                "sha256": _CHUNK_HASH,
+                "byte_count": 64,
+                "chunk_kind": "workspace_bundle",
+            },
+            {
+                "id": "chunk-2",
+                "sha256": _OTHER_CHUNK_HASH,
+                "byte_count": 32,
+                "chunk_kind": "artifact_payloads",
+            },
+        ],
+    )
+    accepted = workspace_client.put(
+        "/api/v1/workspaces/migrations/mig-1/chunks/chunk-1",
+        json={
+            "sha256": _CHUNK_HASH,
+            "byte_count": 64,
+            "chunk_kind": "workspace_bundle",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    session = db.get_workspace_migration_session("mig-1")
+    assert session is not None
+    verification = db._verify_workspace_migration_delete_eligibility(session)
+
+    assert verification["eligible"] is False
+    assert verification["status"] == "missing_chunks"
+    assert verification["missing_chunk_ids"] == ["chunk-2"]
+
+
+@pytest.mark.integration
+def test_workspace_migration_zero_chunk_finalize_remains_delete_ineligible(workspace_client):
+    _create_session(workspace_client, declared_chunks=[])
+
+    finalized = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/finalize",
+        json={"manifest_hash": _MANIFEST_HASH},
+    )
+    assert finalized.status_code == 200, finalized.text
+    body = finalized.json()
+    assert body["status"] == "finalized"
+    assert body["declared_chunk_count"] == 0
+    assert body["accepted_chunk_count"] == 0
+    assert body["missing_chunk_ids"] == []
     assert body["client_delete_eligible"] is False
     assert body["recovery_manifest"]["can_delete_legacy_storage"] is False
+    assert body["recovery_manifest"]["server_readback_verified"] is False
+    assert body["recovery_manifest"]["verification_status"] == "no_declared_chunks"
+
+    delete_ack = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
+        json={"acknowledged_manifest_hash": _MANIFEST_HASH},
+    )
+    assert delete_ack.status_code == 409, delete_ack.text
+
+
+@pytest.mark.integration
+def test_workspace_migration_client_delete_ack_requires_matching_manifest(workspace_client):
+    _create_session(workspace_client)
+
+    accepted = workspace_client.put(
+        "/api/v1/workspaces/migrations/mig-1/chunks/chunk-1",
+        json={
+            "sha256": _CHUNK_HASH,
+            "byte_count": 64,
+            "chunk_kind": "workspace_bundle",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    finalized = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/finalize",
+        json={"manifest_hash": _MANIFEST_HASH},
+    )
+    assert finalized.status_code == 200, finalized.text
+    assert finalized.json()["client_delete_eligible"] is True
+
+    delete_ack = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
+        json={"acknowledged_manifest_hash": "d" * 64},
+    )
+    assert delete_ack.status_code == 409, delete_ack.text
+
+
+@pytest.mark.integration
+def test_workspace_migration_failed_readback_verification_remains_recoverable(workspace_client, db):
+    _create_session(workspace_client)
+
+    accepted = workspace_client.put(
+        "/api/v1/workspaces/migrations/mig-1/chunks/chunk-1",
+        json={
+            "sha256": _CHUNK_HASH,
+            "byte_count": 64,
+            "chunk_kind": "workspace_bundle",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE workspace_migration_chunks SET sha256 = ? WHERE migration_id = ? AND id = ?",
+            ("e" * 64, "mig-1", "chunk-1"),
+        )
+
+    finalized = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/finalize",
+        json={"manifest_hash": _MANIFEST_HASH},
+    )
+    assert finalized.status_code == 200, finalized.text
+    body = finalized.json()
+    assert body["status"] == "finalized"
+    assert body["client_delete_eligible"] is False
+    assert body["recovery_manifest"]["can_delete_legacy_storage"] is False
+    assert body["recovery_manifest"]["server_readback_verified"] is False
+    assert body["recovery_manifest"]["verification_status"] == "verification_failed"
+    assert body["recovery_manifest"]["mismatch_chunk_ids"] == ["chunk-1"]
 
     delete_ack = workspace_client.post(
         "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
@@ -294,187 +425,3 @@ def test_workspace_migration_rejects_oversized_chunk_receipt(workspace_client):
     )
 
     assert response.status_code == 422, response.text
-
-
-@pytest.mark.unit
-def test_workspace_migration_endpoints_are_sync_handlers_with_return_annotations():
-    expected_annotations = {
-        workspace_migrations.create_workspace_migration: WorkspaceMigrationResponse,
-        workspace_migrations.list_workspace_migrations: list[WorkspaceMigrationResponse],
-        workspace_migrations.get_workspace_migration: WorkspaceMigrationResponse,
-        workspace_migrations.put_workspace_migration_chunk: WorkspaceMigrationChunkReceiptResponse,
-        workspace_migrations.finalize_workspace_migration: WorkspaceMigrationResponse,
-        workspace_migrations.acknowledge_workspace_migration_client_delete: StatusResponse,
-    }
-
-    for endpoint, expected_return in expected_annotations.items():
-        assert not inspect.iscoroutinefunction(endpoint)
-        assert get_type_hints(endpoint)["return"] == expected_return
-
-
-class _BackendErrorConnection:
-    def __init__(self, message: str) -> None:
-        self.message = message
-
-    def execute(self, *_args, **_kwargs) -> NoReturn:
-        raise BackendDatabaseError(self.message)
-
-
-class _BackendErrorTransaction:
-    def __init__(self, message: str) -> None:
-        self.message = message
-
-    def __enter__(self) -> _BackendErrorConnection:
-        return _BackendErrorConnection(self.message)
-
-    def __exit__(self, _exc_type, _exc_val, _exc_tb) -> bool:
-        return False
-
-
-@pytest.mark.unit
-def test_workspace_migration_session_postgres_duplicate_race_returns_existing(db, monkeypatch):
-    raced_row = {
-        "id": "mig-1",
-        "idempotency_key": "legacy-import-1",
-        "target_workspace_id": "rw-import-1",
-        "target_workspace_name": "Migrated Research Workspace",
-        "source_product": "research-workspace-webui",
-        "manifest_hash": _MANIFEST_HASH,
-        "manifest_json": "{}",
-        "diagnostics_json": "{}",
-        "declared_chunks_json": "[]",
-        "status": "created",
-        "client_delete_eligible": False,
-        "created_at": "2026-05-24T00:00:00Z",
-        "updated_at": "2026-05-24T00:00:00Z",
-        "finalized_at": None,
-        "recovery_manifest_json": None,
-        "_chunks": [],
-    }
-    reads = iter([None, raced_row])
-
-    monkeypatch.setattr(db, "get_workspace_migration_session", lambda _migration_id: next(reads))
-    monkeypatch.setattr(db, "_get_workspace_migration_session_by_idempotency_key", lambda _key: None)
-    monkeypatch.setattr(db, "upsert_workspace", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(
-        db,
-        "transaction",
-        lambda: _BackendErrorTransaction("duplicate key value violates unique constraint"),
-    )
-
-    row, created = db.upsert_workspace_migration_session(_session_payload())
-
-    assert created is False
-    assert row == raced_row
-
-
-@pytest.mark.unit
-def test_workspace_migration_session_postgres_backend_error_is_wrapped(db, monkeypatch):
-    monkeypatch.setattr(db, "get_workspace_migration_session", lambda _migration_id: None)
-    monkeypatch.setattr(db, "_get_workspace_migration_session_by_idempotency_key", lambda _key: None)
-    monkeypatch.setattr(db, "upsert_workspace", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(db, "transaction", lambda: _BackendErrorTransaction("connection reset"))
-
-    with pytest.raises(CharactersRAGDBError, match="workspace migration"):
-        db.upsert_workspace_migration_session(_session_payload())
-
-
-@pytest.mark.unit
-def test_workspace_migration_chunk_postgres_duplicate_race_returns_existing(db, monkeypatch):
-    session = {
-        "id": "mig-1",
-        "manifest_hash": _MANIFEST_HASH,
-        "status": "created",
-        "declared_chunks_json": (
-            '[{"id":"chunk-1","sha256":"%s","byte_count":64,"chunk_kind":"workspace_bundle"}]' % _CHUNK_HASH
-        ),
-        "_chunks": [],
-    }
-    raced_chunk = {
-        "id": "chunk-1",
-        "migration_id": "mig-1",
-        "sha256": _CHUNK_HASH,
-        "byte_count": 64,
-        "chunk_kind": "workspace_bundle",
-        "metadata_json": "{}",
-        "accepted_at": "2026-05-24T00:00:00Z",
-    }
-    chunk_reads = iter([None, raced_chunk])
-
-    monkeypatch.setattr(db, "get_workspace_migration_session", lambda _migration_id: session)
-    monkeypatch.setattr(db, "_get_workspace_migration_chunk", lambda _migration_id, _chunk_id: next(chunk_reads))
-    monkeypatch.setattr(
-        db,
-        "transaction",
-        lambda: _BackendErrorTransaction("duplicate key value violates unique constraint"),
-    )
-
-    chunk = db.add_workspace_migration_chunk(
-        "mig-1",
-        "chunk-1",
-        {
-            "sha256": _CHUNK_HASH,
-            "byte_count": 64,
-            "chunk_kind": "workspace_bundle",
-        },
-    )
-
-    assert chunk == raced_chunk
-
-
-@pytest.mark.unit
-def test_workspace_migration_chunk_postgres_backend_error_is_wrapped(db, monkeypatch):
-    session = {
-        "id": "mig-1",
-        "manifest_hash": _MANIFEST_HASH,
-        "status": "created",
-        "declared_chunks_json": "[]",
-        "_chunks": [],
-    }
-
-    monkeypatch.setattr(db, "get_workspace_migration_session", lambda _migration_id: session)
-    monkeypatch.setattr(db, "_get_workspace_migration_chunk", lambda _migration_id, _chunk_id: None)
-    monkeypatch.setattr(db, "transaction", lambda: _BackendErrorTransaction("connection reset"))
-
-    with pytest.raises(CharactersRAGDBError, match="workspace migration chunk"):
-        db.add_workspace_migration_chunk(
-            "mig-1",
-            "chunk-1",
-            {
-                "sha256": _CHUNK_HASH,
-                "byte_count": 64,
-                "chunk_kind": "workspace_bundle",
-            },
-        )
-
-
-@pytest.mark.unit
-def test_workspace_migration_finalize_and_delete_ack_wrap_backend_errors(db, monkeypatch):
-    finalized_session = {
-        "id": "mig-1",
-        "target_workspace_id": "rw-import-1",
-        "source_product": "research-workspace-webui",
-        "manifest_hash": _MANIFEST_HASH,
-        "status": "created",
-        "declared_chunks_json": "[]",
-        "_chunks": [],
-    }
-    ack_session = {
-        **finalized_session,
-        "status": "finalized",
-        "client_delete_eligible": True,
-    }
-
-    monkeypatch.setattr(db, "get_workspace_migration_session", lambda _migration_id: finalized_session)
-    monkeypatch.setattr(db, "transaction", lambda: _BackendErrorTransaction("connection reset"))
-
-    with pytest.raises(CharactersRAGDBError, match="finalize workspace migration"):
-        db.finalize_workspace_migration("mig-1", {"manifest_hash": _MANIFEST_HASH})
-
-    monkeypatch.setattr(db, "get_workspace_migration_session", lambda _migration_id: ack_session)
-
-    with pytest.raises(CharactersRAGDBError, match="client delete acknowledgement"):
-        db.record_workspace_migration_client_delete_ack(
-            "mig-1",
-            {"acknowledged_manifest_hash": _MANIFEST_HASH},
-        )

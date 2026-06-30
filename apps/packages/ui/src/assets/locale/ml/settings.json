@@ -3,7 +3,13 @@
     "serverAndAuth": "സെർവർ & ഓത്",
     "knowledgeTools": "നോളജ് ടൂളുകൾ",
     "workspace": "വർക്ക്സ്പേസ്",
-    "about": "അറിയുക"
+    "about": "അറിയുക",
+    "connect": "കണക്ഷൻ",
+    "aiModels": "AI & മോഡലുകൾ",
+    "experience": "അനുഭവം",
+    "knowledgeWorkspace": "അറിവും വർക്ക്‌സ്പേസും",
+    "safetyAdmin": "സുരക്ഷയും അഡ്മിനും",
+    "dataManagement": "ഡാറ്റ മാനേജ്മെന്റ്"
   },
   "healthNav": "ഹെൽത്ത്",
   "worldBooksNav": "വേൾഡ് ബുക്കുകൾ",
@@ -1662,5 +1668,11 @@
     "subtitle": "ദ്രുത ഇംപോർട്ടിന്റെ ഡീഫോൾട്ടുകൾ, പ്രീസെറ്റുകൾ, പെരുമാറ്റം കോൺഫിഗർ ചെയ്യുക."
   },
   "acpPlaygroundNav": "ACP പ്ലേഗ്രൗണ്ട്",
-  "skillsNav": "നൈപുണ്യങ്ങൾ"
+  "skillsNav": "നൈപുണ്യങ്ങൾ",
+  "providerKeys": {
+    "navTitle": "പ്രൊവൈഡർ കീകൾ"
+  },
+  "dataManagement": {
+    "navTitle": "ഡാറ്റ മാനേജ്മെന്റ്"
+  }
 }

@@ -6,7 +6,6 @@ import {
   Form,
   Switch,
   Space,
-  Alert,
   Spin,
   message,
   InputNumber,
@@ -17,6 +16,7 @@ import {
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 
 // ---------------------------------------------------------------------------
 // RuntimeConfigPage -- load / edit / save cleanup & registration settings
@@ -126,10 +126,18 @@ const RuntimeConfigPage: React.FC = () => {
   // ── Guard Rendering ──
 
   if (adminGuard === "forbidden") {
-    return <Alert type="error" showIcon message="Forbidden" description="You do not have permission to view runtime configuration." />
+    return (
+      <DesignSystemAlert variant="error" title="Forbidden">
+        You do not have permission to view runtime configuration.
+      </DesignSystemAlert>
+    )
   }
   if (adminGuard === "notFound") {
-    return <Alert type="warning" showIcon message="Not Available" description="The runtime configuration endpoints are not available on this server." />
+    return (
+      <DesignSystemAlert variant="warning" title="Not Available">
+        The runtime configuration endpoints are not available on this server.
+      </DesignSystemAlert>
+    )
   }
 
   return (

@@ -18,6 +18,14 @@ class _DummyConn:
         return None
 
 
+class _DummyTransaction:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
 class _DummyCursor:
     def __init__(self, rows):
         self._rows = rows
@@ -35,6 +43,9 @@ class FakeDB:
 
     def get_connection(self):
         return _DummyConn()
+
+    def transaction(self):
+        return _DummyTransaction()
 
     def execute_query(self, sql, params=(), commit=False):
         sql_norm = " ".join(str(sql).strip().split()).lower()

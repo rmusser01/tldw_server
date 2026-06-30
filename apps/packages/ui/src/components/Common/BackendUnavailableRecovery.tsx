@@ -1,4 +1,8 @@
 import React from "react"
+import {
+  RecoveryCallout,
+  type StatePanelDiagnostic
+} from "@/components/ui/state"
 
 export type BackendUnavailableRecoveryDetails = {
   title?: React.ReactNode
@@ -27,18 +31,6 @@ const DEFAULT_TITLE = "Can't reach your tldw server right now."
 const DEFAULT_MESSAGE =
   "Check that your server is running and accessible. Try again, reload the page, or open Health & diagnostics for more details."
 
-const actionButtonClassName =
-  "inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-
-const primaryActionClassName =
-  "bg-primary text-white hover:bg-primaryStrong"
-
-const secondaryActionClassName =
-  "border border-border bg-surface text-text hover:bg-surface2"
-
-const informationRowClassName =
-  "grid gap-1 rounded-2xl border border-border/70 bg-surface2/60 p-3"
-
 const formatStructuredValue = (value: unknown): React.ReactNode => {
   if (value === null || value === undefined) {
     return null
@@ -59,6 +51,16 @@ const formatStructuredValue = (value: unknown): React.ReactNode => {
   }
 }
 
+const asPreformatted = (value: unknown): React.ReactNode => {
+  const formatted = formatStructuredValue(value)
+
+  return formatted ? (
+    <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-5">
+      {formatted}
+    </pre>
+  ) : null
+}
+
 const hasDiagnostics = (details?: BackendUnavailableRecoveryDetails): boolean =>
   Boolean(
     details &&
@@ -72,6 +74,60 @@ const hasDiagnostics = (details?: BackendUnavailableRecoveryDetails): boolean =>
         details.diagnostics)
   )
 
+const buildDiagnostics = (
+  details?: BackendUnavailableRecoveryDetails
+): StatePanelDiagnostic[] | undefined => {
+  if (!hasDiagnostics(details)) {
+    return undefined
+  }
+
+  const diagnostics: StatePanelDiagnostic[] = []
+
+  if (details?.method) {
+    diagnostics.push({ label: "Request method", value: details.method })
+  }
+
+  if (details?.path) {
+    diagnostics.push({ label: "Request path", value: details.path, code: true })
+  }
+
+  if (details?.serverUrl) {
+    diagnostics.push({
+      label: "Configured server URL",
+      value: details.serverUrl,
+      code: true
+    })
+  }
+
+  if (details?.status !== undefined) {
+    diagnostics.push({ label: "Status", value: String(details.status) })
+  }
+
+  if (details?.rawMessage) {
+    diagnostics.push({ label: "Raw message", value: details.rawMessage })
+  }
+
+  if (details?.source) {
+    diagnostics.push({ label: "Source", value: details.source })
+  }
+
+  if (details?.diagnostics) {
+    diagnostics.push({
+      label: "Additional diagnostics",
+      value: asPreformatted(details.diagnostics)
+    })
+  }
+
+  if (details?.recentRequestError) {
+    diagnostics.push({
+      label: "Recent request error",
+      value: asPreformatted(details.recentRequestError)
+    })
+  }
+
+  return diagnostics
+}
+
 export const BackendUnavailableRecovery: React.FC<
   BackendUnavailableRecoveryProps
 > = ({
@@ -84,165 +140,33 @@ export const BackendUnavailableRecovery: React.FC<
   const title = details?.title ?? DEFAULT_TITLE
   const message = details?.message ?? DEFAULT_MESSAGE
   const fixHint = details?.fixHint
-  const showDiagnostics = hasDiagnostics(details)
+  const diagnostics = buildDiagnostics(details)
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-bg px-4 py-10 text-text">
-      <section
-        className="w-full max-w-3xl rounded-3xl border border-border/80 bg-surface p-8 shadow-card"
-        aria-labelledby="backend-unavailable-recovery-title"
+      <RecoveryCallout
+        state="unavailable"
+        title={title}
+        message={message}
+        diagnostics={diagnostics}
+        primaryAction={{ label: "Try again", onClick: onRetry }}
+        secondaryActions={[
+          { label: "Reload page", onClick: onReload },
+          { label: "Open Health & diagnostics", onClick: onOpenDiagnostics },
+          { label: "Open Settings", onClick: onOpenSettings }
+        ]}
+        className="w-full max-w-3xl"
       >
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-text-subtle">
-              Connection issue
-            </p>
-            <h1
-              id="backend-unavailable-recovery-title"
-              className="text-3xl font-semibold tracking-tight text-text"
-            >
-              {title}
-            </h1>
-            <p className="max-w-2xl text-sm leading-6 text-text-muted">
-              {message}
-            </p>
-            {fixHint ? (
-              <p
-                className="max-w-2xl rounded-xl border border-border/60 bg-surface2/40 px-4 py-3 text-sm leading-6 text-text-muted"
-                data-testid="backend-recovery-fix-hint"
-              >
-                <span className="font-medium text-text">How to fix: </span>
-                {fixHint}
-              </p>
-            ) : null}
-          </div>
-
-          {showDiagnostics ? (
-            <section
-              aria-label="Diagnostics"
-              className="space-y-3 rounded-2xl border border-border/70 bg-surface2/50 p-5"
-            >
-              <div className="space-y-1">
-                <h2 className="text-sm font-semibold text-text">Diagnostics</h2>
-                <p className="text-xs leading-5 text-text-muted">
-                  Review the failing request and server location before trying
-                  again.
-                </p>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                {details?.method ? (
-                  <div className={informationRowClassName}>
-                    <span className="text-xs font-medium uppercase tracking-[0.12em] text-text-subtle">
-                      Request method
-                    </span>
-                    <span className="text-sm text-text">{details.method}</span>
-                  </div>
-                ) : null}
-
-                {details?.path ? (
-                  <div className={informationRowClassName}>
-                    <span className="text-xs font-medium uppercase tracking-[0.12em] text-text-subtle">
-                      Request path
-                    </span>
-                    <code className="break-all text-sm text-text">
-                      {details.path}
-                    </code>
-                  </div>
-                ) : null}
-
-                {details?.serverUrl ? (
-                  <div className={informationRowClassName}>
-                    <span className="text-xs font-medium uppercase tracking-[0.12em] text-text-subtle">
-                      Configured server URL
-                    </span>
-                    <code className="break-all text-sm text-text">
-                      {details.serverUrl}
-                    </code>
-                  </div>
-                ) : null}
-
-                {details?.status !== undefined ? (
-                  <div className={informationRowClassName}>
-                    <span className="text-xs font-medium uppercase tracking-[0.12em] text-text-subtle">
-                      Status
-                    </span>
-                    <span className="text-sm text-text">{details.status}</span>
-                  </div>
-                ) : null}
-              </div>
-
-              {details?.rawMessage ? (
-                <div className="space-y-1">
-                  <span className="text-xs font-medium uppercase tracking-[0.12em] text-text-subtle">
-                    Raw message
-                  </span>
-                  <p className="rounded-2xl border border-border/70 bg-bg px-4 py-3 text-sm leading-6 text-text-muted">
-                    {details.rawMessage}
-                  </p>
-                </div>
-              ) : null}
-
-              {details?.diagnostics ? (
-                <div className="space-y-1">
-                  <span className="text-xs font-medium uppercase tracking-[0.12em] text-text-subtle">
-                    Additional diagnostics
-                  </span>
-                  <div className="rounded-2xl border border-border/70 bg-bg px-4 py-3 text-sm leading-6 text-text-muted">
-                    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-text-muted">
-                      {formatStructuredValue(details.diagnostics)}
-                    </pre>
-                  </div>
-                </div>
-              ) : null}
-
-              {details?.recentRequestError ? (
-                <div className="space-y-1">
-                  <span className="text-xs font-medium uppercase tracking-[0.12em] text-text-subtle">
-                    Recent request error
-                  </span>
-                  <div className="rounded-2xl border border-border/70 bg-bg px-4 py-3 text-sm leading-6 text-text-muted">
-                    <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-text-muted">
-                      {formatStructuredValue(details.recentRequestError)}
-                    </pre>
-                  </div>
-                </div>
-              ) : null}
-            </section>
-          ) : null}
-
-          <div className="flex flex-wrap gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onRetry}
-              className={`${actionButtonClassName} ${primaryActionClassName}`}
-            >
-              Try again
-            </button>
-            <button
-              type="button"
-              onClick={onReload}
-              className={`${actionButtonClassName} ${secondaryActionClassName}`}
-            >
-              Reload page
-            </button>
-            <button
-              type="button"
-              onClick={onOpenDiagnostics}
-              className={`${actionButtonClassName} ${secondaryActionClassName}`}
-            >
-              Open Health & diagnostics
-            </button>
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className={`${actionButtonClassName} ${secondaryActionClassName}`}
-            >
-              Open Settings
-            </button>
-          </div>
-        </div>
-      </section>
+        {fixHint ? (
+          <p
+            className="rounded-md border border-border bg-surface2 px-3 py-2 text-sm leading-6 text-text-muted"
+            data-testid="backend-recovery-fix-hint"
+          >
+            <span className="font-medium text-text">How to fix: </span>
+            {fixHint}
+          </p>
+        ) : null}
+      </RecoveryCallout>
     </main>
   )
 }

@@ -7,6 +7,7 @@ import base64
 import copy
 import inspect
 import os
+import tempfile
 import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
@@ -34,6 +35,7 @@ from .adapter_registry import (
     get_tts_factory,
 )
 from .adapters.base import AudioFormat, TTSAdapter, TTSCapabilities, TTSRequest, TTSResponse
+from .adapters.omnivoice_sidecar_supervisor import OmniVoiceSidecarSupervisor
 from .adapters.pocket_tts_cpp_runtime import (
     cleanup_transient_voice_reference,
     get_runtime_dir,
@@ -44,6 +46,7 @@ from .adapters.pocket_tts_cpp_runtime import (
     register_provider_managed_voice_path,
     revoke_provider_managed_voice_token,
 )
+from .audio_converter import AudioConverter
 from .audio_utils import (
     crossfade_audio,
     evaluate_audio_quality,
@@ -69,6 +72,7 @@ from .tts_exceptions import (
     TTSFallbackExhaustedError,
     TTSGenerationError,
     TTSInvalidVoiceReferenceError,
+    TTSProviderBusyError,
     TTSProviderError,
     TTSProviderNotConfiguredError,
     TTSResourceError,
@@ -113,6 +117,21 @@ _TTS_NONCRITICAL_EXCEPTIONS = (
     TTSValidationError,
     CircuitOpenError,
 )
+_OMNIVOICE_ALIAS_VALUES = {"omnivoice", "omni-voice", "omni_voice"}
+_OMNIVOICE_INSTRUCT_KEYS = ("instruct", "voice_design", "voice_description")
+_OMNIVOICE_SEMANTIC_GENERATION_KEYS = {
+    "num_step",
+    "guidance_scale",
+    "denoise",
+    "t_shift",
+    "position_temperature",
+    "class_temperature",
+    "layer_penalty_factor",
+    "postprocess_output",
+    "preprocess_prompt",
+    "audio_chunk_duration",
+    "audio_chunk_threshold",
+}
 
 class TTSServiceV2:
     """
@@ -200,6 +219,8 @@ class TTSServiceV2:
         self._active_requests_lock = asyncio.Lock()
         self._provider_semaphores: dict[str, asyncio.Semaphore] = {}
         self._provider_limits: dict[str, int] = {}
+        self._closing = False
+        self._omnivoice_supervisor: Optional[OmniVoiceSidecarSupervisor] = None
 
         # Initialize metrics
         self.metrics = get_metrics_registry()
@@ -445,6 +466,7 @@ class TTSServiceV2:
                 config=self._get_validation_config(),
             )
             await self._apply_custom_voice_reference(tts_request, user_id, provider_hint)
+            await self._apply_fish_s2_reference_context(tts_request, user_id, provider_hint)
 
             adapter = await self._get_adapter(request.model, provider, overrides=provider_overrides)
             if not adapter and fallback:
@@ -612,8 +634,10 @@ class TTSServiceV2:
             enabled = parse_bool(extras.get("chunking_service"), default=False)
         elif "chunking" in extras:
             enabled = parse_bool(extras.get("chunking"), default=False)
+        elif "split_text" in extras:
+            enabled = parse_bool(extras.get("split_text"), default=False)
         else:
-            for key in ("chunk_target_chars", "chunk_max_chars", "chunk_min_chars", "chunk_crossfade_ms"):
+            for key in ("chunk_size", "chunk_target_chars", "chunk_max_chars", "chunk_min_chars", "chunk_crossfade_ms"):
                 if key in extras:
                     enabled = True
                     break
@@ -621,8 +645,8 @@ class TTSServiceV2:
         if not enabled:
             return False, 0, 0, 0, 0
 
-        target = _pick_int(("chunk_target_chars", "chunk_target", "chunk_chars_target"), 120)
-        max_chars = _pick_int(("chunk_max_chars", "chunk_max", "chunk_chars_max"), 150)
+        target = _pick_int(("chunk_target_chars", "chunk_target", "chunk_chars_target", "chunk_size"), 120)
+        max_chars = _pick_int(("chunk_max_chars", "chunk_max", "chunk_chars_max", "chunk_size"), 150)
         min_chars = _pick_int(("chunk_min_chars", "chunk_min", "chunk_chars_min"), 50)
         crossfade_ms = _pick_int(("chunk_crossfade_ms", "crossfade_ms"), 50)
         if max_chars <= 0:
@@ -925,6 +949,8 @@ class TTSServiceV2:
         for key in (
             "chunking_service",
             "chunking",
+            "split_text",
+            "chunk_size",
             "chunk_target_chars",
             "chunk_target",
             "chunk_chars_target",
@@ -1172,19 +1198,41 @@ class TTSServiceV2:
 
     async def shutdown(self) -> None:
         """Gracefully close any underlying factory/adapters (best-effort)."""
-        try:
-            if self.factory and hasattr(self.factory, "close"):
+        self._closing = True
+        supervisor = self._omnivoice_supervisor
+        if supervisor is not None:
+            with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
+                supervisor.mark_closing()
+            shutdown_supervisor = getattr(supervisor, "shutdown", None)
+            if callable(shutdown_supervisor):
+                with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
+                    maybe_stop = shutdown_supervisor()
+                    if asyncio.iscoroutine(maybe_stop):
+                        await maybe_stop
+            else:
+                stop_process = getattr(supervisor, "_stop_process", None)
+                if callable(stop_process):
+                    with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
+                        maybe_stop = stop_process()
+                        if asyncio.iscoroutine(maybe_stop):
+                            await maybe_stop
+
+        if self.factory and hasattr(self.factory, "close"):
+            with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
                 maybe = self.factory.close()  # type: ignore[attr-defined]
                 if asyncio.iscoroutine(maybe):
                     await maybe  # type: ignore[func-returns-value]
-            # Some tests set/patch `_factory` only
-            if self._factory and self._factory is not self.factory and hasattr(self._factory, "close"):
+
+        # Some tests set/patch `_factory` only
+        if self._factory and self._factory is not self.factory and hasattr(self._factory, "close"):
+            with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
                 maybe2 = self._factory.close()  # type: ignore[attr-defined]
                 if asyncio.iscoroutine(maybe2):
                     await maybe2  # type: ignore[func-returns-value]
-        except _TTS_NONCRITICAL_EXCEPTIONS:
-            # Do not let shutdown errors fail tests
-            pass
+
+        self._omnivoice_supervisor = None
+        self.factory = None
+        self._factory = None
 
     async def generate(self, request: TTSRequest) -> TTSResponse:
         """Legacy synchronous-style generation wrapper expected by unit tests."""
@@ -1699,6 +1747,11 @@ class TTSServiceV2:
                         provider_hint = getattr(provider_enum, "value", str(provider_enum)).lower()
             except _TTS_NONCRITICAL_EXCEPTIONS:
                 provider_hint = None
+        fallback = fallback and not self._is_explicit_omnivoice_request(
+            request,
+            provider=provider,
+            provider_hint=provider_hint,
+        )
 
         try:
             adapter, provider_key, request_for_provider = await self._prepare_generate_speech_request(
@@ -1856,6 +1909,12 @@ class TTSServiceV2:
                         response = await _generate_with_adapter()
 
                     if fallback_plan is None and response is not None:
+                        if not metadata_only:
+                            response = await self._convert_response_if_needed(
+                                response,
+                                request_for_provider,
+                                provider_key=provider_key,
+                            )
                         self._attach_response_metadata(
                             request,
                             response,
@@ -2230,11 +2289,19 @@ class TTSServiceV2:
                     raise TTSGenerationError(error_message, provider=provider_key)
                 success = True
         except _TTS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Fallback generation failed: {e}")
-            error_message = str(e)
+            logger.error(
+                "Fallback generation failed for provider {}: {}",
+                provider_key,
+                type(e).__name__,
+            )
+            error_message = "All providers failed"
             if self._stream_errors_as_audio:
                 yield f"ERROR: All providers failed - {str(e)}".encode()
-            raise TTSGenerationError(f"All providers failed - {str(e)}") from e
+            raise TTSGenerationError(
+                error_message,
+                provider=provider_key,
+                details={"error_type": type(e).__name__},
+            ) from e
         finally:
             await self._close_response_audio_stream(response)
             self._cleanup_transient_pocket_tts_cpp_voice_path(request_for_provider)
@@ -2257,6 +2324,55 @@ class TTSServiceV2:
                 except _TTS_NONCRITICAL_EXCEPTIONS:
                     pass
 
+    async def convert_chatterbox_voice(
+        self,
+        *,
+        source_audio_path: str,
+        target_voice_path: Optional[str],
+        response_format: str | AudioFormat = "wav",
+        stream: bool = False,
+        provider_overrides: Optional[dict[str, Any]] = None,
+    ) -> TTSResponse:
+        """Convert source speech to a target voice using the Chatterbox VC adapter."""
+        if isinstance(response_format, AudioFormat):
+            audio_format = response_format
+        else:
+            try:
+                audio_format = AudioFormat(str(response_format).strip().lower())
+            except _TTS_NONCRITICAL_EXCEPTIONS as exc:
+                raise TTSValidationError(
+                    f"Unsupported response_format for Chatterbox voice conversion: {response_format}",
+                    provider="chatterbox",
+                ) from exc
+
+        adapter = await self._get_adapter("chatterbox", "chatterbox", overrides=provider_overrides)
+        if adapter is None:
+            raise TTSProviderNotConfiguredError(
+                "Chatterbox adapter is not configured",
+                provider="chatterbox",
+            )
+
+        convert_voice = getattr(adapter, "convert_voice", None)
+        if convert_voice is None:
+            raise TTSProviderNotConfiguredError(
+                "Chatterbox adapter does not support voice conversion",
+                provider="chatterbox",
+            )
+
+        provider_key = "chatterbox"
+        await self._increment_active_requests(provider_key)
+        try:
+            async with self._semaphore:
+                async with self._provider_concurrency_guard(provider_key):
+                    return await convert_voice(
+                        source_audio_path=source_audio_path,
+                        target_voice_path=target_voice_path,
+                        format=audio_format,
+                        stream=stream,
+                    )
+        finally:
+            await self._decrement_active_requests(provider_key)
+
     def _convert_request(self, request: OpenAISpeechRequest) -> TTSRequest:
         """Convert OpenAI request to unified TTS request"""
         # Map format
@@ -2272,12 +2388,28 @@ class TTSServiceV2:
             "ulaw": AudioFormat.ULAW
         }
 
+        model_id = str(getattr(request, "model", "") or "").strip().lower()
+        response_format = request.response_format
+        output_format = getattr(request, "output_format", None)
+        if output_format:
+            try:
+                explicit_fields = getattr(request, "model_fields_set", None)
+                if explicit_fields is None:
+                    explicit_fields = getattr(request, "__fields_set__", set())
+                if model_id.startswith("chatterbox") and "response_format" not in explicit_fields:
+                    response_format = output_format
+                    setattr(request, "response_format", response_format)
+            except _TTS_NONCRITICAL_EXCEPTIONS:
+                pass
+
         audio_format = format_mapping.get(
-            request.response_format.lower(),
+            response_format.lower(),
             AudioFormat.MP3
         )
-        # Optional language code mapping (lang_code primary; extra_params.language override)
+        # Optional language code mapping (lang_code primary; Chatterbox language alias next; extra_params.language override)
         language = self._normalize_language_code(getattr(request, 'lang_code', None))
+        if language is None and model_id.startswith("chatterbox"):
+            language = self._normalize_language_code(getattr(request, "language", None))
         # Optional voice reference decoding (base64)
         voice_ref_bytes = None
         if getattr(request, 'voice_reference', None):
@@ -2291,6 +2423,7 @@ class TTSServiceV2:
         # Provider-specific extras passthrough
         extras = getattr(request, 'extra_params', None) or {}
         target_sample_rate: Optional[int] = None
+        seed: Optional[int] = None
         try:
             requested_rate = getattr(request, "target_sample_rate", None)
             if requested_rate is not None:
@@ -2336,6 +2469,16 @@ class TTSServiceV2:
                 extras["target_sample_rate"] = target_sample_rate
                 # Alias for providers that currently look up `sample_rate` in extra params.
                 extras["sample_rate"] = target_sample_rate
+            for seed_key in ("seed", "generation_seed"):
+                maybe_seed = extras.get(seed_key)
+                if maybe_seed is None:
+                    continue
+                try:
+                    seed = int(maybe_seed)
+                    extras["seed"] = seed
+                    break
+                except _TTS_NONCRITICAL_EXCEPTIONS:
+                    seed = None
 
         tts_request = TTSRequest(
             text=request.input,
@@ -2346,6 +2489,7 @@ class TTSServiceV2:
             stream=request.stream if hasattr(request, 'stream') else True,
             language=language,
             voice_reference=voice_ref_bytes,
+            seed=seed,
             # Additional parameters can be added via extra_params
             extra_params=extras
         )
@@ -2372,6 +2516,35 @@ class TTSServiceV2:
                 return data_b64, fmt
         return None, None
 
+    @staticmethod
+    def _coerce_nonempty_string(value: Any) -> str:
+        """Return a stripped string value or an empty string for invalid inputs."""
+        if value is None:
+            return ""
+        try:
+            return str(value).strip()
+        except _TTS_NONCRITICAL_EXCEPTIONS:
+            return ""
+
+    def _resolve_custom_voice_reference_id(
+        self,
+        request: TTSRequest,
+        provider_hint: Optional[str],
+    ) -> str:
+        """Resolve stored custom voice ids from canonical and safe provider aliases."""
+        voice_id = self._coerce_nonempty_string(request.voice)
+        if voice_id.startswith("custom:"):
+            return voice_id.split("custom:", 1)[-1].strip()
+
+        if (provider_hint or "").lower() != "chatterbox":
+            return ""
+
+        extras = request.extra_params if isinstance(request.extra_params, dict) else {}
+        voice_mode = self._coerce_nonempty_string(extras.get("voice_mode")).lower()
+        if voice_mode != "predefined":
+            return ""
+        return self._coerce_nonempty_string(extras.get("predefined_voice_id"))
+
     async def _apply_custom_voice_reference(
         self,
         request: TTSRequest,
@@ -2381,23 +2554,21 @@ class TTSServiceV2:
         """Populate voice_reference and provider artifacts for custom: voices."""
         if not user_id:
             return
-        voice_id = request.voice or ""
-        is_custom_voice = isinstance(voice_id, str) and voice_id.startswith("custom:")
-        raw_id = voice_id.split("custom:", 1)[-1].strip() if is_custom_voice else ""
+        raw_id = self._resolve_custom_voice_reference_id(request, provider_hint)
         provider_key = (provider_hint or "").lower()
         try:
             from tldw_Server_API.app.core.TTS.voice_manager import VoiceProcessingError, get_voice_manager
 
             voice_manager = get_voice_manager()
             metadata = None
-            if is_custom_voice and raw_id and request.voice_reference is None:
+            if raw_id and request.voice_reference is None:
                 request.voice_reference = await voice_manager.load_voice_reference_audio(user_id, raw_id)
 
             extras = request.extra_params or {}
             if not isinstance(extras, dict):
                 extras = {}
 
-            if is_custom_voice and raw_id:
+            if raw_id:
                 metadata = await voice_manager.load_reference_metadata(user_id, raw_id)
                 ref_text_keys = ("reference_text", "ref_text", "voice_reference_text")
                 has_ref_text = any(extras.get(key) for key in ref_text_keys)
@@ -2516,6 +2687,252 @@ class TTSServiceV2:
                 exc,
             )
 
+    async def _apply_fish_s2_reference_context(
+        self,
+        request: TTSRequest,
+        user_id: Optional[int],
+        provider_hint: Optional[str],
+    ) -> None:
+        """Resolve Fish S2 logical references into backend-ready request fields."""
+        if not user_id or (provider_hint or "").lower() != "fish_s2":
+            return
+
+        extras = request.extra_params or {}
+        if not isinstance(extras, dict):
+            extras = {}
+
+        explicit_reference_id = extras.get("reference_id")
+        local_voice_id: Optional[str] = None
+        if isinstance(explicit_reference_id, str) and explicit_reference_id.strip():
+            local_voice_id = explicit_reference_id.strip()
+        elif isinstance(request.voice, str) and request.voice.startswith("custom:"):
+            local_voice_id = request.voice.split("custom:", 1)[-1].strip() or None
+
+        if not local_voice_id:
+            request.extra_params = extras
+            return
+
+        try:
+            from tldw_Server_API.app.core.TTS.voice_manager import VoiceProcessingError, get_voice_manager
+
+            voice_manager = get_voice_manager()
+            metadata = await voice_manager.load_reference_metadata(user_id, local_voice_id)
+
+            fish_artifacts = {}
+            if metadata and isinstance(metadata.provider_artifacts, dict):
+                fish_artifacts = metadata.provider_artifacts.get("fish_s2") or {}
+
+            remote_reference_id = None
+            if isinstance(fish_artifacts, dict):
+                remote_reference_id = fish_artifacts.get("remote_reference_id") or fish_artifacts.get("reference_id")
+
+            if remote_reference_id:
+                extras["reference_id"] = str(remote_reference_id)
+                extras.pop("references", None)
+                request.extra_params = extras
+                return
+
+            reference_text = (
+                extras.get("reference_text")
+                or extras.get("ref_text")
+                or extras.get("voice_reference_text")
+                or (fish_artifacts.get("reference_text") if isinstance(fish_artifacts, dict) else None)
+                or (metadata.reference_text if metadata else None)
+            )
+
+            voice_bytes = request.voice_reference
+            if voice_bytes is None:
+                try:
+                    voice_bytes = await voice_manager.load_voice_reference_audio(user_id, local_voice_id)
+                    request.voice_reference = voice_bytes
+                except VoiceProcessingError:
+                    voice_bytes = None
+
+            if isinstance(voice_bytes, (bytes, bytearray)) and reference_text:
+                extras.pop("reference_id", None)
+                extras["references"] = [
+                    {
+                        "audio_b64": base64.b64encode(bytes(voice_bytes)).decode("ascii"),
+                        "text": str(reference_text),
+                    }
+                ]
+
+            request.extra_params = extras
+        except _TTS_NONCRITICAL_EXCEPTIONS as exc:
+            request_id, _ = self._get_tts_request_observability(request)
+            logger.debug(
+                "Fish S2 reference resolution failed for {} (request_id={}): {}",
+                local_voice_id,
+                request_id or "unknown",
+                exc,
+            )
+
+    async def create_fish_s2_reference(
+        self,
+        *,
+        user_id: int,
+        voice_id: Optional[str] = None,
+        file_content: Optional[bytes] = None,
+        filename: Optional[str] = None,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        reference_text: Optional[str] = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Create or reuse a managed Fish S2 reference backed by local voice metadata."""
+        from tldw_Server_API.app.core.TTS.voice_manager import (
+            VoiceProcessingError,
+            VoiceReferenceMetadata,
+            VoiceUploadRequest,
+            get_voice_manager,
+        )
+
+        voice_manager = get_voice_manager()
+
+        resolved_voice_id = voice_id
+        if not resolved_voice_id:
+            if not file_content or not filename or not name or not reference_text:
+                raise VoiceProcessingError(
+                    "file, filename, name, and reference_text are required when voice_id is not provided"
+                )
+            upload_request = VoiceUploadRequest(
+                name=name,
+                description=description,
+                provider="fish_s2",
+                reference_text=reference_text,
+            )
+            upload_result = await voice_manager.upload_voice(
+                user_id=user_id,
+                file_content=file_content,
+                filename=filename,
+                request=upload_request,
+            )
+            resolved_voice_id = upload_result.voice_id
+
+        metadata = await voice_manager.load_reference_metadata(user_id, resolved_voice_id)
+        if metadata is None:
+            metadata = VoiceReferenceMetadata(voice_id=resolved_voice_id)
+        if reference_text:
+            metadata.reference_text = reference_text.strip() or None
+
+        fish_artifacts = metadata.provider_artifacts.get("fish_s2") or {}
+        existing_remote_reference_id = fish_artifacts.get("remote_reference_id")
+        if existing_remote_reference_id and not force:
+            return {
+                "reference_id": resolved_voice_id,
+                "voice_id": resolved_voice_id,
+                "remote_reference_id": existing_remote_reference_id,
+                "reference_text": fish_artifacts.get("reference_text") or metadata.reference_text,
+                "cached": True,
+            }
+
+        voice_bytes = await voice_manager.load_voice_reference_audio(user_id, resolved_voice_id)
+        resolved_reference_text = metadata.reference_text
+        if not resolved_reference_text:
+            raise VoiceProcessingError("reference_text is required for Fish S2 references")
+
+        adapter = await self._get_adapter("fish_s2", provider="fish_s2")
+        if adapter is None or not hasattr(adapter, "add_reference"):
+            raise TTSProviderNotConfiguredError("Fish S2 adapter is not available", provider="fish_s2")
+
+        local_reference_id = self._build_fish_s2_remote_reference_id(user_id, resolved_voice_id)
+        if force and existing_remote_reference_id and hasattr(adapter, "delete_reference"):
+            try:
+                delete_result = await adapter.delete_reference(reference_id=str(existing_remote_reference_id))
+            except _TTS_NONCRITICAL_EXCEPTIONS:
+                logger.debug("Fish S2 remote reference delete failed before recreation")
+            else:
+                if delete_result is not False:
+                    metadata.provider_artifacts.pop("fish_s2", None)
+                    await voice_manager.save_reference_metadata(user_id, metadata)
+
+        adapter_result = await adapter.add_reference(
+            reference_id=local_reference_id,
+            audio_b64=base64.b64encode(voice_bytes).decode("ascii"),
+            reference_text=resolved_reference_text,
+            title=name or resolved_voice_id,
+            description=description,
+        )
+        remote_reference_id = local_reference_id
+        if isinstance(adapter_result, dict):
+            remote_reference_id = str(
+                adapter_result.get("remote_reference_id")
+                or adapter_result.get("reference_id")
+                or local_reference_id
+            )
+
+        metadata.provider_artifacts["fish_s2"] = {
+            "remote_reference_id": remote_reference_id,
+            "local_reference_id": local_reference_id,
+            "reference_text": resolved_reference_text,
+        }
+        await voice_manager.save_reference_metadata(user_id, metadata)
+        return {
+            "reference_id": resolved_voice_id,
+            "voice_id": resolved_voice_id,
+            "remote_reference_id": remote_reference_id,
+            "reference_text": resolved_reference_text,
+            "cached": False,
+        }
+
+    async def list_fish_s2_references(self, *, user_id: int) -> list[dict[str, Any]]:
+        """List Fish S2 managed references from local voice metadata."""
+        from tldw_Server_API.app.core.TTS.voice_manager import get_voice_manager
+
+        voice_manager = get_voice_manager()
+        voices = await voice_manager.list_user_voices(user_id, refresh=True)
+        references: list[dict[str, Any]] = []
+
+        for voice in voices:
+            voice_id = getattr(voice, "voice_id", None)
+            if not voice_id:
+                continue
+            metadata = await voice_manager.load_reference_metadata(user_id, voice_id)
+            if metadata is None:
+                continue
+            fish_artifacts = metadata.provider_artifacts.get("fish_s2") or {}
+            remote_reference_id = fish_artifacts.get("remote_reference_id")
+            if not remote_reference_id:
+                continue
+            references.append(
+                {
+                    "reference_id": voice_id,
+                    "voice_id": voice_id,
+                    "name": getattr(voice, "name", voice_id),
+                    "reference_text": fish_artifacts.get("reference_text") or metadata.reference_text,
+                    "remote_reference_id": remote_reference_id,
+                }
+            )
+
+        return references
+
+    async def delete_fish_s2_reference(self, *, user_id: int, reference_id: str) -> dict[str, Any]:
+        """Delete a Fish S2 managed reference while preserving the local voice record."""
+        from tldw_Server_API.app.core.TTS.voice_manager import VoiceProcessingError, get_voice_manager
+
+        voice_manager = get_voice_manager()
+        metadata = await voice_manager.load_reference_metadata(user_id, reference_id)
+        if metadata is None:
+            raise VoiceProcessingError(f"Fish S2 reference not found: {reference_id}")
+
+        fish_artifacts = metadata.provider_artifacts.get("fish_s2") or {}
+        remote_reference_id = fish_artifacts.get("remote_reference_id")
+        if not remote_reference_id:
+            raise VoiceProcessingError(f"Fish S2 reference not found: {reference_id}")
+
+        adapter = await self._get_adapter("fish_s2", provider="fish_s2")
+        if adapter is None or not hasattr(adapter, "delete_reference"):
+            raise TTSProviderNotConfiguredError("Fish S2 adapter is not available", provider="fish_s2")
+
+        await adapter.delete_reference(reference_id=str(remote_reference_id))
+        metadata.provider_artifacts.pop("fish_s2", None)
+        await voice_manager.save_reference_metadata(user_id, metadata)
+        return {"reference_id": reference_id, "deleted": True}
+
+    @staticmethod
+    def _build_fish_s2_remote_reference_id(user_id: int, voice_id: str) -> str:
+        return f"tldw_u{user_id}_{voice_id}"
+
     async def _get_adapter(
         self,
         model: str,
@@ -2530,12 +2947,153 @@ class TTSServiceV2:
             if provider_enum is None:
                 logger.warning(f"Unknown provider: {provider}")
             else:
+                if provider_enum == TTSProvider.OMNIVOICE:
+                    return await factory.registry.create_adapter_with_overrides(
+                        provider_enum,
+                        self._build_omnivoice_adapter_overrides(overrides),
+                    )
                 if overrides:
                     return await factory.registry.create_adapter_with_overrides(provider_enum, overrides)
                 return await factory.registry.get_adapter(provider_enum)
 
-        # Get adapter by model name
+        # Get adapter by model name. Some tests and integrations inject a
+        # minimal factory that only implements get_adapter_by_model.
+        model_provider = None
+        if hasattr(factory, "get_provider_for_model"):
+            model_provider = factory.get_provider_for_model(model)
+        if model_provider == TTSProvider.OMNIVOICE:
+            return await factory.registry.create_adapter_with_overrides(
+                model_provider,
+                self._build_omnivoice_adapter_overrides(overrides),
+            )
         return await factory.get_adapter_by_model(model)
+
+    def _build_omnivoice_adapter_overrides(
+        self,
+        overrides: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        merged_overrides = dict(overrides or {})
+        merged_overrides["_supervisor"] = self._get_or_create_omnivoice_supervisor()
+        return merged_overrides
+
+    @staticmethod
+    def _is_explicit_omnivoice_request(
+        request: OpenAISpeechRequest,
+        provider: Optional[str] = None,
+        provider_hint: Optional[str] = None,
+    ) -> bool:
+        provider_value = (provider or "").strip().lower()
+        if provider_value in _OMNIVOICE_ALIAS_VALUES:
+            return True
+        if provider_value:
+            return False
+        model_value = (getattr(request, "model", None) or "").strip().lower()
+        if (
+            model_value.startswith("omnivoice")
+            or model_value.startswith("omni-voice")
+            or model_value.startswith("omni_voice")
+        ):
+            return True
+        provider_hint_value = (provider_hint or "").strip().lower()
+        if provider_hint_value and provider_hint_value not in _OMNIVOICE_ALIAS_VALUES:
+            return False
+        voice = (getattr(request, "voice", None) or "").strip().lower()
+        has_omnivoice_semantics = False
+        if voice.startswith("custom:"):
+            has_omnivoice_semantics = True
+        if getattr(request, "voice_reference", None):
+            has_omnivoice_semantics = True
+        extras = getattr(request, "extra_params", None)
+        if not isinstance(extras, dict):
+            return has_omnivoice_semantics
+        if any(extras.get(key) is not None for key in _OMNIVOICE_INSTRUCT_KEYS):
+            has_omnivoice_semantics = True
+        if any(key in extras for key in _OMNIVOICE_SEMANTIC_GENERATION_KEYS):
+            has_omnivoice_semantics = True
+        mode = extras.get("omnivoice_mode", extras.get("mode"))
+        if isinstance(mode, str) and mode.strip().lower() in {"design", "clone"}:
+            has_omnivoice_semantics = True
+        return has_omnivoice_semantics
+
+    def _get_or_create_omnivoice_supervisor(self) -> OmniVoiceSidecarSupervisor:
+        if self._closing:
+            raise RuntimeError("TTS service is closing")
+        if self._omnivoice_supervisor is None:
+            provider_cfg = self._get_provider_runtime_config("omnivoice")
+            repo_root = Path(__file__).resolve().parents[4]
+            self._omnivoice_supervisor = OmniVoiceSidecarSupervisor(
+                provider_cfg,
+                repo_root=repo_root,
+            )
+        return self._omnivoice_supervisor
+
+    @staticmethod
+    def _write_temp_audio_file_sync(audio_data: bytes, *, suffix: str) -> Path:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+            handle.write(audio_data)
+            return Path(handle.name)
+
+    @staticmethod
+    def _reserve_temp_audio_path_sync(*, suffix: str) -> Path:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+            return Path(handle.name)
+
+    @staticmethod
+    def _remove_temp_path_sync(path: Path) -> None:
+        with suppress(_TTS_NONCRITICAL_EXCEPTIONS):
+            path.unlink()
+
+    async def _convert_response_if_needed(
+        self,
+        response: TTSResponse,
+        request: TTSRequest,
+        *,
+        provider_key: str,
+    ) -> TTSResponse:
+        if response.audio_data is None:
+            return response
+        if response.format == request.format:
+            return response
+        if response.format != AudioFormat.WAV:
+            return response
+
+        input_path = None
+        output_path = None
+        try:
+            input_path = await asyncio.to_thread(
+                self._write_temp_audio_file_sync,
+                response.audio_data,
+                suffix=".wav",
+            )
+            output_path = await asyncio.to_thread(
+                self._reserve_temp_audio_path_sync,
+                suffix=f".{request.format.value}",
+            )
+
+            converted = await AudioConverter.convert_format(
+                input_path,
+                output_path,
+                request.format.value,
+                sample_rate=response.sample_rate,
+                channels=response.channels,
+            )
+            if not converted or output_path is None or not output_path.exists():
+                raise TTSGenerationError(
+                    "TTS output conversion failed",
+                    provider=provider_key,
+                    details={"target_format": request.format.value},
+                )
+
+            converted_bytes = await asyncio.to_thread(output_path.read_bytes)
+            response.audio_data = converted_bytes
+            response.audio_content = converted_bytes
+            response.format = request.format
+            return response
+        finally:
+            if input_path is not None:
+                await asyncio.to_thread(self._remove_temp_path_sync, input_path)
+            if output_path is not None:
+                await asyncio.to_thread(self._remove_temp_path_sync, output_path)
 
     def _resolve_provider_key(self, adapter: TTSAdapter) -> str:
         provider_key = getattr(adapter, "provider_key", None)
@@ -3059,6 +3617,38 @@ class TTSServiceV2:
 
         return status
 
+    async def unload_provider(self, provider: str) -> dict[str, Any]:
+        """Release one cached TTS provider runtime without shutting down the whole service."""
+        factory = self.factory or self._factory
+        if factory is None:
+            factory = await get_tts_factory()
+            self.factory = factory
+            self._factory = factory
+
+        unload = getattr(factory, "unload_provider", None)
+        if unload is None:
+            raise TTSProviderNotConfiguredError(
+                "TTS factory does not support provider unload",
+                provider=str(provider),
+            )
+
+        provider_key = str(provider).strip().lower()
+        async with self._active_requests_lock:
+            active_count = self._active_request_counts.get(provider_key, 0)
+        if active_count > 0:
+            raise TTSProviderBusyError(
+                "Cannot unload TTS provider while requests are in flight",
+                provider=provider_key,
+                details={"active_requests": active_count},
+            )
+
+        result = unload(provider)
+        if inspect.isawaitable(result):
+            result = await result
+        if isinstance(result, dict):
+            return result
+        return {"provider": str(provider), "unloaded": bool(result)}
+
 
 # Singleton management
 _service_instance: Optional[TTSServiceV2] = None
@@ -3104,6 +3694,7 @@ async def close_tts_service_v2():
     global _service_instance
 
     if _service_instance:
+        await _service_instance.shutdown()
         await close_tts_factory()
         _service_instance = None
         logger.info("Enhanced TTS Service (V2) closed")

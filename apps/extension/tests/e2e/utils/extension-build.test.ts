@@ -110,7 +110,9 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
     fs.writeFileSync(path.join(extensionDir, "options.html"), "<html></html>", "utf8")
     fs.writeFileSync(path.join(extensionDir, "sidepanel.html"), "<html></html>", "utf8")
 
+    const prepareExtensionLaunchPath = vi.fn((extensionPath: string) => extensionPath)
     vi.doMock("./extension-paths", () => ({
+      prepareExtensionLaunchPath,
       prioritizeExtensionBuildCandidates: () => [extensionDir],
     }))
 
@@ -119,6 +121,20 @@ describe("normalizeBuiltExtensionSeedConfig", () => {
 
       await launchWithBuiltExtension()
 
+      expect(prepareExtensionLaunchPath).toHaveBeenCalledWith(
+        extensionDir,
+        expect.objectContaining({
+          preserveDefaultLocaleCatalog: false,
+          rootDir: expect.stringContaining("tmp-playwright-profile/user-data-"),
+        }),
+      )
+      expect(resolveExtensionId).toHaveBeenCalledWith(
+        context,
+        expect.objectContaining({
+          extensionPath: extensionDir,
+          userDataDir: expect.stringContaining("tmp-playwright-profile/user-data-"),
+        }),
+      )
       expect(launchPersistentContext).toHaveBeenCalledWith(
         expect.stringContaining("tmp-playwright-profile/user-data-"),
         expect.objectContaining({

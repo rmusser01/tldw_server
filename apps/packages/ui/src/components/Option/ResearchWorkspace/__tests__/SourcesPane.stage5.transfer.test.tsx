@@ -88,13 +88,15 @@ vi.mock("react-i18next", () => ({
         count?: number
       }
     ) => {
+      const options =
+        typeof defaultValueOrOptions === "string" ? null : defaultValueOrOptions
       const count =
-        interpolationValues?.count ?? defaultValueOrOptions?.count ?? undefined
+        interpolationValues?.count ?? options?.count ?? undefined
       if (typeof defaultValueOrOptions === "string") {
         return defaultValueOrOptions.replace("{{count}}", String(count ?? ""))
       }
-      if (defaultValueOrOptions?.defaultValue) {
-        return defaultValueOrOptions.defaultValue.replace(
+      if (options?.defaultValue) {
+        return options.defaultValue.replace(
           "{{count}}",
           String(count ?? "")
         )

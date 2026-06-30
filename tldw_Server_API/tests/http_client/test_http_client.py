@@ -199,6 +199,69 @@ def test_json_max_bytes_guard():
 
 
 @requires_httpx
+def test_json_max_bytes_guard_uses_actual_body_despite_short_content_length():
+    import httpx
+    from tldw_Server_API.app.core.http_client import fetch_json, create_client
+    from tldw_Server_API.app.core.exceptions import JSONDecodeError
+
+    content = b"{" + b" \n" * 1024 + b"}"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            content=content,
+            headers={"Content-Type": "application/json", "Content-Length": "2"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = create_client(transport=transport)
+    try:
+        with pytest.raises(JSONDecodeError):
+            fetch_json(
+                method="GET",
+                url="http://93.184.216.34/json",
+                client=client,
+                require_json_ct=True,
+                max_bytes=10,
+            )
+    finally:
+        client.close()
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_async_json_max_bytes_guard_uses_actual_body_despite_short_content_length():
+    import httpx
+    from tldw_Server_API.app.core.http_client import afetch_json, create_async_client
+    from tldw_Server_API.app.core.exceptions import JSONDecodeError
+
+    content = b"{" + b" \n" * 1024 + b"}"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            content=content,
+            headers={"Content-Type": "application/json", "Content-Length": "2"},
+        )
+
+    transport = httpx.MockTransport(handler)
+    client = create_async_client(transport=transport)
+    try:
+        with pytest.raises(JSONDecodeError):
+            await afetch_json(
+                method="GET",
+                url="http://93.184.216.34/json",
+                client=client,
+                require_json_ct=True,
+                max_bytes=10,
+            )
+    finally:
+        await client.aclose()
+
+
+@requires_httpx
 @pytest.mark.asyncio
 async def test_stream_cancellation_propagates():
     import httpx
@@ -293,11 +356,11 @@ async def test_afetch_pins_dns_resolution_for_subsequent_egress_checks(monkeypat
     from tldw_Server_API.app.core.http_client import afetch, create_async_client
     from tldw_Server_API.app.core.Security import egress as egress_mod
 
-    observed_overrides: list[object] = []
+    observed_pins: list[object] = []
 
-    def _fake_policy(url: str, *, block_private_override=None, resolved_ips_override=None):  # noqa: ARG001
-        observed_overrides.append(resolved_ips_override)
-        if resolved_ips_override is None:
+    def _fake_policy(url: str, *, block_private_override=None, resolved_ips_override=None, pinned_resolved_ips=None):  # noqa: ARG001
+        observed_pins.append(pinned_resolved_ips)
+        if pinned_resolved_ips is None:
             return types.SimpleNamespace(
                 allowed=True,
                 reason=None,
@@ -306,7 +369,7 @@ async def test_afetch_pins_dns_resolution_for_subsequent_egress_checks(monkeypat
         return types.SimpleNamespace(
             allowed=True,
             reason=None,
-            resolved_ips=tuple(resolved_ips_override),
+            resolved_ips=tuple(pinned_resolved_ips),
         )
 
     monkeypatch.setattr(egress_mod, "evaluate_url_policy", _fake_policy)
@@ -321,11 +384,38 @@ async def test_afetch_pins_dns_resolution_for_subsequent_egress_checks(monkeypat
     try:
         resp = await afetch(method="GET", url="http://93.184.216.34/start", client=client, allow_redirects=True)
         assert resp.status_code == 200
-        assert observed_overrides
-        assert observed_overrides[0] is None
-        assert all(v == ("93.184.216.34",) for v in observed_overrides[1:])
+        assert observed_pins
+        assert observed_pins[0] is None
+        assert all(v == ("93.184.216.34",) for v in observed_pins[1:])
     finally:
         await client.aclose()
+
+
+@requires_httpx
+@pytest.mark.asyncio
+async def test_apost_runs_egress_validation_off_event_loop(monkeypatch):
+    import types
+
+    import tldw_Server_API.app.core.http_client as hc
+
+    calls: list[object] = []
+
+    async def _fake_to_thread(func, *args, **kwargs):
+        calls.append((func, args, kwargs))
+        return func(*args, **kwargs)
+
+    class _DummyClient:
+        async def post(self, *args, **kwargs):  # noqa: ARG002
+            return types.SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(hc.asyncio, "to_thread", _fake_to_thread)
+    monkeypatch.setattr(hc, "_validate_egress_or_raise", lambda *args, **kwargs: None)
+
+    response = await hc.apost(url="https://example.com/api", client=_DummyClient())
+
+    assert response.status_code == 200
+    assert calls
+    assert calls[0][0] is hc._validate_egress_or_raise
 
 
 @requires_httpx

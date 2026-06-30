@@ -25,6 +25,36 @@ def test_create_source_normalizes_enums_and_defaults():
 
 
 @pytest.mark.unit
+def test_normalize_source_payload_rejects_string_boolean_enabled():
+    from tldw_Server_API.app.core.Ingestion_Sources.service import normalize_source_payload
+    from tldw_Server_API.app.core.exceptions import IngestionSourceValidationError
+
+    with pytest.raises(IngestionSourceValidationError, match="enabled must be a boolean"):
+        normalize_source_payload(
+            {
+                "source_type": "local_directory",
+                "sink_type": "media",
+                "enabled": "false",
+            }
+        )
+
+
+@pytest.mark.unit
+def test_normalize_source_payload_rejects_string_boolean_schedule_enabled():
+    from tldw_Server_API.app.core.Ingestion_Sources.service import normalize_source_payload
+    from tldw_Server_API.app.core.exceptions import IngestionSourceValidationError
+
+    with pytest.raises(IngestionSourceValidationError, match="schedule_enabled must be a boolean"):
+        normalize_source_payload(
+            {
+                "source_type": "local_directory",
+                "sink_type": "media",
+                "schedule_enabled": "true",
+            }
+        )
+
+
+@pytest.mark.unit
 def test_ingestion_source_schema_models_have_docstrings():
     from tldw_Server_API.app.api.v1.schemas.ingestion_sources import (
         IngestionSourceCreateRequest,

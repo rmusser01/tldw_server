@@ -1,0 +1,3132 @@
+"""Package-level tests for the standalone MCP gateway CLI."""
+
+from __future__ import annotations
+
+import asyncio
+import io
+import json
+import os
+import subprocess
+import sys
+from collections.abc import Mapping
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import pytest
+from mcp_unified.gateway import cli as gateway_cli
+from mcp_unified.gateway.config import (
+    ExternalRegistryStorageConfigurationError,
+    build_gateway_external_registry_storage,
+    build_gateway_profile_storage,
+)
+from mcp_unified.gateway.profiles import GatewayProfileManager
+from mcp_unified.gateway.snapshots import GatewayConfigSnapshotManagementError
+from mcp_unified.profiles.models import MCPProfile
+from mcp_unified.profiles.presets import ProfilePreset, get_builtin_preset
+from mcp_unified.storage.models import (
+    CredentialGrant,
+    ExternalServerDefinition,
+    ProfileAssignment,
+)
+from mcp_unified.tool_use_reporting import ToolUseEvent
+from mcp_unified.tool_use_reporting.sqlite import SQLiteToolUseEventStore
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
+    import tomli as tomllib
+
+
+def _repo_root() -> Path:
+    """Locate the repository root from this test file."""
+
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "pyproject.toml").is_file():
+            return parent
+    raise AssertionError("Unable to locate repository root from test path")
+
+
+def test_gateway_cli_validate_config_reports_success_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Validate a JSON config file and report a deterministic success payload."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "default_preset_id": "project-researcher",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(["validate-config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "default_preset_id": "project-researcher",
+        "default_profile_id": None,
+        "external_runtime": {
+            "enabled": False,
+            "process_policy": {
+                "allow_path_lookup": True,
+                "allowed_cwd_roots": 0,
+                "allowed_env_names": None,
+                "allowed_executables": 0,
+                "configured": False,
+                "default_cwd": False,
+                "reject_shell_executables": True,
+            },
+            "reconcile_on_startup": False,
+            "stop_on_shutdown": False,
+            "transport_factory": "stdio",
+        },
+        "ok": True,
+        "path": str(config_path),
+        "profiles": 0,
+        "store": {"kind": "memory", "sqlite_path": None},
+        "tool_use_reporting": {
+            "enabled": False,
+            "retention_max_age_days": None,
+            "retention_max_events": None,
+            "store": {"kind": "memory", "sqlite_path": None},
+        },
+    }
+
+
+def test_gateway_cli_validate_config_reports_process_policy_summary(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Validate-config reports policy counts without echoing path details."""
+
+    secret_path = tmp_path / "workspace"
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "external_runtime": {
+                    "enabled": True,
+                    "process_policy": {
+                        "allowed_executables": ["/usr/bin/python3", "node"],
+                        "allowed_cwd_roots": [str(secret_path)],
+                        "allowed_env_names": ["PATH", "TOKEN"],
+                        "allow_path_lookup": False,
+                        "default_cwd": str(secret_path),
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(["validate-config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["external_runtime"]["process_policy"] == {
+        "allow_path_lookup": False,
+        "allowed_cwd_roots": 1,
+        "allowed_env_names": 2,
+        "allowed_executables": 2,
+        "configured": True,
+        "default_cwd": True,
+        "reject_shell_executables": True,
+    }
+    assert str(secret_path) not in captured.out
+
+
+def test_gateway_cli_process_policy_summary_handles_missing_policy() -> None:
+    """Process-policy summaries keep stable keys for older runtime config shapes."""
+
+    runtime = type("LegacyRuntimeConfig", (), {})()
+
+    assert gateway_cli._process_policy_summary(runtime) == {
+        "allow_path_lookup": False,
+        "allowed_cwd_roots": 0,
+        "allowed_env_names": None,
+        "allowed_executables": 0,
+        "configured": False,
+        "default_cwd": False,
+        "reject_shell_executables": False,
+    }
+
+
+def test_gateway_cli_validate_config_includes_tool_use_reporting_payload(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Validate-config reports the tool-use reporting config without secrets."""
+
+    sqlite_path = tmp_path / "events.sqlite3"
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "tool_use_reporting": {
+                    "enabled": True,
+                    "store": {
+                        "kind": "sqlite",
+                        "sqlite_path": str(sqlite_path),
+                    },
+                    "retention_max_age_days": 30,
+                    "retention_max_events": 1000,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(["validate-config", str(config_path)])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["tool_use_reporting"] == {
+        "enabled": True,
+        "retention_max_age_days": 30,
+        "retention_max_events": 1000,
+        "store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)},
+    }
+
+
+def test_gateway_cli_validate_config_reports_error_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report validation failures as user-facing JSON without tracebacks."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text("{", encoding="utf-8")
+
+    exit_code = gateway_cli.main(["validate-config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["path"] == str(config_path)
+    assert "Invalid gateway config JSON" in payload["error"]
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_validate_config_reports_unexpected_loader_errors_as_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Convert non-ValueError loader failures into JSON stderr responses."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    def _raise_runtime_error(*args: object, **kwargs: object) -> object:
+        """Simulate an unexpected loader failure from the config boundary."""
+
+        raise RuntimeError("loader failed")
+
+    monkeypatch.setattr(
+        gateway_cli,
+        "load_gateway_profile_bootstrap_config",
+        _raise_runtime_error,
+    )
+
+    exit_code = gateway_cli.main(["validate-config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload == {
+        "error": "loader failed",
+        "ok": False,
+        "path": str(config_path),
+    }
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_argument_errors_are_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report argparse failures as deterministic JSON instead of usage text."""
+
+    exit_code = gateway_cli.main([])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 2
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert "command" in payload["error"]
+    assert "usage:" not in captured.err
+
+
+def test_gateway_cli_parses_tool_events_report() -> None:
+    """Parse nested tool-events report command arguments."""
+
+    parser = gateway_cli._build_parser()
+
+    args = parser.parse_args(
+        [
+            "tool-events",
+            "report",
+            "--config",
+            "gateway.toml",
+            "--group-by",
+            "profile",
+            "--since",
+            "24h",
+        ]
+    )
+
+    assert args.command == "tool-events"
+    assert args.tool_events_command == "report"
+    assert args.group_by == "profile"
+    assert args.since == "24h"
+
+
+def test_gateway_cli_list_presets_reports_builtin_summary(
+) -> None:
+    """List bundled presets as a small JSON summary for front-end discovery."""
+
+    result = subprocess.run(
+        [sys.executable, "-m", "mcp_unified.gateway.cli", "list-presets"],
+        check=False,
+        cwd=_repo_root(),
+        env={**os.environ, "PYTHONWARNINGS": "ignore"},
+        text=True,
+        capture_output=True,
+    )
+
+    payload = json.loads(result.stdout)
+    preset_ids = {preset["id"] for preset in payload["presets"]}
+    product_owner = next(
+        preset for preset in payload["presets"] if preset["id"] == "product-owner"
+    )
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert "project-researcher" in preset_ids
+    assert all(
+        {"description", "id", "name", "version"} <= set(preset)
+        for preset in payload["presets"]
+    )
+    assert product_owner["tooling"]["direct_categories"]
+    assert product_owner["tooling"]["deferred_categories"]
+    assert product_owner["tooling"]["recommendation_catalog_patchable"] is True
+
+
+def test_gateway_cli_preset_tooling_summary_ignores_malformed_metadata() -> None:
+    """Malformed tooling metadata does not leak invalid category values."""
+
+    preset_with_missing_servers = ProfilePreset(
+        id="malformed",
+        version="test",
+        profile=MCPProfile(
+            id="malformed",
+            name="Malformed",
+            metadata={
+                "tooling": {
+                    "progressive_disclosure": {
+                        "direct_categories": "files",
+                        "deferred_categories": ("browser", 42, None),
+                    },
+                    "recommended_servers": None,
+                    "recommendation_catalog_patchable": True,
+                }
+            },
+        ),
+    )
+    preset_with_mixed_servers = preset_with_missing_servers.model_copy(
+        update={
+            "profile": preset_with_missing_servers.profile.model_copy(
+                update={
+                    "metadata": {
+                        "tooling": {
+                            "progressive_disclosure": {
+                                "direct_categories": ("files", 42),
+                                "deferred_categories": ["browser", None],
+                            },
+                            "recommended_servers": [
+                                {"category": "browser"},
+                                {"category": 7},
+                                object(),
+                                {"category": "search"},
+                            ],
+                            "recommendation_catalog_patchable": True,
+                        }
+                    }
+                }
+            )
+        }
+    )
+
+    missing_servers_summary = gateway_cli._preset_tooling_summary(
+        preset_with_missing_servers
+    )
+    mixed_servers_summary = gateway_cli._preset_tooling_summary(
+        preset_with_mixed_servers
+    )
+
+    assert missing_servers_summary == {
+        "direct_categories": [],
+        "deferred_categories": ["browser"],
+        "recommended_server_categories": [],
+        "recommendation_catalog_patchable": True,
+    }
+    assert mixed_servers_summary == {
+        "direct_categories": ["files"],
+        "deferred_categories": ["browser"],
+        "recommended_server_categories": ["browser", "search"],
+        "recommendation_catalog_patchable": True,
+    }
+
+
+def test_gateway_cli_show_preset_reports_full_builtin_profile(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Show one bundled preset with its full profile policy document."""
+
+    exit_code = gateway_cli.main(["show-preset", "project-researcher"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    preset = payload["preset"]
+    profile = preset["profile"]
+    policy = profile["policy_document"]
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert preset["id"] == "project-researcher"
+    assert preset["version"] == profile["preset_version"]
+    assert profile["id"] == "project-researcher"
+    assert profile["name"] == "Project Researcher"
+    expected_preset = get_builtin_preset("project-researcher")
+    expected_timestamp = datetime.fromisoformat(
+        expected_preset.version.replace(".", "-")
+    ).replace(tzinfo=timezone.utc)
+    assert _parse_cli_timestamp(profile["created_at"]) == expected_timestamp
+    assert _parse_cli_timestamp(profile["updated_at"]) == expected_timestamp
+    assert policy["capabilities"] == ["code_search", "filesystem.read", "docs.read"]
+    assert policy["resource_constraints"] == {}
+    assert profile["provenance"]["source"] == "builtin_preset"
+
+
+def test_gateway_cli_show_preset_reports_unknown_id_as_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report unknown preset ids as JSON errors without tracebacks."""
+
+    exit_code = gateway_cli.main(["show-preset", "unknown-mode"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload == {
+        "error": "Unknown MCP profile preset: unknown-mode",
+        "ok": False,
+        "preset_id": "unknown-mode",
+    }
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["list-profiles"],
+        ["show-profile", "reviewer"],
+        ["create-profile", "--profile-file", "profile.json"],
+        ["patch-profile", "reviewer", "--patch-file", "patch.json"],
+        ["delete-profile", "reviewer"],
+        ["duplicate-preset", "project-researcher"],
+        ["get-default-profile"],
+        ["set-default-profile", "reviewer"],
+    ],
+)
+def test_gateway_cli_profile_management_commands_require_config_or_env(
+    argv: list[str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Require an explicit or environment-provided config for store-backed commands."""
+
+    (tmp_path / "profile.json").write_text(
+        json.dumps(_profile_payload("reviewer", "Reviewer")),
+        encoding="utf-8",
+    )
+    (tmp_path / "patch.json").write_text(
+        json.dumps({"description": "Updated reviewer description"}),
+        encoding="utf-8",
+    )
+    resolved_argv = [
+        str(tmp_path / token) if token in {"profile.json", "patch.json"} else token
+        for token in argv
+    ]
+    monkeypatch.delenv("MCP_UNIFIED_GATEWAY_CONFIG", raising=False)
+    monkeypatch.delenv("MCP_GATEWAY_CONFIG", raising=False)
+
+    exit_code = gateway_cli.main(resolved_argv)
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 2
+    assert captured.out == ""
+    assert payload == {
+        "error": (
+            "--config is required unless MCP_UNIFIED_GATEWAY_CONFIG or "
+            "MCP_GATEWAY_CONFIG is set"
+        ),
+        "ok": False,
+    }
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_profile_management_uses_env_config_fallback(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Load profile-management config from MCP_UNIFIED_GATEWAY_CONFIG."""
+
+    profile = _profile_payload("env-profile", "Env Profile")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "store": {"kind": "memory"},
+            "profiles": [profile],
+        },
+    )
+    monkeypatch.setenv("MCP_UNIFIED_GATEWAY_CONFIG", str(config_path))
+
+    exit_code = gateway_cli.main(["show-profile", "env-profile"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "ok": True,
+        "profile": profile,
+        "store": {"kind": "memory", "persistent": False},
+    }
+
+
+def test_gateway_cli_profile_management_uses_env_config_alias(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Load profile-management config from MCP_GATEWAY_CONFIG when needed."""
+
+    profile = _profile_payload("alias-profile", "Alias Profile")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "store": {"kind": "memory"},
+            "profiles": [profile],
+        },
+    )
+    monkeypatch.delenv("MCP_UNIFIED_GATEWAY_CONFIG", raising=False)
+    monkeypatch.setenv("MCP_GATEWAY_CONFIG", str(config_path))
+
+    exit_code = gateway_cli.main(["show-profile", "alias-profile"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "ok": True,
+        "profile": profile,
+        "store": {"kind": "memory", "persistent": False},
+    }
+
+
+def test_gateway_cli_profile_management_unified_env_wins_over_alias(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prefer MCP_UNIFIED_GATEWAY_CONFIG when both env aliases are present."""
+
+    alias_config = tmp_path / "invalid-alias.json"
+    alias_config.write_text("{", encoding="utf-8")
+    unified_config = _write_gateway_config(
+        tmp_path,
+        {
+            "store": {"kind": "memory"},
+            "profiles": [_profile_payload("unified-profile", "Unified Profile")],
+        },
+        name="unified.json",
+    )
+    monkeypatch.setenv("MCP_UNIFIED_GATEWAY_CONFIG", str(unified_config))
+    monkeypatch.setenv("MCP_GATEWAY_CONFIG", str(alias_config))
+
+    exit_code = gateway_cli.main(["show-profile", "unified-profile"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["profile"]["id"] == "unified-profile"
+
+
+def test_gateway_cli_profile_management_explicit_config_wins_over_env(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prefer --config over MCP_UNIFIED_GATEWAY_CONFIG when both are present."""
+
+    invalid_env_config = tmp_path / "invalid-env.json"
+    invalid_env_config.write_text("{", encoding="utf-8")
+    explicit_config = _write_gateway_config(
+        tmp_path,
+        {
+            "store": {"kind": "memory"},
+            "profiles": [_profile_payload("explicit-profile", "Explicit Profile")],
+        },
+        name="explicit.json",
+    )
+    monkeypatch.setenv("MCP_UNIFIED_GATEWAY_CONFIG", str(invalid_env_config))
+
+    exit_code = gateway_cli.main(
+        ["show-profile", "explicit-profile", "--config", str(explicit_config)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["profile"]["id"] == "explicit-profile"
+
+
+def test_gateway_cli_profile_management_loader_failures_are_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report profile-management config loader failures as JSON stderr."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text("{", encoding="utf-8")
+
+    exit_code = gateway_cli.main(["list-profiles", "--config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["path"] == str(config_path)
+    assert "Invalid gateway config JSON" in payload["error"]
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_profile_management_parse_failures_are_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report profile-management parse failures with code 2 and JSON stderr."""
+
+    exit_code = gateway_cli.main(["show-profile"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 2
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert "profile_id" in payload["error"]
+    assert "usage:" not in captured.err
+
+
+def test_gateway_cli_list_profiles_reports_memory_config_profiles(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """List config-seeded memory profiles and default presets."""
+
+    reviewer = _profile_payload("reviewer", "Reviewer")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "store": {"kind": "memory"},
+            "profiles": [reviewer],
+            "default_preset_id": "project-researcher",
+        },
+    )
+
+    exit_code = gateway_cli.main(["list-profiles", "--config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert set(payload) == {"ok", "profiles", "store"}
+    assert payload["ok"] is True
+    assert payload["store"] == {"kind": "memory", "persistent": False}
+    assert [profile["id"] for profile in payload["profiles"]] == [
+        "project-researcher",
+        "reviewer",
+    ]
+    assert payload["profiles"][0]["name"] == "Project Researcher"
+    assert payload["profiles"][0]["preset_id"] == "project-researcher"
+    assert payload["profiles"][0]["provenance"]["duplicated"] is True
+    assert payload["profiles"][1] == reviewer
+
+
+def test_gateway_cli_show_profile_reports_memory_config_profile(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Show one config-seeded memory profile with memory store metadata."""
+
+    reviewer = _profile_payload("reviewer", "Reviewer")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "store": {"kind": "memory"},
+            "profiles": [reviewer],
+        },
+    )
+
+    exit_code = gateway_cli.main(["show-profile", "reviewer", "--config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "ok": True,
+        "profile": reviewer,
+        "store": {"kind": "memory", "persistent": False},
+    }
+
+
+def test_gateway_cli_get_default_profile_reports_memory_fallback_preset(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Read a config-seeded memory default preset without an assignment record."""
+
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "store": {"kind": "memory"},
+            "default_preset_id": "project-researcher",
+        },
+    )
+
+    exit_code = gateway_cli.main(["get-default-profile", "--config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert set(payload) == {"ok", "profile", "assignment", "store"}
+    assert payload["ok"] is True
+    assert payload["assignment"] is None
+    assert payload["store"] == {"kind": "memory", "persistent": False}
+    assert payload["profile"]["id"] == "project-researcher"
+    assert payload["profile"]["name"] == "Project Researcher"
+    assert payload["profile"]["preset_id"] == "project-researcher"
+    assert payload["profile"]["provenance"]["duplicated"] is True
+
+
+def test_gateway_cli_get_default_profile_reports_sqlite_assignment(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Read the assigned default profile from a persistent SQLite gateway store."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_default_profile(sqlite_path, "project-researcher")
+
+    exit_code = gateway_cli.main(["get-default-profile", "--config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert set(payload) == {"ok", "profile", "assignment", "store"}
+    assert payload["ok"] is True
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+    assert payload["profile"]["id"] == "project-researcher"
+    assert payload["profile"]["name"] == "Project Researcher"
+    assert payload["profile"]["preset_id"] == "project-researcher"
+    assert payload["assignment"]["id"] == "gateway-default"
+    assert payload["assignment"]["profile_id"] == "project-researcher"
+    assert payload["assignment"]["is_default"] is True
+    assert payload["assignment"]["enabled"] is True
+
+
+def test_gateway_cli_duplicate_preset_persists_to_sqlite_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Duplicate a preset into the configured persistent profile store."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+
+    exit_code = gateway_cli.main(
+        ["duplicate-preset", "project-researcher", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["preset_id"] == "project-researcher"
+    assert (
+        payload["preset_version"]
+        == get_builtin_preset("project-researcher").version
+    )
+    assert payload["profile"]["id"] == "project-researcher"
+    assert payload["profile"]["preset_id"] == "project-researcher"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_duplicate_preset_accepts_custom_id_and_name(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Duplicate a preset with caller-selected profile id and display name."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "duplicate-preset",
+            "project-researcher",
+            "--profile-id",
+            "workspace-researcher",
+            "--name",
+            "Workspace Researcher",
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["preset_id"] == "project-researcher"
+    assert (
+        payload["preset_version"]
+        == get_builtin_preset("project-researcher").version
+    )
+    assert payload["profile"]["id"] == "workspace-researcher"
+    assert payload["profile"]["name"] == "Workspace Researcher"
+    assert payload["profile"]["preset_id"] == "project-researcher"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_create_profile_persists_to_sqlite_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Create a user profile from JSON file input and persist to SQLite."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    profile_path = tmp_path / "profile.json"
+    profile = _profile_payload("reviewer", "Reviewer")
+    profile_path.write_text(json.dumps(profile), encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-profile",
+            "--profile-file",
+            str(profile_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["profile"]["id"] == "reviewer"
+    assert payload["profile"]["name"] == "Reviewer"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+    show_exit_code = gateway_cli.main(
+        ["show-profile", "reviewer", "--config", str(config_path)]
+    )
+    show_payload = json.loads(capsys.readouterr().out)
+    assert show_exit_code == 0
+    assert show_payload["profile"]["id"] == "reviewer"
+
+
+def test_gateway_cli_create_profile_accepts_stdin_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Create a user profile from stdin JSON when --profile-file=-."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    profile_payload = _profile_payload("stdin-profile", "Stdin Profile")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    monkeypatch.setattr(
+        gateway_cli.sys,
+        "stdin",
+        io.StringIO(json.dumps(profile_payload)),
+    )
+
+    exit_code = gateway_cli.main(
+        ["create-profile", "--profile-file", "-", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["profile"]["id"] == "stdin-profile"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_patch_profile_updates_sqlite_profile(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Patch safe mutable profile fields from a JSON file payload."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    patch_path = tmp_path / "patch.json"
+    patch_payload = {"description": "Updated reviewer description", "enabled": False}
+    patch_path.write_text(json.dumps(patch_payload), encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "reviewer", "Reviewer")
+
+    exit_code = gateway_cli.main(
+        [
+            "patch-profile",
+            "reviewer",
+            "--patch-file",
+            str(patch_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["profile"]["id"] == "reviewer"
+    assert payload["profile"]["description"] == "Updated reviewer description"
+    assert payload["profile"]["enabled"] is False
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_patch_profile_accepts_stdin_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Patch a stored profile from stdin JSON when --patch-file=-."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    patch_payload = {"description": "Updated via stdin"}
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "reviewer", "Reviewer")
+    monkeypatch.setattr(gateway_cli.sys, "stdin", io.StringIO(json.dumps(patch_payload)))
+
+    exit_code = gateway_cli.main(
+        ["patch-profile", "reviewer", "--patch-file", "-", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["profile"]["id"] == "reviewer"
+    assert payload["profile"]["description"] == "Updated via stdin"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_create_external_server_persists_to_sqlite_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Create an external server from JSON file input and persist to SQLite."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    server_path = tmp_path / "server.json"
+    server = _server_payload("search", "Search")
+    server_path.write_text(json.dumps(server), encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-external-server",
+            "--server-file",
+            str(server_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["server"]["id"] == "search"
+    assert payload["server"]["name"] == "Search"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+    show_exit_code = gateway_cli.main(
+        ["show-external-server", "search", "--config", str(config_path)]
+    )
+    show_payload = json.loads(capsys.readouterr().out)
+    assert show_exit_code == 0
+    assert show_payload["server"]["id"] == "search"
+
+
+def test_gateway_cli_show_external_server_returns_stored_server(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Show one stored external server with SQLite store metadata."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "search", "Search")
+
+    exit_code = gateway_cli.main(
+        ["show-external-server", "search", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["server"]["id"] == "search"
+    assert payload["server"]["name"] == "Search"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_list_external_servers_filters_enabled_servers(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """List external servers and honor the optional enabled filter."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "disabled-search", "Disabled", enabled=False)
+    _seed_sqlite_external_server(sqlite_path, "enabled-search", "Enabled", enabled=True)
+
+    exit_code = gateway_cli.main(
+        [
+            "list-external-servers",
+            "--enabled",
+            "true",
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert [server["id"] for server in payload["servers"]] == ["enabled-search"]
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_create_external_server_accepts_stdin_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Create an external server from stdin JSON when --server-file=-."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    server_payload = _server_payload("stdin-server", "Stdin Server")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    monkeypatch.setattr(gateway_cli.sys, "stdin", io.StringIO(json.dumps(server_payload)))
+
+    exit_code = gateway_cli.main(
+        ["create-external-server", "--server-file", "-", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["server"]["id"] == "stdin-server"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_patch_external_server_updates_sqlite_server(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Patch safe mutable external server fields from a JSON file payload."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text(
+        json.dumps({"name": "Updated Search", "enabled": False}),
+        encoding="utf-8",
+    )
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "search", "Search")
+
+    exit_code = gateway_cli.main(
+        [
+            "patch-external-server",
+            "search",
+            "--patch-file",
+            str(patch_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["server"]["id"] == "search"
+    assert payload["server"]["name"] == "Updated Search"
+    assert payload["server"]["enabled"] is False
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_delete_external_server_deletes_ungranted_sqlite_server(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Delete an external server that has no enabled credential grants."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "temporary", "Temporary")
+
+    exit_code = gateway_cli.main(
+        ["delete-external-server", "temporary", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "ok": True,
+        "server_id": "temporary",
+        "store": {"kind": "sqlite", "persistent": True},
+    }
+
+
+def test_gateway_cli_external_server_json_argument_rejects_malformed_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject malformed external server JSON payload files with exit code 2."""
+
+    server_path = tmp_path / "server.json"
+    server_path.write_text("{", encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(tmp_path / 'gateway.db')}},
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-external-server",
+            "--server-file",
+            str(server_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 2
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["error"].startswith("Invalid server JSON:")
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_external_server_json_argument_rejects_non_object_payload(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject external server JSON payloads that are not JSON objects."""
+
+    server_path = tmp_path / "server.json"
+    server_path.write_text(json.dumps(["invalid"]), encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(tmp_path / 'gateway.db')}},
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-external-server",
+            "--server-file",
+            str(server_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 2
+    assert captured.out == ""
+    assert payload == {"error": "server JSON must be an object", "ok": False}
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_create_external_server_duplicate_reports_reason_code(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report duplicate external server creation as a domain JSON error."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    server_path = tmp_path / "server.json"
+    server_path.write_text(
+        json.dumps(_server_payload("search", "Duplicate Search")),
+        encoding="utf-8",
+    )
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "search", "Search")
+
+    exit_code = gateway_cli.main(
+        [
+            "create-external-server",
+            "--server-file",
+            str(server_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "external_server_already_exists"
+    assert payload["server_id"] == "search"
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_patch_external_server_unsupported_field_reports_reason_code(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report unsupported external server patch fields as domain JSON errors."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text(json.dumps({"id": "renamed"}), encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "search", "Search")
+
+    exit_code = gateway_cli.main(
+        [
+            "patch-external-server",
+            "search",
+            "--patch-file",
+            str(patch_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "invalid_external_server_patch"
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_delete_external_server_with_enabled_grant_reports_reason_code(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject deleting an external server that has enabled credential grants."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_external_server(sqlite_path, "search", "Search")
+    _seed_sqlite_external_server_grant(sqlite_path, "grant-search", "search")
+
+    exit_code = gateway_cli.main(
+        ["delete-external-server", "search", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "external_server_has_credential_grants"
+    assert payload["server_id"] == "search"
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_external_registry_memory_config_reports_json_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report memory-store external registry unavailability without tracebacks."""
+
+    config_path = _write_gateway_config(tmp_path, {"store": {"kind": "memory"}})
+
+    exit_code = gateway_cli.main(
+        ["list-external-servers", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "external_registry_store_unavailable"
+    assert "external registry management requires" in payload["error"]
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_external_registry_storage_unavailable_uses_exception_type(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Map external-registry storage config failures by exception type."""
+
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(tmp_path / "mcp.sqlite")}},
+    )
+
+    def _raise_storage_error(*args: object, **kwargs: object) -> object:
+        raise ExternalRegistryStorageConfigurationError("custom store unavailable")
+
+    monkeypatch.setattr(
+        gateway_cli,
+        "build_gateway_external_registry_storage",
+        _raise_storage_error,
+    )
+
+    exit_code = gateway_cli.main(
+        ["list-external-servers", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload == {
+        "error": "custom store unavailable",
+        "ok": False,
+        "reason_code": "external_registry_store_unavailable",
+    }
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_external_registry_runtime_failures_are_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Convert raw external-registry operation failures into JSON errors."""
+
+    class _FailingExternalRegistryManager:
+        async def list_servers(self, enabled: bool | None = None) -> dict[str, Any]:
+            raise RuntimeError("raw store failure")
+
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(tmp_path / "mcp.sqlite")}},
+    )
+    monkeypatch.setattr(
+        gateway_cli,
+        "external_registry_manager_from_storage",
+        lambda bundle: _FailingExternalRegistryManager(),
+    )
+
+    exit_code = gateway_cli.main(
+        ["list-external-servers", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload == {
+        "error": "External registry store unavailable",
+        "ok": False,
+        "reason_code": "external_registry_store_unavailable",
+    }
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_create_credential_grant_persists_to_sqlite_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Create a credential grant from JSON file input and persist to SQLite."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    grant_path = tmp_path / "grant.json"
+    grant_path.write_text(
+        json.dumps(_credential_grant_payload("grant-one")),
+        encoding="utf-8",
+    )
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+
+    exit_code = gateway_cli.main(
+        [
+            "create-credential-grant",
+            "--grant-file",
+            str(grant_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["grant"]["id"] == "grant-one"
+    assert payload["grant"]["credential_slot"] == "api_key"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+    show_exit_code = gateway_cli.main(
+        ["show-credential-grant", "grant-one", "--config", str(config_path)]
+    )
+    show_payload = json.loads(capsys.readouterr().out)
+    assert show_exit_code == 0
+    assert show_payload["grant"]["id"] == "grant-one"
+
+
+def test_gateway_cli_list_credential_grants_filters_profile(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """List credential grants and honor the optional profile filter."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+    _seed_sqlite_profile(sqlite_path, "other", "Other")
+    _seed_sqlite_credential_grant(sqlite_path, "grant-one", profile_id="profile")
+    _seed_sqlite_credential_grant(sqlite_path, "grant-two", profile_id="other")
+
+    exit_code = gateway_cli.main(
+        [
+            "list-credential-grants",
+            "--profile-id",
+            "profile",
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert [grant["id"] for grant in payload["grants"]] == ["grant-one"]
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_patch_credential_grant_accepts_stdin_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Patch a credential grant from stdin JSON when --patch-file=-."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+    _seed_sqlite_credential_grant(sqlite_path, "grant-one")
+    monkeypatch.setattr(
+        gateway_cli.sys,
+        "stdin",
+        io.StringIO(json.dumps({"metadata": {"label": "Updated"}, "enabled": False})),
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "patch-credential-grant",
+            "grant-one",
+            "--patch-file",
+            "-",
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["grant"]["metadata"] == {"label": "Updated"}
+    assert payload["grant"]["enabled"] is False
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+def test_gateway_cli_delete_credential_grant_removes_sqlite_grant(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Delete one credential grant from a persistent gateway store."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+    _seed_sqlite_credential_grant(sqlite_path, "grant-one")
+
+    exit_code = gateway_cli.main(
+        ["delete-credential-grant", "grant-one", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "ok": True,
+        "grant_id": "grant-one",
+        "store": {"kind": "sqlite", "persistent": True},
+    }
+
+
+def test_gateway_cli_create_credential_grant_duplicate_reports_reason_code(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject duplicate credential grant creation with a stable reason code."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    grant_path = tmp_path / "grant.json"
+    grant_path.write_text(
+        json.dumps(_credential_grant_payload("grant-one")),
+        encoding="utf-8",
+    )
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+    _seed_sqlite_credential_grant(sqlite_path, "grant-one")
+
+    exit_code = gateway_cli.main(
+        [
+            "create-credential-grant",
+            "--grant-file",
+            str(grant_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "credential_grant_already_exists"
+    assert payload["grant_id"] == "grant-one"
+
+
+def test_gateway_cli_export_config_writes_snapshot_to_stdout(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Export a directly importable config snapshot to stdout."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+    _seed_sqlite_gateway_default_assignment(sqlite_path, "profile")
+    _seed_sqlite_external_server(sqlite_path, "search", "Search")
+    _seed_sqlite_credential_grant(
+        sqlite_path,
+        "grant-one",
+        external_server_id="search",
+    )
+
+    exit_code = gateway_cli.main(["export-config", "--config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["schema"] == "mcp_unified.gateway.config_snapshot"
+    assert payload["version"] == 1
+    assert [profile["id"] for profile in payload["profiles"]] == ["profile"]
+    assert payload["default_assignment"]["profile_id"] == "profile"
+    assert [server["id"] for server in payload["external_servers"]] == ["search"]
+    assert [grant["id"] for grant in payload["credential_grants"]] == ["grant-one"]
+    assert "ok" not in payload
+
+
+def test_gateway_cli_export_config_writes_snapshot_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Export-config can write the snapshot JSON to a requested file."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    output_path = tmp_path / "snapshot.json"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+
+    exit_code = gateway_cli.main(
+        [
+            "export-config",
+            "--config",
+            str(config_path),
+            "--output",
+            str(output_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    file_payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "ok": True,
+        "output": str(output_path),
+        "schema": "mcp_unified.gateway.config_snapshot",
+        "version": 1,
+    }
+    assert file_payload["schema"] == "mcp_unified.gateway.config_snapshot"
+    assert [profile["id"] for profile in file_payload["profiles"]] == ["profile"]
+
+
+def test_gateway_cli_tool_events_report_rejects_disabled_reporting(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Tool event commands fail clearly when reporting is disabled."""
+
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"tool_use_reporting": {"enabled": False}},
+    )
+
+    exit_code = gateway_cli.main(
+        ["tool-events", "report", "--group-by", "profile", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "tool_use_reporting_disabled"
+
+
+def test_gateway_cli_tool_events_report_requires_persistent_reporting_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI report/export/cleanup require a persistent reporting store."""
+
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"tool_use_reporting": {"enabled": True, "store": {"kind": "memory"}}},
+    )
+
+    exit_code = gateway_cli.main(
+        ["tool-events", "report", "--group-by", "profile", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "tool_use_reporting_persistent_store_required"
+
+
+def test_gateway_cli_tool_events_report_reads_sqlite_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Build an aggregate report from the configured SQLite event store."""
+
+    sqlite_path = tmp_path / "tool-events.sqlite3"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "tool_use_reporting": {
+                "enabled": True,
+                "store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)},
+            }
+        },
+    )
+    _seed_sqlite_tool_use_events(
+        sqlite_path,
+        [
+            ToolUseEvent(
+                runtime_surface="gateway",
+                requested_tool_name="git.status",
+                effective_tool_name="git.status",
+                profile_id="devops",
+                model_id="gpt-4.1",
+                status="success",
+                duration_ms=10,
+            ),
+            ToolUseEvent(
+                runtime_surface="gateway",
+                requested_tool_name="git.status",
+                effective_tool_name="git.status",
+                profile_id="devops",
+                model_id="gpt-4.1",
+                status="error",
+                reason_code="BackendFailure",
+                duration_ms=30,
+            ),
+        ],
+    )
+
+    exit_code = gateway_cli.main(
+        ["tool-events", "report", "--group-by", "profile", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["group_by"] == "profile"
+    assert payload["events_scanned"] == 2
+    assert payload["rows"][0]["group_key"] == "devops"
+    assert payload["rows"][0]["call_count"] == 2
+    assert payload["rows"][0]["tool_call_success_rate"] == 0.5
+
+
+def test_gateway_cli_tool_events_export_reads_sqlite_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Export matching events as a deterministic JSON envelope."""
+
+    sqlite_path = tmp_path / "tool-events.sqlite3"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "tool_use_reporting": {
+                "enabled": True,
+                "store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)},
+            }
+        },
+    )
+    _seed_sqlite_tool_use_events(
+        sqlite_path,
+        [
+            ToolUseEvent(
+                runtime_surface="gateway",
+                requested_tool_name="git.status",
+                effective_tool_name="git.status",
+                profile_id="devops",
+                status="success",
+            )
+        ],
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "tool-events",
+            "export",
+            "--format",
+            "json",
+            "--profile-id",
+            "devops",
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["format"] == "json"
+    assert len(payload["events"]) == 1
+    assert payload["events"][0]["profile_id"] == "devops"
+
+
+def test_gateway_cli_tool_events_export_output_uses_thread_offload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Writing export output is offloaded from the async CLI helper."""
+
+    class _ExportStore:
+        async def export_events(self, _query: Any, *, format: str) -> str:
+            assert format == "json"
+            return '[{"ok":true}]'
+
+    calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
+
+    async def fake_to_thread(fn: Any, *args: Any, **kwargs: Any) -> Any:
+        calls.append((fn, args, kwargs))
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(gateway_cli.asyncio, "to_thread", fake_to_thread)
+    output_path = tmp_path / "events.json"
+    args = gateway_cli.argparse.Namespace(
+        effective_tool_name=None,
+        format="json",
+        limit=10,
+        mode_id=None,
+        model_id=None,
+        output=output_path,
+        profile_id=None,
+        requested_tool_name=None,
+        since=None,
+        status=None,
+        tool_prompt_id=None,
+    )
+
+    payload = asyncio.run(gateway_cli._tool_events_export_for_cli(_ExportStore(), args))
+
+    assert payload == {"format": "json", "ok": True, "output": str(output_path)}
+    assert output_path.read_text(encoding="utf-8") == '[{"ok":true}]'
+    assert calls
+    assert calls[0][0] == output_path.write_text
+
+
+def test_gateway_cli_tool_events_cleanup_deletes_over_limit(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Cleanup can enforce a max-events retention cap."""
+
+    sqlite_path = tmp_path / "tool-events.sqlite3"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "tool_use_reporting": {
+                "enabled": True,
+                "store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)},
+            }
+        },
+    )
+    _seed_sqlite_tool_use_events(
+        sqlite_path,
+        [
+            ToolUseEvent(
+                runtime_surface="gateway",
+                requested_tool_name="git.status",
+                effective_tool_name="git.status",
+                status="success",
+            ),
+            ToolUseEvent(
+                runtime_surface="gateway",
+                requested_tool_name="git.diff",
+                effective_tool_name="git.diff",
+                status="success",
+            ),
+        ],
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "tool-events",
+            "cleanup",
+            "--max-events",
+            "1",
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "deleted_older_than": 0,
+        "deleted_over_limit": 1,
+        "ok": True,
+    }
+
+
+def test_gateway_cli_import_config_dry_run_reports_plan_without_mutation(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Import-config dry-run reports the plan and leaves the store untouched."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(_config_snapshot_payload()), encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "import-config",
+            "--snapshot-file",
+            str(snapshot_path),
+            "--dry-run",
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["dry_run"] is True
+    assert [action["action"] for action in payload["plan"]["actions"]] == [
+        "upsert_profile",
+        "set_default_assignment",
+        "upsert_external_server",
+        "upsert_credential_grant",
+    ]
+
+    list_exit_code = gateway_cli.main(["list-profiles", "--config", str(config_path)])
+    list_payload = json.loads(capsys.readouterr().out)
+    assert list_exit_code == 0
+    assert list_payload["profiles"] == []
+
+
+def test_gateway_cli_import_config_applies_snapshot_upserts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Import-config applies profile, default, external-server, and grant upserts."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(_config_snapshot_payload()), encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "import-config",
+            "--snapshot-file",
+            str(snapshot_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["dry_run"] is False
+    assert payload["failed_actions"] == []
+    assert [action["target_id"] for action in payload["applied_actions"]] == [
+        "profile",
+        "gateway-default",
+        "search",
+        "grant-one",
+    ]
+
+    show_profile_exit = gateway_cli.main(
+        ["show-profile", "profile", "--config", str(config_path)]
+    )
+    show_profile_payload = json.loads(capsys.readouterr().out)
+    assert show_profile_exit == 0
+    assert show_profile_payload["profile"]["id"] == "profile"
+
+    show_grant_exit = gateway_cli.main(
+        ["show-credential-grant", "grant-one", "--config", str(config_path)]
+    )
+    show_grant_payload = json.loads(capsys.readouterr().out)
+    assert show_grant_exit == 0
+    assert show_grant_payload["grant"]["external_server_id"] == "search"
+
+
+def test_gateway_cli_import_config_reports_sanitized_partial_failure(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Import-config reports partial action ids without echoing raw snapshots."""
+
+    class _FailingSnapshotManager:
+        async def import_snapshot(
+            self,
+            snapshot: Mapping[str, object],
+            *,
+            dry_run: bool = False,
+        ) -> dict[str, object]:
+            del snapshot, dry_run
+            raise GatewayConfigSnapshotManagementError(
+                "Gateway config snapshot import failed",
+                reason_code="config_snapshot_import_failed",
+                applied_actions=[{"action": "upsert_profile", "target_id": "profile"}],
+                failed_actions=[
+                    {
+                        "action": "upsert_credential_grant",
+                        "reason_code": "RuntimeError",
+                        "target_id": "grant-one",
+                    }
+                ],
+            )
+
+    sqlite_path = tmp_path / "gateway.db"
+    snapshot = _config_snapshot_payload()
+    snapshot["credential_grants"][0]["broker_id"] = "broker-secret-value"
+    snapshot_path = tmp_path / "snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    monkeypatch.setattr(
+        gateway_cli,
+        "gateway_config_snapshot_manager_from_storage",
+        lambda *args, **kwargs: _FailingSnapshotManager(),
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "import-config",
+            "--snapshot-file",
+            str(snapshot_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["reason_code"] == "config_snapshot_import_failed"
+    assert payload["applied_actions"] == [
+        {"action": "upsert_profile", "target_id": "profile"}
+    ]
+    assert payload["failed_actions"] == [
+        {
+            "action": "upsert_credential_grant",
+            "reason_code": "RuntimeError",
+            "target_id": "grant-one",
+        }
+    ]
+    assert "broker-secret-value" not in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_credential_grant_json_argument_rejects_malformed_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject malformed credential grant JSON payload files with exit code 2."""
+
+    grant_path = tmp_path / "grant.json"
+    grant_path.write_text("{", encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(tmp_path / 'gateway.db')}},
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-credential-grant",
+            "--grant-file",
+            str(grant_path),
+            "--config",
+            str(config_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 2
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert "Invalid grant JSON" in payload["error"]
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("argv", "label"),
+    [
+        (["create-profile", "--profile-file"], "profile"),
+        (["patch-profile", "reviewer", "--patch-file"], "patch"),
+    ],
+)
+def test_gateway_cli_profile_json_argument_rejects_malformed_json(
+    argv: list[str],
+    label: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject malformed profile/patch JSON payload files with exit code 2."""
+
+    payload_path = tmp_path / f"{label}.json"
+    payload_path.write_text("{", encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(tmp_path / 'gateway.db')}},
+    )
+
+    exit_code = gateway_cli.main([*argv, str(payload_path), "--config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 2
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["error"].startswith(f"Invalid {label} JSON:")
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("argv", "label"),
+    [
+        (["create-profile", "--profile-file"], "profile"),
+        (["patch-profile", "reviewer", "--patch-file"], "patch"),
+    ],
+)
+def test_gateway_cli_profile_json_argument_rejects_non_object_payload(
+    argv: list[str],
+    label: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject profile/patch JSON payloads that are not JSON objects."""
+
+    payload_path = tmp_path / f"{label}.json"
+    payload_path.write_text(json.dumps(["invalid"]), encoding="utf-8")
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(tmp_path / 'gateway.db')}},
+    )
+
+    exit_code = gateway_cli.main([*argv, str(payload_path), "--config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 2
+    assert captured.out == ""
+    assert payload == {"error": f"{label} JSON must be an object", "ok": False}
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_delete_profile_deletes_unassigned_sqlite_profile(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Delete an unassigned profile from a persistent SQLite store."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "temporary", "Temporary")
+
+    exit_code = gateway_cli.main(
+        ["delete-profile", "temporary", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload == {
+        "ok": True,
+        "profile_id": "temporary",
+        "store": {"kind": "sqlite", "persistent": True},
+    }
+
+
+def test_gateway_cli_delete_profile_rejects_effective_default_profile(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject deleting the effective default profile."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_default_profile(sqlite_path, "project-researcher")
+
+    exit_code = gateway_cli.main(
+        ["delete-profile", "project-researcher", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["reason_code"] == "profile_is_default"
+    assert payload["ok"] is False
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_delete_profile_rejects_assigned_profile(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject deleting a profile with active assignments."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "assigned", "Assigned")
+    _seed_sqlite_profile_assignment(sqlite_path, "workspace-assignment", "assigned")
+
+    exit_code = gateway_cli.main(
+        ["delete-profile", "assigned", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["reason_code"] == "profile_has_assignments"
+    assert payload["ok"] is False
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_set_default_profile_persists_sqlite_assignment(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Set the gateway default profile in the configured persistent store."""
+
+    sqlite_path = tmp_path / "gateway.db"
+    config_path = _write_gateway_config(
+        tmp_path,
+        {"store": {"kind": "sqlite", "sqlite_path": str(sqlite_path)}},
+    )
+    _seed_sqlite_profile(sqlite_path, "reviewer", "Reviewer")
+
+    exit_code = gateway_cli.main(
+        ["set-default-profile", "reviewer", "--config", str(config_path)]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert set(payload) == {"ok", "profile_id", "assignment", "store"}
+    assert payload["ok"] is True
+    assert payload["profile_id"] == "reviewer"
+    assert payload["assignment"]["id"] == "gateway-default"
+    assert payload["assignment"]["profile_id"] == "reviewer"
+    assert payload["store"] == {"kind": "sqlite", "persistent": True}
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["create-profile", "--profile-file", "profile.json"],
+        ["patch-profile", "reviewer", "--patch-file", "patch.json"],
+        ["delete-profile", "reviewer"],
+        ["duplicate-preset", "project-researcher"],
+        ["set-default-profile", "reviewer"],
+    ],
+)
+def test_gateway_cli_memory_store_mutations_are_rejected(
+    argv: list[str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject mutating profile-management commands for transient memory stores."""
+
+    (tmp_path / "profile.json").write_text(
+        json.dumps(_profile_payload("reviewer", "Reviewer")),
+        encoding="utf-8",
+    )
+    (tmp_path / "patch.json").write_text(
+        json.dumps({"description": "Updated description"}),
+        encoding="utf-8",
+    )
+    resolved_argv = [
+        str(tmp_path / token) if token in {"profile.json", "patch.json"} else token
+        for token in argv
+    ]
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "store": {"kind": "memory"},
+            "profiles": [_profile_payload("reviewer", "Reviewer")],
+        },
+    )
+
+    exit_code = gateway_cli.main([*resolved_argv, "--config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "profile_store_unavailable"
+    assert "persistent gateway store" in payload["error"]
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["create-profile", "--profile-file", "missing-profile.json"],
+        ["patch-profile", "reviewer", "--patch-file", "missing-patch.json"],
+    ],
+)
+def test_gateway_cli_memory_store_rejects_mutations_before_reading_payload_files(
+    argv: list[str],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject transient-store writes before attempting profile or patch file reads."""
+
+    config_path = _write_gateway_config(
+        tmp_path,
+        {
+            "store": {"kind": "memory"},
+            "profiles": [_profile_payload("reviewer", "Reviewer")],
+        },
+    )
+    resolved_argv = [
+        str(tmp_path / token)
+        if token in {"missing-profile.json", "missing-patch.json"}
+        else token
+        for token in argv
+    ]
+
+    exit_code = gateway_cli.main([*resolved_argv, "--config", str(config_path)])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert exit_code == 1
+    assert captured.out == ""
+    assert payload["ok"] is False
+    assert payload["reason_code"] == "profile_store_unavailable"
+    assert "persistent gateway store" in payload["error"]
+    assert "Unable to read" not in payload["error"]
+    assert "Traceback" not in captured.err
+
+
+def test_gateway_cli_project_script_is_registered() -> None:
+    """Expose the package CLI through the installed project scripts."""
+
+    pyproject_path = _repo_root() / "pyproject.toml"
+    pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+
+    assert (
+        pyproject["project"]["scripts"]["mcp-unified-gateway"]
+        == "mcp_unified.gateway.cli:main"
+    )
+
+
+def test_gateway_cli_package_info_reports_release_gate(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Expose conservative package-release metadata through the CLI."""
+
+    exit_code = gateway_cli.main(["package-info"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert payload["ok"] is True
+    assert payload["package_name"] == "mcp-unified"
+    assert payload["package_status"] == "internal-experimental"
+    assert payload["publishing_status"] == "not-published"
+    assert payload["license_expression"] == "GPL-3.0-only"
+    assert payload["dependency_version_policy"] == "names-only"
+    assert {"httpx", "websockets"}.issubset(payload["base_dependencies"])
+    assert "gateway" in payload["optional_extras"]
+
+
+def test_standalone_gateway_docs_describe_package_release_gate() -> None:
+    """Document the current package boundary without implying PyPI readiness."""
+
+    docs_path = _repo_root() / "Docs" / "MCP_UNIFIED_STANDALONE_GATEWAY_ADMIN.md"
+    docs = docs_path.read_text(encoding="utf-8")
+
+    assert "package-info" in docs
+    assert "GPL-3.0-only" in docs
+    assert "internal/experimental" in docs
+    assert "names-only" in docs
+    # These are pytest assertions; nosec keeps Bandit B101 from flagging test checks.
+    assert "py.typed" in docs  # nosec B101
+    assert "PEP 561" in docs  # nosec B101
+    assert "not a separately published standalone package" in docs
+
+
+def _parse_cli_timestamp(value: str) -> datetime:
+    """Parse a JSON timestamp without depending on a specific UTC suffix."""
+
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _write_gateway_config(
+    tmp_path: Path,
+    payload: dict[str, object],
+    *,
+    name: str = "gateway.json",
+) -> Path:
+    config_path = tmp_path / name
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+    return config_path
+
+
+def _profile_payload(profile_id: str, name: str) -> dict[str, object]:
+    return MCPProfile(id=profile_id, name=name).model_dump(mode="json")
+
+
+def _server_payload(server_id: str, name: str) -> dict[str, object]:
+    return {
+        "id": server_id,
+        "name": name,
+        "transport": "websocket",
+        "url": "wss://example.test/mcp",
+    }
+
+
+def _credential_grant_payload(
+    grant_id: str,
+    *,
+    profile_id: str = "profile",
+    external_server_id: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": grant_id,
+        "profile_id": profile_id,
+        "broker_id": "broker",
+        "credential_slot": "api_key",
+        "metadata": {"label": grant_id},
+    }
+    if external_server_id is not None:
+        payload["external_server_id"] = external_server_id
+    return payload
+
+
+def _config_snapshot_payload() -> dict[str, object]:
+    return {
+        "schema": "mcp_unified.gateway.config_snapshot",
+        "version": 1,
+        "profiles": [_profile_payload("profile", "Profile")],
+        "default_assignment": ProfileAssignment(
+            id="gateway-default",
+            profile_id="profile",
+            is_default=True,
+        ).model_dump(mode="json"),
+        "external_servers": [
+            {
+                "id": "search",
+                "name": "Search",
+                "transport": "stdio",
+                "command": ["node", "server.js"],
+                "credential_slots": ["api_key"],
+            }
+        ],
+        "credential_grants": [
+            _credential_grant_payload(
+                "grant-one",
+                external_server_id="search",
+            )
+        ],
+    }
+
+
+def _seed_sqlite_profile(sqlite_path: Path, profile_id: str, name: str) -> None:
+    bundle = build_gateway_profile_storage(
+        {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
+    )
+
+    async def _seed() -> None:
+        try:
+            await bundle.profile_store.upsert_profile(
+                MCPProfile(id=profile_id, name=name)
+            )
+        finally:
+            await bundle.profile_store.aclose()
+
+    asyncio.run(_seed())
+
+
+def _seed_sqlite_default_profile(sqlite_path: Path, preset_id: str) -> None:
+    bundle = build_gateway_profile_storage(
+        {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
+    )
+    manager = GatewayProfileManager(
+        profile_store=bundle.profile_store,
+        assignment_store=bundle.assignment_store,
+        audit_store=bundle.audit_store,
+        store_metadata=bundle.metadata,
+    )
+
+    async def _seed_default() -> None:
+        try:
+            await manager.duplicate_preset(preset_id)
+            await manager.set_default_profile(preset_id)
+        finally:
+            await bundle.profile_store.aclose()
+
+    asyncio.run(_seed_default())
+
+
+def _seed_sqlite_gateway_default_assignment(
+    sqlite_path: Path,
+    profile_id: str,
+) -> None:
+    bundle = build_gateway_profile_storage(
+        {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
+    )
+
+    async def _seed_assignment() -> None:
+        try:
+            await bundle.assignment_store.upsert_assignment(
+                ProfileAssignment(
+                    id="gateway-default",
+                    profile_id=profile_id,
+                    is_default=True,
+                )
+            )
+        finally:
+            await bundle.assignment_store.aclose()
+
+    asyncio.run(_seed_assignment())
+
+
+def _seed_sqlite_profile_assignment(
+    sqlite_path: Path,
+    assignment_id: str,
+    profile_id: str,
+) -> None:
+    bundle = build_gateway_profile_storage(
+        {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
+    )
+
+    async def _seed_assignment() -> None:
+        try:
+            await bundle.assignment_store.upsert_assignment(
+                ProfileAssignment(
+                    id=assignment_id,
+                    profile_id=profile_id,
+                    workspace_id="workspace",
+                )
+            )
+        finally:
+            await bundle.assignment_store.aclose()
+
+    asyncio.run(_seed_assignment())
+
+
+def _seed_sqlite_external_server(
+    sqlite_path: Path,
+    server_id: str,
+    name: str,
+    *,
+    enabled: bool = True,
+) -> None:
+    bundle = build_gateway_external_registry_storage(
+        {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
+    )
+
+    async def _seed() -> None:
+        try:
+            await bundle.external_registry_store.upsert_server(
+                ExternalServerDefinition(
+                    **_server_payload(server_id, name),
+                    enabled=enabled,
+                )
+            )
+        finally:
+            await bundle.external_registry_store.aclose()
+
+    asyncio.run(_seed())
+
+
+def _seed_sqlite_external_server_grant(
+    sqlite_path: Path,
+    grant_id: str,
+    server_id: str,
+) -> None:
+    _seed_sqlite_profile(sqlite_path, "profile", "Profile")
+    bundle = build_gateway_external_registry_storage(
+        {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
+    )
+
+    async def _seed() -> None:
+        try:
+            grant_store = bundle.credential_grant_store
+            if grant_store is None:
+                raise RuntimeError("SQLite external registry bundle must expose grants")
+            await grant_store.upsert_grant(
+                CredentialGrant(
+                    id=grant_id,
+                    profile_id="profile",
+                    broker_id="broker",
+                    credential_slot="api_key",
+                    external_server_id=server_id,
+                )
+            )
+        finally:
+            await bundle.external_registry_store.aclose()
+
+    asyncio.run(_seed())
+
+
+def _seed_sqlite_credential_grant(
+    sqlite_path: Path,
+    grant_id: str,
+    *,
+    profile_id: str = "profile",
+    external_server_id: str | None = None,
+) -> None:
+    bundle = build_gateway_external_registry_storage(
+        {"kind": "sqlite", "sqlite_path": str(sqlite_path)}
+    )
+
+    async def _seed() -> None:
+        try:
+            grant_store = bundle.credential_grant_store
+            if grant_store is None:
+                raise RuntimeError("SQLite external registry bundle must expose grants")
+            await grant_store.upsert_grant(
+                CredentialGrant(
+                    **_credential_grant_payload(
+                        grant_id,
+                        profile_id=profile_id,
+                        external_server_id=external_server_id,
+                    )
+                )
+            )
+        finally:
+            await bundle.external_registry_store.aclose()
+
+    asyncio.run(_seed())
+
+
+def _seed_sqlite_tool_use_events(
+    sqlite_path: Path,
+    events: list[ToolUseEvent],
+) -> None:
+    store = SQLiteToolUseEventStore(sqlite_path)
+
+    async def _seed() -> None:
+        try:
+            for event in events:
+                await store.append_event(event)
+        finally:
+            await store.aclose()
+
+    asyncio.run(_seed())
+
+
+def test_gateway_cli_approval_grant_lifecycle(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Create, list, and revoke an approval grant through the CLI."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {
+                    "kind": "sqlite",
+                    "sqlite_path": str(tmp_path / "grants.db"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-approval-grant",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--subject-type",
+            "domain",
+            "--value",
+            "https://Example.com/private",
+            "--ttl-seconds",
+            "900",
+            "--granted-by",
+            "operator",
+        ]
+    )
+    created = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    grant_payload = created["grant"]
+    assert grant_payload["value"] == "example.com"
+    assert grant_payload["profile_id"] == "researcher"
+    grant_id = grant_payload["grant_id"]
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    listed = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert [grant["grant_id"] for grant in listed["grants"]] == [grant_id]
+
+    exit_code = gateway_cli.main(
+        ["revoke-approval-grant", grant_id, "--config", str(config_path)]
+    )
+    revoked = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert revoked["grant"]["grant_id"] == grant_id
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out)["grants"] == []
+
+
+def test_gateway_cli_approval_grant_requires_configured_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fail closed when no policy grant store is configured."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(json.dumps({"store": {"kind": "memory"}}), encoding="utf-8")
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["reason_code"] == "policy_grant_store_unavailable"
+
+
+def test_gateway_cli_approval_grant_requires_persistent_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Reject CLI grant management against a process-local memory store."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {"kind": "memory"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        ["list-approval-grants", "--config", str(config_path)]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["reason_code"] == "policy_grant_store_unavailable"
+
+
+def test_gateway_cli_path_grant_lifecycle(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Create, list, and revoke a TTL path grant through the CLI."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {
+                    "kind": "sqlite",
+                    "sqlite_path": str(tmp_path / "grants.db"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-path-grant",
+            "--config",
+            str(config_path),
+            "--profile",
+            "reviewer",
+            "--prefix",
+            "docs\\scratch/./sub",
+            "--actions",
+            "read,write",
+            "--ttl-seconds",
+            "900",
+            "--session-id",
+            "session-1",
+        ]
+    )
+    created = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    grant_payload = created["grant"]
+    assert grant_payload["grant_type"] == "path"
+    assert grant_payload["value"] == "docs/scratch/sub"
+    assert grant_payload["actions"] == ["read", "write"]
+    grant_id = grant_payload["grant_id"]
+
+    exit_code = gateway_cli.main(
+        [
+            "list-approval-grants",
+            "--config",
+            str(config_path),
+            "--grant-type",
+            "path",
+        ]
+    )
+    listed = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert [grant["grant_id"] for grant in listed["grants"]] == [grant_id]
+
+    exit_code = gateway_cli.main(
+        ["revoke-approval-grant", grant_id, "--config", str(config_path)]
+    )
+    assert exit_code == 0
+    capsys.readouterr()
+
+
+def test_gateway_cli_path_grant_rejects_invalid_actions(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Fail closed on invalid path grant actions."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "policy_grants": {
+                    "kind": "sqlite",
+                    "sqlite_path": str(tmp_path / "grants.db"),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "create-path-grant",
+            "--config",
+            str(config_path),
+            "--profile",
+            "reviewer",
+            "--prefix",
+            "docs/scratch",
+            "--actions",
+            "read,launch_missiles",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert json.loads(captured.err)["reason_code"] == "invalid_policy_grant"
+
+
+def test_gateway_cli_simulate_policy_reports_decision(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Simulate a profile policy decision for one hypothetical tool call."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "profiles": [
+                    {
+                        "id": "researcher",
+                        "name": "Researcher",
+                        "policy_document": {
+                            "allowed_tools": ["web.fetch"],
+                            "permission_rules": [
+                                {"pattern": "WebFetch(example.com)", "outcome": "ask"}
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--tool",
+            "web.fetch",
+            "--url",
+            "https://example.com/private",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["overall"]["status"] == "approval_required"
+    assert payload["profile_id"] == "researcher"
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--tool",
+            "web.fetch",
+            "--url",
+            "https://other.example.org/page",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["overall"]["status"] == "allowed"
+
+
+def test_gateway_cli_simulate_policy_unknown_profile_errors(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Report a JSON error payload for an unknown profile id."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(json.dumps({"store": {"kind": "memory"}}), encoding="utf-8")
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "missing",
+            "--tool",
+            "web.fetch",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert json.loads(captured.err)["reason_code"] == "profile_not_found"
+
+
+def test_gateway_cli_simulate_policy_does_not_write_persistent_profile_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Simulation must stay read-only even against a persistent profile store."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "sqlite", "sqlite_path": str(tmp_path / "profiles.db")},
+                "profiles": [
+                    {
+                        "id": "researcher",
+                        "name": "Researcher",
+                        "policy_document": {"allowed_tools": ["web.fetch"]},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "researcher",
+            "--tool",
+            "web.fetch",
+            "--url",
+            "https://example.com/page",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["overall"]["status"] == "allowed"
+
+    exit_code = gateway_cli.main(
+        ["show-profile", "researcher", "--config", str(config_path)]
+    )
+    capsys.readouterr()
+    assert exit_code == 1
+
+
+def test_gateway_cli_simulate_policy_flags_override_arguments_json(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Explicit convenience flags must win over --arguments-json keys."""
+
+    config_path = tmp_path / "gateway.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "store": {"kind": "memory"},
+                "profiles": [
+                    {
+                        "id": "reviewer",
+                        "name": "Reviewer",
+                        "policy_document": {
+                            "allowed_tools": ["fs.read_text"],
+                            "permission_rules": [
+                                {
+                                    "pattern": "Read(docs/private/**)",
+                                    "outcome": "deny",
+                                    "reason_code": "private_docs_denied",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = gateway_cli.main(
+        [
+            "simulate-policy",
+            "--config",
+            str(config_path),
+            "--profile",
+            "reviewer",
+            "--tool",
+            "fs.read_text",
+            "--path",
+            "docs/private/secret.txt",
+            "--arguments-json",
+            json.dumps({"path": "docs/public/notes.txt"}),
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["overall"]["status"] == "denied"
+    assert payload["overall"]["reason_code"] == "private_docs_denied"

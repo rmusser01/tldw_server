@@ -11,6 +11,14 @@ from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.errors: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
+
+    def error(self, message: str, *args: object, **kwargs: object) -> None:
+        self.errors.append((message, args, kwargs))
+
+
 def _make_principal() -> AuthPrincipal:
     return AuthPrincipal(
         kind="user",
@@ -192,6 +200,45 @@ def test_put_user_override_returns_500_for_persistence_error():
 
     assert resp.status_code == 500
     assert resp.json().get("detail") == "Failed to persist override"
+
+
+@pytest.mark.unit
+def test_put_user_override_persistence_error_log_is_sanitized(monkeypatch):
+    stub = _StubModerationService(
+        set_result={
+            "ok": False,
+            "persisted": False,
+            "error": "moderation persistence exploded at /private/moderation-overrides.json",
+            "error_type": "persistence",
+        }
+    )
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(moderation_mod, "logger", logger_stub)
+    app = _build_app(stub)
+
+    payload = {
+        "enabled": True,
+        "rules": [
+            {
+                "id": "r1",
+                "pattern": "hello",
+                "is_regex": False,
+                "action": "warn",
+                "phase": "both",
+            }
+        ],
+    }
+
+    with TestClient(app) as client:
+        resp = client.put("/api/v1/moderation/users/private-user", json=payload)
+
+    assert resp.status_code == 500
+    assert resp.json().get("detail") == "Failed to persist override"
+    assert logger_stub.errors == [("Moderation override persist failed", (), {})]
+    rendered = " ".join([logger_stub.errors[0][0], *(str(arg) for arg in logger_stub.errors[0][1])])
+    assert "private-user" not in rendered
+    assert "exploded" not in rendered
+    assert "/private/moderation-overrides.json" not in rendered
 
 
 @pytest.mark.unit

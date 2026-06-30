@@ -9,7 +9,10 @@
 
 export type ShareScopeType = "team" | "org"
 export type AccessLevel = "view_chat" | "view_chat_add" | "full_edit"
-export type ShareResourceType = "chatbook" | "workspace"
+export type ShareResourceType =
+  | "chatbook"
+  | "workspace"
+  | "prototype_workspace"
 
 export const ACCESS_LEVEL_LABELS: Record<AccessLevel, string> = {
   view_chat: "Read-only",
@@ -115,4 +118,16 @@ export interface PublicSharePreview {
   is_password_protected: boolean
   access_level: AccessLevel
   allow_clone: boolean
+}
+
+export interface PrototypeLinkExchangeRequest {
+  display_name?: string
+  password?: string
+}
+
+export interface PrototypeLinkExchangeResponse {
+  shared_actor_id: string
+  actor_type: "external_collaborator"
+  session_token: string
+  runtime_policy_profile: string
 }

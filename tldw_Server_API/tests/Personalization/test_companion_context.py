@@ -5,6 +5,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Personalization.companion_user_ids import resolve_companion_storage_user_id
 from tldw_Server_API.app.core.Personalization.companion_context import load_companion_context
 from tldw_Server_API.app.core.config import settings
 
@@ -79,6 +80,34 @@ def test_load_companion_context_returns_compact_knowledge_and_explicit_activity(
     assert payload["activity_lines"] == [
         "- Pytest Patterns (reading item saved)"
     ]
+
+
+def test_load_companion_context_uses_resolved_storage_user_id_for_text_users(monkeypatch):
+    class _FakeDB:
+        def get_or_create_profile(self, user_id_value):
+            assert user_id_value == "user-alpha"
+            return {"enabled": 0}
+
+    opened_user_ids: list[str] = []
+
+    def _fake_for_user(cls, user_id_value):
+        opened_user_ids.append(str(user_id_value))
+        return _FakeDB()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Personalization.companion_context.PersonalizationDB.for_user",
+        classmethod(_fake_for_user),
+    )
+
+    payload = load_companion_context(user_id="user-alpha")
+
+    assert payload == {
+        "knowledge_lines": [],
+        "activity_lines": [],
+        "card_count": 0,
+        "activity_count": 0,
+    }
+    assert opened_user_ids == [resolve_companion_storage_user_id("user-alpha")]
 
 
 def test_load_companion_context_returns_empty_when_profile_disabled(companion_context_env):

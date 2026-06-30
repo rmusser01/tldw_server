@@ -66,8 +66,8 @@ def _check_workflows_db() -> dict:
             status["expected_version"] = None
         status["ok"] = True
     except _HEALTH_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"/readyz DB check failed: {e}")
-        status["error"] = str(e)
+        logger.error("/readyz DB check failed")
+        status["error"] = "Workflow database health check failed"
     return status
 
 
@@ -129,7 +129,7 @@ async def api_health():
         if dbh.get("status") != "healthy":
             overall = "degraded"
     except _HEALTH_NONCRITICAL_EXCEPTIONS as e:
-        checks["database"] = {"status": "unhealthy", "error": str(e)}
+        checks["database"] = {"status": "unhealthy", "error": "Database health check failed"}
         overall = "unhealthy"
 
     # Metrics registry presence
@@ -142,7 +142,7 @@ async def api_health():
         if not metrics_ok and overall == "ok":
             overall = "degraded"
     except _HEALTH_NONCRITICAL_EXCEPTIONS as e:
-        checks["metrics"] = {"status": "unhealthy", "error": str(e)}
+        checks["metrics"] = {"status": "unhealthy", "error": "Metrics health check failed"}
         overall = "unhealthy"
 
     # ChaChaNotes health snapshot
@@ -154,8 +154,8 @@ async def api_health():
         if chacha.get("status") not in {"healthy", "ok"} and overall == "ok":
             overall = "degraded"
     except _HEALTH_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"ChaChaNotes health snapshot failed: {e}")
-        checks["chacha_notes"] = {"status": "unhealthy", "error": str(e)}
+        logger.warning("ChaChaNotes health snapshot failed")
+        checks["chacha_notes"] = {"status": "unhealthy", "error": "ChaChaNotes health check failed"}
         overall = "degraded"
 
     body = {
@@ -206,8 +206,8 @@ async def api_health():
                     body["rg_policy_version"] = int(_data.get("version") or 1)
                     body["rg_policy_store"] = _os.getenv("RG_POLICY_STORE", "file")
                     body["rg_policy_count"] = len((_data.get("policies") or {}).keys())
-                except _HEALTH_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.debug(f"Failed to read RG policy file for /health: {exc}")
+                except _HEALTH_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("Failed to read RG policy file for /health")
     except _HEALTH_NONCRITICAL_EXCEPTIONS:
         pass
     code = status.HTTP_200_OK if overall == "ok" else (206 if overall == "degraded" else 503)
@@ -261,7 +261,7 @@ async def api_health_metrics():
         }
         return {"cpu": cpu, "memory": mem, "disk": disk}
     except _HEALTH_NONCRITICAL_EXCEPTIONS as e:
-        logger.warning(f"health/metrics unavailable: {e}")
+        logger.warning("health/metrics unavailable")
         return {
             "cpu": {"percent": 0.0},
             "memory": {"total": 0, "available": 0, "percent": 0.0, "used": 0, "free": 0},
@@ -277,7 +277,7 @@ def _int_env(name: str, default: int) -> int:
     try:
         return int(value)
     except (TypeError, ValueError):
-        logger.warning(f"Invalid integer for {name!r}: {value!r}. Using default {default}.")
+        logger.warning("Invalid integer environment override")
         return default
 
 
@@ -346,10 +346,10 @@ async def api_security_health():
         status_bits = _calculate_security_status(summary)
         response.update(status_bits)
     except _HEALTH_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error(f"health/security failed: {exc}")
+        logger.error("health/security failed")
         response.update(
             {
-                "error": str(exc),
+                "error": "Security health unavailable",
             }
         )
         return JSONResponse(response, status_code=503)
@@ -358,7 +358,7 @@ async def api_security_health():
         if callable(shutdown):
             try:
                 await shutdown()
-            except _HEALTH_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"UnifiedAuditService stop() ignored: {exc}")
+            except _HEALTH_NONCRITICAL_EXCEPTIONS:
+                logger.debug("UnifiedAuditService stop() ignored")
 
     return JSONResponse(response, status_code=200)

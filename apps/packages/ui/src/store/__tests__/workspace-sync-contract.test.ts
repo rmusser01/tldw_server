@@ -27,6 +27,7 @@ describe("workspace sync contract", () => {
           type: "summary",
           title: "Summary",
           status: "completed",
+          reviewStatus: "draft",
           content: "Summary content",
           totalTokens: 210,
           totalCostUsd: 0.042,
@@ -49,6 +50,7 @@ describe("workspace sync contract", () => {
     expect(payload.snapshot.generatedArtifacts[0]?.completedAt).toBe(
       "2026-02-18T10:06:00.000Z"
     )
+    expect(payload.snapshot.generatedArtifacts[0]?.reviewStatus).toBe("draft")
   })
 
   it("accepts valid payloads and rejects incompatible payloads", () => {

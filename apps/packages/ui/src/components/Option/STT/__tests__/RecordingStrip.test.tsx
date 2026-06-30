@@ -1,11 +1,12 @@
 import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mockStartRecording = vi.fn()
 const mockStopRecording = vi.fn()
 const mockClearRecording = vi.fn()
 const mockLoadBlob = vi.fn()
+const notificationErrorMock = vi.fn()
 
 vi.mock("@/hooks/useAudioRecorder", () => ({
   useAudioRecorder: () => ({
@@ -27,7 +28,7 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => ({
-    error: vi.fn(),
+    error: notificationErrorMock,
     success: vi.fn()
   })
 }))
@@ -61,6 +62,78 @@ describe("RecordingStrip", () => {
     expect(uploadBtn).toBeInTheDocument()
   })
 
+  it("shows the current audio source state before recording starts", () => {
+    render(<RecordingStrip onBlobReady={mockOnBlobReady} />)
+
+    const status = screen
+      .getByText("Audio source: no audio selected")
+      .closest('[role="status"]')
+
+    expect(status).toBeInTheDocument()
+    expect(status).not.toHaveAttribute("aria-label")
+  })
+
+  it("disables recording and upload when route readiness blocks transcription", () => {
+    render(
+      <RecordingStrip
+        onBlobReady={mockOnBlobReady}
+        disabled
+        disabledReason="No transcription models are available."
+      />
+    )
+
+    expect(screen.getByRole("button", { name: /start recording/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Upload audio file" })).toBeDisabled()
+    expect(screen.getByText("No transcription models are available."))
+      .toHaveAttribute("role", "status")
+  })
+
+  it("uses non-danger styling for temporary disabled recording states", () => {
+    render(
+      <RecordingStrip
+        onBlobReady={mockOnBlobReady}
+        disabled
+        disabledReason="Loading transcription model catalog."
+        disabledStatusType="secondary"
+      />
+    )
+
+    const status = screen.getByText("Loading transcription model catalog.")
+
+    expect(status).toHaveClass("ant-typography-secondary")
+    expect(status).not.toHaveClass("ant-typography-danger")
+  })
+
+  it("only cancels the Space shortcut event when it handles recording", () => {
+    render(<RecordingStrip onBlobReady={mockOnBlobReady} />)
+
+    const toggleEvent = new CustomEvent("stt-toggle-record", {
+      cancelable: true
+    })
+    window.dispatchEvent(toggleEvent)
+
+    expect(toggleEvent.defaultPrevented).toBe(true)
+    expect(mockStartRecording).toHaveBeenCalledOnce()
+  })
+
+  it("does not cancel the Space shortcut event while recording is disabled", () => {
+    render(
+      <RecordingStrip
+        onBlobReady={mockOnBlobReady}
+        disabled
+        disabledReason="No transcription models are available."
+      />
+    )
+
+    const toggleEvent = new CustomEvent("stt-toggle-record", {
+      cancelable: true
+    })
+    window.dispatchEvent(toggleEvent)
+
+    expect(toggleEvent.defaultPrevented).toBe(false)
+    expect(mockStartRecording).not.toHaveBeenCalled()
+  })
+
   it("shows settings toggle button when prop provided", () => {
     render(
       <RecordingStrip
@@ -78,5 +151,23 @@ describe("RecordingStrip", () => {
     render(<RecordingStrip onBlobReady={mockOnBlobReady} />)
     const btn = screen.getByRole("button", { name: /start recording/i })
     expect(btn.getAttribute("aria-label")).toContain("Start recording")
+  })
+
+  it("shows classified microphone permission notification when recording cannot start", async () => {
+    mockStartRecording.mockRejectedValueOnce(
+      new DOMException("Permission denied", "NotAllowedError")
+    )
+
+    render(<RecordingStrip onBlobReady={mockOnBlobReady} />)
+    fireEvent.click(screen.getByRole("button", { name: /start recording/i }))
+
+    await waitFor(() => {
+      expect(notificationErrorMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Microphone access is blocked",
+          description: expect.stringContaining("browser permission")
+        })
+      )
+    })
   })
 })

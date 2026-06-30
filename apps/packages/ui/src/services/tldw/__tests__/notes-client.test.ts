@@ -65,4 +65,29 @@ describe("TldwApiClient notes methods", () => {
       })
     )
   })
+
+  it("loads note folders from the public notes folder endpoint", async () => {
+    const client = new TldwApiClient()
+    await client.listNoteFolders()
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/notes/folders/",
+        method: "GET"
+      })
+    )
+  })
+
+  it("creates note folders by normalized path", async () => {
+    const client = new TldwApiClient()
+    await client.createNoteFolder("Inbox/Captured Articles")
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/notes/folders/",
+        method: "POST",
+        body: { path: "Inbox/Captured Articles" }
+      })
+    )
+  })
 })

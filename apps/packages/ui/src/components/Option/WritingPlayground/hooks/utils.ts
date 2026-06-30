@@ -3,6 +3,7 @@
  * Extracted from index.tsx to reduce component file size.
  */
 
+import type { JSONContent } from "@tiptap/react"
 import type { ChatMessage } from "@/services/tldw/TldwApiClient"
 import type {
   WritingTemplateResponse,
@@ -15,6 +16,14 @@ import {
   type WritingWorldInfoEntry,
   type WritingWorldInfoSettings
 } from "../writing-context-utils"
+import type {
+  WritingRevisionAction,
+  WritingRevisionOperation,
+  WritingRevisionPayload,
+  WritingRevisionPresetId,
+  WritingRevisionProposal,
+  WritingRevisionStatus
+} from "../writing-revision-types"
 import type { BasicStoppingModeType } from "../writing-stop-mode-utils"
 
 // ---------------------------------------------------------------------------
@@ -30,6 +39,9 @@ export type SessionUsageMap = Record<string, SessionUsage>
 
 export type WritingSessionPayload = Record<string, unknown> & {
   prompt?: string
+  prompt_rich?: JSONContent
+  revisions?: WritingRevisionPayload
+  revision_preset_id?: WritingRevisionPresetId | null
   settings?: WritingSessionSettings
   template_name?: string | null
   templateName?: string | null
@@ -141,6 +153,7 @@ export type NonToolMessage = Extract<ChatMessage, { role: NonToolRole }>
 // ---------------------------------------------------------------------------
 
 export const WRITING_SPEECH_PREFS_STORAGE_KEY = "writing:speech-preferences"
+export const WRITING_REVISION_PAYLOAD_SCHEMA_VERSION = 1
 export const SAVE_DEBOUNCE_MS = 800
 export const MAX_MATCHES = 500
 export const MAX_CHUNKS = 80
@@ -152,6 +165,47 @@ export const WORDCLOUD_POLL_DELAY_MS = 600
 
 export const PREDICT_PLACEHOLDER = "{predict}"
 export const FILL_PLACEHOLDER = "{fill}"
+
+const WRITING_REVISION_PRESET_IDS: readonly WritingRevisionPresetId[] = [
+  "draft_freely",
+  "polish_prose",
+  "developmental_edit",
+  "preserve_voice",
+  "make_concise",
+  "expand_sensory_detail"
+]
+
+const WRITING_REVISION_ACTIONS: readonly WritingRevisionAction[] = [
+  "continue",
+  "rewrite",
+  "expand",
+  "tighten",
+  "tone",
+  "outline",
+  "custom"
+]
+
+const WRITING_REVISION_OPERATIONS: readonly WritingRevisionOperation[] = [
+  "insert",
+  "replace",
+  "advisory"
+]
+
+const WRITING_REVISION_STATUSES: readonly WritingRevisionStatus[] = [
+  "pending",
+  "applied",
+  "rejected",
+  "conflict",
+  "raw_suggestion",
+  "advisory"
+]
+
+const WRITING_REVISION_TARGET_MODES = [
+  "selection",
+  "paragraph",
+  "cursor",
+  "document"
+] as const
 
 export const PREDICT_SYSTEM_PROMPT =
   "Continue the text from the prompt. Respond with only the continuation."
@@ -320,6 +374,78 @@ export const cloneDefaultSettings = (): WritingSessionSettings => ({
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
+
+const isOneOf = <T extends string>(
+  value: unknown,
+  allowed: readonly T[]
+): value is T => typeof value === "string" && allowed.includes(value as T)
+
+const isOptionalString = (value: unknown): value is string | undefined =>
+  value === undefined || typeof value === "string"
+
+const isOptionalNullableString = (
+  value: unknown
+): value is string | null | undefined =>
+  value == null || typeof value === "string"
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((entry) => typeof entry === "string")
+
+const isWritingRevisionPresetId = (
+  value: unknown
+): value is WritingRevisionPresetId =>
+  isOneOf(value, WRITING_REVISION_PRESET_IDS)
+
+const isWritingRevisionAnchor = (
+  value: unknown
+): value is WritingRevisionProposal["target"]["anchor"] =>
+  isRecord(value) &&
+  typeof value.documentFingerprint === "string" &&
+  typeof value.prefix === "string" &&
+  typeof value.suffix === "string"
+
+const isWritingRevisionTarget = (
+  value: unknown
+): value is WritingRevisionProposal["target"] =>
+  isRecord(value) &&
+  isOneOf(value.mode, WRITING_REVISION_TARGET_MODES) &&
+  typeof value.start === "number" &&
+  Number.isFinite(value.start) &&
+  Number.isInteger(value.start) &&
+  value.start >= 0 &&
+  typeof value.end === "number" &&
+  Number.isFinite(value.end) &&
+  Number.isInteger(value.end) &&
+  value.end >= value.start &&
+  typeof value.beforeText === "string" &&
+  isWritingRevisionAnchor(value.anchor) &&
+  typeof value.label === "string" &&
+  typeof value.requiresConfirmation === "boolean" &&
+  isOptionalString(value.confirmationReason)
+
+const isWritingRevisionProposal = (
+  value: unknown
+): value is WritingRevisionProposal => {
+  if (!isRecord(value)) return false
+  if (typeof value.id !== "string") return false
+  if (typeof value.sessionId !== "string") return false
+  if (!isOneOf(value.action, WRITING_REVISION_ACTIONS)) return false
+  if (!isOneOf(value.operation, WRITING_REVISION_OPERATIONS)) return false
+  if (!isOptionalNullableString(value.presetInstruction)) return false
+  if (value.presetId != null && !isWritingRevisionPresetId(value.presetId)) {
+    return false
+  }
+  if (typeof value.instruction !== "string") return false
+  if (!isWritingRevisionTarget(value.target)) return false
+  if (!isOptionalString(value.replacementText)) return false
+  if (!isOptionalString(value.rawText)) return false
+  if (!isOptionalString(value.rationale)) return false
+  if (!isOptionalString(value.title)) return false
+  if (value.notes !== undefined && !isStringArray(value.notes)) return false
+  if (!isOptionalString(value.regeneratedFromId)) return false
+  if (typeof value.createdAt !== "string") return false
+  return isOneOf(value.status, WRITING_REVISION_STATUSES)
+}
 
 export const buildRegex = (
   pattern: string,
@@ -952,6 +1078,16 @@ export const getPromptFromPayload = (payload?: Record<string, unknown> | null): 
   return typeof prompt === "string" ? prompt : ""
 }
 
+export const getPromptRichFromPayload = (
+  payload?: Record<string, unknown> | null
+): JSONContent | null => {
+  if (!isRecord(payload)) return null
+  const promptRich = payload.prompt_rich
+  return isRecord(promptRich) && promptRich.type === "doc"
+    ? (promptRich as JSONContent)
+    : null
+}
+
 export const getTemplateNameFromPayload = (
   payload?: Record<string, unknown> | null
 ): string | null => {
@@ -978,16 +1114,58 @@ export const getChatModeFromPayload = (
   return Boolean(raw)
 }
 
+export const getRevisionsFromPayload = (
+  payload?: Record<string, unknown> | null
+): WritingRevisionProposal[] => {
+  if (!isRecord(payload) || !isRecord(payload.revisions)) return []
+  if (
+    payload.revisions.schemaVersion !== WRITING_REVISION_PAYLOAD_SCHEMA_VERSION
+  ) {
+    return []
+  }
+  if (!Array.isArray(payload.revisions.items)) return []
+  return payload.revisions.items.filter(isWritingRevisionProposal)
+}
+
+export const mergeRevisionsIntoPayload = (
+  payload: Record<string, unknown> | null | undefined,
+  revisions: WritingRevisionProposal[]
+): WritingSessionPayload => {
+  const base = isRecord(payload) ? payload : {}
+  const next: WritingSessionPayload = { ...base }
+  if (revisions.length > 0) {
+    next.revisions = {
+      schemaVersion: WRITING_REVISION_PAYLOAD_SCHEMA_VERSION,
+      items: revisions
+    }
+  } else {
+    delete next.revisions
+  }
+  return next
+}
+
+export const getRevisionPayloadSignature = (
+  payload?: Record<string, unknown> | null
+): string => JSON.stringify(getRevisionsFromPayload(payload))
+
+export const getRevisionPresetIdFromPayload = (
+  payload?: Record<string, unknown> | null
+): WritingRevisionPresetId | null => {
+  const value = isRecord(payload) ? payload.revision_preset_id : null
+  return isWritingRevisionPresetId(value) ? value : null
+}
+
 export const mergePayloadIntoSession = (
   payload: Record<string, unknown> | null | undefined,
   prompt: string,
   settings: WritingSessionSettings,
   templateName: string | null,
   themeName: string | null,
-  chatMode: boolean
+  chatMode: boolean,
+  options?: { promptRich?: JSONContent | null }
 ): WritingSessionPayload => {
   const base = isRecord(payload) ? payload : {}
-  return {
+  const next: WritingSessionPayload = {
     ...base,
     prompt,
     settings,
@@ -995,6 +1173,50 @@ export const mergePayloadIntoSession = (
     theme_name: themeName,
     chat_mode: chatMode
   }
+  if (options && Object.prototype.hasOwnProperty.call(options, "promptRich")) {
+    if (options.promptRich) {
+      next.prompt_rich = options.promptRich
+    } else {
+      delete next.prompt_rich
+    }
+  }
+  return next
+}
+
+export const mergePendingPayloadIntoSession = (
+  payload: Record<string, unknown> | null | undefined,
+  pendingPayload: Record<string, unknown> | null | undefined,
+  prompt: string,
+  settings: WritingSessionSettings,
+  templateName: string | null,
+  themeName: string | null,
+  chatMode: boolean,
+  options?: { promptRich?: JSONContent | null }
+): WritingSessionPayload =>
+  mergePayloadIntoSession(
+    isRecord(pendingPayload) ? pendingPayload : payload,
+    prompt,
+    settings,
+    templateName,
+    themeName,
+    chatMode,
+    options
+  )
+
+export const shouldClearPendingSessionSave = (
+  savedPayload: Record<string, unknown> | null | undefined,
+  pendingPayload: Record<string, unknown> | null | undefined,
+  hasCurrentFieldChanges: boolean
+): boolean => {
+  if (hasCurrentFieldChanges) return false
+  if (!isRecord(pendingPayload)) return true
+  return (
+    getRevisionPayloadSignature(savedPayload) === getRevisionPayloadSignature(
+      pendingPayload
+    ) &&
+    getRevisionPresetIdFromPayload(savedPayload) ===
+      getRevisionPresetIdFromPayload(pendingPayload)
+  )
 }
 
 export const areSettingsEqual = (

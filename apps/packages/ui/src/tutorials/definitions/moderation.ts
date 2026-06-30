@@ -1,5 +1,5 @@
 /**
- * Moderation Playground Tutorial Definitions
+ * Content Rules Tutorial Definitions
  */
 
 import { ShieldCheck } from "lucide-react"
@@ -7,22 +7,22 @@ import type { TutorialDefinition } from "../registry"
 
 const moderationBasics: TutorialDefinition = {
   id: "moderation-basics",
-  routePattern: "/moderation-playground",
+  routePattern: "/moderation/rules",
   labelKey: "tutorials:moderation.basics.label",
-  labelFallback: "Content Controls Basics",
+  labelFallback: "Content Rules Basics",
   descriptionKey: "tutorials:moderation.basics.description",
   descriptionFallback:
-    "Learn how to set up content safety rules, blocklists, and test moderation.",
+    "Learn how to set up moderation policies, blocklists, overrides, and tests.",
   icon: ShieldCheck,
   priority: 1,
   steps: [
     {
       target: '[data-testid="moderation-hero"]',
       titleKey: "tutorials:moderation.basics.heroTitle",
-      titleFallback: "Moderation Dashboard",
+      titleFallback: "Content Rules",
       contentKey: "tutorials:moderation.basics.heroContent",
       contentFallback:
-        "This is your content safety hub. The status badge shows whether your server is connected.",
+        "This is your rule configuration hub. The status badge shows whether your server is connected.",
       placement: "bottom",
       disableBeacon: true
     },

@@ -238,58 +238,60 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
         <TTSPanel />
         {isEpub && !isMobile && <EpubSettingsPanel />}
 
-        <Tooltip title={t("option:documentWorkspace.previousPage", "Previous")}>
-          <button
-            onClick={onPreviousPage}
-            disabled={currentPage <= 1}
-            className={TOOLBAR_ICON_BUTTON_CLASS}
-            aria-label={t("option:documentWorkspace.previousPage", "Previous")}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-        </Tooltip>
+        <div className="flex items-center gap-1" data-testid="document-navigation">
+          <Tooltip title={t("option:documentWorkspace.previousPage", "Previous")}>
+            <button
+              onClick={onPreviousPage}
+              disabled={currentPage <= 1}
+              className={TOOLBAR_ICON_BUTTON_CLASS}
+              aria-label={t("option:documentWorkspace.previousPage", "Previous")}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          </Tooltip>
 
-        {isEpub ? (
-          <div className="flex items-center gap-2 min-w-[120px]">
-            <Progress
-              percent={Math.round(percentage)}
-              size="small"
-              showInfo={false}
-              className="w-16"
-            />
-            <span className="text-sm text-muted tabular-nums">
-              {Math.round(percentage)}%
-            </span>
-          </div>
-        ) : (
-          <div className="flex items-center gap-1 text-sm">
-            <Input
-              type="number"
-              min={1}
-              max={totalPages}
-              value={currentPage}
-              onChange={handlePageInputChange}
-              onBlur={handlePageInputBlur}
-              className="w-14 text-center"
-              size="small"
-              data-testid="document-page-input"
-            />
-            <span className="text-muted">
-              / {totalPages || "-"}
-            </span>
-          </div>
-        )}
+          {isEpub ? (
+            <div className="flex items-center gap-2 min-w-[120px]">
+              <Progress
+                percent={Math.round(percentage)}
+                size="small"
+                showInfo={false}
+                className="w-16"
+              />
+              <span className="text-sm text-muted tabular-nums">
+                {Math.round(percentage)}%
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 text-sm">
+              <Input
+                type="number"
+                min={1}
+                max={totalPages}
+                value={currentPage}
+                onChange={handlePageInputChange}
+                onBlur={handlePageInputBlur}
+                className="w-14 text-center"
+                size="small"
+                data-testid="document-page-input"
+              />
+              <span className="text-muted">
+                / {totalPages || "-"}
+              </span>
+            </div>
+          )}
 
-        <Tooltip title={t("option:documentWorkspace.nextPage", "Next")}>
-          <button
-            onClick={onNextPage}
-            disabled={currentPage >= totalPages}
-            className={TOOLBAR_ICON_BUTTON_CLASS}
-            aria-label={t("option:documentWorkspace.nextPage", "Next")}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </Tooltip>
+          <Tooltip title={t("option:documentWorkspace.nextPage", "Next")}>
+            <button
+              onClick={onNextPage}
+              disabled={currentPage >= totalPages}
+              className={TOOLBAR_ICON_BUTTON_CLASS}
+              aria-label={t("option:documentWorkspace.nextPage", "Next")}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </Tooltip>
+        </div>
 
         {/* Overflow menu on mobile for secondary controls */}
         {isMobile && overflowItems.length > 0 && (

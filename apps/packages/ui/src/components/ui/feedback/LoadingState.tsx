@@ -1,5 +1,5 @@
 import React from "react"
-import { Skeleton, Spin } from "antd"
+import { Skeleton } from "antd"
 import { Loader2 } from "lucide-react"
 import { cn } from "@/libs/utils"
 
@@ -40,6 +40,8 @@ export interface LoadingStateProps {
   loading?: boolean
   /** Additional CSS classes */
   className?: string
+  /** Inline style for surface-specific sizing; ignored for fullscreen mode */
+  style?: React.CSSProperties
   /** Test ID */
   "data-testid"?: string
 }
@@ -105,6 +107,7 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
       children,
       loading: forcedLoading,
       className,
+      style,
       "data-testid": dataTestId,
     },
     ref
@@ -158,10 +161,6 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
       />
     )
 
-    const renderInline = () => (
-      <Spin size="small" className="inline-flex items-center" />
-    )
-
     const renderContent = () => {
       switch (mode) {
         case "spinner":
@@ -187,7 +186,7 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
             </div>
           )
         case "inline":
-          return renderInline()
+          return renderSpinner()
         case "skeleton":
         default:
           return renderSkeleton()
@@ -212,6 +211,25 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
       )
     }
 
+    if (mode === "inline" && !fullscreen && !overlay) {
+      return (
+        <div
+          ref={ref}
+          className={cn("inline-flex items-center gap-2", className)}
+          style={style}
+          data-testid={dataTestId}
+          data-ds-component="LoadingState"
+        >
+          {renderContent()}
+          {label && (
+            <span className={cn("text-text-muted", sizeStyles.text)}>
+              {label}
+            </span>
+          )}
+        </div>
+      )
+    }
+
     // Fullscreen loading
     if (fullscreen) {
       return (
@@ -222,6 +240,7 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
             className
           )}
           data-testid={dataTestId}
+          data-ds-component="LoadingState"
         >
           {renderSourceLabels()}
           {renderContent()}
@@ -232,7 +251,12 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
     // Overlay loading
     if (overlay) {
       return (
-        <div ref={ref} className={cn("relative", className)}>
+        <div
+          ref={ref}
+          className={cn("relative", className)}
+          style={style}
+          data-ds-component="LoadingState"
+        >
           {children}
           <div
             className="absolute inset-0 flex items-center justify-center bg-bg/60 backdrop-blur-[2px]"
@@ -250,7 +274,9 @@ export const LoadingState = React.forwardRef<HTMLDivElement, LoadingStateProps>(
       <div
         ref={ref}
         className={cn("flex flex-col items-center px-2 py-4", className)}
+        style={style}
         data-testid={dataTestId}
+        data-ds-component="LoadingState"
       >
         {renderSourceLabels()}
         {renderContent()}

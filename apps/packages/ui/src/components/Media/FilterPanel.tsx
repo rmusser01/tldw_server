@@ -1,7 +1,6 @@
 import { ChevronDown, Filter, Plus, Star, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import dayjs, { type Dayjs } from 'dayjs'
-import { DatePicker, Select } from 'antd'
+import { Select } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type {
   MediaBoostFields,
@@ -90,6 +89,50 @@ const getMediaTypeLabel = (type: string): string => {
     Url: 'URL'
   }
   return labelMap[normalized] || normalized
+}
+
+const DATE_INPUT_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
+
+const formatDateInputValue = (value?: string | null): string => {
+  if (!value) return ''
+
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return ''
+
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const parseDateInputValue = (
+  value: string,
+  boundary: 'start' | 'end'
+): string | null => {
+  if (!value) return null
+
+  const match = DATE_INPUT_PATTERN.exec(value)
+  if (!match) return null
+
+  const [, yearText, monthText, dayText] = match
+  const year = Number(yearText)
+  const month = Number(monthText)
+  const day = Number(dayText)
+  const date =
+    boundary === 'start'
+      ? new Date(year, month - 1, day, 0, 0, 0, 0)
+      : new Date(year, month - 1, day, 23, 59, 59, 999)
+
+  if (
+    !Number.isFinite(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null
+  }
+
+  return date.toISOString()
 }
 
 export function FilterPanel({
@@ -225,12 +268,8 @@ export function FilterPanel({
     ).length
   }, [excludeKeywordSearchText, keywordOptions])
 
-  const dateRangeValue = useMemo<[Dayjs | null, Dayjs | null]>(() => {
-    return [
-      dateRange?.startDate ? dayjs(dateRange.startDate) : null,
-      dateRange?.endDate ? dayjs(dateRange.endDate) : null
-    ]
-  }, [dateRange?.endDate, dateRange?.startDate])
+  const startDateInputValue = formatDateInputValue(dateRange?.startDate)
+  const endDateInputValue = formatDateInputValue(dateRange?.endDate)
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     if (section === 'mediaTypes') {
@@ -284,6 +323,24 @@ export function FilterPanel({
     onBoostFieldsChange?.({
       ...boostFields,
       [field]: parsed
+    })
+  }
+
+  const handleDateInputChange = (
+    field: keyof MediaDateRange,
+    value: string
+  ) => {
+    if (!onDateRangeChange) return
+
+    onDateRangeChange({
+      startDate:
+        field === 'startDate'
+          ? parseDateInputValue(value, 'start')
+          : dateRange?.startDate ?? null,
+      endDate:
+        field === 'endDate'
+          ? parseDateInputValue(value, 'end')
+          : dateRange?.endDate ?? null
     })
   }
 
@@ -433,23 +490,34 @@ export function FilterPanel({
         <div className="text-sm text-text">
           {t('review:mediaPage.dateRange', { defaultValue: 'Date range' })}
         </div>
-        <DatePicker.RangePicker
-          className="w-full"
-          value={dateRangeValue}
-          allowClear
-          onChange={(dates: null | [Dayjs | null, Dayjs | null]) => {
-            if (!onDateRangeChange) return
-            if (!dates) {
-              onDateRangeChange({ startDate: null, endDate: null })
-              return
-            }
-            const [start, end] = dates
-            onDateRangeChange({
-              startDate: start ? start.startOf('day').toDate().toISOString() : null,
-              endDate: end ? end.endOf('day').toDate().toISOString() : null
-            })
-          }}
-        />
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <label className="space-y-1 text-xs text-text-muted">
+            <span>
+              {t('review:mediaPage.startDate', { defaultValue: 'Start date' })}
+            </span>
+            <input
+              type="date"
+              value={startDateInputValue}
+              onChange={(event) =>
+                handleDateInputChange('startDate', event.currentTarget.value)
+              }
+              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+          </label>
+          <label className="space-y-1 text-xs text-text-muted">
+            <span>
+              {t('review:mediaPage.endDate', { defaultValue: 'End date' })}
+            </span>
+            <input
+              type="date"
+              value={endDateInputValue}
+              onChange={(event) =>
+                handleDateInputChange('endDate', event.currentTarget.value)
+              }
+              className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary/40"
+            />
+          </label>
+        </div>
       </div>
 
       {searchMode === 'full_text' && (

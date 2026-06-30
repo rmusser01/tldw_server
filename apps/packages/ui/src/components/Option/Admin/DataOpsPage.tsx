@@ -8,7 +8,6 @@ import {
   InputNumber,
   Modal,
   Select,
-  Alert,
   Space,
   Popconfirm,
   Form,
@@ -24,6 +23,7 @@ import {
   PlayCircleOutlined,
   EyeOutlined
 } from "@ant-design/icons"
+import { Alert } from "@/components/ui/primitives"
 import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
@@ -889,10 +889,18 @@ const DataOpsPage: React.FC = () => {
   }, [])
 
   if (adminGuard === "forbidden") {
-    return <Alert type="error" message="Access Denied" description="You don't have permission to access data operations." showIcon />
+    return (
+      <Alert variant="error" title="Access Denied">
+        You don't have permission to access data operations.
+      </Alert>
+    )
   }
   if (adminGuard === "notFound") {
-    return <Alert type="warning" message="Not Available" description="Data operations are not available on this server." showIcon />
+    return (
+      <Alert variant="warning" title="Not Available">
+        Data operations are not available on this server.
+      </Alert>
+    )
   }
 
   const tabItems = [

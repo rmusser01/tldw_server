@@ -97,6 +97,15 @@ def test_get_api_keys_supports_hyphenated_provider_env_vars(monkeypatch):
     assert keys.get("custom-openai-api") == "custom-key"
 
 
+def test_get_api_keys_supports_numbered_custom_openai_env_vars(monkeypatch):
+    monkeypatch.setenv("CUSTOM_OPENAI_API_KEY_99", "custom-key-99")
+    monkeypatch.setattr(chat_request_schemas, "load_and_log_configs", lambda: {})
+
+    keys = chat_request_schemas.get_api_keys()
+
+    assert keys.get("custom-openai-api-99") == "custom-key-99"
+
+
 def test_resolver_prefers_provider_override(monkeypatch):
 
 

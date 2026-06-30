@@ -169,8 +169,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         try:
             self.registry.increment("security_headers_responses_total", 1)
-        except Exception as exc:  # pragma: no cover - metrics failures should not impact request
-            logger.debug(f"Security headers metric increment failed: {exc}")
+        except Exception:  # pragma: no cover - metrics failures should not impact request
+            logger.debug("Security headers metric increment failed")
 
         return response
 

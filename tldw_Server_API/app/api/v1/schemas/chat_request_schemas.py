@@ -50,6 +50,12 @@ except Exception as dotenv_error:
 
 # Use load_and_log_configs which returns a proper dict
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_api_key_env_keys,
+    custom_openai_provider_number,
+    custom_openai_section_name,
+    iter_custom_openai_provider_names,
+)
 
 _config = load_and_log_configs() or {}
 
@@ -106,7 +112,7 @@ def _get_setting(env_var, section, key, default=""):
     return default
 
 
-ALL_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [
+_BASE_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [
     "bedrock",
     "anthropic",
     "cohere",
@@ -129,10 +135,13 @@ ALL_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [
     "vllm",
     "local-llm",
     "aphrodite",
-    "custom-openai-api",
-    "custom-openai-api-2",
     "moonshot",
     "zai",
+]
+
+ALL_SUPPORTED_PROVIDER_NAMES_LIST: list[str] = [
+    *_BASE_SUPPORTED_PROVIDER_NAMES_LIST,
+    *iter_custom_openai_provider_names(),
 ]
 
 
@@ -145,11 +154,27 @@ def get_api_keys() -> dict[str, Optional[str]]:
     # Reload config to get latest values
     current_config = load_and_log_configs() or {}
 
-    def _get_dynamic_setting(env_var, section, key, default=""):
+    def _get_dynamic_setting(
+        env_vars: str | tuple[str, ...],
+        section: str,
+        key: str,
+        default: Optional[str] = "",
+    ) -> Optional[str]:
+        """Resolve an API key from env aliases before config-backed settings."""
         # First check environment variable
-        env_value = os.getenv(env_var)
-        if env_value is not None:
-            return env_value
+        env_candidates = (env_vars,) if isinstance(env_vars, str) else tuple(env_vars or ())
+        for env_var in env_candidates:
+            env_value = os.getenv(env_var)
+            if env_value is not None:
+                return env_value
+
+        custom_number = custom_openai_provider_number(key)
+        if section == "api_keys" and custom_number is not None:
+            custom_section = current_config.get(custom_openai_section_name(custom_number))
+            if isinstance(custom_section, dict):
+                api_key = custom_section.get("api_key")
+                if api_key:
+                    return api_key
 
         # Check for API key in the config dict
         if section == "api_keys":
@@ -171,14 +196,17 @@ def get_api_keys() -> dict[str, Optional[str]]:
 
         return default
 
-    def _provider_env_key(provider_name: str) -> str:
+    def _provider_env_keys(provider_name: str) -> tuple[str, ...]:
+        custom_number = custom_openai_provider_number(provider_name)
+        if custom_number is not None:
+            return custom_openai_api_key_env_keys(custom_number)
         normalized = provider_name.upper().replace('.', '_').replace('-', '_')
         if normalized.endswith("_API"):
             normalized = normalized[: -len("_API")]
-        return f"{normalized}_API_KEY"
+        return (f"{normalized}_API_KEY",)
 
     return {
-        name: _get_dynamic_setting(_provider_env_key(name), "api_keys", name)
+        name: _get_dynamic_setting(_provider_env_keys(name), "api_keys", name)
         for name in ALL_SUPPORTED_PROVIDER_NAMES_LIST
     }
 
@@ -188,35 +216,8 @@ def get_api_keys() -> dict[str, Optional[str]]:
 # use get_api_keys() / resolve_provider_api_key.
 API_KEYS = get_api_keys()
 
-# For type hinting - define explicitly
-SUPPORTED_API_ENDPOINTS = Literal[
-    "bedrock",
-    "anthropic",
-    "cohere",
-    "deepseek",
-    "google",
-    "groq",
-    "qwen",
-    "huggingface",
-    "mistral",
-    "openai",
-    "openrouter",
-    "novita",
-    "poe",
-    "together",
-    "llama.cpp",
-    "kobold",
-    "ollama",
-    "ooba",
-    "tabbyapi",
-    "vllm",
-    "local-llm",
-    "aphrodite",
-    "custom-openai-api",
-    "custom-openai-api-2",
-    "moonshot",
-    "zai",
-]
+# Runtime validation below enforces provider ids; keep this Python 3.10-safe.
+SUPPORTED_API_ENDPOINTS = str
 
 
 # --- Tool Definitions ---
@@ -751,6 +752,63 @@ class ResearchChatContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ChatCompletionResponseChoice(BaseModel):
+    """One non-streaming chat completion choice in the OpenAI-compatible response."""
+
+    index: Optional[int] = Field(default=None, description="Zero-based choice index.")
+    message: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Assistant message payload returned by the selected provider.",
+    )
+    finish_reason: Optional[str] = Field(
+        default=None,
+        description="Provider-reported completion stop reason.",
+    )
+    logprobs: Optional[Any] = Field(
+        default=None,
+        description="Provider-specific log probability payload when requested.",
+    )
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ChatCompletionUsage(BaseModel):
+    """Token usage summary for a non-streaming chat completion response."""
+
+    prompt_tokens: Optional[int] = Field(default=None, ge=0)
+    completion_tokens: Optional[int] = Field(default=None, ge=0)
+    total_tokens: Optional[int] = Field(default=None, ge=0)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ChatCompletionResponse(BaseModel):
+    """Document the non-streaming OpenAI-compatible chat completion response shape."""
+
+    id: Optional[str] = Field(default=None, description="Provider completion identifier.")
+    object: Optional[str] = Field(default=None, description="OpenAI-compatible object type.")
+    created: Optional[int] = Field(default=None, description="Unix timestamp for response creation.")
+    model: Optional[str] = Field(default=None, description="Model used for generation.")
+    choices: list[ChatCompletionResponseChoice] = Field(
+        default_factory=list,
+        description="Completion choices returned by the selected provider.",
+    )
+    usage: Optional[ChatCompletionUsage] = Field(
+        default=None,
+        description="Token usage reported by the selected provider.",
+    )
+    tldw_conversation_id: Optional[str] = Field(
+        default=None,
+        description="Conversation identifier persisted by tldw_server when chat history is enabled.",
+    )
+    meta: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="tldw_server metadata such as persona diagnostics.",
+    )
+
+    model_config = ConfigDict(extra="allow")
+
+
 # --- Main Request Model ---
 class ChatCompletionRequest(BaseModel):
     """
@@ -770,6 +828,16 @@ class ChatCompletionRequest(BaseModel):
             "mode, objective, provider boundary, and failure handling."
         ),
     )
+
+    @field_validator("api_provider")
+    @classmethod
+    def validate_api_provider(cls, value: Optional[str]) -> Optional[str]:
+        """Validate provider ids without Python 3.11-only dynamic Literal syntax."""
+        if value is None:
+            return value
+        if value in ALL_SUPPORTED_PROVIDER_NAMES_LIST:
+            return value
+        raise ValueError(f"Unsupported api_provider: {value}")
 
     # --- Standard OpenAI-like Parameters ---
     model: Optional[str] = Field(
@@ -864,6 +932,20 @@ class ChatCompletionRequest(BaseModel):
         None,
         description="Provider-specific extra body content. For Bedrock guardrails, include"
         " 'amazon-bedrock-guardrailConfig': { 'tagSuffix': '...'} if needed.",
+    )
+    billing_prompt_cache_intent: Optional[dict[str, Any]] = Field(
+        None,
+        description=(
+            "[Extension] Explicit billing prompt-cache intent. Disabled unless enabled=true; "
+            "provider adapters translate only documented cache controls and report intent separately from usage."
+        ),
+    )
+    inference_prefix_cache_intent: Optional[dict[str, Any]] = Field(
+        None,
+        description=(
+            "[Extension] Cost-neutral local inference prefix-cache diagnostic intent for local providers such as "
+            "vLLM and llama.cpp. This does not request or imply paid-provider billing-cache discounts."
+        ),
     )
     thinking_budget_tokens: Optional[int] = Field(
         None,

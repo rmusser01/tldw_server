@@ -42,11 +42,15 @@ describe("quick chat workflow guides", () => {
   it("recommends matching workflow pages with route awareness", () => {
     const recommendations = recommendQuickChatWorkflowGuides({
       query:
-        "I am in research workspace and need guided multi-tool workflows.",
-      answer: "Use Research Workspace to orient the workflow.",
-      currentRoute: "/research-workspace"
+        "I am in research workspace. How do I benchmark model quality and compare providers?",
+      answer: "Use evaluations to compare metrics.",
+      currentRoute: "/research-workspace",
+      maxResults: 8
     })
     expect(recommendations.length).toBeGreaterThan(0)
+    expect(recommendations.some((item) => item.route === "/evaluations")).toBe(
+      true
+    )
     expect(
       recommendations.some(
         (item) =>

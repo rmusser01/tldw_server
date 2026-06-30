@@ -92,9 +92,14 @@ type RecommendationsResponse = {
   catalog?: AudioBundle[]
 }
 
-const toError = async (
-  response: Awaited<ReturnType<typeof bgRequest>>
-): Promise<Error> => {
+type ResponseEnvelope = {
+  ok?: boolean
+  status?: number
+  data?: any
+  error?: string
+}
+
+const toError = async (response: ResponseEnvelope): Promise<Error> => {
   const detail =
     typeof response?.error === "string"
       ? response.error
@@ -121,7 +126,7 @@ const requestJson = async <T,>(
 ): Promise<T> => {
   const response = await bgRequest<any>({
     path,
-    method: init?.method || "GET",
+    method: (init?.method || "GET") as any,
     headers: init?.headers,
     body: init?.body,
     timeoutMs: init?.timeoutMs,

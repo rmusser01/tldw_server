@@ -1,281 +1,408 @@
 # ACP Agent Orchestration and Third-Party Agent Support PRD
 
 Author: tldw_server team
-Status: Draft (v0.1)
-Target Version: v0.2.x
+Status: Current implementation record, refreshed for admin reporting closeout on 2026-05-14
+Parent epic: [#1471](https://github.com/rmusser01/tldw_server/issues/1471)
+Operational doc: [Agent_Client_Protocol.md](../Development/Agent_Client_Protocol.md)
+Release checklist: [ACP_Production_Readiness.md](../Development/ACP_Production_Readiness.md)
+Work product artifact contract: [Traceable_Work_Product_Artifact_Contract.md](Traceable_Work_Product_Artifact_Contract.md)
 
 ## 1) Summary
-Introduce first-party (pi-agent) and third-party ACP agents into tldw_server with a unified orchestration layer, inspired by RalphBoard's task pipeline (todo -> inprogress -> review -> complete/triage) and explicit completion signaling. The system will support a global agent registry, agent discovery via ACP, and a workflow runner that enforces completion tokens, reviewer gates, and triage escalation after repeated failures.
 
-The first-party pi-agent runs as a separate ACP Node process and uses tldw_server LLMs via OpenAI-compatible baseURL. Third-party agents are configured globally and exposed as selectable ACP agents.
+ACP support now covers the core product loop proposed by the original draft:
+configured agents are discoverable, users can create projects and tasks,
+dispatch task runs through ACP sessions, enforce structured completion signals,
+optionally run reviewer agents, and inspect run history without reading server
+logs.
 
-## 2) Problem / Motivation
-- We need a consistent way to run a first-party agent and multiple third-party agents without changing the tldw_server API surface per agent.
-- Current agent execution does not enforce explicit completion signals or QA gating, which increases false positives and inconsistent task outcomes.
-- Users need a simple way to define tasks, dependencies, and review gates, and then dispatch them to configured agents.
+The productionization track moved the plan from a pi-agent-specific proposal to
+a configurable ACP agent platform. The server owns orchestration state,
+governance, audit, scheduling, workspace constraints, and frontend setup and
+diagnostic surfaces. The runner remains an external process boundary and can
+launch configured downstream agents such as Codex, Claude Code, OpenCode, or a
+custom ACP-compatible agent.
 
-RalphBoard demonstrates a proven approach with:
-- Explicit completion markers ("Ralph Wiggum" loop)
-- Reviewer gate with triage escalation
-- Queue-based agent dispatch and dependency gating
+## 2) Documentation Authority
 
-## 3) Goals
-- Provide a global agent registry that lists available ACP agents with metadata (name, description, command, args, env, requires_api_key).
-- Expose ACP agent discovery to tldw_server clients (agent list and default).
-- Implement an orchestration flow that supports:
-  - Task dependencies
-  - Explicit completion signal
-  - Reviewer gate and triage escalation after max failures
-- Use pi-agent as the first-party implementation via ACP, running as a separate Node process.
-- Make pi-agent use tldw_server LLMs via OpenAI-compatible baseURL.
-- Provide server APIs to create tasks, launch runs, and query status.
+This PRD is the product and design record. It describes what the ACP feature is
+for, which parts are shipped, which parts are partial, and which older draft
+claims are superseded.
 
-## 4) Non-Goals
-- Building a full Kanban UI in v0.2.x (basic UI elements are acceptable, full board can follow later).
-- Replacing existing MCP or Jobs system.
-- Rewriting the ACP protocol.
-- Building a full marketplace or installation flow for third-party agents (registry is config-based only).
+[Agent_Client_Protocol.md](../Development/Agent_Client_Protocol.md) is the
+authoritative contributor and operator guide for setup, endpoint behavior,
+configuration, governance, sandbox/workspace operation, scheduling, frontend
+integration, and troubleshooting.
 
-## 5) Personas
-- Admin/Power User: configures agent registry and manages execution policies.
-- Analyst/Researcher: creates tasks and runs them through agents with QA.
-- Developer: integrates external ACP agents into the registry.
+[ACP_Production_Readiness.md](../Development/ACP_Production_Readiness.md) is
+the release-readiness checklist. It tracks the #1471 child issues, verification
+commands, release gates, runtime caveats, and final closeout evidence.
 
-## 6) User Stories
-1. As an admin, I can configure third-party agents in a global registry and see them in the UI/API.
-2. As a user, I can create a project with tasks and dependencies and run it with an agent.
-3. As a user, I can require a reviewer agent to approve work before completion.
-4. As a user, I can view task history, including failures and retry attempts.
-5. As a developer, I can run the pi-agent against tldw_server using OpenAI-compatible LLM endpoints.
+[ACP_Governance_Audit.md](../Development/ACP_Governance_Audit.md) summarizes
+the current governance, RBAC, approval, and audit model.
 
-## 7) Requirements
+[ACP_Workspace_Integration_Decision_2026_05.md](../Design/ACP_Workspace_Integration_Decision_2026_05.md)
+records the maturity decision for connecting ACP projects, tasks, runs,
+reviews, and diagnostics to the canonical workspace model without creating a
+parallel ACP-only workspace product.
 
-### 7.1 Functional Requirements
-- Agent Registry
-  - Global config file with agent entries:
-    - `type`, `name`, `description`, `command`, `args`, `env`, `requires_api_key`
-  - ACP runner exposes `agent/list` returning available agents and default.
+## 3) Current Implementation Status
 
-- ACP Integration
-  - tldw_server uses ACP runner to:
-    - `agent/list`
-    - `session/new`
-    - `session/prompt`
-    - `session/cancel`
-  - Agents can invoke tools via ACP tool calls (fs, search, git, terminal).
+| Area | Status | Notes |
+| --- | --- | --- |
+| ACP session lifecycle | Shipped | REST, WebSocket, SSE/event, prompt, cancel, close, teardown, reconcile, fork, rollback/checkpoint, run-history, diagnostics, artifacts, audit, and async prompt routes exist under `/api/v1/acp/*`. |
+| Agent registry and setup | Shipped | `/api/v1/acp/agents`, `/api/v1/acp/agents/health`, `/api/v1/acp/health`, and `/api/v1/acp/setup-guide` expose configured agents, runner health, setup gaps, and API-key status. |
+| Project/task orchestration | Shipped | `/api/v1/agent-orchestration/*` owns workspaces, projects, tasks, dependencies, dispatch, reviews, task detail, and enriched run history. |
+| Structured completion signals | Shipped by [#1479](https://github.com/rmusser01/tldw_server/issues/1479) | Runs validate machine-readable completion state before review/finalization and persist failure reason codes. |
+| Reviewer-agent loop | Shipped by [#1478](https://github.com/rmusser01/tldw_server/issues/1478) | Reviewer runs are durable, decisions are audited, rejections can retry, and repeated rejection moves tasks to triage. |
+| Run history and drill-through | Shipped by [#1475](https://github.com/rmusser01/tldw_server/issues/1475) | Task detail includes runs, reviews, session links, history counts, failure context, prompt/result previews, and reviewer decisions. |
+| Traceable output artifact mapping | Contract documented under [#1538](https://github.com/rmusser01/tldw_server/issues/1538) | ACP session artifacts remain execution evidence; structured agent deliverables can be promoted into workspace work products only through the traceable artifact contract from [#1525](https://github.com/rmusser01/tldw_server/issues/1525). |
+| Governance, RBAC, and audit | Shipped by [#1476](https://github.com/rmusser01/tldw_server/issues/1476) | ACP control surfaces use token scope guards where applicable, prompt/permission flows use shared governance coordination, and audit events are sanitized. |
+| Workspace and sandbox readiness | Shipped with runtime caveats by [#1477](https://github.com/rmusser01/tldw_server/issues/1477) | Workspace roots fail closed; workspace MCP servers and env flow into sessions; sandbox mode merges configured and per-session env. Docker/Lima/VZ runtime verification remains host-specific. |
+| Schedules and triggers | Shipped by [#1474](https://github.com/rmusser01/tldw_server/issues/1474) | ACP schedules route through APScheduler to the core Scheduler `acp_run` handler; triggers sanitize secrets and expose operator state. |
+| Admin execution-health reporting | Shipped under [#1537](https://github.com/rmusser01/tldw_server/issues/1537) and [#1654](https://github.com/rmusser01/tldw_server/pull/1654) | `/api/v1/admin/acp/execution-health/summary` summarizes ACP sessions, failure buckets, setup blockers, retention/redaction posture, and downstream-agent compatibility evidence; Agent Registry consumes the summary for the initial admin display. |
+| Frontend setup/run/diagnose UX | Shipped by [#1473](https://github.com/rmusser01/tldw_server/issues/1473) | Agent Tasks, Agent Registry, and ACP Playground share connection/auth handling; Agent Tasks shows setup gaps and task diagnostics without manual ID copying. |
+| Production readiness closeout | Remaining under [#1472](https://github.com/rmusser01/tldw_server/issues/1472) | Final release signoff still needs the readiness matrix closeout, broader live-backend E2E, Go runner verification, and accepted runtime caveats. |
 
-- Task Orchestration
-  - Create project and tasks with dependencies.
-  - Enforce a workflow pipeline:
-    - todo -> inprogress -> review -> complete
-    - review failures increment review_count; after N failures, move to triage.
-  - Support explicit completion token (or structured completion event) before moving to review/complete.
+## 4) Goals
 
-- Reviewer Gate
-  - Reviewer agent validates success criteria and outputs explicit "COMPLETE" or "REJECTED".
-  - Rejections trigger retry or triage after `max_review_attempts`.
+- Let users configure and discover ACP agents without changing the API surface
+  per agent.
+- Let users create projects and tasks, express dependencies and success
+  criteria, and dispatch runs to a selected ACP agent.
+- Require structured completion signals before a run can be treated as complete.
+- Support reviewer-agent or manual review gates with retry and triage behavior.
+- Preserve useful run history, artifacts, diagnostics, and audit records.
+- Keep privileged tools, prompts, approvals, workspaces, and sandbox execution
+  governed by server-side policy and authenticated route checks.
+- Give first-time users a clear setup path and regular users a task
+  run/review/diagnose workflow in the WebUI.
 
-- First-party pi-agent
-  - Runs as separate ACP process.
-  - Uses tldw_server LLMs via OpenAI-compatible baseURL.
+## 5) Non-Goals And Superseded Draft Claims
 
-### 7.2 Non-Functional Requirements
-- Reliability: each run is idempotent and recoverable on restart.
-- Observability: logs and run history stored for audit.
-- Security: agent registry and tool permissions are admin-controlled.
-- Latency: first token within 2 seconds for local LLMs; degrade gracefully.
+- The original draft route names are superseded. Use
+  `/api/v1/agent-orchestration/*` instead of proposed top-level
+  `/api/v1/agent_projects`, `/api/v1/agent_tasks`, and `/api/v1/agent_agents`.
+- The first-party pi-agent-only framing is superseded by the configurable ACP
+  agent registry. A first-party agent may still be configured, but it is not the
+  only supported execution model.
+- A full Kanban board remains out of scope for this productionization slice.
+  Agent Tasks provides project/task/run/review operations, not a full board.
+- ACP does not replace MCP, Jobs, Scheduler, or Workflows. ACP uses the core
+  Scheduler for async/background `acp_run` work and can use workspace MCP server
+  configuration when launching sessions.
+- Registry-based agent setup is config/admin owned. This is not a public agent
+  marketplace or installer flow.
 
-## 8) UX / UI (Initial)
-- Agent list view with metadata (name, description, requires_api_key).
-- Task list with status (todo/inprogress/review/complete/triage).
-- Per-task run history with last result and failure count.
+## 6) Personas
 
-## 9) Architecture & Data Model
+- Admin or power user: configures agents, runner settings, workspaces, sandbox
+  behavior, schedules, triggers, governance, and API keys.
+- Analyst or researcher: creates projects and tasks, dispatches agent runs,
+  reviews outcomes, and follows diagnostic links when something fails.
+- Developer or operator: integrates external ACP agents, validates runner
+  behavior, troubleshoots route/config/auth issues, and reviews audit history.
 
-### 9.1 Orchestration Model
-- Use Jobs for user-facing orchestration visibility.
-- Add an Agent Orchestration layer that:
-  - Creates tasks and dependencies.
-  - Dispatches ACP sessions to selected agents.
-  - Tracks status transitions and review outcomes.
+## 7) User Stories
 
-### 9.2 Proposed Tables (minimal)
-- `agent_projects` (id, name, description, created_at)
-- `agent_tasks` (id, project_id, title, description, success_criteria, dependency_id, status, review_count)
-- `agent_runs` (id, task_id, agent_type, status, started_at, finished_at, error, output_ref)
+1. As an admin, I can inspect ACP health and setup gaps before dispatching work.
+2. As a user, I can create a project with tasks and dependencies and run a task
+   with a configured ACP agent.
+3. As a user, I can require a reviewer agent or submit a manual review before a
+   task becomes complete.
+4. As a user, I can inspect a failed run from Agent Tasks and open the linked
+   session diagnostics, artifacts, and audit history.
+5. As an operator, I can schedule recurring ACP runs or trigger them through a
+   webhook while preserving owner, status, and failure visibility.
+6. As a developer, I can configure a custom ACP-compatible agent and verify it
+   through the registry and ACP Playground.
 
-Alternatively, map `agent_tasks` and `agent_runs` to Jobs with metadata in a JSON payload.
+## 8) Stable Route Contract
 
-## 10) API / Integration
+All paths below are mounted below `/api/v1`.
 
-### 10.1 Public Endpoints (new)
-- `POST /api/v1/agent_projects` (create project)
-- `POST /api/v1/agent_tasks` (create task)
-- `POST /api/v1/agent_tasks/{id}/run` (dispatch via ACP)
-- `GET /api/v1/agent_tasks/{id}` (task status + history)
-- `GET /api/v1/agent_agents` (list agents from ACP runner)
+### ACP Core
 
-### 10.2 ACP Runner Methods
-- `agent/list`
-- `session/new`
-- `session/prompt`
-- `session/cancel`
+- `GET /acp/health`
+- `GET /acp/setup-guide`
+- `GET /acp/agents`
+- `GET /acp/agents/health`
+- `POST /acp/agents/register`
+- `PUT /acp/agents/{agent_type}`
+- `DELETE /acp/agents/{agent_type}`
+- `POST /acp/sessions/new`
+- `POST /acp/sessions/prompt`
+- `POST /acp/sessions/cancel`
+- `POST /acp/sessions/close`
+- `POST /acp/sessions/{session_id}/teardown`
+- `GET /acp/sessions/{session_id}/reconciliation`
+- `POST /acp/sessions/{session_id}/reconcile`
+- `GET /acp/sessions/{session_id}/updates`
+- `GET /acp/sessions/{session_id}/detail`
+- `GET /acp/sessions/{session_id}/events`
+- `GET /acp/sessions/{session_id}/events/stream`
+- `GET /acp/sessions/{session_id}/artifacts`
+- `GET /acp/sessions/{session_id}/diagnostics`
+- `GET /acp/sessions/{session_id}/audit`
+- `POST /acp/sessions/{session_id}/fork`
+- `POST /acp/sessions/{session_id}/prompt-async`
+- `GET /acp/tasks/{task_id}`
+- `GET /acp/runs`
+- `GET /acp/runs/aggregate`
+- `POST /acp/sessions/{session_id}/rollback`
+- `GET /acp/sessions/{session_id}/checkpoints`
+- `WS /acp/sessions/{session_id}/stream`
+- `WS /acp/sessions/{session_id}/ssh`
 
-## 11) Permissions & Security
-- Registry changes restricted to admin.
-- Per-agent tool permissions configurable (auto-approve list).
-- ACP processes inherit environment variables; secrets never logged.
+### Admin Reporting
 
-## 12) Metrics / Monitoring
-- Task completion rate
-- Avg. iterations per task
-- Review rejection rate
-- Triage rate
-- Average time to completion
+- `GET /admin/acp/execution-health/summary`
 
-## 13) Rollout Plan
+### Agent Orchestration
 
-### Phase 1 (MVP)
-- Agent registry + `agent/list` integration
-- Create tasks, dispatch runs, status tracking
-- Reviewer gate and triage logic
+- `POST /agent-orchestration/workspaces`
+- `GET /agent-orchestration/workspaces`
+- `GET /agent-orchestration/workspaces/{workspace_id}`
+- `PUT /agent-orchestration/workspaces/{workspace_id}`
+- `DELETE /agent-orchestration/workspaces/{workspace_id}`
+- `GET /agent-orchestration/workspaces/{workspace_id}/health`
+- `POST /agent-orchestration/workspaces/health/refresh-all`
+- `GET /agent-orchestration/workspaces/{workspace_id}/mcp-servers`
+- `POST /agent-orchestration/workspaces/{workspace_id}/mcp-servers`
+- `DELETE /agent-orchestration/workspaces/{workspace_id}/mcp-servers/{server_id}`
+- `POST /agent-orchestration/workspaces/discover`
+- `POST /agent-orchestration/projects`
+- `GET /agent-orchestration/projects`
+- `GET /agent-orchestration/projects/{project_id}`
+- `DELETE /agent-orchestration/projects/{project_id}`
+- `POST /agent-orchestration/projects/{project_id}/tasks`
+- `GET /agent-orchestration/projects/{project_id}/tasks`
+- `GET /agent-orchestration/tasks/{task_id}`
+- `POST /agent-orchestration/tasks/{task_id}/run`
+- `POST /agent-orchestration/tasks/{task_id}/review`
 
-### Phase 2
-- UI enhancements (task list + basic status)
-- Task expansion via LLM
-- richer run history
+### Schedules And Triggers
 
-### Phase 3
-- Kanban-style workflow UI
-- Advanced scheduling (batch runs, auto-dispatch)
+- `POST /acp/schedules`
+- `GET /acp/schedules`
+- `PUT /acp/schedules/{schedule_id}`
+- `DELETE /acp/schedules/{schedule_id}`
+- `POST /acp/triggers`
+- `GET /acp/triggers`
+- `GET /acp/triggers/{trigger_id}`
+- `PUT /acp/triggers/{trigger_id}`
+- `DELETE /acp/triggers/{trigger_id}`
+- `POST /acp/triggers/webhook/{trigger_id}`
 
-## 14) Risks & Mitigations
-- Risk: False positives if completion token is not enforced.
-  - Mitigation: Require explicit completion signal and reviewer gate.
-- Risk: Third-party agents behave inconsistently.
-  - Mitigation: Validate capabilities and provide per-agent tool policies.
-- Risk: Task dependency deadlocks.
-  - Mitigation: Detect cycles and surface errors at task creation.
+## 9) Architecture
 
-## 15) Open Questions
-- Should tasks be stored as Jobs (single source) or as a dedicated agent schema?
-- What is the minimum UI surface to deliver in v0.2.x?
-- Should reviewer be a distinct agent type or allow "self-review" as an option?
+### Server
 
-## 16) Design Doc
+The FastAPI backend owns route authorization, task state, run history,
+governance, audit, workspace validation, schedules, triggers, and session
+metadata. Agent orchestration is intentionally server-owned so UI and API
+clients consume the same durable state.
 
-**Purpose**  
-Define the concrete architecture, data model, and flows for ACP-based agent orchestration with a first-party pi-agent and globally configured third-party agents. This design follows the RalphBoard-inspired loop (explicit completion + reviewer gate + triage escalation).
+### Runner And Agents
 
-**Decisions (Confirmed)**  
-1. The pi-agent runs as a separate Node ACP process.  
-2. Third-party agents are globally configured via a registry.  
-3. The pi-agent uses tldw_server LLMs via the OpenAI-compatible baseURL.
+The server talks to an ACP runner client over the configured runner boundary.
+The standard runner launches downstream ACP-compatible agents and proxies
+session lifecycle and prompt calls. Sandbox mode runs the ACP runner inside a
+configured container/VM backend and exposes additional SSH/checkpoint behavior
+where supported.
 
-**Architecture Overview**  
-Components:
-1. `tldw_server2` API and orchestration service (FastAPI).  
-2. ACP runner client (`runner_client.py`) for agent discovery and session control.  
-3. ACP runner process (Go) that spawns agent processes using the global registry.  
-4. pi-agent ACP CLI (Node) that handles session lifecycle and tool calls.  
-5. Storage for tasks, runs, and history (SQLite or Jobs metadata).
+### Storage
 
-Data Flow (Happy Path):
-1. User creates project and tasks.  
-2. Orchestrator selects agent type and calls ACP `session/new`.  
-3. Orchestrator sends `session/prompt` with task details.  
-4. Agent runs loop and emits explicit completion signal.  
-5. Orchestrator dispatches reviewer agent if configured.  
-6. Task transitions to `complete` or `triage` based on reviewer result.
+Current state is stored in dedicated ACP/session/orchestration tables and
+supporting scheduler/trigger storage rather than the originally proposed
+single minimal table sketch. Task detail enriches orchestration run rows with
+ACP session records when available.
 
-**System Responsibilities**  
-`tldw_server2`:
-1. Persist projects, tasks, and run history.  
-2. Enforce task state transitions and dependency gating.  
-3. Invoke ACP sessions and handle tool permission prompts.  
-4. Provide API endpoints and UI data.
+### Background Work
 
-ACP runner:
-1. Expose `agent/list` to advertise configured agents.  
-2. Spawn agent processes for `session/new`.  
-3. Forward tool calls and permission requests.  
-4. Maintain session lifecycle and cancellation.
+Async prompts and recurring schedules enqueue `handler="acp_run"` on the core
+Scheduler `acp` queue. Use Jobs for future user-facing/admin queue systems that
+need pause/resume/drain semantics beyond recurring cron registration.
 
-pi-agent:
-1. Implement ACP JSON-RPC over stdio.  
-2. Use tldw_server OpenAI-compatible baseURL for LLM calls.  
-3. Emit structured `session/update` events for assistant output and tool calls.
+### Frontend
 
-**Data Model**  
-Minimum schema (dedicated tables), or map to Jobs with metadata.  
-Suggested tables:
-```\n+agent_projects\n+  id (pk)\n+  name\n+  description\n+  created_at\n+\n+agent_tasks\n+  id (pk)\n+  project_id (fk)\n+  title\n+  description\n+  success_criteria\n+  dependency_id (nullable fk)\n+  status (todo|inprogress|review|complete|triage)\n+  review_count\n+  created_at\n+  updated_at\n+\n+agent_runs\n+  id (pk)\n+  task_id (fk)\n+  agent_type\n+  status (running|succeeded|failed|cancelled)\n+  started_at\n+  finished_at\n+  error\n+  output_ref (log/artifact pointer)\n```\n+
-**State Machine**  
-Statuses:
-1. `todo` (ready)  
-2. `inprogress` (agent active)  
-3. `review` (awaiting reviewer)  
-4. `complete` (approved)  
-5. `triage` (failed after max review attempts)
+The WebUI uses shared ACP connection/auth helpers for Agent Tasks, Agent
+Registry, and ACP Playground. Agent Tasks is the project/task/run/review surface;
+Agent Registry is the setup and health surface; ACP Playground is the direct
+session experimentation and diagnostics surface.
 
-Transitions:
-1. `todo` -> `inprogress` on run dispatch.  
-2. `inprogress` -> `review` on explicit completion signal.  
-3. `review` -> `complete` on reviewer approval.  
-4. `review` -> `todo` on reviewer rejection if attempts < max.  
-5. `review` -> `triage` on reviewer rejection if attempts >= max.  
-6. Any -> `triage` on fatal agent error if policy requires.
+## 10) Data And State Model
 
-**Dependency Gating**  
-Rule: A task with `dependency_id` cannot move from `todo` to `inprogress` until the dependency is `complete`.  
-Enforcement: Validate at dispatch time and return a structured error.
+Projects contain tasks. Tasks can reference dependencies, success criteria,
+selected agent type, reviewer agent type, maximum review attempts, metadata,
+run history, and review rows. Runs store selected agent, status, session ID,
+timing, error/result summaries, token usage, and completion signal metadata.
 
-**ACP Integration Details**  
-Session creation:
-1. `agent/list` to resolve agent availability and default.  
-2. `session/new` with `agent_type`, `cwd`, `search_tools`, `git_tools`.  
-3. `session/prompt` with task payload.
+Task status uses the production workflow:
 
-Tool call handling:
-1. Agent emits tool call in `session/update`.  
-2. ACP runner asks for permission (`session/request_permission`).  
-3. Orchestrator responds (`session/permission_response`).  
-4. ACP runner executes tool and returns `tool_result`.
+1. `todo`: ready to run after dependencies complete.
+2. `in_progress`: agent run active or awaiting retry.
+3. `review`: primary agent signaled structured completion and review is needed.
+4. `complete`: reviewer approved or no reviewer was required.
+5. `triage`: fatal error or reviewer rejection after max attempts.
 
-Completion signal:
-1. The agent must emit a structured completion marker.  
-2. The orchestrator validates the marker before transitioning to `review` or `complete`.
+## 11) Governance And Security
 
-**Agent Registry (Global)**  
-Configuration keys for each agent:
-1. `type` (unique id)  
-2. `name`  
-3. `description`  
-4. `command`  
-5. `args`  
-6. `env`  
-7. `requires_api_key`  
-8. `default` (optional)
+- ACP control routes use AuthNZ dependencies and route-specific scope guards
+  where applicable.
+- Agent registration, update, and removal require admin privileges.
+- Prompt and permission flows use shared ACP governance coordination.
+- Permission, prompt, review, task, session, schedule, trigger, and diagnostic
+  operations record sanitized audit events where applicable.
+- Workspace roots are allowlisted. Missing workspace configuration is a
+  fail-closed setup error, not implicit permission to run anywhere.
+- Webhook trigger secrets are encrypted at rest and sanitized in responses.
+- Per-session workspace env vars are operational configuration, not a secret
+  vault. Prefer external secret managers for durable secrets.
 
-Example entry:
-```\n+agents:\n+  default_agent: \"pi-agent\"\n+  registry:\n+    - type: \"pi-agent\"\n+      name: \"Pi Agent\"\n+      description: \"First-party ACP agent\"\n+      command: \"node\"\n+      args:\n+        - \"/path/to/pi-agent-acp/dist/cli.js\"\n+      env:\n+        TLDW_OPENAI_BASE_URL: \"http://127.0.0.1:8000/api/v1\"\n+      requires_api_key: false\n```\n+
-**Security and Permissions**  
-1. Registry edits restricted to admin.  
-2. Tool permissions enforced by ACP runner, with server-defined policy.  
-3. Sensitive env values must be stored in server config and never logged.
+## 12) Metrics And Observability
 
-**Error Handling**  
-1. Agent crash -> mark run failed and task to triage if configured.  
-2. Timeout -> cancel session and retry or triage based on policy.  
-3. Invalid completion signal -> continue loop or fail run with clear error.
+The current implementation exposes enough state to derive:
 
-**Testing Strategy**  
-1. Unit tests for state machine transitions.  
-2. Integration tests for ACP session lifecycle (`session/new`, `session/prompt`, `session/cancel`).  
-3. Integration tests for reviewer gate and triage escalation.  
-4. Contract tests for `agent/list` response shape.
+- task completion, rejection, retry, and triage rates
+- average runs and reviews per task
+- run duration and failure reasons
+- token usage and run cost aggregates from ACP run history
+- ACP execution-health buckets for setup blockers, runner/session failures,
+  reviewer outcomes, governance denials, structured completion failures,
+  sandbox/runtime errors, retention/redaction actions, setup-health dimensions,
+  and documented-unverified compatibility
+- schedule queued, skipped, disabled, and error states
+- audit event volume by action and session
 
-**Implementation Phases**  
-1. Phase 1: Agent registry + agent discovery + task model + basic dispatch.  
-2. Phase 2: Reviewer gate + triage + run history + minimal UI.  
-3. Phase 3: Task expansion via LLM + Kanban UI + scheduling.
+### Admin Execution-Health Reporting
+
+[#1537](https://github.com/rmusser01/tldw_server/issues/1537) is the ACP
+admin reporting tracker. Its release contract is intentionally summary-first:
+the backend owns one compact execution-health summary, while drill-through
+remains on the existing task, run, session detail, events, artifacts,
+diagnostics, and audit endpoints.
+
+| Metric group | Contract |
+| --- | --- |
+| Sessions | `sessions.total` and `sessions.by_status` count ACP sessions in the requested `range_days` window. |
+| Failure buckets | `setup_blockers`, `runner_session_failures`, `reviewer_rejections`, `reviewer_failures`, `governance_denials`, `structured_completion_failures`, `sandbox_runtime_errors`, and `retention_redaction_actions` normalize common operator failure modes. |
+| Setup health | `agent`, `workspace`, `sandbox_runtime`, `mcp_injection`, and `scheduler_trigger_path` each report `status`, blocker codes, and evidence count. |
+| Compatibility | `agents[]`, `compatibility.by_support_state`, `compatibility.documented_unverified_agents`, `compatibility.live_certification_required`, and `compatibility.docs_url` prevent UI and release notes from overstating downstream-agent support. |
+| Retention and redaction | `retention` mirrors configured session/audit retention; `redaction` declares whether support-safe detail/events/artifacts, diagnostics, and audit metadata views are available. |
+
+| Surface | Status | Role |
+| --- | --- | --- |
+| Admin API | Shipped | `GET /api/v1/admin/acp/execution-health/summary?range_days=30` is the reporting contract. |
+| Agent Registry | Shipped in [#1654](https://github.com/rmusser01/tldw_server/pull/1654) | First admin-facing summary surface for sessions, compatibility, setup blockers, failure buckets, and retention/redaction posture. |
+| Agent Tasks | Existing drill-through surface | Use task detail and run history for per-task run/review context; add filters or summary badges only as a separate follow-up if product needs row-level reporting. |
+| ACP Playground diagnostics | Existing drill-through surface | Keep session diagnostics focused on the selected run/session; preflight setup hints can reuse the summary contract in a future follow-up. |
+| Admin/ops dashboards | Future packaging | Broader exports, trends, and alerting belong under the admin/deployment packaging track, not the initial #1537 closeout. |
+| Docs | Shipped here and in `Agent_Client_Protocol.md` | Product, operator, and readiness docs define metric semantics, dependencies, and release caveats. |
+
+The #1537 closeout depends on the retention and support-safe view work tracked
+by [#1512](https://github.com/rmusser01/tldw_server/issues/1512) and
+[#1513](https://github.com/rmusser01/tldw_server/issues/1513), and on the
+admin/deployment baseline tracked by
+[#1529](https://github.com/rmusser01/tldw_server/issues/1529). Remaining
+live-certification work for downstream agents stays in
+[#1563](https://github.com/rmusser01/tldw_server/issues/1563) and
+[#1564](https://github.com/rmusser01/tldw_server/issues/1564), not this
+summary-reporting issue.
+
+### Traceable ACP Output Artifacts
+
+[#1538](https://github.com/rmusser01/tldw_server/issues/1538) connects ACP
+agent outputs to the product artifact contract in
+[#1525](https://github.com/rmusser01/tldw_server/issues/1525). The rule is:
+ACP session artifacts are execution evidence by default; only structured
+deliverables that satisfy
+[Traceable_Work_Product_Artifact_Contract.md](Traceable_Work_Product_Artifact_Contract.md)
+should become canonical workspace work-product artifacts.
+
+| ACP output | Artifact treatment |
+| --- | --- |
+| Raw ACP session artifacts from `/acp/sessions/{session_id}/artifacts` | Keep as execution artifacts linked from task/run/session detail. They are not polished workspace work products by themselves. |
+| Prompt text, transcript events, raw model/tool payloads, and diagnostics | Keep as authenticated drill-through evidence with `?redacted=true` support-safe views. Do not promote into workspace artifacts. |
+| Structured completion signals and run result summaries | Store on run/task history and link as provenance for a promoted artifact when a deliverable is accepted. |
+| Reviewer decisions, rejection reasons, retries, and triage state | Preserve as review metadata on the promoted artifact version and as durable ACP run/review history. |
+| Agent-authored brief/spec/report/table/action plan with source references | Eligible for promotion into a work-product artifact when it has owner/workspace placement, source lineage, review state, version metadata, and retention/redaction posture. |
+| Exported files from an accepted deliverable | Treat as export artifacts tied to a specific work-product artifact version, not as the canonical record. |
+
+Promotion should follow this workflow:
+
+1. ACP task produces a structured deliverable and a machine-readable completion
+   signal.
+2. Reviewer agent or manual reviewer accepts, requests revision, rejects, or
+   routes the output to triage using existing reviewer-loop semantics.
+3. Accepted or explicitly draftable deliverables create or update a work-product
+   artifact with `producer_type="acp"`, ACP task/run/session IDs, source-lineage
+   snapshot, review decision, artifact state, and version metadata.
+4. Rejected or `needs_revision` outputs remain linked to ACP task/run history and
+   may create a new artifact version only when the user or reviewer requests a
+   revised deliverable.
+5. Support-safe views use the existing ACP redaction contract for transcripts,
+   payloads, local paths, and diagnostic metadata; artifact detail should show
+   safe previews, source labels, decision state, and links back to authenticated
+   ACP drill-through.
+
+Implementation should be split into:
+
+| Slice | Scope |
+| --- | --- |
+| Storage/API | Backend foundation implemented by #1703 on `workspace_artifacts`: traceable artifact fields, version rows, source-lineage metadata, review metadata, export references, redaction posture, schema version, and ACP producer references. |
+| UI detail | Implemented by #1707: artifact detail shows source lineage, ACP provenance, review state, review-state controls, exports, redaction posture, version metadata, and authenticated ACP drill-through links. |
+| ACP promotion | Implemented by #1706: accepted structured ACP deliverables promote into canonical workspace work-product artifacts; rejected, needs-revision, malformed, or unsupported artifacts remain execution evidence. |
+| Export identity | Backend foundation implemented by #1705 on `POST /api/v1/workspaces/{workspace_id}/artifacts/{artifact_id}/exports`: accepted Markdown/HTML/JSON exports preserve artifact/version/workspace identity, source lineage, review state, ACP producer metadata, generated timestamp, and export references. |
+| Verification | Implemented by #1704: contract and UI tests cover ACP-to-artifact promotion, redacted support-safe views, reviewer-loop state mapping, versioning, UI hydration/detail behavior, and export identity. Evidence is recorded in `Docs/Development/ACP_Artifact_Release_Verification_2026_05_15.md`. |
+
+The initial implementation targets one golden-path deliverable family: accepted
+source-grounded workspace briefs/reports/specs/action plans/tables generated by
+an ACP task. Template-specific artifact types outside that promotion allowlist,
+rich document/slides/table export channels, Chatbook packaging, and live
+downstream-agent certification remain separate follow-ups.
+
+## 13) Remaining Work Before Production Signoff
+
+These items remain under the #1471/#1472 closeout rather than this PRD refresh:
+
+- Run the final live-backend ACP browser E2E against a seeded local backend and
+  API key, or document accepted release skips.
+- Run the Go runner build/test gate in `tools/tldw-agent`.
+- Decide and document artifact retention and transcript redaction policy before
+  release notes claim production retention behavior.
+- Verify any sandbox backend selected as default on the target host runtime.
+- Keep `ACP_Production_Readiness.md` current with final evidence for each child
+  issue and close #1472 only after the matrix is fully resolved.
+
+## 14) Verification References
+
+Use the readiness matrix command catalog for current verification commands. At
+minimum, a release candidate needs:
+
+- focused backend ACP protocol and orchestration pytest suites
+- focused frontend ACP Vitest suite
+- browser E2E for setup/run/diagnose flows
+- Go runner build and test verification
+- Bandit on touched backend Python paths
+- `git diff --check`
+
+## 15) Change History
+
+- Draft v0.1: original agent orchestration and pi-agent proposal.
+- 2026-05-10 refresh: aligned the PRD with the current ACP productionization
+  implementation, marked superseded route and pi-agent assumptions, linked the
+  #1471 child issue map, and moved operator detail to the operational docs and
+  readiness matrix.
+- 2026-05-14 admin reporting closeout: documented the #1537
+  execution-health metric groups, reporting surfaces, dependencies, and
+  follow-up split after the Agent Registry summary display shipped.
+- 2026-05-14 artifact contract closeout: linked ACP output promotion to the
+  traceable work-product artifact contract and split #1538 implementation into
+  storage/API, UI detail, and verification slices.
+- 2026-05-14 storage/API foundation: #1703 added traceable workspace artifact
+  fields, API exposure, and per-version storage while leaving UI detail, ACP
+  promotion, export adapters, and broader signoff checks as follow-up slices.
+- 2026-05-15 accepted export foundation: #1705 added the backend
+  Markdown/HTML/JSON accepted-version export contract while leaving richer
+  file/document export channels, retention policy, and UI download workflows as
+  follow-up slices.

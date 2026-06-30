@@ -164,6 +164,21 @@ async def test_model_path_traversal_rejected(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_start_server_rejects_absolute_model_filename_even_under_allowed_dir(tmp_path: Path):
+    exe = tmp_path / "llama_server"
+    exe.write_text("#!/bin/sh\n")
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    model = model_dir / "m.gguf"
+    model.write_text("x")
+    cfg = LlamaCppConfig(executable_path=exe, models_dir=model_dir)
+    handler = LlamaCppHandler(cfg, global_app_config={})
+
+    with pytest.raises(ServerError):
+        await handler.start_server(str(model))
+
+
+@pytest.mark.asyncio
 async def test_port_autoselect(monkeypatch, tmp_path: Path):
     exe = tmp_path / "llama_server"
     exe.write_text("#!/bin/sh\n")
@@ -386,11 +401,12 @@ async def test_model_swap_rollback_on_stop_failure(monkeypatch, tmp_path: Path):
     handler._active_server_port = 8080
     handler._active_server_host = "127.0.0.1"
 
-    # Make stop_server fail
-    async def failing_stop():
+    # start_server() already holds the lifecycle lock and calls the unlocked
+    # stop path directly during model swaps.
+    async def failing_stop(*_args, **_kwargs):
         raise ServerError("Failed to stop server")
 
-    monkeypatch.setattr(handler, "stop_server", failing_stop)
+    monkeypatch.setattr(handler, "_stop_server_unlocked", failing_stop)
 
     # Attempt to swap models - should fail and restore state
     with pytest.raises(ServerError, match="Model swap failed"):

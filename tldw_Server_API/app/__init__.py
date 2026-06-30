@@ -49,8 +49,8 @@ def _under_pytest() -> bool:
             return True
         # Fallback heuristic if PYTEST_CURRENT_TEST isn't set yet
         return any("pytest" in (arg or "") for arg in sys.argv)
-    except Exception as e:
-        logger.debug(f"app.__init__._under_pytest check failed: {e}")
+    except Exception:
+        logger.debug("app.__init__._under_pytest check failed")
         return False
 
 

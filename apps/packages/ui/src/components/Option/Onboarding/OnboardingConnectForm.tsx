@@ -54,24 +54,36 @@ import { HEADER_SHORTCUT_SELECTION_SETTING } from "@/services/settings/ui-settin
 import { getDefaultShortcutsForPersona } from "@/components/Layouts/header-shortcut-items"
 import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { getProviderDisplayName, normalizeProviderKey } from "@/utils/provider-registry"
+import { getDesignSystemState } from "@/design-system"
 import {
   trackOnboardingFirstIngestSuccess,
   trackOnboardingSuccessReached
 } from "@/utils/onboarding-ingestion-telemetry"
 import {
+  buildCharacterOnboardingRoute,
+  CHARACTER_CHAT_ONBOARDING_INTENT,
+  type OnboardingEntryIntent
+} from "@/utils/onboarding-route-intent"
+import {
   validateApiKey,
   validateMultiUserAuth,
   validateMagicLinkAuth,
   categorizeConnectionError,
+  isConnectivityErrorKind,
   type ConnectionErrorKind,
   type ValidationResult,
 } from "./validation"
+import {
+  buildSetupDiagnostic,
+  type OnboardingDiagnosticActionId,
+} from "./onboarding-diagnostics"
+import { CharacterChatOnboardingLane } from "./CharacterChatOnboardingLane"
 import { ProgressItem, type ProgressStatus } from "./ProgressItem"
 
 type AuthMode = "single-user" | "multi-user"
 type LoginMethod = "magic-link" | "password"
 
-type ConnectionProgress = {
+export type ConnectionProgress = {
   serverReachable: ProgressStatus
   authentication: ProgressStatus
   knowledgeIndex: ProgressStatus
@@ -107,7 +119,7 @@ type ConnectionUiAction =
       hasRunConnectionTest: boolean
     }
 
-const initialConnectionUiState: ConnectionUiState = {
+export const initialConnectionUiState: ConnectionUiState = {
   isConnecting: false,
   progress: {
     serverReachable: "idle",
@@ -120,7 +132,20 @@ const initialConnectionUiState: ConnectionUiState = {
   hasRunConnectionTest: false,
 }
 
-function connectionUiReducer(
+export function buildAuthValidationFailureProgress(
+  previous: ConnectionProgress,
+  errorKind: ConnectionErrorKind
+): ConnectionProgress {
+  return {
+    ...previous,
+    serverReachable: isConnectivityErrorKind(errorKind)
+      ? "error"
+      : previous.serverReachable,
+    authentication: "error",
+  }
+}
+
+export function connectionUiReducer(
   state: ConnectionUiState,
   action: ConnectionUiAction
 ): ConnectionUiState {
@@ -128,7 +153,7 @@ function connectionUiReducer(
     case "START_CONNECT":
       return {
         ...state,
-        hasRunConnectionTest: true,
+        hasRunConnectionTest: false,
         isConnecting: true,
         errorKind: null,
         errorMessage: null,
@@ -171,7 +196,9 @@ function connectionUiReducer(
 }
 
 interface Props {
+  entryIntent?: OnboardingEntryIntent | null
   onFinish?: () => void
+  returnTo?: string | null
 }
 
 const QUICK_INGEST_OPEN_DELAY_MS = 120
@@ -248,7 +275,11 @@ function IntentSteps({
  * - Granular error messages
  * - All fields on one page (no multi-step wizard)
  */
-export function OnboardingConnectForm({ onFinish }: Props) {
+export function OnboardingConnectForm({
+  entryIntent,
+  onFinish,
+  returnTo
+}: Props) {
   const { t } = useTranslation(["settings", "common"])
   const navigate = useNavigate()
   const { setDemoEnabled } = useDemoMode()
@@ -290,13 +321,14 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     isConnecting,
     progress,
     errorKind,
-    errorMessage,
     showSuccess,
     hasRunConnectionTest,
   } = uiState
 
   // Post-connection guided flow: when user selects an intent, show persona-specific steps
   const [selectedIntent, setSelectedIntent] = useState<"chat" | "family" | "research" | null>(null)
+  const isCharacterChatEntry =
+    entryIntent === CHARACTER_CHAT_ONBOARDING_INTENT
 
   const {
     data: availableModels = [],
@@ -402,6 +434,9 @@ export function OnboardingConnectForm({ onFinish }: Props) {
   ])
 
   const urlInputRef = useRef<InputRef | null>(null)
+  const apiKeyInputRef = useRef<InputRef | null>(null)
+  const usernameInputRef = useRef<InputRef | null>(null)
+  const magicEmailInputRef = useRef<InputRef | null>(null)
   const hasLoadedInitialConfigRef = useRef(false)
 
   // Load initial config
@@ -518,59 +553,6 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     setAuthTouched(false)
   }, [authMode, loginMethod])
 
-  // Derive a health-check URL from the user-entered server URL
-  const healthCheckUrl = useMemo(() => {
-    try {
-      const parsed = new URL(serverUrl.trim())
-      return `${parsed.origin}/health`
-    } catch {
-      return "http://localhost:8000/health"
-    }
-  }, [serverUrl])
-
-  // Derive error messages from errorKind
-  const errorHint = useMemo(() => {
-    switch (errorKind) {
-      case "dns_failed":
-        return t(
-          "settings:onboarding.errors.dns",
-          "Could not find server. Check the URL for typos and make sure the hostname is correct."
-        )
-      case "refused":
-        return t(
-          "settings:onboarding.errors.refused",
-          `The server is not accepting connections. Is it running? Try: curl ${healthCheckUrl}`
-        )
-      case "timeout":
-        return t(
-          "settings:onboarding.errors.timeout",
-          "The server did not respond in time. If using Docker, check containers are running: docker ps"
-        )
-      case "cors_blocked":
-        return t(
-          "settings:onboarding.errors.cors",
-          "Your browser can't reach the server due to security settings. If you manage the server, add your browser's origin to ALLOWED_ORIGINS in the server's .env file. Otherwise, ask your server administrator for help."
-        )
-      case "ssl_error":
-        return t(
-          "settings:onboarding.errors.ssl",
-          "SSL certificate error. For local development, try http:// instead of https://"
-        )
-      case "auth_invalid":
-        return t(
-          "settings:onboarding.errors.auth",
-          "API key not accepted. Check your key. Docker users: run make show-api-key in terminal"
-        )
-      case "server_error":
-        return t(
-          "settings:onboarding.errors.server",
-          "The server returned an error. Check server logs for details: docker compose logs --tail=50"
-        )
-      default:
-        return null
-    }
-  }, [errorKind, healthCheckUrl, t])
-
   const handleSendMagicLink = useCallback(async () => {
     if (!magicEmail.trim()) {
       dispatchUi({
@@ -661,10 +643,11 @@ export function OnboardingConnectForm({ onFinish }: Props) {
       if (authResult && !authResult.success) {
         dispatchUi({
           type: "UPDATE_PROGRESS",
-          updater: (p) => ({
-            ...p,
-            authentication: "error",
-          }),
+          updater: (p) =>
+            buildAuthValidationFailureProgress(
+              p,
+              authResult.errorKind ?? null
+            ),
         })
         if (authResult.errorKind || authResult.error) {
           dispatchUi({
@@ -695,6 +678,7 @@ export function OnboardingConnectForm({ onFinish }: Props) {
 
       try {
         await actions.testConnectionFromOnboarding()
+        dispatchUi({ type: "SET_HAS_RUN_TEST", hasRunConnectionTest: true })
         const latestConnection = useConnectionStore.getState().state
         emitSplashAfterSingleUserAuthSuccess(authMode, latestConnection.isConnected)
       } catch (error) {
@@ -763,6 +747,50 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     actions,
     dispatchUi,
   ])
+
+  const setupDiagnostic = useMemo(
+    () =>
+      buildSetupDiagnostic(errorKind, t, {
+        authMode:
+          authMode === "single-user" ||
+          (authMode === "multi-user" && isExtensionRuntime())
+            ? "api_key"
+            : loginMethod === "magic-link"
+              ? "magic_link"
+              : "multi_user",
+      }),
+    [authMode, errorKind, loginMethod, t]
+  )
+
+  const handleDiagnosticAction = useCallback(
+    (actionId: OnboardingDiagnosticActionId) => {
+      if (actionId === "edit_api_key") {
+        apiKeyInputRef.current?.focus()
+        return
+      }
+      if (actionId === "edit_credentials") {
+        usernameInputRef.current?.focus()
+        return
+      }
+      if (actionId === "send_magic_link") {
+        magicEmailInputRef.current?.focus()
+        void handleSendMagicLink()
+        return
+      }
+      if (actionId === "edit_server_url") {
+        urlInputRef.current?.focus()
+        return
+      }
+      if (actionId === "retry") {
+        void handleConnect()
+        return
+      }
+      if (actionId === "open_setup") {
+        navigate("/setup")
+      }
+    },
+    [handleConnect, handleSendMagicLink, navigate]
+  )
 
   // React to connection test results using hook state
   useEffect(() => {
@@ -929,6 +957,37 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     await finishAndNavigate("/settings/tldw")
   }, [finishAndNavigate])
 
+  const handleCreateCharacterFlow = useCallback(async () => {
+    await finishAndNavigate(
+      buildCharacterOnboardingRoute({
+        returnTo,
+        action: "create"
+      })
+    )
+  }, [finishAndNavigate, returnTo])
+
+  const handleImportCharacterFlow = useCallback(async () => {
+    await finishAndNavigate(
+      buildCharacterOnboardingRoute({
+        returnTo,
+        action: "import"
+      })
+    )
+  }, [finishAndNavigate, returnTo])
+
+  const handleChooseCharacterModelFlow = useCallback(async () => {
+    await finishAndNavigate("/settings/model?from=character-chat-onboarding")
+  }, [finishAndNavigate])
+
+  const handleStartCharacterChatFlow = useCallback(async () => {
+    try {
+      await openSidepanelForActiveTab()
+    } catch (err) {
+      console.debug("[OnboardingConnectForm] Failed to open sidepanel", err)
+    }
+    await finishAndNavigate("/chat?from=character-chat-onboarding")
+  }, [finishAndNavigate])
+
   const handleOpenFamilyFlow = useCallback(async () => {
     try {
       await actions.setUserPersona("family")
@@ -970,6 +1029,22 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     quickIngestLastRun.status === "success" && quickIngestLastRun.successCount > 0
   const hasFailedIngest = quickIngestLastRun.status === "error"
   const shouldPrioritizeMedia = hasSuccessfulIngest
+  const setupState = getDesignSystemState("setup_required")
+  const authRequiredState = getDesignSystemState("auth_required")
+  const unavailableState = getDesignSystemState("unavailable")
+  const retryingState = getDesignSystemState("retrying")
+  const readyState = getDesignSystemState("ready")
+  const loadingState = getDesignSystemState("loading")
+  const activeErrorState =
+    errorKind === "auth_invalid" ? authRequiredState : unavailableState
+  const progressHeaderState = isConnecting
+    ? retryingState
+    : errorKind
+      ? activeErrorState
+      : progress.serverReachable === "success" &&
+          progress.authentication === "success"
+        ? readyState
+        : loadingState
   const primarySourcePreview = useMemo(() => {
     const label = quickIngestLastRun.primarySourceLabel
     if (!label) return null
@@ -1015,11 +1090,21 @@ export function OnboardingConnectForm({ onFinish }: Props) {
         data-ingest-status={quickIngestLastRun.status}
       >
         <div className="mb-8 text-center">
+          <div className="mb-3 flex justify-center">
+            <span className="inline-flex rounded-full border border-state-ready/30 bg-state-ready/10 px-2 py-0.5 text-xs font-semibold text-state-ready">
+              {readyState.label}
+            </span>
+          </div>
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-success/10">
             <Check className="size-7 text-success" />
           </div>
           <h2 className="text-2xl font-semibold text-text tracking-tight">
-            {hasSuccessfulIngest
+            {isCharacterChatEntry
+              ? t(
+                  "settings:onboarding.success.titleCharacterChat",
+                  "You're connected. Set up character chat."
+                )
+              : hasSuccessfulIngest
               ? t(
                   "settings:onboarding.success.titlePostIngest",
                   "Connected and ingest is working. Continue to verification."
@@ -1030,7 +1115,12 @@ export function OnboardingConnectForm({ onFinish }: Props) {
                 )}
           </h2>
           <p className="mt-2 text-sm text-text-muted">
-            {hasSuccessfulIngest
+            {isCharacterChatEntry
+              ? t(
+                  "settings:onboarding.success.subtitleCharacterChat",
+                  "Create or import a character, choose a model, then start chatting."
+                )
+              : hasSuccessfulIngest
               ? t(
                   "settings:onboarding.success.subtitlePostIngest",
                   "Great start. Next, verify the result in Media, then ask Chat for a summary."
@@ -1044,7 +1134,14 @@ export function OnboardingConnectForm({ onFinish }: Props) {
 
         {/* Intent selector — route to persona-appropriate next step */}
         <div data-testid="intent-selector" className="mb-6">
-          {selectedIntent == null ? (
+          {isCharacterChatEntry ? (
+            <CharacterChatOnboardingLane
+              onCreateCharacter={handleCreateCharacterFlow}
+              onImportCharacter={handleImportCharacterFlow}
+              onChooseModel={handleChooseCharacterModelFlow}
+              onStartCharacterChat={handleStartCharacterChatFlow}
+            />
+          ) : selectedIntent == null ? (
             <>
               <p className="mb-3 text-sm font-medium text-text-muted">
                 {t("settings:onboarding.success.intentTitle", "What would you like to do first?")}
@@ -1436,6 +1533,9 @@ export function OnboardingConnectForm({ onFinish }: Props) {
     <div className="mx-auto w-full max-w-2xl rounded-3xl border border-border/70 bg-surface/95 p-8 shadow-lg shadow-black/5 backdrop-blur">
       {/* Header */}
       <div className="mb-8">
+        <span className="mb-3 inline-flex rounded-full border border-state-setupRequired/30 bg-state-setupRequired/10 px-2 py-0.5 text-xs font-semibold text-state-setupRequired">
+          {setupState.label}
+        </span>
         <h2 className="text-2xl font-semibold text-text tracking-tight">
           {t("settings:onboarding.title", "Welcome to tldw Assistant")}
         </h2>
@@ -1628,6 +1728,7 @@ export function OnboardingConnectForm({ onFinish }: Props) {
               {t("settings:onboarding.apiKey.label", "Paste your API key")}
             </label>
             <Input.Password
+              ref={apiKeyInputRef}
               data-testid="onboarding-api-key"
               placeholder={t(
                 "settings:onboarding.apiKey.placeholder",
@@ -1708,6 +1809,7 @@ export function OnboardingConnectForm({ onFinish }: Props) {
                     {t("settings:onboarding.magicLink.email.label", "Email")}
                   </label>
                   <Input
+                    ref={magicEmailInputRef}
                     placeholder={t(
                       "settings:onboarding.magicLink.email.placeholder",
                       "you@company.com"
@@ -1806,6 +1908,7 @@ export function OnboardingConnectForm({ onFinish }: Props) {
                     {t("settings:onboarding.username.label", "Username")}
                   </label>
                   <Input
+                    ref={usernameInputRef}
                     placeholder={t(
                       "settings:onboarding.username.placeholder",
                       "Enter username"
@@ -1895,6 +1998,8 @@ export function OnboardingConnectForm({ onFinish }: Props) {
           >
             <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-primary">
               {isConnecting && <Loader2 className="size-3 animate-spin" />}
+              <span>{progressHeaderState.label}</span>
+              <span aria-hidden="true">·</span>
               {t("settings:onboarding.progress.title", "Connection Status")}
             </div>
             <ProgressItem
@@ -1927,27 +2032,67 @@ export function OnboardingConnectForm({ onFinish }: Props) {
         )}
 
         {/* Error display */}
-        {errorKind && (
-          <div className="rounded-2xl border border-danger/30 bg-danger/10 p-4">
+        {errorKind && setupDiagnostic && (
+          <div
+            className="rounded-2xl border border-danger/30 bg-danger/10 p-4"
+            data-testid="onboarding-diagnostic-panel"
+            role="alert"
+          >
             <div className="flex items-start gap-2">
               <AlertCircle className="mt-0.5 size-4 shrink-0 text-danger" />
-              <div>
-                <div className="text-sm font-medium text-danger">
-                  {t("settings:onboarding.connectionFailed", "Connection failed")}
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 inline-flex rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">
+                  {activeErrorState.label}
                 </div>
-                {errorHint && (
-                  <p className="mt-1 text-xs text-danger">
-                    {errorHint}
-                  </p>
-                )}
-                {errorMessage && errorMessage !== errorHint && (
-                  <p className="mt-1 font-mono text-xs text-danger">
-                    {errorMessage}
-                  </p>
-                )}
+                <div
+                  className="text-sm font-medium text-danger"
+                  data-testid="onboarding-diagnostic-title"
+                >
+                  {setupDiagnostic.title}
+                </div>
+                <p
+                  className="mt-1 text-xs text-danger"
+                  data-testid="onboarding-diagnostic-cause"
+                >
+                  {setupDiagnostic.cause}
+                </p>
+                <p className="mt-1 text-xs text-danger/80">
+                  {setupDiagnostic.whyItMatters}
+                </p>
               </div>
             </div>
-            {/* B4: Troubleshooting docs link */}
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => handleDiagnosticAction(setupDiagnostic.primaryAction.id)}
+                data-testid="onboarding-diagnostic-primary-action"
+                disabled={isConnecting}
+                className="rounded-full"
+              >
+                {setupDiagnostic.primaryAction.label}
+              </Button>
+              {setupDiagnostic.secondaryActions.map((diagnosticAction) => (
+                <Button
+                  key={diagnosticAction.id}
+                  type="default"
+                  size="small"
+                  onClick={() => handleDiagnosticAction(diagnosticAction.id)}
+                  data-testid={`onboarding-diagnostic-secondary-action-${diagnosticAction.id}`}
+                  disabled={isConnecting}
+                  className="rounded-full"
+                  icon={
+                    diagnosticAction.id === "retry" ? (
+                      <RefreshCw className="size-3.5" />
+                    ) : undefined
+                  }
+                >
+                  {diagnosticAction.label}
+                </Button>
+              ))}
+            </div>
+
             <a
               href={TROUBLESHOOTING_URL}
               target="_blank"
@@ -1981,18 +2126,6 @@ export function OnboardingConnectForm({ onFinish }: Props) {
             : t("settings:onboarding.buttons.connect", "Connect")}
         </Button>
 
-        {/* Retry if error */}
-        {errorKind && !isConnecting && (
-          <Button
-            type="default"
-            block
-            onClick={handleConnect}
-            icon={<RefreshCw className="size-4" />}
-            className="!h-11 rounded-full"
-          >
-            {t("common:retry", "Retry")}
-          </Button>
-        )}
       </div>
 
       {/* Advanced: Server commands */}

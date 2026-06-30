@@ -34,4 +34,10 @@ describe("extension route registry stability parity", () => {
     expect(extensionRouteRegistrySource).toMatch(/path:\s*"\/quick-chat-popout"/)
     expect(extensionRouteRegistrySource).toContain("OptionQuickChatPopout")
   })
+
+  it("registers the provider key settings options route", () => {
+    expect(extensionRouteRegistrySource).toMatch(/path:\s*"\/settings\/provider-keys"/)
+    expect(extensionRouteRegistrySource).toContain("OptionProviderKeysSettings")
+    expect(extensionRouteRegistrySource).toContain("settings:providerKeys.navTitle")
+  })
 })

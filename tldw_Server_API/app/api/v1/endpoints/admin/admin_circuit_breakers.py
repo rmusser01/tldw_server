@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     AdminCircuitBreakerListFilters,
     AdminCircuitBreakerListResponse,
@@ -86,7 +86,7 @@ def _build_status_row(
 @router.get(
     "/circuit-breakers",
     response_model=AdminCircuitBreakerListResponse,
-    dependencies=[Depends(require_permissions(SYSTEM_LOGS))],
+    dependencies=[Depends(RequirePermission(SYSTEM_LOGS))],
 )
 async def list_unified_circuit_breakers(
     filters: AdminCircuitBreakerListFilters = Depends(),

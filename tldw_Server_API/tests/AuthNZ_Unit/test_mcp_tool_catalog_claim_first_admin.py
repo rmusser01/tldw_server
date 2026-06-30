@@ -6,6 +6,16 @@ from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debugs: list[str] = []
+
+    def debug(self, message: str, *args, **kwargs) -> None:
+        if args or kwargs:
+            message = message.format(*args, **kwargs)
+        self.debugs.append(message)
+
+
 def _make_request_with_principal(principal: AuthPrincipal | None) -> Request:
     request = Request(
         {
@@ -66,9 +76,7 @@ def test_catalog_admin_context_allows_principal_admin_permission_claim():
 
 
 def test_catalog_admin_context_principal_non_admin_overrides_token_admin_role():
-    request = _make_request_with_principal(
-        _make_principal(is_admin=True, roles=["user"], permissions=[])
-    )
+    request = _make_request_with_principal(_make_principal(is_admin=True, roles=["user"], permissions=[]))
     token = _make_token_data(roles=["admin"])
     assert mcp_mod._is_catalog_admin_context(request, token) is False
 
@@ -180,3 +188,72 @@ async def test_list_tool_catalogs_uses_membership_repo_for_team_scope(
             "team_ids": {99},
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_tool_catalogs_membership_lookup_logs_are_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_attach_api_key_metadata(*_args, **_kwargs) -> dict:
+        return {}
+
+    async def _raise_org_lookup(user_id: int):
+        raise RuntimeError(f"org membership lookup exploded for {user_id} at /private/mcp.db")
+
+    async def _raise_team_lookup(user_id: int):
+        raise RuntimeError(f"team membership lookup exploded for {user_id} at /private/mcp.db")
+
+    async def _fake_list_visible_tool_catalogs(
+        _db,
+        *,
+        scope_norm: str,
+        admin_all: bool,
+        org_ids: set[int] | None = None,
+        team_ids: set[int] | None = None,
+    ):
+        assert scope_norm == "all"
+        assert admin_all is False
+        assert org_ids == set()
+        assert team_ids == set()
+        return []
+
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(mcp_mod, "logger", logger_stub)
+    monkeypatch.setattr(mcp_mod, "_attach_api_key_metadata", _fake_attach_api_key_metadata)
+    monkeypatch.setattr(mcp_mod, "list_org_memberships_for_user", _raise_org_lookup)
+    monkeypatch.setattr(
+        mcp_mod,
+        "list_active_team_memberships_for_user",
+        _raise_team_lookup,
+    )
+    monkeypatch.setattr(
+        mcp_mod.admin_tool_catalog_service,
+        "list_visible_tool_catalogs",
+        _fake_list_visible_tool_catalogs,
+    )
+
+    request = _make_request_with_principal(None)
+    auth = mcp_mod.McpAuthContext(
+        user=_make_token_data(roles=["user"]),
+        principal=None,
+        api_key_info=None,
+        raw_api_key=None,
+    )
+
+    rows = await mcp_mod.list_tool_catalogs(
+        http_request=request,
+        scope="all",
+        auth=auth,
+        _guard=None,
+        db=object(),
+    )
+
+    assert rows == []
+    assert logger_stub.debugs == [
+        "MCP tool catalogs: org membership lookup failed",
+        "MCP tool catalogs: team membership lookup failed",
+    ]
+    rendered_logs = " ".join(logger_stub.debugs)
+    assert "1" not in rendered_logs
+    assert "/private/" not in rendered_logs
+    assert "exploded" not in rendered_logs

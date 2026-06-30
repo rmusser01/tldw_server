@@ -10,6 +10,26 @@ import pytest
 pytestmark = pytest.mark.smoke
 
 
+class _CaptureLogger:
+    def __init__(self):
+        self.records = []
+
+    def info(self, message, *args, **kwargs):
+        self.records.append(("info", message, args, kwargs))
+
+    def debug(self, message, *args, **kwargs):
+        self.records.append(("debug", message, args, kwargs))
+
+    def error(self, message, *args, **kwargs):
+        self.records.append(("error", message, args, kwargs))
+
+
+def _render_log_records(records):
+    return "\n".join(
+        f"{level} {message} {args!r} {kwargs!r}" for level, message, args, kwargs in records
+    )
+
+
 def _has_ffmpeg() -> bool:
 
 
@@ -327,3 +347,180 @@ async def test_audio_gpu_worker_normalizes_segments_and_text(monkeypatch, tmp_pa
     finally:
         stop.set()
         await asyncio.wait_for(task, timeout=2.0)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_gpu_worker_sanitizes_worker_error_log_but_preserves_job_error(monkeypatch):
+    import tldw_Server_API.app.services.audio_transcribe_gpu_worker as gpu_worker
+
+    sensitive_error = "transcribe failed for /tmp/private/audio.wav token=SECRET123"
+    logger_capture = _CaptureLogger()
+    stop = asyncio.Event()
+    failed_errors = []
+
+    class _FakeJobManager:
+        def __init__(self):
+            self._sent_job = False
+
+        def acquire_next_job(self, **kwargs):
+            if self._sent_job:
+                stop.set()
+                return None
+            self._sent_job = True
+            return {
+                "id": 101,
+                "owner_user_id": "7",
+                "job_type": "audio_transcribe",
+                "lease_id": "lease-101",
+                "payload": {"wav_path": "/tmp/private/audio.wav"},
+            }
+
+        def fail_job(self, job_id, error, **kwargs):
+            failed_errors.append(error)
+
+    async def _fake_can_start_job(user_id: int):
+        return True, ""
+
+    async def _fake_increment_jobs_started(user_id: int):
+        return None
+
+    async def _fake_finish_job(user_id: int):
+        return None
+
+    async def _fake_handle_stage(payload):
+        raise RuntimeError(sensitive_error)
+
+    monkeypatch.setattr(gpu_worker, "JobManager", _FakeJobManager, raising=True)
+    monkeypatch.setattr(gpu_worker, "can_start_job", _fake_can_start_job, raising=True)
+    monkeypatch.setattr(gpu_worker, "increment_jobs_started", _fake_increment_jobs_started, raising=True)
+    monkeypatch.setattr(gpu_worker, "finish_job", _fake_finish_job, raising=True)
+    monkeypatch.setattr(gpu_worker, "_handle_gpu_audio_transcribe_stage", _fake_handle_stage, raising=True)
+    monkeypatch.setattr(gpu_worker, "logger", logger_capture, raising=True)
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.01")
+
+    await asyncio.wait_for(gpu_worker.run_audio_transcribe_gpu_worker(stop), timeout=1.0)
+
+    assert failed_errors == [sensitive_error]
+    rendered_logs = _render_log_records(logger_capture.records)
+    assert "/tmp/private/audio.wav" not in rendered_logs
+    assert "SECRET123" not in rendered_logs
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_gpu_worker_sanitizes_failed_mark_job_as_failed_log(monkeypatch):
+    import tldw_Server_API.app.services.audio_transcribe_gpu_worker as gpu_worker
+
+    primary_error = "primary failure /tmp/private/audio.wav token=PRIMARY"
+    fail_job_error = "fail_job failure /tmp/private/jobs.db token=FAILJOB"
+    logger_capture = _CaptureLogger()
+    stop = asyncio.Event()
+
+    class _FakeJobManager:
+        def __init__(self):
+            self._sent_job = False
+
+        def acquire_next_job(self, **kwargs):
+            if self._sent_job:
+                stop.set()
+                return None
+            self._sent_job = True
+            return {
+                "id": 102,
+                "owner_user_id": "7",
+                "job_type": "audio_transcribe",
+                "lease_id": "lease-102",
+                "payload": {"wav_path": "/tmp/private/audio.wav"},
+            }
+
+        def fail_job(self, job_id, error, **kwargs):
+            assert error == primary_error
+            raise RuntimeError(fail_job_error)
+
+    async def _fake_can_start_job(user_id: int):
+        return True, ""
+
+    async def _fake_increment_jobs_started(user_id: int):
+        return None
+
+    async def _fake_finish_job(user_id: int):
+        return None
+
+    async def _fake_handle_stage(payload):
+        raise RuntimeError(primary_error)
+
+    monkeypatch.setattr(gpu_worker, "JobManager", _FakeJobManager, raising=True)
+    monkeypatch.setattr(gpu_worker, "can_start_job", _fake_can_start_job, raising=True)
+    monkeypatch.setattr(gpu_worker, "increment_jobs_started", _fake_increment_jobs_started, raising=True)
+    monkeypatch.setattr(gpu_worker, "finish_job", _fake_finish_job, raising=True)
+    monkeypatch.setattr(gpu_worker, "_handle_gpu_audio_transcribe_stage", _fake_handle_stage, raising=True)
+    monkeypatch.setattr(gpu_worker, "logger", logger_capture, raising=True)
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.01")
+
+    await asyncio.wait_for(gpu_worker.run_audio_transcribe_gpu_worker(stop), timeout=1.0)
+
+    rendered_logs = _render_log_records(logger_capture.records)
+    assert "/tmp/private/audio.wav" not in rendered_logs
+    assert "/tmp/private/jobs.db" not in rendered_logs
+    assert "PRIMARY" not in rendered_logs
+    assert "FAILJOB" not in rendered_logs
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_audio_gpu_worker_sanitizes_owner_slot_release_log(monkeypatch):
+    import tldw_Server_API.app.services.audio_transcribe_gpu_worker as gpu_worker
+
+    release_error = "release failed for /tmp/private/quota.db token=RELEASE"
+    logger_capture = _CaptureLogger()
+    stop = asyncio.Event()
+
+    class _FakeJobManager:
+        def __init__(self):
+            self._sent_job = False
+
+        def acquire_next_job(self, **kwargs):
+            if self._sent_job:
+                stop.set()
+                return None
+            self._sent_job = True
+            return {
+                "id": 103,
+                "owner_user_id": "7",
+                "job_type": "audio_transcribe",
+                "lease_id": "lease-103",
+                "payload": {"wav_path": "/tmp/private/audio.wav"},
+            }
+
+        def complete_job(self, *args, **kwargs):
+            return None
+
+        def create_job(self, *args, **kwargs):
+            return {"id": 104}
+
+    async def _fake_can_start_job(user_id: int):
+        return True, ""
+
+    async def _fake_increment_jobs_started(user_id: int):
+        return None
+
+    async def _fake_finish_job(user_id: int):
+        raise RuntimeError(release_error)
+
+    async def _fake_handle_stage(payload):
+        return dict(payload, segments=[], text="", normalized_stt={})
+
+    monkeypatch.setattr(gpu_worker, "JobManager", _FakeJobManager, raising=True)
+    monkeypatch.setattr(gpu_worker, "can_start_job", _fake_can_start_job, raising=True)
+    monkeypatch.setattr(gpu_worker, "increment_jobs_started", _fake_increment_jobs_started, raising=True)
+    monkeypatch.setattr(gpu_worker, "finish_job", _fake_finish_job, raising=True)
+    monkeypatch.setattr(gpu_worker, "_handle_gpu_audio_transcribe_stage", _fake_handle_stage, raising=True)
+    monkeypatch.setattr(gpu_worker, "logger", logger_capture, raising=True)
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.01")
+
+    await asyncio.wait_for(gpu_worker.run_audio_transcribe_gpu_worker(stop), timeout=1.0)
+
+    rendered_logs = _render_log_records(logger_capture.records)
+    assert "/tmp/private/quota.db" not in rendered_logs
+    assert "RELEASE" not in rendered_logs

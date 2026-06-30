@@ -13,6 +13,7 @@ from pathlib import Path
 
 from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
     MediaDBRetriever,
+    _extract_file_uri_path,
 )
 
 
@@ -53,6 +54,27 @@ class TestPathValidationURISchemes:
         assert result == str(db_file.resolve())
         assert "?" not in result
         assert "mode" not in result
+
+    @pytest.mark.parametrize(
+        ("uri", "expected"),
+        [
+            (
+                "file://C:/Users/runneradmin/AppData/Local/Temp/safe.db?mode=ro",
+                "C:/Users/runneradmin/AppData/Local/Temp/safe.db",
+            ),
+            (
+                r"file://C:\Users\runneradmin\AppData\Local\Temp\safe.db?mode=ro",
+                r"C:\Users\runneradmin\AppData\Local\Temp\safe.db",
+            ),
+            (
+                "file:///C:/Users/runneradmin/AppData/Local/Temp/safe.db?mode=ro",
+                "C:/Users/runneradmin/AppData/Local/Temp/safe.db",
+            ),
+        ],
+    )
+    def test_windows_file_uri_drive_paths_preserved_before_validation(self, uri: str, expected: str):
+        """Windows drive-letter file URIs should not collapse to the current directory."""
+        assert _extract_file_uri_path(uri) == expected
 
     def test_http_uri_rejected(self, retriever_instance: MediaDBRetriever):
         """http:// URIs should be rejected."""
@@ -111,6 +133,11 @@ class TestPathValidationTraversal:
         # The path becomes "/%2e%2e/etc/passwd" which still contains /etc/
         with pytest.raises(ValueError, match="Path traversal|suspicious pattern|not allowed"):
             retriever_instance._validate_path("file://%252e%252e/etc/passwd")
+
+    def test_residual_encoded_windows_unc_traversal_blocked(self, retriever_instance: MediaDBRetriever):
+        """Residual encoded traversal should be blocked before Windows path resolution."""
+        with pytest.raises(ValueError, match="Path traversal|suspicious pattern|not allowed"):
+            retriever_instance._validate_path(r"\\%2e%2e\etc\passwd")
 
 
 @pytest.mark.unit

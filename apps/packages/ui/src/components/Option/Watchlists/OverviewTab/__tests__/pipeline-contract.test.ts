@@ -60,14 +60,18 @@ describe("watchlists pipeline contract", () => {
           }) as Intl.DateTimeFormat
       )
 
-    expect(toPipelineJobCreatePayload(baseDraft)).toEqual(
+    const jobPayload = toPipelineJobCreatePayload(baseDraft)
+    expect(jobPayload).toEqual(
       expect.objectContaining({
         name: "Morning Brief",
         scope: { sources: [10, 11] },
         schedule_expr: "0 8 * * *",
         timezone: "UTC",
         output_prefs: expect.objectContaining({
-          template_name: "briefing_md",
+          template_name: "briefing_markdown",
+          template: expect.objectContaining({
+            default_name: "briefing_markdown"
+          }),
           generate_audio: true,
           audio_voice: "alloy",
           target_audio_minutes: 8,
@@ -78,14 +82,22 @@ describe("watchlists pipeline contract", () => {
         })
       })
     )
+    expect(jobPayload.output_prefs).toMatchObject({
+      template_name: "briefing_markdown",
+      template: { default_name: "briefing_markdown" }
+    })
 
-    expect(toPipelineOutputCreatePayload(9001, baseDraft, [1, 2])).toEqual({
+    const outputPayload = toPipelineOutputCreatePayload(9001, baseDraft, [1, 2])
+    expect(outputPayload).toEqual({
       run_id: 9001,
       item_ids: [1, 2],
       type: "briefing_markdown",
       format: "md",
-      template_name: "briefing_md",
+      template_name: "briefing_markdown",
       template_version: 2,
+      generate_audio: true,
+      audio_voice: "alloy",
+      target_audio_minutes: 8,
       metadata: {
         audio: {
           enabled: true,
@@ -98,6 +110,112 @@ describe("watchlists pipeline contract", () => {
         chatbook: { enabled: true, title: "Morning Intel" }
       }
     })
+    expect(outputPayload.template_name).toBe("briefing_markdown")
+
+    timezoneSpy.mockRestore()
+  })
+
+  it("does not auto-generate scheduled output unless requested", () => {
+    expect(toPipelineJobCreatePayload(baseDraft).output_prefs).not.toHaveProperty("auto_output")
+  })
+
+  it("enables scheduled output when a pipeline draft explicitly requests scheduled reports", () => {
+    expect(
+      toPipelineJobCreatePayload({
+        ...baseDraft,
+        createScheduledOutput: true
+      }).output_prefs
+    ).toMatchObject({
+      auto_output: {
+        enabled: true,
+        type: "briefing_markdown",
+        format: "md",
+        template_name: "briefing_markdown",
+        template_version: 2
+      }
+    })
+  })
+
+  it("does not auto-generate scheduled output for manual-only monitor drafts", () => {
+    expect(
+      toPipelineJobCreatePayload({
+        ...baseDraft,
+        schedulePreset: "none",
+        createScheduledOutput: true,
+        includeAudio: false,
+        emailRecipients: [],
+        createChatbook: false
+      }).output_prefs
+    ).not.toHaveProperty("auto_output")
+  })
+
+  it("serializes variable cadence drafts through the existing schedule contract", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(
+        () =>
+          ({
+            resolvedOptions: () => ({ timeZone: "UTC" })
+          }) as Intl.DateTimeFormat
+      )
+
+    expect(
+      toPipelineJobCreatePayload({
+        ...baseDraft,
+        schedulePreset: "none",
+        scheduleCadence: { kind: "interval", every: 30, unit: "minute" }
+      })
+    ).toMatchObject({
+      schedule_expr: "*/30 * * * *",
+      timezone: "UTC"
+    })
+
+    expect(
+      toPipelineJobCreatePayload({
+        ...baseDraft,
+        schedulePreset: "none",
+        scheduleCadence: { kind: "weekly", weekday: "fri", time: "09:15" }
+      })
+    ).toMatchObject({
+      schedule_expr: "15 9 * * FRI",
+      timezone: "UTC"
+    })
+
+    expect(
+      toPipelineJobCreatePayload({
+        ...baseDraft,
+        schedulePreset: "none",
+        scheduleCadence: { kind: "advanced", cron: "20 6 * * TUE" }
+      })
+    ).toMatchObject({
+      schedule_expr: "20 6 * * TUE",
+      timezone: "UTC"
+    })
+
+    timezoneSpy.mockRestore()
+  })
+
+  it("uses the same schedule precedence for payload and review summary", () => {
+    const timezoneSpy = vi
+      .spyOn(Intl, "DateTimeFormat")
+      .mockImplementation(
+        () =>
+          ({
+            resolvedOptions: () => ({ timeZone: "UTC" })
+          }) as Intl.DateTimeFormat
+      )
+    const draft: BriefingPipelineDraft = {
+      ...baseDraft,
+      schedulePreset: "none",
+      scheduleExpr: "0 8 * * *",
+      scheduleCadence: { kind: "interval", every: 30, unit: "minute" }
+    }
+
+    expect(toPipelineJobCreatePayload(draft)).toMatchObject({
+      schedule_expr: "*/30 * * * *",
+      timezone: "UTC"
+    })
+    expect(buildPipelineReviewSummary(draft).scheduleLabel).toBe("Every 30 minutes")
 
     timezoneSpy.mockRestore()
   })
@@ -146,5 +264,48 @@ describe("watchlists pipeline contract", () => {
       artifacts: ["Text briefing"],
       deliveries: ["In-app reports"]
     })
+  })
+
+  it("labels variable cadence drafts in the review summary", () => {
+    expect(
+      buildPipelineReviewSummary({
+        ...baseDraft,
+        schedulePreset: "none",
+        scheduleCadence: { kind: "interval", every: 30, unit: "minute" }
+      }).scheduleLabel
+    ).toBe("Every 30 minutes")
+
+    expect(
+      buildPipelineReviewSummary({
+        ...baseDraft,
+        schedulePreset: "none",
+        scheduleCadence: { kind: "weekly", weekday: "fri", time: "09:15" }
+      }).scheduleLabel
+    ).toBe("Weekly on Friday at 09:15")
+
+    expect(
+      buildPipelineReviewSummary({
+        ...baseDraft,
+        schedulePreset: "none",
+        scheduleCadence: { kind: "advanced", cron: "20 6 * * TUE" }
+      }).scheduleLabel
+    ).toBe("Custom cron: 20 6 * * TUE")
+  })
+
+  it("supports localized cadence label copy in the review summary", () => {
+    expect(
+      buildPipelineReviewSummary(
+        {
+          ...baseDraft,
+          schedulePreset: "none",
+          scheduleCadence: { kind: "interval", every: 1, unit: "hour" }
+        },
+        {
+          schedule: {
+            interval: (value, unit) => `localized ${value} ${unit}`
+          }
+        }
+      ).scheduleLabel
+    ).toBe("localized 1 hours")
   })
 })

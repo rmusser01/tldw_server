@@ -104,23 +104,11 @@ def _should_replace_ocr_content(
 
 
 def _sanitize_ocr_backend_details_for_output(details: dict[str, Any]) -> dict[str, Any]:
-    sanitized: dict[str, Any] = {}
-    for key, value in details.items():
-        if key in _OCR_BACKEND_OUTPUT_DENYLIST:
-            continue
-        if isinstance(value, dict):
-            sanitized[key] = _sanitize_ocr_backend_details_for_output(value)
-            continue
-        if isinstance(value, list):
-            sanitized[key] = [
-                _sanitize_ocr_backend_details_for_output(item)
-                if isinstance(item, dict)
-                else item
-                for item in value
-            ]
-            continue
-        sanitized[key] = value
-    return sanitized
+    return {
+        key: value
+        for key, value in details.items()
+        if key not in _OCR_BACKEND_OUTPUT_DENYLIST
+    }
 
 
 def _is_usable_torch_module_for_docling() -> bool:
@@ -1172,6 +1160,7 @@ def process_pdf(
             logging.info(f"Summarization enabled for {len(processed_chunks)} chunks of {filename} using API: {api_name}.")
             log_counter("pdf_summarization_attempt", value=len(processed_chunks), labels={"file_name": filename, "api_name": api_name})
 
+            final_summary: str | None = None
             chunk_summaries = []  # Store summaries of individual chunks
             summarized_chunks_for_result = [] # Store chunk data including the generated analysis
 

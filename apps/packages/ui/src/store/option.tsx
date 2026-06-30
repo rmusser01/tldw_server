@@ -10,6 +10,7 @@ export type {
   ChatHistory,
   Knowledge,
   Message,
+  MessageMetadataExtra,
   MessageVariant,
   ReplyTarget,
   State,

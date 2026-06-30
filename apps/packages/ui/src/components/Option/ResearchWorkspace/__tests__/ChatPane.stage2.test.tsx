@@ -51,6 +51,7 @@ const workspaceStoreState = {
     mediaId: number
     title: string
     type: "pdf" | "video" | "audio" | "website" | "document" | "text"
+    status?: "processing" | "ready" | "error"
     addedAt?: Date
     url?: string
   }>,
@@ -71,7 +72,7 @@ const workspaceStoreState = {
 }
 
 const deriveSelectedSources = () =>
-  workspaceStoreState.sources.filter((source) =>
+  getWorkspaceSources().filter((source) =>
     workspaceStoreState.selectedSourceIds.includes(source.id)
   )
 
@@ -79,6 +80,12 @@ const deriveSelectedMediaIds = () =>
   deriveSelectedSources()
     .map((source) => source.mediaId)
     .filter((mediaId): mediaId is number => Number.isFinite(mediaId))
+
+const getWorkspaceSources = () =>
+  workspaceStoreState.sources.map((source) => ({
+    status: "ready" as const,
+    ...source
+  }))
 
 const messageOptionState = {
   messages: [] as StoreMessage[],
@@ -99,6 +106,10 @@ const messageOptionState = {
   setHistoryId: mockSetHistoryId,
   serverChatId: null as string | null,
   setServerChatId: mockSetServerChatId
+}
+
+const messageOptionStoreState = {
+  selectedModel: "ollama:gemma3:1b" as string | null
 }
 
 vi.mock("react-i18next", () => ({
@@ -139,7 +150,11 @@ vi.mock("@/store/connection", () => ({
 vi.mock("@/store/workspace", () => ({
   useWorkspaceStore: (
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  ) =>
+    selector({
+      ...workspaceStoreState,
+      sources: getWorkspaceSources()
+    })
 }))
 
 vi.mock("@/store/option", () => ({
@@ -165,7 +180,7 @@ vi.mock("@/store/option", () => ({
       ragAdvancedOptions: {},
       setRagAdvancedOptions: vi.fn(),
       setSelectedModel: hoistedMocks.setSelectedModel,
-      selectedModel: null
+      selectedModel: messageOptionStoreState.selectedModel
     })
 }))
 
@@ -249,7 +264,9 @@ vi.mock("@/components/Common/FeatureEmptyState", () => ({
 
 vi.mock("../source-location-copy", () => ({
   getWorkspaceChatNoSourcesHint: () =>
-    "Select sources from the Sources pane, then ask questions."
+    "Select sources from the Sources pane, then ask questions.",
+  getWorkspaceChatSourcesExplainer: () =>
+    "Selected sources keep answers grounded in this workspace."
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -335,6 +352,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     workspaceStoreState.getSelectedMediaIds = deriveSelectedMediaIds
     workspaceStoreState.chatFocusTarget = null
 
+    messageOptionStoreState.selectedModel = "ollama:gemma3:1b"
     mockFocusSourceById.mockReturnValue(true)
     mockFocusSourceByMediaId.mockReturnValue(true)
     mockSetSelectedSourceIds.mockReset()
@@ -525,7 +543,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     fireEvent.click(await screen.findByText("Claude 3.5 Sonnet"))
 
     expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith(
-      "tldw:anthropic/claude-3-5-sonnet"
+      "anthropic:anthropic/claude-3-5-sonnet"
     )
   })
 
@@ -577,7 +595,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
 
     fireEvent.click(screen.getByText("Claude 3.5 Sonnet"))
     expect(hoistedMocks.setSelectedModel).toHaveBeenCalledWith(
-      "tldw:anthropic/claude-3-5-sonnet"
+      "anthropic:anthropic/claude-3-5-sonnet"
     )
   })
 
@@ -601,6 +619,38 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
       await screen.findByText("No models available. Connect your server in Settings.")
     ).toBeInTheDocument()
     expect(screen.getByText("Open model settings")).toBeInTheDocument()
+  })
+
+  it("retries chat model loading when the selector opens after an empty startup load", async () => {
+    hoistedMocks.getModels.mockRejectedValue(new Error("legacy models unused"))
+    hoistedMocks.fetchChatModels
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          model: "tldw:openai/gpt-4o",
+          name: "tldw:openai/gpt-4o",
+          nickname: "GPT-4o",
+          provider: "openai"
+        }
+      ])
+
+    renderChatPane()
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true
+      })
+    })
+
+    fireEvent.click(await screen.findByTestId("model-selector"))
+
+    await waitFor(() => {
+      expect(hoistedMocks.fetchChatModels).toHaveBeenCalledWith({
+        returnEmpty: true,
+        forceRefresh: true
+      })
+    })
+    expect(await screen.findByText("GPT-4o")).toBeInTheDocument()
   })
 
   it("handles partial retrieval metadata by inferring diagnostics from sources", () => {

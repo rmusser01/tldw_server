@@ -1,5 +1,8 @@
 default_profile: docker_single_user
 default_entrypoint: quickstart-docker-webui
+primary_start_command: make quickstart
+completion_gate: first_successful_chat
+next_milestone: add_first_source
 profiles:
   local_single_user:
     title: "Local single-user"

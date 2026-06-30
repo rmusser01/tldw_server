@@ -61,3 +61,41 @@ def test_acquire_order_priority_and_availability_sqlite(tmp_path, monkeypatch):
     # Ensure scheduled job remains queued
     queued = jm.list_jobs(domain=domain, queue=queue, status="queued")
     assert any(j.get("job_type") == "scheduled" for j in queued)
+
+
+@pytest.mark.unit
+def test_acquire_next_jobs_filters_by_job_type_sqlite(tmp_path):
+    db_path = tmp_path / "jobs_job_type_filter.db"
+    jm = JobManager(db_path=db_path)
+
+    domain = "acqtype"
+    queue = "default"
+    jm.create_job(
+        domain=domain,
+        queue=queue,
+        job_type="ignored",
+        payload={},
+        owner_user_id=None,
+        priority=1,
+    )
+    wanted = jm.create_job(
+        domain=domain,
+        queue=queue,
+        job_type="wanted",
+        payload={},
+        owner_user_id=None,
+        priority=5,
+    )
+
+    got = jm.acquire_next_jobs(
+        domain=domain,
+        queue=queue,
+        lease_seconds=30,
+        worker_id="worker-1",
+        limit=2,
+        job_type="wanted",
+    )
+
+    assert [job["id"] for job in got] == [wanted["id"]]
+    queued = jm.list_jobs(domain=domain, queue=queue, status="queued")
+    assert [job["job_type"] for job in queued] == ["ignored"]

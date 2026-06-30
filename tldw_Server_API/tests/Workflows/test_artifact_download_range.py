@@ -7,6 +7,9 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_RUNS_READ
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 
@@ -18,11 +21,22 @@ def client_and_db(tmp_path, auth_headers):
         # Match the run's owner and tenant for strict owner checks
         return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True, tenant_id="default")
 
+    async def override_principal():
+        return AuthPrincipal(
+            kind="user",
+            user_id=1,
+            username="tester",
+            email="t@e.com",
+            roles=["admin"],
+            permissions=[WORKFLOWS_RUNS_READ],
+        )
+
     def override_db():
 
         return db
 
     app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_auth_principal] = override_principal
     app.dependency_overrides[wf_mod._get_db] = override_db
 
     with TestClient(app, headers=auth_headers) as client:

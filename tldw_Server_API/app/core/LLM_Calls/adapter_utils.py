@@ -6,6 +6,10 @@ from typing import Any, Optional
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.custom_openai_providers import (
+    custom_openai_provider_number,
+    custom_openai_section_name,
+)
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.Utils.Utils import logging
 
@@ -48,6 +52,9 @@ def resolve_provider_section(provider: str) -> str:
     normalized = normalize_provider(provider)
     if not normalized:
         return ""
+    custom_number = custom_openai_provider_number(normalized)
+    if custom_number is not None:
+        return custom_openai_section_name(custom_number)
     return _PROVIDER_SECTION_MAP.get(
         normalized,
         f"{normalized.replace('.', '_').replace('-', '_')}_api",

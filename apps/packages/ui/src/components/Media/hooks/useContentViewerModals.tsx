@@ -5,7 +5,7 @@ import { downloadBlob } from '@/utils/download-blob'
 import type { MediaResultItem } from '../types'
 
 type MediaExportFormat = 'json' | 'markdown' | 'text' | 'bibtex'
-type MediaAnnotationColor = 'yellow' | 'green' | 'blue' | 'pink'
+export type MediaAnnotationColor = 'yellow' | 'green' | 'blue' | 'pink'
 type ReingestSchedulePreset = 'hourly' | 'daily' | 'weekly'
 type DocumentIntelligenceTab =
   | 'outline'
@@ -506,6 +506,21 @@ export function useContentViewerModals(deps: UseContentViewerModalsDeps) {
   ])
 
   // Annotation handlers
+  const captureAnnotationSelection = useCallback((selectionText: string, location?: string) => {
+    const selectedText = selectionText.trim()
+    if (!selectedMediaId || isNote || !selectedText) return
+
+    setAnnotationSelectionText(selectedText.slice(0, 4000))
+    setAnnotationSelectionLocation(location || `selection:${Date.now()}`)
+    setActiveIntelligenceTab('annotations')
+    if (collapsedSections.intelligence ?? true) {
+      void setCollapsedSections((prev) => ({
+        ...prev,
+        intelligence: false
+      }))
+    }
+  }, [collapsedSections.intelligence, isNote, selectedMediaId, setCollapsedSections])
+
   const handleCaptureAnnotationSelection = useCallback(() => {
     if (!selectedMediaId || isNote) return
     if (typeof window === 'undefined' || typeof window.getSelection !== 'function') {
@@ -527,16 +542,8 @@ export function useContentViewerModals(deps: UseContentViewerModalsDeps) {
     const selectedText = selection.toString().trim()
     if (!selectedText) return
 
-    setAnnotationSelectionText(selectedText.slice(0, 4000))
-    setAnnotationSelectionLocation(`selection:${Date.now()}`)
-    setActiveIntelligenceTab('annotations')
-    if (collapsedSections.intelligence ?? true) {
-      void setCollapsedSections((prev) => ({
-        ...prev,
-        intelligence: false
-      }))
-    }
-  }, [collapsedSections.intelligence, contentBodyRef, isNote, selectedMediaId, setCollapsedSections])
+    captureAnnotationSelection(selectedText)
+  }, [captureAnnotationSelection, contentBodyRef, isNote, selectedMediaId])
 
   const handleCreateAnnotation = useCallback(async () => {
     if (!selectedMediaId || isNote) return
@@ -1090,6 +1097,7 @@ export function useContentViewerModals(deps: UseContentViewerModalsDeps) {
     annotationDeletingId,
     annotationSyncing,
     annotationPanelEntries,
+    captureAnnotationSelection,
     handleCaptureAnnotationSelection,
     handleCreateAnnotation,
     handleUpdateAnnotationNote,

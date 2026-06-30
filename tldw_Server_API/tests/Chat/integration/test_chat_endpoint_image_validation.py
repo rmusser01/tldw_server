@@ -365,19 +365,21 @@ def test_chat_endpoint_streaming_large_data_image_placeholder_in_db():
                 assert "text/event-stream" in ctype
 
                 lines = r.text.splitlines()
-                # Find stream_start for conversation_id
+                # Find conversation_id in the normalized stream metadata.
                 conv_id = None
-                for i, line in enumerate(lines):
-                    if line.startswith("event: stream_start") and i + 1 < len(lines):
-                        data_line = lines[i + 1]
-                        if data_line.startswith("data: "):
-                            try:
-                                payload = json.loads(data_line[6:].strip())
-                                conv_id = payload.get("conversation_id")
-                            except Exception:
-                                _ = None
-                        break
-                assert conv_id, "Expected conversation_id in stream_start event"
+                for line in lines:
+                    if not line.startswith("data: "):
+                        continue
+                    payload = None
+                    try:
+                        payload = json.loads(line[6:].strip())
+                    except json.JSONDecodeError:
+                        payload = None
+                    if isinstance(payload, dict):
+                        conv_id = payload.get("conversation_id") or payload.get("tldw_conversation_id")
+                        if conv_id:
+                            break
+                assert conv_id, "Expected conversation_id in normalized stream metadata"
 
                 # Verify normalized chunks appear
                 normalized = []
@@ -386,10 +388,11 @@ def test_chat_endpoint_streaming_large_data_image_placeholder_in_db():
                         continue
                     data_s = line[6:].strip()
                     if data_s and data_s != "[DONE]":
+                        obj = None
                         try:
                             obj = json.loads(data_s)
-                        except Exception:
-                            continue
+                        except json.JSONDecodeError:
+                            obj = None
                         if isinstance(obj, dict) and obj.get("choices"):
                             delta = obj["choices"][0].get("delta", {})
                             text = delta.get("content")

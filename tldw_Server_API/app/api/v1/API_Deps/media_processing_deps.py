@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from fastapi import Form, status
 from loguru import logger
 from pydantic import ValidationError
 
+from tldw_Server_API.app.api.v1.API_Deps.form_coercion import (
+    chunking_contract_kwargs,
+)
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     TRANSCRIPTION_MODEL_ENUM,
     ProcessAudiosForm,
@@ -96,10 +100,7 @@ def _raise_422(exc: ValidationError) -> None:
             loc = ["body"]
         err["loc"] = loc
         if isinstance(ctx, dict):
-            err["ctx"] = {
-                k: (str(v) if isinstance(v, Exception) else v)
-                for k, v in ctx.items()
-            }
+            err["ctx"] = {k: (str(v) if isinstance(v, Exception) else v) for k, v in ctx.items()}
         serializable_errors.append(err)
     raise APIValidationError(
         detail=serializable_errors,
@@ -123,6 +124,13 @@ async def get_process_documents_form(
     chunk_method: str | None = Form(None),
     chunk_size: int = Form(500),
     chunk_overlap: int = Form(200),
+    chunking_mode: str | None = Form(None),
+    auto_chunking_goal: str = Form("balanced"),
+    auto_chunking_use_llm: bool = Form(False),
+    auto_apply_template: bool = Form(False),
+    chunking_template_name: str | None = Form(None),
+    hierarchical_chunking: bool = Form(False),
+    hierarchical_template: str | dict[str, Any] | None = Form(None),
     api_provider: str | None = Form(None),
     model_name: str | None = Form(None),
     api_name: str | None = Form(None),
@@ -136,9 +144,7 @@ async def get_process_documents_form(
     """
     try:
         urls_norm = _coerce_urls(urls)
-        keywords_value = (
-            keywords if keywords is not None else (keywords_str if keywords_str is not None else "")
-        )
+        keywords_value = keywords if keywords is not None else (keywords_str if keywords_str is not None else "")
         title_val = title or titles
         return ProcessDocumentsForm(
             urls=urls_norm,
@@ -154,6 +160,15 @@ async def get_process_documents_form(
             chunk_method=chunk_method,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            **chunking_contract_kwargs(
+                chunking_mode=chunking_mode,
+                auto_chunking_goal=auto_chunking_goal,
+                auto_chunking_use_llm=auto_chunking_use_llm,
+                auto_apply_template=auto_apply_template,
+                chunking_template_name=chunking_template_name,
+                hierarchical_chunking=hierarchical_chunking,
+                hierarchical_template=hierarchical_template,
+            ),
             api_provider=api_provider,
             model_name=model_name,
             api_name=api_name,
@@ -195,6 +210,13 @@ async def get_process_videos_form(
     chunk_method: str | None = Form(None),
     chunk_size: int = Form(500),
     chunk_overlap: int = Form(200),
+    chunking_mode: str | None = Form(None),
+    auto_chunking_goal: str = Form("balanced"),
+    auto_chunking_use_llm: bool = Form(False),
+    auto_apply_template: bool = Form(False),
+    chunking_template_name: str | None = Form(None),
+    hierarchical_chunking: bool = Form(False),
+    hierarchical_template: str | dict[str, Any] | None = Form(None),
 ) -> ProcessVideosForm:
     """
     Dependency that parses multipart/form-data into a ProcessVideosForm.
@@ -235,6 +257,15 @@ async def get_process_videos_form(
             chunk_method=chunk_method,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            **chunking_contract_kwargs(
+                chunking_mode=chunking_mode,
+                auto_chunking_goal=auto_chunking_goal,
+                auto_chunking_use_llm=auto_chunking_use_llm,
+                auto_apply_template=auto_apply_template,
+                chunking_template_name=chunking_template_name,
+                hierarchical_chunking=hierarchical_chunking,
+                hierarchical_template=hierarchical_template,
+            ),
         )
     except ValidationError as exc:
         _raise_422(exc)
@@ -271,6 +302,13 @@ async def get_process_audios_form(
     chunk_method: str | None = Form(None),
     chunk_size: int = Form(500),
     chunk_overlap: int = Form(200),
+    chunking_mode: str | None = Form(None),
+    auto_chunking_goal: str = Form("balanced"),
+    auto_chunking_use_llm: bool = Form(False),
+    auto_apply_template: bool = Form(False),
+    chunking_template_name: str | None = Form(None),
+    hierarchical_chunking: bool = Form(False),
+    hierarchical_template: str | dict[str, Any] | None = Form(None),
 ) -> ProcessAudiosForm:
     """
     Dependency that parses multipart/form-data into a ProcessAudiosForm.
@@ -311,6 +349,15 @@ async def get_process_audios_form(
             chunk_method=chunk_method,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            **chunking_contract_kwargs(
+                chunking_mode=chunking_mode,
+                auto_chunking_goal=auto_chunking_goal,
+                auto_chunking_use_llm=auto_chunking_use_llm,
+                auto_apply_template=auto_apply_template,
+                chunking_template_name=chunking_template_name,
+                hierarchical_chunking=hierarchical_chunking,
+                hierarchical_template=hierarchical_template,
+            ),
         )
     except ValidationError as exc:
         _raise_422(exc)
@@ -329,8 +376,13 @@ async def get_process_pdfs_form(
     chunk_method: str | None = Form(None),
     chunk_size: int = Form(500),
     chunk_overlap: int = Form(200),
+    chunking_mode: str | None = Form(None),
+    auto_chunking_goal: str = Form("balanced"),
+    auto_chunking_use_llm: bool = Form(False),
     auto_apply_template: bool = Form(False),
     chunking_template_name: str | None = Form(None),
+    hierarchical_chunking: bool = Form(False),
+    hierarchical_template: str | dict[str, Any] | None = Form(None),
     pdf_parsing_engine: str = Form("pymupdf4llm"),
     enable_ocr: bool = Form(False),
     ocr_backend: str | None = Form(None),
@@ -368,8 +420,15 @@ async def get_process_pdfs_form(
             chunk_method=chunk_method,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            auto_apply_template=auto_apply_template,
-            chunking_template_name=chunking_template_name,
+            **chunking_contract_kwargs(
+                chunking_mode=chunking_mode,
+                auto_chunking_goal=auto_chunking_goal,
+                auto_chunking_use_llm=auto_chunking_use_llm,
+                auto_apply_template=auto_apply_template,
+                chunking_template_name=chunking_template_name,
+                hierarchical_chunking=hierarchical_chunking,
+                hierarchical_template=hierarchical_template,
+            ),
             pdf_parsing_engine=pdf_parsing_engine,
             enable_ocr=enable_ocr,
             ocr_backend=ocr_backend,
@@ -407,6 +466,13 @@ async def get_process_ebooks_form(
     chunk_overlap: int = Form(200),
     chunk_language: str | None = Form(None),
     custom_chapter_pattern: str | None = Form(None),
+    chunking_mode: str | None = Form(None),
+    auto_chunking_goal: str = Form("balanced"),
+    auto_chunking_use_llm: bool = Form(False),
+    auto_apply_template: bool = Form(False),
+    chunking_template_name: str | None = Form(None),
+    hierarchical_chunking: bool = Form(False),
+    hierarchical_template: str | dict[str, Any] | None = Form(None),
     extraction_method: str = Form("filtered"),
     api_name: str | None = Form(None),
     api_key: str | None = Form(None),
@@ -418,9 +484,7 @@ async def get_process_ebooks_form(
     """
     try:
         urls_norm = _coerce_urls(urls)
-        keywords_value = (
-            keywords if keywords is not None else (keywords_str if keywords_str is not None else "")
-        )
+        keywords_value = keywords if keywords is not None else (keywords_str if keywords_str is not None else "")
         return ProcessEbooksForm(
             urls=urls_norm,
             title=title,
@@ -436,6 +500,15 @@ async def get_process_ebooks_form(
             chunk_overlap=chunk_overlap,
             chunk_language=chunk_language,
             custom_chapter_pattern=custom_chapter_pattern,
+            **chunking_contract_kwargs(
+                chunking_mode=chunking_mode,
+                auto_chunking_goal=auto_chunking_goal,
+                auto_chunking_use_llm=auto_chunking_use_llm,
+                auto_apply_template=auto_apply_template,
+                chunking_template_name=chunking_template_name,
+                hierarchical_chunking=hierarchical_chunking,
+                hierarchical_template=hierarchical_template,
+            ),
             extraction_method=extraction_method,
             api_name=api_name,
             api_key=api_key,
@@ -464,6 +537,13 @@ async def get_process_emails_form(
     custom_chapter_pattern: str | None = Form(None),
     use_adaptive_chunking: bool = Form(False),
     use_multi_level_chunking: bool = Form(False),
+    chunking_mode: str | None = Form(None),
+    auto_chunking_goal: str = Form("balanced"),
+    auto_chunking_use_llm: bool = Form(False),
+    auto_apply_template: bool = Form(False),
+    chunking_template_name: str | None = Form(None),
+    hierarchical_chunking: bool = Form(False),
+    hierarchical_template: str | dict[str, Any] | None = Form(None),
     accept_archives: bool = Form(False),
     accept_mbox: bool = Form(False),
     accept_pst: bool = Form(False),
@@ -497,6 +577,15 @@ async def get_process_emails_form(
             custom_chapter_pattern=custom_chapter_pattern,
             use_adaptive_chunking=use_adaptive_chunking,
             use_multi_level_chunking=use_multi_level_chunking,
+            **chunking_contract_kwargs(
+                chunking_mode=chunking_mode,
+                auto_chunking_goal=auto_chunking_goal,
+                auto_chunking_use_llm=auto_chunking_use_llm,
+                auto_apply_template=auto_apply_template,
+                chunking_template_name=chunking_template_name,
+                hierarchical_chunking=hierarchical_chunking,
+                hierarchical_template=hierarchical_template,
+            ),
             accept_archives=accept_archives,
             accept_mbox=accept_mbox,
             accept_pst=accept_pst,

@@ -21,6 +21,12 @@
 
 **Context:** The codebase already uses Dexie for audiobook chapter assets (see `audiobook-projects.ts`). Follow the same pattern: store blobs directly in IndexedDB with a storage cap.
 
+**Current dependency note:** This historical plan references `fake-indexeddb/auto`
+for the initial failing test. As of TASK-141, `fake-indexeddb` is no longer a
+direct WebUI dev dependency; revive this plan with the current jsdom/browser
+test shims, or re-add a narrowly justified test dependency in the implementing
+PR.
+
 **Step 1: Write failing tests**
 
 ```typescript

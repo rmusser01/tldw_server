@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ScopeType = Literal["global", "org", "team", "user"]
 CapabilityAdapterScopeType = Literal["global", "org", "team"]
@@ -32,6 +32,8 @@ ToolRiskClass = Literal["low", "medium", "high", "unclassified"]
 ToolMetadataSource = Literal["explicit", "heuristic", "fallback"]
 PathScopeMode = Literal["none", "workspace_root", "cwd_descendants"]
 PathScopeEnforcement = Literal["approval_required_when_unenforceable"]
+PathPermissionAction = Literal["read", "edit", "write"]
+PathPermissionOutcome = Literal["allow", "ask", "deny"]
 WorkspaceSourceMode = Literal["inline", "named"]
 WorkspaceTrustSource = Literal["user_local", "shared_registry"]
 ExternalAuthTemplateTargetType = Literal["header", "env"]
@@ -532,6 +534,45 @@ class EffectivePolicyResponse(BaseModel):
     provenance: list[EffectivePolicyProvenanceResponse] = Field(default_factory=list)
 
 
+class EffectivePermissionPreviewRequest(BaseModel):
+    """Request a redacted effective permission preview for a path-scoped MCP tool call."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_name: str = Field(..., min_length=1, max_length=255)
+    action: PathPermissionAction
+    path: str = Field(..., min_length=1, max_length=1024)
+    persona_id: str | None = Field(default=None, max_length=200)
+    group_id: str | None = Field(default=None, max_length=200)
+    org_id: int | None = None
+    team_id: int | None = None
+    workspace_id: str | None = Field(default=None, max_length=255)
+    cwd: str | None = Field(default=None, max_length=1024)
+
+
+class EffectivePermissionPreviewResponse(BaseModel):
+    """Redacted explanation of the effective path policy decision for an MCP tool call."""
+
+    tool_name: str
+    requested_action: PathPermissionAction
+    requested_path: str
+    normalized_path: str | None = None
+    outcome: PathPermissionOutcome
+    within_scope: bool
+    reason_code: str | None = None
+    selected_assignment_id: int | None = None
+    profile_id: int | None = None
+    grant_source: str | None = None
+    grant_outcome: str | None = None
+    matched_grant_prefix: str | None = None
+    matched_grant_effect: str | None = None
+    path_scope_mode: PathScopeMode | None = None
+    workspace_id: str | None = None
+    path_allowlist_prefixes: list[str] = Field(default_factory=list)
+    path_decisions: list[dict[str, Any]] = Field(default_factory=list)
+    redacted: bool = True
+
+
 class ToolRegistryEntryResponse(BaseModel):
     tool_name: str
     display_name: str
@@ -566,6 +607,95 @@ class ToolRegistrySummaryResponse(BaseModel):
     modules: list[ToolRegistryModuleResponse] = Field(default_factory=list)
 
 
+McpHubDisplayState = Literal["needs_setup", "checking", "ready", "needs_attention", "no_tools", "stale"]
+McpHubReasonCode = Literal[
+    "not_configured",
+    "preflight_failed",
+    "discovery_not_run",
+    "auth_missing",
+    "runtime_unavailable",
+    "unreachable",
+    "discovery_failed",
+    "no_tools_returned",
+    "config_changed",
+    "catalog_expired",
+    "partial_capability",
+]
+McpHubReadinessAction = Literal[
+    "add_server",
+    "edit_config",
+    "open_credentials",
+    "refresh_discovery",
+    "validate",
+    "view_details",
+    "open_tool_catalog",
+    "open_audit",
+]
+McpHubCredentialState = Literal[
+    "not_required",
+    "required_missing",
+    "configured",
+    "legacy_fallback",
+    "unknown",
+]
+McpHubOperationType = Literal["validation", "discovery"]
+
+
+class McpHubCurrentOperationResponse(BaseModel):
+    """In-flight MCP Hub readiness operation shown without secret material."""
+
+    operation_type: McpHubOperationType
+    started_at: datetime | str | None = None
+    message: str | None = None
+
+
+class McpHubDiscoveryRefreshResultResponse(BaseModel):
+    """Sanitized result summary for an external-server discovery refresh."""
+
+    refreshed_servers: int = 0
+    total_servers: int = 0
+    virtual_tools: int = 0
+    errors: dict[str, str] = Field(default_factory=dict)
+
+
+class McpServerReadinessResponse(BaseModel):
+    """Per-server MCP Hub setup and tool-catalog readiness state."""
+
+    server_id: str
+    server_name: str
+    display_state: McpHubDisplayState
+    credential_state: McpHubCredentialState
+    tool_count: int
+    reason_codes: list[McpHubReasonCode] = Field(default_factory=list)
+    primary_reason_code: McpHubReasonCode | None = None
+    allowed_actions: list[McpHubReadinessAction] = Field(default_factory=list)
+    message: str
+    current_operation: McpHubCurrentOperationResponse | None = None
+    last_validation_at: datetime | str | None = None
+    last_discovery_at: datetime | str | None = None
+    last_successful_discovery_at: datetime | str | None = None
+    last_error_category: str | None = None
+    last_error_message: str | None = None
+    refresh_result: McpHubDiscoveryRefreshResultResponse | None = None
+
+
+class McpHubReadinessResponse(BaseModel):
+    """Aggregate MCP Hub readiness summary for the caller's visible servers."""
+
+    display_state: McpHubDisplayState
+    reason_codes: list[McpHubReasonCode] = Field(default_factory=list)
+    primary_reason_code: McpHubReasonCode | None = None
+    allowed_actions: list[McpHubReadinessAction] = Field(default_factory=list)
+    message: str
+    servers: list[McpServerReadinessResponse] = Field(default_factory=list)
+    total_servers: int = 0
+    ready_server_count: int = 0
+    checking_server_count: int = 0
+    attention_server_count: int = 0
+    no_tool_server_count: int = 0
+    stale_server_count: int = 0
+
+
 class ExternalServerCreateRequest(BaseModel):
     server_id: str = Field(..., min_length=1, max_length=128)
     name: str = Field(..., min_length=1, max_length=200)
@@ -583,6 +713,34 @@ class ExternalServerUpdateRequest(BaseModel):
     owner_scope_type: ScopeType | None = None
     owner_scope_id: int | None = None
     enabled: bool | None = None
+
+
+class ExternalServerDiscoveryRefreshRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    server_id: str | None = Field(default=None, max_length=128)
+
+    @field_validator("server_id")
+    @classmethod
+    def normalize_server_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("server_id must be a non-empty string")
+        return normalized
+
+
+class ExternalServerDiscoveryRefreshResponse(BaseModel):
+    ok: bool
+    server_id: str | None = None
+    reconciled_servers: int = 0
+    refreshed_servers: int = 0
+    total_servers: int = 0
+    virtual_tools: int = 0
+    errors: dict[str, str] = Field(default_factory=dict)
+    requires_restart: bool = False
+    message: str | None = None
 
 
 class ExternalServerCredentialSlotCreateRequest(BaseModel):

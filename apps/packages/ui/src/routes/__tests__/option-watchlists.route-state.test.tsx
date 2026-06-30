@@ -2,7 +2,7 @@
 
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, waitFor } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import OptionWatchlists from "../option-watchlists"
 
@@ -25,6 +25,22 @@ vi.mock("@/components/Layouts/Layout", () => ({
   __esModule: true,
   default: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="option-layout">{children}</div>
+  )
+}))
+
+vi.mock("@/components/Common/RouteErrorBoundary", () => ({
+  RouteErrorBoundary: ({
+    children,
+    routeId,
+    routeLabel
+  }: {
+    children: React.ReactNode
+    routeId: string
+    routeLabel: string
+  }) => (
+    <div data-route-boundary={routeId} data-route-label={routeLabel}>
+      {children}
+    </div>
   )
 }))
 
@@ -101,5 +117,35 @@ describe("option-watchlists route query handoff", () => {
     expect(routeStateMocks.setOutputsRunFilter).toHaveBeenCalledWith(13)
     expect(routeStateMocks.openOutputPreview).toHaveBeenCalledWith(377)
     expect(routeStateMocks.openRunDetail).not.toHaveBeenCalled()
+  })
+
+  it("wraps the watchlists route in the shared route error boundary", () => {
+    const { container } = renderAt("/watchlists")
+
+    expect(container.querySelector('[data-route-boundary="watchlists"]')).toHaveAttribute(
+      "data-route-label",
+      "Watchlists"
+    )
+    expect(screen.getByTestId("option-layout")).toContainElement(
+      screen.getByTestId("watchlists-playground")
+    )
+  })
+
+  it("accepts user-facing tab aliases and camelCase deep-link params", async () => {
+    renderAt(
+      "/watchlists?tab=activity&sourceId=12&itemSmart=todayUnread&itemStatus=ingested&itemQuery=chips&jobId=44&runId=55&open_run=1"
+    )
+
+    await waitFor(() => {
+      expect(routeStateMocks.setActiveTab).toHaveBeenCalledWith("runs")
+    })
+    expect(routeStateMocks.setItemsSelectedSourceId).toHaveBeenCalledWith(12)
+    expect(routeStateMocks.setItemsSmartFilter).toHaveBeenCalledWith("todayUnread")
+    expect(routeStateMocks.setItemsStatusFilter).toHaveBeenCalledWith("ingested")
+    expect(routeStateMocks.setItemsSearchQuery).toHaveBeenCalledWith("chips")
+    expect(routeStateMocks.setRunsJobFilter).toHaveBeenCalledWith(44)
+    expect(routeStateMocks.setOutputsJobFilter).toHaveBeenCalledWith(44)
+    expect(routeStateMocks.setOutputsRunFilter).toHaveBeenCalledWith(55)
+    expect(routeStateMocks.openRunDetail).toHaveBeenCalledWith(55)
   })
 })

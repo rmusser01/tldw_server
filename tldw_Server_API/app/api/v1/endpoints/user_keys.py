@@ -33,6 +33,11 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     UserProviderKeyStatusItem,
     UserProviderKeyUpsertRequest,
 )
+from tldw_Server_API.app.core.Audit.unified_audit_service import (
+    AuditContext,
+    AuditEventCategory,
+    AuditEventType,
+)
 from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
     is_byok_enabled,
     is_provider_allowlisted,
@@ -63,15 +68,10 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     loads_envelope,
     normalize_provider_name,
 )
-from tldw_Server_API.app.core.Audit.unified_audit_service import (
-    AuditContext,
-    AuditEventCategory,
-    AuditEventType,
-)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import afetch as _http_afetch
+from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -142,8 +142,8 @@ def _record_openai_oauth_counter(
 ) -> None:
     try:
         increment_counter(metric_name, value=value, labels=labels or {})
-    except Exception as exc:
-        logger.debug("OpenAI OAuth metric emission failed for {}: {}", metric_name, exc)
+    except Exception:
+        logger.debug("OpenAI OAuth metric emission failed")
 
 
 def _record_openai_oauth_histogram(
@@ -154,8 +154,8 @@ def _record_openai_oauth_histogram(
 ) -> None:
     try:
         observe_histogram(metric_name, value=value, labels=labels or {})
-    except Exception as exc:
-        logger.debug("OpenAI OAuth histogram emission failed for {}: {}", metric_name, exc)
+    except Exception:
+        logger.debug("OpenAI OAuth histogram emission failed")
 
 
 async def _emit_openai_oauth_audit_event(
@@ -181,15 +181,8 @@ async def _emit_openai_oauth_audit_event(
         method = None
 
         if request is not None:
-            correlation_id = (
-                request.headers.get("X-Correlation-ID")
-                or getattr(request.state, "correlation_id", None)
-            )
-            request_id = (
-                request.headers.get("X-Request-ID")
-                or getattr(request.state, "request_id", None)
-                or ""
-            )
+            correlation_id = request.headers.get("X-Correlation-ID") or getattr(request.state, "correlation_id", None)
+            request_id = request.headers.get("X-Request-ID") or getattr(request.state, "request_id", None) or ""
             ip_address = request.client.host if request.client else None
             user_agent = request.headers.get("user-agent")
             endpoint = str(request.url.path)
@@ -205,15 +198,9 @@ async def _emit_openai_oauth_audit_event(
             method=method,
         )
         result_norm = _coerce_nonempty_string(result) or "success"
-        event_type = (
-            AuditEventType.API_ERROR
-            if result_norm in {"failure", "error"}
-            else AuditEventType.DATA_UPDATE
-        )
+        event_type = AuditEventType.API_ERROR if result_norm in {"failure", "error"} else AuditEventType.DATA_UPDATE
         category = (
-            AuditEventCategory.SECURITY
-            if result_norm in {"failure", "error"}
-            else AuditEventCategory.DATA_MODIFICATION
+            AuditEventCategory.SECURITY if result_norm in {"failure", "error"} else AuditEventCategory.DATA_MODIFICATION
         )
         event_metadata: dict[str, Any] = {"provider": _OPENAI_PROVIDER}
         if metadata:
@@ -230,8 +217,8 @@ async def _emit_openai_oauth_audit_event(
             error_message=error_message,
             metadata=event_metadata,
         )
-    except Exception as exc:
-        logger.debug("OpenAI OAuth audit emission skipped for action {}: {}", action_name, exc)
+    except Exception:
+        logger.debug("OpenAI OAuth audit emission skipped")
 
 
 def _parse_iso_datetime(value: Any) -> datetime | None:
@@ -298,8 +285,8 @@ def _extract_payload_from_row(row: dict[str, Any] | None) -> dict[str, Any] | No
         return None
     try:
         payload = decrypt_byok_payload(loads_envelope(encrypted_blob))
-    except Exception as exc:
-        logger.warning("Failed to decrypt BYOK payload for provider row: {}", exc)
+    except Exception:
+        logger.warning("Failed to decrypt BYOK payload for provider row")
         return None
     return payload if isinstance(payload, dict) else None
 
@@ -381,9 +368,7 @@ def _payload_active_auth_source(payload: dict[str, Any] | None) -> str | None:
 
     active_raw = _coerce_nonempty_string(payload.get("active_auth_source"))
     active = (active_raw or "").lower()
-    if active in {_OPENAI_SOURCE_API_KEY, _OPENAI_SOURCE_OAUTH} and _v2_source_available(
-        payload, active
-    ):
+    if active in {_OPENAI_SOURCE_API_KEY, _OPENAI_SOURCE_OAUTH} and _v2_source_available(payload, active):
         return active
 
     if _v2_source_available(payload, _OPENAI_SOURCE_API_KEY):
@@ -496,9 +481,7 @@ def _coerce_openai_payload_v2(payload: dict[str, Any] | None) -> dict[str, Any]:
         result["credential_fields"] = existing_credential_fields
 
     active_source = _payload_active_auth_source(payload)
-    if active_source in {_OPENAI_SOURCE_API_KEY, _OPENAI_SOURCE_OAUTH} and _v2_source_available(
-        result, active_source
-    ):
+    if active_source in {_OPENAI_SOURCE_API_KEY, _OPENAI_SOURCE_OAUTH} and _v2_source_available(result, active_source):
         result["active_auth_source"] = active_source
     elif _v2_source_available(result, _OPENAI_SOURCE_API_KEY):
         result["active_auth_source"] = _OPENAI_SOURCE_API_KEY
@@ -684,12 +667,6 @@ async def _openai_oauth_token_exchange(
 
         if status_code < 200 or status_code >= 300:
             detail = "OpenAI OAuth token exchange failed"
-            if payload:
-                provider_error = _coerce_nonempty_string(
-                    payload.get("error_description") or payload.get("error")
-                )
-                if provider_error:
-                    detail = f"{detail}: {provider_error}"
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=detail,
@@ -772,11 +749,12 @@ async def upsert_user_provider_key(
             allow_base_url=allow_base_url,
         )
         if "base_url" in credential_fields:
-            credential_fields["base_url"] = validate_base_url_override(
-                credential_fields["base_url"]
-            )
+            credential_fields["base_url"] = validate_base_url_override(credential_fields["base_url"])
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid provider credential fields",
+        ) from exc
 
     try:
         await test_provider_credentials(
@@ -786,7 +764,10 @@ async def upsert_user_provider_key(
             model=None,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provider credential validation failed",
+        ) from exc
     except ChatAPIError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except Exception as exc:
@@ -913,11 +894,7 @@ async def list_user_provider_keys(
         allowed = provider in allowlist
         user_row = user_keys.get(provider)
         shared_row = shared_keys.get(provider)
-        auth_source = (
-            _user_row_openai_auth_source(openai_user_full_row)
-            if provider == _OPENAI_PROVIDER
-            else None
-        )
+        auth_source = _user_row_openai_auth_source(openai_user_full_row) if provider == _OPENAI_PROVIDER else None
         if not allowed and (user_row or shared_row):
             items.append(
                 UserProviderKeyStatusItem(
@@ -1017,11 +994,12 @@ async def test_user_provider_key(
             allow_base_url=allow_base_url,
         )
         if "base_url" in credential_fields:
-            credential_fields["base_url"] = validate_base_url_override(
-                credential_fields["base_url"]
-            )
+            credential_fields["base_url"] = validate_base_url_override(credential_fields["base_url"])
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid provider credential fields",
+        ) from exc
 
     try:
         model_used = await test_provider_credentials(
@@ -1031,7 +1009,10 @@ async def test_user_provider_key(
             model=payload.model,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provider credential validation failed",
+        ) from exc
     except ChatAPIError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except Exception as exc:
@@ -1075,7 +1056,10 @@ async def authorize_openai_oauth(
             allow_base_url=False,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid OpenAI OAuth credential fields",
+        ) from exc
 
     allowed_prefixes = _normalize_openai_return_path_prefixes(
         getattr(settings, "OPENAI_OAUTH_ALLOWED_RETURN_PATH_PREFIXES", ["/"])
@@ -1168,6 +1152,17 @@ async def authorize_openai_oauth(
     "/keys/openai/oauth/callback",
     response_model=OpenAIOAuthCallbackResponse,
     status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_303_SEE_OTHER: {
+            "description": "Redirect to the stored OAuth return path when redirect=true.",
+            "headers": {
+                "Location": {
+                    "description": "Stored OAuth return path.",
+                    "schema": {"type": "string"},
+                },
+            },
+        },
+    },
 )
 async def callback_openai_oauth(
     request: Request,
@@ -1265,7 +1260,10 @@ async def callback_openai_oauth(
                 allow_base_url=False,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OpenAI OAuth credential fields",
+            ) from exc
         failure_reason = None
 
         token_url = _coerce_nonempty_string(getattr(settings, "OPENAI_OAUTH_TOKEN_URL", None))
@@ -1317,7 +1315,10 @@ async def callback_openai_oauth(
                 model=None,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Provider credential validation failed",
+            ) from exc
         except ChatAPIError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
         except Exception as exc:
@@ -1529,13 +1530,9 @@ async def refresh_openai_oauth(
                 detail="OpenAI OAuth token response is missing access_token",
             )
 
-        next_refresh_token = (
-            _coerce_nonempty_string(token_payload.get("refresh_token")) or refresh_token
-        )
+        next_refresh_token = _coerce_nonempty_string(token_payload.get("refresh_token")) or refresh_token
         token_type = (
-            _coerce_nonempty_string(token_payload.get("token_type"))
-            or oauth_payload.get("token_type")
-            or "Bearer"
+            _coerce_nonempty_string(token_payload.get("token_type")) or oauth_payload.get("token_type") or "Bearer"
         )
         scope = _coerce_nonempty_string(token_payload.get("scope")) or _coerce_nonempty_string(
             oauth_payload.get("scope")

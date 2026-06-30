@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Drawer, Form, Input, notification, Skeleton, Collapse, Alert, Radio } from "antd"
+import { Drawer, Form, Input, notification, Skeleton, Collapse, Radio } from "antd"
 import React, { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
+import { Alert } from "@/components/ui/primitives"
 import {
   createPrompt,
   updatePrompt,
@@ -513,16 +514,16 @@ export const PromptEditorDrawer: React.FC<PromptEditorDrawerProps> = ({
                 children: (
                   <div className="space-y-4">
                     <Alert
-                      type="info"
-                      showIcon
-                      title={t(
+                      variant="info"
+                    >
+                      {t(
                         "managePrompts.studio.prompts.form.advancedInfo",
                         {
                           defaultValue:
                             "These fields accept JSON. Few-shot examples help the model learn from examples."
                         }
                       )}
-                    />
+                    </Alert>
 
                     <Form.Item
                       name="few_shot_examples"

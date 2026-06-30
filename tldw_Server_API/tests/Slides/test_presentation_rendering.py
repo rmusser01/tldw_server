@@ -7,6 +7,8 @@ import pytest
 from PIL import Image, ImageChops
 
 from tldw_Server_API.app.core.Slides.presentation_rendering import (
+    MAX_RENDER_SLIDES,
+    MAX_RENDER_SLIDE_DURATION_SECONDS,
     PresentationRenderError,
     _TRANSITION_DURATION_SECONDS,
     _build_transition_video_command,
@@ -451,6 +453,66 @@ def test_render_presentation_video_rejects_unsupported_format(tmp_path):
         )
 
     assert exc.value.code == "presentation_render_format_invalid"
+
+
+def test_render_presentation_video_rejects_excessive_slide_count_before_ffmpeg(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.presentation_rendering._resolve_ffmpeg_path",
+        lambda: (_ for _ in ()).throw(AssertionError("ffmpeg should not be resolved")),
+    )
+
+    with pytest.raises(PresentationRenderError) as exc:
+        render_presentation_video(
+            presentation_id="pres_too_many",
+            presentation_version=1,
+            title="Deck",
+            slides=[
+                {
+                    "order": index,
+                    "layout": "content",
+                    "title": f"Slide {index}",
+                    "content": "Body",
+                    "metadata": {},
+                }
+                for index in range(MAX_RENDER_SLIDES + 1)
+            ],
+            output_format="mp4",
+            output_dir=tmp_path,
+        )
+
+    assert exc.value.code == "presentation_render_slides_too_many"
+
+
+def test_render_presentation_video_rejects_excessive_manual_duration_before_ffmpeg(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Slides.presentation_rendering._resolve_ffmpeg_path",
+        lambda: (_ for _ in ()).throw(AssertionError("ffmpeg should not be resolved")),
+    )
+
+    with pytest.raises(PresentationRenderError) as exc:
+        render_presentation_video(
+            presentation_id="pres_too_long",
+            presentation_version=1,
+            title="Deck",
+            slides=[
+                {
+                    "order": 0,
+                    "layout": "content",
+                    "title": "Slide",
+                    "content": "Body",
+                    "metadata": {
+                        "studio": {
+                            "timing_mode": "manual",
+                            "manual_duration_ms": int((MAX_RENDER_SLIDE_DURATION_SECONDS + 1) * 1000),
+                        }
+                    },
+                }
+            ],
+            output_format="mp4",
+            output_dir=tmp_path,
+        )
+
+    assert exc.value.code == "presentation_render_duration_too_long"
 
 
 def test_run_ffmpeg_command_logs_stderr_on_failure(tmp_path, monkeypatch):

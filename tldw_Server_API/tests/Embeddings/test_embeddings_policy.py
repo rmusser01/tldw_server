@@ -11,9 +11,17 @@ from contextlib import contextmanager
 
 @contextmanager
 def _client():
-    with TestClient(app) as c:
-        c.cookies.set("csrf_token", "test-csrf")
-        yield c
+    previous_auto_download = os.environ.get("AUTO_DOWNLOAD_MODELS")
+    os.environ["AUTO_DOWNLOAD_MODELS"] = "false"
+    try:
+        with TestClient(app) as c:
+            c.cookies.set("csrf_token", "test-csrf")
+            yield c
+    finally:
+        if previous_auto_download is None:
+            os.environ.pop("AUTO_DOWNLOAD_MODELS", None)
+        else:
+            os.environ["AUTO_DOWNLOAD_MODELS"] = previous_auto_download
 
 
 def test_embeddings_token_limit_rejected():
@@ -92,3 +100,35 @@ def test_embeddings_allowlist_rejected():
             settings.pop("ALLOWED_EMBEDDING_MODELS", None)
         else:
             settings["ALLOWED_EMBEDDING_MODELS"] = original_allowed_models
+
+
+def test_embeddings_endpoint_uses_centralized_policy_decision(monkeypatch):
+    monkeypatch.setenv("TESTING", "true")
+    from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as emb_mod
+    from tldw_Server_API.app.core.Embeddings.request_types import EmbeddingPolicyError
+
+    def deny_from_policy(*_args, **_kwargs):
+        raise EmbeddingPolicyError(
+            "provider_denied",
+            "blocked by centralized policy",
+            provider="openai",
+            model="text-embedding-3-small",
+        )
+
+    monkeypatch.setattr(
+        emb_mod.embedding_policy_core,
+        "enforce_embedding_policy",
+        deny_from_policy,
+        raising=True,
+    )
+
+    with _client() as client:
+        api_key = get_settings().SINGLE_USER_API_KEY
+        response = client.post(
+            "/api/v1/embeddings",
+            json={"model": "text-embedding-3-small", "input": "short"},
+            headers={"X-API-KEY": api_key},
+        )
+
+    assert response.status_code == 403
+    assert response.json().get("detail") == "blocked by centralized policy"

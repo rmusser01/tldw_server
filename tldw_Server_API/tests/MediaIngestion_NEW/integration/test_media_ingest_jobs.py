@@ -110,7 +110,7 @@ def test_media_ingest_jobs_list_by_batch(
     auth_headers,
     monkeypatch,
     tmp_path,
-):
+) -> None:
     _set_jobs_db(monkeypatch, tmp_path)
 
     upload_path = tmp_path / "batch.txt"
@@ -143,6 +143,71 @@ def test_media_ingest_jobs_list_by_batch(
     assert list_body.get("batch_id") == batch_id
     listed_ids = {job["id"] for job in list_body.get("jobs", [])}
     assert listed_ids == job_ids
+
+
+def test_media_ingest_jobs_list_by_batch_returns_canonical_offset_pagination(
+    test_client,
+    auth_headers,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    _set_jobs_db(monkeypatch, tmp_path)
+
+    resp = test_client.post(
+        "/api/v1/media/ingest/jobs",
+        data={
+            "media_type": "document",
+            "urls": [
+                "https://example.com/doc-1",
+                "https://example.com/doc-2",
+            ],
+        },
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    batch_id = body.get("batch_id")
+    assert batch_id
+    submitted_ids = {job["id"] for job in body["jobs"]}
+    assert len(submitted_ids) == 2
+
+    list_resp = test_client.get(
+        f"/api/v1/media/ingest/jobs?batch_id={batch_id}&limit=1&offset=0",
+        headers=auth_headers,
+    )
+    assert list_resp.status_code == 200, list_resp.text
+    list_body = list_resp.json()
+    assert list_body["limit"] == 1
+    assert list_body["offset"] == 0
+    assert len(list_body["jobs"]) == 1
+    first_page_ids = {job["id"] for job in list_body["jobs"]}
+    assert list_body["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 0,
+        "total": None,
+        "has_more": True,
+        "next_offset": 1,
+    }
+
+    second_page_resp = test_client.get(
+        f"/api/v1/media/ingest/jobs?batch_id={batch_id}&limit=1&offset=1",
+        headers=auth_headers,
+    )
+    assert second_page_resp.status_code == 200, second_page_resp.text
+    second_page_body = second_page_resp.json()
+    assert len(second_page_body["jobs"]) == 1
+    second_page_ids = {job["id"] for job in second_page_body["jobs"]}
+    assert first_page_ids.isdisjoint(second_page_ids)
+    assert first_page_ids | second_page_ids == submitted_ids
+    assert second_page_body["pagination"] == {
+        "mode": "offset",
+        "limit": 1,
+        "offset": 1,
+        "total": None,
+        "has_more": False,
+        "next_offset": None,
+    }
 
 
 def test_media_ingest_jobs_routes_audio_to_heavy_queue(

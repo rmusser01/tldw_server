@@ -13,16 +13,16 @@ from loguru import logger
 from starlette.status import HTTP_403_FORBIDDEN, HTTP_500_INTERNAL_SERVER_ERROR
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
     get_auth_principal,
     get_db_transaction,
     get_org_policy_from_principal,
-    require_permissions,
-    require_roles,
 )
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.api.v1.schemas.connectors import (
     AuthorizeURLResponse,
     ConnectorAccount,
+    ConnectorBrowseResponse,
     ConnectorPolicy,
     ConnectorProvider,
     ConnectorSource,
@@ -35,6 +35,8 @@ from tldw_Server_API.app.api.v1.schemas.connectors import (
     ImportJob,
     SyncOptions,
 )
+from tldw_Server_API.app.api.v1.utils.pagination import build_cursor_pagination_meta
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.External_Sources import (
     get_connector_by_name,
@@ -80,8 +82,8 @@ def _extract_request_base(request: Request | None) -> str:
         return ""
     try:
         return str(request.base_url).rstrip("/")
-    except (AttributeError, TypeError, ValueError) as e:
-        logger.debug(f"Failed to resolve base_url from request: {e}")
+    except (AttributeError, TypeError, ValueError):
+        logger.debug("Failed to resolve base_url from request")
         return ""
 
 
@@ -272,8 +274,8 @@ def _load_active_job(sync_state: dict[str, Any] | None) -> dict[str, Any] | None
         from tldw_Server_API.app.core.Jobs.manager import JobManager
 
         return JobManager().get_job(int(active_job_id))
-    except Exception as exc:
-        logger.warning("Failed to load active connectors job {}: {}", active_job_id, exc)
+    except Exception:
+        logger.warning("Failed to load active connectors job")
         return None
 
 
@@ -376,7 +378,7 @@ async def _queue_source_job(
         try:
             today_count = count_jobs_fn(user_id)
         except Exception as exc:
-            logger.exception(f"Quota check failed for user_id={user_id}: {exc}")
+            logger.error("Connectors quota check failed")
             raise HTTPException(
                 status_code=HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Daily import quota check failed",
@@ -559,7 +561,7 @@ async def oauth_callback(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Policy enforcement error on callback for provider '{provider}': {e}")
+        logger.error("Connector callback policy enforcement failed")
         raise HTTPException(
             status_code=403,
             detail="Account linking denied: policy enforcement failed",
@@ -616,8 +618,8 @@ async def oauth_callback(
                     close = getattr(resp, "close", None)
                     if callable(close):
                         close()
-        except Exception as e:
-            logger.debug(f"Failed to fetch userinfo for drive account (non-fatal): {e}")
+        except Exception:
+            logger.debug("Failed to fetch drive userinfo")
     elif provider == 'notion':
         notion_workspace_id = tokens.get('workspace_id')
     # Enforce additional org policy constraints at callback across modes using
@@ -631,7 +633,7 @@ async def oauth_callback(
             account_email=acct_email,
         )
     except Exception as e:
-        logger.exception(f"Callback constraint evaluation failed for provider '{provider}': {e}")
+        logger.error("Connector callback constraint evaluation failed")
         raise HTTPException(
             status_code=500,
             detail="Account linking denied: policy evaluation failed",
@@ -672,7 +674,7 @@ async def remove_account(
     return {"ok": True}
 
 
-@router.get("/providers/{provider}/sources/browse")
+@router.get("/providers/{provider}/sources/browse", response_model=ConnectorBrowseResponse)
 async def browse_provider_sources(
     provider: str,
     account_id: int = Query(..., ge=1),
@@ -681,7 +683,7 @@ async def browse_provider_sources(
     cursor: str | None = None,
     db=Depends(get_db_transaction),
     principal: AuthPrincipal = Depends(get_auth_principal),
-) -> dict[str, Any]:
+) -> ConnectorBrowseResponse:
     provider = _ensure_connector_provider_enabled(provider)
     user_id = _get_user_id(principal)
     tokens = await get_account_tokens(db, user_id, account_id)
@@ -712,9 +714,20 @@ async def browse_provider_sources(
         else:
             items, next_cursor = [], None
     except Exception as e:
-        logger.error(f"Browse error for {provider}: {e}")
-        raise HTTPException(status_code=502, detail=f"Browse failed: {e}") from e
-    return {"items": items, "next_cursor": next_cursor}
+        logger.error("Connector browse failed")
+        raise HTTPException(status_code=502, detail="Browse failed") from e
+    return ConnectorBrowseResponse(
+        items=items,
+        limit=page_size,
+        cursor=cursor,
+        next_cursor=next_cursor,
+        has_more=bool(next_cursor),
+        pagination=build_cursor_pagination_meta(
+            limit=page_size,
+            cursor=cursor,
+            next_cursor=next_cursor,
+        ),
+    )
 
 
 @router.post("/sources", response_model=ConnectorSource)
@@ -747,7 +760,7 @@ async def add_source(
     try:
         ok, why = evaluate_policy_constraints(org_policy, provider=provider, remote_path=path)
     except Exception as e:
-        logger.exception(f"Policy evaluation failed for provider '{provider}': {e}")
+        logger.error("Connector source policy evaluation failed")
         raise HTTPException(
             status_code=HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Source denied: policy evaluation failed",
@@ -809,7 +822,7 @@ async def add_source(
                     **sync_updates,
                 )
         except Exception as exc:
-            logger.warning(f"{provider} webhook provisioning failed for source {row.get('id')}: {exc}")
+            logger.warning("Connector webhook provisioning failed")
             await upsert_source_sync_state(
                 db,
                 source_id=int(row.get("id")),
@@ -982,7 +995,17 @@ async def trigger_source_sync(
     )
 
 
-@router.api_route("/providers/{provider}/webhook", methods=["GET", "POST"], response_model=ConnectorWebhookCallbackResponse)
+@router.api_route(
+    "/providers/{provider}/webhook",
+    methods=["GET", "POST"],
+    response_model=ConnectorWebhookCallbackResponse,
+    responses={
+        200: {
+            "description": "Connector webhook callback result or plaintext validation challenge.",
+            "content": {"text/plain": {}},
+        },
+    },
+)
 async def provider_webhook_callback(
     provider: str,
     request: Request,
@@ -1137,7 +1160,7 @@ async def get_job_status(job_id: int) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Failed to get connector job status") from e
 
 
 # Admin: Org-level policy
@@ -1146,8 +1169,8 @@ async def get_job_status(job_id: int) -> dict[str, Any]:
     response_model=ConnectorPolicy,
     dependencies=[
         Depends(get_auth_principal),
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
     ],
 )
 async def get_org_policy(
@@ -1179,8 +1202,8 @@ async def get_org_policy(
     response_model=ConnectorPolicy,
     dependencies=[
         Depends(get_auth_principal),
-        Depends(require_roles("admin")),
-        Depends(require_permissions(SYSTEM_CONFIGURE)),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
     ],
 )
 async def upsert_org_policy(

@@ -9,6 +9,7 @@ import importlib.util
 import inspect
 import json
 import os
+import re
 import shutil
 import subprocess  # nosec B404 - setup provisioning intentionally invokes vetted command lists without a shell
 import sys
@@ -38,10 +39,17 @@ from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
     get_audio_bundle_catalog,
 )
 from tldw_Server_API.app.core.Setup.install_schema import DEFAULT_WHISPER_MODELS, InstallPlan
+from tldw_Server_API.app.core.exceptions import SetupSubprocessError
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 CONFIG_ROOT = setup_manager.CONFIG_RELATIVE_PATH.parent
 STATUS_FILENAME = 'setup_install_status.json'
+DEFAULT_SUBPROCESS_TIMEOUT_SECONDS = 900.0
+SUBPROCESS_OUTPUT_SNIPPET_CHARS = 16_384
+_REDACTED = "[redacted]"
+_SECRET_OPTION_NAMES = {"--index-url", "--extra-index-url"}
+_MOVING_VCS_REFS = {"", "head", "main", "master", "develop", "development", "dev", "trunk"}
+_VCS_COMMIT_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$", re.IGNORECASE)
 
 
 _LATEST_STATUS_DATA: dict[str, Any] | None = None
@@ -79,10 +87,36 @@ def _resolve_status_file() -> Path | None:
                 probe.unlink()
             return root / STATUS_FILENAME
         except Exception:  # noqa: BLE001
-            logger.debug('Install status directory {} not writable', root, exc_info=True)
+            logger.debug('Install status directory not writable')
 
     logger.warning('No writable location found for setup install status; running without persistence.')
     return None
+
+
+def _write_json_file_atomically(path: Path, data: dict[str, Any]) -> None:
+    """Write JSON through a same-directory temp file and atomic replace."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            'w',
+            encoding='utf-8',
+            dir=path.parent,
+            prefix=f'{path.name}.',
+            suffix='.tmp',
+            delete=False,
+        ) as handle:
+            json.dump(data, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+            tmp_path = handle.name
+        os.replace(tmp_path, path)
+    except Exception:
+        if tmp_path:
+            with contextlib.suppress(FileNotFoundError):
+                Path(tmp_path).unlink()
+        raise
 
 
 def _install_dependencies(plan: InstallPlan, status: InstallationStatus, errors: list[str]) -> None:
@@ -194,6 +228,12 @@ def _ensure_requirement(requirement: PipRequirement) -> None:
         _INSTALLED_DEPENDENCIES.add(package_name)
         return
 
+    if _is_unpinned_vcs_requirement(package_name) and not _allow_unpinned_vcs_requirements():
+        raise PipInstallBlockedError(
+            f'Unpinned VCS dependency installs are disabled by default: {package_name}. '
+            'Pin the requirement to an immutable commit or set TLDW_SETUP_ALLOW_UNPINNED_VCS=1.'
+        )
+
     if not _pip_allowed():
         raise PipInstallBlockedError('Package installs disabled via TLDW_SETUP_SKIP_PIP')
 
@@ -263,6 +303,35 @@ def _select_package(requirement: PipRequirement) -> str | None:
         elif requirement.cpu_package:
             package = requirement.cpu_package
     return package
+
+
+def _allow_unpinned_vcs_requirements() -> bool:
+    flag = os.getenv('TLDW_SETUP_ALLOW_UNPINNED_VCS')
+    return bool(flag and flag.strip().lower() in {'1', 'true', 'yes', 'y', 'on'})
+
+
+def _is_vcs_requirement(package: str) -> bool:
+    return package.strip().lower().startswith(('git+', 'hg+', 'svn+', 'bzr+'))
+
+
+def _vcs_requirement_revision(package: str) -> str | None:
+    spec = package.strip().split('#', 1)[0]
+    revision_marker = spec.rfind('@')
+    if revision_marker <= spec.rfind('/'):
+        return None
+    revision = spec[revision_marker + 1:].strip()
+    return revision or None
+
+
+def _is_unpinned_vcs_requirement(package: str) -> bool:
+    if not _is_vcs_requirement(package):
+        return False
+    revision = _vcs_requirement_revision(package)
+    if revision is None:
+        return True
+    if revision.lower() in _MOVING_VCS_REFS:
+        return True
+    return _VCS_COMMIT_RE.fullmatch(revision) is None
 
 
 def _cuda_available() -> bool:
@@ -439,7 +508,7 @@ class InstallationStatus:
             return
 
         try:
-            self.path.write_text(json.dumps(self.data, indent=2), encoding='utf-8')
+            _write_json_file_atomically(self.path, self.data)
         except Exception:  # noqa: BLE001
             if not self._persist_failed:
                 logger.warning(
@@ -498,7 +567,7 @@ def _persist_install_status_snapshot(data: dict[str, Any]) -> None:
     path = _resolve_status_file()
     if path:
         try:
-            path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+            _write_json_file_atomically(path, data)
         except Exception:  # noqa: BLE001
             logger.warning('Failed to persist qualified setup install status to {}', path, exc_info=True)
     _record_latest_status(data)
@@ -1108,6 +1177,8 @@ def _install_tts(plan: InstallPlan, status: InstallationStatus, errors: list[str
                 _install_higgs()
             elif entry.engine == 'vibevoice':
                 _install_vibevoice(entry.variants)
+            elif entry.engine == 'omnivoice':
+                _install_omnivoice()
             status.step(step_name, 'completed')
         except DownloadBlockedError as exc:
             logger.info('Skipping TTS install {}: {}', entry.engine, exc)
@@ -1334,6 +1405,51 @@ def _install_vibevoice(variants: list[str]) -> None:
         _snapshot_repo('FabioSarracino/VibeVoice-Large-Q8')
 
 
+def _install_omnivoice() -> None:
+    from Helper_Scripts.TTS_Installers import install_tts_omnivoice_sidecar as installer
+
+    _ensure_downloads_allowed("OmniVoice sidecar runtime")
+    repo_root = Path(__file__).resolve().parents[4]
+    configured_model_path = os.getenv("TLDW_OMNIVOICE_MODEL_PATH")
+    if not configured_model_path:
+        raise RuntimeError("TLDW_OMNIVOICE_MODEL_PATH is required to enable OmniVoice")
+    candidate_model_path = Path(configured_model_path).expanduser()
+    if not candidate_model_path.is_absolute():
+        candidate_model_path = repo_root / candidate_model_path
+    try:
+        model_path = installer.validate_local_model_path(candidate_model_path)
+    except SystemExit as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    runtime_base = repo_root / "models" / "omnivoice_sidecar"
+    source_checkout = installer.resolve_source_checkout(repo_root=repo_root)
+    layout = installer.build_runtime_layout(runtime_base, repo_root=repo_root)
+    installer.create_runtime_layout(layout)
+    installer.clone_repository(installer.DEFAULT_REPO_URL, source_checkout)
+    installer.create_virtualenv(layout.venv_dir)
+    installer.install_sidecar_runtime(
+        interpreter_path=layout.interpreter_path,
+        repo_root=repo_root,
+        source_checkout=source_checkout,
+    )
+    missing = installer.validate_runtime_layout(layout)
+    if missing:
+        raise RuntimeError(f"OmniVoice runtime layout incomplete: {', '.join(missing)}")
+    try:
+        config_patched = installer.patch_tts_config(
+            config_path=repo_root / installer.DEFAULT_CONFIG_PATH,
+            layout=layout,
+            source_checkout=source_checkout,
+            model_path=model_path,
+            repo_root=repo_root,
+        )
+    except SystemExit as exc:
+        raise RuntimeError(f"OmniVoice provider configuration could not be updated: {exc}") from exc
+    if not config_patched:
+        logger.error("OmniVoice provider configuration was not updated after runtime installation")
+        raise RuntimeError("OmniVoice provider configuration could not be updated")
+
+
 def _download_huggingface_models(models: list[str]) -> None:
     for model_id in models:
         logger.info('Downloading embedding model {}', model_id)
@@ -1454,6 +1570,13 @@ def _resolve_hf_revision(repo_id: str) -> str | None:
     )
 
 def _snapshot_repo(repo_id: str) -> None:
+    """Prefetch a HuggingFace repository snapshot into the local cache.
+
+    The download respects the setup download policy, optional pinned
+    repository revisions, and force-download environment flags. Network errors
+    are normalized to DownloadBlockedError so install-plan status reporting can
+    present a clear remediation message.
+    """
     _ensure_downloads_allowed(f'{repo_id} snapshot')
     try:
         from huggingface_hub import snapshot_download
@@ -1473,18 +1596,94 @@ def _snapshot_repo(repo_id: str) -> None:
         raise
 
 
-def _run_subprocess(command: list[str]) -> None:
-    logger.info('Running command: {}', ' '.join(command))
-    result = subprocess.run(  # nosec B603 - command argv is assembled from trusted setup requirement mappings
-        command,
-        check=False,
-        capture_output=True,
-        text=True,
+def _redact_secret_text(value: str) -> str:
+    redacted = re.sub(r'(?i)([a-z][a-z0-9+.-]*://)[^/\s@]+@', rf'\1{_REDACTED}@', value)
+    return re.sub(
+        r'(?i)([?&][^=\s&]*(?:token|key|secret|password|credential|auth)[^=\s&]*=)[^&\s]+',
+        rf'\1{_REDACTED}',
+        redacted,
     )
+
+
+def _redact_command(command: list[str]) -> list[str]:
+    redacted: list[str] = []
+    redact_next = False
+    for part in command:
+        if redact_next:
+            redacted.append(_redact_secret_text(part))
+            redact_next = False
+            continue
+        option, separator, value = part.partition('=')
+        if part in _SECRET_OPTION_NAMES:
+            redacted.append(part)
+            redact_next = True
+        elif separator and option in _SECRET_OPTION_NAMES:
+            redacted.append(f'{option}={_redact_secret_text(value)}')
+        else:
+            redacted.append(_redact_secret_text(part))
+    return redacted
+
+
+def _subprocess_timeout_seconds() -> float | None:
+    raw = os.getenv('TLDW_SETUP_SUBPROCESS_TIMEOUT_SECONDS')
+    if raw is None or not raw.strip():
+        return DEFAULT_SUBPROCESS_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning('Invalid TLDW_SETUP_SUBPROCESS_TIMEOUT_SECONDS value; using default.')
+        return DEFAULT_SUBPROCESS_TIMEOUT_SECONDS
+    if value <= 0:
+        return None
+    return value
+
+
+def _format_timeout(seconds: float | None) -> str:
+    if seconds is None:
+        return 'configured'
+    if float(seconds).is_integer():
+        return str(int(seconds))
+    return str(seconds)
+
+
+def _read_bounded_output(handle: Any) -> str:
+    handle.seek(0)
+    output = handle.read(SUBPROCESS_OUTPUT_SNIPPET_CHARS + 1)
+    truncated = len(output) > SUBPROCESS_OUTPUT_SNIPPET_CHARS
+    if len(output) > SUBPROCESS_OUTPUT_SNIPPET_CHARS:
+        output = output[:SUBPROCESS_OUTPUT_SNIPPET_CHARS]
+    if isinstance(output, bytes):
+        text = output.decode('utf-8', errors='replace')
+    else:
+        text = str(output)
+    if truncated:
+        text += '\n[output truncated]'
+    return _redact_secret_text(text)
+
+
+def _run_subprocess(command: list[str], *, timeout_seconds: float | None = None) -> None:
+    timeout = _subprocess_timeout_seconds() if timeout_seconds is None else timeout_seconds
+    logger.info('Running command: {}', ' '.join(_redact_command(command)))
+    try:
+        with tempfile.TemporaryFile('w+b') as stdout_handle, tempfile.TemporaryFile('w+b') as stderr_handle:
+            result = subprocess.run(  # nosec B603 - command argv is assembled from trusted setup requirement mappings
+                command,
+                check=False,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                text=False,
+                timeout=timeout,
+            )
+            stderr_output = _read_bounded_output(stderr_handle)
+            stdout_output = _read_bounded_output(stdout_handle)
+    except subprocess.TimeoutExpired as exc:
+        raise SetupSubprocessError(f'Command timed out after {_format_timeout(timeout)} seconds') from exc
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or f'Command failed with exit code {result.returncode}')
-    if result.stdout:
-        logger.debug(result.stdout)
+        raise SetupSubprocessError(stderr_output.strip() or f'Command failed with exit code {result.returncode}')
+    if stdout_output:
+        logger.debug(stdout_output)
+
+
 @dataclass(frozen=True)
 class PipRequirement:
     package: str
@@ -1594,6 +1793,7 @@ TTS_DEPENDENCIES: dict[str, list[PipRequirement]] = {
         PipRequirement(package='safetensors>=0.4.2', import_name='safetensors'),
         PipRequirement(package='einops>=0.8.0', import_name='einops'),
     ],
+    'omnivoice': [],
 }
 
 EMBEDDING_DEPENDENCIES: dict[str, list[PipRequirement]] = {

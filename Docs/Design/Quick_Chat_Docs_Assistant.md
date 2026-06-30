@@ -112,7 +112,7 @@ Route matching uses normalization logic so canonical routes, hash routes, and le
 Representative route-to-basics mapping:
 
 - `/chat` -> `playground-basics`
-- `/workspace-playground` -> `workspace-playground-basics`
+- `/research-workspace` -> `research-workspace-basics`
 - `/media` -> `media-basics`
 - `/knowledge` -> `knowledge-basics`
 - `/characters` -> `characters-basics`

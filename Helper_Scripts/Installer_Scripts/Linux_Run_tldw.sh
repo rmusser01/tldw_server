@@ -1,21 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Compatibility launcher for installs created by Linux_Install_Update.sh.
 
-# TLDW Run Script
+set -euo pipefail
 
-install_dir="$(dirname "$0")/tldw"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+install_dir="${TLDW_INSTALL_DIR:-$script_dir/tldw}"
+launcher="$install_dir/quick-launch.sh"
 
-if [ ! -d "$install_dir" ]; then
-    echo "TLDW installation not found. Please run the install_update_tldw.sh script first."
+if [ ! -f "$launcher" ]; then
+    echo "tldw_server launcher not found at: $launcher" >&2
+    echo "Run Linux_Install_Update.sh first, or set TLDW_INSTALL_DIR to a checkout that contains quick-launch.sh." >&2
     exit 1
 fi
 
-cd "$install_dir" || exit
+export TLDW_VENV_DIR="${TLDW_VENV_DIR:-venv}"
+export TLDW_SKIP_INSTALL="${TLDW_SKIP_INSTALL:-1}"
 
-# Activate virtual environment
-source venv/bin/activate
-
-# Run TLDW
-python3 summarize.py -gui
-
-# Deactivate virtual environment when done
-deactivate
+cd "$install_dir"
+exec bash "$launcher" "$@"

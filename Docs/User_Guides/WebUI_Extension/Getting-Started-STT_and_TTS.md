@@ -12,12 +12,13 @@ Scope:
 - Use this guide for first successful STT + TTS requests end-to-end.
 - Use [TTS Providers Getting Started](./TTS_Getting_Started.md) to compare providers and setup paths.
 - Use [TTS Provider Setup Guide](./TTS-SETUP-GUIDE.md) for deep provider runbooks and tuning.
+- Use [Persona Live Wake Phrase Guide](./Persona_Live_Wake_Phrases.md) for manually armed Persona Garden wake phrase setup and troubleshooting.
 
 See design doc: [`Docs/Design/STT_TTS_Audio_API_Design.md`](../../Design/STT_TTS_Audio_API_Design.md) for architecture details, provider priority/retry behavior, auth mode behavior, storage header semantics, and streaming protocol/error handling.
 
 ## TL;DR Choices
 
-- First-time CPU setup: use the CPU guide and start with `parakeet-onnx` for STT plus `supertonic` for TTS.
+- First-time CPU setup: use the CPU guide and start with `parakeet-tdt-0.6b-v3-onnx` for STT plus `supertonic` for TTS. `parakeet-onnx` remains accepted as a legacy alias.
 - First-time accelerated setup: use the GPU/accelerated guide and start with `faster-whisper` on NVIDIA or `parakeet-mlx` on Apple Silicon, plus `supertonic` for TTS.
 - `/setup` bundles remain optional, but use the hardware-first guides when you want explicit local-first provider selection and current verification steps.
 - Use this page when you want a shorter API smoke test, `/setup` notes, or older alternative-provider examples.

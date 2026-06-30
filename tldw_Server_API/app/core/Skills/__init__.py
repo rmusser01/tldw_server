@@ -34,9 +34,12 @@ Usage:
 
 from tldw_Server_API.app.core.Skills.context_integration import (
     add_skill_tool_to_tools_list,
+    add_skill_tool_to_tools_list_async,
     build_system_message_with_skills,
+    build_system_message_with_skills_async,
     get_skill_tool_definition,
     get_skills_context_text,
+    get_skills_context_text_async,
     handle_skill_tool_call,
 )
 from tldw_Server_API.app.core.Skills.exceptions import (
@@ -69,8 +72,11 @@ __all__ = [
     "SkillExecutionError",
     # Context integration
     "get_skills_context_text",
+    "get_skills_context_text_async",
     "build_system_message_with_skills",
+    "build_system_message_with_skills_async",
     "get_skill_tool_definition",
     "handle_skill_tool_call",
     "add_skill_tool_to_tools_list",
+    "add_skill_tool_to_tools_list_async",
 ]

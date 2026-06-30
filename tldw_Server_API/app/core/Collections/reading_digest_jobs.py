@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sqlite3
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
@@ -12,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.Collections.reading_service import ReadingService
+from tldw_Server_API.app.core.Collections.utils import is_supported_reading_url
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import ReadingDigestJobError
@@ -61,6 +63,8 @@ READING_DIGEST_SUGGESTIONS_MAX_LIMIT = _env_int("READING_DIGEST_SUGGESTIONS_MAX_
 READING_DIGEST_SUGGESTIONS_MAX_CANDIDATES = _env_int("READING_DIGEST_SUGGESTIONS_MAX_CANDIDATES", 200)
 
 _SUGGESTION_ALLOWED_STATUSES = {"saved", "reading", "read", "archived"}
+_MARKDOWN_ESCAPE_RE = re.compile(r"([\\`*_{}\[\]()#+\-.!])")
+_DANGEROUS_MARKDOWN_SCHEME_RE = re.compile(r"\b(javascript|vbscript|data):", re.IGNORECASE)
 
 
 def reading_digest_queue() -> str:
@@ -313,27 +317,45 @@ def _resolve_retention_until(retention_days: int | None) -> str | None:
     return (datetime.now(tz=timezone.utc) + timedelta(days=days)).isoformat()
 
 
+def _escape_markdown_text(value: Any) -> str:
+    """Escape untrusted text before interpolating it into Markdown."""
+    text = str(value or "").replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+    escaped = _MARKDOWN_ESCAPE_RE.sub(r"\\\1", text)
+    return _DANGEROUS_MARKDOWN_SCHEME_RE.sub(lambda match: f"{match.group(1)}&#58;", escaped)
+
+
+def _is_safe_markdown_url(value: str) -> bool:
+    """Return True when value is safe to use inside a Markdown autolink target."""
+    return is_supported_reading_url(value) and not any(ch.isspace() or ord(ch) < 32 or ch in "<>\"'" for ch in value)
+
+
 def _render_default_markdown(
     title: str,
     items: list[dict[str, Any]],
     suggestions: list[dict[str, Any]] | None = None,
 ) -> str:
-    lines = [f"# {title}", ""]
+    lines = [f"# {_escape_markdown_text(title)}", ""]
     for idx, itm in enumerate(items, 1):
-        entry_title = itm.get("title") or f"Item {idx}"
-        url = itm.get("url")
-        line = f"{idx}. [{entry_title}]({url})" if url else f"{idx}. {entry_title}"
-        summary = itm.get("summary") or ""
+        entry_title = _escape_markdown_text(itm.get("title") or f"Item {idx}")
+        url = str(itm.get("url") or "").strip()
+        if url and _is_safe_markdown_url(url):
+            line = f"{idx}. [{entry_title}](<{url}>)"
+        else:
+            line = f"{idx}. {entry_title}"
+        summary = _escape_markdown_text(itm.get("summary") or "")
         if summary:
             line += f" - {summary}"
         lines.append(line)
     if suggestions:
         lines.extend(["", "## Suggested reads", ""])
         for idx, itm in enumerate(suggestions, 1):
-            entry_title = itm.get("title") or f"Suggestion {idx}"
-            url = itm.get("url")
-            line = f"{idx}. [{entry_title}]({url})" if url else f"{idx}. {entry_title}"
-            summary = itm.get("summary") or ""
+            entry_title = _escape_markdown_text(itm.get("title") or f"Suggestion {idx}")
+            url = str(itm.get("url") or "").strip()
+            if url and _is_safe_markdown_url(url):
+                line = f"{idx}. [{entry_title}](<{url}>)"
+            else:
+                line = f"{idx}. {entry_title}"
+            summary = _escape_markdown_text(itm.get("summary") or "")
             if summary:
                 line += f" - {summary}"
             lines.append(line)
@@ -349,8 +371,8 @@ def _render_default_html(
     for idx, itm in enumerate(items, 1):
         entry_title = escape(itm.get("title") or f"Item {idx}")
         summary = escape(itm.get("summary") or "")
-        url = itm.get("url")
-        entry = f'<li><a href="{escape(url)}">{entry_title}</a>' if url else f"<li>{entry_title}"
+        url = str(itm.get("url") or "").strip()
+        entry = f'<li><a href="{escape(url)}">{entry_title}</a>' if is_supported_reading_url(url) else f"<li>{entry_title}"
         if summary:
             entry += f" - {summary}"
         entry += "</li>"
@@ -361,8 +383,8 @@ def _render_default_html(
         for idx, itm in enumerate(suggestions, 1):
             entry_title = escape(itm.get("title") or f"Suggestion {idx}")
             summary = escape(itm.get("summary") or "")
-            url = itm.get("url")
-            entry = f'<li><a href="{escape(url)}">{entry_title}</a>' if url else f"<li>{entry_title}"
+            url = str(itm.get("url") or "").strip()
+            entry = f'<li><a href="{escape(url)}">{entry_title}</a>' if is_supported_reading_url(url) else f"<li>{entry_title}"
             if summary:
                 entry += f" - {summary}"
             entry += "</li>"

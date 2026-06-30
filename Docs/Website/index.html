@@ -172,7 +172,7 @@
     <div class="container">
       <div class="reveal">
         <h2 id="cta-title" style="margin:0 0 6px 0;font-size:28px">Quick Start</h2>
-        <p class="muted" style="max-width:60ch;margin-bottom:24px">Clone the repo, pick a profile, and get a working stack up. The default Docker + WebUI path uses same-origin browser API requests through the WebUI proxy. API-only Docker and local dev remain supported alternative setup profiles. LAN/custom-host browser access is the advanced configuration path.</p>
+        <p class="muted" style="max-width:60ch;margin-bottom:24px">Clone the repo, pick one public setup profile, and follow prepare, start, then verify. The default Docker single-user + WebUI path uses same-origin browser API requests through the WebUI proxy. API-only Docker and local dev remain supported alternative setup profiles.</p>
       </div>
       <div class="reveal">
         <div class="code-block">
@@ -186,8 +186,8 @@ make quickstart-prereqs</code></pre>
         </div>
         <div class="code-block">
           <div class="code-header">
-            <span>Recommended: Docker + WebUI</span>
-            <button class="copy-btn" data-code="git clone https://github.com/rmusser01/tldw_server.git&#10;cd tldw_server&#10;make quickstart" aria-label="Copy Docker + WebUI command">Copy</button>
+            <span>Shortest alias: Docker single-user + WebUI</span>
+            <button class="copy-btn" data-code="git clone https://github.com/rmusser01/tldw_server.git&#10;cd tldw_server&#10;make quickstart" aria-label="Copy Docker single-user quickstart command">Copy</button>
           </div>
           <pre><code>git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
@@ -195,24 +195,42 @@ make quickstart</code></pre>
         </div>
         <div class="code-block">
           <div class="code-header">
-            <span>Alternative: API-only Docker</span>
-            <button class="copy-btn" data-code="git clone https://github.com/rmusser01/tldw_server.git&#10;cd tldw_server&#10;make quickstart-docker" aria-label="Copy API-only Docker command">Copy</button>
+            <span>Docker single-user + WebUI</span>
+            <button class="copy-btn" data-code="git clone https://github.com/rmusser01/tldw_server.git&#10;cd tldw_server&#10;make setup-docker-single&#10;make start-docker-single&#10;make verify-docker-single" aria-label="Copy Docker single-user profile commands">Copy</button>
           </div>
           <pre><code>git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-make quickstart-docker</code></pre>
+make setup-docker-single
+make start-docker-single
+make verify-docker-single</code></pre>
         </div>
         <div class="code-block">
           <div class="code-header">
-            <span>Development: local API install</span>
-            <button class="copy-btn" data-code="git clone https://github.com/rmusser01/tldw_server.git&#10;cd tldw_server&#10;make quickstart-install" aria-label="Copy local install command">Copy</button>
+            <span>Docker multi-user + Postgres</span>
+            <button class="copy-btn" data-code="git clone https://github.com/rmusser01/tldw_server.git&#10;cd tldw_server&#10;export ADMIN_USERNAME=tldw-admin&#10;export ADMIN_PASSWORD=&quot;$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')&quot;&#10;make setup-docker-multi&#10;make start-docker-multi&#10;make verify-docker-multi" aria-label="Copy Docker multi-user profile commands">Copy</button>
           </div>
           <pre><code>git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
-make quickstart-install</code></pre>
+export ADMIN_USERNAME=tldw-admin
+export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+make setup-docker-multi
+make start-docker-multi
+make verify-docker-multi</code></pre>
+        </div>
+        <div class="code-block">
+          <div class="code-header">
+            <span>Local single-user</span>
+            <button class="copy-btn" data-code="git clone https://github.com/rmusser01/tldw_server.git&#10;cd tldw_server&#10;make install-local&#10;make setup-local-single&#10;make start-local-single&#10;make verify-local-single" aria-label="Copy local single-user profile commands">Copy</button>
+          </div>
+          <pre><code>git clone https://github.com/rmusser01/tldw_server.git
+cd tldw_server
+make install-local
+make setup-local-single
+make start-local-single
+make verify-local-single</code></pre>
         </div>
         <p class="muted" style="font-size:14px;margin-bottom:12px">PyPI installation is not generally available yet. Use this repository checkout and the quickstart targets above.</p>
-        <p class="muted" style="font-size:14px;margin-bottom:12px">Default Docker startup brings up the API at <a href="http://127.0.0.1:8000/docs" style="color:var(--brand-2)">localhost:8000/docs</a> and the WebUI at <span style="color:var(--brand-2)">localhost:8080</span>. Browsers stay on same-origin browser API requests through the WebUI proxy unless you intentionally move to LAN/custom-host access as an advanced configuration path. The local development path starts the API at <a href="http://127.0.0.1:8000/api/v1/config/quickstart" style="color:var(--brand-2)">localhost:8000/api/v1/config/quickstart</a>.</p>
+        <p class="muted" style="font-size:14px;margin-bottom:12px">Default Docker startup brings up the API at <a href="http://127.0.0.1:8000/docs" style="color:var(--brand-2)">localhost:8000/docs</a> and the WebUI at <span style="color:var(--brand-2)">localhost:8080</span>. Browsers stay on same-origin browser API requests through the WebUI proxy. LAN/custom-host browser access is the advanced configuration path. The local single-user path starts the API at <a href="http://127.0.0.1:8000/api/v1/config/quickstart" style="color:var(--brand-2)">localhost:8000/api/v1/config/quickstart</a>.</p>
         <p class="muted" style="font-size:14px">Need a team or public deployment instead of the default single-user path? Start with the <a href="https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md" style="color:var(--brand-2)" target="_blank" rel="noreferrer">Docker Multi-User + Postgres guide</a>.</p>
       </div>
     </div>

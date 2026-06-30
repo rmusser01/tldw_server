@@ -90,6 +90,10 @@ async def test_store_persistent_persists_crawl_metadata_when_available(monkeypat
         result=result,
         keywords="k1,k2",
         user_id=7,
+        perform_chunking=False,
+        chunking_mode=None,
+        auto_chunking_goal="balanced",
+        auto_chunking_use_llm=False,
     )
 
     assert persisted["status"] == "persist-ok"

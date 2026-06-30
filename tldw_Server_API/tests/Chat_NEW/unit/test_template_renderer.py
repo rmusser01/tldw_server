@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import os
+from dataclasses import fields
+from datetime import datetime, timezone
+from typing import Any
+
+import pytest
 
 from tldw_Server_API.app.core.Templating.template_renderer import (
     TemplateContext,
@@ -12,6 +15,9 @@ from tldw_Server_API.app.core.Templating.template_renderer import (
     _ENV,
     render,
 )
+import tldw_Server_API.app.core.Templating.template_renderer as template_renderer
+
+pytestmark = pytest.mark.unit
 
 
 def test_basic_now_renders_year():
@@ -82,7 +88,7 @@ def test_compiled_template_cache_reuses_compiled_template(monkeypatch):
     calls = {"n": 0}
     original_from_string = _ENV.from_string
 
-    def counting_from_string(src):
+    def counting_from_string(src: str) -> Any:
         calls["n"] += 1
         return original_from_string(src)
 
@@ -98,3 +104,74 @@ def test_compiled_template_cache_reuses_compiled_template(monkeypatch):
     assert out1 == "ok"
     assert out2 == "ok"
     assert calls["n"] == 1
+
+
+def test_runtime_arithmetic_errors_fallback_to_original():
+    ctx = TemplateContext()
+    tpl = "{{ 1 / 0 }}"
+
+    out = render(tpl, ctx, TemplateOptions())
+
+    assert out == tpl
+
+
+def test_oversized_range_errors_fallback_to_original():
+    ctx = TemplateContext()
+    tpl = "{{ range(1000000)|list|length }}"
+
+    out = render(tpl, ctx, TemplateOptions())
+
+    assert out == tpl
+
+
+def test_expensive_string_multiplication_is_rejected_before_rendering():
+    ctx = TemplateContext()
+    tpl = "{{ 'x' * 100 }}"
+
+    out = render(tpl, ctx, TemplateOptions(max_output_chars=20))
+
+    assert out == tpl
+
+
+def test_extra_objects_cannot_call_public_methods():
+    class Probe:
+        def __init__(self) -> None:
+            self.hit = False
+
+        def public_method(self) -> str:
+            self.hit = True
+            return "CALLED"
+
+    probe = Probe()
+    tpl = "{{ obj.public_method() }}"
+
+    out = render(tpl, TemplateContext(extra={"obj": probe}), TemplateOptions())
+
+    assert out == tpl
+    assert probe.hit is False
+
+
+def test_default_now_uses_context_timezone(monkeypatch):
+    real_datetime = datetime
+
+    class FrozenDateTime:
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:
+            value = real_datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc)
+            if tz is not None:
+                return value.astimezone(tz)
+            return value
+
+    monkeypatch.setattr(template_renderer, "datetime", FrozenDateTime)
+    ctx = TemplateContext(env=TemplateEnv(timezone="America/Los_Angeles"))
+
+    out = render("{{ now('%Y-%m-%d') }}", ctx, TemplateOptions())
+
+    assert out == "2025-12-31"
+
+
+def test_unused_renderer_api_surface_is_removed():
+    option_names = {field.name for field in fields(TemplateOptions)}
+
+    assert "allow_external_calls" not in option_names
+    assert not hasattr(template_renderer, "TemplateRenderError")

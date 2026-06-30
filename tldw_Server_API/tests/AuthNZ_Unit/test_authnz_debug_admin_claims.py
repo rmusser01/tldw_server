@@ -53,6 +53,45 @@ def _make_principal(
     )
 
 
+class _LoggerStub:
+    def __init__(self) -> None:
+        self.debugs: list[str] = []
+
+    def debug(self, message: str, *args, **kwargs) -> None:
+        if args or kwargs:
+            message = message.format(*args, **kwargs)
+        self.debugs.append(message)
+
+
+class _BrokenAuthState:
+    @property
+    def auth(self):
+        raise TypeError("auth context exploded at /private/authnz-debug.db")
+
+
+@pytest.mark.asyncio
+async def test_resolve_api_key_id_principal_fallback_log_is_sanitized(monkeypatch):
+    request = type(
+        "_Request",
+        (),
+        {
+            "state": _BrokenAuthState(),
+            "headers": {},
+        },
+    )()
+    logger_stub = _LoggerStub()
+    monkeypatch.setattr(debug_mod, "logger", logger_stub)
+
+    resolved = await debug_mod._resolve_api_key_id(request, None)
+
+    assert resolved == {"api_key_id": None, "user_id": None}
+    assert logger_stub.debugs == [
+        "_resolve_api_key_id: principal-first resolution failed, falling back",
+    ]
+    assert "auth context exploded" not in str(logger_stub.debugs)
+    assert "/private/authnz-debug.db" not in str(logger_stub.debugs)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "path",

@@ -56,3 +56,19 @@ def test_effective_config_sections_filter(monkeypatch, auth_headers):
     assert "default_provider" in tts_values
     assert tts_values["default_provider"]["source"] == "env"
     assert "strict_validation" not in tts_values
+
+
+def test_effective_config_sanitizes_resolution_error(monkeypatch, auth_headers):
+
+    from tldw_Server_API.app.api.v1.endpoints import config_admin
+
+    def _raise_missing_config_root():
+        raise FileNotFoundError("sensitive config path")
+
+    monkeypatch.setattr(config_admin, "resolve_config_root", _raise_missing_config_root)
+
+    with TestClient(app) as client:
+        resp = client.get("/api/v1/admin/config/effective", headers=auth_headers)
+
+    assert resp.status_code == 500
+    assert resp.json()["detail"] == "Failed to resolve effective configuration"

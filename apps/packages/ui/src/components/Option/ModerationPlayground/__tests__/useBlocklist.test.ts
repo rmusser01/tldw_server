@@ -26,6 +26,22 @@ import { useBlocklist } from "../hooks/useBlocklist"
 describe("useBlocklist", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    lintBlocklistMock.mockImplementation((payload: { line?: string; lines?: string[] }) => {
+      const lines = payload.lines ?? (payload.line ? [payload.line] : [])
+      return Promise.resolve({
+        items: lines.map((line, index) => ({
+          index,
+          line,
+          ok: true,
+          pattern_type: line.trim().startsWith("/") ? "regex" : "literal",
+          action: "block",
+          categories: ["uncategorized"],
+          sample: line
+        })),
+        valid_count: lines.length,
+        invalid_count: 0
+      })
+    })
   })
 
   it("returns initial state", () => {
@@ -67,6 +83,7 @@ describe("useBlocklist", () => {
 
   it("saveRaw splits text and calls updateBlocklist", async () => {
     updateBlocklistMock.mockResolvedValue({ status: "ok", count: 2 })
+    lintBlocklistMock.mockResolvedValue({ items: [], valid_count: 2, invalid_count: 0 })
 
     const { result } = renderHook(() => useBlocklist())
 
@@ -76,6 +93,17 @@ describe("useBlocklist", () => {
 
     await act(async () => {
       await result.current.saveRaw()
+    })
+
+    expect(updateBlocklistMock).not.toHaveBeenCalled()
+    expect(lintBlocklistMock).toHaveBeenCalledWith({ lines: ["rule1", "rule2"] })
+    expect(result.current.pendingRawPreview).toMatchObject({
+      nextText: "rule1\nrule2",
+      lint: { valid_count: 2, invalid_count: 0 }
+    })
+
+    await act(async () => {
+      await result.current.confirmRawReplace()
     })
 
     expect(updateBlocklistMock).toHaveBeenCalledWith(["rule1", "rule2"])
@@ -123,6 +151,21 @@ describe("useBlocklist", () => {
       data: { version: "v1", items: [{ id: 1, line: "bad-word" }] },
       etag: "etag1"
     })
+    lintBlocklistMock.mockResolvedValue({
+      items: [
+        {
+          index: 0,
+          line: "bad-word",
+          ok: true,
+          pattern_type: "literal",
+          action: "block",
+          categories: ["uncategorized"],
+          sample: "bad-word"
+        }
+      ],
+      valid_count: 1,
+      invalid_count: 0
+    })
 
     const { result } = renderHook(() => useBlocklist())
 
@@ -130,8 +173,87 @@ describe("useBlocklist", () => {
       await result.current.loadManaged()
     })
 
-    expect(result.current.managedItems).toEqual([{ id: 1, line: "bad-word" }])
+    expect(lintBlocklistMock).toHaveBeenCalledWith({ lines: ["bad-word"] })
+    expect(result.current.managedItems).toEqual([
+      expect.objectContaining({
+        id: 1,
+        line: "bad-word",
+        pattern_type: "literal",
+        action: "block",
+        categories: ["uncategorized"],
+        ok: true
+      })
+    ])
     expect(result.current.managedVersion).toBe("v1")
+  })
+
+  it("does not relint managed rows when backend metadata is already present", async () => {
+    getManagedBlocklistMock.mockResolvedValue({
+      data: {
+        version: "v1",
+        items: [{ id: 1, line: "bad-word", pattern_type: "literal", action: "block", ok: true }]
+      },
+      etag: null
+    })
+
+    const { result } = renderHook(() => useBlocklist())
+
+    await act(async () => {
+      await result.current.loadManaged()
+    })
+
+    expect(lintBlocklistMock).not.toHaveBeenCalled()
+    expect(result.current.managedItems[0]).toMatchObject({
+      pattern_type: "literal",
+      action: "block",
+      ok: true
+    })
+  })
+
+  it("blocks raw replace confirmation when preview lint has invalid rows", async () => {
+    lintBlocklistMock.mockResolvedValue({
+      items: [{ index: 0, line: "/[bad/", ok: false, pattern_type: "regex", error: "invalid regex" }],
+      valid_count: 0,
+      invalid_count: 1
+    })
+
+    const { result } = renderHook(() => useBlocklist())
+
+    await act(async () => {
+      await result.current.previewRawReplace("/[bad/")
+    })
+
+    await expect(
+      act(async () => {
+        await result.current.confirmRawReplace()
+      })
+    ).rejects.toThrow("Fix invalid blocklist rows before replacing")
+    expect(updateBlocklistMock).not.toHaveBeenCalled()
+  })
+
+  it("can undo a confirmed raw replace with the previous baseline", async () => {
+    getBlocklistMock.mockResolvedValue(["old"])
+    lintBlocklistMock.mockResolvedValue({ items: [], valid_count: 1, invalid_count: 0 })
+    updateBlocklistMock.mockResolvedValue({ status: "ok", count: 1 })
+
+    const { result } = renderHook(() => useBlocklist())
+
+    await act(async () => {
+      await result.current.loadRaw()
+      await result.current.previewRawReplace("new")
+      await result.current.confirmRawReplace()
+    })
+
+    expect(result.current.rawText).toBe("new")
+    expect(result.current.rawReplaceUndo).toMatchObject({ previousText: "old" })
+
+    await act(async () => {
+      await result.current.undoRawReplace()
+    })
+
+    expect(updateBlocklistMock).toHaveBeenLastCalledWith(["old"])
+    expect(result.current.rawText).toBe("old")
+    expect(result.current.rawReplaceUndo).toBeNull()
   })
 
   it("loadManaged falls back to etag for version", async () => {

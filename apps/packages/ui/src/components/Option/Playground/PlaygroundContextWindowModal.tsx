@@ -1,5 +1,6 @@
 import React from "react"
-import { Button, InputNumber, Modal } from "antd"
+import { InputNumber, Modal } from "antd"
+import { ModalFooter } from "@/components/ui/layout"
 import { ContextFootprintPanel } from "./ContextFootprintPanel"
 import { SessionInsightsPanel } from "./SessionInsightsPanel"
 import { CONTEXT_FOOTPRINT_THRESHOLD_PERCENT } from "./hooks"
@@ -93,20 +94,22 @@ export const PlaygroundContextWindowModal: React.FC<PlaygroundContextWindowModal
           okText={t("common:save", "Save")}
           destroyOnHidden
           footer={
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button onClick={onCloseContextWindow}>
-                {t("common:cancel", "Cancel")}
-              </Button>
-              <Button onClick={onResetContextWindow}>
-                {t(
+            <ModalFooter
+              data-testid="context-window-modal-footer"
+              onCancel={onCloseContextWindow}
+              cancelLabel={t("common:cancel", "Cancel")}
+              secondaryAction={{
+                label: t(
                   "playground:tokens.useModelDefault",
                   "Use model default"
-                )}
-              </Button>
-              <Button type="primary" onClick={onSaveContextWindow}>
-                {t("common:save", "Save")}
-              </Button>
-            </div>
+                ),
+                onClick: onResetContextWindow
+              }}
+              primaryAction={{
+                label: t("common:save", "Save"),
+                onClick: onSaveContextWindow
+              }}
+            />
           }
         >
           <div className="space-y-3">
@@ -226,11 +229,16 @@ export const PlaygroundContextWindowModal: React.FC<PlaygroundContextWindowModal
           destroyOnHidden
           width={760}
           footer={
-            <div className="flex justify-end">
-              <Button onClick={onCloseSessionInsights}>
-                {t("common:close", "Close")}
-              </Button>
-            </div>
+            <ModalFooter
+              hideCancel
+              data-testid="session-insights-modal-footer"
+              actions={[
+                {
+                  label: t("common:close", "Close"),
+                  onClick: onCloseSessionInsights
+                }
+              ]}
+            />
           }
         >
           <SessionInsightsPanel t={t} insights={sessionInsights} />

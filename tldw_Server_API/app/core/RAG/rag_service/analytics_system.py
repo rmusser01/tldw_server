@@ -138,8 +138,8 @@ class AnalyticsStore:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.db.record_search, search_data
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to record search analytics: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to record search analytics")
         else:
             return True
         return False
@@ -158,8 +158,8 @@ class AnalyticsStore:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.db.record_feedback, feedback_data
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to record feedback: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to record feedback")
         else:
             return True
         return False
@@ -179,8 +179,8 @@ class AnalyticsStore:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.db.record_event, payload
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to record analytics event: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to record analytics event")
         else:
             return True
         return False
@@ -256,8 +256,8 @@ class AnalyticsStore:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.db.record_document_performance, payload
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to record document performance: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to record document performance")
         else:
             return True
         return False
@@ -280,8 +280,8 @@ class AnalyticsStore:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.db.record_error, payload
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to record error: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to record error")
         else:
             return True
         return False
@@ -300,8 +300,8 @@ class AnalyticsStore:
             await asyncio.get_event_loop().run_in_executor(
                 None, self.db.record_feature_usage, feature_data
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to record feature usage: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to record feature usage")
         else:
             return True
         return False
@@ -320,8 +320,8 @@ class AnalyticsStore:
             summary = await asyncio.get_event_loop().run_in_executor(
                 None, self.db.get_analytics_summary, days
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to get analytics summary: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to get analytics summary")
         else:
             return summary
         return {}
@@ -340,8 +340,8 @@ class AnalyticsStore:
             deleted = await asyncio.get_event_loop().run_in_executor(
                 None, self.db.cleanup_old_data, days_to_keep
             )
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Failed to cleanup old data: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to cleanup old data")
         else:
             return deleted
         return 0
@@ -441,8 +441,8 @@ class UserFeedbackStore:
                 for statement in statements:
                     conn.execute(statement)
                 self._ensure_issues_column(conn)
-        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"Failed to initialize feedback schema: {exc}", exc_info=True)
+        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to initialize feedback schema")
 
     def _ensure_issues_column(self, conn: Any) -> None:
         """Backfill `issues` on pre-existing schemas created before this field existed."""
@@ -512,8 +512,8 @@ class UserFeedbackStore:
                         user_notes,
                     ),
                 )
-        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"Failed to add feedback: {exc}")
+        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to add feedback")
             raise
         else:
             logger.info(f"Added feedback {feedback_id} for conversation {conversation_id}")
@@ -783,8 +783,8 @@ class UserFeedbackStore:
                         conn.execute(update_sql, (json.dumps(updated_issues), updated_notes, feedback_id))
 
                     result = {"issues": updated_issues, "user_notes": updated_notes}
-        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"Failed to merge feedback update: {exc}")
+        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to merge feedback update")
         else:
             return result
         return None
@@ -814,8 +814,8 @@ class UserFeedbackStore:
                 helpful_value = fb.get("helpful")
                 fb["helpful"] = None if helpful_value is None else bool(helpful_value)
                 feedback.append(fb)
-        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"Failed to get conversation feedback: {exc}")
+        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to get conversation feedback")
         else:
             return feedback
         return []
@@ -838,8 +838,8 @@ class UserFeedbackStore:
             helpful_value = fb.get("helpful")
             fb["helpful"] = None if helpful_value is None else bool(helpful_value)
             return fb
-        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"Failed to get feedback by id: {exc}")
+        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to get feedback by id")
             return None
 
     async def delete_feedback(self, feedback_id: str) -> bool:
@@ -853,8 +853,8 @@ class UserFeedbackStore:
                 cursor = conn.execute(delete_sql, (feedback_id,))
                 deleted = getattr(cursor, "rowcount", 0) or 0
                 return deleted > 0
-        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logger.error(f"Failed to delete feedback {feedback_id}: {exc}")
+        except (BackendDatabaseError, CharactersRAGDBError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.error("Failed to delete feedback")
             raise
 
 
@@ -1053,10 +1053,10 @@ class UnifiedFeedbackSystem:
                     dwell_ms=dwell_ms,
                     query=query,
                 )
-            except ValueError as e:
-                logger.debug(f"Personalization store update skipped for user_id={user_id}: {e}")
-            except (AttributeError, OSError, RuntimeError, TypeError) as e:
-                logger.debug(f"Personalization store update failed: {e}")
+            except ValueError:
+                logger.debug("Personalization store update skipped")
+            except (AttributeError, OSError, RuntimeError, TypeError):
+                logger.debug("Personalization store update failed")
 
             # Emit anonymized analytics
             if self.enable_analytics and self.analytics:
@@ -1094,8 +1094,8 @@ class UnifiedFeedbackSystem:
                     metrics=metrics,
                 )
                 await self.analytics.record_event(evt)
-        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.debug(f"Implicit interaction recording failed: {e}")
+        except (BackendDatabaseError, AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            logger.debug("Implicit interaction recording failed")
 
     async def record_search(
         self,
@@ -1273,10 +1273,10 @@ async def apply_feedback_boost(context: Any, **kwargs) -> Any:
         from .user_personalization_store import UserPersonalizationStore
         store = UserPersonalizationStore(user_id)
         context.documents = store.boost_documents(context.documents, corpus=context.config.get("index_namespace"))
-    except ValueError as e:
-        logger.debug(f"Feedback boost skipped for user_id={user_id}: {e}")
-    except (AttributeError, OSError, RuntimeError, TypeError) as e:
-        logger.debug(f"Feedback boost failed: {e}")
+    except ValueError:
+        logger.debug("Feedback boost skipped")
+    except (AttributeError, OSError, RuntimeError, TypeError):
+        logger.debug("Feedback boost failed")
     else:
         return context
     return context

@@ -6,7 +6,7 @@ import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -91,6 +91,19 @@ class ResearchRunEventRow:
     phase: str | None
     job_id: str | None
     created_at: str
+
+
+@dataclass(frozen=True)
+class ResearchDiscoverySnapshotRow:
+    id: str
+    owner_user_id: str
+    query: str
+    request_json: dict[str, Any]
+    response_json: dict[str, Any]
+    effective_config_json: dict[str, Any]
+    catalog_version: str
+    created_at: str
+    expires_at: str
 
 
 @dataclass(frozen=True)
@@ -198,6 +211,18 @@ class ResearchSessionsDB:
                     FOREIGN KEY(session_id) REFERENCES research_sessions(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS research_discovery_snapshots (
+                    id TEXT PRIMARY KEY,
+                    owner_user_id TEXT NOT NULL,
+                    query TEXT NOT NULL,
+                    request_json TEXT NOT NULL DEFAULT '{}',
+                    response_json TEXT NOT NULL DEFAULT '{}',
+                    effective_config_json TEXT NOT NULL DEFAULT '{}',
+                    catalog_version TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS research_chat_handoffs (
                     session_id TEXT PRIMARY KEY,
                     owner_user_id TEXT NOT NULL,
@@ -221,6 +246,10 @@ class ResearchSessionsDB:
                     ON research_artifacts(session_id, artifact_name, artifact_version DESC);
                 CREATE INDEX IF NOT EXISTS idx_research_run_events_owner_session
                     ON research_run_events(owner_user_id, session_id, id ASC);
+                CREATE INDEX IF NOT EXISTS idx_research_discovery_snapshots_owner_created
+                    ON research_discovery_snapshots(owner_user_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_research_discovery_snapshots_owner_expires
+                    ON research_discovery_snapshots(owner_user_id, expires_at);
                 CREATE INDEX IF NOT EXISTS idx_research_chat_handoffs_owner_chat
                     ON research_chat_handoffs(owner_user_id, chat_id, handoff_status);
                 """
@@ -231,13 +260,9 @@ class ResearchSessionsDB:
                     "ALTER TABLE research_sessions ADD COLUMN provider_overrides_json TEXT NOT NULL DEFAULT '{}'"
                 )
             if "follow_up_json" not in columns:
-                conn.execute(
-                    "ALTER TABLE research_sessions ADD COLUMN follow_up_json TEXT NOT NULL DEFAULT '{}'"
-                )
+                conn.execute("ALTER TABLE research_sessions ADD COLUMN follow_up_json TEXT NOT NULL DEFAULT '{}'")
             if "control_state" not in columns:
-                conn.execute(
-                    "ALTER TABLE research_sessions ADD COLUMN control_state TEXT NOT NULL DEFAULT 'running'"
-                )
+                conn.execute("ALTER TABLE research_sessions ADD COLUMN control_state TEXT NOT NULL DEFAULT 'running'")
             if "progress_percent" not in columns:
                 conn.execute("ALTER TABLE research_sessions ADD COLUMN progress_percent REAL")
             if "progress_message" not in columns:
@@ -258,19 +283,11 @@ class ResearchSessionsDB:
             autonomy_mode=str(row["autonomy_mode"]),
             limits_json=_parse_json_dict(row["limits_json"]),
             provider_overrides_json=(
-                _parse_json_dict(row["provider_overrides_json"])
-                if "provider_overrides_json" in keys
-                else {}
+                _parse_json_dict(row["provider_overrides_json"]) if "provider_overrides_json" in keys else {}
             ),
-            follow_up_json=(
-                _parse_json_dict(row["follow_up_json"])
-                if "follow_up_json" in keys
-                else {}
-            ),
+            follow_up_json=(_parse_json_dict(row["follow_up_json"]) if "follow_up_json" in keys else {}),
             control_state=(
-                str(row["control_state"])
-                if "control_state" in keys and row["control_state"] is not None
-                else "running"
+                str(row["control_state"]) if "control_state" in keys and row["control_state"] is not None else "running"
             ),
             progress_percent=(
                 float(row["progress_percent"])
@@ -339,6 +356,32 @@ class ResearchSessionsDB:
         )
 
     @staticmethod
+    def _discovery_snapshot_from_row(row: sqlite3.Row | None) -> ResearchDiscoverySnapshotRow | None:
+        if row is None:
+            return None
+        return ResearchDiscoverySnapshotRow(
+            id=str(row["id"]),
+            owner_user_id=str(row["owner_user_id"]),
+            query=str(row["query"]),
+            request_json=_parse_json_dict(row["request_json"]),
+            response_json=_parse_json_dict(row["response_json"]),
+            effective_config_json=_parse_json_dict(row["effective_config_json"]),
+            catalog_version=str(row["catalog_version"]),
+            created_at=str(row["created_at"]),
+            expires_at=str(row["expires_at"]),
+        )
+
+    @staticmethod
+    def _discovery_snapshot_is_expired(snapshot: ResearchDiscoverySnapshotRow) -> bool:
+        try:
+            expires_at = datetime.fromisoformat(snapshot.expires_at)
+        except ValueError:
+            return True
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        return expires_at <= datetime.now(UTC)
+
+    @staticmethod
     def _chat_handoff_from_row(row: sqlite3.Row | None) -> ResearchChatHandoffRow | None:
         if row is None:
             return None
@@ -352,9 +395,7 @@ class ResearchSessionsDB:
                 str(row["delivered_chat_message_id"]) if row["delivered_chat_message_id"] else None
             ),
             delivered_notification_id=(
-                int(row["delivered_notification_id"])
-                if row["delivered_notification_id"] is not None
-                else None
+                int(row["delivered_notification_id"]) if row["delivered_notification_id"] is not None else None
             ),
             last_error=str(row["last_error"]) if row["last_error"] else None,
             created_at=str(row["created_at"]),
@@ -423,6 +464,80 @@ class ResearchSessionsDB:
         if session is None:
             raise RuntimeError("failed_to_create_research_session")
         return session
+
+    def create_discovery_snapshot(
+        self,
+        *,
+        owner_user_id: str,
+        query: str,
+        request_json: dict[str, Any],
+        response_json: dict[str, Any],
+        effective_config_json: dict[str, Any],
+        catalog_version: str,
+        retention_hours: int = 24,
+    ) -> ResearchDiscoverySnapshotRow:
+        snapshot_id = f"rd_{uuid.uuid4().hex[:12]}"
+        created_at = datetime.now(UTC)
+        expires_at = created_at + timedelta(hours=retention_hours)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO research_discovery_snapshots (
+                    id, owner_user_id, query, request_json, response_json,
+                    effective_config_json, catalog_version, created_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    snapshot_id,
+                    str(owner_user_id),
+                    query,
+                    json.dumps(request_json or {}, sort_keys=True),
+                    json.dumps(response_json or {}, sort_keys=True),
+                    json.dumps(effective_config_json or {}, sort_keys=True),
+                    catalog_version,
+                    created_at.isoformat(),
+                    expires_at.isoformat(),
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT * FROM research_discovery_snapshots
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (snapshot_id, str(owner_user_id)),
+            ).fetchone()
+        snapshot = self._discovery_snapshot_from_row(row)
+        if snapshot is None:
+            raise RuntimeError("failed_to_create_research_discovery_snapshot")
+        return snapshot
+
+    def get_discovery_snapshot(
+        self,
+        snapshot_id: str,
+        *,
+        owner_user_id: str,
+    ) -> ResearchDiscoverySnapshotRow | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM research_discovery_snapshots
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (snapshot_id, str(owner_user_id)),
+            ).fetchone()
+        snapshot = self._discovery_snapshot_from_row(row)
+        if snapshot is None or self._discovery_snapshot_is_expired(snapshot):
+            return None
+        return snapshot
+
+    def delete_expired_discovery_snapshots(self, now: str | None = None) -> int:
+        cutoff = now or _utc_now()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "DELETE FROM research_discovery_snapshots WHERE expires_at <= ?",
+                (cutoff,),
+            )
+        return int(cursor.rowcount)
 
     def create_chat_handoff(
         self,
@@ -612,17 +727,37 @@ class ResearchSessionsDB:
             ).fetchone()
         return self._session_from_row(row)
 
-    def list_sessions(self, owner_user_id: str, *, limit: int = 25) -> list[ResearchSessionRow]:
+    def list_sessions(
+        self,
+        owner_user_id: str,
+        *,
+        limit: int = 25,
+        offset: int = 0,
+        status: str | None = None,
+        session_id: str | None = None,
+    ) -> list[ResearchSessionRow]:
         bounded_limit = max(1, int(limit))
-        with self._connect() as conn:
-            rows = conn.execute(
-                """
+        bounded_offset = max(0, int(offset))
+        query = """
                 SELECT * FROM research_sessions
                 WHERE owner_user_id = ?
-                ORDER BY created_at DESC, id DESC
-                LIMIT ?
-                """,
-                (str(owner_user_id), bounded_limit),
+                """
+        params: list[Any] = [str(owner_user_id)]
+        if session_id:
+            query += " AND id = ?"
+            params.append(str(session_id))
+        if status:
+            query += " AND status = ?"
+            params.append(str(status))
+        query += """
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT ? OFFSET ?
+                """
+        params.extend([bounded_limit, bounded_offset])
+        with self._connect() as conn:
+            rows = conn.execute(
+                query,
+                tuple(params),
             ).fetchall()
         return [session for row in rows if (session := self._session_from_row(row)) is not None]
 

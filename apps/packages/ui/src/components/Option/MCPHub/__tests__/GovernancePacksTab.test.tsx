@@ -20,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   listGovernancePackUpgradeHistory: vi.fn()
 }))
 
+const designSystemLabels = vi.hoisted(() => ({
+  blocked: "Registry Blocked"
+}))
+
 vi.mock("@/services/tldw/mcp-hub", () => ({
   listGovernancePacks: (...args: unknown[]) => mocks.listGovernancePacks(...args),
   getGovernancePackDetail: (...args: unknown[]) => mocks.getGovernancePackDetail(...args),
@@ -42,6 +46,26 @@ vi.mock("@/services/tldw/mcp-hub", () => ({
   executeGovernancePackUpgrade: (...args: unknown[]) => mocks.executeGovernancePackUpgrade(...args),
   listGovernancePackUpgradeHistory: (...args: unknown[]) => mocks.listGovernancePackUpgradeHistory(...args)
 }))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    BLOCKED_STATE_LABEL: designSystemLabels.blocked,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        if (key === "blocked") {
+          return { ...state, label: designSystemLabels.blocked }
+        }
+
+        return state
+      }
+    )
+  }
+})
 
 import { GovernancePacksTab } from "../GovernancePacksTab"
 
@@ -453,6 +477,100 @@ describe("GovernancePacksTab", () => {
     expect(await screen.findByText("Resolved capabilities")).toBeTruthy()
     expect(screen.getByText("tool.invoke.research")).toBeTruthy()
     expect(screen.getByText("Importable")).toBeTruthy()
+  })
+
+  it("renders blocked dry-run and upgrade statuses through design-system state labels", async () => {
+    mocks.dryRunGovernancePack.mockResolvedValueOnce({
+      report: {
+        manifest: {
+          pack_id: "researcher-pack",
+          pack_version: "1.0.0",
+          title: "Researcher Pack",
+          description: "Portable research governance pack"
+        },
+        digest: "a".repeat(64),
+        resolved_capabilities: ["filesystem.read"],
+        unresolved_capabilities: ["tool.invoke.research"],
+        warnings: [],
+        blocked_objects: ["permission_profile:researcher.profile"],
+        verdict: "blocked"
+      }
+    })
+    mocks.dryRunGovernancePackUpgrade.mockResolvedValueOnce({
+      plan: {
+        source_governance_pack_id: 81,
+        source_manifest: {
+          pack_id: "researcher-pack",
+          pack_version: "1.0.0",
+          title: "Researcher Pack"
+        },
+        target_manifest: {
+          pack_id: "researcher-pack",
+          pack_version: "1.1.0",
+          title: "Researcher Pack"
+        },
+        object_diff: [],
+        dependency_impact: [],
+        structural_conflicts: [],
+        behavioral_conflicts: ["permission_profile:researcher.profile changed"],
+        warnings: [],
+        planner_inputs_fingerprint: "plan-fingerprint",
+        adapter_state_fingerprint: "adapter-fingerprint",
+        upgradeable: false
+      }
+    })
+    const user = userEvent.setup()
+    render(<GovernancePacksTab />)
+
+    expect((await screen.findAllByText("Researcher Pack")).length).toBeGreaterThan(0)
+    fireEvent.change(screen.getByLabelText(/governance pack json/i), {
+      target: {
+        value: JSON.stringify({
+          manifest: {
+            pack_id: "researcher-pack",
+            pack_version: "1.0.0",
+            pack_schema_version: 1,
+            capability_taxonomy_version: 1,
+            adapter_contract_version: 1,
+            title: "Researcher Pack"
+          },
+          profiles: [],
+          approvals: [],
+          personas: [],
+          assignments: []
+        })
+      }
+    })
+
+    await user.click(screen.getByRole("button", { name: /preview pack/i }))
+
+    expect(await screen.findByText(designSystemLabels.blocked)).toBeTruthy()
+    expect(screen.queryByText("Blocked")).toBeNull()
+
+    fireEvent.change(screen.getByLabelText(/governance pack json/i), {
+      target: {
+        value: JSON.stringify({
+          manifest: {
+            pack_id: "researcher-pack",
+            pack_version: "1.1.0",
+            pack_schema_version: 1,
+            capability_taxonomy_version: 1,
+            adapter_contract_version: 1,
+            title: "Researcher Pack"
+          },
+          profiles: [],
+          approvals: [],
+          personas: [],
+          assignments: []
+        })
+      }
+    })
+
+    await user.click(screen.getByRole("button", { name: /preview upgrade/i }))
+
+    expect(await screen.findByRole("dialog")).toBeTruthy()
+    expect(await screen.findAllByText(designSystemLabels.blocked)).toHaveLength(2)
+    expect(screen.queryByText("Blocked")).toBeNull()
   })
 
   it("surfaces detail load failures without clearing the inventory", async () => {

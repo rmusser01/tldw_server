@@ -176,7 +176,9 @@ describe("useMessageState TTS defaults", () => {
         totalMessages: 1,
         isProcessing: false,
         isStreaming: false,
-        conversationInstanceId: "conversation-1"
+        conversationInstanceId: "conversation-1",
+        onRegenerate: vi.fn(),
+        onEditFormSubmit: vi.fn()
       })
     )
 

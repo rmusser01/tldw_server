@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.chat_grammar_schemas import (
     ChatGrammarCreate,
     ChatGrammarListResponse,
@@ -15,6 +17,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_grammar_schemas import (
 from tldw_Server_API.app.core.Character_Chat.chat_grammar import ChatGrammarService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
+    CharactersRAGDBError,
     ConflictError,
     InputError,
 )
@@ -47,13 +50,14 @@ async def create_chat_grammar(
             grammar_text=grammar.grammar_text,
         )
         created = service.get_grammar(grammar_id, include_archived=True)
-    except ConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to create chat grammar") from exc
     except Exception as exc:
-        logger.error(f"Error creating chat grammar: {exc}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        logger.error("Error creating chat grammar")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create chat grammar",
+        ) from exc
 
     if not created:
         raise HTTPException(
@@ -85,13 +89,24 @@ async def list_chat_grammars(
             offset=offset,
         )
         total = service.count_grammars(include_archived=include_archived)
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list chat grammars") from exc
     except Exception as exc:
-        logger.error(f"Error listing chat grammars: {exc}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        logger.error("Error listing chat grammars")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list chat grammars",
+        ) from exc
 
     return ChatGrammarListResponse(
         items=[_grammar_to_response(grammar) for grammar in grammars],
         total=total,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(grammars),
+        ),
     )
 
 
@@ -111,11 +126,14 @@ async def get_chat_grammar(
     try:
         service = ChatGrammarService(db)
         grammar = service.get_grammar(grammar_id, include_archived=include_archived)
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to get chat grammar") from exc
     except Exception as exc:
-        logger.error(f"Error getting chat grammar: {exc}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        logger.error("Error getting chat grammar")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get chat grammar",
+        ) from exc
 
     if not grammar:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Grammar not found")
@@ -148,15 +166,16 @@ async def update_chat_grammar(
             update_payload,
             expected_version=expected_version if expected_version is not None else current["version"],
         )
-    except ConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except InputError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update chat grammar") from exc
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Error updating chat grammar: {exc}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        logger.error("Error updating chat grammar")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update chat grammar",
+        ) from exc
 
     return _grammar_to_response(updated)
 
@@ -178,13 +197,19 @@ async def delete_chat_grammar(
     service = ChatGrammarService(db)
     try:
         deleted = service.delete_grammar(grammar_id, hard_delete=hard_delete)
-    except InputError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Grammar not found")
-    except ConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except InputError as exc:
+        raise map_db_error_to_http(
+            exc,
+            input_status_code=status.HTTP_404_NOT_FOUND,
+        ) from exc
+    except (ConflictError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete chat grammar") from exc
     except Exception as exc:
-        logger.error(f"Error deleting chat grammar: {exc}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        logger.error("Error deleting chat grammar")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete chat grammar",
+        ) from exc
 
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Grammar not found")

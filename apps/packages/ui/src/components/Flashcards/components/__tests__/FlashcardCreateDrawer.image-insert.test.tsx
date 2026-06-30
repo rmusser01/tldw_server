@@ -2,7 +2,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { FlashcardCreateDrawer } from "../FlashcardCreateDrawer"
-import { useCreateDeckMutation, useCreateFlashcardMutation, useDecksQuery } from "../../hooks"
+import {
+  useCreateDeckMutation,
+  useCreateFlashcardMutation,
+  useCreateFlashcardTemplateMutation,
+  useDecksQuery
+} from "../../hooks"
 import type { DeckSchedulerSettings, DeckSchedulerSettingsEnvelope } from "@/services/flashcards"
 
 const uploadFlashcardAsset = vi.hoisted(() => vi.fn())
@@ -51,6 +56,7 @@ vi.mock("@/hooks/useAntdMessage", () => ({
 vi.mock("../../hooks", () => ({
   useDecksQuery: vi.fn(),
   useCreateFlashcardMutation: vi.fn(),
+  useCreateFlashcardTemplateMutation: vi.fn(),
   useCreateDeckMutation: vi.fn(),
   useDebouncedFormField: vi.fn(() => undefined),
   useFlashcardDeckRecentCardsQuery: vi.fn(() => ({
@@ -140,6 +146,10 @@ describe("FlashcardCreateDrawer image insertion", () => {
       isLoading: false
     } as any)
     vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardTemplateMutation).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false
     } as any)

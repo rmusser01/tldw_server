@@ -86,6 +86,47 @@ describe("flashcard-template-resolution", () => {
     ).toThrow("Missing required placeholder value: definition")
   })
 
+  it("falls back to draft defaults when a template omits optional fields", () => {
+    const sparseTemplate: FlashcardTemplate = {
+      ...template,
+      id: 20,
+      back_template: null,
+      notes_template: null,
+      extra_template: null,
+      placeholder_definitions: [
+        {
+          key: "term",
+          label: "Term",
+          help_text: null,
+          default_value: null,
+          required: true,
+          targets: ["front_template"]
+        }
+      ]
+    }
+
+    expect(
+      materializeFlashcardTemplateDraft(
+        sparseTemplate,
+        {
+          term: "ATP"
+        },
+        {
+          back: "Existing generated back",
+          notes: "Existing generated notes",
+          extra: "Existing generated extra"
+        }
+      )
+    ).toEqual(
+      expect.objectContaining({
+        front: "What does ATP mean?",
+        back: "Existing generated back",
+        notes: "Existing generated notes",
+        extra: "Existing generated extra"
+      })
+    )
+  })
+
   it("preserves cloze syntax when materializing cloze templates", () => {
     const clozeTemplate: FlashcardTemplate = {
       ...template,

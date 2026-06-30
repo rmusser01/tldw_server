@@ -1,7 +1,6 @@
 import React from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
-  Alert,
   Badge,
   Button,
   Checkbox,
@@ -23,12 +22,11 @@ import {
   Typography
 } from "antd"
 import { Filter, Plus, LayoutList, List as ListIcon, Keyboard, Check, CheckCheck } from "lucide-react"
-import dayjs from "dayjs"
-import relativeTime from "dayjs/plugin/relativeTime"
 import { useTranslation } from "react-i18next"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 import { trackFlashcardsShortcutHintTelemetry } from "@/utils/flashcards-shortcut-hint-telemetry"
 import { processInChunks } from "@/utils/chunk-processing"
 import {
@@ -61,7 +59,15 @@ import { FLASHCARDS_DRAWER_WIDTH_PX } from "../constants"
 import { formatCardType } from "../utils/model-type-labels"
 import { FlashcardQueueStateBadge } from "../utils/queue-state-badges"
 import { getFlashcardSourceMeta } from "../utils/source-reference"
-import { formatDeckDisplayName } from "../utils/deck-display"
+import {
+  formatDeckHierarchyLabel,
+  getDeckDescendantIds
+} from "../utils/deck-display"
+import {
+  formatFlashcardAbsoluteDateTime,
+  formatFlashcardRelativeTime,
+  isFlashcardTimestampBefore
+} from "../utils/date-display"
 import {
   formatFlashcardsUiErrorMessage,
   mapFlashcardsUiError
@@ -77,8 +83,6 @@ import {
   type Flashcard,
   type FlashcardUpdate
 } from "@/services/flashcards"
-
-dayjs.extend(relativeTime)
 
 const { Text } = Typography
 
@@ -99,11 +103,16 @@ type MoveUndoSnapshot = {
 
 interface ManageTabProps {
   onNavigateToImport: () => void
+  onNavigateToGenerate?: () => void
   onReviewCard: (card: Flashcard) => void
   openCreateSignal?: number
   isActive: boolean
   initialDeckId?: number
+  initialDeckHandoffKey?: string | null
   initialShowWorkspaceDecks?: boolean
+  createInitialDeckId?: number | null
+  createInitialShowWorkspaceDecks?: boolean
+  onCreateHandoffConsumed?: () => void
 }
 
 export const buildFlashcardsWorkspaceVisibilityOptions = (
@@ -122,11 +131,16 @@ export const buildFlashcardsWorkspaceVisibilityOptions = (
  */
 export const ManageTab: React.FC<ManageTabProps> = ({
   onNavigateToImport,
+  onNavigateToGenerate,
   onReviewCard,
   openCreateSignal,
   isActive,
   initialDeckId,
-  initialShowWorkspaceDecks = false
+  initialDeckHandoffKey = null,
+  initialShowWorkspaceDecks = false,
+  createInitialDeckId = null,
+  createInitialShowWorkspaceDecks = false,
+  onCreateHandoffConsumed
 }) => {
   const { t } = useTranslation(["option", "common"])
   const qc = useQueryClient()
@@ -157,6 +171,30 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     },
     [message]
   )
+  const formatCardCount = React.useCallback(
+    (count: number) => {
+      const noun =
+        count === 1
+          ? t("option:flashcards.cardLowercase", { defaultValue: "card" })
+          : t("option:flashcards.cardsLowercase", { defaultValue: "cards" })
+      return `${count} ${noun}`
+    },
+    [t]
+  )
+  const warnBulkPartialFailure = React.useCallback(
+    (verb: string, successCount: number, failedCount: number) => {
+      message.warning(
+        t("option:flashcards.bulkPartialFailure", {
+          defaultValue:
+            "{{verb}} {{successLabel}}; {{failed}} failed. Failed cards remain selected so you can retry.",
+          verb,
+          successLabel: formatCardCount(successCount),
+          failed: failedCount
+        })
+      )
+    },
+    [formatCardCount, message, t]
+  )
 
   // Track pending deletions for soft-delete with undo + trash view
   const [pendingDeletions, setPendingDeletions] = React.useState<Record<string, PendingDeletion>>({})
@@ -169,6 +207,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const [nowMs, setNowMs] = React.useState(() => Date.now())
   const [showWorkspaceDecks, setShowWorkspaceDecks] = React.useState(initialShowWorkspaceDecks)
   const [selectedWorkspaceId, setSelectedWorkspaceId] = React.useState<string | null>(null)
+  const appliedDeckHandoffKeyRef = React.useRef<string | null>(null)
   const [deckScopeOpen, setDeckScopeOpen] = React.useState(false)
   const [deckScopeForm] = Form.useForm()
 
@@ -192,14 +231,21 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const [pageSize, setPageSize] = React.useState(20)
   const [listDensity, setListDensity] = React.useState<"compact" | "expanded" | "document">("compact")
   const [shortcutHintDensity, setShortcutHintDensity] = useFlashcardsShortcutHintDensity()
+
   React.useEffect(() => {
-    if (!isActive || viewMode !== "cards" || shortcutHintDensity === "hidden") return
-    void trackFlashcardsShortcutHintTelemetry({
-      type: "flashcards_shortcut_hints_exposed",
-      surface: "cards",
-      density: shortcutHintDensity
-    })
-  }, [isActive, viewMode, shortcutHintDensity])
+    if (
+      initialDeckId == null ||
+      !initialDeckHandoffKey ||
+      appliedDeckHandoffKeyRef.current === initialDeckHandoffKey
+    ) {
+      return
+    }
+    appliedDeckHandoffKeyRef.current = initialDeckHandoffKey
+    setMDeckId(initialDeckId)
+    setShowWorkspaceDecks(initialShowWorkspaceDecks)
+    setSelectedWorkspaceId(null)
+    setPage(1)
+  }, [initialDeckHandoffKey, initialDeckId, initialShowWorkspaceDecks])
   const cycleShortcutHintDensity = React.useCallback(() => {
     void setShortcutHintDensity((prev) => {
       const next =
@@ -264,8 +310,17 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     [mSort]
   )
 
-  // Check if any filters are active
-  const hasActiveFilters = !!(mQuery || mTags.length > 0 || mDeckId != null || mDue !== "all")
+  const normalizedManageQuery = mQuery.trim()
+
+  // Check if any manage filters are active
+  const hasActiveFilters = !!(
+    normalizedManageQuery ||
+    mTags.length > 0 ||
+    mDue !== "all" ||
+    mDeckId != null ||
+    selectedWorkspaceId != null ||
+    showWorkspaceDecks
+  )
 
   // Clear all filters
   const clearAllFilters = () => {
@@ -274,6 +329,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     setMTags([])
     setMTagInput("")
     setMDeckId(undefined)
+    setShowWorkspaceDecks(false)
+    setSelectedWorkspaceId(null)
     setMDue("all")
     setMSort("due")
     setPage(1)
@@ -331,10 +388,24 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       if (deckId == null) {
         return t("option:flashcards.noDeck", { defaultValue: "No deck" })
       }
-      return formatDeckDisplayName(deckMap.get(deckId), `Deck ${deckId}`)
+      return formatDeckHierarchyLabel(deckMap.get(deckId), deckMap, `Deck ${deckId}`)
     },
     [deckMap, t]
   )
+  const deckParentOptions = React.useMemo(() => {
+    if (!selectedDeck) {
+      return []
+    }
+    const decks = decksQuery.data || []
+    const blockedDeckIds = getDeckDescendantIds(decks, selectedDeck.id)
+    blockedDeckIds.add(selectedDeck.id)
+    return decks
+      .filter((deck) => !blockedDeckIds.has(deck.id))
+      .map((deck) => ({
+        label: formatDeckHierarchyLabel(deck, deckMap, `Deck ${deck.id}`),
+        value: deck.id
+      }))
+  }, [deckMap, decksQuery.data, selectedDeck])
   const workspaceFilterOptions = React.useMemo(() => {
     const workspaceIds = new Set<string>()
     ;(decksQuery.data || []).forEach((deck) => {
@@ -358,6 +429,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set())
   const [previewOpen, setPreviewOpen] = React.useState<Set<string>>(new Set())
   const [selectAllAcross, setSelectAllAcross] = React.useState<boolean>(false)
+  const [selectedIdsMaySpanPages, setSelectedIdsMaySpanPages] = React.useState(false)
 
   const updatePendingDeletions = React.useCallback(
     (updater: (prev: Record<string, PendingDeletion>) => Record<string, PendingDeletion>) => {
@@ -398,7 +470,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
   const manageQuery = useManageQuery({
     deckId: mDeckId,
-    query: mQuery,
+    query: normalizedManageQuery,
     tags: mTags,
     dueStatus: mDue,
     sortBy: mSort,
@@ -409,7 +481,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const documentQuery = useFlashcardDocumentQuery(
     {
       deckId: mDeckId,
-      query: mQuery,
+      query: normalizedManageQuery,
       tags: mTags,
       dueStatus: mDue,
       sortBy: documentSort,
@@ -423,21 +495,29 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const documentFilterContext = React.useMemo(
     () => ({
       deckId: mDeckId,
-      query: mQuery,
+      query: normalizedManageQuery,
       tags: mTags,
       dueStatus: mDue,
       sortBy: documentSort,
       workspaceId: selectedWorkspaceId,
       includeWorkspaceItems: selectedWorkspaceId == null ? showWorkspaceDecks : false
     }),
-    [documentSort, mDeckId, mDue, mQuery, mTags, selectedWorkspaceId, showWorkspaceDecks]
+    [
+      documentSort,
+      mDeckId,
+      mDue,
+      normalizedManageQuery,
+      mTags,
+      selectedWorkspaceId,
+      showWorkspaceDecks
+    ]
   )
   const documentQueryKey = React.useMemo(
     () =>
       getFlashcardDocumentQueryKey(
         {
           deckId: mDeckId,
-          query: mQuery,
+          query: normalizedManageQuery,
           tags: mTags,
           dueStatus: mDue,
           sortBy: documentSort,
@@ -451,7 +531,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
           includeWorkspaceItems: selectedWorkspaceId == null ? showWorkspaceDecks : false
         }
       ),
-    [documentSort, mDeckId, mDue, mQuery, mTags, selectedWorkspaceId, showWorkspaceDecks]
+    [
+      documentSort,
+      mDeckId,
+      mDue,
+      normalizedManageQuery,
+      mTags,
+      selectedWorkspaceId,
+      showWorkspaceDecks
+    ]
   )
 
   React.useEffect(() => {
@@ -464,15 +552,24 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   }, [mQueryInput, mQuery])
 
   React.useEffect(() => {
-    if (!selectAllAcross) {
+    if (!selectAllAcross && !selectedIdsMaySpanPages) {
       setSelectedIds(new Set())
     }
-  }, [page, pageSize, selectAllAcross])
+  }, [page, pageSize, selectAllAcross, selectedIdsMaySpanPages])
 
   React.useEffect(() => {
     setSelectedIds(new Set())
     setSelectAllAcross(false)
-  }, [mDeckId, mQuery, mTags, mDue, mSort])
+    setSelectedIdsMaySpanPages(false)
+  }, [
+    mDeckId,
+    normalizedManageQuery,
+    mTags,
+    mDue,
+    mSort,
+    selectedWorkspaceId,
+    showWorkspaceDecks
+  ])
 
   React.useEffect(() => {
     return () => {
@@ -485,28 +582,34 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
   const toggleSelect = (uuid: string, checked: boolean) => {
     if (selectAllAcross) return
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (checked) next.add(uuid)
-      else next.delete(uuid)
-      return next
-    })
+    const next = new Set(selectedIds)
+    if (checked) next.add(uuid)
+    else next.delete(uuid)
+    const selectedVisibleCount = visibleItems.reduce(
+      (count, item) => count + (next.has(item.uuid) ? 1 : 0),
+      0
+    )
+    setSelectedIdsMaySpanPages(next.size > selectedVisibleCount)
+    setSelectedIds(next)
   }
 
   const selectAllOnPage = () => {
     const ids = visibleItems.map((i) => i.uuid)
     setSelectAllAcross(false)
-    setSelectedIds(new Set([...(selectedIds || new Set()), ...ids]))
+    setSelectedIdsMaySpanPages(false)
+    setSelectedIds(new Set(ids))
   }
 
   const clearSelection = React.useCallback(() => {
     setSelectedIds(new Set())
     setSelectAllAcross(false)
+    setSelectedIdsMaySpanPages(false)
   }, [])
 
   const selectAllAcrossResults = () => {
     if (selectAllAcrossDisabled) return
     setSelectAllAcross(true)
+    setSelectedIdsMaySpanPages(false)
     setSelectedIds(new Set())
   }
 
@@ -543,6 +646,42 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const allOnPageSelected = pageCount > 0 && selectedOnPageCount === pageCount
   const someOnPageSelected = selectedOnPageCount > 0 && selectedOnPageCount < pageCount
   const selectAllAcrossDisabled = isDocumentMode && documentQuery.isTruncated
+  const selectionScopeLabel = selectedIdsMaySpanPages
+    ? t("option:flashcards.selectedFailedForRetry", {
+        defaultValue: "failed cards selected for retry"
+      })
+    : selectAllAcross
+      ? t("option:flashcards.selectedAcrossAll", {
+          defaultValue: "selected across all results"
+        })
+      : t("option:flashcards.selectedOnPage", {
+          defaultValue: "selected on this page"
+        })
+  const selectionBadgeTitle = selectedIdsMaySpanPages
+    ? t("option:flashcards.failedCardsForRetry", {
+        defaultValue: "Failed cards selected for retry"
+      })
+    : selectAllAcross
+      ? t("option:flashcards.allResults", { defaultValue: "All results" })
+      : t("option:flashcards.thisPage", { defaultValue: "This page" })
+  const isNoCardFirstRun =
+    viewMode === "cards" &&
+    !isDocumentMode &&
+    manageQuery.data !== undefined &&
+    !manageQuery.isFetching &&
+    !hasActiveFilters &&
+    totalCount === 0 &&
+    pageItems.length === 0
+  const showManageExpertChrome = viewMode === "cards" && !isNoCardFirstRun
+
+  React.useEffect(() => {
+    if (!isActive || !showManageExpertChrome || shortcutHintDensity === "hidden") return
+    void trackFlashcardsShortcutHintTelemetry({
+      type: "flashcards_shortcut_hints_exposed",
+      surface: "cards",
+      density: shortcutHintDensity
+    })
+  }, [isActive, shortcutHintDensity, showManageExpertChrome])
 
   const updateMutation = useUpdateFlashcardMutation()
   const bulkUpdateMutation = useUpdateFlashcardsBulkMutation()
@@ -596,7 +735,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   // Reset focused index when page or filters change
   React.useEffect(() => {
     setFocusedIndex(-1)
-  }, [page, pageSize, listDensity, mDeckId, mQuery, mTags, mDue, mSort])
+  }, [page, pageSize, listDensity, mDeckId, normalizedManageQuery, mTags, mDue, mSort])
 
   async function fetchAllItemsAcrossFilters(): Promise<Flashcard[]> {
     const items: Flashcard[] = []
@@ -620,7 +759,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     ) {
       const res = await listFlashcards({
         deck_id: mDeckId ?? undefined,
-        q: mQuery || undefined,
+        q: normalizedManageQuery || undefined,
         tag: primaryTag,
         due_status: mDue,
         workspace_id: selectedWorkspaceId ?? undefined,
@@ -652,7 +791,21 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
   async function getSelectedItems(): Promise<Flashcard[]> {
     if (!selectAllAcross) {
-      return visibleItems.filter((i) => selectedIds.has(i.uuid))
+      const selectedVisibleItems = visibleItems.filter((i) => selectedIds.has(i.uuid))
+      if (!selectedIdsMaySpanPages || selectedVisibleItems.length === selectedIds.size) {
+        return selectedVisibleItems
+      }
+      const selectedItemsByUuid = new Map(
+        selectedVisibleItems.map((item) => [item.uuid, item])
+      )
+      const missingIds = [...selectedIds].filter((uuid) => !selectedItemsByUuid.has(uuid))
+      await processInChunks(missingIds, BULK_MUTATION_CHUNK_SIZE, async (chunk) => {
+        const results = await Promise.all(chunk.map((uuid) => getFlashcard(uuid)))
+        results.forEach((item) => {
+          selectedItemsByUuid.set(item.uuid, item)
+        })
+      })
+      return [...selectedItemsByUuid.values()]
     }
     const all = await fetchAllItemsAcrossFilters()
     return all
@@ -676,7 +829,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const openDeckScopeEditor = () => {
     if (!selectedDeck) return
     deckScopeForm.setFieldsValue({
-      workspaceId: selectedDeck.workspace_id ?? ""
+      workspaceId: selectedDeck.workspace_id ?? "",
+      parentDeckId: selectedDeck.parent_deck_id ?? undefined
     })
     setDeckScopeOpen(true)
   }
@@ -698,10 +852,12 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     try {
       const values = await deckScopeForm.validateFields()
       const workspaceId = typeof values.workspaceId === "string" ? values.workspaceId.trim() : ""
+      const parentDeckId = typeof values.parentDeckId === "number" ? values.parentDeckId : null
       await updateDeckMutation.mutateAsync({
         deckId: selectedDeck.id,
         update: {
           workspace_id: workspaceId.length > 0 ? workspaceId : null,
+          parent_deck_id: parentDeckId,
           expected_version: selectedDeck.version
         }
       })
@@ -753,6 +909,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       }
 
       let changedCount = 0
+      const failedIds = new Set<string>()
       await processInChunks(
         selectedItems,
         BULK_MUTATION_CHUNK_SIZE,
@@ -783,17 +940,37 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               changedCount += 1
             })
           )
-          const failures = results.filter((result) => result.status === "rejected")
-          if (failures.length > 0) {
-            console.warn(`${failures.length} bulk tag updates failed in chunk`)
+          let chunkFailures = 0
+          results.forEach((result, index) => {
+            if (result.status === "rejected") {
+              failedIds.add(chunk[index].uuid)
+              chunkFailures += 1
+            }
+          })
+          if (chunkFailures > 0) {
+            console.warn(`${chunkFailures} bulk tag updates failed in chunk`)
           }
         }
       )
 
-      clearSelection()
       setBulkTagOpen(false)
       setBulkTagInput("")
       await qc.invalidateQueries({ queryKey: ["flashcards:list"] })
+
+      const failedCount = failedIds.size
+      if (failedCount > 0) {
+        setSelectAllAcross(false)
+        setSelectedIdsMaySpanPages(true)
+        setSelectedIds(new Set(failedIds))
+        warnBulkPartialFailure(
+          t("option:flashcards.bulkPartialUpdated", { defaultValue: "Updated" }),
+          changedCount,
+          failedCount
+        )
+        return
+      }
+
+      clearSelection()
 
       if (changedCount === 0) {
         message.info(
@@ -1118,12 +1295,41 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
   // Create drawer
   const [createOpen, setCreateOpen] = React.useState(false)
+  const [createDrawerInitialDeckId, setCreateDrawerInitialDeckId] =
+    React.useState<number | null>(null)
+  const handledOpenCreateSignalRef = React.useRef<number | undefined>(undefined)
 
   React.useEffect(() => {
-    if (!openCreateSignal) return
+    if (!openCreateSignal || handledOpenCreateSignalRef.current === openCreateSignal) return
+    handledOpenCreateSignalRef.current = openCreateSignal
     setViewMode("cards")
+    setShowWorkspaceDecks(createInitialShowWorkspaceDecks)
+    setSelectedWorkspaceId(null)
+    if (createInitialDeckId != null) {
+      setMDeckId(createInitialDeckId)
+      setPage(1)
+    }
+    setCreateDrawerInitialDeckId(createInitialDeckId ?? null)
     setCreateOpen(true)
-  }, [openCreateSignal])
+    onCreateHandoffConsumed?.()
+  }, [
+    createInitialDeckId,
+    createInitialShowWorkspaceDecks,
+    onCreateHandoffConsumed,
+    openCreateSignal
+  ])
+
+  const openManualCreateDrawer = React.useCallback(() => {
+    setCreateDrawerInitialDeckId(null)
+    onCreateHandoffConsumed?.()
+    setCreateOpen(true)
+  }, [onCreateHandoffConsumed])
+
+  const closeCreateDrawer = React.useCallback(() => {
+    setCreateOpen(false)
+    setCreateDrawerInitialDeckId(null)
+    onCreateHandoffConsumed?.()
+  }, [onCreateHandoffConsumed])
 
   // Quick actions: duplicate
   const duplicateCard = async (card: Flashcard) => {
@@ -1162,6 +1368,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
     try {
       const undoSnapshots: MoveUndoSnapshot[] = []
       let movedCount = 0
+      let failedCount = 0
       if (moveCard) {
         const full = await getFlashcard(moveCard.uuid)
         const previousDeckId = full.deck_id ?? null
@@ -1178,6 +1385,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
           movedCount += 1
         }
       } else {
+        const failedIds = new Set<string>()
         if (moveDeckId == null) {
           message.error(
             t("option:flashcards.bulkMoveSelectDeck", {
@@ -1210,20 +1418,41 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   movedCount += 1
                 })
               )
-              const failures = results.filter((r) => r.status === "rejected")
-              if (failures.length > 0) {
-                console.warn(`${failures.length} move updates failed in chunk`)
+              let chunkFailures = 0
+              results.forEach((result, index) => {
+                if (result.status === "rejected") {
+                  failedIds.add(chunk[index].uuid)
+                  chunkFailures += 1
+                }
+              })
+              if (chunkFailures > 0) {
+                console.warn(`${chunkFailures} move updates failed in chunk`)
               }
             }
           )
         }
-        clearSelection()
+        if (failedIds.size > 0) {
+          setSelectAllAcross(false)
+          setSelectedIdsMaySpanPages(true)
+          setSelectedIds(new Set(failedIds))
+        } else {
+          clearSelection()
+        }
+        failedCount = failedIds.size
       }
       setMoveOpen(false)
       setMoveCard(null)
       setMoveDeckId(null)
       await qc.invalidateQueries({ queryKey: ["flashcards:list"] })
       if (movedCount === 0) {
+        if (failedCount > 0) {
+          warnBulkPartialFailure(
+            t("option:flashcards.bulkPartialMoved", { defaultValue: "Moved" }),
+            0,
+            failedCount
+          )
+          return
+        }
         message.info(
           t("option:flashcards.bulkMoveNoChanges", {
             defaultValue: "No cards needed moving."
@@ -1272,7 +1501,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
           await qc.invalidateQueries({ queryKey: ["flashcards:list"] })
         }
       })
-      message.success(t("common:updated", { defaultValue: "Updated" }))
+      if (failedCount > 0) {
+        warnBulkPartialFailure(
+          t("option:flashcards.bulkPartialMoved", { defaultValue: "Moved" }),
+          movedCount,
+          failedCount
+        )
+      } else {
+        message.success(t("common:updated", { defaultValue: "Updated" }))
+      }
     } catch (e: unknown) {
       reportUiError(
         e,
@@ -1537,7 +1774,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               ]}
             />
             {/* Keyboard shortcut hint */}
-            {viewMode === "cards" && (
+            {showManageExpertChrome && (
               <div
                 className="hidden md:flex items-center gap-1.5"
                 data-testid="flashcards-manage-shortcut-chips"
@@ -1610,7 +1847,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         )}
 
         {/* Simplified Filter UI */}
-        {viewMode === "cards" && (
+        {showManageExpertChrome && (
         <div className="mb-3 space-y-3">
           {/* Primary filters: Search + Deck (always visible) */}
           <div className="flex items-center gap-2 flex-wrap">
@@ -1638,7 +1875,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               className="min-w-44"
               data-testid="flashcards-manage-deck-select"
               options={(decksQuery.data || []).map((d) => ({
-                label: formatDeckDisplayName(d, `Deck ${d.id}`),
+                label: formatDeckHierarchyLabel(d, deckMap, `Deck ${d.id}`),
                 value: d.id
               }))}
             />
@@ -1876,7 +2113,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         )}
 
         {/* Selection Summary Bar - simplified to two modes */}
-        {viewMode === "cards" && (
+        {showManageExpertChrome && (
         <div
           className="mb-2 flex items-center gap-3"
           data-testid="flashcards-manage-selection-summary"
@@ -1915,16 +2152,10 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   showZero={false}
                   className="mr-1"
                   style={{ backgroundColor: selectAllAcross ? "rgb(var(--color-primary))" : "rgb(var(--color-success))" }}
-                  title={selectAllAcross ? t("option:flashcards.allResults", { defaultValue: "All results" }) : t("option:flashcards.thisPage", { defaultValue: "This page" })}
+                  title={selectionBadgeTitle}
                 />
                 <span className="text-text-muted flex items-center gap-1">
-                  {selectAllAcross
-                    ? t("option:flashcards.selectedAcrossAll", {
-                        defaultValue: "selected across all results"
-                      })
-                    : t("option:flashcards.selectedOnPage", {
-                        defaultValue: "selected on this page"
-                      })}
+                  {selectionScopeLabel}
                 </span>
                 {!selectAllAcross && selectedCount > 0 && totalCount > selectedCount && (
                   <button
@@ -1982,7 +2213,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                 <Empty
                   description={t("option:flashcards.noCardsTitle", {
                     defaultValue:
-                      mQuery || mTags.length > 0 || mDeckId != null || mDue !== "all"
+                      hasActiveFilters
                         ? "No cards match your filters"
                         : "No flashcards yet"
                   })}
@@ -1991,13 +2222,13 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                     <Text type="secondary">
                       {t("option:flashcards.noCardsDescription", {
                         defaultValue:
-                          mQuery || mTags.length > 0 || mDeckId != null || mDue !== "all"
+                          hasActiveFilters
                             ? "Try adjusting your search, deck, tag, or due filters."
                             : "Create cards from your notes and media, or import an existing deck."
                       })}
                     </Text>
                     <Space>
-                      {mQuery || mTags.length > 0 || mDeckId != null || mDue !== "all" ? (
+                      {hasActiveFilters ? (
                         <Button onClick={clearAllFilters}>
                           {t("option:flashcards.clearFilters", {
                             defaultValue: "Clear filters"
@@ -2005,14 +2236,29 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                         </Button>
                       ) : (
                         <>
-                          <Button type="primary" onClick={() => setCreateOpen(true)}>
+                          <Button
+                            type="primary"
+                            onClick={openManualCreateDrawer}
+                            data-testid="flashcards-manage-empty-create-cta"
+                          >
                             {t("option:flashcards.noCardsCreateCta", {
                               defaultValue: "Create card"
                             })}
                           </Button>
-                          <Button onClick={onNavigateToImport}>
+                          <Button
+                            onClick={onNavigateToImport}
+                            data-testid="flashcards-manage-empty-import-cta"
+                          >
                             {t("option:flashcards.noCardsImportCta", {
                               defaultValue: "Import flashcards"
+                            })}
+                          </Button>
+                          <Button
+                            onClick={onNavigateToGenerate ?? onNavigateToImport}
+                            data-testid="flashcards-manage-empty-generate-cta"
+                          >
+                            {t("option:flashcards.noCardsGenerateCta", {
+                              defaultValue: "Generate from text"
                             })}
                           </Button>
                         </>
@@ -2027,6 +2273,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             const compactSchedule = compactSchedulingLabels(item)
             const expandedSchedule = expandedSchedulingLabels(item)
             const sourceMeta = getFlashcardSourceMeta(item)
+            const dueRelativeLabel = item.due_at
+              ? formatFlashcardRelativeTime(item.due_at)
+              : null
+            const dueAbsoluteLabel = item.due_at
+              ? formatFlashcardAbsoluteDateTime(item.due_at)
+              : null
+            const isDue = item.due_at
+              ? isFlashcardTimestampBefore(item.due_at)
+              : false
             return (
             <List.Item
               data-testid={`flashcard-item-${item.uuid}`}
@@ -2068,7 +2323,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                   title={
                     <div className="flex items-center gap-2">
                       {/* Due status indicator */}
-                      {item.due_at && dayjs(item.due_at).isBefore(dayjs()) && (
+                      {isDue && (
                         <Tooltip title={t("option:flashcards.dueNow", { defaultValue: "Due now" })}>
                           <span className="inline-block w-2 h-2 rounded-full bg-success" />
                         </Tooltip>
@@ -2092,7 +2347,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                         )}
                         {item.due_at && (
                           <span className="text-text-subtle">
-                            {dayjs(item.due_at).fromNow()}
+                            {dueRelativeLabel ?? item.due_at}
                           </span>
                         )}
                         {sourceMeta && (
@@ -2209,8 +2464,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
                         {item.due_at && (
                           <Tag color="green">
                             {t("option:flashcards.due", { defaultValue: "Due" })}:{" "}
-                            {dayjs(item.due_at).fromNow()} (
-                            {dayjs(item.due_at).format("YYYY-MM-DD HH:mm")})
+                            {dueRelativeLabel ?? item.due_at} (
+                            {dueAbsoluteLabel ?? item.due_at})
                           </Tag>
                         )}
                         <Tooltip
@@ -2366,9 +2621,15 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             style={{ backgroundColor: selectAllAcross ? "rgb(var(--color-primary))" : "rgb(var(--color-success))" }}
           />
           <span className="text-sm text-text-muted">
-            {selectAllAcross
-              ? t("option:flashcards.selectedAcrossAll", { defaultValue: "selected across all results" })
-              : t("option:flashcards.selected", { defaultValue: "selected" })}
+            {selectedIdsMaySpanPages
+              ? t("option:flashcards.selectedFailedForRetry", {
+                  defaultValue: "failed cards selected for retry"
+                })
+              : selectAllAcross
+                ? t("option:flashcards.selectedAcrossAll", {
+                    defaultValue: "selected across all results"
+                  })
+                : t("option:flashcards.selected", { defaultValue: "selected" })}
           </span>
           <div className="h-4 w-px bg-border" />
           <Space>
@@ -2397,6 +2658,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
       <Modal
         open={bulkTagOpen}
+        destroyOnHidden
         title={
           bulkTagMode === "add"
             ? t("option:flashcards.bulkAddTagTitle", {
@@ -2460,6 +2722,18 @@ export const ManageTab: React.FC<ManageTabProps> = ({
               })}
             />
           </Form.Item>
+          <Form.Item
+            name="parentDeckId"
+            label={t("option:flashcards.parentDeck", { defaultValue: "Parent deck" })}
+          >
+            <Select<number>
+              allowClear
+              placeholder={t("option:flashcards.topLevelDeck", {
+                defaultValue: "Top-level deck"
+              })}
+              options={deckParentOptions}
+            />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -2508,7 +2782,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
           value={moveDeckId ?? undefined}
           onChange={(v) => setMoveDeckId(v ?? null)}
           options={(decksQuery.data || []).map((d) => ({
-            label: d.name,
+            label: formatDeckHierarchyLabel(d, deckMap, `Deck ${d.id}`),
             value: d.id
           }))}
         />
@@ -2533,9 +2807,10 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       {/* Create Drawer */}
       <FlashcardCreateDrawer
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={closeCreateDrawer}
         decks={decksQuery.data || []}
         decksLoading={decksQuery.isLoading}
+        initialDeckId={createDrawerInitialDeckId}
         includeWorkspaceItems={workspaceVisibilityOptions.includeWorkspaceItems}
         workspaceId={workspaceVisibilityOptions.workspaceId}
       />
@@ -2549,7 +2824,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
             size="large"
             icon={<Plus className="size-5" />}
             className="fixed bottom-6 right-6 z-50 shadow-lg !w-14 !h-14 flex items-center justify-center"
-            onClick={() => setCreateOpen(true)}
+            onClick={openManualCreateDrawer}
             data-testid="flashcards-fab-create"
           />
         </Tooltip>
@@ -2611,9 +2886,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         centered
       >
         <div className="space-y-4">
-          <Alert
-            type="warning"
-            showIcon
+          <DsAlert
+            variant="warning"
             title={t("option:flashcards.bulkDeleteLargeWarning", {
               defaultValue: "These cards will move to Trash for {{seconds}} seconds.",
               seconds: DELETE_UNDO_SECONDS

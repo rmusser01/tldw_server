@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 
 
 pytestmark = pytest.mark.integration
@@ -30,6 +30,22 @@ class _BulkStubDB:
 
     def get_note_by_id(self, note_id: str):
         return None
+
+
+class _FolderConflictStubDB:
+    client_id = "folder_conflict_stub"
+
+    def __init__(self) -> None:
+        self._lookup_count = 0
+
+    def get_note_folder_by_path(self, folder_path: str) -> dict[str, object] | None:
+        self._lookup_count += 1
+        if self._lookup_count == 1:
+            return None
+        return {"id": 42, "name": "Inbox", "path": "Inbox", "parent_id": None}
+
+    def create_note_folder_path(self, folder_path: str) -> dict[str, object]:
+        raise ConflictError("Folder already exists")
 
 
 @pytest.fixture()
@@ -92,6 +108,33 @@ def client_with_bulk_stub(monkeypatch):
     fastapi_app.dependency_overrides.clear()
 
 
+@pytest.fixture()
+def client_with_folder_conflict_stub(monkeypatch):
+    async def override_user():
+        return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
+
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+
+    def override_db_dep():
+        return _FolderConflictStubDB()
+
+    monkeypatch.setenv("MINIMAL_TEST_APP", "0")
+    monkeypatch.setenv("ULTRA_MINIMAL_APP", "0")
+
+    from tldw_Server_API.app import main as app_main
+
+    importlib.reload(app_main)
+    fastapi_app = app_main.app
+
+    fastapi_app.dependency_overrides[get_request_user] = override_user
+    fastapi_app.dependency_overrides[get_chacha_db_for_user] = override_db_dep
+
+    with TestClient(fastapi_app) as client:
+        yield client
+
+    fastapi_app.dependency_overrides.clear()
+
+
 def test_create_get_update_delete_note(client_with_notes_db: TestClient):
     client = client_with_notes_db
 
@@ -134,6 +177,52 @@ def test_create_get_update_delete_note(client_with_notes_db: TestClient):
     assert del_resp.status_code in (200, 204)
 
 
+def test_note_folder_list_and_create_endpoints(client_with_notes_db: TestClient) -> None:
+    client = client_with_notes_db
+
+    empty_response = client.get("/api/v1/notes/folders/")
+    assert empty_response.status_code == 200, empty_response.text
+    assert empty_response.json()["items"] == []
+
+    create_response = client.post(
+        "/api/v1/notes/folders/",
+        json={"path": "Inbox/Captured Articles"},
+    )
+    assert create_response.status_code == 201, create_response.text
+    created = create_response.json()
+    assert created["name"] == "Captured Articles"
+    assert created["path"] == "Inbox/Captured Articles"
+    assert created["parent_id"] is not None
+
+    duplicate_response = client.post(
+        "/api/v1/notes/folders/",
+        json={"path": "inbox/captured articles"},
+    )
+    assert duplicate_response.status_code == 200, duplicate_response.text
+    assert duplicate_response.json()["id"] == created["id"]
+
+    list_response = client.get("/api/v1/notes/folders/")
+    assert list_response.status_code == 200, list_response.text
+    payload = list_response.json()
+    assert payload["count"] == 2
+    assert [folder["path"] for folder in payload["items"]] == [
+        "Inbox",
+        "Inbox/Captured Articles",
+    ]
+
+
+def test_create_note_folder_refetches_after_conflict(
+    client_with_folder_conflict_stub: TestClient,
+) -> None:
+    response = client_with_folder_conflict_stub.post(
+        "/api/v1/notes/folders/",
+        json={"path": "Inbox"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] == 42
+
+
 def test_keywords_crud_and_linking(client_with_notes_db: TestClient):
     client = client_with_notes_db
 
@@ -155,6 +244,8 @@ def test_keywords_crud_and_linking(client_with_notes_db: TestClient):
     assert lst.status_code == 200 and isinstance(lst.json(), list)
     srch = client.get("/api/v1/notes/keywords/search/", params={"query": "fru"})
     assert srch.status_code == 200 and any(k.get("id") == kw_id for k in srch.json())
+    srch_no_slash = client.get("/api/v1/notes/keywords/search", params={"query": "fru"})
+    assert srch_no_slash.status_code == 200 and any(k.get("id") == kw_id for k in srch_no_slash.json())
 
     # Link to note 1 and note 2
     link1 = client.post(f"/api/v1/notes/{n1['id']}/keywords/{kw_id}")
@@ -227,12 +318,121 @@ def test_keywords_list_can_include_note_counts(client_with_notes_db: TestClient)
     assert by_keyword.get("beta", {}).get("note_count") == 1
 
 
+def test_search_notes_with_keyword_tokens_returns_pagination_total(client_with_notes_db: TestClient):
+    client = client_with_notes_db
+
+    note_ids = []
+    for i in range(3):
+        note = client.post(
+            "/api/v1/notes/",
+            json={"title": f"Topic Note {i}", "content": f"Tagged content {i}"},
+        ).json()
+        note_ids.append(note["id"])
+    client.post("/api/v1/notes/", json={"title": "Other Note", "content": "Not tagged"})
+
+    kw_resp = client.post("/api/v1/notes/keywords/", json={"keyword": "topic-filter"})
+    assert kw_resp.status_code == 201, kw_resp.text
+    kw_id = kw_resp.json()["id"]
+    for note_id in note_ids:
+        link = client.post(f"/api/v1/notes/{note_id}/keywords/{kw_id}")
+        assert link.status_code == 200
+
+    response = client.get(
+        "/api/v1/notes/search/",
+        params=[("tokens", "topic-filter"), ("limit", "2"), ("offset", "0")],
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert isinstance(payload, dict)
+    assert payload["count"] == 2
+    assert payload["total"] == 3
+    assert len(payload["notes"]) == 2
+    assert payload["pagination"]["total"] == 3
+    assert payload["pagination"]["has_more"] is True
+    assert payload["pagination"]["next_offset"] == 2
+
+
+def test_search_notes_rejects_excessive_keyword_tokens(client_with_notes_db: TestClient):
+    client = client_with_notes_db
+
+    response = client.get(
+        "/api/v1/notes/search/",
+        params=[("tokens", f"topic-{index}") for index in range(21)],
+    )
+
+    assert response.status_code == 400
+    assert "Too many keyword tokens" in response.json()["detail"]
+
+
+def test_search_notes_rejects_excessive_raw_keyword_tokens(client_with_notes_db: TestClient):
+    client = client_with_notes_db
+
+    response = client.get(
+        "/api/v1/notes/search/",
+        params=[("tokens", "topic") for _ in range(101)],
+    )
+
+    assert response.status_code == 400
+    assert "maximum raw tokens is 100" in response.json()["detail"]
+
+
+def test_search_notes_falls_back_to_integer_total_when_count_fails(
+    client_with_notes_db: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = client_with_notes_db
+
+    note_ids = []
+    for i in range(3):
+        note = client.post(
+            "/api/v1/notes/",
+            json={"title": f"Fallback Search {i}", "content": f"Fallback searchable content {i}"},
+        ).json()
+        note_ids.append(note["id"])
+
+    kw_resp = client.post("/api/v1/notes/keywords/", json={"keyword": "fallback-topic"})
+    assert kw_resp.status_code == 201, kw_resp.text
+    kw_id = kw_resp.json()["id"]
+    for note_id in note_ids:
+        link = client.post(f"/api/v1/notes/{note_id}/keywords/{kw_id}")
+        assert link.status_code == 200
+
+    def fail_count(*args, **kwargs):
+        raise RuntimeError("count unavailable")
+
+    monkeypatch.setattr(CharactersRAGDB, "count_notes_matching", fail_count)
+    response = client.get(
+        "/api/v1/notes/search/",
+        params={"query": "Fallback", "limit": 2, "offset": 1},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["count"] == 2
+    assert payload["total"] == 3
+    assert payload["pagination"]["total"] == 3
+
+    monkeypatch.setattr(CharactersRAGDB, "count_notes_matching_keywords", fail_count)
+    keyword_response = client.get(
+        "/api/v1/notes/search/",
+        params=[("tokens", "fallback-topic"), ("limit", "2"), ("offset", "1")],
+    )
+    assert keyword_response.status_code == 200, keyword_response.text
+    keyword_payload = keyword_response.json()
+    assert keyword_payload["count"] == 2
+    assert keyword_payload["total"] == 3
+    assert keyword_payload["pagination"]["total"] == 3
+
+
 def test_list_and_search_pagination_and_404s(client_with_notes_db: TestClient):
     client = client_with_notes_db
 
     # Create several notes
     for i in range(5):
-        client.post("/api/v1/notes/", json={"title": f"T{i}", "content": f"C{i}"})
+        client.post(
+            "/api/v1/notes/",
+            json={"title": f"Searchable Topic {i}", "content": f"Searchable Content {i}"},
+        )
 
     # Paginate list
     page1 = client.get("/api/v1/notes/", params={"limit": 2, "offset": 0})
@@ -241,6 +441,22 @@ def test_list_and_search_pagination_and_404s(client_with_notes_db: TestClient):
     d1, d2 = page1.json(), page2.json()
     assert isinstance(d1, dict) and isinstance(d2, dict)
     assert isinstance(d1.get("notes"), list) and isinstance(d2.get("notes"), list)
+    assert d1["pagination"]["mode"] == "offset"
+    assert d1["pagination"]["limit"] == 2
+    assert d1["pagination"]["offset"] == 0
+    assert d1["pagination"]["total"] == d1["total"]
+    assert d1["pagination"]["has_more"] is True
+    assert d1["pagination"]["next_offset"] == 2
+    assert d1["has_more"] is True
+    assert d1["next_offset"] == 2
+    assert d2["pagination"]["mode"] == "offset"
+    assert d2["pagination"]["limit"] == 2
+    assert d2["pagination"]["offset"] == 2
+    assert d2["pagination"]["total"] == d2["total"]
+    assert d2["pagination"]["has_more"] is True
+    assert d2["pagination"]["next_offset"] == 4
+    assert d2["has_more"] is True
+    assert d2["next_offset"] == 4
     # Verify disjointness of pages by IDs
     ids1 = {n.get("id") for n in d1.get("notes", [])}
     ids2 = {n.get("id") for n in d2.get("notes", [])}
@@ -249,11 +465,30 @@ def test_list_and_search_pagination_and_404s(client_with_notes_db: TestClient):
     if len(ids1) == 2 and len(ids2) == 2:
         assert len(ids1 | ids2) == 4
 
-    # Search notes
-    search = client.get("/api/v1/notes/search/", params={"query": "T", "limit": 3})
-    assert search.status_code == 200 and isinstance(search.json(), list)
+    # Search notes returns the same canonical pagination envelope as list endpoints.
+    search = client.get("/api/v1/notes/search/", params={"query": "Searchable", "limit": 3})
+    assert search.status_code == 200
+    search_data = search.json()
+    assert isinstance(search_data, dict)
+    assert isinstance(search_data.get("notes"), list)
+    assert isinstance(search_data.get("items"), list)
+    assert isinstance(search_data.get("results"), list)
+    assert search_data["count"] == len(search_data["notes"])
+    assert search_data["limit"] == 3
+    assert search_data["offset"] == 0
+    assert search_data["pagination"]["mode"] == "offset"
+    assert search_data["pagination"]["limit"] == 3
+    assert search_data["pagination"]["offset"] == 0
+    assert search_data["pagination"]["total"] == search_data["total"]
+    assert search_data["total"] >= 5
+    assert search_data["total"] > search_data["count"]
     empty_search = client.get("/api/v1/notes/search/", params={"query": "zzznotfound", "limit": 3})
-    assert empty_search.status_code == 200 and empty_search.json() == []
+    assert empty_search.status_code == 200
+    empty_data = empty_search.json()
+    assert empty_data["notes"] == []
+    assert empty_data["count"] == 0
+    assert empty_data["total"] == 0
+    assert empty_data["pagination"]["has_more"] is False
 
     # Non-existent note 404
     nf = client.get("/api/v1/notes/non-existent-id")
@@ -342,6 +577,56 @@ def test_keywords_list_pagination_and_search_limit(client_with_notes_db: TestCli
     results = search.json()
     assert isinstance(results, list)
     assert len(results) <= 7
+
+
+def test_keyword_collections_list_includes_canonical_pagination(client_with_notes_db: TestClient):
+    client = client_with_notes_db
+
+    first = client.post("/api/v1/notes/collections", json={"name": "Collection A"})
+    second = client.post("/api/v1/notes/collections", json={"name": "Collection B"})
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+
+    page1 = client.get("/api/v1/notes/collections", params={"limit": 1, "offset": 0})
+    page2 = client.get("/api/v1/notes/collections", params={"limit": 1, "offset": 1})
+    assert page1.status_code == 200, page1.text
+    assert page2.status_code == 200, page2.text
+
+    payload1 = page1.json()
+    payload2 = page2.json()
+    assert len(payload1["collections"]) == 1
+    assert len(payload2["collections"]) == 1
+    page1_ids = {collection["id"] for collection in payload1["collections"]}
+    page2_ids = {collection["id"] for collection in payload2["collections"]}
+    assert page1_ids.isdisjoint(page2_ids)
+    assert payload1["total"] == 2
+    assert payload1["count"] == 1
+    assert payload1["limit"] == 1
+    assert payload1["offset"] == 0
+    assert payload1["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 0,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    assert payload1["has_more"] is True
+    assert payload1["next_offset"] == 1
+    assert payload2["total"] == 2
+    assert payload2["count"] == 1
+    assert payload2["limit"] == 1
+    assert payload2["offset"] == 1
+    assert payload2["pagination"] == {
+        "mode": "offset",
+        "total": 2,
+        "limit": 1,
+        "offset": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
+    assert payload2["has_more"] is False
+    assert payload2["next_offset"] is None
 
 
 def test_keywords_list_without_trailing_slash_does_not_hit_note_lookup(client_with_notes_db: TestClient):

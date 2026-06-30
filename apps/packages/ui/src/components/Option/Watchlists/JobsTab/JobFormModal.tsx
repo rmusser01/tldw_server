@@ -2,25 +2,36 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { Button, Collapse, Form, Input, InputNumber, Modal, Radio, Select, Switch, Tag, message } from "antd"
 import { useTranslation } from "react-i18next"
 import {
+  applyWatchlistOutputPreset,
+  createWatchlistOutputPreset,
   createWatchlistJob,
+  deleteWatchlistOutputPreset,
   fetchWatchlistGroups,
   fetchJobOutputTemplates,
+  fetchWatchlistOutputPresets,
   fetchWatchlistSources,
   fetchWatchlistTemplates,
   previewWatchlistJob,
   testWatchlistAudioSettings,
-  updateWatchlistJob
+  updateWatchlistJob,
+  updateWatchlistOutputPreset
 } from "@/services/watchlists"
 import type {
   JobOutputPrefs,
   JobPreviewResult,
   JobScope,
   PreviewItem,
+  WatchlistOutputPreset,
   WatchlistFilter,
   WatchlistJob,
   WatchlistJobCreate
 } from "@/types/watchlists"
-import { CronDisplay, WatchlistsHelpTooltip } from "../shared"
+import {
+  buildWatchlistsModalChrome,
+  CronDisplay,
+  useWatchlistsViewport,
+  WatchlistsHelpTooltip
+} from "../shared"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import {
   getFocusableActiveElement,
@@ -46,12 +57,14 @@ import {
   trackWatchlistsPreventionTelemetry,
   type WatchlistsPreventionRule
 } from "@/utils/watchlists-prevention-telemetry"
+import { applyOutputPresetToPrefs } from "./output-presets"
 
 interface JobFormModalProps {
   open: boolean
   onClose: () => void
   onSuccess: () => void
   initialValues?: WatchlistJob
+  watchlistId?: number | null
 }
 
 interface FormValues {
@@ -213,6 +226,7 @@ const OUTPUT_PRESETS: Record<
     format: OutputFormat
     emailEnabled: boolean
     emailBodyFormat: EmailBodyFormat
+    createScheduledOutput: boolean
   }
 > = {
   briefing_md: {
@@ -220,18 +234,21 @@ const OUTPUT_PRESETS: Record<
     format: "md",
     emailEnabled: false,
     emailBodyFormat: "auto",
+    createScheduledOutput: true,
   },
   newsletter_html: {
     templateName: "newsletter_html",
     format: "html",
     emailEnabled: true,
     emailBodyFormat: "html",
+    createScheduledOutput: true,
   },
   mece_md: {
     templateName: "mece_markdown",
     format: "md",
     emailEnabled: false,
     emailBodyFormat: "auto",
+    createScheduledOutput: true,
   },
 }
 
@@ -239,7 +256,8 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   open,
   onClose,
   onSuccess,
-  initialValues
+  initialValues,
+  watchlistId
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
   const [form] = Form.useForm<FormValues>()
@@ -248,6 +266,11 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   const isEditing = !!initialValues
   const restoreFocusTargetRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
+  const { isConstrained } = useWatchlistsViewport()
+  const modalChrome = buildWatchlistsModalChrome(isConstrained, 700, {
+    maxHeight: "70vh",
+    overflowY: "auto"
+  })
 
   useLayoutEffect(() => {
     if (open) {
@@ -273,9 +296,17 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   const [timezone, setTimezone] = useState("UTC")
   const [templateOptions, setTemplateOptions] = useState<Array<{ label: string; value: string }>>([])
   const [outputPreset, setOutputPreset] = useState<OutputPresetId | undefined>(undefined)
+  const [outputPrefsBase, setOutputPrefsBase] = useState<JobOutputPrefs>({})
+  const [savedOutputPresets, setSavedOutputPresets] = useState<WatchlistOutputPreset[]>([])
+  const [savedOutputPresetsLoading, setSavedOutputPresetsLoading] = useState(false)
+  const [savedOutputPresetsError, setSavedOutputPresetsError] = useState<string | null>(null)
+  const [selectedOutputPresetId, setSelectedOutputPresetId] = useState<number | undefined>(undefined)
+  const [outputPresetName, setOutputPresetName] = useState("")
+  const [outputPresetBusy, setOutputPresetBusy] = useState<"save" | "update" | "apply" | "delete" | null>(null)
   const [outputTemplateName, setOutputTemplateName] = useState<string | undefined>(undefined)
   const [outputTemplateVersion, setOutputTemplateVersion] = useState<number | null>(null)
   const [outputTemplateFormat, setOutputTemplateFormat] = useState<OutputFormat | undefined>(undefined)
+  const [createScheduledOutput, setCreateScheduledOutput] = useState(false)
   const [retentionDefaultDuration, setRetentionDefaultDuration] = useState<DurationInputValue>({
     value: null,
     unit: "days"
@@ -312,13 +343,20 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
 
   const watchedName = Form.useWatch("name", form)
 
-  const applyOutputPrefsState = (prefs: JobOutputPrefs | null | undefined) => {
+  const applyOutputPrefsState = (
+    prefs: JobOutputPrefs | null | undefined,
+    options?: { updateBase?: boolean }
+  ) => {
     const prefsRecord = isRecord(prefs) ? prefs : {}
+    if (options?.updateBase) {
+      setOutputPrefsBase(cloneRecord(prefsRecord) as JobOutputPrefs)
+    }
     const templateRecord = isRecord(prefsRecord.template) ? prefsRecord.template : {}
     const retentionRecord = isRecord(prefsRecord.retention) ? prefsRecord.retention : {}
     const deliveriesRecord = isRecord(prefsRecord.deliveries) ? prefsRecord.deliveries : {}
     const emailRecord = isRecord(deliveriesRecord.email) ? deliveriesRecord.email : null
     const chatbookRecord = isRecord(deliveriesRecord.chatbook) ? deliveriesRecord.chatbook : null
+    const autoOutputRecord = isRecord(prefsRecord.auto_output) ? prefsRecord.auto_output : null
 
     setOutputTemplateName(
       typeof templateRecord.default_name === "string" && templateRecord.default_name.trim().length > 0
@@ -335,6 +373,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     setOutputTemplateFormat(
       isOutputFormat(templateRecord.default_format) ? templateRecord.default_format : undefined
     )
+    setCreateScheduledOutput(Boolean(autoOutputRecord) && autoOutputRecord.enabled === true)
     const parsedDefaultRetention = Number(retentionRecord.default_seconds)
     setRetentionDefaultDuration(
       secondsToDurationInput(
@@ -410,15 +449,9 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   }
 
   const buildOutputPrefs = (
-    options?: { audioVoiceMap?: Record<string, string> | null }
+    options?: { audioVoiceMap?: Record<string, string> | null; forPreset?: boolean }
   ): JobOutputPrefs | undefined => {
-    const basePrefs = (
-      isEditing &&
-      initialValues?.output_prefs &&
-      isRecord(initialValues.output_prefs)
-    )
-      ? cloneRecord(initialValues.output_prefs)
-      : {}
+    const basePrefs = isRecord(outputPrefsBase) ? cloneRecord(outputPrefsBase) : {}
 
     const templatePrefs = isRecord(basePrefs.template) ? { ...basePrefs.template } : {}
     const normalizedTemplateName = outputTemplateName?.trim() || ""
@@ -551,6 +584,41 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       }
     }
 
+    const hasRecurringSchedule = Boolean(schedule && schedule.trim().length > 0)
+    const existingAutoOutput = isRecord(basePrefs.auto_output)
+      ? { ...basePrefs.auto_output }
+      : {}
+    const shouldAutoOutput = options?.forPreset
+      ? createScheduledOutput
+      : (hasRecurringSchedule && createScheduledOutput)
+    existingAutoOutput.enabled = shouldAutoOutput
+    if (shouldAutoOutput) {
+      existingAutoOutput.type =
+        typeof existingAutoOutput.type === "string" && existingAutoOutput.type.trim().length > 0
+          ? existingAutoOutput.type.trim()
+          : "briefing_markdown"
+      if (isOutputFormat(outputTemplateFormat)) {
+        existingAutoOutput.format = outputTemplateFormat
+      } else {
+        delete existingAutoOutput.format
+      }
+      if (normalizedTemplateName) {
+        existingAutoOutput.template_name = normalizedTemplateName
+      } else {
+        delete existingAutoOutput.template_name
+      }
+      if (typeof outputTemplateVersion === "number" && outputTemplateVersion > 0) {
+        existingAutoOutput.template_version = Math.floor(outputTemplateVersion)
+      } else {
+        delete existingAutoOutput.template_version
+      }
+      basePrefs.auto_output = existingAutoOutput
+    } else if (isEditing && isRecord(basePrefs.auto_output)) {
+      basePrefs.auto_output = existingAutoOutput
+    } else {
+      delete basePrefs.auto_output
+    }
+
     if (Object.keys(basePrefs).length > 0) {
       return basePrefs as JobOutputPrefs
     }
@@ -569,6 +637,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     setOutputTemplateFormat(preset.format)
     setDeliveryEmailEnabled(preset.emailEnabled)
     setDeliveryEmailBodyFormat(preset.emailBodyFormat)
+    setCreateScheduledOutput(preset.createScheduledOutput)
     setOutputPreset(presetId)
     message.success(t("watchlists:jobs.form.presetApplied", "Preset applied"))
   }
@@ -608,6 +677,194 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         )
       )
       return undefined
+    }
+  }
+
+  const buildOutputPrefsForPresetSave = (): JobOutputPrefs | null => {
+    if (audioBriefingEnabled && !isValidBackgroundAudioUri(audioBackgroundUri)) {
+      message.error(
+        t(
+          "watchlists:jobs.form.audioBackgroundTrackInvalid",
+          "Background track must start with https://, http://, or file://."
+        )
+      )
+      return null
+    }
+
+    let parsedAudioVoiceMap: Record<string, string> | null = null
+    if (audioBriefingEnabled) {
+      const parsedAudioVoiceMapResult = parseAudioVoiceMapForValidation()
+      if (parsedAudioVoiceMapResult === undefined) return null
+      parsedAudioVoiceMap = parsedAudioVoiceMapResult
+    }
+
+    return buildOutputPrefs({
+      audioVoiceMap: parsedAudioVoiceMap,
+      forPreset: true
+    }) || {}
+  }
+
+  const selectedSavedOutputPreset = savedOutputPresets.find(
+    (preset) => preset.id === selectedOutputPresetId
+  )
+
+  const handleSavedOutputPresetSelect = (presetId: number | undefined) => {
+    setSelectedOutputPresetId(presetId)
+    const preset = savedOutputPresets.find((candidate) => candidate.id === presetId)
+    setOutputPresetName(preset?.name || "")
+  }
+
+  const handleSaveOutputPreset = async () => {
+    const name = outputPresetName.trim()
+    if (!name) {
+      message.error(
+        t("watchlists:jobs.form.outputPresetNameRequired", "Enter a preset name before saving.")
+      )
+      return
+    }
+    const outputPrefs = buildOutputPrefsForPresetSave()
+    if (!outputPrefs) return
+
+    setOutputPresetBusy("save")
+    setSavedOutputPresetsError(null)
+    try {
+      const created = await createWatchlistOutputPreset({
+        name,
+        output_prefs: outputPrefs
+      })
+      setSavedOutputPresets((previous) => [
+        created,
+        ...previous.filter((preset) => preset.id !== created.id)
+      ])
+      setSelectedOutputPresetId(created.id)
+      setOutputPresetName(created.name)
+      message.success(t("watchlists:jobs.form.outputPresetSaved", "Output preset saved"))
+    } catch (err) {
+      const mapped = mapWatchlistsError(err, {
+        t,
+        context: t("watchlists:jobs.form.outputPresetsContext", "output presets"),
+        fallbackMessage: t(
+          "watchlists:jobs.form.outputPresetSaveError",
+          "Could not save output preset."
+        ),
+        operationLabel: t("watchlists:errors.operation.save", "save")
+      })
+      setSavedOutputPresetsError(`${mapped.title} ${mapped.description}`.trim())
+      message.error(mapped.title)
+    } finally {
+      setOutputPresetBusy(null)
+    }
+  }
+
+  const handleUpdateOutputPreset = async () => {
+    if (!selectedSavedOutputPreset) return
+    const name = outputPresetName.trim() || selectedSavedOutputPreset.name
+    const outputPrefs = buildOutputPrefsForPresetSave()
+    if (!outputPrefs) return
+
+    setOutputPresetBusy("update")
+    setSavedOutputPresetsError(null)
+    try {
+      const updated = await updateWatchlistOutputPreset(selectedSavedOutputPreset.id, {
+        name,
+        output_prefs: outputPrefs
+      })
+      setSavedOutputPresets((previous) =>
+        previous.map((preset) => (preset.id === updated.id ? updated : preset))
+      )
+      setOutputPresetName(updated.name)
+      message.success(t("watchlists:jobs.form.outputPresetUpdated", "Output preset updated"))
+    } catch (err) {
+      const mapped = mapWatchlistsError(err, {
+        t,
+        context: t("watchlists:jobs.form.outputPresetsContext", "output presets"),
+        fallbackMessage: t(
+          "watchlists:jobs.form.outputPresetUpdateError",
+          "Could not update output preset."
+        ),
+        operationLabel: t("watchlists:errors.operation.save", "save")
+      })
+      setSavedOutputPresetsError(`${mapped.title} ${mapped.description}`.trim())
+      message.error(mapped.title)
+    } finally {
+      setOutputPresetBusy(null)
+    }
+  }
+
+  const handleApplySavedOutputPreset = async () => {
+    if (!selectedSavedOutputPreset) return
+    setOutputPresetBusy("apply")
+    setSavedOutputPresetsError(null)
+    try {
+      const response = await applyWatchlistOutputPreset(selectedSavedOutputPreset.id, {
+        base_output_prefs: outputPrefsBase
+      })
+      const outputPrefs = response.output_prefs || applyOutputPresetToPrefs({
+        baseOutputPrefs: outputPrefsBase,
+        presetOutputPrefs: selectedSavedOutputPreset.output_prefs
+      })
+      applyOutputPrefsState(outputPrefs, { updateBase: true })
+      setOutputPresetName(selectedSavedOutputPreset.name)
+      message.success(t("watchlists:jobs.form.outputPresetApplied", "Saved preset applied"))
+    } catch (err) {
+      const mapped = mapWatchlistsError(err, {
+        t,
+        context: t("watchlists:jobs.form.outputPresetsContext", "output presets"),
+        fallbackMessage: t(
+          "watchlists:jobs.form.outputPresetApplyError",
+          "Could not apply output preset."
+        ),
+        operationLabel: t("watchlists:errors.operation.apply", "apply")
+      })
+      setSavedOutputPresetsError(`${mapped.title} ${mapped.description}`.trim())
+      message.error(mapped.title)
+    } finally {
+      setOutputPresetBusy(null)
+    }
+  }
+
+  const handleDeleteOutputPreset = async () => {
+    if (!selectedSavedOutputPreset) return
+    const confirmed = await new Promise<boolean>((resolve) => {
+      Modal.confirm({
+        title: t("watchlists:jobs.form.deleteOutputPresetTitle", "Delete output preset?"),
+        content: t(
+          "watchlists:jobs.form.deleteOutputPresetDescription",
+          "This removes {{name}} for future monitors. Existing monitor settings will not change.",
+          { name: selectedSavedOutputPreset.name }
+        ),
+        okText: t("common:delete", "Delete"),
+        okButtonProps: { danger: true },
+        cancelText: t("common:cancel", "Cancel"),
+        onOk: () => resolve(true),
+        onCancel: () => resolve(false)
+      })
+    })
+    if (!confirmed) return
+    setOutputPresetBusy("delete")
+    setSavedOutputPresetsError(null)
+    try {
+      await deleteWatchlistOutputPreset(selectedSavedOutputPreset.id)
+      setSavedOutputPresets((previous) =>
+        previous.filter((preset) => preset.id !== selectedSavedOutputPreset.id)
+      )
+      setSelectedOutputPresetId(undefined)
+      setOutputPresetName("")
+      message.success(t("watchlists:jobs.form.outputPresetDeleted", "Output preset deleted"))
+    } catch (err) {
+      const mapped = mapWatchlistsError(err, {
+        t,
+        context: t("watchlists:jobs.form.outputPresetsContext", "output presets"),
+        fallbackMessage: t(
+          "watchlists:jobs.form.outputPresetDeleteError",
+          "Could not delete output preset."
+        ),
+        operationLabel: t("watchlists:errors.operation.delete", "delete")
+      })
+      setSavedOutputPresetsError(`${mapped.title} ${mapped.description}`.trim())
+      message.error(mapped.title)
+    } finally {
+      setOutputPresetBusy(null)
     }
   }
 
@@ -716,7 +973,9 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         setSchedule(initialValues.schedule_expr || null)
         setTimezone(initialValues.timezone || "UTC")
         setOutputPreset(undefined)
-        applyOutputPrefsState(initialValues.output_prefs)
+        setSelectedOutputPresetId(undefined)
+        setOutputPresetName("")
+        applyOutputPrefsState(initialValues.output_prefs, { updateBase: true })
       } else {
         form.resetFields()
         form.setFieldsValue({
@@ -737,7 +996,9 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         setSchedule(null)
         setTimezone("UTC")
         setOutputPreset(undefined)
-        applyOutputPrefsState(null)
+        setSelectedOutputPresetId(undefined)
+        setOutputPresetName("")
+        applyOutputPrefsState(null, { updateBase: true })
       }
     }
   }, [open, initialValues, form])
@@ -759,7 +1020,11 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     let cancelled = false
 
     Promise.all([
-      fetchWatchlistSources({ page: 1, size: JOB_SCOPE_CATALOG_PAGE_SIZE }),
+      fetchWatchlistSources({
+        watchlist_id: watchlistId ?? undefined,
+        page: 1,
+        size: JOB_SCOPE_CATALOG_PAGE_SIZE
+      }),
       fetchWatchlistGroups({ page: 1, size: JOB_SCOPE_CATALOG_PAGE_SIZE })
     ])
       .then(([sourcesResult, groupsResult]) => {
@@ -782,7 +1047,55 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, watchlistId])
+
+  useEffect(() => {
+    if (!open) {
+      setSavedOutputPresets([])
+      setSavedOutputPresetsError(null)
+      setSavedOutputPresetsLoading(false)
+      setSelectedOutputPresetId(undefined)
+      setOutputPresetName("")
+      return
+    }
+    let cancelled = false
+    setSavedOutputPresetsLoading(true)
+    setSavedOutputPresetsError(null)
+
+    fetchWatchlistOutputPresets()
+      .then((result) => {
+        if (cancelled) return
+        const presets = Array.isArray(result.items) ? result.items : []
+        setSavedOutputPresets(presets)
+        setSelectedOutputPresetId((previous) =>
+          previous && presets.some((preset) => preset.id === previous) ? previous : undefined
+        )
+      })
+      .catch((err) => {
+        if (cancelled) return
+        console.error("Failed to load output presets for job form:", err)
+        const mapped = mapWatchlistsError(err, {
+          t,
+          context: t("watchlists:jobs.form.outputPresetsContext", "output presets"),
+          fallbackMessage: t(
+            "watchlists:jobs.form.outputPresetsLoadError",
+            "Could not load saved output presets."
+          ),
+          operationLabel: t("watchlists:errors.operation.load", "load")
+        })
+        setSavedOutputPresets([])
+        setSavedOutputPresetsError(`${mapped.title} ${mapped.description}`.trim())
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSavedOutputPresetsLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [open, t])
 
   useEffect(() => {
     if (!open || !isEditing || !initialValues?.id) {
@@ -991,11 +1304,12 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         schedule_expr: schedule || undefined,
         timezone: timezone || undefined,
         output_prefs: isEditing ? (outputPrefs || {}) : outputPrefs,
-        job_filters: filters.length > 0 ? { filters } : undefined
+        job_filters: filters.length > 0 ? { filters } : undefined,
+        watchlist_id: watchlistId ?? undefined
       }
 
       const confirmationItems: string[] = []
-      if (deliveryEmailEnabled) {
+      if (createScheduledOutput && deliveryEmailEnabled) {
         confirmationItems.push(
           t(
             "watchlists:jobs.form.confirmationEmail",
@@ -1007,7 +1321,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
           )
         )
       }
-      if (deliveryChatbookEnabled) {
+      if (createScheduledOutput && deliveryChatbookEnabled) {
         confirmationItems.push(
           t(
             "watchlists:jobs.form.confirmationChatbook",
@@ -1155,6 +1469,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     filters.length > 0 ||
     retentionDefaultDuration.value !== null ||
     retentionTemporaryDuration.value !== null ||
+    createScheduledOutput ||
     deliveryEmailEnabled ||
     deliveryEmailRecipients.length > 0 ||
     deliveryEmailSubject.trim().length > 0 ||
@@ -1252,12 +1567,26 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
     ? t("watchlists:jobs.form.confidenceNeedsAttention", "Needs attention")
     : t("watchlists:jobs.form.confidenceReady", "Ready to save")
   const confidenceStatusColor = confidenceHasBlockingRisk ? "orange" : "green"
+  const outputScheduleSummaryText = createScheduledOutput
+    ? hasScheduleSelection
+      ? t(
+        "watchlists:jobs.form.liveSummary.scheduledOutput",
+        "Create a report after each scheduled run"
+      )
+      : t(
+        "watchlists:jobs.form.liveSummary.scheduledOutputNeedsSchedule",
+        "Add a schedule to create reports automatically"
+      )
+    : t(
+      "watchlists:jobs.form.liveSummary.manualOutput",
+      "Manual/test reports only"
+    )
   const deliverySummaryParts: string[] = []
   if (deliveryEmailEnabled) {
     deliverySummaryParts.push(
       t(
         "watchlists:jobs.form.liveSummary.deliveryEmail",
-        "Email ({{count}} recipient{{plural}})",
+        "Deliver by email ({{count}} recipient{{plural}})",
         {
           count: deliveryEmailRecipients.length,
           plural: deliveryEmailRecipients.length === 1 ? "" : "s"
@@ -1267,23 +1596,23 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
   }
   if (deliveryChatbookEnabled) {
     deliverySummaryParts.push(
-      t("watchlists:jobs.form.liveSummary.deliveryChatbook", "Chatbook export enabled")
+      t("watchlists:jobs.form.liveSummary.deliveryChatbook", "Save to Chatbook")
     )
   }
   const deliverySummaryText =
     deliverySummaryParts.length > 0
       ? deliverySummaryParts.join(" + ")
-      : t("watchlists:jobs.form.liveSummary.deliveryNone", "No automatic delivery")
+      : t("watchlists:jobs.form.liveSummary.deliveryReportsOnly", "Reports tab only")
   const audioSummaryText = audioBriefingEnabled
     ? t(
       "watchlists:jobs.form.liveSummary.audioEnabled",
-      "Enabled ({{voice}}, {{minutes}} min target)",
+      "Audio briefing requested ({{voice}}, {{minutes}} min target)",
       {
         voice: audioVoice,
         minutes: audioTargetMinutes
       }
     )
-    : t("watchlists:jobs.form.liveSummary.audioDisabled", "Disabled")
+    : t("watchlists:jobs.form.liveSummary.audioDisabled", "Text report only")
   const hasHiddenAdvancedInBasic = authoringMode === "basic" && hasAdvancedConfiguration
 
   const handleAuthoringModeChange = (nextMode: AuthoringMode) => {
@@ -1416,7 +1745,7 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
           <span className="text-danger ml-1">*</span>
         </span>
       ),
-      children: <ScopeSelector value={scope} onChange={setScope} />,
+      children: <ScopeSelector value={scope} onChange={setScope} watchlistId={watchlistId} />,
       forceRender: true
     },
     {
@@ -1470,6 +1799,82 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
         <div className="space-y-4">
           <div className="rounded-lg border border-border p-3">
             <div className="mb-3 text-sm font-medium">
+              {t("watchlists:jobs.form.savedOutputPresets", "Saved output presets")}
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_1fr]">
+              <Select
+                allowClear
+                value={selectedOutputPresetId}
+                loading={savedOutputPresetsLoading}
+                onChange={(value) =>
+                  handleSavedOutputPresetSelect(
+                    typeof value === "number" ? value : undefined
+                  )
+                }
+                options={savedOutputPresets.map((preset) => ({
+                  label: preset.name,
+                  value: preset.id
+                }))}
+                placeholder={t("watchlists:jobs.form.savedOutputPresetPlaceholder", "Choose saved preset")}
+                data-testid="job-form-output-preset-select"
+              />
+              <Input
+                value={outputPresetName}
+                onChange={(event) => setOutputPresetName(event.target.value)}
+                placeholder={t("watchlists:jobs.form.outputPresetName", "Preset name")}
+                data-testid="job-form-output-preset-name-input"
+              />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                onClick={handleApplySavedOutputPreset}
+                disabled={!selectedSavedOutputPreset || outputPresetBusy !== null}
+                loading={outputPresetBusy === "apply"}
+                data-testid="job-form-output-preset-apply-button"
+              >
+                {t("watchlists:jobs.form.applySavedOutputPreset", "Apply saved")}
+              </Button>
+              <Button
+                onClick={handleSaveOutputPreset}
+                disabled={!outputPresetName.trim() || outputPresetBusy !== null}
+                loading={outputPresetBusy === "save"}
+                data-testid="job-form-output-preset-save-button"
+              >
+                {t("watchlists:jobs.form.saveOutputPreset", "Save current setup")}
+              </Button>
+              <Button
+                onClick={handleUpdateOutputPreset}
+                disabled={!selectedSavedOutputPreset || outputPresetBusy !== null}
+                loading={outputPresetBusy === "update"}
+                data-testid="job-form-output-preset-update-button"
+              >
+                {t("watchlists:jobs.form.updateOutputPreset", "Update selected")}
+              </Button>
+              <Button
+                danger
+                onClick={handleDeleteOutputPreset}
+                disabled={!selectedSavedOutputPreset || outputPresetBusy !== null}
+                loading={outputPresetBusy === "delete"}
+                data-testid="job-form-output-preset-delete-button"
+              >
+                {t("watchlists:jobs.form.deleteOutputPreset", "Delete selected")}
+              </Button>
+            </div>
+            <div className="mt-2 text-xs text-text-muted">
+              {t(
+                "watchlists:jobs.form.savedOutputPresetHint",
+                "Presets reuse output, delivery, and audio settings only. Scope, filters, source rules, dedupe, and cadence stay unchanged."
+              )}
+            </div>
+            {savedOutputPresetsError && (
+              <div className="mt-2 text-xs text-danger" data-testid="job-form-output-preset-error">
+                {savedOutputPresetsError}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-border p-3">
+            <div className="mb-3 text-sm font-medium">
               {t("watchlists:jobs.form.guidedPresets", "Guided presets")}
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
@@ -1505,6 +1910,35 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
                 "Presets prefill template and delivery defaults. Structured review groups content into non-overlapping sections for easier scanning."
               )}
             </div>
+          </div>
+
+          <div className="rounded-lg border border-border p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium">
+                  {t("watchlists:jobs.form.createScheduledOutput", "Scheduled reports")}
+                </div>
+                <div className="text-xs text-text-muted">
+                  {t(
+                    "watchlists:jobs.form.createScheduledOutputHint",
+                    "Create a report after each scheduled run. Leave off for manual/test reports only."
+                  )}
+                </div>
+              </div>
+              <Switch
+                checked={createScheduledOutput}
+                onChange={setCreateScheduledOutput}
+                data-testid="job-form-create-scheduled-output-switch"
+              />
+            </div>
+            {createScheduledOutput && !hasScheduleSelection && (
+              <div className="mt-2 text-xs text-text-muted">
+                {t(
+                  "watchlists:jobs.form.createScheduledOutputNeedsSchedule",
+                  "Add a schedule before saving if this monitor should generate recurring reports."
+                )}
+              </div>
+            )}
           </div>
 
           <div className="rounded-lg border border-border p-3">
@@ -1985,8 +2419,10 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
       cancelText={t("common:cancel", "Cancel")}
       confirmLoading={submitting}
       destroyOnHidden
-      width={700}
-      styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}
+      data-testid="job-form-modal"
+      width={modalChrome.width}
+      style={modalChrome.style}
+      styles={modalChrome.styles}
     >
       <Form form={form} layout="vertical" className="mt-4">
         <div className="mb-4 rounded-lg border border-border bg-surface p-3">
@@ -2113,7 +2549,10 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
           {filterPreviewSummaryText}
         </div>
         <div className="text-xs text-text-muted" data-testid="job-form-summary-output">
-          {t("watchlists:jobs.form.liveSummary.output", "Output template")}:{" "}
+          {t("watchlists:jobs.form.liveSummary.output", "Output")}:{" "}
+          {outputScheduleSummaryText}
+          {" • "}
+          {t("watchlists:jobs.form.liveSummary.outputTemplate", "Template")}:{" "}
           {outputTemplateName || t("watchlists:jobs.form.defaultTemplateVersionAuto", "Latest")}
         </div>
         <div className="text-xs text-text-muted" data-testid="job-form-summary-delivery">
@@ -2223,7 +2662,9 @@ export const JobFormModal: React.FC<JobFormModalProps> = ({
                 )}
               </div>
               <div>
-                {t("watchlists:jobs.form.steps.reviewOutput", "Output template")}:{" "}
+                {t("watchlists:jobs.form.steps.reviewOutput", "Output")}:{" "}
+                {outputScheduleSummaryText}
+                {" • "}
                 {outputTemplateName || t("watchlists:jobs.form.defaultTemplatePlaceholder", "Select a template")}
               </div>
               <div>

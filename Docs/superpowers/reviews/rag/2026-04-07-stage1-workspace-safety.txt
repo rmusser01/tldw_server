@@ -1,0 +1,23 @@
+Workspace safety evidence
+
+Worktree root:
+/Users/appledev/Documents/GitHub/tldw_server/.worktrees/rag-module-review
+
+Pre-scaffold observed `git status --short`:
+?? Docs/superpowers/plans/2026-04-07-rag-module-review-execution-plan.md
+
+Current `git status --short` after Task 1 fix commits:
+[no output]
+
+Docs-only Task 1 commit trail:
+- `c1d4d9684` `docs: scaffold rag review artifacts`
+- `0fce4c31b` `docs: preserve rag stage1 inventories`
+- `dcfd0ec6c` `docs: preserve rag stage1 safety evidence`
+- `89a476814` `docs: tighten rag stage1 safety notes`
+- `ef2f53d6c` `docs: align rag worktree review instructions`
+- `e656cf373` `docs: finalize rag stage1 safety artifact`
+- `5368ea209` `docs: mark rag stage1 baseline complete`
+- `9494d0fed` `docs: tighten rag stage1 review evidence`
+
+Task 1 stabilization tail after `9494d0fed` reproduction:
+`git log --reverse --oneline 9494d0fed..HEAD -- Docs/superpowers/reviews/rag/2026-04-07-stage1-workspace-safety.txt Docs/superpowers/reviews/rag/2026-04-07-stage1-architecture-survey-and-inventory.md Docs/superpowers/reviews/rag/2026-04-07-stage1-seed-set-ownership-map.txt`

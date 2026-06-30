@@ -3,6 +3,10 @@
 ## Summary
 Add backend support for Data Tables with async generation jobs, Media DB storage, reproducible RAG snapshots, and server-side exports. This design aligns with existing Media DB patterns, JobManager workflows, and AuthNZ scoping.
 
+## Related ADR
+
+- `Docs/ADR/023-data-tables-backend-storage-jobs-and-exports.md` records the accepted, bounded backend storage, Jobs, source snapshot, UUID table identity, and server-side export decision backfilled from this design.
+
 ## Goals
 - Store all Data Tables in the per-user Media DB.
 - Generate tables via background jobs with progress and cancellation.

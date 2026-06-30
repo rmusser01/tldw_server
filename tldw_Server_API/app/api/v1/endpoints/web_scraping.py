@@ -8,8 +8,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
 from tldw_Server_API.app.services.enhanced_web_scraping_service import get_web_scraping_service
@@ -50,8 +50,8 @@ async def get_scraping_service_status(
         service = get_web_scraping_service()
         return service.get_service_status()
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to get scraping service status: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to get scraping service status")
+        raise HTTPException(status_code=500, detail="Failed to get scraping service status") from e
 
 
 @router.get("/job/{job_id}")
@@ -72,8 +72,8 @@ async def get_scraping_job_status(
         service = get_web_scraping_service()
         return await service.get_job_status(job_id, current_user)
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to get job status for {job_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to get scraping job status")
+        raise HTTPException(status_code=500, detail="Failed to get scraping job status") from e
 
 
 @router.delete("/job/{job_id}")
@@ -94,8 +94,8 @@ async def cancel_scraping_job(
         service = get_web_scraping_service()
         return await service.cancel_job(job_id, current_user)
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to cancel job {job_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to cancel scraping job")
+        raise HTTPException(status_code=500, detail="Failed to cancel scraping job") from e
 
 
 @router.post("/service/initialize")
@@ -116,8 +116,8 @@ async def initialize_scraping_service(
             "service_status": service.get_service_status()
         }
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to initialize scraping service: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to initialize scraping service")
+        raise HTTPException(status_code=500, detail="Failed to initialize scraping service") from e
 
 
 @router.post("/service/shutdown")
@@ -137,8 +137,8 @@ async def shutdown_scraping_service(
             "message": "Web scraping service shutdown completed"
         }
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to shutdown scraping service: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to shutdown scraping service")
+        raise HTTPException(status_code=500, detail="Failed to shutdown scraping service") from e
 
 
 @router.get("/progress/{task_id}")
@@ -174,8 +174,8 @@ async def get_scraping_progress(
     except HTTPException:
         raise
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to get progress for task {task_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to get scraping progress")
+        raise HTTPException(status_code=500, detail="Failed to get scraping progress") from e
 
 
 @router.get("/cookies/{domain}")
@@ -205,8 +205,8 @@ async def get_cookies_for_domain(
             "cookie_count": len(cookies) if cookies else 0
         }
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to get cookies for {domain}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to get cookies for domain")
+        raise HTTPException(status_code=500, detail="Failed to get cookies for domain") from e
 
 
 @router.post("/cookies/{domain}")
@@ -240,8 +240,8 @@ async def set_cookies_for_domain(
             "domain": domain
         }
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to set cookies for {domain}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to set cookies for domain")
+        raise HTTPException(status_code=500, detail="Failed to set cookies for domain") from e
 
 
 @router.get("/duplicates/check")
@@ -280,8 +280,8 @@ async def check_url_duplicate(
             "message": "Duplicate checking requires content analysis"
         }
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:
-        logger.error(f"Failed to check duplicate for {url}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Failed to check URL duplicate")
+        raise HTTPException(status_code=500, detail="Failed to check URL duplicate") from e
 
 
 # Include this router in your main app

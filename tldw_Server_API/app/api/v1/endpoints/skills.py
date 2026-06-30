@@ -29,22 +29,31 @@ from fastapi.responses import Response
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import CurrentPrincipal
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
 # Local Imports
 from tldw_Server_API.app.api.v1.schemas.skills_schemas import (
+    SkillContext,
     SkillContextPayload,
+    SkillBulkDeleteRequest,
+    SkillBulkDeleteResponse,
     SkillCreate,
     SkillExecuteRequest,
     SkillExecutionResult,
+    SkillImportPreviewRequest,
+    SkillImportPreviewResponse,
     SkillImportRequest,
+    SkillListOrder,
+    SkillListSort,
     SkillResponse,
     SkillsListResponse,
     SkillSummary,
     SkillUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Context_Integrity.resolver import ContextIntegrityBlocked
 from tldw_Server_API.app.core.Skills.exceptions import (
     SkillConflictError,
     SkillNotFoundError,
@@ -52,25 +61,55 @@ from tldw_Server_API.app.core.Skills.exceptions import (
     SkillValidationError,
 )
 from tldw_Server_API.app.core.Skills.skill_executor import RequestContext, SkillExecutor
+from tldw_Server_API.app.core.Skills.runtime_metadata import build_skill_runtime_metadata
 from tldw_Server_API.app.core.Skills.skills_service import SkillsService
 
 router = APIRouter()
 
+MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES = 6 * 1024 * 1024
+_ZIP_UPLOAD_SIGNATURES = (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")
+CONTEXT_INTEGRITY_LOCKED_DETAIL = "Asset is quarantined pending admin review."
+
+
+async def _read_skill_import_preview_upload(file: UploadFile) -> bytes:
+    """Read a preview upload with a hard size cap."""
+    content = await file.read(MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES + 1)
+    if len(content) > MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                "Skill import preview file exceeds "
+                f"{MAX_SKILL_IMPORT_PREVIEW_UPLOAD_BYTES // (1024 * 1024)}MB limit"
+            ),
+        )
+    return content
+
+
+def _is_zip_upload(content: bytes) -> bool:
+    """Detect zip archives from trusted file bytes instead of upload metadata."""
+    return any(content.startswith(signature) for signature in _ZIP_UPLOAD_SIGNATURES)
+
+
+def _upload_log_name(filename: str | None) -> str:
+    """Return a bounded basename for structured upload logs."""
+    raw_name = str(filename or "unnamed")
+    return raw_name.replace("\\", "/").rsplit("/", 1)[-1][:128]
+
 
 async def get_skills_service(
-    current_user: User = Depends(get_request_user),
+    principal: CurrentPrincipal,
     chacha_db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> SkillsService:
     """
     FastAPI dependency to get the SkillsService instance for the identified user.
     """
-    if not current_user or not isinstance(current_user.id, int):
+    if not isinstance(principal.user_id, int):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="User identification failed for Skills service.",
         )
 
-    user_id = current_user.id
+    user_id = principal.user_id
     user_base_dir = DatabasePaths.get_user_base_directory(user_id)
 
     return SkillsService(user_id=user_id, base_path=user_base_dir, db=chacha_db)
@@ -78,16 +117,26 @@ async def get_skills_service(
 
 def _skill_data_to_response(skill_data: dict) -> SkillResponse:
     """Convert skill data dict to SkillResponse."""
+    allowed_tools = skill_data.get("allowed_tools")
+    model = skill_data.get("model")
+    context = skill_data.get("context") or "inline"
+    disable_model_invocation = bool(skill_data.get("disable_model_invocation"))
     return SkillResponse(
         id=skill_data["id"],
         name=skill_data["name"],
         description=skill_data.get("description"),
         argument_hint=skill_data.get("argument_hint"),
-        disable_model_invocation=skill_data.get("disable_model_invocation", False),
+        disable_model_invocation=disable_model_invocation,
         user_invocable=skill_data.get("user_invocable", True),
-        allowed_tools=skill_data.get("allowed_tools"),
-        model=skill_data.get("model"),
-        context=skill_data.get("context", "inline"),
+        allowed_tools=allowed_tools,
+        model=model,
+        context=context,
+        runtime=build_skill_runtime_metadata(
+            context=context,
+            allowed_tools=allowed_tools,
+            model=model,
+            disable_model_invocation=disable_model_invocation,
+        ),
         content=skill_data["content"],
         supporting_files=skill_data.get("supporting_files"),
         directory_path=skill_data["directory_path"],
@@ -99,23 +148,73 @@ def _skill_data_to_response(skill_data: dict) -> SkillResponse:
 
 def _metadata_to_summary(metadata) -> SkillSummary:
     """Convert SkillMetadata to SkillSummary."""
+    allowed_tools = getattr(metadata, "allowed_tools", None)
+    model = getattr(metadata, "model", None)
+    context = getattr(metadata, "context", None) or "inline"
+    disable_model_invocation = bool(getattr(metadata, "disable_model_invocation", False))
     return SkillSummary(
         name=metadata.name,
         description=metadata.description,
         argument_hint=metadata.argument_hint,
         user_invocable=metadata.user_invocable,
-        disable_model_invocation=metadata.disable_model_invocation,
-        context=metadata.context,
+        disable_model_invocation=disable_model_invocation,
+        allowed_tools=allowed_tools,
+        model=model,
+        context=context,
+        runtime=build_skill_runtime_metadata(
+            context=context,
+            allowed_tools=allowed_tools,
+            model=model,
+            disable_model_invocation=disable_model_invocation,
+        ),
+        version=metadata.version or 1,
     )
+
+
+def _raise_context_integrity_locked(exc: ContextIntegrityBlocked) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_423_LOCKED,
+        detail=CONTEXT_INTEGRITY_LOCKED_DETAIL,
+    ) from exc
 
 
 @router.get("/", response_model=SkillsListResponse)
 async def list_skills(
     include_hidden: bool = Query(False, description="Include hidden skills (user_invocable=false)"),
+    q: Optional[str] = Query(
+        None,
+        max_length=200,
+        description="Case-insensitive search across skill names, descriptions, and argument hints",
+    ),
+    context: SkillContext | None = Query(
+        None,
+        description="Filter by execution context",
+    ),
+    user_invocable: bool | None = Query(
+        None,
+        description="Filter by visibility; overrides include_hidden when provided",
+    ),
+    has_tools: bool | None = Query(
+        None,
+        description="Filter by whether a skill declares allowed tools",
+    ),
+    model: Optional[str] = Query(
+        None,
+        max_length=200,
+        description="Filter by exact model override",
+    ),
+    sort: SkillListSort = Query(
+        "name",
+        description="Sort field",
+    ),
+    order: SkillListOrder = Query(
+        "asc",
+        description="Sort direction",
+    ),
     limit: int = Query(100, ge=1, le=500, description="Maximum number of skills to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     service: SkillsService = Depends(get_skills_service),
-):
+) -> SkillsListResponse:
     """
     List available skills.
 
@@ -124,10 +223,24 @@ async def list_skills(
     try:
         skills = await service.list_skills(
             include_hidden=include_hidden,
+            q=q,
+            context=context,
+            user_invocable=user_invocable,
+            has_tools=has_tools,
+            model=model,
+            sort=sort,
+            order=order,
             limit=limit,
             offset=offset,
         )
-        total = await service.get_total_count(include_hidden=include_hidden)
+        total = await service.get_total_count(
+            include_hidden=include_hidden,
+            q=q,
+            context=context,
+            user_invocable=user_invocable,
+            has_tools=has_tools,
+            model=model,
+        )
 
         return SkillsListResponse(
             skills=[_metadata_to_summary(s) for s in skills],
@@ -135,12 +248,18 @@ async def list_skills(
             total=total,
             limit=limit,
             offset=offset,
+            pagination=build_offset_pagination_meta(
+                limit=limit,
+                offset=offset,
+                total=total,
+                count=len(skills),
+            ),
         )
     except SkillsError as e:
-        logger.error(f"Error listing skills: {e}")
+        logger.error("Error listing skills")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to list skills",
         ) from e
 
 
@@ -156,16 +275,57 @@ async def get_skills_context(
     try:
         payload = await service.get_context_payload_async()
         return SkillContextPayload(
-            available_skills=[
-                SkillSummary(**s) for s in payload["available_skills"]
-            ],
+            available_skills=[SkillSummary(**s) for s in payload["available_skills"]],
             context_text=payload["context_text"],
         )
     except SkillsError as e:
-        logger.error(f"Error getting skills context: {e}")
+        logger.error("Error getting skills context")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get skills context",
+        ) from e
+
+
+@router.post("/bulk-delete", response_model=SkillBulkDeleteResponse)
+async def bulk_delete_skills(
+    request: SkillBulkDeleteRequest,
+    service: SkillsService = Depends(get_skills_service),
+) -> SkillBulkDeleteResponse:
+    """
+    Delete multiple selected skills.
+
+    Validates every supplied version before deleting any selected skill.
+    """
+    try:
+        deleted = await service.bulk_delete_skills(
+            [item.model_dump() for item in request.skills]
+        )
+        return SkillBulkDeleteResponse(deleted=deleted, count=len(deleted))
+    except SkillNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
+        ) from e
+    except SkillConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from e
+    except SkillValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except SkillsError as e:
+        logger.error(
+            "Error bulk deleting skills user_id={} selected_count={} error_type={}",
+            service.user_id,
+            len(request.skills),
+            type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to bulk delete skills",
         ) from e
 
 
@@ -182,16 +342,18 @@ async def get_skill(
     try:
         skill_data = await service.get_skill(skill_name)
         return _skill_data_to_response(skill_data)
+    except ContextIntegrityBlocked as e:
+        _raise_context_integrity_locked(e)
     except SkillNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Skill '{skill_name}' not found",
         ) from None
     except SkillsError as e:
-        logger.error(f"Error getting skill '{skill_name}': {e}")
+        logger.error("Error getting skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to get skill",
         ) from e
 
 
@@ -223,10 +385,10 @@ async def create_skill(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error creating skill: {e}")
+        logger.error("Error creating skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to create skill",
         ) from e
 
 
@@ -266,10 +428,10 @@ async def update_skill(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error updating skill '{skill_name}': {e}")
+        logger.error("Error updating skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to update skill",
         ) from e
 
 
@@ -297,10 +459,35 @@ async def delete_skill(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error deleting skill '{skill_name}': {e}")
+        logger.error("Error deleting skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to delete skill",
+        ) from e
+
+
+@router.post("/import/preview", response_model=SkillImportPreviewResponse)
+async def preview_import_skill(
+    request: SkillImportPreviewRequest,
+    service: SkillsService = Depends(get_skills_service),
+):
+    """
+    Preview a skill import from SKILL.md content without mutating stored skills.
+    """
+    try:
+        return await service.preview_import_skill(
+            content=request.content,
+            name=request.name,
+            supporting_files=request.supporting_files,
+        )
+    except SkillsError as e:
+        logger.bind(
+            action="preview_import_skill",
+            skill_name=request.name or "",
+        ).exception("Error previewing skill import")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to preview skill import",
         ) from e
 
 
@@ -333,10 +520,58 @@ async def import_skill(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error importing skill: {e}")
+        logger.error("Error importing skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to import skill",
+        ) from e
+
+
+@router.post("/import/file/preview", response_model=SkillImportPreviewResponse)
+async def preview_import_skill_from_file(
+    file: UploadFile = File(..., description="SKILL.md file or zip archive"),
+    service: SkillsService = Depends(get_skills_service),
+):
+    """
+    Preview a skill import from an uploaded file without mutating stored skills.
+
+    Accepts either a SKILL.md file or a zip archive containing a skill directory.
+    """
+    filename = _upload_log_name(file.filename)
+    try:
+        content = await _read_skill_import_preview_upload(file)
+
+        if _is_zip_upload(content):
+            return await service.preview_import_from_zip(content)
+
+        try:
+            text_content = content.decode("utf-8")
+        except UnicodeDecodeError:
+            raise SkillValidationError("File must be UTF-8 encoded text or a zip archive") from None
+
+        name = None
+        if file.filename:
+            name = Path(file.filename).stem.lower()
+            if name == "skill":
+                name = None
+
+        return await service.preview_import_skill(
+            content=text_content,
+            name=name,
+        )
+    except SkillValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
+        ) from e
+    except SkillsError as e:
+        logger.bind(
+            action="preview_import_skill_file",
+            filename=filename,
+        ).exception("Error previewing skill import from file")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to preview skill import from file",
         ) from e
 
 
@@ -389,14 +624,27 @@ async def import_skill_from_file(
             detail=str(e),
         ) from e
     except SkillsError as e:
-        logger.error(f"Error importing skill from file: {e}")
+        logger.error("Error importing skill from file")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to import skill from file",
         ) from e
 
 
-@router.get("/{skill_name}/export")
+@router.get(
+    "/{skill_name}/export",
+    response_class=Response,
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Skill zip archive",
+            "content": {
+                "application/zip": {
+                    "schema": {"type": "string", "format": "binary"},
+                },
+            },
+        },
+    },
+)
 async def export_skill(
     skill_name: str,
     service: SkillsService = Depends(get_skills_service),
@@ -415,16 +663,18 @@ async def export_skill(
                 "Content-Disposition": f'attachment; filename="{skill_name}.zip"',
             },
         )
+    except ContextIntegrityBlocked as e:
+        _raise_context_integrity_locked(e)
     except SkillNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Skill '{skill_name}' not found",
         ) from None
     except SkillsError as e:
-        logger.error(f"Error exporting skill '{skill_name}': {e}")
+        logger.error("Error exporting skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to export skill",
         ) from e
 
 
@@ -432,8 +682,8 @@ async def export_skill(
 async def execute_skill(
     skill_name: str,
     request: SkillExecuteRequest,
+    principal: CurrentPrincipal,
     service: SkillsService = Depends(get_skills_service),
-    current_user: User = Depends(get_request_user),
 ):
     """
     Execute a skill with optional arguments.
@@ -446,20 +696,22 @@ async def execute_skill(
 
         executor = SkillExecutor()
         ctx = None
-        if current_user and getattr(current_user, "id", None) is not None:
+        if isinstance(principal.user_id, int):
             # Populate full RequestContext for fork mode support
             try:
                 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+
                 default_provider = DEFAULT_LLM_PROVIDER
             except Exception:
                 default_provider = "openai"
             try:
                 from tldw_Server_API.app.core.config import load_and_log_configs
+
                 app_config = load_and_log_configs()
             except Exception:
                 app_config = None
             ctx = RequestContext(
-                user_id=current_user.id,
+                user_id=principal.user_id,
                 default_provider=default_provider,
                 app_config=app_config,
                 client_id=getattr(service.db, "client_id", None) if getattr(service, "db", None) else None,
@@ -468,6 +720,7 @@ async def execute_skill(
             skill_data=skill_data,
             arguments=request.args or "",
             context=ctx,
+            dry_run=request.dry_run,
         )
 
         return SkillExecutionResult(
@@ -477,17 +730,20 @@ async def execute_skill(
             model_override=result.model_override,
             execution_mode=result.execution_mode,
             fork_output=result.fork_output,
+            dry_run=result.dry_run,
         )
+    except ContextIntegrityBlocked as e:
+        _raise_context_integrity_locked(e)
     except SkillNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Skill '{skill_name}' not found",
         ) from None
     except SkillsError as e:
-        logger.error(f"Error executing skill '{skill_name}': {e}")
+        logger.error("Error executing skill")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
+            detail="Failed to execute skill",
         ) from e
 
 

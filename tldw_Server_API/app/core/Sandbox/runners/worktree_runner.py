@@ -8,7 +8,6 @@ profile layering ready for a future iteration).  On Linux, requires
 from __future__ import annotations
 
 import contextlib
-import fnmatch
 import os
 import shutil
 import signal
@@ -18,7 +17,6 @@ import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 
@@ -28,6 +26,7 @@ from tldw_Server_API.app.core.testing import is_truthy
 from ..models import RunPhase, RunSpec, RunStatus, RuntimeType
 from ..runtime_capabilities import RuntimePreflightResult
 from ..streams import get_hub
+from .resource_limits import collect_runner_artifacts, log_limit_counters
 
 # ---------------------------------------------------------------------------
 # Env vars stripped from child processes for security
@@ -63,6 +62,13 @@ _WORKTREE_NONCRITICAL_EXCEPTIONS = (
     TypeError,
     ValueError,
     UnicodeDecodeError,
+    subprocess.SubprocessError,
+)
+
+_WORKTREE_CLEANUP_EXCEPTIONS = (
+    FileNotFoundError,
+    PermissionError,
+    OSError,
     subprocess.SubprocessError,
 )
 
@@ -253,14 +259,14 @@ class WorktreeRunner:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-        except subprocess.CalledProcessError:
+        except _WORKTREE_CLEANUP_EXCEPTIONS:
             logger.warning(
                 "git worktree remove failed for {}, cleaning up manually",
                 worktree_path,
             )
             shutil.rmtree(worktree_path, ignore_errors=True)
             # Prune stale worktree references
-            with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(_WORKTREE_CLEANUP_EXCEPTIONS):
                 subprocess.check_call(
                     ["git", "worktree", "prune"],
                     cwd=repo_path,
@@ -397,6 +403,15 @@ class WorktreeRunner:
             return b""
 
     @staticmethod
+    def _output_file_exceeds_cap(path: Path, max_bytes: int) -> bool:
+        if max_bytes <= 0 or not path.is_file():
+            return False
+        try:
+            return int(path.stat().st_size) > int(max_bytes)
+        except _WORKTREE_NONCRITICAL_EXCEPTIONS:
+            return False
+
+    @staticmethod
     def _path_within_root(root_path: Path, candidate: Path) -> bool:
         try:
             root = root_path.resolve()
@@ -410,31 +425,7 @@ class WorktreeRunner:
         workspace: str,
         capture_patterns: list[str] | None,
     ) -> dict[str, bytes]:
-        if not capture_patterns:
-            return {}
-        artifacts_map: dict[str, bytes] = {}
-        workspace_root = Path(workspace)
-        if workspace_root.is_symlink():
-            return {}
-        try:
-            for root, _dirs, files in os.walk(workspace):
-                root_path = Path(root)
-                if not WorktreeRunner._path_within_root(workspace_root, root_path):
-                    continue
-                for file_name in files:
-                    full_path = root_path / file_name
-                    if full_path.is_symlink():
-                        continue
-                    if not WorktreeRunner._path_within_root(workspace_root, full_path):
-                        continue
-                    full = os.path.join(root, file_name)
-                    rel = os.path.relpath(full, workspace)
-                    rel_posix = rel.replace(os.sep, "/")
-                    if any(fnmatch.fnmatchcase(rel_posix, p) for p in capture_patterns):
-                        artifacts_map[rel_posix] = full_path.read_bytes()
-        except _WORKTREE_NONCRITICAL_EXCEPTIONS:
-            return {}
-        return artifacts_map
+        return collect_runner_artifacts(workspace, capture_patterns).artifacts
 
     # ---- execution ----------------------------------------------------------
 
@@ -476,11 +467,15 @@ class WorktreeRunner:
         hub = get_hub()
         max_log_bytes = self._max_log_bytes()
         artifacts_map: dict[str, bytes] = {}
+        artifact_counters: dict[str, int] = {}
         message = "worktree execution failed"
         exit_code: int | None = None
         phase = RunPhase.failed
+        log_truncated = False
         proc: subprocess.Popen[bytes] | None = None
         run_dir: str | None = None
+        repo_path_for_cleanup: str | None = None
+        worktree_path: str | None = None
 
         with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
             hub.publish_event(
@@ -536,6 +531,7 @@ class WorktreeRunner:
             # Validate repo_path is under an allowed directory
             self._validate_repo_path(repo_path)
 
+            repo_path_for_cleanup = repo_path
             worktree_path = self.create_worktree(repo_path, branch="HEAD")
 
             # Copy session_workspace files into the worktree if they came from
@@ -602,35 +598,44 @@ class WorktreeRunner:
 
             stdout_data = self._read_capped_output(stdout_path, max_log_bytes)
             stderr_data = self._read_capped_output(stderr_path, max_log_bytes)
+            log_truncated = self._output_file_exceeds_cap(
+                stdout_path,
+                max_log_bytes,
+            ) or self._output_file_exceeds_cap(stderr_path, max_log_bytes)
 
             if stdout_data:
                 hub.publish_stdout(run_id, stdout_data, max_log_bytes=max_log_bytes)
             if stderr_data:
                 hub.publish_stderr(run_id, stderr_data, max_log_bytes=max_log_bytes)
+            if log_truncated:
+                hub.mark_log_truncated(run_id)
 
             if phase != RunPhase.timed_out:
-                artifacts_map = self._collect_artifacts(
+                artifact_result = collect_runner_artifacts(
                     worktree_path, spec.capture_patterns,
                 )
+                artifacts_map = artifact_result.artifacts
+                artifact_counters = artifact_result.counters
 
             if self._consume_cancelled(run_id):
                 phase = RunPhase.killed
                 exit_code = None
                 artifacts_map = {}
+                artifact_counters = {}
                 message = "canceled_by_user"
-
-            # Tear down the worktree
-            with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
-                self.destroy_worktree(worktree_path, repo_path)
 
         except _WORKTREE_NONCRITICAL_EXCEPTIONS as exc:
             logger.error("Worktree execution error for run {}: {}", run_id, exc)
             message = f"worktree execution error: {exc}"
             if self._consume_cancelled(run_id):
                 phase = RunPhase.killed
+                artifact_counters = {}
                 message = "canceled_by_user"
         finally:
             finished = datetime.now(timezone.utc)
+            if worktree_path and repo_path_for_cleanup:
+                with contextlib.suppress(_WORKTREE_NONCRITICAL_EXCEPTIONS):
+                    self.destroy_worktree(worktree_path, repo_path_for_cleanup)
             run_dir_to_remove = self._clear_active_run(run_id)
             if run_dir_to_remove:
                 run_dir = run_dir_to_remove
@@ -663,6 +668,8 @@ class WorktreeRunner:
             "log_bytes": int(total_log_bytes),
             "artifact_bytes": int(artifact_bytes),
         }
+        usage.update(log_limit_counters(hub, run_id, max_log_bytes))
+        usage.update(artifact_counters)
 
         return RunStatus(
             id="",

@@ -10,7 +10,7 @@ import time
 from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Mapping
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from typing import Annotated, Any, Callable, Optional
 from weakref import WeakKeyDictionary
 
 #
@@ -53,6 +53,8 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
     authenticate_api_key_user,
     get_single_user_instance,
     get_request_user,
+    resolve_user_id_for_request as resolve_user_id_for_request,
+    User as User,
     verify_jwt_and_fetch_user,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import set_scope
@@ -253,7 +255,10 @@ async def _authenticate_api_key_from_request(request: Request, api_key: str) -> 
                     db_path = settings.DATABASE_URL.replace("sqlite:///", "")
                     _ensure_authnz_tables(_Path(db_path))
             except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as _ensure_err:
-                logger.debug("AuthNZ test fallback: ensure_authnz_tables skipped/failed: {}", _ensure_err)
+                logger.debug(
+                    "AuthNZ test fallback: ensure_authnz_tables skipped/failed: error_type={}",
+                    type(_ensure_err).__name__,
+                )
             fixed_id = getattr(settings, "SINGLE_USER_FIXED_ID", 1)
             user = {
                 "id": fixed_id,
@@ -735,7 +740,11 @@ async def get_current_user(
     x_api_key: Optional[str] = Header(None, alias="X-API-KEY")
 ) -> dict[str, Any]:
     """
-    Resolve and return the current authenticated user.
+    Legacy compatibility shim that resolves and returns a user dictionary.
+
+    New or migrated route code should prefer ``CurrentPrincipal`` /
+    ``get_auth_principal`` unless the endpoint still requires dictionary-shaped
+    user data for backwards compatibility.
 
     Supports Bearer JWT authentication and API keys via `X-API-KEY` or
     Authorization Bearer (non-JWT tokens). If an upstream dependency already
@@ -1371,7 +1380,7 @@ async def get_auth_principal(
     except HTTPException:
         raise
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Maintenance guard skipped: {}", exc)
+        logger.debug("Maintenance guard skipped: error_type={}", type(exc).__name__)
     return principal
 
 
@@ -1557,7 +1566,10 @@ async def get_current_active_user(
     current_user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
     """
-    Get current active user (verified and not locked)
+    Legacy compatibility shim that returns an active user dictionary.
+
+    New or migrated route code should prefer ``CurrentPrincipal`` /
+    ``get_auth_principal`` unless dictionary-shaped user data is still needed.
 
     Args:
         current_user: Current authenticated user
@@ -1973,7 +1985,7 @@ async def enforce_rbac_rate_limit(
         else:
             logger.debug("RBAC rate-limit: no configured limits for user {}, resource {}", user_id, resource)
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug("RBAC rate-limit selection failed: {}", e)
+        logger.debug("RBAC rate-limit selection failed: error_type={}", type(e).__name__)
 
 
 def rbac_rate_limit(resource: str):
@@ -2497,6 +2509,36 @@ def require_token_scope(
         )
 
     return _checker
+
+
+#######################################################################################################################
+#
+# Phase 3.4 Standard Auth Dependency Surface
+
+CurrentPrincipal = Annotated[AuthPrincipal, Depends(get_auth_principal)]
+"""Route dependency alias that resolves and returns the current AuthPrincipal."""
+
+CurrentUserDict = Annotated[dict[str, Any], Depends(get_current_active_user)]
+"""Legacy route dependency alias for endpoints that still require user dictionaries."""
+
+_require_admin_principal = require_roles("admin")
+AdminPrincipal = Annotated[AuthPrincipal, Depends(_require_admin_principal)]
+"""Route dependency alias that returns an AuthPrincipal after admin role checks."""
+
+ServicePrincipal = Annotated[AuthPrincipal, Depends(require_service_principal)]
+"""Route dependency alias that returns an AuthPrincipal after service-principal checks."""
+
+RequireRole = require_roles
+"""Standard role-guard factory; returns an AuthPrincipal on success."""
+
+RequirePermission = require_permissions
+"""Standard permission-guard factory; returns an AuthPrincipal on success."""
+
+RequireApiKeyScope = require_api_key_scope
+"""Standard API-key-scope guard factory; returns an AuthPrincipal on success."""
+
+TokenScopeGuard = require_token_scope
+"""Standard token-scope guard factory for dependency lists; returns None on success."""
 #
 # End of auth_deps.py
 #######################################################################################################################

@@ -32,19 +32,29 @@ def _strip_common_root(member_name: str, common_root: str | None) -> str:
     return normalized
 
 
-def normalize_archive_members(
-    member_names: list[str],
-    hashes: dict[str, str],
-) -> dict[str, dict[str, str | None]]:
+def normalized_archive_member_paths(member_names: list[str]) -> dict[str, str]:
     common_root = _single_common_root(member_names)
-    items: dict[str, dict[str, str | None]] = {}
+    paths_by_member: dict[str, str] = {}
+    seen_relative_paths: set[str] = set()
     for member_name in member_names:
         normalized_name = _normalize_member_name(member_name)
         if not normalized_name or member_name.endswith("/"):
             continue
         relative_path = _strip_common_root(member_name, common_root)
-        if relative_path in items:
+        if relative_path in seen_relative_paths:
             raise ValueError(f"Duplicate normalized archive member path: {relative_path}")
+        seen_relative_paths.add(relative_path)
+        paths_by_member[member_name] = relative_path
+    return paths_by_member
+
+
+def normalize_archive_members(
+    member_names: list[str],
+    hashes: dict[str, str],
+) -> dict[str, dict[str, str | None]]:
+    items: dict[str, dict[str, str | None]] = {}
+    for member_name, relative_path in normalized_archive_member_paths(member_names).items():
+        normalized_name = _normalize_member_name(member_name)
         items[relative_path] = {
             "relative_path": relative_path,
             "content_hash": hashes.get(member_name, hashes.get(normalized_name)),

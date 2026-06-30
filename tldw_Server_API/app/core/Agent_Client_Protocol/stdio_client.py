@@ -9,9 +9,23 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
+    ACP_DEFAULT_RPC_TIMEOUT_SECONDS,
+    redact_agent_output,
+)
+
 
 class ACPResponseError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: int | None = None,
+        error: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.error = error or {}
 
 
 @dataclass
@@ -35,11 +49,13 @@ class ACPStdioClient:
         args: list[str],
         env: dict[str, str] | None = None,
         cwd: str | None = None,
+        rpc_timeout_sec: float | None = None,
     ) -> None:
         self.command = command
         self.args = args
         self.env = env or {}
         self.cwd = cwd
+        self.rpc_timeout_sec = ACP_DEFAULT_RPC_TIMEOUT_SECONDS if rpc_timeout_sec is None else float(rpc_timeout_sec)
         self._proc: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task | None = None
         self._stderr_task: asyncio.Task | None = None
@@ -109,10 +125,22 @@ class ACPStdioClient:
             "method": method,
             "params": params,
         }
-        await self._send(payload)
-        resp = await future
+        try:
+            await self._send(payload)
+            if self.rpc_timeout_sec > 0:
+                resp = await asyncio.wait_for(future, timeout=self.rpc_timeout_sec)
+            else:
+                resp = await future
+        except asyncio.TimeoutError as exc:
+            raise ACPResponseError(f"ACP call timed out waiting for {method}", code=-32000) from exc
+        finally:
+            self._pending.pop(str(request_id), None)
         if resp.error:
-            raise ACPResponseError(resp.error.get("message", "ACP error"))
+            raise ACPResponseError(
+                resp.error.get("message", "ACP error"),
+                code=resp.error.get("code"),
+                error=resp.error,
+            )
         return resp
 
     async def notify(self, method: str, params: Any | None = None) -> None:
@@ -137,9 +165,11 @@ class ACPStdioClient:
             await self._proc.stdin.drain()
 
     async def _read_loop(self) -> None:
-        assert self._proc is not None
-        assert self._proc.stdout is not None
-        reader = self._proc.stdout
+        proc = self._proc
+        if proc is None or proc.stdout is None:
+            self._drain_pending("ACP stdout not available")
+            return
+        reader = proc.stdout
         while True:
             line = await reader.readline()
             if not line:
@@ -210,13 +240,14 @@ class ACPStdioClient:
         await self._send(payload)
 
     async def _stderr_loop(self) -> None:
-        assert self._proc is not None
-        assert self._proc.stderr is not None
+        proc = self._proc
+        if proc is None or proc.stderr is None:
+            return
         while True:
-            line = await self._proc.stderr.readline()
+            line = await proc.stderr.readline()
             if not line:
                 break
-            logger.debug("ACP runner stderr: {}", line.decode("utf-8", errors="ignore").rstrip())
+            logger.debug("ACP runner stderr: {}", redact_agent_output(line).rstrip())
 
     def _drain_pending(self, reason: str) -> None:
         for future in self._pending.values():

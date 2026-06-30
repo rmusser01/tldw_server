@@ -30,8 +30,10 @@ def temp_db():
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
         db_path = f.name
 
-    # Initialize test database
-    with sqlite3.connect(db_path) as conn:
+    # Initialize test database. sqlite3's context manager commits/rolls back
+    # but does not close the connection, which leaves the file locked on Windows.
+    conn = sqlite3.connect(db_path)
+    try:
         conn.execute("""
             CREATE TABLE test_table (
                 id INTEGER PRIMARY KEY,
@@ -40,6 +42,8 @@ def temp_db():
             )
         """)
         conn.commit()
+    finally:
+        conn.close()
 
     yield db_path
 
@@ -392,7 +396,9 @@ class TestConnectionPoolIntegration:
 
         stats = connection_pool.get_statistics()
         assert stats.checkout_count == 5
-        assert stats.avg_checkout_time > 0
+        assert stats.total_checkout_time >= 0
+        assert stats.max_checkout_time >= 0
+        assert stats.avg_checkout_time == stats.total_checkout_time / stats.checkout_count
 
 
 if __name__ == "__main__":

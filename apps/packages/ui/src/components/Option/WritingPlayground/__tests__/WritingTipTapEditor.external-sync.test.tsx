@@ -1,0 +1,120 @@
+import React from "react"
+import type { JSONContent } from "@tiptap/react"
+import { act, render, waitFor } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
+import { WritingTipTapEditor } from "../WritingTipTapEditor"
+import type { WritingEditorAdapter } from "../writing-editor-adapter"
+
+const FIRST_DOC: JSONContent = {
+  type: "doc",
+  content: [
+    {
+      type: "paragraph",
+      content: [{ type: "text", text: "First draft" }]
+    }
+  ]
+}
+
+const SECOND_DOC: JSONContent = {
+  type: "doc",
+  content: [
+    {
+      type: "paragraph",
+      content: [{ type: "text", text: "Second draft" }]
+    }
+  ]
+}
+
+describe("WritingTipTapEditor external sync", () => {
+  it("accepts external content updates without a component-level focus gate", async () => {
+    const onContentChange = vi.fn()
+    const { container, rerender } = render(
+      <WritingTipTapEditor content={FIRST_DOC} onContentChange={onContentChange} />
+    )
+
+    rerender(
+      <WritingTipTapEditor content={SECOND_DOC} onContentChange={onContentChange} />
+    )
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("Second draft")
+    })
+  })
+
+  it("notifies after applying external content updates", async () => {
+    const onContentChange = vi.fn()
+    let textAtApply = ""
+    let container: HTMLElement
+    const onContentApplied = vi.fn(() => {
+      textAtApply = container.textContent ?? ""
+    })
+    const view = render(
+      <WritingTipTapEditor
+        content={FIRST_DOC}
+        onContentChange={onContentChange}
+        onContentApplied={onContentApplied}
+      />
+    )
+    container = view.container
+
+    view.rerender(
+      <WritingTipTapEditor
+        content={SECOND_DOC}
+        onContentChange={onContentChange}
+        onContentApplied={onContentApplied}
+      />
+    )
+
+    await waitFor(() => {
+      expect(onContentApplied).toHaveBeenCalledTimes(1)
+    })
+    expect(textAtApply).toContain("Second draft")
+  })
+
+  it("maps selections to plain-text offsets after paragraph boundaries", async () => {
+    const adapterRef: { current: WritingEditorAdapter | null } = {
+      current: null
+    }
+    const selectionChanges: Array<{ start: number; end: number }> = []
+
+    render(
+      <WritingTipTapEditor
+        content={{
+          type: "doc",
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "Alpha" }]
+            },
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "Beta" }]
+            }
+          ]
+        }}
+        onContentChange={vi.fn()}
+        onAdapterReady={(adapter) => {
+          adapterRef.current = adapter
+        }}
+        onSelectionChange={(selection) => {
+          selectionChanges.push(selection)
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(adapterRef.current).not.toBeNull()
+    })
+
+    act(() => {
+      adapterRef.current?.setSelection({ start: 7, end: 11 })
+    })
+
+    await waitFor(() => {
+      expect(adapterRef.current?.getSelectedText("Alpha\n\nBeta")).toBe("Beta")
+    })
+    await waitFor(() => {
+      expect(selectionChanges.at(-1)).toEqual({ start: 7, end: 11 })
+    })
+  })
+})

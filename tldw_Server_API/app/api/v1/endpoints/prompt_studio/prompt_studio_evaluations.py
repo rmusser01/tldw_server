@@ -26,6 +26,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import get_prompt_studio_db, get_prompt_studio_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import (
     EvaluationCreate,
     EvaluationList,
@@ -349,6 +351,16 @@ async def create_evaluation(
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        rid = ensure_request_id(request) if request is not None else None
+        tp = ensure_traceparent(request) if request is not None else ""
+        get_ps_logger(
+            request_id=rid,
+            ps_component="endpoint",
+            ps_job_kind="evaluations",
+            traceparent=tp,
+        ).error("Failed to create evaluation")
+        raise map_db_error_to_http(e, default_detail="Failed to create evaluation") from e
     except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS as e:
         rid = ensure_request_id(request) if request is not None else None
         tp = ensure_traceparent(request) if request is not None else ""
@@ -357,8 +369,8 @@ async def create_evaluation(
             ps_component="endpoint",
             ps_job_kind="evaluations",
             traceparent=tp,
-        ).exception("Failed to create evaluation: {}", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        ).error("Failed to create evaluation")
+        raise HTTPException(status_code=500, detail="Failed to create evaluation") from e
 
 @router.get("/evaluations", response_model=EvaluationList, openapi_extra={
     "responses": {"200": {"description": "Evaluations", "content": {"application/json": {"examples": {"list": {"summary": "Eval list", "value": [{"id": 501, "project_id": 1, "prompt_id": 12, "status": "running"}]}}}}}}
@@ -371,7 +383,7 @@ async def list_evaluations(
     offset: int = Query(0, ge=0),
     db: PromptStudioDatabase = Depends(get_prompt_studio_db),
     user_context: dict = Depends(get_prompt_studio_user),
-) -> list[EvaluationResponse]:
+) -> EvaluationList:
     """
     List evaluations for a project.
 
@@ -390,8 +402,10 @@ async def list_evaluations(
         # Use EvaluationManager to list evaluations
         eval_manager = EvaluationManager(db)
 
-        # Calculate page from offset
+        # Convert the public offset contract onto the manager's page API without
+        # returning rows before the requested offset.
         page = (offset // limit) + 1 if limit > 0 else 1
+        start_in_page = offset % limit if limit > 0 else 0
 
         result = eval_manager.list_evaluations(
             project_id=project_id,
@@ -399,10 +413,20 @@ async def list_evaluations(
             page=page,
             per_page=limit
         )
+        evaluation_rows = list(result.get("evaluations", []))
+        if start_in_page and len(evaluation_rows) < start_in_page + limit:
+            next_result = eval_manager.list_evaluations(
+                project_id=project_id,
+                prompt_id=prompt_id,
+                page=page + 1,
+                per_page=limit,
+            )
+            evaluation_rows.extend(next_result.get("evaluations", []))
+        evaluation_rows = evaluation_rows[start_in_page:start_in_page + limit]
 
         # Convert to response format
         evaluations = []
-        for eval_data in result.get("evaluations", []):
+        for eval_data in evaluation_rows:
             evaluations.append(EvaluationResponse(
                 id=eval_data["id"],
                 uuid=eval_data.get("uuid", ""),
@@ -413,16 +437,34 @@ async def list_evaluations(
                 status=eval_data.get("status", "pending"),
                 created_at=eval_data.get("created_at", ""),
                 completed_at=eval_data.get("completed_at"),
-                metrics=eval_data.get("aggregate_metrics")
+                metrics=eval_data.get("aggregate_metrics") or {},
             ))
 
+        pagination_data = result.get("pagination") if isinstance(result.get("pagination"), dict) else {}
+        total = int(pagination_data.get("total", result.get("total", len(evaluations))))
         return {
             "evaluations": evaluations,
-            "total": int(result.get("total", len(evaluations))),
+            "total": total,
             "limit": limit,
             "offset": offset,
+            "pagination": build_offset_pagination_meta(
+                total=total,
+                limit=limit,
+                offset=offset,
+                count=len(evaluations),
+            ),
         }
 
+    except DatabaseError as e:
+        rid = ensure_request_id(request) if request is not None else None
+        tp = ensure_traceparent(request) if request is not None else ""
+        get_ps_logger(
+            request_id=rid,
+            ps_component="endpoint",
+            ps_job_kind="evaluations",
+            traceparent=tp,
+        ).error("Failed to list evaluations")
+        raise map_db_error_to_http(e, default_detail="Failed to list evaluations") from e
     except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS as e:
         rid = ensure_request_id(request) if request is not None else None
         tp = ensure_traceparent(request) if request is not None else ""
@@ -431,8 +473,8 @@ async def list_evaluations(
             ps_component="endpoint",
             ps_job_kind="evaluations",
             traceparent=tp,
-        ).exception("Failed to list evaluations: {}", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        ).error("Failed to list evaluations")
+        raise HTTPException(status_code=500, detail="Failed to list evaluations") from e
 
 @router.get(
     "/evaluations/{evaluation_id}",
@@ -545,6 +587,16 @@ async def get_evaluation(
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        rid = ensure_request_id(request) if request is not None else None
+        tp = ensure_traceparent(request) if request is not None else ""
+        get_ps_logger(
+            request_id=rid,
+            ps_component="endpoint",
+            ps_job_kind="evaluations",
+            traceparent=tp,
+        ).error("Failed to get evaluation")
+        raise map_db_error_to_http(e, default_detail="Failed to get evaluation") from e
     except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS as e:
         rid = ensure_request_id(request) if request is not None else None
         tp = ensure_traceparent(request) if request is not None else ""
@@ -553,8 +605,8 @@ async def get_evaluation(
             ps_component="endpoint",
             ps_job_kind="evaluations",
             traceparent=tp,
-        ).exception("Failed to get evaluation: {}", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        ).error("Failed to get evaluation")
+        raise HTTPException(status_code=500, detail="Failed to get evaluation") from e
 
 @router.delete("/evaluations/{evaluation_id}", openapi_extra={
     "responses": {"200": {"description": "Deleted", "content": {"application/json": {"examples": {"deleted": {"value": {"message": "Evaluation 123 deleted successfully"}}}}}}}
@@ -592,8 +644,8 @@ async def delete_evaluation(
                 cursor.execute("PRAGMA table_info(prompt_studio_evaluations)")
                 columns = {row[1] for row in cursor.fetchall()}
             supports_soft_delete = "deleted" in columns and "deleted_at" in columns
-        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Failed to check prompt_studio_evaluations columns: {}", exc)
+        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
+            logger.debug("Failed to check prompt_studio_evaluations columns")
 
         if supports_soft_delete:
             cursor.execute(
@@ -619,6 +671,16 @@ async def delete_evaluation(
 
     except HTTPException:
         raise
+    except DatabaseError as e:
+        rid = ensure_request_id(request) if request is not None else None
+        tp = ensure_traceparent(request) if request is not None else ""
+        get_ps_logger(
+            request_id=rid,
+            ps_component="endpoint",
+            ps_job_kind="evaluations",
+            traceparent=tp,
+        ).error("Failed to delete evaluation")
+        raise map_db_error_to_http(e, default_detail="Failed to delete evaluation") from e
     except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS as e:
         rid = ensure_request_id(request) if request is not None else None
         tp = ensure_traceparent(request) if request is not None else ""
@@ -627,8 +689,8 @@ async def delete_evaluation(
             ps_component="endpoint",
             ps_job_kind="evaluations",
             traceparent=tp,
-        ).exception("Failed to delete evaluation: {}", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        ).error("Failed to delete evaluation")
+        raise HTTPException(status_code=500, detail="Failed to delete evaluation") from e
 
 ########################################################################################################################
 # Background Task Health

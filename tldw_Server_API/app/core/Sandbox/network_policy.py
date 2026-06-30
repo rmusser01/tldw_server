@@ -8,6 +8,7 @@ from collections.abc import Iterable, Sequence
 from typing import Callable
 
 from loguru import logger
+
 from tldw_Server_API.app.core.testing import is_truthy
 
 _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS = (
@@ -20,6 +21,7 @@ _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     subprocess.SubprocessError,
 )
+_IPTABLES_CLEANUP_TIMEOUT_SEC = 5
 
 
 def _truthy(v: str | None) -> bool:
@@ -250,27 +252,48 @@ def apply_egress_rules_atomic(container_ip: str, targets: Sequence[str], label: 
             logger.debug("iptables-restore failed; falling back to iterative iptables invocations")
     except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"iptables-restore invocation failed: {e}")
-    # Fallback path: iterative `iptables` calls
+    # Fallback path: iterative `iptables` calls. This path must still fail
+    # closed; reporting rules as installed when iptables returned non-zero
+    # leaves allowlist containers with unrestricted egress.
+    failures: list[str] = []
     for tgt in targets:
         dspec = tgt if "/" in tgt else f"{tgt}/32"
         try:
-            subprocess.run([
+            proc = subprocess.run([
                 "iptables", "-I", "DOCKER-USER", "1",
                 "-s", container_ip, "-d", dspec, "-j", "ACCEPT",
                 "-m", "comment", "--comment", label,
             ], check=False)
-            rule_specs.append(f"DOCKER-USER -s {container_ip} -d {dspec} -j ACCEPT -m comment --comment {label}")
+            if proc.returncode == 0:
+                rule_specs.append(f"DOCKER-USER -s {container_ip} -d {dspec} -j ACCEPT -m comment --comment {label}")
+            else:
+                failures.append(f"ACCEPT {dspec} returned {proc.returncode}")
         except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
             logger.debug("network policy: iptables ACCEPT rule failed for {} -> {}: {}", container_ip, dspec, e)
+            failures.append(f"ACCEPT {dspec} raised {e}")
     try:
-        subprocess.run([
+        proc = subprocess.run([
             "iptables", "-A", "DOCKER-USER",
             "-s", container_ip, "-j", "DROP",
             "-m", "comment", "--comment", label,
         ], check=False)
-        rule_specs.append(f"DOCKER-USER -s {container_ip} -j DROP -m comment --comment {label}")
+        if proc.returncode == 0:
+            rule_specs.append(f"DOCKER-USER -s {container_ip} -j DROP -m comment --comment {label}")
+        else:
+            failures.append(f"DROP returned {proc.returncode}")
     except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
         logger.debug("network policy: iptables DROP rule failed for {}: {}", container_ip, e)
+        failures.append(f"DROP raised {e}")
+    if failures:
+        try:
+            delete_rules_by_label(label)
+        except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as cleanup_exc:
+            logger.debug(
+                "network policy: failed to clean partial egress rules label={} error={}",
+                label,
+                cleanup_exc,
+            )
+        raise RuntimeError(f"iptables egress rule application failed: {'; '.join(failures)}")
     return rule_specs
 
 
@@ -281,7 +304,11 @@ def delete_rules_by_label(label: str) -> None:
     """
     # Try deletion by line numbers (descending)
     try:
-        out = subprocess.check_output(["iptables", "-L", "DOCKER-USER", "--line-numbers", "-n", "-v"], text=True)
+        out = subprocess.check_output(
+            ["iptables", "-L", "DOCKER-USER", "--line-numbers", "-n", "-v"],
+            text=True,
+            timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
+        )
         lines = out.splitlines()
         # Skip header lines, find those with the comment
         numbered: list[int] = []
@@ -294,19 +321,31 @@ def delete_rules_by_label(label: str) -> None:
                     continue
         for num in sorted(numbered, reverse=True):
             with contextlib.suppress(_SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS):
-                subprocess.run(["iptables", "-D", "DOCKER-USER", str(num)], check=False)
+                subprocess.run(
+                    ["iptables", "-D", "DOCKER-USER", str(num)],
+                    check=False,
+                    timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
+                )
         return
     except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
         logger.debug("network policy: delete_rules_by_label line-number path failed for {}: {}", label, e)
     # Fallback: translate `iptables -S` specs into deletions
     try:
-        out2 = subprocess.check_output(["iptables", "-S", "DOCKER-USER"], text=True)
+        out2 = subprocess.check_output(
+            ["iptables", "-S", "DOCKER-USER"],
+            text=True,
+            timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
+        )
         for line in out2.splitlines():
             if label in line:
                 parts = line.strip().split()
                 if parts and parts[0] in {"-A", "-I"}:
                     parts[0] = "-D"
                     with contextlib.suppress(_SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS):
-                        subprocess.run(["iptables"] + parts, check=False)
+                        subprocess.run(
+                            ["iptables"] + parts,
+                            check=False,
+                            timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
+                        )
     except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
         logger.debug("network policy: delete_rules_by_label -S fallback failed for {}: {}", label, e)

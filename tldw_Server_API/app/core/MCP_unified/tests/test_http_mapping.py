@@ -1,9 +1,9 @@
-import os
 import base64
-import json
-import pytest
 import ipaddress
+import json
+import os
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -21,6 +21,7 @@ def _setup_env():
 
 def _build_mcp_client():
     from fastapi import FastAPI
+
     from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_router
 
     app = FastAPI()
@@ -31,10 +32,10 @@ def _build_mcp_client():
 @pytest.fixture(scope="module")
 def client():
     _setup_env()
-    from fastapi import FastAPI
-    from fastapi import Request, HTTPException, status
-    from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_router
+    from fastapi import FastAPI, HTTPException, Request, status
+
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_router
     from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
     app = FastAPI()
     app.include_router(mcp_router, prefix="/api/v1")
@@ -87,6 +88,7 @@ def test_tools_list_via_request_bearer_token_allowed(client: TestClient):
     body = r.json()
     assert isinstance(body, dict) and isinstance(body.get("result"), dict)
     assert "tools" in body["result"]
+    assert "error" not in body
 
 
 def test_initialize_request_sets_session_header(client: TestClient):
@@ -102,8 +104,25 @@ def test_initialize_request_sets_session_header(client: TestClient):
     assert r.headers.get("mcp-session-id") is not None
     body = r.json()
     assert isinstance(body, dict) and body.get("result") is not None
+    assert "error" not in body
     result = body["result"]
     assert result.get("serverInfo", {}).get("name") == "tldw-mcp-unified"
+
+
+def test_http_request_invalid_safe_config_returns_400(client: TestClient):
+    payload = {"jsonrpc": "2.0", "method": "initialize", "params": {}, "id": 1}
+
+    r = client.post(
+        "/api/v1/mcp/request",
+        json=payload,
+        params={"config": "not-base64-json"},
+    )
+
+    assert r.status_code == 400
+    body = r.json()
+    assert body["detail"]["code"] == "invalid_safe_config"
+    assert body["detail"]["next_action"]
+    assert "not-base64-json" not in json.dumps(body)
 
 
 def test_http_notification_returns_204(client: TestClient):
@@ -226,8 +245,10 @@ def test_demo_auth_issues_token_with_secret(monkeypatch):
 
 def test_refresh_endpoint_rejects_query_token_and_accepts_body(monkeypatch):
     _setup_env()
-    from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
+    monkeypatch.setenv("MCP_ENABLE_DEMO_AUTH", "1")
+    monkeypatch.setenv("MCP_DEMO_AUTH_SECRET", "supersecretvalue12345")
     from tldw_Server_API.app.core.MCP_unified import config as config_module
+    from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
     from tldw_Server_API.app.core.MCP_unified.security import ip_filter
 
     try:
@@ -255,6 +276,30 @@ def test_refresh_endpoint_rejects_query_token_and_accepts_body(monkeypatch):
         assert r_body.status_code == 200
         data = r_body.json()
         assert "access_token" in data and data["token_type"] == "bearer"
+
+
+def test_refresh_endpoint_disabled_without_demo_auth(monkeypatch):
+    _setup_env()
+    monkeypatch.delenv("MCP_ENABLE_DEMO_AUTH", raising=False)
+    from tldw_Server_API.app.core.MCP_unified import config as config_module
+    from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
+    from tldw_Server_API.app.core.MCP_unified.security import ip_filter
+
+    try:
+        config_module.get_config.cache_clear()  # type: ignore[attr-defined]
+        ip_filter.get_ip_access_controller.cache_clear()  # type: ignore[attr-defined]
+    except Exception:
+        _ = None
+
+    refresh, token_id = get_jwt_manager().create_refresh_token(subject="1")
+
+    with _build_mcp_client() as temp_client:
+        r_body = temp_client.post(
+            "/api/v1/mcp/auth/refresh",
+            json={"refresh_token": refresh, "token_id": token_id},
+        )
+
+    assert r_body.status_code == 501
 
 
 def test_request_guard_enforces_body_size_limit(monkeypatch):
@@ -351,3 +396,121 @@ def test_request_guard_requires_client_certificate(monkeypatch):
             headers={"x-ssl-client-verify": "SUCCESS"},
         )
         assert r_valid.status_code == 200
+
+
+def test_tools_execute_unauth_preserves_string_detail_and_adds_recovery_headers(client: TestClient):
+    response = client.post(
+        "/api/v1/mcp/tools/execute",
+        json={"tool_name": "media.search", "arguments": {}},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication required"
+    assert response.headers["x-mcp-reason-code"] == "authentication_required"
+    assert response.headers["x-mcp-next-action"]
+
+
+def test_modules_permission_detail_mentions_modules_and_recovery(client: TestClient):
+    response = client.get("/api/v1/mcp/modules")
+
+    assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert detail["reason_code"] == "permission_denied"
+    assert detail["next_action"]
+    assert "modules" in detail["hint"].lower()
+    assert "tools" not in detail["hint"].lower()
+
+
+def test_permission_detail_preserves_protocol_recovery_metadata():
+    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as endpoint
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPError, MCPResponse
+
+    response = MCPResponse(
+        error=MCPError(
+            code=-32001,
+            message="Write tools are disabled for this profile",
+            data={
+                "hint": "Enable write tools on the selected MCP profile.",
+                "reason_code": "write_tools_disabled",
+                "next_action": "Switch to a profile that permits write tools before retrying.",
+            },
+        ),
+        id=1,
+    )
+
+    detail = endpoint._mcp_permission_detail(
+        response,
+        hint="Use a token or API key with tools execution permission.",
+        next_action="Use a token or API key with the required MCP permission.",
+    )
+
+    assert detail == {
+        "message": "Write tools are disabled for this profile",
+        "hint": "Enable write tools on the selected MCP profile.",
+        "reason_code": "write_tools_disabled",
+        "next_action": "Switch to a profile that permits write tools before retrying.",
+    }
+
+
+def test_invalid_safe_config_keeps_structured_recovery_detail(client: TestClient):
+    response = client.post(
+        "/api/v1/mcp/request",
+        json={"jsonrpc": "2.0", "method": "initialize", "params": {}, "id": 1},
+        params={"config": "not-base64-json"},
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["code"] == "invalid_safe_config"
+    assert detail["reason_code"] == "invalid_params"
+    assert detail["next_action"]
+
+
+@pytest.mark.asyncio
+async def test_jsonrpc_invalid_params_error_data_includes_recovery_metadata():
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest
+    from tldw_Server_API.app.core.MCP_unified.protocol_types import RequestContext
+
+    protocol = MCPProtocol()
+    response = await protocol.process_request(
+        MCPRequest(method="tools/call", params={}, id=1),
+        RequestContext(request_id="invalid-params-test", client_id="pytest", user_id="1"),
+    )
+
+    assert response.error is not None
+    assert response.error.code == -32602
+    assert response.error.data["reason_code"] == "invalid_params"
+    assert response.error.data["next_action"]
+
+
+def test_jsonrpc_write_tools_disabled_recovery_metadata_has_specific_next_action():
+    from tldw_Server_API.app.core.MCP_unified.protocol import ErrorCode, MCPProtocol
+
+    metadata = MCPProtocol._error_recovery_metadata(
+        ErrorCode.AUTHORIZATION_ERROR,
+        "Write tools are disabled for this profile",
+    )
+
+    assert metadata == {
+        "reason_code": "write_tools_disabled",
+        "next_action": (
+            "Enable write tools (set MCP_DISABLE_WRITE_TOOLS=0) "
+            "or switch to a read-only operation."
+        ),
+    }
+
+
+def test_websocket_query_auth_is_marked_legacy_in_endpoint_copy():
+    import inspect
+    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as endpoint
+
+    signature = inspect.signature(endpoint.websocket_endpoint)
+    token_description = signature.parameters["token"].default.description.lower()
+    api_key_description = signature.parameters["api_key"].default.description.lower()
+    docstring = inspect.getdoc(endpoint.websocket_endpoint).lower()
+
+    assert "legacy" in token_description
+    assert "disabled by default" in token_description
+    assert "legacy" in api_key_description
+    assert "disabled by default" in api_key_description
+    assert "?token=jwt-token" not in docstring

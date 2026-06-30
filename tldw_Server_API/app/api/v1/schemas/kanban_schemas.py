@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 # =============================================================================
 # Common Schemas
@@ -1122,6 +1123,7 @@ class WorkflowEventsListResponse(BaseModel):
     """Workflow events list response."""
 
     events: list[WorkflowEventResponse]
+    pagination: OffsetPaginationMeta
 
 
 class WorkflowStaleClaimResponse(BaseModel):
@@ -1142,3 +1144,4 @@ class WorkflowStaleClaimsListResponse(BaseModel):
     """Stale claims list response."""
 
     stale_claims: list[WorkflowStaleClaimResponse]
+    pagination: OffsetPaginationMeta

@@ -37,6 +37,23 @@ Connector sync jobs are not only deduped at Jobs level. They also reserve a sour
 - workers renew their Jobs lease and update source sync state while running
 - file-hosting sync jobs report `processed`, `skipped`, `failed`, and `degraded` counts in the job result
 
+## Audio Studio Domain
+
+Audio Studio uses Jobs for user-visible audio asset work.
+
+- Domain: `audio_studio`
+- Queue: `default`
+- Endpoint-enqueued job types:
+  - `audio_studio_generate`
+  - `audio_studio_render`
+  - `audio_studio_export`
+- Trigger paths:
+  - `POST /api/v1/audio-studio/projects/{project_id}/generations`
+  - `POST /api/v1/audio-studio/projects/{project_id}/renders`
+  - `POST /api/v1/audio-studio/projects/{project_id}/exports`
+
+Audio Studio job payloads are sanitized before persistence. Client requests must not include provider secrets or external URLs; provider base URLs are resolved from environment configuration and checked against `AUDIO_STUDIO_EXTERNAL_ENDPOINT_ALLOWLIST`. Jobs are idempotent by project, target resource, target revision, job type, and caller idempotency key. Audiobook migration commit currently runs as a server-side transaction through `POST /api/v1/audio-studio/migrations/audiobook/commit`; the worker has a reserved migration handler for a future async migration path, but the public endpoint does not enqueue that job type today.
+
 ### Recurring Connector Scheduler
 
 `tldw_Server_API/app/services/connectors_sync_scheduler.py` is an APScheduler bridge that scans sources and enqueues Jobs. It does not perform sync work itself.
@@ -473,7 +490,7 @@ jm.fail_job(job["id"], error="boom", retryable=True, worker_id=worker_id, lease_
 ### Encryption & Rotation
 
 - Enabling encryption
-  - Set `WORKFLOWS_ARTIFACT_ENC_KEY` to a base64-encoded AES key (16/24/32 bytes)
+  - Set `WORKFLOWS_ARTIFACT_ENC_KEY` to a strict base64-encoded 32-byte AES-256 key
   - Enable globally with `JOBS_ENCRYPT=true` or per-domain with `JOBS_ENCRYPT_<DOMAIN>=true`
   - When enabled, `payload`/`result` are stored as envelopes: `{ "_encrypted": {"_enc":"aesgcm:v1", ... } }`
 - Reading with dual keys (rotation window)

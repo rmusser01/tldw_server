@@ -17,8 +17,10 @@ Provides:
 
 import asyncio
 import contextlib
+import os
 import re
 import shutil
+import stat
 import time
 import zipfile
 from datetime import datetime, timezone
@@ -34,22 +36,87 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Context_Integrity.canonicalization import (
+    canonical_filesystem_digest,
+)
+from tldw_Server_API.app.core.Context_Integrity.resolver import (
+    ContextIntegrityBlocked,
+    ContextIntegrityResolver,
+    get_global_context_integrity_resolver,
+)
 from tldw_Server_API.app.core.Skills.exceptions import (
     SkillConflictError,
     SkillNotFoundError,
+    SkillParseError,
     SkillsError,
     SkillStorageError,
     SkillValidationError,
 )
+from tldw_Server_API.app.core.Skills.runtime_metadata import build_skill_runtime_metadata
 from tldw_Server_API.app.core.Skills.skill_parser import SkillFrontmatter, SkillParser
 
 # Skill name validation pattern (same as in schemas)
-SKILL_NAME_PATTERN = re.compile(r'^[a-z][a-z0-9-]{0,63}$')
+SKILL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 # Supporting file name validation pattern (same as in schemas)
-SUPPORTING_FILE_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$')
+SUPPORTING_FILE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$")
 MAX_SUPPORTING_FILES_COUNT = 20
 MAX_SUPPORTING_FILE_BYTES = 500000
 MAX_SUPPORTING_FILES_TOTAL_BYTES = 5 * 1024 * 1024  # 5MB
+MAX_SKILL_MD_BYTES = 500000
+MAX_ZIP_IMPORT_ENTRIES = 100
+SKILL_INTEGRITY_TEXT_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh"}
+SkillFileFingerprint = tuple[tuple[str, int, int, int, int, int], ...]
+
+
+def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    return (
+        left.st_dev,
+        left.st_ino,
+        stat.S_IFMT(left.st_mode),
+    ) == (
+        right.st_dev,
+        right.st_ino,
+        stat.S_IFMT(right.st_mode),
+    )
+
+
+def _stat_mtime_ns(value: os.stat_result) -> int:
+    return int(getattr(value, "st_mtime_ns", int(value.st_mtime * 1_000_000_000)))
+
+
+def _fingerprint_entry(relative_path: str, value: os.stat_result) -> tuple[str, int, int, int, int, int]:
+    return (
+        relative_path,
+        int(value.st_dev),
+        int(value.st_ino),
+        int(stat.S_IFMT(value.st_mode)),
+        int(value.st_size),
+        _stat_mtime_ns(value),
+    )
+
+
+def _fd_relative_walk_supported() -> bool:
+    supports_dir_fd = getattr(os, "supports_dir_fd", set())
+    return bool(hasattr(os, "fwalk") and os.open in supports_dir_fd and os.stat in supports_dir_fd)
+
+
+def _read_regular_file_bytes_no_follow(path: Path) -> bytes:
+    expected = path.lstat()
+    if not stat.S_ISREG(expected.st_mode):
+        raise OSError(f"Skill file is not a regular file: {path}")
+
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or not _same_file_identity(expected, opened):
+            raise OSError(f"Skill file changed while being opened: {path}")
+        with os.fdopen(fd, "rb", closefd=True) as file_obj:
+            fd = -1
+            return file_obj.read()
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 class SkillMetadata:
@@ -142,6 +209,7 @@ class SkillsService:
         base_path: Path,
         db: CharactersRAGDB | None = None,
         sync_interval: float = 5.0,
+        integrity_resolver: ContextIntegrityResolver | None = None,
     ):
         """
         Initialize the SkillsService.
@@ -159,6 +227,10 @@ class SkillsService:
         self._parser = SkillParser()
         self._sync_interval = sync_interval
         self._last_sync_time: float = 0.0
+        self.integrity_resolver = (
+            integrity_resolver if integrity_resolver is not None else get_global_context_integrity_resolver()
+        )
+        self._integrity_decision_cache: dict[tuple[str, str], tuple[float, SkillFileFingerprint, bool]] = {}
         self._ensure_skills_directory()
         self._ensure_registry_ready()
 
@@ -189,6 +261,250 @@ class SkillsService:
     def _get_skill_dir(self, name: str) -> Path:
         """Get the directory path for a skill."""
         return self.skills_dir / name
+
+    def _skill_asset_id(self, name: str) -> str:
+        """Return the Context Integrity asset id for a user skill."""
+        return f"skill:user:{self.user_id}/{name}"
+
+    def _relative_skill_path(self, skill_dir: Path, path: Path) -> str:
+        try:
+            return path.relative_to(skill_dir).as_posix()
+        except ValueError:
+            return path.resolve().relative_to(skill_dir.resolve()).as_posix()
+
+    def _read_skill_file_map_fd_walk(self, skill_dir: Path) -> dict[str, bytes]:
+        root_stat = skill_dir.lstat()
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise OSError(f"Skill directory is not a directory: {skill_dir}")
+
+        files: dict[str, bytes] = {}
+        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        for directory, dirnames, filenames, dirfd in os.fwalk(skill_dir, topdown=True, follow_symlinks=False):
+            dirnames.sort()
+            for dirname in list(dirnames):
+                entry_path = Path(directory) / dirname
+                entry_stat = os.stat(dirname, dir_fd=dirfd, follow_symlinks=False)
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    raise OSError(f"Symlinked skill path is not allowed: {entry_path}")
+                if not stat.S_ISDIR(entry_stat.st_mode):
+                    dirnames.remove(dirname)
+
+            for filename in sorted(filenames):
+                entry_path = Path(directory) / filename
+                entry_stat = os.stat(filename, dir_fd=dirfd, follow_symlinks=False)
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    raise OSError(f"Symlinked skill path is not allowed: {entry_path}")
+                if not stat.S_ISREG(entry_stat.st_mode):
+                    continue
+                if Path(filename).suffix.lower() not in SKILL_INTEGRITY_TEXT_SUFFIXES:
+                    continue
+
+                fd = os.open(filename, flags, dir_fd=dirfd)
+                try:
+                    opened_stat = os.fstat(fd)
+                    if not stat.S_ISREG(opened_stat.st_mode) or not _same_file_identity(entry_stat, opened_stat):
+                        raise OSError(f"Skill file changed while being opened: {entry_path}")
+                    with os.fdopen(fd, "rb", closefd=True) as file_obj:
+                        fd = -1
+                        files[self._relative_skill_path(skill_dir, entry_path)] = file_obj.read()
+                finally:
+                    if fd >= 0:
+                        os.close(fd)
+        return files
+
+    def _read_skill_file_map_path_walk(self, skill_dir: Path) -> dict[str, bytes]:
+        root_stat = skill_dir.lstat()
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise OSError(f"Skill directory is not a directory: {skill_dir}")
+
+        files: dict[str, bytes] = {}
+
+        def _walk(directory: Path, relative_prefix: str = "") -> None:
+            for path in sorted(directory.iterdir(), key=lambda item: item.name):
+                entry_stat = path.lstat()
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    raise OSError(f"Symlinked skill path is not allowed: {path}")
+
+                relative_path = f"{relative_prefix}{path.name}"
+                if stat.S_ISDIR(entry_stat.st_mode):
+                    _walk(path, f"{relative_path}/")
+                    continue
+
+                if not stat.S_ISREG(entry_stat.st_mode):
+                    continue
+                if path.suffix.lower() not in SKILL_INTEGRITY_TEXT_SUFFIXES:
+                    continue
+                files[relative_path] = _read_regular_file_bytes_no_follow(path)
+
+        _walk(skill_dir)
+        return files
+
+    def _read_skill_file_map(self, skill_dir: Path) -> dict[str, bytes]:
+        """Read prompt-bearing skill files without following symlinks."""
+        if _fd_relative_walk_supported():
+            return self._read_skill_file_map_fd_walk(skill_dir)
+        return self._read_skill_file_map_path_walk(skill_dir)
+
+    def _skill_file_fingerprint_fd_walk(self, skill_dir: Path) -> SkillFileFingerprint:
+        root_stat = skill_dir.lstat()
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise OSError(f"Skill directory is not a directory: {skill_dir}")
+
+        entries: list[tuple[str, int, int, int, int, int]] = []
+        for directory, dirnames, filenames, dirfd in os.fwalk(skill_dir, topdown=True, follow_symlinks=False):
+            dirnames.sort()
+            for dirname in list(dirnames):
+                entry_path = Path(directory) / dirname
+                entry_stat = os.stat(dirname, dir_fd=dirfd, follow_symlinks=False)
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    raise OSError(f"Symlinked skill path is not allowed: {entry_path}")
+                if not stat.S_ISDIR(entry_stat.st_mode):
+                    dirnames.remove(dirname)
+
+            for filename in sorted(filenames):
+                entry_path = Path(directory) / filename
+                entry_stat = os.stat(filename, dir_fd=dirfd, follow_symlinks=False)
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    raise OSError(f"Symlinked skill path is not allowed: {entry_path}")
+                if not stat.S_ISREG(entry_stat.st_mode):
+                    continue
+                if Path(filename).suffix.lower() not in SKILL_INTEGRITY_TEXT_SUFFIXES:
+                    continue
+                entries.append(_fingerprint_entry(self._relative_skill_path(skill_dir, entry_path), entry_stat))
+        return tuple(entries)
+
+    def _skill_file_fingerprint_path_walk(self, skill_dir: Path) -> SkillFileFingerprint:
+        root_stat = skill_dir.lstat()
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise OSError(f"Skill directory is not a directory: {skill_dir}")
+
+        entries: list[tuple[str, int, int, int, int, int]] = []
+
+        def _walk(directory: Path, relative_prefix: str = "") -> None:
+            for path in sorted(directory.iterdir(), key=lambda item: item.name):
+                entry_stat = path.lstat()
+                if stat.S_ISLNK(entry_stat.st_mode):
+                    raise OSError(f"Symlinked skill path is not allowed: {path}")
+
+                relative_path = f"{relative_prefix}{path.name}"
+                if stat.S_ISDIR(entry_stat.st_mode):
+                    _walk(path, f"{relative_path}/")
+                    continue
+
+                if not stat.S_ISREG(entry_stat.st_mode):
+                    continue
+                if path.suffix.lower() not in SKILL_INTEGRITY_TEXT_SUFFIXES:
+                    continue
+                entries.append(_fingerprint_entry(relative_path, entry_stat))
+
+        _walk(skill_dir)
+        return tuple(entries)
+
+    def _skill_file_fingerprint(self, skill_dir: Path) -> SkillFileFingerprint:
+        if _fd_relative_walk_supported():
+            return self._skill_file_fingerprint_fd_walk(skill_dir)
+        return self._skill_file_fingerprint_path_walk(skill_dir)
+
+    def _skill_digest(self, name: str, files: dict[str, bytes]) -> str:
+        """Compute the same canonical digest used by startup skill inventory."""
+        return canonical_filesystem_digest(
+            source_type="skill_file",
+            asset_id=self._skill_asset_id(name),
+            files=files,
+            metadata={"skill_name": name},
+        )
+
+    def _is_skill_allowed(self, name: str, *, purpose: str) -> bool:
+        """Return whether a skill can be advertised for a model-facing purpose."""
+        if self.integrity_resolver is None:
+            return True
+
+        cache_key = (name, purpose)
+        now = time.monotonic()
+        try:
+            skill_dir = self._get_skill_dir(name)
+            fingerprint = self._skill_file_fingerprint(skill_dir)
+            cached = self._integrity_decision_cache.get(cache_key)
+            if cached is not None and cached[0] >= now and cached[1] == fingerprint:
+                return cached[2]
+
+            files = self._read_skill_file_map(skill_dir)
+            if "SKILL.md" not in files:
+                self._integrity_decision_cache[cache_key] = (
+                    now + min(max(self._sync_interval, 0.0), 5.0),
+                    fingerprint,
+                    False,
+                )
+                return False
+            current_digest = self._skill_digest(name, files)
+            self.integrity_resolver.require_digest_allowed(
+                self._skill_asset_id(name),
+                current_digest=current_digest,
+                purpose=purpose,
+            )
+            self._integrity_decision_cache[cache_key] = (
+                now + min(max(self._sync_interval, 0.0), 5.0),
+                fingerprint,
+                True,
+            )
+            return True
+        except (ContextIntegrityBlocked, OSError, UnicodeDecodeError):
+            self._integrity_decision_cache.pop(cache_key, None)
+            return False
+
+    def _require_skill_allowed(
+        self,
+        name: str,
+        *,
+        purpose: str,
+        current_digest: str | None = None,
+    ) -> None:
+        """Raise when a skill is not allowed by the current integrity resolver."""
+        if self.integrity_resolver is None:
+            return
+
+        asset_id = self._skill_asset_id(name)
+        if current_digest is None:
+            self.integrity_resolver.require_allowed(asset_id, purpose=purpose)
+            return
+
+        self.integrity_resolver.require_digest_allowed(
+            asset_id,
+            current_digest=current_digest,
+            purpose=purpose,
+        )
+
+    def _parse_unchecked_skill_directory(
+        self,
+        name: str,
+        skill_dir: Path,
+        *,
+        files: dict[str, bytes] | None = None,
+    ) -> Any:
+        """Parse a skill from an already-read file map without integrity checks."""
+        files = files if files is not None else self._read_skill_file_map(skill_dir)
+        raw_skill = files.get("SKILL.md")
+        if raw_skill is None:
+            raise SkillNotFoundError(name, detail="SKILL.md not found")
+
+        parsed = self._parser.parse_content(raw_skill.decode("utf-8"), default_name=name)
+        parsed.supporting_files = {
+            relative_path: content.decode("utf-8")
+            for relative_path, content in files.items()
+            if relative_path != "SKILL.md"
+        }
+        return parsed
+
+    def _parse_verified_skill_directory(self, name: str, skill_dir: Path) -> Any:
+        """Read, verify, and parse a skill using one file snapshot."""
+        files = self._read_skill_file_map(skill_dir)
+        current_digest = self._skill_digest(name, files)
+        self._require_skill_allowed(
+            name,
+            purpose="skill_read",
+            current_digest=current_digest,
+        )
+        return self._parse_unchecked_skill_directory(name, skill_dir, files=files)
 
     def _normalize_and_validate_skill_name(self, name: str, *, source: str = "skill name") -> str:
         """Normalize and validate a skill name."""
@@ -286,11 +602,11 @@ class SkillsService:
     def _parse_skill_file(self, skill_dir: Path) -> Optional[Any]:
         """Parse SKILL.md content without loading supporting files."""
         skill_file = skill_dir / "SKILL.md"
-        if not skill_file.exists():
-            return None
         try:
-            content = skill_file.read_text(encoding="utf-8")
-        except OSError as e:
+            content = _read_regular_file_bytes_no_follow(skill_file).decode("utf-8")
+        except FileNotFoundError:
+            return None
+        except (OSError, UnicodeDecodeError) as e:
             logger.warning(f"Failed to read SKILL.md for {skill_dir.name}: {e}")
             return None
         try:
@@ -347,9 +663,29 @@ class SkillsService:
         disk_names: set[str] = set()
         if self.skills_dir.exists():
             for item in self.skills_dir.iterdir():
-                if not item.is_dir():
+                try:
+                    item_stat = item.lstat()
+                except OSError as e:
+                    logger.warning("Skipping unreadable skill path '{}': {}", item, e)
                     continue
-                if not (item / "SKILL.md").exists():
+                if stat.S_ISLNK(item_stat.st_mode):
+                    logger.warning("Skipping symlinked skill directory '{}'", item)
+                    continue
+                if not stat.S_ISDIR(item_stat.st_mode):
+                    continue
+
+                skill_file = item / "SKILL.md"
+                try:
+                    skill_file_stat = skill_file.lstat()
+                except FileNotFoundError:
+                    continue
+                except OSError as e:
+                    logger.warning("Skipping unreadable SKILL.md for '{}': {}", item.name, e)
+                    continue
+                if stat.S_ISLNK(skill_file_stat.st_mode):
+                    logger.warning("Skipping skill '{}' because SKILL.md is a symlink", item.name)
+                    continue
+                if not stat.S_ISREG(skill_file_stat.st_mode):
                     continue
 
                 disk_names.add(item.name)
@@ -392,10 +728,9 @@ class SkillsService:
                         "context": parsed.frontmatter.context,
                         "directory_path": str(item),
                         "file_hash": parsed.content_hash,
-                        "deleted": 0,
                     }
                     try:
-                        db.update_skill_registry(item.name, update_data, expected_version=existing.get("version", 1))
+                        db.restore_skill_registry(item.name, update_data, expected_version=existing.get("version", 1))
                         logger.info(f"Restored deleted skill '{item.name}' from disk")
                     except ConflictError as e:
                         logger.warning(f"Conflict restoring skill '{item.name}': {e}")
@@ -443,6 +778,13 @@ class SkillsService:
     async def list_skills(
         self,
         include_hidden: bool = False,
+        q: str | None = None,
+        context: str | None = None,
+        user_invocable: bool | None = None,
+        has_tools: bool | None = None,
+        model: str | None = None,
+        sort: str = "name",
+        order: str = "asc",
         limit: int = 100,
         offset: int = 0,
     ) -> list[SkillMetadata]:
@@ -451,6 +793,13 @@ class SkillsService:
 
         Args:
             include_hidden: If True, include skills with user_invocable=False
+            q: Optional case-insensitive search query for skill name or description
+            context: Optional execution context filter ("inline" or "fork").
+            user_invocable: Optional explicit visibility filter.
+            has_tools: Optional filter for skills with non-empty allowed_tools.
+            model: Optional exact model override filter.
+            sort: Whitelisted sort field.
+            order: Sort direction, "asc" or "desc".
             limit: Maximum number of skills to return
             offset: Offset for pagination
 
@@ -459,15 +808,41 @@ class SkillsService:
         """
         await self._sync_registry_async()
         db = self._get_db()
+        if self.integrity_resolver is not None:
+            rows = db.list_skill_registry(
+                include_hidden=include_hidden,
+                include_deleted=False,
+                q=q,
+                context=context,
+                user_invocable=user_invocable,
+                has_tools=has_tools,
+                model=model,
+                sort=sort,
+                order=order,
+                limit=None,
+                offset=0,
+            )
+            allowed_rows = [
+                row for row in rows if self._is_skill_allowed(str(row.get("name") or ""), purpose="skill_discovery")
+            ]
+            return [self._metadata_from_row(row) for row in allowed_rows[offset : offset + limit]]
+
         rows = db.list_skill_registry(
             include_hidden=include_hidden,
             include_deleted=False,
+            q=q,
+            context=context,
+            user_invocable=user_invocable,
+            has_tools=has_tools,
+            model=model,
+            sort=sort,
+            order=order,
             limit=limit,
             offset=offset,
         )
         return [self._metadata_from_row(row) for row in rows]
 
-    async def get_skill(self, name: str) -> dict[str, Any]:
+    async def get_skill(self, name: str, *, enforce_integrity: bool = True) -> dict[str, Any]:
         """
         Get full skill content.
 
@@ -496,7 +871,12 @@ class SkillsService:
             raise SkillNotFoundError(name, detail="Skill directory not found")
 
         try:
-            parsed = self._parser.parse_directory(skill_dir)
+            if enforce_integrity:
+                parsed = self._parse_verified_skill_directory(name, skill_dir)
+            else:
+                parsed = self._parse_unchecked_skill_directory(name, skill_dir)
+        except ContextIntegrityBlocked:
+            raise
         except Exception as e:
             raise SkillsError(f"Failed to parse skill: {e}") from e
 
@@ -511,6 +891,7 @@ class SkillsService:
             "model": parsed.frontmatter.model,
             "context": parsed.frontmatter.context,
             "content": parsed.content,
+            "raw_content": parsed.raw_content,
             "supporting_files": parsed.supporting_files,
             "directory_path": str(skill_dir),
             "created_at": metadata.created_at,
@@ -622,7 +1003,7 @@ class SkillsService:
 
         logger.info(f"Created skill '{name}' for user {self.user_id}")
 
-        return await self.get_skill(name)
+        return await self.get_skill(name, enforce_integrity=False)
 
     async def update_skill(
         self,
@@ -665,12 +1046,38 @@ class SkillsService:
             )
 
         skill_dir = self._get_skill_dir(name)
-        if not skill_dir.exists():
+        if not await asyncio.to_thread(skill_dir.exists):
             with contextlib.suppress(Exception):
                 db.mark_skill_registry_deleted(name, expected_version=current_version)
             raise SkillNotFoundError(name, detail="Skill directory not found")
 
         update_data: dict[str, Any] = {}
+        touched_files: dict[Path, Optional[str]] = {}
+
+        async def snapshot_file(file_path: Path) -> None:
+            """Capture a file's current text content before mutating it."""
+            if file_path in touched_files:
+                return
+            try:
+                if await asyncio.to_thread(file_path.exists):
+                    touched_files[file_path] = await asyncio.to_thread(file_path.read_text, encoding="utf-8")
+                else:
+                    touched_files[file_path] = None
+            except OSError as e:
+                raise SkillStorageError(f"Failed to read existing file before update: {e}", path=str(file_path)) from e
+
+        async def restore_touched_files() -> None:
+            """Restore files captured by snapshot_file after a failed update."""
+            for file_path, original_content in touched_files.items():
+                try:
+                    if original_content is None:
+                        await asyncio.to_thread(file_path.unlink, missing_ok=True)
+                    else:
+                        await asyncio.to_thread(file_path.parent.mkdir, parents=True, exist_ok=True)
+                        await asyncio.to_thread(file_path.write_text, original_content, encoding="utf-8")
+                except OSError as e:
+                    logger.error(f"Failed to restore skill file {file_path}: {e}")
+
         if content is not None:
             try:
                 parsed = self._parser.parse_content(content, default_name=name)
@@ -679,8 +1086,13 @@ class SkillsService:
 
             skill_file = skill_dir / "SKILL.md"
             try:
-                skill_file.write_text(content, encoding="utf-8")
+                await snapshot_file(skill_file)
+                await asyncio.to_thread(skill_file.write_text, content, encoding="utf-8")
+            except SkillStorageError:
+                await restore_touched_files()
+                raise
             except OSError as e:
+                await restore_touched_files()
                 raise SkillStorageError(f"Failed to write SKILL.md: {e}", path=str(skill_file)) from e
 
             update_data.update(
@@ -706,28 +1118,61 @@ class SkillsService:
             for filename, file_content in normalized_supporting_files.items():
                 file_path = self._safe_supporting_path(skill_dir, filename)
                 if file_content is None:
-                    if file_path.exists():
+                    if await asyncio.to_thread(file_path.exists):
                         try:
-                            file_path.unlink()
+                            await snapshot_file(file_path)
+                            await asyncio.to_thread(file_path.unlink, missing_ok=True)
+                        except SkillStorageError:
+                            await restore_touched_files()
+                            raise
                         except OSError as e:
-                            logger.warning(f"Failed to delete supporting file {filename}: {e}")
+                            await restore_touched_files()
+                            raise SkillStorageError(
+                                f"Failed to delete supporting file '{filename}': {e}",
+                                path=str(file_path),
+                            ) from e
                 else:
                     try:
-                        file_path.write_text(file_content, encoding="utf-8")
+                        await snapshot_file(file_path)
+                        await asyncio.to_thread(file_path.write_text, file_content, encoding="utf-8")
+                    except SkillStorageError:
+                        await restore_touched_files()
+                        raise
                     except OSError as e:
-                        logger.warning(f"Failed to write supporting file {filename}: {e}")
+                        await restore_touched_files()
+                        raise SkillStorageError(
+                            f"Failed to write supporting file '{filename}': {e}",
+                            path=str(file_path),
+                        ) from e
+
+            if normalized_supporting_files and not update_data:
+                parsed = await asyncio.to_thread(self._parse_skill_file, skill_dir)
+                if not parsed:
+                    await restore_touched_files()
+                    raise SkillsError(f"Failed to parse skill '{name}' after supporting file update")
+                update_data.update(
+                    {
+                        "directory_path": str(skill_dir),
+                        "file_hash": parsed.content_hash,
+                    }
+                )
 
         if update_data:
             try:
                 db.update_skill_registry(name, update_data, expected_version=current_version)
             except ConflictError as e:
+                await restore_touched_files()
                 raise SkillConflictError(str(e), skill_name=name) from e
             except (CharactersRAGDBError, InputError) as e:
+                await restore_touched_files()
                 raise SkillsError(f"Failed to update skill '{name}' in registry: {e}") from e
+            except Exception as e:
+                await restore_touched_files()
+                raise SkillsError(f"Unexpected error updating skill '{name}' in registry: {e}") from e
 
         logger.info(f"Updated skill '{name}' for user {self.user_id}")
 
-        return await self.get_skill(name)
+        return await self.get_skill(name, enforce_integrity=False)
 
     async def delete_skill(self, name: str, expected_version: Optional[int] = None) -> None:
         """
@@ -758,14 +1203,6 @@ class SkillsService:
                 actual_version=current_version,
             )
 
-        # Delete skill directory
-        skill_dir = self._get_skill_dir(name)
-        if skill_dir.exists():
-            try:
-                shutil.rmtree(skill_dir)
-            except OSError as e:
-                raise SkillStorageError(f"Failed to delete skill directory: {e}", path=str(skill_dir)) from e
-
         if not row.get("deleted"):
             try:
                 db.mark_skill_registry_deleted(name, expected_version=current_version)
@@ -774,7 +1211,100 @@ class SkillsService:
             except CharactersRAGDBError as e:
                 raise SkillsError(f"Failed to delete skill '{name}' in registry: {e}") from e
 
+        # Delete skill directory after the registry accepts the versioned delete.
+        skill_dir = self._get_skill_dir(name)
+        if await asyncio.to_thread(skill_dir.exists):
+            try:
+                await asyncio.to_thread(shutil.rmtree, skill_dir)
+            except OSError as e:
+                if not row.get("deleted"):
+                    try:
+                        db.restore_skill_registry(
+                            name,
+                            {"directory_path": str(skill_dir)},
+                            expected_version=current_version + 1,
+                        )
+                    except Exception as restore_error:
+                        logger.error(f"Failed to restore skill registry after delete failure: {restore_error}")
+                raise SkillStorageError(f"Failed to delete skill directory: {e}", path=str(skill_dir)) from e
+
         logger.info(f"Deleted skill '{name}' for user {self.user_id}")
+
+    async def bulk_delete_skills(self, items: list[dict[str, Any]]) -> list[str]:
+        """
+        Delete multiple skills after validating all selected versions.
+
+        Args:
+            items: Skill name/version mappings. Version may be omitted for legacy rows.
+
+        Returns:
+            Deleted skill names in request order.
+
+        Raises:
+            SkillValidationError: If the selection is invalid
+            SkillNotFoundError: If any selected skill doesn't exist
+            SkillConflictError: If any selected version is stale
+        """
+        if not items:
+            raise SkillValidationError("At least one skill is required for bulk delete")
+
+        normalized_items: list[tuple[str, int | None]] = []
+        seen_names: set[str] = set()
+        for item in items:
+            name = self._normalize_and_validate_skill_name(str(item.get("name") or ""))
+            if name in seen_names:
+                raise SkillValidationError(f"Duplicate skill selected for bulk delete: {name}")
+            seen_names.add(name)
+
+            expected_version = item.get("version")
+            if expected_version is not None:
+                if isinstance(expected_version, bool) or not isinstance(expected_version, int) or expected_version < 1:
+                    raise SkillValidationError(
+                        f"Invalid version for skill '{name}'",
+                        field="version",
+                    )
+            normalized_items.append((name, expected_version))
+
+        await self._sync_registry_async(force=True)
+        db = self._get_db()
+
+        try:
+            deleted_rows = await asyncio.to_thread(db.bulk_mark_skill_registry_deleted, normalized_items)
+        except InputError as e:
+            message = str(e)
+            missing_name = (
+                message.removeprefix("Skill not found: ").strip()
+                if message.startswith("Skill not found: ")
+                else message
+            )
+            raise SkillNotFoundError(missing_name) from e
+        except ConflictError as e:
+            raise SkillConflictError(str(e)) from e
+        except CharactersRAGDBError as e:
+            raise SkillsError(f"Failed to bulk delete skills in registry: {e}") from e
+
+        deleted: list[str] = []
+        for row in deleted_rows:
+            name = str(row["name"])
+            skill_dir = self._get_skill_dir(name)
+            if await asyncio.to_thread(skill_dir.exists):
+                try:
+                    await asyncio.to_thread(shutil.rmtree, skill_dir)
+                except OSError as e:
+                    if not row.get("was_deleted"):
+                        try:
+                            db.restore_skill_registry(
+                                name,
+                                {"directory_path": str(skill_dir)},
+                                expected_version=int(row["version"]),
+                            )
+                        except Exception as restore_error:
+                            logger.error(f"Failed to restore skill registry after bulk delete failure: {restore_error}")
+                    raise SkillStorageError(f"Failed to delete skill directory: {e}", path=str(skill_dir)) from e
+            deleted.append(name)
+
+        logger.info(f"Bulk deleted {len(deleted)} skills for user {self.user_id}")
+        return deleted
 
     async def import_skill(
         self,
@@ -813,10 +1343,14 @@ class SkillsService:
             raise SkillValidationError("Skill name must be specified in frontmatter or as parameter")
 
         skill_name = self._normalize_and_validate_skill_name(skill_name)
-        normalized_supporting_files = self._normalize_supporting_files(
-            supporting_files,
-            allow_deletes=False,
-        ) if supporting_files else None
+        normalized_supporting_files = (
+            self._normalize_supporting_files(
+                supporting_files,
+                allow_deletes=False,
+            )
+            if supporting_files
+            else None
+        )
 
         await self._sync_registry_async(force=True)
         db = self._get_db()
@@ -830,67 +1364,177 @@ class SkillsService:
 
         return await self.create_skill(skill_name, content, normalized_supporting_files)
 
-    async def import_from_zip(
+    def _invalid_import_preview(self, errors: list[str]) -> dict[str, Any]:
+        """Build a non-mutating import preview for invalid input."""
+        return {
+            "valid": False,
+            "errors": errors,
+            "name": None,
+            "description": None,
+            "argument_hint": None,
+            "disable_model_invocation": None,
+            "user_invocable": None,
+            "allowed_tools": None,
+            "model": None,
+            "context": None,
+            "supporting_file_count": 0,
+            "conflict": False,
+            "can_overwrite": False,
+            "existing_version": None,
+        }
+
+    async def preview_import_skill(
         self,
-        zip_data: bytes,
-        overwrite: bool = False,
+        content: str,
+        name: Optional[str] = None,
+        supporting_files: Optional[dict[str, str]] = None,
     ) -> dict[str, Any]:
         """
-        Import a skill from a zip file.
+        Preview a skill import without creating, deleting, or overwriting files.
 
         Args:
-            zip_data: Zip file bytes
-            overwrite: If True, overwrite existing skill
+            content: SKILL.md content
+            name: Optional skill name override
+            supporting_files: Additional files to validate with the import
 
         Returns:
-            Imported skill data
+            Import review data with parsed metadata, validation errors, and
+            conflict state.
         """
         try:
+            parsed = self._parser.parse_content(content, default_name=name)
+        except SkillParseError as e:
+            return self._invalid_import_preview([f"Invalid skill content: {e}"])
+
+        try:
+            if parsed.frontmatter.name:
+                self._normalize_and_validate_skill_name(
+                    parsed.frontmatter.name,
+                    source="frontmatter skill name",
+                )
+
+            requested_name: Optional[str] = None
+            if name is not None:
+                requested_name = self._normalize_and_validate_skill_name(name)
+
+            skill_name = requested_name or parsed.frontmatter.name
+            if not skill_name:
+                raise SkillValidationError("Skill name must be specified in frontmatter or as parameter")
+
+            skill_name = self._normalize_and_validate_skill_name(skill_name)
+            normalized_supporting_files = self._normalize_supporting_files(
+                supporting_files,
+                allow_deletes=False,
+            ) if supporting_files else {}
+        except SkillValidationError as e:
+            return self._invalid_import_preview([str(e)])
+
+        await self._sync_registry_async()
+        db = self._get_db()
+        existing = db.get_skill_registry(skill_name, include_deleted=True)
+        active_existing = bool(existing and not existing.get("deleted"))
+        existing_version = int(existing.get("version") or 1) if active_existing else None
+        fm = parsed.frontmatter
+
+        return {
+            "valid": True,
+            "errors": [],
+            "name": skill_name,
+            "description": fm.description,
+            "argument_hint": fm.argument_hint,
+            "disable_model_invocation": fm.disable_model_invocation,
+            "user_invocable": fm.user_invocable,
+            "allowed_tools": fm.allowed_tools,
+            "model": fm.model,
+            "context": fm.context,
+            "supporting_file_count": len(normalized_supporting_files),
+            "conflict": active_existing,
+            "can_overwrite": active_existing,
+            "existing_version": existing_version,
+        }
+
+    def _extract_zip_import_payload(
+        self,
+        zip_data: bytes,
+    ) -> tuple[str, Optional[str], Optional[dict[str, str]]]:
+        """Extract SKILL.md content, name, and supporting files from zip bytes."""
+        try:
             with zipfile.ZipFile(BytesIO(zip_data), "r") as zf:
+                entries = zf.infolist()
+                if len(entries) > MAX_ZIP_IMPORT_ENTRIES:
+                    raise SkillValidationError(
+                        f"Zip file contains too many entries: maximum {MAX_ZIP_IMPORT_ENTRIES} allowed"
+                    )
                 # Find SKILL.md
-                skill_md_path = None
+                skill_md_info = None
                 base_dir = ""
 
-                for name in zf.namelist():
+                for info in entries:
+                    name = info.filename
                     if name.endswith("SKILL.md"):
-                        skill_md_path = name
+                        skill_md_info = info
                         # Get the base directory
                         parts = name.split("/")
                         if len(parts) > 1:
                             base_dir = "/".join(parts[:-1]) + "/"
                         break
 
-                if not skill_md_path:
+                if not skill_md_info:
                     raise SkillValidationError("Zip file does not contain SKILL.md")
 
+                skill_md_path = skill_md_info.filename
                 skill_md_posix_path = PurePosixPath(skill_md_path)
                 if skill_md_posix_path.is_absolute() or ".." in skill_md_posix_path.parts:
                     raise SkillValidationError(f"Invalid SKILL.md path in zip: '{skill_md_path}'")
+                if skill_md_info.file_size > MAX_SKILL_MD_BYTES:
+                    raise SkillValidationError("SKILL.md exceeds 500KB limit")
 
                 # Read SKILL.md
-                content = zf.read(skill_md_path).decode("utf-8")
+                try:
+                    content = zf.read(skill_md_path).decode("utf-8")
+                except UnicodeDecodeError as e:
+                    raise SkillValidationError("SKILL.md in zip must be UTF-8 encoded text") from e
 
                 # Read supporting files
                 supporting_files: dict[str, str] = {}
-                for name in zf.namelist():
+                supporting_count = 0
+                supporting_total_bytes = 0
+                for info in entries:
+                    name = info.filename
                     if name == skill_md_path:
                         continue
-                    if name.startswith(base_dir) and not name.endswith("/"):
+                    if name.startswith(base_dir) and not info.is_dir():
                         relative_name = name[len(base_dir) :]
                         if not relative_name:
                             continue
 
                         relative_path = PurePosixPath(relative_name)
                         if relative_path.is_absolute() or ".." in relative_path.parts:
-                            raise SkillValidationError(
-                                f"Zip contains path traversal entry: '{name}'"
-                            )
+                            raise SkillValidationError(f"Zip contains path traversal entry: '{name}'")
 
                         # Ignore nested directories; supporting files are top-level only.
                         if relative_path.name != relative_name:
                             continue
 
                         safe_filename = self._validate_supporting_filename(relative_name)
+                        supporting_count += 1
+                        if supporting_count > MAX_SUPPORTING_FILES_COUNT:
+                            raise SkillValidationError(
+                                f"Too many supporting files: maximum {MAX_SUPPORTING_FILES_COUNT} allowed",
+                                field="supporting_files",
+                            )
+                        if info.file_size > MAX_SUPPORTING_FILE_BYTES:
+                            raise SkillValidationError(
+                                f"Supporting file '{safe_filename}' exceeds 500KB limit",
+                                field="supporting_files",
+                            )
+                        supporting_total_bytes += info.file_size
+                        if supporting_total_bytes > MAX_SUPPORTING_FILES_TOTAL_BYTES:
+                            raise SkillValidationError(
+                                "Supporting files exceed "
+                                f"{MAX_SUPPORTING_FILES_TOTAL_BYTES // (1024 * 1024)}MB limit",
+                                field="supporting_files",
+                            )
                         try:
                             file_content = zf.read(name).decode("utf-8")
                             supporting_files[safe_filename] = file_content
@@ -909,15 +1553,53 @@ class SkillsService:
                         source="skill name from zip",
                     )
 
-                return await self.import_skill(
-                    content=content,
-                    name=skill_name,
-                    supporting_files=supporting_files or None,
-                    overwrite=overwrite,
-                )
+                return content, skill_name, supporting_files or None
 
         except zipfile.BadZipFile:
             raise SkillValidationError("Invalid zip file") from None
+
+    async def preview_import_from_zip(
+        self,
+        zip_data: bytes,
+    ) -> dict[str, Any]:
+        """
+        Preview a skill import from a zip file without mutating stored skills.
+
+        Args:
+            zip_data: Zip file bytes
+
+        Returns:
+            Import review data
+        """
+        content, skill_name, supporting_files = self._extract_zip_import_payload(zip_data)
+        return await self.preview_import_skill(
+            content=content,
+            name=skill_name,
+            supporting_files=supporting_files,
+        )
+
+    async def import_from_zip(
+        self,
+        zip_data: bytes,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Import a skill from a zip file.
+
+        Args:
+            zip_data: Zip file bytes
+            overwrite: If True, overwrite existing skill
+
+        Returns:
+            Imported skill data
+        """
+        content, skill_name, supporting_files = self._extract_zip_import_payload(zip_data)
+        return await self.import_skill(
+            content=content,
+            name=skill_name,
+            supporting_files=supporting_files,
+            overwrite=overwrite,
+        )
 
     async def export_skill(self, name: str) -> bytes:
         """
@@ -934,11 +1616,8 @@ class SkillsService:
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
             # Write SKILL.md with full content (including frontmatter)
-            skill_dir = self._get_skill_dir(name)
-            skill_file = skill_dir / "SKILL.md"
-            if skill_file.exists():
-                full_content = skill_file.read_text(encoding="utf-8")
-            else:
+            full_content = skill_data.get("raw_content")
+            if not isinstance(full_content, str):
                 # Reconstruct from parsed data
                 fm = SkillFrontmatter(
                     name=skill_data["name"],
@@ -964,8 +1643,11 @@ class SkillsService:
     def _build_context_payload(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
         """Build a context payload from skill registry rows."""
         skills = [
-            row for row in rows
-            if row.get("user_invocable") and not row.get("disable_model_invocation")
+            row
+            for row in rows
+            if row.get("user_invocable")
+            and not row.get("disable_model_invocation")
+            and self._is_skill_allowed(str(row.get("name") or ""), purpose="skill_context")
         ]
 
         if not skills:
@@ -990,7 +1672,16 @@ class SkillsService:
                     "argument_hint": s.get("argument_hint"),
                     "user_invocable": bool(s.get("user_invocable")),
                     "disable_model_invocation": bool(s.get("disable_model_invocation")),
-                    "context": s.get("context", "inline"),
+                    "allowed_tools": s.get("allowed_tools"),
+                    "model": s.get("model"),
+                    "context": s.get("context") or "inline",
+                    "runtime": build_skill_runtime_metadata(
+                        context=s.get("context") or "inline",
+                        allowed_tools=s.get("allowed_tools"),
+                        model=s.get("model"),
+                        disable_model_invocation=bool(s.get("disable_model_invocation")),
+                    ),
+                    "version": int(s.get("version") or 1),
                 }
                 for s in skills
             ],
@@ -1025,13 +1716,55 @@ class SkillsService:
         rows = self._list_context_rows()
         return self._build_context_payload(rows)
 
-    async def get_total_count(self, include_hidden: bool = False) -> int:
-        """Get total count of skills."""
+    async def get_total_count(
+        self,
+        include_hidden: bool = False,
+        q: str | None = None,
+        context: str | None = None,
+        user_invocable: bool | None = None,
+        has_tools: bool | None = None,
+        model: str | None = None,
+    ) -> int:
+        """
+        Get total count of skills.
+
+        Args:
+            include_hidden: Include skills hidden from user invocation.
+            q: Optional search string filtering skills by name or description;
+                empty values are ignored.
+            context: Optional execution context filter ("inline" or "fork").
+            user_invocable: Optional explicit visibility filter.
+            has_tools: Optional filter for skills with non-empty allowed_tools.
+            model: Optional exact model override filter.
+        """
         await self._sync_registry_async()
         db = self._get_db()
+        if self.integrity_resolver is not None:
+            rows = db.list_skill_registry(
+                include_hidden=include_hidden,
+                include_deleted=False,
+                q=q,
+                context=context,
+                user_invocable=user_invocable,
+                has_tools=has_tools,
+                model=model,
+                sort="name",
+                order="asc",
+                limit=None,
+                offset=0,
+            )
+            return sum(
+                1 for row in rows if self._is_skill_allowed(str(row.get("name") or ""), purpose="skill_discovery")
+            )
+
         return db.count_skill_registry(
             include_hidden=include_hidden,
             include_deleted=False,
+            q=q,
+            context=context,
+            user_invocable=user_invocable,
+            has_tools=has_tools,
+            model=model,
         )
 
     def _get_builtin_skills_dir(self) -> Path:

@@ -100,7 +100,7 @@ export const isTldwServerRunning = async () => {
   try {
     const config = await tldwClient.getConfig()
     if (!config) return false
-    
+
     const health = await tldwClient.healthCheck()
     return health
   } catch (e) {
@@ -110,6 +110,7 @@ export const isTldwServerRunning = async () => {
 }
 
 const mapTldwModelToUi = (model: any) => ({
+  id: model.id,
   name: `tldw:${model.id}`,
   model: `tldw:${model.id}`,
   provider: String(model.provider || "unknown").toLowerCase(),
@@ -119,11 +120,57 @@ const mapTldwModelToUi = (model: any) => ({
   modified_at: new Date().toISOString(),
   size: 0,
   digest: "",
+  is_configured:
+    typeof model.isConfigured === "boolean" ? model.isConfigured : undefined,
+  provider_is_configured:
+    typeof model.providerIsConfigured === "boolean"
+      ? model.providerIsConfigured
+      : undefined,
+  catalog_only:
+    typeof model.catalogOnly === "boolean" ? model.catalogOnly : undefined,
+  provider_enabled:
+    typeof model.providerEnabled === "boolean" ? model.providerEnabled : undefined,
+  availability:
+    typeof model.availability === "string" ? model.availability : undefined,
+  readiness_reason_code:
+    typeof model.readinessReasonCode === "string"
+      ? model.readinessReasonCode
+      : undefined,
+  readiness_message:
+    typeof model.readinessMessage === "string"
+      ? model.readinessMessage
+      : undefined,
+  chat_provider:
+    typeof model.chatProvider === "string" ? model.chatProvider : undefined,
   details: {
     provider: model.provider,
     capabilities: model.capabilities,
     type: model.type,
-    modalities: model.modalities
+    modalities: model.modalities,
+    is_configured:
+      typeof model.isConfigured === "boolean" ? model.isConfigured : undefined,
+    provider_is_configured:
+      typeof model.providerIsConfigured === "boolean"
+        ? model.providerIsConfigured
+        : undefined,
+    catalog_only:
+      typeof model.catalogOnly === "boolean" ? model.catalogOnly : undefined,
+    provider_enabled:
+      typeof model.providerEnabled === "boolean"
+        ? model.providerEnabled
+        : undefined,
+    availability:
+      typeof model.availability === "string" ? model.availability : undefined,
+    readiness_reason_code:
+      typeof model.readinessReasonCode === "string"
+        ? model.readinessReasonCode
+        : undefined,
+    readiness_message:
+      typeof model.readinessMessage === "string"
+        ? model.readinessMessage
+        : undefined,
+    chat_provider:
+      typeof model.chatProvider === "string" ? model.chatProvider : undefined
   }
 })
 
@@ -131,13 +178,22 @@ const CHAT_MODELS_CACHE_TTL_MS = 60_000
 let chatModelsCache: { value: any[]; expiresAt: number } | null = null
 let chatModelsInFlight: Promise<any[]> | null = null
 
+type ChatModelsCacheListenerState = {
+  clear: () => void
+  listenersAdded: boolean
+}
+
+const CHAT_MODELS_CACHE_LISTENER_KEY = "__tldwChatModelsCacheListeners"
+
 const dedupeChatModelsByModel = (models: any[]) => {
   const unique: any[] = []
   const indexByModel = new Map<string, number>()
   const duplicates: string[] = []
 
   for (const model of models) {
-    const key = String(model?.model || model?.name || "").trim()
+    const modelId = String(model?.model || model?.name || "").trim()
+    const provider = String(model?.provider || "unknown").trim().toLowerCase()
+    const key = modelId ? `${provider}:${modelId}` : ""
     if (!key) {
       unique.push(model)
       continue
@@ -201,6 +257,38 @@ const dedupeChatModelsByModel = (models: any[]) => {
 export const clearChatModelsCache = () => {
   chatModelsCache = null
   chatModelsInFlight = null
+}
+
+const getChatModelsCacheListenerState = (): ChatModelsCacheListenerState => {
+  const globalWindow = window as typeof window & {
+    [CHAT_MODELS_CACHE_LISTENER_KEY]?: ChatModelsCacheListenerState
+  }
+  const existing = globalWindow[CHAT_MODELS_CACHE_LISTENER_KEY]
+  if (existing) {
+    return existing
+  }
+  const created: ChatModelsCacheListenerState = {
+    clear: clearChatModelsCache,
+    listenersAdded: false
+  }
+  globalWindow[CHAT_MODELS_CACHE_LISTENER_KEY] = created
+  return created
+}
+
+if (typeof window !== "undefined") {
+  const listenerState = getChatModelsCacheListenerState()
+  listenerState.clear = clearChatModelsCache
+  if (!listenerState.listenersAdded) {
+    window.addEventListener("tldw:config-updated", () => {
+      listenerState.clear()
+    })
+    window.addEventListener("storage", (event) => {
+      if (!event.key || event.key === "tldwConfig") {
+        listenerState.clear()
+      }
+    })
+    listenerState.listenersAdded = true
+  }
 }
 
 export const getAllModels = async ({ returnEmpty = false }: { returnEmpty?: boolean }) => {
@@ -277,9 +365,11 @@ export const fetchChatModels = async ({
       }
 
       const resolved = dedupeChatModelsByModel(combined)
-      chatModelsCache = {
-        value: resolved,
-        expiresAt: Date.now() + CHAT_MODELS_CACHE_TTL_MS
+      if (resolved.length > 0) {
+        chatModelsCache = {
+          value: resolved,
+          expiresAt: Date.now() + CHAT_MODELS_CACHE_TTL_MS
+        }
       }
       return resolved
     })()

@@ -377,7 +377,10 @@ async def test_auto_output_generates_file_and_artifact(tmp_path, monkeypatch):
             return (fake_items, 2)
 
     class FakeCollDB:
+        artifact_kwargs: dict | None = None
+
         def create_output_artifact(self, **kwargs):
+            self.artifact_kwargs = kwargs
             return _FakeArtifact(artifact_id=99)
 
     # Patch _outputs_dir_for_user and _resolve_output_path_for_user to use tmp_path
@@ -394,9 +397,10 @@ async def test_auto_output_generates_file_and_artifact(tmp_path, monkeypatch):
         fake_resolve,
     )
 
+    fake_collections_db = FakeCollDB()
     result = await _maybe_auto_generate_output(
         db=FakeDB(),
-        collections_db=FakeCollDB(),
+        collections_db=fake_collections_db,
         user_id=1,
         run=_FakeRun(run_id=7),
         job=_FakeJob(job_id=10, name="MyJob"),
@@ -404,6 +408,10 @@ async def test_auto_output_generates_file_and_artifact(tmp_path, monkeypatch):
         stats={"items_ingested": 2},
     )
     assert result == 99
+    metadata = json.loads(fake_collections_db.artifact_kwargs["metadata_json"])
+    assert metadata["origin"] == "watchlists"
+    assert metadata["generation_mode"] == "auto_output"
+    assert metadata["auto_output"] is True
 
     # Verify a file was written
     files = list(tmp_path.glob("*.md"))

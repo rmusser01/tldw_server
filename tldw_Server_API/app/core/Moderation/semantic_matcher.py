@@ -66,8 +66,8 @@ class SemanticMatcher:
             if isinstance(result, dict):
                 return result.get("embedding", [])
             return None
-        except _SEMANTIC_NONCRITICAL as e:
-            logger.debug(f"Embedding failed: {e}")
+        except _SEMANTIC_NONCRITICAL:
+            logger.debug("Embedding failed")
             return None
 
     def _get_reference_embeddings(
@@ -162,8 +162,8 @@ class SemanticMatcher:
             if result_text == "none" or "none" in result_text:
                 return False, None, 0.1
             return False, None, 0.5  # Ambiguous response
-        except _SEMANTIC_NONCRITICAL as e:
-            logger.debug(f"LLM classification failed: {e}")
+        except _SEMANTIC_NONCRITICAL:
+            logger.debug("LLM classification failed")
             return False, None, 0.0
 
     def clear_cache(self) -> None:

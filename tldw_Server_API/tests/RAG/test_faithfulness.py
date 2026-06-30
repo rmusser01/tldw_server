@@ -19,6 +19,7 @@ import json
 import pytest
 from typing import Any
 
+from tldw_Server_API.app.core.RAG.rag_service import faithfulness as faithfulness_mod
 from tldw_Server_API.app.core.RAG.rag_service.faithfulness import (
     ClaimVerification,
     FaithfulnessResult,
@@ -87,6 +88,49 @@ class FailOnVerificationLLM:
         if "Extract all factual claims" in prompt:
             return self.claims_json
         raise RuntimeError("Verification service unavailable")
+
+
+class SensitiveExtractionFailureLLM:
+    """Mock LLM that leaks sensitive details in extraction exceptions."""
+
+    async def generate(self, prompt: str, **kwargs: Any) -> str:
+        raise RuntimeError(
+            "extract failed with sk-test-secret at /private/tmp/faithfulness.env"
+        )
+
+
+class SensitiveVerificationFailureLLM:
+    """Mock LLM that leaks sensitive details in verification exceptions."""
+
+    def __init__(self, claims_json: str) -> None:
+        self.claims_json = claims_json
+
+    async def generate(self, prompt: str, **kwargs: Any) -> str:
+        if "Extract all factual claims" in prompt:
+            return self.claims_json
+        raise RuntimeError(
+            "verify failed with sk-test-secret at /private/tmp/faithfulness.env"
+        )
+
+
+class WarningLoggerStub:
+    """Capture warning messages rendered by loguru-style calls."""
+
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        if args or kwargs:
+            self.warnings.append(message.format(*args, **kwargs))
+        else:
+            self.warnings.append(message)
+
+
+def _assert_no_sensitive_fallback_leak(text: str) -> None:
+    assert "sk-test-secret" not in text
+    assert "/private/tmp/faithfulness.env" not in text
+    assert "extract failed" not in text
+    assert "verify failed" not in text
 
 
 # ---------------------------------------------------------------------------
@@ -488,6 +532,26 @@ class TestFaithfulnessEvaluatorDetailed:
         assert result.claims == []
         assert "Claim extraction failed" in result.reasoning
 
+    async def test_llm_extraction_failure_fallback_is_sanitized(self, monkeypatch):
+        """Extraction fallback must not leak raw exception details."""
+        logger_stub = WarningLoggerStub()
+        monkeypatch.setattr(faithfulness_mod, "logger", logger_stub)
+        llm = SensitiveExtractionFailureLLM()
+        evaluator = FaithfulnessEvaluator(llm=llm)
+
+        result = await evaluator.evaluate_detailed(
+            response="Some response.",
+            context="Some context.",
+        )
+
+        assert result.score == 0.0
+        assert result.claims == []
+        assert result.reasoning == "Claim extraction failed."
+        rendered_logs = "\n".join(logger_stub.warnings)
+        assert "Faithfulness: claim extraction failed" in rendered_logs
+        _assert_no_sensitive_fallback_leak(result.reasoning)
+        _assert_no_sensitive_fallback_leak(rendered_logs)
+
     async def test_llm_verification_failure_marks_claim_unsupported(self):
         """When verification fails for a claim, it should be marked unsupported."""
         llm = FailOnVerificationLLM(
@@ -504,6 +568,31 @@ class TestFaithfulnessEvaluatorDetailed:
         assert len(result.claims) == 1
         assert result.claims[0].supported is False
         assert "Verification failed" in result.claims[0].reasoning
+
+    async def test_llm_verification_failure_fallback_is_sanitized(self, monkeypatch):
+        """Verification fallback must preserve status without leaking exceptions."""
+        logger_stub = WarningLoggerStub()
+        monkeypatch.setattr(faithfulness_mod, "logger", logger_stub)
+        llm = SensitiveVerificationFailureLLM(
+            claims_json='["Claim that will fail verification"]'
+        )
+        evaluator = FaithfulnessEvaluator(llm=llm)
+
+        result = await evaluator.evaluate_detailed(
+            response="Claim that will fail verification.",
+            context="Some context.",
+        )
+
+        assert result.score == 0.0
+        assert len(result.claims) == 1
+        assert result.claims[0].claim == "Claim that will fail verification"
+        assert result.claims[0].supported is False
+        assert result.claims[0].reasoning == "Verification failed."
+        assert result.reasoning == "None of the claims in the response are supported by the context."
+        rendered_logs = "\n".join(logger_stub.warnings)
+        assert "Faithfulness: claim verification failed for 'Claim that will fail verification...'" in rendered_logs
+        _assert_no_sensitive_fallback_leak(result.claims[0].reasoning)
+        _assert_no_sensitive_fallback_leak(rendered_logs)
 
     async def test_no_verifiable_claims_returns_perfect_score(self):
         """When extraction returns no claims, score should be 1.0."""

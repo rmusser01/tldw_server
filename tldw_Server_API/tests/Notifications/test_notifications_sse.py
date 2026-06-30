@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -21,6 +25,52 @@ from tldw_Server_API.app.core.config import settings
 
 
 pytestmark = pytest.mark.unit
+
+
+class _TimeoutSSEStream:
+    def __init__(self, **_kwargs):
+        self._closed = False
+
+    async def send_event(self, _event: str, _payload: dict, *, event_id: str | None = None) -> None:
+        raise asyncio.TimeoutError("notifications timeout leaked /private/notifications-stream.log")
+
+    async def done(self, *, force: bool = False) -> None:
+        self._closed = True
+
+    async def iter_sse(self):
+        while not self._closed:
+            await asyncio.sleep(0)
+            yield "data: {}\n\n"
+
+
+class _LoopErrorSSEStream:
+    def __init__(self, **_kwargs):
+        self._closed = False
+
+    async def send_event(self, _event: str, _payload: dict, *, event_id: str | None = None) -> None:
+        return None
+
+    async def done(self, *, force: bool = False) -> None:
+        self._closed = True
+
+    async def iter_sse(self):
+        while not self._closed:
+            await asyncio.sleep(0)
+            yield "data: {}\n\n"
+
+
+async def _advance_stream(response, *, until=None, steps: int = 10) -> None:
+    iterator = response.body_iterator
+    try:
+        for _ in range(steps):
+            with contextlib.suppress(StopAsyncIteration):
+                await anext(iterator)
+            await asyncio.sleep(0)
+            if until is not None and until():
+                break
+    finally:
+        with contextlib.suppress(BaseException):
+            await iterator.aclose()
 
 
 def _collect_sse_events(response, *, max_events: int = 8) -> list[dict]:
@@ -52,6 +102,53 @@ def _collect_sse_events(response, *, max_events: int = 8) -> list[dict]:
         if line.startswith("data: "):
             current.setdefault("data_lines", []).append(line[6:])
     return events
+
+
+@pytest.mark.asyncio
+async def test_notifications_stream_sanitizes_send_timeout_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import notifications as notifications_endpoint
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(notifications_endpoint, "logger", fake_logger)
+    monkeypatch.setattr(notifications_endpoint, "SSEStream", _TimeoutSSEStream)
+
+    response = await notifications_endpoint.stream_notifications(
+        after=0,
+        last_event_id=None,
+        db=SimpleNamespace(user_id=882),
+        _principal=object(),
+    )
+
+    await _advance_stream(response, until=lambda: fake_logger.warning.called)
+
+    fake_logger.warning.assert_called_once_with("notifications stream send timeout")
+
+
+@pytest.mark.asyncio
+async def test_notifications_stream_sanitizes_loop_error_log(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import notifications as notifications_endpoint
+
+    fake_logger = MagicMock()
+    monkeypatch.setattr(notifications_endpoint, "logger", fake_logger)
+    monkeypatch.setattr(notifications_endpoint, "SSEStream", _LoopErrorSSEStream)
+    monkeypatch.setattr(
+        notifications_endpoint.CollectionsDatabase,
+        "for_user",
+        staticmethod(lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("notifications db leaked /private/notifications.db")
+        )),
+    )
+
+    response = await notifications_endpoint.stream_notifications(
+        after=0,
+        last_event_id=None,
+        db=SimpleNamespace(user_id=882),
+        _principal=object(),
+    )
+
+    await _advance_stream(response, until=lambda: fake_logger.warning.called)
+
+    fake_logger.warning.assert_called_once_with("notifications stream loop error")
 
 
 @pytest.fixture()

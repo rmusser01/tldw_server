@@ -36,6 +36,18 @@ def _resolve_user_id(job: dict[str, Any], payload: dict[str, Any]) -> int:
     return int(owner)
 
 
+def _task_run_completion_patch(task: Any, *, now_iso: str, last_status: str) -> dict[str, Any]:
+    """Build the task state patch shared by completed and skipped runs."""
+    patch: dict[str, Any] = {
+        "last_run_at": now_iso,
+        "last_status": last_status,
+    }
+    if task.schedule_kind == "one_time":
+        patch["enabled"] = False
+        patch["next_run_at"] = None
+    return patch
+
+
 async def handle_reminder_job(
     job: dict[str, Any],
     *,
@@ -51,7 +63,6 @@ async def handle_reminder_job(
     now_iso = datetime.now(timezone.utc).isoformat()
 
     cdb = collections_db or CollectionsDatabase.for_user(user_id=user_id)
-    task = cdb.get_reminder_task(task_id)
     run = cdb.create_reminder_task_run(
         task_id=task_id,
         scheduled_for=payload.get("scheduled_for"),
@@ -65,6 +76,67 @@ async def handle_reminder_job(
 
     if run.status == "succeeded":
         return {"status": "succeeded", "task_id": task_id, "run_id": run.id, "deduped": True}
+    if run.status == "skipped":
+        return {"status": "skipped", "task_id": task_id, "run_id": run.id, "deduped": True}
+
+    try:
+        task = cdb.get_reminder_task(task_id)
+    except KeyError:
+        completed_at = datetime.now(timezone.utc).isoformat()
+        cdb.update_reminder_task_run_status(
+            run_id=run.id,
+            status="skipped",
+            error="task_missing",
+            completed_at=completed_at,
+        )
+        logger.info("Reminder job skipped for missing task: task_id={} run_id={}", task_id, run.id)
+        return {
+            "status": "skipped",
+            "reason": "task_missing",
+            "task_id": task_id,
+            "run_id": run.id,
+        }
+
+    if not task.enabled:
+        completed_at = datetime.now(timezone.utc).isoformat()
+        cdb.update_reminder_task_run_status(
+            run_id=run.id,
+            status="skipped",
+            error="task_disabled",
+            completed_at=completed_at,
+        )
+        cdb.update_reminder_task(
+            task_id,
+            _task_run_completion_patch(task, now_iso=now_iso, last_status="skipped"),
+        )
+        logger.info("Reminder job skipped for disabled task: task_id={} run_id={}", task_id, run.id)
+        return {
+            "status": "skipped",
+            "reason": "task_disabled",
+            "task_id": task_id,
+            "run_id": run.id,
+        }
+
+    prefs = cdb.get_notification_preferences()
+    if not prefs.reminder_enabled:
+        completed_at = datetime.now(timezone.utc).isoformat()
+        cdb.update_reminder_task_run_status(
+            run_id=run.id,
+            status="skipped",
+            error="reminder_notifications_disabled",
+            completed_at=completed_at,
+        )
+        cdb.update_reminder_task(
+            task_id,
+            _task_run_completion_patch(task, now_iso=now_iso, last_status="skipped"),
+        )
+        logger.info("Reminder job skipped by notification preferences: task_id={} run_id={}", task_id, run.id)
+        return {
+            "status": "skipped",
+            "reason": "reminder_notifications_disabled",
+            "task_id": task_id,
+            "run_id": run.id,
+        }
 
     notification = cdb.create_user_notification(
         kind="reminder_due",
@@ -88,14 +160,10 @@ async def handle_reminder_job(
         error=None,
         completed_at=datetime.now(timezone.utc).isoformat(),
     )
-    patch: dict[str, Any] = {
-        "last_run_at": now_iso,
-        "last_status": "succeeded",
-    }
-    if task.schedule_kind == "one_time":
-        patch["enabled"] = False
-        patch["next_run_at"] = None
-    cdb.update_reminder_task(task_id, patch)
+    cdb.update_reminder_task(
+        task_id,
+        _task_run_completion_patch(task, now_iso=now_iso, last_status="succeeded"),
+    )
     logger.info("Reminder job handled successfully: task_id={} run_id={}", task_id, run.id)
     return {
         "status": "succeeded",

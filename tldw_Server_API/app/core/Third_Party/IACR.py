@@ -18,8 +18,10 @@ def fetch_conference(venue: str, year: int) -> tuple[dict[str, Any] | None, str 
         params = {"venue": venue, "year": str(year)}
         data = fetch_json(method="GET", url=BASE_URL, params=params, timeout=20)
         return data, None
-    except Exception as e:
-        return None, f"IACR error: {str(e)}"
+    except TimeoutError:
+        return None, "IACR request timed out."
+    except Exception:
+        return None, "IACR request failed."
 
 
 def fetch_conference_raw(venue: str, year: int) -> tuple[bytes | None, str | None, str | None]:
@@ -31,5 +33,7 @@ def fetch_conference_raw(venue: str, year: int) -> tuple[bytes | None, str | Non
             return None, None, f"IACR HTTP error: {r.status_code}"
         ct = r.headers.get("content-type") or "application/json"
         return r.content, ct.split(";")[0], None
-    except Exception as e:
-        return None, None, f"IACR error: {str(e)}"
+    except TimeoutError:
+        return None, None, "IACR request timed out."
+    except Exception:
+        return None, None, "IACR request failed."

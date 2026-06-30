@@ -3,25 +3,36 @@ import {
   AutoComplete,
   Card,
   Table,
+  Descriptions,
   Button,
   InputNumber,
   Form,
   Tag,
   Space,
-  Alert,
   Select,
   Switch,
   Popconfirm,
-  Tooltip,
   Typography,
   message
 } from "antd"
+import type { ColumnsType } from "antd/es/table"
 import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
 import { CollapsibleSection } from "./CollapsibleSection"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { Alert } from "@/components/ui/primitives"
+import {
+  RecoveryCallout,
+  buildCapabilityState,
+  type CapabilityStateDescriptor
+} from "@/components/ui/state"
+import {
+  tldwClient,
+  type SandboxAdminRuntimeDiagnosticsItem,
+  type SandboxAdminRuntimeDiagnosticsResponse
+} from "@/services/tldw/TldwApiClient"
+import { getDesignSystemState } from "@/design-system"
 
 /** Format a stat value for display — handles objects, arrays, booleans, numbers */
 function formatStatValue(value: unknown): React.ReactNode {
@@ -63,6 +74,78 @@ function formatStatKey(key: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+function formatRuntimeCode(value: string | null | undefined): string {
+  if (!value) return "\u2014"
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+const RUNTIME_READINESS_TAG_COLORS: Record<string, string> = {
+  ready: "green",
+  unavailable: "red",
+  host_gated: "gold",
+  scaffold: "blue",
+  unsupported: "default",
+  not_applicable: "default"
+}
+
+const RUNTIME_WARNING_LABELS: Record<string, string> = {
+  host_local_boundary: "Host-local boundary",
+  not_untrusted_eligible: "Not untrusted eligible",
+  sandbox_exec_deprecated: "sandbox-exec deprecated",
+  weaker_than_vm_isolation: "Weaker than VM isolation"
+}
+
+const READY_STATE_LABEL = getDesignSystemState("ready")?.label ?? "ready"
+const UNAVAILABLE_STATE_LABEL =
+  getDesignSystemState("unavailable")?.label ?? "unavailable"
+const SANDBOX_RUNTIME_DIAGNOSTICS_PATH =
+  "/api/v1/sandbox/admin/runtime-diagnostics"
+
+type SandboxDiagnosticsErrorState = CapabilityStateDescriptor
+type DashboardRecord = Record<string, unknown>
+type AlertRuleFormValues = {
+  metric: string
+  operator: string
+  threshold: number
+  duration_minutes: number
+  severity: string
+  enabled?: boolean
+}
+type StarterRule = Omit<AlertRuleFormValues, "enabled">
+type AlertRuleRow = Partial<AlertRuleFormValues> & {
+  id: number
+}
+type AlertHistoryRow = {
+  id?: string | number
+  alert?: string
+  metric?: string
+  severity?: string
+  status?: string
+  triggered_at?: string
+}
+type ActivityEntry = {
+  timestamp?: string
+  action?: string
+  user?: string
+  details?: unknown
+  [key: string]: unknown
+}
+type ActivityState = { entries?: ActivityEntry[] } | ActivityEntry[]
+type ActivityRow = ActivityEntry & { _key: number }
+type CurrentUserProfile = {
+  id?: number | string | null
+}
+
+const hasAntdValidationError = (
+  error: unknown
+): error is { errorFields: unknown[] } => (
+  Boolean(error) &&
+  typeof error === "object" &&
+  "errorFields" in error
+)
+
 const MonitoringDashboardPage: React.FC = () => {
   // Admin guard state
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
@@ -71,23 +154,26 @@ const MonitoringDashboardPage: React.FC = () => {
   const [currentUserId, setCurrentUserId] = useState<number | null>(null)
 
   // System overview state
-  const [systemStats, setSystemStats] = useState<any>(null)
+  const [systemStats, setSystemStats] = useState<DashboardRecord | null>(null)
   const [statsLoading, setStatsLoading] = useState(false)
-  const [securityStatus, setSecurityStatus] = useState<any>(null)
+  const [securityStatus, setSecurityStatus] = useState<DashboardRecord | null>(null)
   const [securityLoading, setSecurityLoading] = useState(false)
+  const [sandboxDiagnostics, setSandboxDiagnostics] = useState<SandboxAdminRuntimeDiagnosticsResponse | null>(null)
+  const [sandboxDiagnosticsLoading, setSandboxDiagnosticsLoading] = useState(false)
+  const [sandboxDiagnosticsError, setSandboxDiagnosticsError] = useState<SandboxDiagnosticsErrorState | null>(null)
 
   // Alert rules state
-  const [alertRules, setAlertRules] = useState<any[]>([])
+  const [alertRules, setAlertRules] = useState<AlertRuleRow[]>([])
   const [rulesLoading, setRulesLoading] = useState(false)
-  const [ruleForm] = Form.useForm()
+  const [ruleForm] = Form.useForm<AlertRuleFormValues>()
   const [creatingRule, setCreatingRule] = useState(false)
 
   // Alert history state
-  const [alertHistory, setAlertHistory] = useState<any[]>([])
+  const [alertHistory, setAlertHistory] = useState<AlertHistoryRow[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
 
   // Activity state
-  const [activity, setActivity] = useState<any>(null)
+  const [activity, setActivity] = useState<ActivityState | null>(null)
   const [activityLoading, setActivityLoading] = useState(false)
 
   // Staleness indicator & auto-refresh
@@ -97,7 +183,7 @@ const MonitoringDashboardPage: React.FC = () => {
 
   const initialLoadRef = useRef(false)
 
-  const markAdminGuardFromError = useCallback((err: any) => {
+  const markAdminGuardFromError = useCallback((err: unknown) => {
     const guardState = deriveAdminGuardFromError(err)
     if (guardState) setAdminGuard(guardState)
   }, [])
@@ -128,6 +214,36 @@ const MonitoringDashboardPage: React.FC = () => {
     }
   }, [markAdminGuardFromError])
 
+  const loadSandboxDiagnostics = useCallback(async () => {
+    setSandboxDiagnosticsLoading(true)
+    try {
+      const diagnostics = await tldwClient.getSandboxRuntimeDiagnostics()
+      setSandboxDiagnostics(diagnostics)
+      setSandboxDiagnosticsError(null)
+    } catch (err: unknown) {
+      const guardState = deriveAdminGuardFromError(err)
+      const isForbidden = guardState === "forbidden"
+      setSandboxDiagnostics(null)
+      setSandboxDiagnosticsError(
+        buildCapabilityState({
+          featureName: "Sandbox diagnostics",
+          capabilityName: "Sandbox Admin Runtime Diagnostics API",
+          endpoint: SANDBOX_RUNTIME_DIAGNOSTICS_PATH,
+          method: "GET",
+          error: err,
+          title: isForbidden
+            ? "Sandbox diagnostics access denied"
+            : "Sandbox diagnostics unavailable",
+          message: isForbidden
+            ? "You don't have permission to view sandbox runtime diagnostics."
+            : "Sandbox runtime diagnostics are not available."
+        })
+      )
+    } finally {
+      setSandboxDiagnosticsLoading(false)
+    }
+  }, [])
+
   // ── Alert Rules ──
 
   const loadAlertRules = useCallback(async () => {
@@ -157,8 +273,8 @@ const MonitoringDashboardPage: React.FC = () => {
       ruleForm.resetFields()
       message.success("Alert rule created")
       await loadAlertRules()
-    } catch (err: any) {
-      if (err?.errorFields) return
+    } catch (err: unknown) {
+      if (hasAntdValidationError(err)) return
       message.error(sanitizeAdminErrorMessage(err, "Failed to create alert rule"))
     } finally {
       setCreatingRule(false)
@@ -170,7 +286,7 @@ const MonitoringDashboardPage: React.FC = () => {
       await tldwClient.deleteAlertRule(ruleId)
       message.success("Alert rule deleted")
       await loadAlertRules()
-    } catch (err: any) {
+    } catch (err: unknown) {
       message.error(sanitizeAdminErrorMessage(err, "Failed to delete alert rule"))
     }
   }
@@ -194,7 +310,7 @@ const MonitoringDashboardPage: React.FC = () => {
       await tldwClient.assignAlert(alertId, { assigned_to_user_id: userId })
       message.success("Alert assigned")
       await loadAlertHistory()
-    } catch (err: any) {
+    } catch (err: unknown) {
       message.error(sanitizeAdminErrorMessage(err, "Failed to assign alert"))
     }
   }
@@ -204,7 +320,7 @@ const MonitoringDashboardPage: React.FC = () => {
       await tldwClient.snoozeAlert(alertId, { until })
       message.success("Alert snoozed")
       await loadAlertHistory()
-    } catch (err: any) {
+    } catch (err: unknown) {
       message.error(sanitizeAdminErrorMessage(err, "Failed to snooze alert"))
     }
   }
@@ -214,7 +330,7 @@ const MonitoringDashboardPage: React.FC = () => {
       await tldwClient.escalateAlert(alertId)
       message.success("Alert escalated")
       await loadAlertHistory()
-    } catch (err: any) {
+    } catch (err: unknown) {
       message.error(sanitizeAdminErrorMessage(err, "Failed to escalate alert"))
     }
   }
@@ -237,11 +353,12 @@ const MonitoringDashboardPage: React.FC = () => {
   const refreshAll = useCallback(() => {
     void loadSystemStats()
     void loadSecurityStatus()
+    void loadSandboxDiagnostics()
     void loadAlertRules()
     void loadAlertHistory()
     void loadActivity()
     setLastRefreshedAt(new Date())
-  }, [loadSystemStats, loadSecurityStatus, loadAlertRules, loadAlertHistory, loadActivity])
+  }, [loadSystemStats, loadSecurityStatus, loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
 
   // ── Initial Load ──
 
@@ -250,17 +367,26 @@ const MonitoringDashboardPage: React.FC = () => {
     initialLoadRef.current = true
     void loadSystemStats()
     void loadSecurityStatus()
+    void loadSandboxDiagnostics()
     void loadAlertRules()
     void loadAlertHistory()
     void loadActivity()
     setLastRefreshedAt(new Date())
     void tldwClient.getCurrentUserProfile().then(
-      (profile: any) => {
-        if (profile?.id) setCurrentUserId(profile.id)
+      (profile: CurrentUserProfile) => {
+        const profileId =
+          typeof profile?.id === "number"
+            ? profile.id
+            : typeof profile?.id === "string" && profile.id.trim()
+              ? Number(profile.id)
+              : null
+        if (profileId !== null && Number.isFinite(profileId) && profileId > 0) {
+          setCurrentUserId(profileId)
+        }
       },
       () => { /* non-critical */ }
     )
-  }, [loadSystemStats, loadSecurityStatus, loadAlertRules, loadAlertHistory, loadActivity])
+  }, [loadSystemStats, loadSecurityStatus, loadSandboxDiagnostics, loadAlertRules, loadAlertHistory, loadActivity])
 
   // Auto-refresh timer
   useEffect(() => {
@@ -296,7 +422,7 @@ const MonitoringDashboardPage: React.FC = () => {
   }, [systemStats])
 
   // Starter alert rules for empty state
-  const starterRules = useMemo(() => [
+  const starterRules = useMemo<StarterRule[]>(() => [
     { metric: "cpu_usage", operator: ">", threshold: 90, duration_minutes: 5, severity: "high" },
     { metric: "memory_percent", operator: ">", threshold: 85, duration_minutes: 10, severity: "medium" },
     { metric: "disk_usage", operator: ">", threshold: 95, duration_minutes: 1, severity: "critical" }
@@ -308,7 +434,7 @@ const MonitoringDashboardPage: React.FC = () => {
       await tldwClient.createAlertRule({ ...rule, enabled: true })
       message.success(`Starter rule created: ${rule.metric} ${rule.operator} ${rule.threshold}`)
       await loadAlertRules()
-    } catch (err: any) {
+    } catch (err: unknown) {
       message.error(sanitizeAdminErrorMessage(err, "Failed to create starter rule"))
     } finally {
       setCreatingRule(false)
@@ -317,7 +443,7 @@ const MonitoringDashboardPage: React.FC = () => {
 
   // ── Alert Rules Table Columns ──
 
-  const ruleColumns = [
+  const ruleColumns: ColumnsType<AlertRuleRow> = [
     { title: "Metric", dataIndex: "metric", key: "metric", render: (metric: string) => <code>{metric}</code> },
     { title: "Operator", dataIndex: "operator", key: "operator" },
     { title: "Threshold", dataIndex: "threshold", key: "threshold" },
@@ -335,7 +461,7 @@ const MonitoringDashboardPage: React.FC = () => {
     },
     {
       title: "Actions", key: "actions",
-      render: (_: any, record: any) => (
+      render: (_value: unknown, record: AlertRuleRow) => (
         <Popconfirm title="Delete this alert rule?" onConfirm={() => handleDeleteRule(record.id)}>
           <Button size="small" danger>Delete</Button>
         </Popconfirm>
@@ -345,8 +471,8 @@ const MonitoringDashboardPage: React.FC = () => {
 
   // ── Alert History Table Columns ──
 
-  const historyColumns = [
-    { title: "Alert", dataIndex: "alert", key: "alert", render: (alert: string, record: any) => alert || record.metric || record.id || "\u2014" },
+  const historyColumns: ColumnsType<AlertHistoryRow> = [
+    { title: "Alert", dataIndex: "alert", key: "alert", render: (alert: string | undefined, record: AlertHistoryRow) => alert || record.metric || record.id || "\u2014" },
     {
       title: "Severity", dataIndex: "severity", key: "severity",
       render: (severity: string) => {
@@ -364,7 +490,7 @@ const MonitoringDashboardPage: React.FC = () => {
     },
     {
       title: "Actions", key: "actions",
-      render: (_: any, record: any) => {
+      render: (_value: unknown, record: AlertHistoryRow) => {
         const identity = String(record.id ?? record.alert ?? "")
         return (
           <Space size="small">
@@ -381,16 +507,110 @@ const MonitoringDashboardPage: React.FC = () => {
     }
   ]
 
+  const sandboxRuntimeColumns: ColumnsType<SandboxAdminRuntimeDiagnosticsItem> = [
+    {
+      title: "Runtime",
+      dataIndex: "name",
+      key: "name",
+      render: (name: string) => <code>{name}</code>
+    },
+    {
+      title: "Readiness",
+      dataIndex: "readiness",
+      key: "readiness",
+      render: (readiness: string) => (
+        <Tag color={RUNTIME_READINESS_TAG_COLORS[readiness] || "default"}>
+          {formatRuntimeCode(readiness)}
+        </Tag>
+      )
+    },
+    {
+      title: "Boundary",
+      dataIndex: "boundary_class",
+      key: "boundary_class",
+      render: (boundaryClass: string | null | undefined) => formatRuntimeCode(boundaryClass)
+    },
+    {
+      title: "VM-grade",
+      dataIndex: "vm_grade_isolation",
+      key: "vm_grade_isolation",
+      render: (vmGrade: boolean) => (
+        <Tag color={vmGrade ? "green" : "orange"}>{vmGrade ? "Yes" : "No"}</Tag>
+      )
+    },
+    {
+      title: "Untrusted",
+      dataIndex: "untrusted_eligible",
+      key: "untrusted_eligible",
+      render: (eligible: boolean) => (
+        <Tag color={eligible ? "green" : "red"}>{eligible ? "Eligible" : "Not eligible"}</Tag>
+      )
+    },
+    {
+      title: "Warnings",
+      dataIndex: "isolation_warnings",
+      key: "isolation_warnings",
+      render: (warnings: string[] | undefined) => {
+        const values = Array.isArray(warnings) ? warnings : []
+        if (values.length === 0) return <Tag color="green">None</Tag>
+        return (
+          <Space size={[4, 4]} wrap>
+            {values.map((warning) => (
+              <Tag key={warning} color="gold">
+                {RUNTIME_WARNING_LABELS[warning] || formatRuntimeCode(warning)}
+              </Tag>
+            ))}
+          </Space>
+        )
+      }
+    },
+    {
+      title: "Action",
+      dataIndex: "recommended_action",
+      key: "recommended_action",
+      render: (action: string | undefined) => formatRuntimeCode(action || "none")
+    }
+  ]
+
   // ── Render ──
 
   if (adminGuard === "forbidden") {
-    return <Alert type="error" title="Access Denied" description="You don't have permission to access the monitoring dashboard." showIcon />
+    return (
+      <Alert variant="error" title="Access Denied">
+        You don't have permission to access the monitoring dashboard.
+      </Alert>
+    )
   }
   if (adminGuard === "notFound") {
-    return <Alert type="warning" title="Not Available" description="The monitoring dashboard is not available on this server." showIcon />
+    return (
+      <Alert variant="warning" title="Not Available">
+        The monitoring dashboard is not available on this server.
+      </Alert>
+    )
   }
 
-  const activityEntries = Array.isArray(activity?.entries) ? activity.entries : Array.isArray(activity) ? activity : []
+  const activityEntries: ActivityEntry[] =
+    activity && !Array.isArray(activity) && Array.isArray(activity.entries)
+      ? activity.entries
+      : Array.isArray(activity)
+        ? activity
+        : []
+  const activityRows: ActivityRow[] = activityEntries.map((entry, idx) => ({
+    ...entry,
+    _key: idx
+  }))
+  const activityColumns: ColumnsType<ActivityRow> = [
+    { title: "Time", dataIndex: "timestamp", key: "timestamp", render: (val: string | undefined) => val ? new Date(val).toLocaleString() : "\u2014" },
+    { title: "Action", dataIndex: "action", key: "action" },
+    { title: "User", dataIndex: "user", key: "user", render: (val: string | undefined) => val || "\u2014" },
+    { title: "Details", dataIndex: "details", key: "details", render: (val: unknown) => formatStatValue(val) }
+  ]
+  const sandboxRuntimeRows: SandboxAdminRuntimeDiagnosticsItem[] = Array.isArray(sandboxDiagnostics?.runtimes)
+    ? sandboxDiagnostics.runtimes
+    : []
+  const hostLocalWarningRuntimes = Array.isArray(sandboxDiagnostics?.summary?.host_local_warning_runtimes)
+    ? sandboxDiagnostics.summary.host_local_warning_runtimes
+    : []
 
   return (
     <div style={{ padding: "24px", maxWidth: 1200 }}>
@@ -421,8 +641,69 @@ const MonitoringDashboardPage: React.FC = () => {
             </div>
           )}
           {!systemStats && !securityStatus && !statsLoading && !securityLoading && (
-            <Alert type="info" title="No system data available yet." showIcon />
+            <Alert title="No system data available yet." />
           )}
+        </Space>
+      </Card>
+
+      <Card title="Sandbox Runtime Isolation" loading={sandboxDiagnosticsLoading} style={{ marginBottom: 16 }} extra={<Button onClick={() => loadSandboxDiagnostics()} size="small">Refresh</Button>}>
+        <Space orientation="vertical" style={{ width: "100%" }} size="middle">
+          {sandboxDiagnosticsError && (
+            <RecoveryCallout
+              state={sandboxDiagnosticsError.state}
+              title={sandboxDiagnosticsError.title}
+              message={sandboxDiagnosticsError.message}
+              diagnostics={sandboxDiagnosticsError.diagnostics}
+              role="alert"
+              primaryAction={{
+                label: "Retry diagnostics",
+                onClick: () => void loadSandboxDiagnostics()
+              }}
+            />
+          )}
+          {sandboxDiagnostics?.summary && (
+            <Descriptions size="small" column={5}>
+              <Descriptions.Item label="Total">
+                {sandboxDiagnostics.summary.total}
+              </Descriptions.Item>
+              <Descriptions.Item label={READY_STATE_LABEL}>
+                {sandboxDiagnostics.summary.ready}
+              </Descriptions.Item>
+              <Descriptions.Item label={UNAVAILABLE_STATE_LABEL}>
+                {sandboxDiagnostics.summary.unavailable}
+              </Descriptions.Item>
+              <Descriptions.Item label="Host-gated">
+                {sandboxDiagnostics.summary.host_gated}
+              </Descriptions.Item>
+              <Descriptions.Item label="Scaffold">
+                {sandboxDiagnostics.summary.scaffold}
+              </Descriptions.Item>
+            </Descriptions>
+          )}
+          {hostLocalWarningRuntimes.length > 0 && (
+            <Alert
+              variant="warning"
+              title="Host-local sandbox runtimes require operator review"
+            >
+              {
+                <span>
+                  {hostLocalWarningRuntimes.join(", ")} run on host-local boundaries,
+                  are not VM-grade isolation, and are not eligible for untrusted code.
+                </span>
+              }
+            </Alert>
+          )}
+          {sandboxRuntimeRows.length > 0 ? (
+            <Table<SandboxAdminRuntimeDiagnosticsItem>
+              dataSource={sandboxRuntimeRows}
+              columns={sandboxRuntimeColumns}
+              rowKey="name"
+              pagination={false}
+              size="small"
+            />
+          ) : !sandboxDiagnosticsLoading && !sandboxDiagnosticsError ? (
+            <Alert title="No sandbox runtime diagnostics available yet." />
+          ) : null}
         </Space>
       </Card>
 
@@ -454,7 +735,7 @@ const MonitoringDashboardPage: React.FC = () => {
           </Form>
         </div>
         {alertRules.length === 0 && !rulesLoading ? (
-          <Alert type="info" showIcon message="No alert rules configured" description={
+          <Alert title="No alert rules configured" className="mb-4">
             <div>
               <p style={{ marginBottom: 8 }}>Create your first rule using the form above, or try a starter rule:</p>
               <Space wrap>
@@ -466,7 +747,7 @@ const MonitoringDashboardPage: React.FC = () => {
               </Space>
               <p style={{ marginTop: 8 }}><Typography.Text type="secondary" style={{ fontSize: 12 }}>These are common rules &mdash; your server may use different metric names.</Typography.Text></p>
             </div>
-          } style={{ marginBottom: 16 }} />
+          </Alert>
         ) : (
           <Table dataSource={alertRules} columns={ruleColumns} rowKey="id" loading={rulesLoading} pagination={false} size="small" />
         )}
@@ -481,15 +762,10 @@ const MonitoringDashboardPage: React.FC = () => {
       <CollapsibleSection title="Recent Activity" description="Dashboard activity over the last 7 days" defaultOpen>
         {activityLoading ? (
           <Card loading={true} />
-        ) : activityEntries.length > 0 ? (
-          <Table dataSource={activityEntries.map((entry: any, idx: number) => ({ ...entry, _key: idx }))} columns={[
-            { title: "Time", dataIndex: "timestamp", key: "timestamp", render: (val: string) => val ? new Date(val).toLocaleString() : "\u2014" },
-            { title: "Action", dataIndex: "action", key: "action" },
-            { title: "User", dataIndex: "user", key: "user", render: (val: string) => val || "\u2014" },
-            { title: "Details", dataIndex: "details", key: "details", render: (val: unknown) => formatStatValue(val) }
-          ]} rowKey="_key" pagination={false} size="small" />
+        ) : activityRows.length > 0 ? (
+          <Table dataSource={activityRows} columns={activityColumns} rowKey="_key" pagination={false} size="small" />
         ) : (
-          <Alert type="info" title="No recent activity data available." showIcon />
+          <Alert title="No recent activity data available." />
         )}
       </CollapsibleSection>
     </div>

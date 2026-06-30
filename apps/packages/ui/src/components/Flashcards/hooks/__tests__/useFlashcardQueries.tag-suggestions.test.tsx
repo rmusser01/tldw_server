@@ -3,7 +3,7 @@ import { renderHook, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { useGlobalFlashcardTagSuggestionsQuery } from "../useFlashcardQueries"
+import { useGlobalFlashcardTagSuggestionsQuery, useManageQuery } from "../useFlashcardQueries"
 import {
   listFlashcardTagSuggestions,
   listFlashcards,
@@ -95,5 +95,51 @@ describe("useGlobalFlashcardTagSuggestionsQuery", () => {
 
     expect(listFlashcardTagSuggestions).not.toHaveBeenCalled()
     expect(listFlashcards).not.toHaveBeenCalled()
+  })
+})
+
+describe("useManageQuery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("normalizes whitespace around search text for cache keys and list requests", async () => {
+    vi.mocked(listFlashcards).mockResolvedValue({
+      items: [],
+      count: 0,
+      total: 0
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false }
+      }
+    })
+
+    const { result } = renderHook(
+      () =>
+        useManageQuery({
+          query: "  mitochondria  ",
+          page: 1,
+          pageSize: 20
+        }),
+      { wrapper: buildWrapper(queryClient) }
+    )
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true)
+    })
+
+    expect(listFlashcards).toHaveBeenCalledWith(
+      expect.objectContaining({
+        q: "mitochondria"
+      })
+    )
+
+    const manageQuery = queryClient
+      .getQueryCache()
+      .getAll()
+      .find((query) => query.queryKey[0] === "flashcards:list")
+
+    expect(manageQuery?.queryKey[2]).toBe("mitochondria")
   })
 })

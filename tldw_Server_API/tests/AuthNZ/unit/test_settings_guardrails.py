@@ -4,6 +4,8 @@ Tests for production guardrails in single-user mode.
 
 import os
 from pathlib import Path
+import subprocess
+import sys
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.settings import (
@@ -185,3 +187,28 @@ def test_authnz_settings_env_file_points_to_config_files() -> None:
     assert env_file == AUTHNZ_DEFAULT_ENV_FILE
     assert env_file.name == ".env"
     assert "Config_Files" in str(env_file)
+
+
+def test_authnz_settings_env_file_honors_tldw_env_file_before_import(
+    tmp_path: Path,
+) -> None:
+    explicit_env = tmp_path / "runtime.env"
+    explicit_env.write_text("AUTH_MODE=single_user\n", encoding="utf-8")
+
+    script = (
+        "from pathlib import Path\n"
+        "from tldw_Server_API.app.core.AuthNZ.settings import Settings\n"
+        "print(Path(Settings.model_config['env_file']).resolve())\n"
+    )
+    env = os.environ.copy()
+    env["TLDW_ENV_FILE"] = str(explicit_env)
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.strip() == str(explicit_env.resolve())

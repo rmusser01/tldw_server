@@ -18,7 +18,7 @@ Note: This README follows the project-wide template to help contributors quickly
   - Outputs: token responses, user/session info, success messages for reset/verify flows.
 - Related Endpoints (mounted under `/api/v1`):
   - Core auth + enhanced flows (reset, verify, MFA): `tldw_Server_API/app/api/v1/endpoints/auth.py:1`
-  - Admin (RBAC, orgs/teams, users): `tldw_Server_API/app/api/v1/endpoints/admin/__init__.py:1` plus split modules in `tldw_Server_API/app/api/v1/endpoints/admin/` (`admin_user.py`, `admin_api_keys.py`, `admin_profiles.py`, `admin_sessions_mfa.py`, `admin_byok.py`, `admin_llm_providers.py`, `admin_orgs.py`, `admin_settings.py`, `admin_registration.py`, `admin_system.py`, `admin_usage.py`, `admin_budgets.py`, `admin_tools.py`, `admin_personalization.py`, `admin_network.py`), and `tldw_Server_API/app/api/v1/endpoints/users.py:1`, `tldw_Server_API/app/api/v1/endpoints/privileges.py:1`, `tldw_Server_API/app/api/v1/endpoints/register.py:1`
+  - Admin (RBAC, orgs/teams, users): `tldw_Server_API/app/api/v1/endpoints/admin/__init__.py:1` plus split modules in `tldw_Server_API/app/api/v1/endpoints/admin/` (`admin_user.py`, `admin_api_keys.py`, `admin_profiles.py`, `admin_sessions_mfa.py`, `admin_byok.py`, `admin_llm_providers.py`, `admin_orgs.py`, `admin_settings.py`, `admin_registration.py`, `admin_system.py`, `admin_usage.py`, `admin_budgets.py`, `admin_tools.py`, `admin_personalization.py`, `admin_network.py`), and `tldw_Server_API/app/api/v1/endpoints/users.py:1`, `tldw_Server_API/app/api/v1/endpoints/privileges.py:1`
   - Debug helpers: `tldw_Server_API/app/api/v1/endpoints/authnz_debug.py:1`
   - Dependencies used by endpoints: `tldw_Server_API/app/api/v1/API_Deps/auth_deps.py:1`
 - Related Schemas (requests/responses and admin/RBAC):
@@ -83,7 +83,7 @@ Note: This README follows the project-wide template to help contributors quickly
 - Error Handling & Security:
   - Custom exceptions in `exceptions.py`; consistent HTTP errors from endpoints.
   - Input validation in `input_validation.py`; CSRF middleware for WebUI flows.
-- Admin routes should be protected via claim-first dependencies (`get_auth_principal` + `require_roles("admin")` / `require_permissions(...)`); legacy `require_admin`/`require_role` shims in API deps are retired.
+- Admin routes should be protected via claim-first dependencies (`get_auth_principal` + `RequireRole("admin")` / `RequirePermission(...)`); legacy `require_admin`/`require_role` shims in API deps are retired.
 
 ## 3. Developer-Related/Relevant Information for Contributors
 
@@ -95,7 +95,7 @@ Note: This README follows the project-wide template to help contributors quickly
   - Keys/budgets: `api_key_manager.py`, `virtual_keys.py`, `quotas.py`.
   - Ops/monitoring: `monitoring.py`, `alerting.py`, `scheduler.py`.
 - Extension Points:
-  - Add endpoints under `app/api/v1/endpoints/` and use dependencies from `API_Deps/auth_deps.py` (`get_auth_principal`, `require_roles`, `require_permissions`, `check_rate_limit`).
+  - Add endpoints under `app/api/v1/endpoints/` and use dependencies from `API_Deps/auth_deps.py` (`get_auth_principal`, `RequireRole`, `RequirePermission`, `TokenScopeGuard`, `check_rate_limit`).
   - Extend roles/permissions using RBAC tables; seed updates go into `migrations.py` seeding section.
   - Add budgets or allowlists by extending `virtual_keys.py`/`api_key_manager.py` and updating schema + tests.
   - Add periodic tasks in `scheduler.py` (e.g., cleanup of expired tokens/lockouts).
@@ -123,7 +123,7 @@ Note: This README follows the project-wide template to help contributors quickly
   - LLM budget enforcement relies on correct `LLM_BUDGET_ENDPOINTS` and middleware placement.
   - Single-user `X-API-KEY` may be additionally constrained by IP allowlist.
   - Tests may rely on relaxed foreign keys for usage tables; do not tighten without updating fixtures.
-- Roadmap/TODOs:
+- Follow-up candidates:
   - Complete docstring cleanup for obsolete params referenced in older comments.
   - Expand integration tests for lockout/CSRF and virtual-key requeues.
   - Optional CI guard to assert presence of the three section headers in module READMEs.

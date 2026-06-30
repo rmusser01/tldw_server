@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -17,7 +18,8 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
 
-from .models import RunPhase, RunStatus, RuntimeType
+from .models import RunPhase, RunStatus, RuntimeType, WorkspaceVolume, WorkspaceVolumeState
+from .utils import coerce_optional_nonempty_string
 
 _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -38,6 +40,14 @@ _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
     sqlite3.Error,
 )
+
+_WORKSPACE_VOLUME_DIAGNOSTIC_MAX_KEYS = 12
+_WORKSPACE_VOLUME_DIAGNOSTIC_MAX_STRING = 240
+_WORKSPACE_VOLUME_SECRET_KEY_RE = re.compile(r"(api[_-]?key|secret|token|password|credential)", re.IGNORECASE)
+_WORKSPACE_VOLUME_HOST_PATH_RE = re.compile(
+    r"(/Users/[^\s'\"<>]+|/home/[^\s'\"<>]+|/private/[^\s'\"<>]+|/var/folders/[^\s'\"<>]+|[A-Za-z]:\\[^\s'\"<>]+)"
+)
+_WORKSPACE_VOLUME_SAFE_MOUNT_PREFIXES = ("/workspace/", "/mnt/workspace/", "/workspaces/")
 
 
 def _now_iso() -> str:
@@ -82,6 +92,126 @@ def _normalize_string_dict(value: Any) -> dict[str, str]:
     if not isinstance(loaded, dict):
         return {}
     return {str(k): str(v) for k, v in loaded.items()}
+
+
+def _coerce_workspace_volume_state(value: Any) -> WorkspaceVolumeState:
+    if isinstance(value, WorkspaceVolumeState):
+        return value
+    try:
+        return WorkspaceVolumeState(str(value))
+    except (TypeError, ValueError):
+        return WorkspaceVolumeState.unavailable
+
+
+def _normalize_diagnostics(value: Any) -> dict[str, object]:
+    if isinstance(value, dict):
+        return sanitize_workspace_volume_diagnostics(value)
+    if value is None:
+        return {}
+    text = str(value).strip()
+    if not text:
+        return {}
+    try:
+        loaded = json.loads(text)
+    except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
+        return {}
+    return sanitize_workspace_volume_diagnostics(loaded) if isinstance(loaded, dict) else {}
+
+
+def sanitize_workspace_volume_diagnostics(diagnostics: dict[str, object] | None) -> dict[str, object]:
+    """Return bounded Workspace volume diagnostics without secrets or raw host paths."""
+    if not isinstance(diagnostics, dict):
+        return {}
+    sanitized: dict[str, object] = {}
+    for idx, (key, value) in enumerate(diagnostics.items()):
+        if idx >= _WORKSPACE_VOLUME_DIAGNOSTIC_MAX_KEYS:
+            sanitized["truncated"] = True
+            break
+        key_text = _bounded_workspace_volume_text(key, 64) or "diagnostic"
+        sanitized[key_text] = _sanitize_workspace_volume_diagnostic_value(key_text, value)
+    return sanitized
+
+
+def sanitize_workspace_volume_mount_path(value: str | None) -> str | None:
+    """Keep only sandbox-visible mount hints; never persist raw host-local paths."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    parts = [part for part in text.split("/") if part]
+    if text.startswith("/") and all(part not in {".", ".."} for part in parts):
+        normalized = "/" + "/".join(parts)
+        for prefix in _WORKSPACE_VOLUME_SAFE_MOUNT_PREFIXES:
+            base = prefix.rstrip("/")
+            if normalized == base or normalized.startswith(f"{base}/"):
+                return normalized
+    return None
+
+
+def _sanitize_workspace_volume_diagnostic_value(key: str, value: object) -> object:
+    if _WORKSPACE_VOLUME_SECRET_KEY_RE.search(key):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return sanitize_workspace_volume_diagnostics(value)
+    if isinstance(value, (list, tuple)):
+        return [
+            _sanitize_workspace_volume_diagnostic_value(key, item)
+            for item in value[:_WORKSPACE_VOLUME_DIAGNOSTIC_MAX_KEYS]
+        ]
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    text = str(value)
+    text = _WORKSPACE_VOLUME_HOST_PATH_RE.sub("[redacted-path]", text)
+    if _WORKSPACE_VOLUME_SECRET_KEY_RE.search(text):
+        text = "[redacted]"
+    return text[:_WORKSPACE_VOLUME_DIAGNOSTIC_MAX_STRING]
+
+
+def _bounded_workspace_volume_text(value: Any, limit: int) -> str | None:
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return None
+    return text[: max(1, int(limit))]
+
+
+def _workspace_volume_from_mapping(row: Any) -> WorkspaceVolume:
+    row_dict = dict(row)
+    return WorkspaceVolume(
+        id=str(row_dict.get("id") or ""),
+        workspace_id=str(row_dict.get("workspace_id") or ""),
+        user_id=str(row_dict.get("user_id") or ""),
+        state=_coerce_workspace_volume_state(row_dict.get("state")),
+        root_id=(
+            str(row_dict["root_id"])
+            if row_dict.get("root_id") is not None
+            else None
+        ),
+        runtime=(
+            str(row_dict["runtime"])
+            if row_dict.get("runtime") is not None
+            else None
+        ),
+        display_name=(
+            str(row_dict["display_name"])
+            if row_dict.get("display_name") is not None
+            else None
+        ),
+        mount_path=sanitize_workspace_volume_mount_path(
+            str(row_dict["mount_path"]) if row_dict.get("mount_path") is not None else None
+        ),
+        diagnostics=_normalize_diagnostics(row_dict.get("diagnostics")),
+        idempotency_key=(
+            str(row_dict["idempotency_key"])
+            if row_dict.get("idempotency_key") is not None
+            else None
+        ),
+        idempotency_fingerprint=(
+            str(row_dict["idempotency_fingerprint"])
+            if row_dict.get("idempotency_fingerprint") is not None
+            else None
+        ),
+        created_at=_parse_optional_iso_datetime(row_dict.get("created_at")),
+        updated_at=_parse_optional_iso_datetime(row_dict.get("updated_at")),
+    )
 
 
 class IdempotencyConflict(Exception):
@@ -179,6 +309,38 @@ class SandboxStore:
     def delete_session(self, session_id: str) -> bool:
         raise NotImplementedError
 
+    def put_workspace_volume(self, volume: WorkspaceVolume) -> None:
+        raise NotImplementedError
+
+    def get_workspace_volume(self, volume_id: str) -> WorkspaceVolume | None:
+        raise NotImplementedError
+
+    def find_workspace_volume_by_idempotency(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        idempotency_key: str,
+        idempotency_fingerprint: str | None = None,
+    ) -> WorkspaceVolume | None:
+        raise NotImplementedError
+
+    def update_workspace_volume_state(
+        self,
+        volume_id: str,
+        *,
+        state: WorkspaceVolumeState,
+        mount_path: str | None = None,
+        diagnostics: dict[str, object] | None = None,
+    ) -> WorkspaceVolume | None:
+        raise NotImplementedError
+
+    def bind_workspace_volume_root(self, volume_id: str, *, root_id: str) -> WorkspaceVolume | None:
+        raise NotImplementedError
+
+    def list_workspace_volumes_for_workspace(self, workspace_id: str) -> list[WorkspaceVolume]:
+        raise NotImplementedError
+
     # ACP control-plane metadata for cross-process/cross-node session rehydration.
     def put_acp_session_control(
         self,
@@ -202,6 +364,30 @@ class SandboxStore:
         raise NotImplementedError
 
     def delete_acp_session_control(self, session_id: str) -> bool:
+        raise NotImplementedError
+
+    # Virtualization session control metadata for persisted VM/session bookkeeping.
+    def put_vz_session_control(
+        self,
+        *,
+        session_id: str,
+        runtime: str,
+        vm_id: str,
+        template_id: str | None,
+        workspace_mount: str | None,
+        agent_ready: bool,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
+    ) -> None:
+        raise NotImplementedError
+
+    def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    def delete_vz_session_control(self, session_id: str) -> bool:
+        raise NotImplementedError
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def get_user_artifact_bytes(self, user_id: str) -> int:
@@ -358,6 +544,8 @@ class InMemoryStore(SandboxStore):
         self._owners: dict[str, str] = {}
         self._sessions: dict[str, dict[str, Any]] = {}
         self._acp_sessions: dict[str, dict[str, Any]] = {}
+        self._vz_sessions: dict[str, dict[str, Any]] = {}
+        self._workspace_volumes: dict[str, WorkspaceVolume] = {}
         self._user_bytes: dict[str, int] = {}
         self._run_queue: list[dict[str, Any]] = []
         self._lock = threading.RLock()
@@ -528,6 +716,14 @@ class InMemoryStore(SandboxStore):
                     is_active = True
                 if not is_active:
                     continue
+                active_exp = getattr(rs, "claim_expires_at", None)
+                if isinstance(active_exp, str):
+                    active_exp = _parse_optional_iso_datetime(active_exp)
+                if isinstance(active_exp, datetime):
+                    if active_exp.tzinfo is None:
+                        active_exp = active_exp.replace(tzinfo=timezone.utc)
+                    if active_exp <= now:
+                        continue
                 active += 1
                 if target_user and self._owners.get(rs.id) == target_user:
                     active_user += 1
@@ -641,6 +837,93 @@ class InMemoryStore(SandboxStore):
         with self._lock:
             return self._sessions.pop(str(session_id), None) is not None
 
+    def put_workspace_volume(self, volume: WorkspaceVolume) -> None:
+        now = datetime.now(timezone.utc)
+        if volume.created_at is None:
+            volume.created_at = now
+        volume.updated_at = now
+        volume.mount_path = sanitize_workspace_volume_mount_path(volume.mount_path)
+        volume.diagnostics = sanitize_workspace_volume_diagnostics(volume.diagnostics)
+        with self._lock:
+            self._workspace_volumes[str(volume.id)] = volume
+
+    def get_workspace_volume(self, volume_id: str) -> WorkspaceVolume | None:
+        with self._lock:
+            return self._workspace_volumes.get(str(volume_id))
+
+    def find_workspace_volume_by_idempotency(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        idempotency_key: str,
+        idempotency_fingerprint: str | None = None,
+    ) -> WorkspaceVolume | None:
+        user_key = self._user_key(user_id)
+        key = str(idempotency_key or "").strip()
+        if not user_key or not key:
+            return None
+        with self._lock:
+            for volume in self._workspace_volumes.values():
+                if (
+                    volume.user_id != user_key
+                    or volume.workspace_id != str(workspace_id)
+                    or volume.idempotency_key != key
+                ):
+                    continue
+                if (
+                    idempotency_fingerprint is not None
+                    and volume.idempotency_fingerprint != idempotency_fingerprint
+                ):
+                    raise IdempotencyConflict(volume.id, key=key)
+                return volume
+        return None
+
+    def update_workspace_volume_state(
+        self,
+        volume_id: str,
+        *,
+        state: WorkspaceVolumeState,
+        mount_path: str | None = None,
+        diagnostics: dict[str, object] | None = None,
+    ) -> WorkspaceVolume | None:
+        with self._lock:
+            volume = self._workspace_volumes.get(str(volume_id))
+            if volume is None:
+                return None
+            volume.state = _coerce_workspace_volume_state(state)
+            if mount_path is not None:
+                volume.mount_path = sanitize_workspace_volume_mount_path(mount_path)
+            if diagnostics is not None:
+                volume.diagnostics = sanitize_workspace_volume_diagnostics(diagnostics)
+            volume.updated_at = datetime.now(timezone.utc)
+            self._workspace_volumes[volume.id] = volume
+            return volume
+
+    def bind_workspace_volume_root(self, volume_id: str, *, root_id: str) -> WorkspaceVolume | None:
+        root_key = str(root_id or "").strip()
+        if not root_key:
+            return None
+        with self._lock:
+            volume = self._workspace_volumes.get(str(volume_id))
+            if volume is None:
+                return None
+            volume.root_id = root_key
+            volume.updated_at = datetime.now(timezone.utc)
+            self._workspace_volumes[volume.id] = volume
+            return volume
+
+    def list_workspace_volumes_for_workspace(self, workspace_id: str) -> list[WorkspaceVolume]:
+        workspace_key = str(workspace_id or "").strip()
+        if not workspace_key:
+            return []
+        with self._lock:
+            return [
+                volume
+                for volume in self._workspace_volumes.values()
+                if str(volume.workspace_id) == workspace_key
+            ]
+
     def put_acp_session_control(
         self,
         *,
@@ -686,6 +969,52 @@ class InMemoryStore(SandboxStore):
     def delete_acp_session_control(self, session_id: str) -> bool:
         with self._lock:
             return self._acp_sessions.pop(str(session_id), None) is not None
+
+    def put_vz_session_control(
+        self,
+        *,
+        session_id: str,
+        runtime: str,
+        vm_id: str,
+        template_id: str | None,
+        workspace_mount: str | None,
+        agent_ready: bool,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
+    ) -> None:
+        now_ts = time.time()
+        with self._lock:
+            existing = self._vz_sessions.get(str(session_id), {})
+            created_at = existing.get("created_at", now_ts)
+            self._vz_sessions[str(session_id)] = {
+                "id": str(session_id),
+                "runtime": str(runtime),
+                "vm_id": str(vm_id),
+                "template_id": (str(template_id) if template_id is not None else None),
+                "workspace_mount": (str(workspace_mount) if workspace_mount is not None else None),
+                "agent_ready": bool(agent_ready),
+                "helper_instance_id": coerce_optional_nonempty_string(helper_instance_id),
+                "helper_started_at": coerce_optional_nonempty_string(helper_started_at),
+                "created_at": float(created_at),
+                "updated_at": float(now_ts),
+            }
+
+    def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._vz_sessions.get(str(session_id))
+            return dict(row) if isinstance(row, dict) else None
+
+    def delete_vz_session_control(self, session_id: str) -> bool:
+        with self._lock:
+            return self._vz_sessions.pop(str(session_id), None) is not None
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                dict(row)
+                for row in self._vz_sessions.values()
+                if isinstance(row, dict)
+            ]
 
     def get_user_artifact_bytes(self, user_id: str) -> int:
         with self._lock:
@@ -779,6 +1108,7 @@ class InMemoryStore(SandboxStore):
                     "message": st.message,
                     "image_digest": st.image_digest,
                     "policy_hash": st.policy_hash,
+                    "resource_usage": st.resource_usage,
                 })
         def _key(r: dict):
             return r.get("started_at") or ""
@@ -1064,6 +1394,39 @@ class SQLiteStore(SandboxStore):
                     priority INTEGER DEFAULT 0,
                     enqueued_at TEXT NOT NULL DEFAULT (datetime('now'))
                 );
+                CREATE TABLE IF NOT EXISTS sandbox_vz_sessions (
+                    id TEXT PRIMARY KEY,
+                    runtime TEXT,
+                    vm_id TEXT,
+                    template_id TEXT,
+                    workspace_mount TEXT,
+                    agent_ready INTEGER,
+                    helper_instance_id TEXT,
+                    helper_started_at TEXT,
+                    created_at REAL,
+                    updated_at REAL
+                );
+                CREATE TABLE IF NOT EXISTS workspace_volumes (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    root_id TEXT,
+                    runtime TEXT,
+                    display_name TEXT,
+                    mount_path TEXT,
+                    diagnostics TEXT,
+                    idempotency_key TEXT,
+                    idempotency_fingerprint TEXT,
+                    created_at TEXT,
+                    updated_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_workspace_volumes_workspace
+                    ON workspace_volumes(workspace_id);
+                DROP INDEX IF EXISTS idx_workspace_volumes_idempotency;
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_volumes_idempotency
+                    ON workspace_volumes(workspace_id, user_id, idempotency_key)
+                    WHERE idempotency_key IS NOT NULL;
                 """
             )
             # Backfill migrations for older schemas.
@@ -1120,6 +1483,15 @@ class SQLiteStore(SandboxStore):
             _ensure_sqlite_column("sandbox_acp_sessions", "workspace_id", "TEXT")
             _ensure_sqlite_column("sandbox_acp_sessions", "workspace_group_id", "TEXT")
             _ensure_sqlite_column("sandbox_acp_sessions", "scope_snapshot_id", "TEXT")
+            _ensure_sqlite_column("sandbox_vz_sessions", "helper_instance_id", "TEXT")
+            _ensure_sqlite_column("sandbox_vz_sessions", "helper_started_at", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "runtime", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "root_id", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "display_name", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "mount_path", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "diagnostics", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "idempotency_key", "TEXT")
+            _ensure_sqlite_column("workspace_volumes", "idempotency_fingerprint", "TEXT")
 
     def _fp(self, body: dict[str, Any]) -> str:
         """
@@ -1462,9 +1834,10 @@ class SQLiteStore(SandboxStore):
                 cur_active = con.execute(
                     (
                         "SELECT COUNT(*) AS c FROM sandbox_runs "
-                        "WHERE phase=? OR (phase=? AND started_at IS NOT NULL)"
+                        "WHERE (phase=? OR (phase=? AND started_at IS NOT NULL)) "
+                        "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
                     ),
-                    (RunPhase.running.value, RunPhase.starting.value),
+                    (RunPhase.running.value, RunPhase.starting.value, now_iso),
                 )
                 row = cur_active.fetchone()
                 active = int(row["c"]) if row and row["c"] is not None else 0
@@ -1479,9 +1852,10 @@ class SQLiteStore(SandboxStore):
                     cur_user = con.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE user_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL))"
+                            "WHERE user_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
                         ),
-                        (target_user, RunPhase.running.value, RunPhase.starting.value),
+                        (target_user, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_user = cur_user.fetchone()
                     active_user = int(row_user["c"]) if row_user and row_user["c"] is not None else 0
@@ -1492,9 +1866,10 @@ class SQLiteStore(SandboxStore):
                     cur_persona = con.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE persona_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL))"
+                            "WHERE persona_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
                         ),
-                        (target_persona, RunPhase.running.value, RunPhase.starting.value),
+                        (target_persona, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_persona = cur_persona.fetchone()
                     active_persona = int(row_persona["c"]) if row_persona and row_persona["c"] is not None else 0
@@ -1505,9 +1880,10 @@ class SQLiteStore(SandboxStore):
                     cur_workspace = con.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE workspace_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL))"
+                            "WHERE workspace_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
                         ),
-                        (target_workspace, RunPhase.running.value, RunPhase.starting.value),
+                        (target_workspace, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_workspace = cur_workspace.fetchone()
                     active_workspace = int(row_workspace["c"]) if row_workspace and row_workspace["c"] is not None else 0
@@ -1518,9 +1894,10 @@ class SQLiteStore(SandboxStore):
                     cur_workspace_group = con.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE workspace_group_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL))"
+                            "WHERE workspace_group_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at > ?)"
                         ),
-                        (target_workspace_group, RunPhase.running.value, RunPhase.starting.value),
+                        (target_workspace_group, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_workspace_group = cur_workspace_group.fetchone()
                     active_workspace_group = int(row_workspace_group["c"]) if row_workspace_group and row_workspace_group["c"] is not None else 0
@@ -1707,6 +2084,185 @@ class SQLiteStore(SandboxStore):
                 deleted = 0
             return deleted > 0
 
+    def put_workspace_volume(self, volume: WorkspaceVolume) -> None:
+        now = datetime.now(timezone.utc)
+        created_at = volume.created_at or now
+        updated_at = now
+        mount_path = sanitize_workspace_volume_mount_path(volume.mount_path)
+        diagnostics = sanitize_workspace_volume_diagnostics(volume.diagnostics)
+        with self._lock, self._conn() as con:
+            con.execute(
+                (
+                    "INSERT INTO workspace_volumes("
+                    "id,workspace_id,user_id,state,root_id,runtime,display_name,mount_path,diagnostics,"
+                    "idempotency_key,idempotency_fingerprint,created_at,updated_at"
+                    ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET "
+                    "workspace_id=excluded.workspace_id,"
+                    "user_id=excluded.user_id,"
+                    "state=excluded.state,"
+                    "root_id=excluded.root_id,"
+                    "runtime=excluded.runtime,"
+                    "display_name=excluded.display_name,"
+                    "mount_path=excluded.mount_path,"
+                    "diagnostics=excluded.diagnostics,"
+                    "idempotency_key=excluded.idempotency_key,"
+                    "idempotency_fingerprint=excluded.idempotency_fingerprint,"
+                    "updated_at=excluded.updated_at"
+                ),
+                (
+                    str(volume.id),
+                    str(volume.workspace_id),
+                    self._user_key(volume.user_id),
+                    _coerce_workspace_volume_state(volume.state).value,
+                    (str(volume.root_id) if volume.root_id is not None else None),
+                    (str(volume.runtime) if volume.runtime is not None else None),
+                    (str(volume.display_name) if volume.display_name is not None else None),
+                    mount_path,
+                    json.dumps(diagnostics, ensure_ascii=False),
+                    (str(volume.idempotency_key) if volume.idempotency_key is not None else None),
+                    (
+                        str(volume.idempotency_fingerprint)
+                        if volume.idempotency_fingerprint is not None
+                        else None
+                    ),
+                    created_at.isoformat(),
+                    updated_at.isoformat(),
+                ),
+            )
+
+    def get_workspace_volume(self, volume_id: str) -> WorkspaceVolume | None:
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                (
+                    "SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,"
+                    "root_id,idempotency_key,idempotency_fingerprint,created_at,updated_at "
+                    "FROM workspace_volumes WHERE id=?"
+                ),
+                (str(volume_id),),
+            )
+            row = cur.fetchone()
+            return _workspace_volume_from_mapping(row) if row else None
+
+    def find_workspace_volume_by_idempotency(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        idempotency_key: str,
+        idempotency_fingerprint: str | None = None,
+    ) -> WorkspaceVolume | None:
+        user_key = self._user_key(user_id)
+        key = str(idempotency_key or "").strip()
+        if not user_key or not key:
+            return None
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                (
+                    "SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,"
+                    "root_id,idempotency_key,idempotency_fingerprint,created_at,updated_at "
+                    "FROM workspace_volumes WHERE workspace_id=? AND user_id=? AND idempotency_key=?"
+                ),
+                (str(workspace_id), user_key, key),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        volume = _workspace_volume_from_mapping(row)
+        if idempotency_fingerprint is not None and volume.idempotency_fingerprint != idempotency_fingerprint:
+            created_at = volume.created_at.timestamp() if volume.created_at is not None else None
+            raise IdempotencyConflict(volume.id, key=key, created_at=created_at)
+        return volume
+
+    def update_workspace_volume_state(
+        self,
+        volume_id: str,
+        *,
+        state: WorkspaceVolumeState,
+        mount_path: str | None = None,
+        diagnostics: dict[str, object] | None = None,
+    ) -> WorkspaceVolume | None:
+        next_state = _coerce_workspace_volume_state(state)
+        updated_at = datetime.now(timezone.utc).isoformat()
+        diagnostics_json = (
+            json.dumps(sanitize_workspace_volume_diagnostics(diagnostics), ensure_ascii=False)
+            if diagnostics is not None
+            else None
+        )
+        with self._lock, self._conn() as con:
+            if diagnostics is None:
+                if mount_path is None:
+                    cur = con.execute(
+                        "UPDATE workspace_volumes SET state=?, updated_at=? WHERE id=?",
+                        (next_state.value, updated_at, str(volume_id)),
+                    )
+                else:
+                    cur = con.execute(
+                        (
+                            "UPDATE workspace_volumes SET state=?, mount_path=?, updated_at=? "
+                            "WHERE id=?"
+                        ),
+                        (
+                            next_state.value,
+                            sanitize_workspace_volume_mount_path(mount_path),
+                            updated_at,
+                            str(volume_id),
+                        ),
+                    )
+            else:
+                if mount_path is None:
+                    cur = con.execute(
+                        (
+                            "UPDATE workspace_volumes SET state=?, diagnostics=?, updated_at=? "
+                            "WHERE id=?"
+                        ),
+                        (next_state.value, diagnostics_json, updated_at, str(volume_id)),
+                    )
+                else:
+                    cur = con.execute(
+                        (
+                            "UPDATE workspace_volumes SET state=?, mount_path=?, diagnostics=?, updated_at=? "
+                            "WHERE id=?"
+                        ),
+                        (
+                            next_state.value,
+                            sanitize_workspace_volume_mount_path(mount_path),
+                            diagnostics_json,
+                            updated_at,
+                            str(volume_id),
+                        ),
+                    )
+            updated = int(getattr(cur, "rowcount", 0) or 0)
+        return self.get_workspace_volume(str(volume_id)) if updated > 0 else None
+
+    def bind_workspace_volume_root(self, volume_id: str, *, root_id: str) -> WorkspaceVolume | None:
+        root_key = str(root_id or "").strip()
+        if not root_key:
+            return None
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                "UPDATE workspace_volumes SET root_id=?, updated_at=? WHERE id=?",
+                (root_key, updated_at, str(volume_id)),
+            )
+            updated = int(getattr(cur, "rowcount", 0) or 0)
+        return self.get_workspace_volume(str(volume_id)) if updated > 0 else None
+
+    def list_workspace_volumes_for_workspace(self, workspace_id: str) -> list[WorkspaceVolume]:
+        workspace_key = str(workspace_id or "").strip()
+        if not workspace_key:
+            return []
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                (
+                    "SELECT id,workspace_id,user_id,state,root_id,runtime,display_name,mount_path,diagnostics,"
+                    "idempotency_key,idempotency_fingerprint,created_at,updated_at "
+                    "FROM workspace_volumes WHERE workspace_id=? ORDER BY created_at ASC, id ASC"
+                ),
+                (workspace_key,),
+            )
+            return [_workspace_volume_from_mapping(row) for row in cur.fetchall()]
+
     def put_acp_session_control(
         self,
         *,
@@ -1784,6 +2340,88 @@ class SQLiteStore(SandboxStore):
             except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
                 deleted = 0
             return deleted > 0
+
+    def put_vz_session_control(
+        self,
+        *,
+        session_id: str,
+        runtime: str,
+        vm_id: str,
+        template_id: str | None,
+        workspace_mount: str | None,
+        agent_ready: bool,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
+    ) -> None:
+        now_ts = time.time()
+        with self._lock, self._conn() as con:
+            con.execute(
+                (
+                    "INSERT INTO sandbox_vz_sessions("
+                    "id,runtime,vm_id,template_id,workspace_mount,agent_ready,"
+                    "helper_instance_id,helper_started_at,created_at,updated_at"
+                    ") VALUES (?,?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET "
+                    "runtime=excluded.runtime,"
+                    "vm_id=excluded.vm_id,"
+                    "template_id=excluded.template_id,"
+                    "workspace_mount=excluded.workspace_mount,"
+                    "agent_ready=excluded.agent_ready,"
+                    "helper_instance_id=excluded.helper_instance_id,"
+                    "helper_started_at=excluded.helper_started_at,"
+                    "updated_at=excluded.updated_at"
+                ),
+                (
+                    str(session_id),
+                    str(runtime),
+                    str(vm_id),
+                    (str(template_id) if template_id is not None else None),
+                    (str(workspace_mount) if workspace_mount is not None else None),
+                    1 if agent_ready else 0,
+                    coerce_optional_nonempty_string(helper_instance_id),
+                    coerce_optional_nonempty_string(helper_started_at),
+                    float(now_ts),
+                    float(now_ts),
+                ),
+            )
+
+    def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                (
+                    "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,"
+                    "helper_instance_id,helper_started_at,created_at,updated_at "
+                    "FROM sandbox_vz_sessions WHERE id=?"
+                ),
+                (str(session_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            row_dict = dict(row)
+            row_dict["agent_ready"] = bool(row_dict.get("agent_ready"))
+            return row_dict
+
+    def delete_vz_session_control(self, session_id: str) -> bool:
+        with self._lock, self._conn() as con:
+            cur = con.execute("DELETE FROM sandbox_vz_sessions WHERE id=?", (str(session_id),))
+            try:
+                deleted = int(getattr(cur, "rowcount", 0))
+            except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
+                deleted = 0
+            return deleted > 0
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,"
+                "helper_instance_id,helper_started_at,created_at,updated_at "
+                "FROM sandbox_vz_sessions ORDER BY id"
+            )
+            rows = [dict(row) for row in cur.fetchall() or []]
+            for row in rows:
+                row["agent_ready"] = bool(row.get("agent_ready"))
+            return rows
 
     def get_user_artifact_bytes(self, user_id: str) -> int:
         with self._lock, self._conn() as con:
@@ -1872,7 +2510,7 @@ class SQLiteStore(SandboxStore):
             where.append("started_at <= ?")
             params.append(started_at_to)
         sql = (
-            "SELECT id,user_id,spec_version,runtime,runtime_version,base_image,session_id,persona_id,workspace_id,workspace_group_id,scope_snapshot_id,phase,exit_code,started_at,finished_at,message,image_digest,policy_hash "  # nosec B608
+            "SELECT id,user_id,spec_version,runtime,runtime_version,base_image,session_id,persona_id,workspace_id,workspace_group_id,scope_snapshot_id,phase,exit_code,started_at,finished_at,message,image_digest,policy_hash,resource_usage "  # nosec B608
             f"FROM sandbox_runs WHERE {' AND '.join(where)} ORDER BY started_at {order} LIMIT ? OFFSET ?"
         )
         params.extend([int(limit), int(offset)])
@@ -1881,6 +2519,18 @@ class SQLiteStore(SandboxStore):
             items: list[dict] = []
             for row in cur.fetchall():
                 row_dict = dict(row)
+                resource_usage = None
+                if row_dict.get("resource_usage"):
+                    try:
+                        loaded = json.loads(row_dict.get("resource_usage"))
+                        resource_usage = loaded if isinstance(loaded, dict) else None
+                    except (TypeError, ValueError) as exc:
+                        logger.debug(
+                            "SQLiteStore.list_runs ignored malformed resource_usage for run_id={}: {}",
+                            row_dict.get("id"),
+                            exc,
+                        )
+                        resource_usage = None
                 items.append({
                     "id": row_dict.get("id"),
                     "user_id": row_dict.get("user_id"),
@@ -1900,6 +2550,7 @@ class SQLiteStore(SandboxStore):
                     "message": row_dict.get("message"),
                     "image_digest": row_dict.get("image_digest"),
                     "policy_hash": row_dict.get("policy_hash"),
+                    "resource_usage": resource_usage,
                 })
             return items
 
@@ -2225,6 +2876,22 @@ class PostgresStore(SandboxStore):
             )
             cur.execute(
                 """
+                    CREATE TABLE IF NOT EXISTS sandbox_vz_sessions (
+                        id TEXT PRIMARY KEY,
+                        runtime TEXT,
+                        vm_id TEXT,
+                        template_id TEXT,
+                        workspace_mount TEXT,
+                        agent_ready BOOLEAN,
+                        helper_instance_id TEXT,
+                        helper_started_at TEXT,
+                        created_at DOUBLE PRECISION,
+                        updated_at DOUBLE PRECISION
+                    );
+                    """
+            )
+            cur.execute(
+                """
                     CREATE TABLE IF NOT EXISTS sandbox_acp_sessions (
                         id TEXT PRIMARY KEY,
                         user_id TEXT,
@@ -2253,6 +2920,35 @@ class PostgresStore(SandboxStore):
                     );
                     """
             )
+            cur.execute(
+                """
+                    CREATE TABLE IF NOT EXISTS workspace_volumes (
+                        id TEXT PRIMARY KEY,
+                        workspace_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        root_id TEXT,
+                        runtime TEXT,
+                        display_name TEXT,
+                        mount_path TEXT,
+                        diagnostics JSONB,
+                        idempotency_key TEXT,
+                        idempotency_fingerprint TEXT,
+                        created_at TEXT,
+                        updated_at TEXT
+                    );
+                    """
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workspace_volumes_workspace ON workspace_volumes(workspace_id)"
+            )
+            cur.execute("DROP INDEX IF EXISTS idx_workspace_volumes_idempotency")
+            cur.execute(
+                (
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_volumes_idempotency "
+                    "ON workspace_volumes(workspace_id, user_id, idempotency_key) WHERE idempotency_key IS NOT NULL"
+                )
+            )
             # Migrations: ensure new columns exist
             def _ensure_column(table: str, col: str, coltype: str) -> None:
                 try:
@@ -2266,8 +2962,11 @@ class PostgresStore(SandboxStore):
                     if cur.fetchone():
                         return
                     cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
-                except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
-                    logger.debug(f"Postgres migration: could not add {table}.{col}")
+                except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS as exc:
+                    logger.exception(f"Postgres migration failed while adding {table}.{col}")
+                    raise ClusterStoreUnavailable(
+                        f"Postgres migration failed while adding required column {table}.{col}"
+                    ) from exc
 
             _ensure_column("sandbox_runs", "resource_usage", "JSONB")
             _ensure_column("sandbox_runs", "runtime_version", "TEXT")
@@ -2299,6 +2998,15 @@ class PostgresStore(SandboxStore):
             _ensure_column("sandbox_acp_sessions", "workspace_id", "TEXT")
             _ensure_column("sandbox_acp_sessions", "workspace_group_id", "TEXT")
             _ensure_column("sandbox_acp_sessions", "scope_snapshot_id", "TEXT")
+            _ensure_column("sandbox_vz_sessions", "helper_instance_id", "TEXT")
+            _ensure_column("sandbox_vz_sessions", "helper_started_at", "TEXT")
+            _ensure_column("workspace_volumes", "runtime", "TEXT")
+            _ensure_column("workspace_volumes", "root_id", "TEXT")
+            _ensure_column("workspace_volumes", "display_name", "TEXT")
+            _ensure_column("workspace_volumes", "mount_path", "TEXT")
+            _ensure_column("workspace_volumes", "diagnostics", "JSONB")
+            _ensure_column("workspace_volumes", "idempotency_key", "TEXT")
+            _ensure_column("workspace_volumes", "idempotency_fingerprint", "TEXT")
 
     def _fp(self, body: dict[str, Any]) -> str:
         try:
@@ -2652,9 +3360,10 @@ class PostgresStore(SandboxStore):
                 cur.execute(
                     (
                         "SELECT COUNT(*) AS c FROM sandbox_runs "
-                        "WHERE phase=%s OR (phase=%s AND started_at IS NOT NULL)"
+                        "WHERE (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
+                        "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
                     ),
-                    (RunPhase.running.value, RunPhase.starting.value),
+                    (RunPhase.running.value, RunPhase.starting.value, now_iso),
                 )
                 row = cur.fetchone() or {}
                 active = int(row.get("c") or 0)
@@ -2669,9 +3378,10 @@ class PostgresStore(SandboxStore):
                     cur.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE user_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
+                            "WHERE user_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
                         ),
-                        (target_user, RunPhase.running.value, RunPhase.starting.value),
+                        (target_user, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_user = cur.fetchone() or {}
                     active_user = int(row_user.get("c") or 0)
@@ -2682,9 +3392,10 @@ class PostgresStore(SandboxStore):
                     cur.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE persona_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
+                            "WHERE persona_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
                         ),
-                        (target_persona, RunPhase.running.value, RunPhase.starting.value),
+                        (target_persona, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_persona = cur.fetchone() or {}
                     active_persona = int(row_persona.get("c") or 0)
@@ -2695,9 +3406,10 @@ class PostgresStore(SandboxStore):
                     cur.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE workspace_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
+                            "WHERE workspace_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
                         ),
-                        (target_workspace, RunPhase.running.value, RunPhase.starting.value),
+                        (target_workspace, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_workspace = cur.fetchone() or {}
                     active_workspace = int(row_workspace.get("c") or 0)
@@ -2708,9 +3420,10 @@ class PostgresStore(SandboxStore):
                     cur.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE workspace_group_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
+                            "WHERE workspace_group_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
+                            "AND (claim_expires_at IS NULL OR claim_expires_at::timestamptz > %s::timestamptz)"
                         ),
-                        (target_workspace_group, RunPhase.running.value, RunPhase.starting.value),
+                        (target_workspace_group, RunPhase.running.value, RunPhase.starting.value, now_iso),
                     )
                     row_workspace_group = cur.fetchone() or {}
                     active_workspace_group = int(row_workspace_group.get("c") or 0)
@@ -2890,6 +3603,182 @@ class PostgresStore(SandboxStore):
                 deleted = 0
             return deleted > 0
 
+    def put_workspace_volume(self, volume: WorkspaceVolume) -> None:
+        now = datetime.now(timezone.utc)
+        created_at = volume.created_at or now
+        updated_at = now
+        mount_path = sanitize_workspace_volume_mount_path(volume.mount_path)
+        diagnostics = sanitize_workspace_volume_diagnostics(volume.diagnostics)
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO workspace_volumes(
+                    id,workspace_id,user_id,state,root_id,runtime,display_name,mount_path,diagnostics,
+                    idempotency_key,idempotency_fingerprint,created_at,updated_at
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT(id) DO UPDATE SET
+                    workspace_id=EXCLUDED.workspace_id,
+                    user_id=EXCLUDED.user_id,
+                    state=EXCLUDED.state,
+                    root_id=EXCLUDED.root_id,
+                    runtime=EXCLUDED.runtime,
+                    display_name=EXCLUDED.display_name,
+                    mount_path=EXCLUDED.mount_path,
+                    diagnostics=EXCLUDED.diagnostics,
+                    idempotency_key=EXCLUDED.idempotency_key,
+                    idempotency_fingerprint=EXCLUDED.idempotency_fingerprint,
+                    updated_at=EXCLUDED.updated_at
+                """,
+                (
+                    str(volume.id),
+                    str(volume.workspace_id),
+                    self._user_key(volume.user_id),
+                    _coerce_workspace_volume_state(volume.state).value,
+                    (str(volume.root_id) if volume.root_id is not None else None),
+                    (str(volume.runtime) if volume.runtime is not None else None),
+                    (str(volume.display_name) if volume.display_name is not None else None),
+                    mount_path,
+                    json.dumps(diagnostics, ensure_ascii=False),
+                    (str(volume.idempotency_key) if volume.idempotency_key is not None else None),
+                    (
+                        str(volume.idempotency_fingerprint)
+                        if volume.idempotency_fingerprint is not None
+                        else None
+                    ),
+                    created_at.isoformat(),
+                    updated_at.isoformat(),
+                ),
+            )
+
+    def get_workspace_volume(self, volume_id: str) -> WorkspaceVolume | None:
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,
+                       root_id,idempotency_key,idempotency_fingerprint,created_at,updated_at
+                FROM workspace_volumes WHERE id=%s
+                """,
+                (str(volume_id),),
+            )
+            row = cur.fetchone()
+            return _workspace_volume_from_mapping(row) if row else None
+
+    def find_workspace_volume_by_idempotency(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        idempotency_key: str,
+        idempotency_fingerprint: str | None = None,
+    ) -> WorkspaceVolume | None:
+        user_key = self._user_key(user_id)
+        key = str(idempotency_key or "").strip()
+        if not user_key or not key:
+            return None
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,
+                       root_id,idempotency_key,idempotency_fingerprint,created_at,updated_at
+                FROM workspace_volumes WHERE workspace_id=%s AND user_id=%s AND idempotency_key=%s
+                """,
+                (str(workspace_id), user_key, key),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        volume = _workspace_volume_from_mapping(row)
+        if idempotency_fingerprint is not None and volume.idempotency_fingerprint != idempotency_fingerprint:
+            created_at = volume.created_at.timestamp() if volume.created_at is not None else None
+            raise IdempotencyConflict(volume.id, key=key, created_at=created_at)
+        return volume
+
+    def update_workspace_volume_state(
+        self,
+        volume_id: str,
+        *,
+        state: WorkspaceVolumeState,
+        mount_path: str | None = None,
+        diagnostics: dict[str, object] | None = None,
+    ) -> WorkspaceVolume | None:
+        next_state = _coerce_workspace_volume_state(state)
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            if diagnostics is None:
+                if mount_path is None:
+                    cur.execute(
+                        "UPDATE workspace_volumes SET state=%s, updated_at=%s WHERE id=%s",
+                        (next_state.value, updated_at, str(volume_id)),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE workspace_volumes SET state=%s, mount_path=%s, updated_at=%s WHERE id=%s",
+                        (
+                            next_state.value,
+                            sanitize_workspace_volume_mount_path(mount_path),
+                            updated_at,
+                            str(volume_id),
+                        ),
+                    )
+            else:
+                if mount_path is None:
+                    cur.execute(
+                        (
+                            "UPDATE workspace_volumes SET state=%s, diagnostics=%s, "
+                            "updated_at=%s WHERE id=%s"
+                        ),
+                        (
+                            next_state.value,
+                            json.dumps(sanitize_workspace_volume_diagnostics(diagnostics), ensure_ascii=False),
+                            updated_at,
+                            str(volume_id),
+                        ),
+                    )
+                else:
+                    cur.execute(
+                        (
+                            "UPDATE workspace_volumes SET state=%s, mount_path=%s, diagnostics=%s, "
+                            "updated_at=%s WHERE id=%s"
+                        ),
+                        (
+                            next_state.value,
+                            sanitize_workspace_volume_mount_path(mount_path),
+                            json.dumps(sanitize_workspace_volume_diagnostics(diagnostics), ensure_ascii=False),
+                            updated_at,
+                            str(volume_id),
+                        ),
+                    )
+            updated = int(getattr(cur, "rowcount", 0) or 0)
+        return self.get_workspace_volume(str(volume_id)) if updated > 0 else None
+
+    def bind_workspace_volume_root(self, volume_id: str, *, root_id: str) -> WorkspaceVolume | None:
+        root_key = str(root_id or "").strip()
+        if not root_key:
+            return None
+        updated_at = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                "UPDATE workspace_volumes SET root_id=%s, updated_at=%s WHERE id=%s",
+                (root_key, updated_at, str(volume_id)),
+            )
+            updated = int(getattr(cur, "rowcount", 0) or 0)
+        return self.get_workspace_volume(str(volume_id)) if updated > 0 else None
+
+    def list_workspace_volumes_for_workspace(self, workspace_id: str) -> list[WorkspaceVolume]:
+        workspace_key = str(workspace_id or "").strip()
+        if not workspace_key:
+            return []
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id,workspace_id,user_id,state,runtime,display_name,mount_path,diagnostics,
+                       root_id,idempotency_key,idempotency_fingerprint,created_at,updated_at
+                FROM workspace_volumes WHERE workspace_id=%s ORDER BY created_at ASC, id ASC
+                """,
+                (workspace_key,),
+            )
+            return [_workspace_volume_from_mapping(row) for row in (cur.fetchall() or [])]
+
     def put_acp_session_control(
         self,
         *,
@@ -2969,6 +3858,83 @@ class PostgresStore(SandboxStore):
             except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
                 deleted = 0
             return deleted > 0
+
+    def put_vz_session_control(
+        self,
+        *,
+        session_id: str,
+        runtime: str,
+        vm_id: str,
+        template_id: str | None,
+        workspace_mount: str | None,
+        agent_ready: bool,
+        helper_instance_id: str | None = None,
+        helper_started_at: str | None = None,
+    ) -> None:
+        now_ts = time.time()
+        with self._lock, self._conn() as con:
+            with con.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO sandbox_vz_sessions(
+                        id,runtime,vm_id,template_id,workspace_mount,agent_ready,
+                        helper_instance_id,helper_started_at,created_at,updated_at
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (id) DO UPDATE SET
+                        runtime=EXCLUDED.runtime,
+                        vm_id=EXCLUDED.vm_id,
+                        template_id=EXCLUDED.template_id,
+                        workspace_mount=EXCLUDED.workspace_mount,
+                        agent_ready=EXCLUDED.agent_ready,
+                        helper_instance_id=EXCLUDED.helper_instance_id,
+                        helper_started_at=EXCLUDED.helper_started_at,
+                        updated_at=EXCLUDED.updated_at
+                    """,
+                    (
+                        str(session_id),
+                        str(runtime),
+                        str(vm_id),
+                        (str(template_id) if template_id is not None else None),
+                        (str(workspace_mount) if workspace_mount is not None else None),
+                        bool(agent_ready),
+                        coerce_optional_nonempty_string(helper_instance_id),
+                        coerce_optional_nonempty_string(helper_started_at),
+                        float(now_ts),
+                        float(now_ts),
+                    ),
+                )
+
+    def get_vz_session_control(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                (
+                    "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,"
+                    "helper_instance_id,helper_started_at,created_at,updated_at "
+                    "FROM sandbox_vz_sessions WHERE id=%s"
+                ),
+                (str(session_id),),
+            )
+            row = cur.fetchone()
+            return dict(row) if isinstance(row, dict) else None
+
+    def delete_vz_session_control(self, session_id: str) -> bool:
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute("DELETE FROM sandbox_vz_sessions WHERE id=%s", (str(session_id),))
+            try:
+                deleted = int(getattr(cur, "rowcount", 0))
+            except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
+                deleted = 0
+            return deleted > 0
+
+    def list_vz_session_controls(self) -> list[dict[str, Any]]:
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                "SELECT id,runtime,vm_id,template_id,workspace_mount,agent_ready,"
+                "helper_instance_id,helper_started_at,created_at,updated_at "
+                "FROM sandbox_vz_sessions ORDER BY id"
+            )
+            return [dict(row) for row in cur.fetchall() or [] if isinstance(row, dict)]
 
     def get_user_artifact_bytes(self, user_id: str) -> int:
         with self._lock, self._conn() as con, con.cursor() as cur:
@@ -3070,7 +4036,7 @@ class PostgresStore(SandboxStore):
             where.append("started_at <= %s")
             params.append(started_at_to)
         sql = (
-            "SELECT id,user_id,spec_version,runtime,runtime_version,base_image,session_id,persona_id,workspace_id,workspace_group_id,scope_snapshot_id,phase,exit_code,started_at,finished_at,message,image_digest,policy_hash "  # nosec B608
+            "SELECT id,user_id,spec_version,runtime,runtime_version,base_image,session_id,persona_id,workspace_id,workspace_group_id,scope_snapshot_id,phase,exit_code,started_at,finished_at,message,image_digest,policy_hash,resource_usage "  # nosec B608
             f"FROM sandbox_runs WHERE {' AND '.join(where)} ORDER BY started_at {order} LIMIT %s OFFSET %s"
         )
         params.extend([int(limit), int(offset)])
@@ -3078,6 +4044,20 @@ class PostgresStore(SandboxStore):
             cur.execute(sql, tuple(params))
             items: list[dict] = []
             for row in cur.fetchall() or []:
+                resource_usage = row.get("resource_usage")
+                if isinstance(resource_usage, str):
+                    try:
+                        loaded = json.loads(resource_usage)
+                        resource_usage = loaded if isinstance(loaded, dict) else None
+                    except (TypeError, ValueError) as exc:
+                        logger.debug(
+                            "PostgresStore.list_runs ignored malformed resource_usage for run_id={}: {}",
+                            row.get("id"),
+                            exc,
+                        )
+                        resource_usage = None
+                elif not isinstance(resource_usage, dict):
+                    resource_usage = None
                 items.append({
                     "id": row.get("id"),
                     "user_id": row.get("user_id"),
@@ -3097,6 +4077,7 @@ class PostgresStore(SandboxStore):
                     "message": row.get("message"),
                     "image_digest": row.get("image_digest"),
                     "policy_hash": row.get("policy_hash"),
+                    "resource_usage": resource_usage,
                 })
             return items
 
@@ -3356,7 +4337,7 @@ def _require_cluster_ready() -> str:
 def get_store() -> SandboxStore:
     backend = None
     try:
-        backend = str(getattr(app_settings, "SANDBOX_STORE_BACKEND", "memory")).strip().lower()
+        backend = str(os.getenv("SANDBOX_STORE_BACKEND") or getattr(app_settings, "SANDBOX_STORE_BACKEND", "memory")).strip().lower()
     except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
         backend = "memory"
     if backend == "memory":
@@ -3369,7 +4350,7 @@ def get_store() -> SandboxStore:
     # Default sqlite
     ttl = int(getattr(app_settings, "SANDBOX_IDEMPOTENCY_TTL_SEC", 600))
     try:
-        db_path = getattr(app_settings, "SANDBOX_STORE_DB_PATH", None)
+        db_path = os.getenv("SANDBOX_STORE_DB_PATH") or getattr(app_settings, "SANDBOX_STORE_DB_PATH", None)
     except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
         db_path = None
     return SQLiteStore(db_path=db_path, idem_ttl_sec=ttl)
@@ -3381,7 +4362,7 @@ def get_store_mode() -> str:
     Values: memory | sqlite | cluster | unknown
     """
     try:
-        backend = str(getattr(app_settings, "SANDBOX_STORE_BACKEND", "memory")).strip().lower()
+        backend = str(os.getenv("SANDBOX_STORE_BACKEND") or getattr(app_settings, "SANDBOX_STORE_BACKEND", "memory")).strip().lower()
     except _SANDBOX_STORE_NONCRITICAL_EXCEPTIONS:
         backend = "memory"
     if backend == "cluster":

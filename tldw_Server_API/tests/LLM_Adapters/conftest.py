@@ -21,6 +21,7 @@ import sys
 import types
 import pytest
 
+from tldw_Server_API.tests._plugins.authnz_fixtures import authnz_schema_ready_sync  # noqa: F401
 from tldw_Server_API.tests.helpers.app_main_state import restore_app_main, set_app_main, snapshot_app_main
 
 
@@ -126,6 +127,7 @@ def client_user_only(request):  # noqa: D401 - compatibility alias with fallback
     which does not expose `.stream()` and breaks streaming adapter tests.
     """
     try:
+        request.getfixturevalue("authnz_schema_ready_sync")
         client, _logger = request.getfixturevalue("client_with_single_user")
         return client
     except Exception:

@@ -6,9 +6,7 @@ import {
   Upload,
   Input,
   Button,
-  Alert,
   Spin,
-  List,
   Checkbox,
   Empty,
   message,
@@ -24,6 +22,7 @@ import {
   X,
   Loader2
 } from "lucide-react"
+import { ProductStateAlert as Alert } from "@/components/Option/productStatePrimitives"
 import { useWorkspaceStore } from "@/store/workspace"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -48,7 +47,6 @@ import {
 
 const { TextArea } = Input
 const { Dragger } = Upload
-const EXISTING_MEDIA_CACHE_TTL_MS = 60_000
 const ADD_SOURCE_TAB_USAGE_STORAGE_KEY =
   "tldw:research-workspace:add-source-tab-usage:v1"
 const DEFAULT_ADD_SOURCE_TAB_ORDER: AddSourceTab[] = [
@@ -67,9 +65,6 @@ const WORKSPACE_UPLOAD_INGEST_FIELDS = {
   overwrite: "false",
   ...WORKSPACE_RAG_INGEST_FIELDS
 } as const
-
-let existingMediaCache: { items: any[]; totalCount: number; cachedAt: number } | null =
-  null
 
 type AddSourceCandidate = {
   mediaId: number
@@ -104,6 +99,59 @@ type UploadProgressEntry = {
 }
 
 type AddSourceTabUsage = Record<AddSourceTab, number>
+
+type ExistingMediaSortBy =
+  | "relevance"
+  | "date_desc"
+  | "date_asc"
+  | "title_asc"
+  | "title_desc"
+
+type ExistingMediaFilters = {
+  query: string
+  mediaType: string
+  keywords: string
+  sortBy: ExistingMediaSortBy
+}
+
+type MediaLibraryItem = Record<string, unknown>
+type ExistingMediaCache = {
+  items: MediaLibraryItem[]
+  totalCount: number
+  cachedAt: number
+}
+
+const EXISTING_MEDIA_CACHE_TTL_MS = 60_000
+let existingMediaCache: ExistingMediaCache | null = null
+
+const DEFAULT_EXISTING_MEDIA_FILTERS: ExistingMediaFilters = {
+  query: "",
+  mediaType: "all",
+  keywords: "",
+  sortBy: "relevance"
+}
+
+const EXISTING_MEDIA_TYPE_FILTERS = [
+  { value: "all", label: "All types" },
+  { value: "pdf", label: "PDF" },
+  { value: "video", label: "Video" },
+  { value: "audio", label: "Audio" },
+  { value: "website", label: "Website" },
+  { value: "document", label: "Document" },
+  { value: "text", label: "Text" },
+  { value: "email", label: "Email" }
+] as const
+
+const EXISTING_MEDIA_SORT_OPTIONS: Array<{
+  value: ExistingMediaSortBy
+  label: string
+}> = [
+  { value: "relevance", label: "Relevance" },
+  { value: "date_desc", label: "Newest" },
+  { value: "date_asc", label: "Oldest" },
+  { value: "title_asc", label: "Title A-Z" },
+  { value: "title_desc", label: "Title Z-A" }
+]
 
 const buildDefaultAddSourceTabUsage = (): AddSourceTabUsage => ({
   upload: 0,
@@ -182,6 +230,108 @@ const toOptionalString = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value)
+
+const isAuthRecoveryError = (error: unknown): boolean => {
+  const maybeError = error as { status?: unknown; message?: unknown } | null
+  const status = Number(maybeError?.status)
+  if (status === 401 || status === 403) return true
+
+  const messageText =
+    error instanceof Error
+      ? error.message
+      : typeof maybeError?.message === "string"
+        ? maybeError.message
+        : typeof error === "string"
+          ? error
+          : ""
+
+  return /unauthori[sz]ed|forbidden|api key|auth|sign in|permission/i.test(
+    messageText
+  )
+}
+
+const asMediaLibraryItem = (value: unknown): MediaLibraryItem | null =>
+  isRecord(value) ? value : null
+
+const getMediaLibraryIdNumber = (item: MediaLibraryItem): number | null =>
+  toMediaId(item.media_id ?? item.id)
+
+const getMediaLibraryTitle = (item: MediaLibraryItem): string =>
+  toOptionalString(item.title) || toOptionalString(item.name) || "Untitled"
+
+const getMediaLibraryTypeLabel = (item: MediaLibraryItem): string =>
+  toOptionalString(item.type) || toOptionalString(item.media_type) || "document"
+
+const getMediaLibraryKeywords = (item: MediaLibraryItem): string[] => {
+  const raw = item.keywords
+  if (Array.isArray(raw)) {
+    return raw
+      .map((keyword) => String(keyword).trim())
+      .filter(Boolean)
+      .slice(0, 8)
+  }
+  if (typeof raw === "string") {
+    return raw
+      .split(",")
+      .map((keyword) => keyword.trim())
+      .filter(Boolean)
+      .slice(0, 8)
+  }
+  return []
+}
+
+const parseKeywordFilterInput = (value: string): string[] =>
+  Array.from(
+    new Set(
+      value
+        .split(",")
+        .map((keyword) => keyword.trim())
+        .filter(Boolean)
+    )
+  )
+
+const hasActiveExistingMediaFilters = (filters: ExistingMediaFilters): boolean =>
+  Boolean(filters.query.trim()) ||
+  filters.mediaType !== "all" ||
+  parseKeywordFilterInput(filters.keywords).length > 0 ||
+  filters.sortBy !== "relevance"
+
+const isValidSourceUrl = (rawUrl: string): boolean => {
+  try {
+    const parsed = new URL(rawUrl)
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
+const buildMediaSearchPayload = (filters: ExistingMediaFilters) => {
+  const payload: {
+    query?: string
+    fields: string[]
+    media_types?: string[]
+    must_have?: string[]
+    sort_by: ExistingMediaSortBy
+  } = {
+    fields: ["title", "content"],
+    sort_by: filters.sortBy
+  }
+  const trimmedQuery = filters.query.trim()
+  if (trimmedQuery) {
+    payload.query = trimmedQuery
+  }
+  if (filters.mediaType !== "all") {
+    payload.media_types = [filters.mediaType]
+  }
+  const keywords = parseKeywordFilterInput(filters.keywords)
+  if (keywords.length > 0) {
+    payload.must_have = keywords
+  }
+  return payload
 }
 
 const extractCandidateMetadata = (candidate: Record<string, unknown>) => ({
@@ -293,6 +443,21 @@ const UploadTab: React.FC<{
     () => formatSourceUploadSizeLimit(uploadSizeLimitBytes),
     [uploadSizeLimitBytes]
   )
+  const uploadSourceFilesLabel = t(
+    "playground:sources.uploadSourceFilesLabel",
+    "Upload source files"
+  )
+  const browseSourceFilesLabel = t(
+    "playground:sources.browseSourceFilesLabel",
+    "Browse source files"
+  )
+
+  React.useEffect(() => {
+    const uploadButton = draggerContainerRef.current?.querySelector<HTMLElement>(
+      ".ant-upload-btn[role='button']"
+    )
+    uploadButton?.setAttribute("aria-label", uploadSourceFilesLabel)
+  }, [uploadSourceFilesLabel])
 
   const beginProcessing = React.useCallback(() => {
     activeUploadCountRef.current += 1
@@ -465,7 +630,11 @@ const UploadTab: React.FC<{
   return (
     <div className="space-y-4">
       <div ref={draggerContainerRef}>
-        <Dragger {...uploadProps} className="bg-surface">
+        <Dragger
+          {...uploadProps}
+          aria-label={uploadSourceFilesLabel}
+          className="bg-surface"
+        >
           <p className="ant-upload-drag-icon">
             <UploadIcon className="mx-auto h-12 w-12 text-primary" />
           </p>
@@ -492,6 +661,7 @@ const UploadTab: React.FC<{
           className="w-full"
           onClick={openFilePicker}
           data-testid="mobile-browse-files-button"
+          aria-label={browseSourceFilesLabel}
         >
           {t("playground:sources.browseFiles", "Browse files")}
         </Button>
@@ -590,6 +760,9 @@ const UrlTab: React.FC<{
   const [inputMode, setInputMode] = React.useState<"single" | "batch">("single")
   const [url, setUrl] = React.useState("")
   const [batchUrls, setBatchUrls] = React.useState("")
+  const [urlValidationError, setUrlValidationError] = React.useState<
+    string | null
+  >(null)
   const [batchResults, setBatchResults] = React.useState<
     Array<{
       url: string
@@ -633,15 +806,27 @@ const UrlTab: React.FC<{
     []
   )
 
+  const invalidUrlMessage = t(
+    "playground:sources.invalidUrl",
+    "Enter a valid URL starting with http:// or https://."
+  )
+
   const handleAddUrl = async () => {
     const singleUrl = url.trim()
     const batchUrlList = parseBatchUrls(batchUrls)
     if (inputMode === "single" && !singleUrl) return
     if (inputMode === "batch" && batchUrlList.length === 0) return
 
-    setProcessing(true)
     setError(null)
+    setUrlValidationError(null)
     setBatchResults([])
+
+    if (inputMode === "single" && !isValidSourceUrl(singleUrl)) {
+      setUrlValidationError(invalidUrlMessage)
+      return
+    }
+
+    setProcessing(true)
 
     try {
       if (inputMode === "single") {
@@ -670,6 +855,16 @@ const UrlTab: React.FC<{
       }> = []
 
       for (const rawUrl of batchUrlList) {
+        if (!isValidSourceUrl(rawUrl)) {
+          setUrlValidationError(invalidUrlMessage)
+          results.push({
+            url: rawUrl,
+            status: "error",
+            message: invalidUrlMessage
+          })
+          continue
+        }
+
         try {
           const response = await tldwClient.addMedia(rawUrl, {
             ...WORKSPACE_RAG_INGEST_FIELDS
@@ -769,15 +964,32 @@ const UrlTab: React.FC<{
             </label>
             <Input
               prefix={<Link className="h-4 w-4 text-text-muted" />}
+              aria-label={t("playground:sources.sourceUrlLabel", "Source URL")}
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => {
+                setUrl(e.target.value)
+                setUrlValidationError(null)
+              }}
               onPressEnter={handleAddUrl}
               placeholder={t(
                 "playground:sources.urlPlaceholder",
                 "https://example.com/article or YouTube URL"
               )}
               size="large"
+              status={urlValidationError ? "error" : undefined}
+              aria-describedby={
+                urlValidationError ? "workspace-url-validation-error" : undefined
+              }
+              aria-invalid={Boolean(urlValidationError)}
             />
+            {urlValidationError && (
+              <p
+                id="workspace-url-validation-error"
+                className="mt-1 text-xs text-error"
+              >
+                {urlValidationError}
+              </p>
+            )}
           </>
         ) : (
           <>
@@ -785,14 +997,31 @@ const UrlTab: React.FC<{
               {t("playground:sources.urlBatchLabel", "Add one URL per line")}
             </label>
             <TextArea
+              aria-label={t("playground:sources.sourceUrlsLabel", "Source URLs")}
               value={batchUrls}
-              onChange={(event) => setBatchUrls(event.target.value)}
+              onChange={(event) => {
+                setBatchUrls(event.target.value)
+                setUrlValidationError(null)
+              }}
               rows={7}
               placeholder={t(
                 "playground:sources.urlBatchPlaceholder",
                 "https://example.com/article-1\nhttps://example.com/article-2"
               )}
+              status={urlValidationError ? "error" : undefined}
+              aria-describedby={
+                urlValidationError ? "workspace-url-validation-error" : undefined
+              }
+              aria-invalid={Boolean(urlValidationError)}
             />
+            {urlValidationError && (
+              <p
+                id="workspace-url-validation-error"
+                className="mt-1 text-xs text-error"
+              >
+                {urlValidationError}
+              </p>
+            )}
           </>
         )}
       </div>
@@ -850,10 +1079,15 @@ const PasteTab: React.FC<{
   onAddSources: AddSourceHandler
   setProcessing: (p: boolean) => void
   setError: (e: string | null) => void
-}> = ({ onAddSources, setProcessing, setError }) => {
+  error?: string | null
+}> = ({ onAddSources, setProcessing, setError, error }) => {
   const { t } = useTranslation(["playground", "common"])
   const [title, setTitle] = React.useState("")
   const [content, setContent] = React.useState("")
+  const pasteAuthRecoveryError = t(
+    "playground:sources.pasteAuthRecoveryError",
+    "You need to finish server setup or sign in before adding sources. Your pasted text is still here."
+  )
 
   const handleAddText = async () => {
     if (!content.trim()) return
@@ -896,7 +1130,11 @@ const PasteTab: React.FC<{
         setError(t("playground:sources.pasteError", "Failed to add text"))
       }
     } catch (err) {
-      setError(mapSourceIngestionError(err))
+      setError(
+        isAuthRecoveryError(err)
+          ? pasteAuthRecoveryError
+          : mapSourceIngestionError(err)
+      )
     } finally {
       setProcessing(false)
     }
@@ -909,6 +1147,10 @@ const PasteTab: React.FC<{
           {t("playground:sources.titleLabel", "Title (optional)")}
         </label>
         <Input
+          aria-label={t(
+            "playground:sources.pastedSourceTitleLabel",
+            "Pasted source title"
+          )}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder={t("playground:sources.titlePlaceholder", "Give your content a title")}
@@ -919,6 +1161,10 @@ const PasteTab: React.FC<{
           {t("playground:sources.contentLabel", "Content")}
         </label>
         <TextArea
+          aria-label={t(
+            "playground:sources.pastedSourceContentLabel",
+            "Pasted source content"
+          )}
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder={t(
@@ -943,6 +1189,11 @@ const PasteTab: React.FC<{
       >
         {t("playground:sources.addText", "Add Text")}
       </Button>
+      {error === pasteAuthRecoveryError && (
+        <Button onClick={handleAddText} disabled={!content.trim()} className="w-full">
+          {t("playground:sources.retryAfterSetup", "Retry after setup")}
+        </Button>
+      )}
     </div>
   )
 }
@@ -1118,6 +1369,7 @@ const SearchTab: React.FC<{
       <div className="flex gap-2">
         <Input
           prefix={<Search className="h-4 w-4 text-text-muted" />}
+          aria-label={t("playground:sources.searchWebLabel", "Search the web")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onPressEnter={handleSearch}
@@ -1137,59 +1389,69 @@ const SearchTab: React.FC<{
 
       {results.length > 0 && (
         <>
-          <div className="max-h-64 overflow-y-auto rounded border border-border">
-            <List
-              size="small"
-              dataSource={results}
-              renderItem={(item, idx) => (
-                (() => {
-                  const record = item as Record<string, unknown>
-                  const resultUrl = getResultUrl(record)
-                  const resultSnippet = getResultSnippet(record)
-                  const faviconUrl = getFaviconUrl(resultUrl)
-                  return (
-                    <List.Item
-                      className={`cursor-pointer transition hover:bg-surface2 ${
-                        selectedResults.has(idx) ? "bg-primary/10" : ""
-                      }`}
-                      onClick={() => toggleResult(idx)}
-                    >
+          <div
+            className="max-h-64 overflow-y-auto rounded border border-border"
+            role="list"
+          >
+            {results.map((item, idx) => {
+              const record = item as Record<string, unknown>
+              const resultUrl = getResultUrl(record)
+              const resultSnippet = getResultSnippet(record)
+              const faviconUrl = getFaviconUrl(resultUrl)
+              const resultTitle = item.title || resultUrl || `Result ${idx + 1}`
+
+              return (
+                <div
+                  key={`${resultUrl || resultTitle}-${idx}`}
+                  role="listitem"
+                  className={`cursor-pointer p-3 transition hover:bg-surface2 ${
+                    selectedResults.has(idx) ? "bg-primary/10" : ""
+                  }`}
+                  tabIndex={0}
+                  aria-selected={selectedResults.has(idx)}
+                  onClick={() => toggleResult(idx)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      toggleResult(idx)
+                    }
+                  }}
+                >
+                  <div className="flex items-start gap-2">
+                    <Checkbox
+                      checked={selectedResults.has(idx)}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={() => toggleResult(idx)}
+                    />
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-start gap-2">
-                        <Checkbox
-                          checked={selectedResults.has(idx)}
-                          onChange={() => toggleResult(idx)}
-                        />
+                        {faviconUrl ? (
+                          <img
+                            src={faviconUrl}
+                            alt=""
+                            data-testid={`search-result-favicon-${idx}`}
+                            className="mt-0.5 h-4 w-4 shrink-0 rounded"
+                          />
+                        ) : null}
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-start gap-2">
-                            {faviconUrl ? (
-                              <img
-                                src={faviconUrl}
-                                alt=""
-                                data-testid={`search-result-favicon-${idx}`}
-                                className="mt-0.5 h-4 w-4 shrink-0 rounded"
-                              />
-                            ) : null}
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium text-text">
-                                {item.title}
-                              </p>
-                              <p className="truncate text-xs text-text-muted">
-                                {resultUrl}
-                              </p>
-                              {resultSnippet ? (
-                                <p className="mt-0.5 line-clamp-2 text-xs text-text-subtle">
-                                  {resultSnippet}
-                                </p>
-                              ) : null}
-                            </div>
-                          </div>
+                          <p className="truncate text-sm font-medium text-text">
+                            {resultTitle}
+                          </p>
+                          <p className="truncate text-xs text-text-muted">
+                            {resultUrl}
+                          </p>
+                          {resultSnippet ? (
+                            <p className="mt-0.5 line-clamp-2 text-xs text-text-subtle">
+                              {resultSnippet}
+                            </p>
+                          ) : null}
                         </div>
                       </div>
-                    </List.Item>
-                  )
-                })()
-              )}
-            />
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
           </div>
           <Button
             type="primary"
@@ -1222,8 +1484,15 @@ const ExistingTab: React.FC<{
   setError: (e: string | null) => void
 }> = ({ onAddSources, setProcessing, setError }) => {
   const { t } = useTranslation(["playground", "common"])
+  const tRef = React.useRef(t)
+  React.useEffect(() => {
+    tRef.current = t
+  }, [t])
   const [searchQuery, setSearchQuery] = React.useState("")
-  const [media, setMedia] = React.useState<any[]>([])
+  const [mediaTypeFilter, setMediaTypeFilter] = React.useState("all")
+  const [keywordFilterInput, setKeywordFilterInput] = React.useState("")
+  const [sortBy, setSortBy] = React.useState<ExistingMediaSortBy>("relevance")
+  const [media, setMedia] = React.useState<MediaLibraryItem[]>([])
   const [isLoading, setIsLoading] = React.useState(false)
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [selectedMediaKeys, setSelectedMediaKeys] = React.useState<Set<string>>(
@@ -1258,7 +1527,7 @@ const ExistingTab: React.FC<{
 
   const fetchMediaFromServer = React.useCallback(
     async (
-      query?: string,
+      filters: ExistingMediaFilters,
       options?: { silent?: boolean; page?: number; append?: boolean }
     ) => {
       const shouldShowLoading = !options?.silent
@@ -1270,11 +1539,10 @@ const ExistingTab: React.FC<{
       const append = Boolean(options?.append)
 
       try {
-        const trimmedQuery = query?.trim()
         let response
-        if (trimmedQuery) {
+        if (hasActiveExistingMediaFilters(filters)) {
           response = await tldwClient.searchMedia(
-            { query: trimmedQuery },
+            buildMediaSearchPayload(filters),
             { page, results_per_page: 50 }
           )
         } else {
@@ -1306,15 +1574,25 @@ const ExistingTab: React.FC<{
         setCurrentPage(page)
         setHasMore(dedupedItems.length < normalizedTotal)
 
-        if (!trimmedQuery && page === 1) {
+        if (!hasActiveExistingMediaFilters(filters) && page === 1) {
           existingMediaCache = {
             items: dedupedItems,
             totalCount: normalizedTotal,
             cachedAt: Date.now()
           }
         }
-      } catch {
-        setLoadError("Unable to load media. Please try again.")
+      } catch (err) {
+        setLoadError(
+          isAuthRecoveryError(err)
+            ? tRef.current(
+                "playground:sources.mediaLibraryAuthRecovery",
+                "Sign in or finish server setup to browse your media library."
+              )
+            : tRef.current(
+                "playground:sources.mediaLibraryLoadError",
+                "Unable to load media. Please try again."
+              )
+        )
       } finally {
         if (shouldShowLoading) {
           setIsLoading(false)
@@ -1325,9 +1603,8 @@ const ExistingTab: React.FC<{
   )
 
   const loadMedia = React.useCallback(
-    async (query?: string) => {
-      const trimmedQuery = query?.trim()
-      if (!trimmedQuery && existingMediaCache) {
+    async (filters: ExistingMediaFilters = DEFAULT_EXISTING_MEDIA_FILTERS) => {
+      if (!hasActiveExistingMediaFilters(filters) && existingMediaCache) {
         const cacheIsFresh =
           Date.now() - existingMediaCache.cachedAt < EXISTING_MEDIA_CACHE_TTL_MS
         if (cacheIsFresh) {
@@ -1339,26 +1616,46 @@ const ExistingTab: React.FC<{
           return
         }
       }
-
       setCurrentPage(1)
       setSelectedMediaKeys(new Set())
-      await fetchMediaFromServer(trimmedQuery, { page: 1 })
+      await fetchMediaFromServer(filters, { page: 1 })
     },
     [fetchMediaFromServer, setMediaList]
   )
 
   React.useEffect(() => {
-    loadMedia()
+    void loadMedia(DEFAULT_EXISTING_MEDIA_FILTERS)
   }, [loadMedia])
+
+  const currentFilters = React.useMemo<ExistingMediaFilters>(
+    () => ({
+      query: searchQuery,
+      mediaType: mediaTypeFilter,
+      keywords: keywordFilterInput,
+      sortBy
+    }),
+    [keywordFilterInput, mediaTypeFilter, searchQuery, sortBy]
+  )
+  const filtersActive = hasActiveExistingMediaFilters(currentFilters)
 
   const handleSearch = () => {
     setCurrentPage(1)
-    void loadMedia(searchQuery)
+    void loadMedia(currentFilters)
+  }
+
+  const handleClearFilters = () => {
+    setSearchQuery("")
+    setMediaTypeFilter("all")
+    setKeywordFilterInput("")
+    setSortBy("relevance")
+    setCurrentPage(1)
+    setSelectedMediaKeys(new Set())
+    void fetchMediaFromServer(DEFAULT_EXISTING_MEDIA_FILTERS, { page: 1 })
   }
 
   const handleLoadMore = () => {
     if (isLoading || !hasMore) return
-    void fetchMediaFromServer(searchQuery, {
+    void fetchMediaFromServer(currentFilters, {
       page: currentPage + 1,
       append: true
     })
@@ -1376,19 +1673,19 @@ const ExistingTab: React.FC<{
       )
     })
 
-    const newSources = selectedItems.map((m) => ({
+    const newSources: AddSourceCandidate[] = selectedItems.map((m) => ({
       mediaId: Number(m.media_id ?? m.id),
-      title: m.title || m.name || "Untitled",
-      type: getSourceTypeFromMediaType(m.type || m.media_type) as WorkspaceSourceType,
+      title: getMediaLibraryTitle(m),
+      type: getSourceTypeFromMediaType(getMediaLibraryTypeLabel(m)) as WorkspaceSourceType,
       status: "ready" as const,
-      url: m.url || m.source_url || undefined,
-      fileSize: toOptionalNumber(m.file_size || m.filesize || m.size),
-      duration: toOptionalNumber(m.duration_seconds || m.duration),
-      pageCount: toOptionalNumber(m.page_count || m.pages),
+      url: toOptionalString(m.url) || toOptionalString(m.source_url),
+      fileSize: toOptionalNumber(m.file_size ?? m.filesize ?? m.size),
+      duration: toOptionalNumber(m.duration_seconds ?? m.duration),
+      pageCount: toOptionalNumber(m.page_count ?? m.pages),
       sourceCreatedAt:
-        parseSourceCreatedAt(m.created_at || m.createdAt || m.date_added) ||
+        parseSourceCreatedAt(m.created_at ?? m.createdAt ?? m.date_added) ||
         undefined,
-      thumbnailUrl: m.thumbnail_url || m.thumbnail || undefined
+      thumbnailUrl: toOptionalString(m.thumbnail_url) || toOptionalString(m.thumbnail)
     }))
 
     if (newSources.length > 0) {
@@ -1416,21 +1713,95 @@ const ExistingTab: React.FC<{
       : availableMedia.length
   const allVisibleMediaAlreadyAdded =
     media.length > 0 && availableMedia.length === 0
+  const alreadyAddedVisibleCount = Math.max(
+    0,
+    media.length - availableMedia.length
+  )
+  const allVisibleMediaAlreadyAddedDescription = filtersActive
+    ? t(
+        "playground:sources.matchingMediaAlreadyAdded",
+        alreadyAddedVisibleCount === 1
+          ? "{{count}} matching media item is already in this workspace"
+          : "{{count}} matching media items are already in this workspace",
+        { count: alreadyAddedVisibleCount }
+      )
+    : t(
+        "playground:sources.allVisibleMediaAlreadyAdded",
+        "All visible media are already in this workspace"
+      )
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
+      <div className="space-y-2 rounded border border-border bg-surface2/30 p-2">
+        <div className="flex gap-2">
+          <Input
+            aria-label={t("playground:sources.searchMediaLabel", "Search media")}
+            prefix={<Search className="h-4 w-4 text-text-muted" />}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onPressEnter={handleSearch}
+            placeholder={t("playground:sources.searchExisting", "Search your media library...")}
+            className="flex-1"
+          />
+          <Button
+            aria-label={t("common:search", "Search")}
+            onClick={handleSearch}
+            loading={isLoading}
+          >
+            {t("common:search", "Search")}
+          </Button>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <label className="min-w-0">
+            <span className="mb-1 block text-[11px] font-medium text-text-muted">
+              {t("playground:sources.mediaTypeFilter", "Media type")}
+            </span>
+            <select
+              aria-label={t("playground:sources.mediaTypeFilter", "Media type")}
+              value={mediaTypeFilter}
+              onChange={(event) => setMediaTypeFilter(event.target.value)}
+              className="h-8 w-full rounded border border-border bg-surface px-2 text-xs text-text"
+            >
+              {EXISTING_MEDIA_TYPE_FILTERS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="min-w-0">
+            <span className="mb-1 block text-[11px] font-medium text-text-muted">
+              {t("playground:sources.sortMedia", "Sort media")}
+            </span>
+            <select
+              aria-label={t("playground:sources.sortMedia", "Sort media")}
+              value={sortBy}
+              onChange={(event) => setSortBy(event.target.value as ExistingMediaSortBy)}
+              className="h-8 w-full rounded border border-border bg-surface px-2 text-xs text-text"
+            >
+              {EXISTING_MEDIA_SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {filtersActive && (
+            <Button onClick={handleClearFilters} className="self-end">
+              {t("playground:sources.clearFilters", "Clear filters")}
+            </Button>
+          )}
+        </div>
         <Input
-          prefix={<Search className="h-4 w-4 text-text-muted" />}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          aria-label={t("playground:sources.keywordFilter", "Keywords")}
+          value={keywordFilterInput}
+          onChange={(event) => setKeywordFilterInput(event.target.value)}
           onPressEnter={handleSearch}
-          placeholder={t("playground:sources.searchExisting", "Search your media library...")}
-          className="flex-1"
+          placeholder={t(
+            "playground:sources.keywordFilterPlaceholder",
+            "Filter keywords, comma-separated"
+          )}
         />
-        <Button onClick={handleSearch} loading={isLoading}>
-          {t("common:search", "Search")}
-        </Button>
       </div>
 
       {isLoading ? (
@@ -1442,10 +1813,7 @@ const ExistingTab: React.FC<{
       ) : allVisibleMediaAlreadyAdded ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={t(
-            "playground:sources.allVisibleMediaAlreadyAdded",
-            "All visible media are already in this workspace"
-          )}
+          description={allVisibleMediaAlreadyAddedDescription}
         />
       ) : availableMedia.length === 0 ? (
         <Empty
@@ -1467,20 +1835,31 @@ const ExistingTab: React.FC<{
               }
             )}
           </p>
-          <div className="max-h-64 overflow-y-auto rounded border border-border">
-            <List
-              size="small"
-              dataSource={availableMedia}
-              renderItem={(item) => {
+          <div
+            className="max-h-64 overflow-y-auto rounded border border-border"
+            role="list"
+          >
+            {availableMedia.map((item) => {
                 const key = getMediaLibraryItemKey(item)
                 if (key == null) return null
-                const title = item.title || item.name || "Untitled"
+                const title = getMediaLibraryTitle(item)
+                const keywords = getMediaLibraryKeywords(item)
                 return (
-                  <List.Item
-                    className={`cursor-pointer transition hover:bg-surface2 ${
+                  <div
+                    key={key}
+                    role="listitem"
+                    className={`cursor-pointer p-3 transition hover:bg-surface2 ${
                       selectedMediaKeys.has(key) ? "bg-primary/10" : ""
                     }`}
+                    tabIndex={0}
+                    aria-selected={selectedMediaKeys.has(key)}
                     onClick={() => toggleMedia(key)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault()
+                        toggleMedia(key)
+                      }
+                    }}
                   >
                     <div className="flex items-start gap-2">
                       <Checkbox
@@ -1498,14 +1877,25 @@ const ExistingTab: React.FC<{
                           {title}
                         </p>
                         <p className="text-xs text-text-muted capitalize">
-                          {item.type || item.media_type || "document"}
+                          {getMediaLibraryTypeLabel(item)}
                         </p>
+                        {keywords.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {keywords.map((keyword) => (
+                              <span
+                                key={keyword}
+                                className="rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-text-muted"
+                              >
+                                {keyword}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </List.Item>
+                  </div>
                 )
-              }}
-            />
+              })}
           </div>
           <Button
             type="primary"
@@ -1528,6 +1918,11 @@ const ExistingTab: React.FC<{
   )
 }
 
+const VIDEO_SOURCE_HOSTS = ["youtube.com", "youtu.be", "vimeo.com"] as const
+
+const hostnameMatchesDomain = (hostname: string, domain: string): boolean =>
+  hostname === domain || hostname.endsWith(`.${domain}`)
+
 // Helper functions
 function getSourceTypeFromFile(file: File): WorkspaceSourceType {
   const ext = file.name.split(".").pop()?.toLowerCase() || ""
@@ -1538,25 +1933,31 @@ function getSourceTypeFromFile(file: File): WorkspaceSourceType {
     return "video"
   if (["mp3", "wav", "m4a", "ogg", "flac"].includes(ext) || mimeType.startsWith("audio/"))
     return "audio"
-  if (["doc", "docx", "odt", "rtf"].includes(ext)) return "document"
+  if (["docx", "odt", "rtf", "epub", "xhtml", "xml", "json"].includes(ext))
+    return "document"
   if (["txt", "md", "markdown"].includes(ext)) return "text"
   if (["html", "htm"].includes(ext)) return "website"
 
-  return "document"
+  return ext ? "text" : "document"
 }
 
 function getSourceTypeFromUrl(url: string): WorkspaceSourceType {
-  const urlLower = url.toLowerCase()
-  if (
-    urlLower.includes("youtube.com") ||
-    urlLower.includes("youtu.be") ||
-    urlLower.includes("vimeo.com")
-  ) {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return "website"
+  }
+
+  const hostname = parsed.hostname.toLowerCase()
+  if (VIDEO_SOURCE_HOSTS.some((domain) => hostnameMatchesDomain(hostname, domain))) {
     return "video"
   }
-  if (urlLower.endsWith(".pdf")) return "pdf"
-  if (urlLower.match(/\.(mp3|wav|m4a|ogg|flac)$/)) return "audio"
-  if (urlLower.match(/\.(mp4|webm|mkv|avi|mov)$/)) return "video"
+
+  const pathname = parsed.pathname.toLowerCase()
+  if (pathname.endsWith(".pdf")) return "pdf"
+  if (pathname.match(/\.(mp3|wav|m4a|ogg|flac)$/)) return "audio"
+  if (pathname.match(/\.(mp4|webm|mkv|avi|mov)$/)) return "video"
 
   return "website"
 }
@@ -1646,14 +2047,20 @@ export const AddSourceModal: React.FC = () => {
 
       // Tag media with workspace tag
       if (workspaceTag) {
-        try {
-          await tldwClient.updateMediaKeywords(source.mediaId, {
-            keywords: [workspaceTag],
-            mode: "add"
+        void tldwClient
+          .updateMediaKeywords(
+            source.mediaId,
+            {
+              keywords: [workspaceTag],
+              mode: "add"
+            },
+            {
+              suppressBackendUnavailableEvent: true
+            }
+          )
+          .catch(() => {
+            // Continue even if best-effort workspace tagging fails.
           })
-        } catch {
-          // Continue even if tagging fails
-        }
       }
     }
 
@@ -1725,6 +2132,7 @@ export const AddSourceModal: React.FC = () => {
           onAddSources={handleAddSources}
           setProcessing={setProcessing}
           setError={setError}
+          error={error}
         />
       )
     },

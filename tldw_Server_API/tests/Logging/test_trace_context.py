@@ -1,11 +1,11 @@
-import types
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.Logging.log_context import ensure_traceparent
+from tldw_Server_API.app.main import app
+from tldw_Server_API.app.services.app_lifecycle import reset_lifecycle_state
 
 
 def _route_exists(path: str, method: str) -> bool:
@@ -18,14 +18,21 @@ def _route_exists(path: str, method: str) -> bool:
     return False
 
 
-def test_ensure_traceparent_sets_state_and_returns_value():
+def _fresh_test_client() -> TestClient:
+    """Return a TestClient after clearing any leaked shared-app drain state."""
+    reset_lifecycle_state(app)
+    client = TestClient(app)
+    reset_lifecycle_state(app)
+    return client
 
 
+@pytest.mark.unit
+def test_ensure_traceparent_sets_state_and_returns_value() -> None:
     class _State:  # minimal stand-in for request.state
         pass
 
     class _Req:
-        def __init__(self, headers: Dict[str, str]):
+        def __init__(self, headers: dict[str, str]) -> None:
             self.headers = headers
             self.state = _State()
 
@@ -33,13 +40,38 @@ def test_ensure_traceparent_sets_state_and_returns_value():
     req = _Req({"traceparent": tp})
     out = ensure_traceparent(req)
     assert out == tp
-    assert getattr(req.state, "traceparent") == tp
+    assert req.state.traceparent == tp
 
     # Case-insensitive header
     req2 = _Req({"Traceparent": tp})
     out2 = ensure_traceparent(req2)
     assert out2 == tp
-    assert getattr(req2.state, "traceparent") == tp
+    assert req2.state.traceparent == tp
+
+    # Mixed-case valid values are normalized before being stored.
+    mixed_case_tp = "00-0123456789ABCDEF0123456789ABCDEF-0123456789ABCDEF-01"
+    req3 = _Req({"traceparent": mixed_case_tp})
+    out3 = ensure_traceparent(req3)
+    assert out3 == tp
+    assert req3.state.traceparent == tp
+
+
+@pytest.mark.unit
+def test_ensure_traceparent_drops_invalid_header_value() -> None:
+    class _State:
+        pass
+
+    class _Req:
+        def __init__(self, headers: dict[str, str]) -> None:
+            self.headers = headers
+            self.state = _State()
+
+    req = _Req({"traceparent": "bad\ntraceparent"})
+
+    out = ensure_traceparent(req)
+
+    assert out == ""
+    assert not hasattr(req.state, "traceparent")
 
 
 def test_audio_jobs_submit_propagates_request_id(monkeypatch):
@@ -49,7 +81,7 @@ def test_audio_jobs_submit_propagates_request_id(monkeypatch):
         pytest.skip("audio-jobs submit route is disabled in this test app configuration")
 
     # Capture kwargs sent to JobManager.create_job
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     from tldw_Server_API.app.core.Jobs import manager as jobs_manager
 
@@ -68,7 +100,7 @@ def test_audio_jobs_submit_propagates_request_id(monkeypatch):
 
     monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
 
-    client = TestClient(app)
+    client = _fresh_test_client()
     resp = client.post(
         "/api/v1/audio/jobs/submit",
         json={"url": "https://example.com/a.mp3"},
@@ -85,7 +117,7 @@ def test_audio_jobs_submit_propagates_request_id(monkeypatch):
 def test_media_ingest_jobs_submit_propagates_request_id(monkeypatch, tmp_path):
 
 
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     from tldw_Server_API.app.core.Jobs import manager as jobs_manager
 
@@ -106,7 +138,7 @@ def test_media_ingest_jobs_submit_propagates_request_id(monkeypatch, tmp_path):
     monkeypatch.delenv("JOBS_DB_URL", raising=False)
     monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
 
-    client = TestClient(app)
+    client = _fresh_test_client()
     resp = client.post(
         "/api/v1/media/ingest/jobs",
         data={"media_type": "audio", "urls": "https://example.com/a.mp3"},
@@ -123,10 +155,10 @@ def test_media_ingest_jobs_submit_propagates_request_id(monkeypatch, tmp_path):
 def test_reembed_schedule_propagates_request_id(monkeypatch):
 
 
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
-    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
     from tldw_Server_API.app.core.Embeddings import redis_pipeline
+    from tldw_Server_API.app.core.Jobs import manager as jobs_manager
 
     if not _route_exists("/api/v1/embeddings/reembed/schedule", "POST"):
         pytest.skip("re-embed schedule route is disabled in this test app configuration")
@@ -154,7 +186,7 @@ def test_reembed_schedule_propagates_request_id(monkeypatch):
     monkeypatch.setattr(jobs_manager.JobManager, "create_job", fake_create_job, raising=True)
     monkeypatch.setattr(redis_pipeline, "enqueue_chunking_job", fake_enqueue_chunking_job, raising=True)
 
-    client = TestClient(app)
+    client = _fresh_test_client()
     resp = client.post(
         "/api/v1/embeddings/reembed/schedule",
         json={"media_id": 1},

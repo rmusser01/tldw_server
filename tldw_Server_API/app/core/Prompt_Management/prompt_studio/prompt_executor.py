@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import re
 import time
 from datetime import datetime
 from typing import Any, Optional
@@ -33,6 +34,13 @@ class PromptExecutor:
     # Template variable constraints
     MAX_VARIABLE_VALUE_LENGTH = 100000  # 100K chars max per variable
     MAX_TOTAL_PROMPT_LENGTH = 500000    # 500K chars max total
+    _VALID_TEMPLATE_KEY = re.compile(r"^[A-Za-z0-9_]+$")
+    _PLACEHOLDER_PATTERN = re.compile(
+        r"\{\{\s*(?P<double>[A-Za-z0-9_]+)\s*\}\}"
+        r"|\{(?P<brace>[A-Za-z0-9_]+)\}"
+        r"|\$(?P<dollar>[A-Za-z0-9_]+)\b"
+        r"|<(?P<angle>[A-Za-z0-9_]+)>"
+    )
 
     # Normalize common aliases to canonical provider ids used by the adapter registry.
     PROVIDER_ALIASES = {
@@ -465,37 +473,34 @@ class PromptExecutor:
         # Prompt Studio stores system and user prompts separately; use user_prompt as the template
         template = (prompt.get("user_prompt") or "")
 
-        # Replace variables in template with length validation
+        # Replace variables in template with length validation.
+        rendered_inputs: dict[str, str] = {}
         for key, value in inputs.items():
             # Validate key name to prevent template injection
             # Keys should be alphanumeric with underscores only
             if not key or not isinstance(key, str):
                 logger.warning(f"Skipping invalid variable key: {key!r}")
                 continue
-            # Sanitize key: only allow alphanumeric and underscore characters
-            sanitized_key = ''.join(c for c in key if c.isalnum() or c == '_')
-            if sanitized_key != key:
-                logger.warning(
-                    f"Variable key '{key}' contains invalid characters, sanitized to '{sanitized_key}'"
-                )
-            if not sanitized_key:
-                logger.warning(f"Variable key '{key}' sanitized to empty string, skipping")
+            if not self._VALID_TEMPLATE_KEY.fullmatch(key):
+                logger.warning(f"Skipping invalid variable key: {key!r}")
                 continue
 
             # Convert to string and validate length
             str_value = str(value) if value is not None else ""
             if len(str_value) > self.MAX_VARIABLE_VALUE_LENGTH:
                 logger.warning(
-                    f"Variable '{sanitized_key}' value truncated from {len(str_value)} to {self.MAX_VARIABLE_VALUE_LENGTH} chars"
+                    f"Variable '{key}' value truncated from {len(str_value)} to {self.MAX_VARIABLE_VALUE_LENGTH} chars"
                 )
                 str_value = str_value[:self.MAX_VARIABLE_VALUE_LENGTH] + "... [truncated]"
+            rendered_inputs[key] = str_value
 
-            # Handle different placeholder formats using sanitized key
-            template = template.replace(f"{{{sanitized_key}}}", str_value)
-            # Double-brace template: replace {{var}} correctly
-            template = template.replace(f"{{{{{sanitized_key}}}}}", str_value)
-            template = template.replace(f"${sanitized_key}", str_value)
-            template = template.replace(f"<{sanitized_key}>", str_value)
+        def _replace_placeholder(match: re.Match[str]) -> str:
+            key = next((value for value in match.groupdict().values() if value is not None), "")
+            if key in rendered_inputs:
+                return rendered_inputs[key]
+            return match.group(0)
+
+        template = self._PLACEHOLDER_PATTERN.sub(_replace_placeholder, template)
 
         # Validate total prompt length
         if len(template) > self.MAX_TOTAL_PROMPT_LENGTH:

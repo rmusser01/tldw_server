@@ -75,6 +75,14 @@ def test_abtest_results_endpoint_returns_rows(tmp_path, monkeypatch):
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["total"] == 1
+        assert data["pagination"] == {
+            "mode": "page",
+            "page": 1,
+            "per_page": 50,
+            "total": 1,
+            "total_pages": 1,
+            "has_more": False,
+        }
         assert len(data["results"]) == 1
         row = data["results"][0]
         assert row["arm_id"] == arm_id

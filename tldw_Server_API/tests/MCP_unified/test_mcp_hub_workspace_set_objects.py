@@ -105,4 +105,15 @@ async def test_policy_resolver_uses_named_workspace_set_members_over_preserved_i
     assert policy["selected_workspace_set_object_id"] == 501
     assert policy["selected_workspace_set_object_name"] == "Research Workspaces"
     assert policy["selected_assignment_workspace_ids"] == ["workspace-alpha", "workspace-beta"]
-    assert policy["authored_policy_document"] == policy["resolved_policy_document"]
+    assert policy["authored_policy_document"] == {
+        "allowed_tools": ["files.read"],
+        "path_scope_mode": "workspace_root",
+        "path_scope_enforcement": "approval_required_when_unenforceable",
+    }
+    assert policy["resolved_policy_document"] == {
+        "allowed_tools": ["files.read"],
+        "conditions": {},
+        "path_scope_mode": "workspace_root",
+        "path_scope_enforcement": "approval_required_when_unenforceable",
+        "tool_tier_overrides": {},
+    }

@@ -1,0 +1,102 @@
+---
+id: TASK-2283
+title: Add Claude-style governed Bash and PowerShell runtime tools
+status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-06-25 03:52
+labels:
+- mcp
+- command-runtime
+- security
+- tools
+- agentic-execution
+dependencies: []
+references:
+- https://code.claude.com/docs/en/tools-reference
+- Docs/superpowers/specs/2026-03-28-mcp-virtual-cli-run-command-design.md
+- https://github.com/rmusser01/tldw_server/pull/2519
+modified_files:
+- tldw_Server_API/app/core/MCP_unified/command_runtime/__init__.py
+- tldw_Server_API/app/core/MCP_unified/command_runtime/executor.py
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Design and implement Claude-style governed shell runtime parity for Bash and PowerShell where appropriate. Cover command pattern permissions, per-command timeouts, output caps with full-output artifacts, cwd carry-over constrained to workspace/additional dirs, env-file support, shell selection, PowerShell platform behavior, hook integration, telemetry redaction, and safe denial of unsupported shell features.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Bash/shell/PowerShell-facing tool names are governed aliases over the virtual CLI and never execute a raw host shell.
+- [x] #2 Unsupported raw-shell features such as redirection, command substitution, environment expansion, environment assignment prefixes, and background execution fail closed before any backend MCP tool call.
+- [x] #3 Compound command chains continue to be parsed and governed per subcommand with existing preflight behavior.
+- [x] #4 Focused run-command/module tests, py_compile, Bandit, and git diff checks pass.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+First slice: harden the existing virtual CLI shell facade rather than adding raw shell execution. Add tests first for PowerShell alias exposure/execution and fail-closed unsupported shell syntax. Implement a small token-aware unsupported-feature detector in the run command path, extend the alias list to PowerShell/pwsh, document the behavior, run focused tests and security checks.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+First slice implemented: expanded governed run aliases to include powershell and pwsh, added token-aware fail-closed detection for unsupported raw shell features before backend MCP preparation, and documented that the aliases remain virtual CLI facades rather than raw host shells. Verification: focused command runtime pytest 91 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_facade_2283.json had results=0 errors=0; git diff --check passed.
+
+Second slice implemented: added optional timeoutSeconds / timeout_seconds support for run, bash, shell, powershell, and pwsh. The timeout wraps the governed command chain including preflight and nested MCP execution, validates positive finite numeric values, rejects conflicting snake/camel timeout aliases, and returns exit code 124 on timeout. Remaining broader TASK-2283 areas include richer output artifact, cwd carry-over, env-file, shell selection, session, and telemetry parity if desired in later slices. Verification: focused command runtime pytest 97 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_timeout_2283.json had results=0 errors=0; git diff --check passed.
+
+Third slice implemented: added explicit cwd / workingDirectory support for one governed command chain. The cwd is normalized as a workspace-relative path, rejects absolute paths, Windows drive roots, home-relative paths, and traversal, rewrites relative file/search-base arguments before nested MCP fs calls, and salts nested idempotency keys so the same parent key cannot collide across cwd scopes. Remaining broader TASK-2283 areas include output artifact, env-file, shell selection, session, and telemetry parity if desired in later slices. Verification: focused command runtime pytest 103 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_cwd_2283.json had results=0 errors=0; git diff --check passed.
+
+Fourth slice implemented: added opt-in retainOutputArtifacts / retain_output_artifacts support for oversized governed run output. Default behavior still deletes spill files after rendering, while retained output keeps the private spill file and reports a redacted mcp-run-output:// handle instead of an absolute filesystem path. Remaining broader TASK-2283 areas include env-file, shell selection, session, and telemetry parity if desired in later slices. Verification: focused command runtime pytest 107 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_artifacts_2283.json had results=0 errors=0; git diff --check passed.
+
+Fifth slice implemented: added sandboxSessionId / sandbox_session_id support for governed sandbox command steps. When set, sandbox steps call sandbox.run with session_id instead of the default base_image, validation rejects empty/non-string/conflicting aliases, and nested idempotency keys are salted by sandbox session scope. Remaining broader TASK-2283 areas include env-file, shell selection, and telemetry parity if desired in later slices. Verification: focused command runtime pytest 112 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_sandbox_session_2283.json had results=0 errors=0; git diff --check passed.
+
+PR review hardening implemented: addressed Qodo, Gemini, and CodeRabbit comments by adding docstrings to newly added helpers/tests, replacing the sleep-based timeout test with deterministic cancellation, preserving whitespace in cwd-rewritten file path tokens, hashing idempotency scope with structured JSON serialization, and using per-invocation spill directories so timeout cleanup removes spills even when execution is cancelled before a result is returned. Verification: focused command runtime pytest 115 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_pr2384_review.json had results=0 errors=0; git diff --check passed.
+
+Sixth slice implemented: added envFile / env_file support for governed sandbox command steps. Env files are validated as workspace-relative paths, resolved under the active workspace root with symlink target containment, bounded to 65536 bytes, parsed as simple UTF-8 .env KEY=value entries without expansion, forwarded only to sandbox.run, and salted into nested idempotency scope by path/content digest without exposing secret values. Non-sandbox command chains fail closed instead of silently loading env files. Verification: focused run command pytest 69 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file.json had results=0 errors=0 skipped=0.
+
+Sixth-slice hardening added: sandbox.run env values are redacted from tool hook contexts while preserving the real prepared/executed sandbox arguments and argument hash behavior. Verification rerun after hardening: run-command plus protocol hook pytest 78 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file.json had results=0 errors=0 skipped=0.
+
+PR #2386 review pass: rebased branch onto latest origin/dev (already up to date) and addressed still-valid review items. Changes: introduced RunEnvFileValidationError for envFile failures, replaced path.stat/read_bytes with os.open/os.fstat/os.fdopen bounded descriptor reads using O_NOFOLLOW/O_CLOEXEC where available, accepted UTF-8 BOM via utf-8-sig, restricted env variable names to ASCII [A-Za-z_][A-Za-z0-9_]*, removed redundant env-file alias normalization, added docstrings to new sandbox hook test helpers, and added focused regression tests for BOM/unicode-key rejection, descriptor reads, and OSError mapping. The marker-policy finding was handled for the newly added env-file tests by marking them unit and relying on repo-configured pytest asyncio auto mode; existing pre-existing asyncio markers were left unchanged. Verification: run-command plus protocol hook pytest 81 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file_review.json had results=0 errors=0 skipped=0; git diff --check passed.
+
+PR #2386 follow-up refinement: changed RunEnvFileValidationError to inherit the project ValidationError base while preserving ValueError-compatible behavior through the existing exception hierarchy. Verification rerun after refinement: run-command plus protocol hook pytest 81 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_env_file_review.json had results=0 errors=0 skipped=0; git diff --check passed.
+
+Seventh slice implemented: added explicit shellName / shell_name selection for the governed virtual CLI. The selector accepts bash, shell, powershell, and pwsh labels, validates alias consistency, pins bash/powershell/pwsh tool aliases to their matching selector, carries the selected label in AdapterContext for future adapter behavior, and salts nested idempotency keys by shell selection without enabling raw host shell execution. Verification: focused run-command pytest 80 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_shell_selection.json had results=0 errors=0 skipped=0; git diff --check passed.
+
+Eighth slice implemented: added PowerShell-specific fail-closed guardrails for the governed virtual CLI. When shellName is powershell/pwsh or the powershell alias is used, raw PowerShell invocation operator syntax (&) and unquoted script blocks ({ ... }) are rejected before parsing or backend MCP preparation, with PowerShell-specific diagnostics. Verification: focused run-command pytest 83 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_powershell_guardrails.json had results=0 errors=0 skipped=0; git diff --check passed.
+
+PR #2391 review pass: rebased against latest origin/dev (already up to date) and addressed still-valid PowerShell scanner review items. Changes: narrowed script-block rejection to unquoted opening braces that are token-shaped like PowerShell script blocks so rg patterns such as foo{2} remain allowed; made PowerShell backtick handling quote-aware so single-quoted backticks are literals while outside/double-quoted backticks escape the next character for preflight scanning; and stopped classifying 2>&1 redirection ampersands as invocation operators so the generic redirection guard reports the denial. Verification recorded below.
+
+PR #2391 review verification: targeted review regressions passed (3 passed); full run-command pytest passed (86 passed, 4 warnings); Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_powershell_guardrails_review.json had results=0 errors=0 skipped=0; git diff --check passed.
+
+Ninth slice implemented: added nested tool-use telemetry metadata for governed run-command backend calls. Run-command passes nested backend MCP calls through a child request context with mcp_tool_use_nested and a safe correlation id derived from the request id, leaving caller metadata isolated before the outer run event is recorded. Protocol tool-use events now preserve the nested flag, so reports can distinguish backend fs/sandbox calls from the top-level run invocation without storing raw command arguments. Verification: targeted nested telemetry regression passed; focused run-command + tool-use reporting + protocol hook pytest 120 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_hook_telemetry.json had results=0 errors=0 skipped=0; git diff --check passed.
+
+PR #2393 review pass: rebased onto latest origin/dev at fc98c351b3 and addressed still-valid Qodo/Gemini review items. Changes: added missing docstrings to the new run-command telemetry test helpers, marked the new async regression as a unit test, simplified nested flag construction in protocol tool-use events, derived a sanitizer-safe hash correlation id for unsafe request ids, and replaced shared RequestContext metadata mutation with an isolated child context for nested backend calls. Verification: focused run-command + tool-use reporting + protocol hook pytest 120 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_hook_telemetry_review.json had results=0 errors=0 skipped=0; git diff --check passed.
+
+Tenth slice implemented: added virtual cwd carry-over commands for the governed run facade. The pure runtime now exposes pwd and cd, carries a bounded workspace-relative cwd across later commands in the same run invocation, includes dynamic cwd changes in nested step idempotency keys, and fails closed for ambiguous cd usage in pipelines or conditional branches where static preflight cannot safely model state. Verification: focused run-command pytest 93 passed; additional checks recorded in the PR branch.
+
+PR #2395 review pass: verified current code against Gemini/Qodo comments and addressed still-valid issues. Changes: added docstrings to modified adapter helpers, allowed semicolon-separated chains to continue preflighting after cd usage errors while leaving cwd unchanged for later governed steps, normalized backslashes in adapter-level cwd carry-over, and added focused regressions for both behaviors. Gemini's HandlerInvocationContext import comment was checked and skipped because the symbol is already imported from its actual module, command_runtime.executor. Frontend UX smoke failure was inspected and appears unrelated to this backend-only MCP run-command branch. Verification: focused run-command pytest 95 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_run_cwd_carryover_review.json had results=0 errors=0 skipped=0; git diff --check passed.
+
+Closure audit cleanup: validated the current governed shell runtime against TASK-2283 acceptance criteria on the latest dev worktree, fixed the remaining focused Ruff findings by organizing command_runtime package imports and removing unused executor locals, and reran the focused MCP verification gates. Verification: focused run-command/parser/registry/execution/presentation/tool-use/protocol-hook pytest 199 passed with 3 existing warnings; py_compile passed for run_command_module.py, command_runtime, and tool_execution scope; Ruff passed for the focused MCP runtime/test scope with --select F,I,UP; Bandit report /tmp/bandit_mcp_shell_task2283_cleanup_final.json had results=0 errors=0 skipped_tests=0; git diff --check passed.
+
+Draft PR created for closure audit: https://github.com/rmusser01/tldw_server/pull/2519. The PR body records that a human-maintainer Change Summary is required before marking the AI-authored PR ready for merge.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+TASK-2283 is complete. Bash, shell, powershell, and pwsh remain governed aliases over the virtual CLI, not raw host shell execution. Unsupported raw-shell features fail closed before backend MCP tool preparation; compound chains are still parsed and governed per subcommand with preflight; timeout, cwd, output artifact retention, sandbox session, env-file, shell selection, PowerShell guardrail, nested telemetry, and virtual cwd carry-over slices are already implemented. Closure audit fixed the remaining focused Ruff hygiene findings in the command runtime and verified the focused MCP shell-runtime gate set.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

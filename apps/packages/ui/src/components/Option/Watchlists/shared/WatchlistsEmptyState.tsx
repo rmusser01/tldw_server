@@ -1,5 +1,4 @@
 import React from "react"
-import { Button, Empty } from "antd"
 import {
   CalendarClock,
   FileOutput,
@@ -7,9 +6,11 @@ import {
   Newspaper,
   Play,
   Plus,
-  Rss
+  Rss,
+  type LucideIcon
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { EmptyState } from "@/components/ui/feedback/EmptyState"
 
 type EntityType = "feeds" | "monitors" | "activity" | "articles" | "reports" | "templates"
 
@@ -28,7 +29,9 @@ interface WatchlistsEmptyStateProps {
 const entityConfig: Record<
   EntityType,
   {
-    icon: React.ReactNode
+    icon: LucideIcon
+    titleKey: string
+    titleDefault: string
     descriptionKey: string
     descriptionDefault: string
     primaryCtaKey: string
@@ -38,7 +41,9 @@ const entityConfig: Record<
   }
 > = {
   feeds: {
-    icon: <Rss className="h-8 w-8 text-text-muted" />,
+    icon: Rss,
+    titleKey: "watchlists:emptyState.feeds.title",
+    titleDefault: "No feeds yet",
     descriptionKey: "watchlists:emptyState.feeds.description",
     descriptionDefault: "Feeds are the sources your monitors check for new content.",
     primaryCtaKey: "watchlists:emptyState.feeds.primaryCta",
@@ -47,7 +52,9 @@ const entityConfig: Record<
     secondaryCtaDefault: "Import from OPML"
   },
   monitors: {
-    icon: <CalendarClock className="h-8 w-8 text-text-muted" />,
+    icon: CalendarClock,
+    titleKey: "watchlists:emptyState.monitors.title",
+    titleDefault: "No monitors yet",
     descriptionKey: "watchlists:emptyState.monitors.description",
     descriptionDefault:
       "Monitors run on a schedule to fetch and process content from your feeds.",
@@ -55,7 +62,9 @@ const entityConfig: Record<
     primaryCtaDefault: "Create your first monitor"
   },
   activity: {
-    icon: <Play className="h-8 w-8 text-text-muted" />,
+    icon: Play,
+    titleKey: "watchlists:emptyState.activity.title",
+    titleDefault: "No activity yet",
     descriptionKey: "watchlists:emptyState.activity.description",
     descriptionDefault:
       "Activity shows the history of monitor runs. Set up a monitor to start seeing activity here.",
@@ -63,15 +72,19 @@ const entityConfig: Record<
     primaryCtaDefault: "Set up a monitor"
   },
   articles: {
-    icon: <Newspaper className="h-8 w-8 text-text-muted" />,
+    icon: Newspaper,
+    titleKey: "watchlists:emptyState.articles.title",
+    titleDefault: "No updates yet",
     descriptionKey: "watchlists:emptyState.articles.description",
     descriptionDefault:
-      "Articles are captured content from successful monitor runs, ready for review.",
+      "Updates are captured content from successful monitor runs, ready for review.",
     primaryCtaKey: "watchlists:emptyState.articles.primaryCta",
-    primaryCtaDefault: "Set up a monitor to start capturing articles"
+    primaryCtaDefault: "Set up a monitor to start capturing updates"
   },
   reports: {
-    icon: <FileOutput className="h-8 w-8 text-text-muted" />,
+    icon: FileOutput,
+    titleKey: "watchlists:emptyState.reports.title",
+    titleDefault: "No reports yet",
     descriptionKey: "watchlists:emptyState.reports.description",
     descriptionDefault:
       "Reports are generated briefings from monitor runs using your templates.",
@@ -79,7 +92,9 @@ const entityConfig: Record<
     primaryCtaDefault: "Run a monitor to generate your first report"
   },
   templates: {
-    icon: <FileText className="h-8 w-8 text-text-muted" />,
+    icon: FileText,
+    titleKey: "watchlists:emptyState.templates.title",
+    titleDefault: "No templates yet",
     descriptionKey: "watchlists:emptyState.templates.description",
     descriptionDefault:
       "Templates define the format and structure of your generated reports.",
@@ -98,11 +113,21 @@ export const WatchlistsEmptyState: React.FC<WatchlistsEmptyStateProps> = ({
 }) => {
   const { t } = useTranslation(["watchlists"])
   const config = entityConfig[entity]
+  const primaryActionLabel =
+    primaryLabel || t(config.primaryCtaKey, config.primaryCtaDefault)
+  const secondaryActionLabel =
+    secondaryLabel ||
+    (config.secondaryCtaKey
+      ? t(config.secondaryCtaKey, config.secondaryCtaDefault || "")
+      : undefined)
 
   return (
-    <Empty
-      image={config.icon}
-      imageStyle={{ height: 48, display: "flex", justifyContent: "center", alignItems: "center" }}
+    <EmptyState
+      title={t(config.titleKey, config.titleDefault)}
+      icon={config.icon}
+      iconClassName="text-text-muted"
+      size="md"
+      variant="card"
       description={
         <div className="space-y-2">
           <p className="text-sm text-text-muted">
@@ -114,28 +139,25 @@ export const WatchlistsEmptyState: React.FC<WatchlistsEmptyStateProps> = ({
         </div>
       }
       data-testid={`watchlists-empty-state-${entity}`}
-    >
-      <div className="flex flex-wrap justify-center gap-2">
-        {onPrimaryAction && (
-          <Button
-            type="primary"
-            icon={<Plus className="h-4 w-4" />}
-            onClick={onPrimaryAction}
-            data-testid={`watchlists-empty-state-${entity}-primary`}
-          >
-            {primaryLabel || t(config.primaryCtaKey, config.primaryCtaDefault)}
-          </Button>
-        )}
-        {onSecondaryAction && config.secondaryCtaKey && (
-          <Button
-            onClick={onSecondaryAction}
-            data-testid={`watchlists-empty-state-${entity}-secondary`}
-          >
-            {secondaryLabel ||
-              t(config.secondaryCtaKey, config.secondaryCtaDefault || "")}
-          </Button>
-        )}
-      </div>
-    </Empty>
+      primaryAction={
+        onPrimaryAction
+          ? {
+              label: primaryActionLabel,
+              icon: <Plus className="h-4 w-4" />,
+              onClick: onPrimaryAction,
+              "data-testid": `watchlists-empty-state-${entity}-primary`
+            }
+          : undefined
+      }
+      secondaryAction={
+        onSecondaryAction && config.secondaryCtaKey && secondaryActionLabel
+          ? {
+              label: secondaryActionLabel,
+              onClick: onSecondaryAction,
+              "data-testid": `watchlists-empty-state-${entity}-secondary`
+            }
+          : undefined
+      }
+    />
   )
 }

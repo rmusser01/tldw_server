@@ -59,6 +59,32 @@ const writeSpecCache = (next: Omit<QuickIngestSpecCache, 'cachedAt'>) => {
 
 const SAVE_DEBOUNCE_MS = 2000
 
+const normalizeCommonOptions = (common?: {
+  perform_analysis?: boolean
+  perform_chunking?: boolean
+  overwrite_existing?: boolean
+  chunking_mode?: string
+  auto_chunking_goal?: string
+  auto_chunking_use_llm?: boolean
+}) => {
+  const chunkingGoal: "balanced" | "qa_search" | "navigation_summary" =
+    common?.auto_chunking_goal === "qa_search" ||
+    common?.auto_chunking_goal === "navigation_summary"
+      ? common.auto_chunking_goal
+      : "balanced"
+  const chunkingMode: "auto" | "manual" =
+    common?.chunking_mode === "manual" ? "manual" : "auto"
+  return {
+    ...(common ?? {}),
+    perform_analysis: common?.perform_analysis ?? true,
+    perform_chunking: common?.perform_chunking ?? true,
+    overwrite_existing: common?.overwrite_existing ?? false,
+    chunking_mode: chunkingMode,
+    auto_chunking_goal: chunkingGoal,
+    auto_chunking_use_llm: common?.auto_chunking_use_llm === true
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Deps interface
 // ---------------------------------------------------------------------------
@@ -104,10 +130,16 @@ export function useIngestOptions(deps: UseIngestOptionsDeps) {
     perform_analysis: boolean
     perform_chunking: boolean
     overwrite_existing: boolean
+    chunking_mode?: "auto" | "manual"
+    auto_chunking_goal?: "balanced" | "qa_search" | "navigation_summary"
+    auto_chunking_use_llm?: boolean
   }>("quickIngestCommon", {
     perform_analysis: true,
     perform_chunking: true,
-    overwrite_existing: false
+    overwrite_existing: false,
+    chunking_mode: "auto",
+    auto_chunking_goal: "balanced",
+    auto_chunking_use_llm: false
   })
   const [savedAdvValues, setSavedAdvValues] = useStorage<Record<string, any>>('quickIngestAdvancedValues', {})
   const [uiPrefs, setUiPrefs] = useStorage<{ advancedOpen?: boolean; fieldDetailsOpen?: Record<string, boolean> }>('quickIngestAdvancedUI', {})
@@ -644,6 +676,14 @@ export function useIngestOptions(deps: UseIngestOptionsDeps) {
       setStoreRemote(true)
     }
   }, [reviewBeforeStorage, storeRemote])
+
+  // Backfill Auto chunking defaults for older persisted Quick Ingest options.
+  React.useEffect(() => {
+    const normalized = normalizeCommonOptions(common)
+    if (JSON.stringify(normalized) !== JSON.stringify(common || {})) {
+      setCommon(normalized)
+    }
+  }, [common, setCommon])
 
   // Sync refs
   React.useEffect(() => {

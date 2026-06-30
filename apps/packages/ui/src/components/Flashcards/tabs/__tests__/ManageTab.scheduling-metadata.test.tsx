@@ -20,7 +20,33 @@ import {
   getManageServerOrderBy
 } from "../../hooks"
 
-const { trackShortcutHintTelemetryMock, markdownSnippetMock, markdownWithBoundaryMock } = vi.hoisted(() => ({
+const {
+  createDrawerMock,
+  trackShortcutHintTelemetryMock,
+  markdownSnippetMock,
+  markdownWithBoundaryMock
+} = vi.hoisted(() => ({
+  createDrawerMock: vi.fn(
+    (props: {
+      open?: boolean
+      initialDeckId?: number | null
+      includeWorkspaceItems?: boolean
+      workspaceId?: string | null
+    }) =>
+      props.open ? (
+        <div data-testid="mock-create-drawer">
+          <span data-testid="mock-create-drawer-initial-deck-id">
+            {String(props.initialDeckId ?? "")}
+          </span>
+          <span data-testid="mock-create-drawer-include-workspace">
+            {String(props.includeWorkspaceItems ?? false)}
+          </span>
+          <span data-testid="mock-create-drawer-workspace-id">
+            {String(props.workspaceId ?? "")}
+          </span>
+        </div>
+      ) : null
+  ),
   trackShortcutHintTelemetryMock: vi.fn().mockResolvedValue(undefined),
   markdownSnippetMock: vi.fn(({ content }: { content: string }) => (
     <div data-testid="markdown-snippet">{content}</div>
@@ -110,7 +136,12 @@ vi.mock("../../components", () => ({
   MarkdownWithBoundary: (props: { content: string }) => markdownWithBoundaryMock(props),
   FlashcardActionsMenu: () => <div />,
   FlashcardEditDrawer: () => null,
-  FlashcardCreateDrawer: () => null
+  FlashcardCreateDrawer: (props: {
+    open?: boolean
+    initialDeckId?: number | null
+    includeWorkspaceItems?: boolean
+    workspaceId?: string | null
+  }) => createDrawerMock(props)
 }))
 
 if (!(globalThis as any).ResizeObserver) {
@@ -134,6 +165,25 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn()
     }))
+  })
+}
+
+if (typeof window !== "undefined" && !window.localStorage) {
+  const storage = new Map<string, string>()
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value)
+      },
+      removeItem: (key: string) => {
+        storage.delete(key)
+      },
+      clear: () => {
+        storage.clear()
+      }
+    }
   })
 }
 
@@ -168,6 +218,7 @@ describe("ManageTab scheduling metadata visibility", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks()
+    createDrawerMock.mockClear()
     markdownSnippetMock.mockClear()
     markdownWithBoundaryMock.mockClear()
     await clearSetting(FLASHCARDS_SHORTCUT_HINT_DENSITY_SETTING)
@@ -258,6 +309,34 @@ describe("ManageTab scheduling metadata visibility", () => {
     expect(screen.getByTestId("flashcards-manage-shortcut-chips")).toBeInTheDocument()
     expect(screen.getByText("Sort: Due date")).toBeInTheDocument()
   }, 15000)
+
+  it("prioritizes first-run actions and hides expert card filters when no cards exist", () => {
+    vi.mocked(useManageQuery).mockReturnValue({
+      data: {
+        items: [],
+        count: 0,
+        total: 0
+      },
+      isFetching: false
+    } as any)
+
+    render(
+      <ManageTab
+        onNavigateToImport={() => {}}
+        onReviewCard={() => {}}
+        isActive
+      />
+    )
+
+    expect(screen.getByText("No flashcards yet")).toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-manage-shortcut-chips")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-manage-search")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-manage-deck-select")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("flashcards-manage-selection-summary")).not.toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-manage-empty-create-cta")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-manage-empty-import-cta")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-manage-empty-generate-cta")).toBeInTheDocument()
+  })
 
   it("uses the markdown renderer for compact flashcard snippets", () => {
     const markdownFront = "**Important** concept"
@@ -560,6 +639,86 @@ describe("ManageTab scheduling metadata visibility", () => {
     )
   })
 
+  it("resets workspace filters for a non-workspace create handoff", async () => {
+    vi.mocked(useDecksQuery).mockImplementation((params: any) => ({
+      data:
+        params?.include_workspace_items || params?.workspace_id === "workspace-77"
+          ? [
+              {
+                id: 1,
+                name: "Biology",
+                description: null,
+                deleted: false,
+                client_id: "test",
+                version: 1,
+                scheduler_type: "sm2_plus",
+                scheduler_settings: DEFAULT_SCHEDULER_SETTINGS_ENVELOPE
+              },
+              {
+                id: 9,
+                name: "Workspace Biology",
+                description: null,
+                workspace_id: "workspace-77",
+                deleted: false,
+                client_id: "test",
+                version: 1,
+                scheduler_type: "sm2_plus",
+                scheduler_settings: DEFAULT_SCHEDULER_SETTINGS_ENVELOPE
+              }
+            ]
+          : [
+              {
+                id: 1,
+                name: "Biology",
+                description: null,
+                deleted: false,
+                client_id: "test",
+                version: 1,
+                scheduler_type: "sm2_plus",
+                scheduler_settings: DEFAULT_SCHEDULER_SETTINGS_ENVELOPE
+              }
+            ],
+      isLoading: false
+    } as any))
+
+    const baseProps = {
+      onNavigateToImport: () => {},
+      onReviewCard: () => {},
+      isActive: true
+    }
+    const onCreateHandoffConsumed = vi.fn()
+    const { rerender } = render(<ManageTab {...baseProps} />)
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Show workspace decks/i }))
+    const workspaceSelect = within(
+      screen.getByTestId("flashcards-manage-workspace-filter")
+    ).getByRole("combobox")
+    fireEvent.mouseDown(workspaceSelect)
+    fireEvent.click(
+      await screen.findByText("workspace-77", {
+        selector: ".ant-select-item-option-content"
+      })
+    )
+
+    rerender(
+      <ManageTab
+        {...baseProps}
+        openCreateSignal={1}
+        createInitialDeckId={12}
+        createInitialShowWorkspaceDecks={false}
+        onCreateHandoffConsumed={onCreateHandoffConsumed}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-create-drawer")).toBeInTheDocument()
+    })
+    expect(screen.getByTestId("mock-create-drawer-initial-deck-id")).toHaveTextContent("12")
+    expect(screen.getByTestId("mock-create-drawer-include-workspace")).toHaveTextContent("false")
+    expect(screen.getByTestId("mock-create-drawer-workspace-id")).toBeEmptyDOMElement()
+    expect(onCreateHandoffConsumed).toHaveBeenCalledTimes(1)
+  })
+
   it("moves deck scope by patching workspace_id in the update payload", async () => {
     render(
       <ManageTab
@@ -591,6 +750,7 @@ describe("ManageTab scheduling metadata visibility", () => {
         deckId: 1,
         update: {
           workspace_id: "workspace-77",
+          parent_deck_id: null,
           expected_version: 1
         }
       })

@@ -33,9 +33,17 @@ export interface UseNotesWikilinksDeps {
   data: NoteListItem[] | undefined
   /** From note relations (computed in main component) */
   noteRelations: {
-    related: Array<{ id: string; title: string }>
-    backlinks: Array<{ id: string; title: string }>
-    manualLinks: Array<{ noteId: string; title: string; edgeId: string; directed: boolean; outgoing: boolean }>
+    related: Array<{ id: string; title: string; available?: boolean; unavailableReason?: string | null }>
+    backlinks: Array<{ id: string; title: string; available?: boolean; unavailableReason?: string | null }>
+    manualLinks: Array<{
+      noteId: string
+      title: string
+      edgeId: string
+      directed: boolean
+      outgoing: boolean
+      available?: boolean
+      unavailableReason?: string | null
+    }>
   }
 }
 
@@ -83,12 +91,15 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
     }
 
     for (const note of noteRelations.related) {
+      if (note.unavailableReason) continue
       append(note.id, note.title)
     }
     for (const note of noteRelations.backlinks) {
+      if (note.unavailableReason) continue
       append(note.id, note.title)
     }
     for (const link of noteRelations.manualLinks) {
+      if (link.unavailableReason) continue
       append(link.noteId, link.title)
     }
 

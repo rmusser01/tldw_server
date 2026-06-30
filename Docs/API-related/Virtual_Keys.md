@@ -217,11 +217,11 @@ Helper CLI
 - Mint and export a scoped token for the scheduler service:
 ```bash
 python -m Helper_Scripts.AuthNZ.mint_virtual_key \
-  --user-id 1 --username admin --role admin \
+  --user-id 1 --username tldw-admin --role admin \
   --scope workflows --ttl-minutes 30 --print-export
 # or write to dotenv
 python -m Helper_Scripts.AuthNZ.mint_virtual_key \
-  --user-id 1 --username admin --role admin \
+  --user-id 1 --username tldw-admin --role admin \
   --dotenv tldw_Server_API/Config_Files/workflows.env
 ```
 
@@ -265,6 +265,7 @@ Use these logical IDs in `allowed_endpoints`. When you prefer path-based allowli
 - chat.completions → POST `/api/v1/chat/completions`
 - rag.search → POST `/api/v1/rag/search`
 - audio.speech → POST `/api/v1/audio/speech`
+- audio.voice_conversion → POST `/api/v1/audio/voice-conversion`
 - audio.voices.upload → POST `/api/v1/audio/voices/upload`
 - audio.voices.encode → POST `/api/v1/audio/voices/encode`
 - audio.voices.list → GET `/api/v1/audio/voices`

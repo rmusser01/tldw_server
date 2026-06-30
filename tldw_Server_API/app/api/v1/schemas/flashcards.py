@@ -2,8 +2,9 @@ import json
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.api.v1.schemas.study_packs import (
     FlashcardCitationResponse,
     FlashcardDeepDiveTarget,
@@ -13,8 +14,18 @@ from tldw_Server_API.app.api.v1.schemas.study_packs import (
 
 DeckSchedulerType = Literal["sm2_plus", "fsrs"]
 DeckReviewPromptSide = Literal["front", "back"]
+DeckVisibility = Literal["private", "team", "org", "public"]
+DeckShareRole = Literal["owner", "editor", "viewer"]
 FlashcardTemplateModelType = Literal["basic", "basic_reverse", "cloze"]
 FlashcardTemplateFieldTarget = Literal["front_template", "back_template", "notes_template", "extra_template"]
+
+
+def _default_offset_pagination_aliases(response):
+    if response.has_more is None:
+        response.has_more = response.pagination.has_more
+    if response.next_offset is None:
+        response.next_offset = response.pagination.next_offset
+    return response
 
 
 def _strip_required_string(value: Any) -> Any:
@@ -99,6 +110,8 @@ class DeckCreate(BaseModel):
     name: str = Field(..., description="Deck name (unique)")
     description: Optional[str] = Field(None, description="Deck description")
     workspace_id: Optional[str] = Field(None, description="Canonical owning workspace ID; null means general scope")
+    parent_deck_id: Optional[int] = Field(None, ge=1, description="Parent deck ID for nested deck hierarchies")
+    visibility: DeckVisibility = "private"
     review_prompt_side: DeckReviewPromptSide = "front"
     scheduler_type: DeckSchedulerType = "sm2_plus"
     scheduler_settings: Optional[DeckSchedulerSettingsEnvelope] = None
@@ -116,6 +129,8 @@ class DeckUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     workspace_id: Optional[str] = None
+    parent_deck_id: Optional[int] = Field(None, ge=1)
+    visibility: Optional[DeckVisibility] = None
     review_prompt_side: Optional[DeckReviewPromptSide] = None
     scheduler_type: Optional[DeckSchedulerType] = None
     scheduler_settings: Optional[DeckSchedulerSettingsEnvelope] = None
@@ -130,7 +145,9 @@ class DeckUpdate(BaseModel):
         return data
 
     @model_validator(mode="after")
-    def _reject_explicit_null_review_prompt_side(self) -> "DeckUpdate":
+    def _reject_explicit_null_restricted_fields(self) -> "DeckUpdate":
+        if "visibility" in self.model_fields_set and self.visibility is None:
+            raise ValueError("visibility cannot be null")
         if "review_prompt_side" in self.model_fields_set and self.review_prompt_side is None:
             raise ValueError("review_prompt_side cannot be null")
         return self
@@ -141,6 +158,8 @@ class Deck(BaseModel):
     name: str
     description: Optional[str] = None
     workspace_id: Optional[str] = None
+    parent_deck_id: Optional[int] = None
+    visibility: DeckVisibility = "private"
     review_prompt_side: DeckReviewPromptSide = "front"
     created_at: Optional[str] = None
     last_modified: Optional[str] = None
@@ -166,6 +185,29 @@ class Deck(BaseModel):
             except Exception:
                 data["scheduler_settings"] = DeckSchedulerSettingsEnvelope().model_dump()
         return data
+
+
+class DeckShareUpsert(BaseModel):
+    role: DeckShareRole = "viewer"
+
+
+class DeckShare(BaseModel):
+    deck_id: int
+    user_id: int
+    role: DeckShareRole
+    shared_by: int
+    shared_at: Optional[str] = None
+    last_modified: Optional[str] = None
+    client_id: str
+    version: int
+
+
+class DeckShareDeleteResponse(BaseModel):
+    removed: bool
+
+
+class DeckDeleteResponse(BaseModel):
+    deleted: bool
 
 
 class FlashcardTemplatePlaceholderDefinition(BaseModel):
@@ -246,6 +288,13 @@ class FlashcardTemplateListResponse(BaseModel):
     items: list[FlashcardTemplate]
     count: int
     total: int | None = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
 
 
 class FlashcardReviewIntervalPreviews(BaseModel):
@@ -328,6 +377,18 @@ class FlashcardListResponse(BaseModel):
     items: list[Flashcard]
     count: int
     total: int | None = None
+    has_more: bool | None = Field(default=None, description="Alias for pagination.has_more")
+    next_offset: int | None = Field(default=None, ge=0, description="Alias for pagination.next_offset")
+    pagination: OffsetPaginationMeta
+
+    @model_validator(mode="after")
+    def _default_pagination_aliases(self):
+        return _default_offset_pagination_aliases(self)
+
+
+class FlashcardBulkCreateResponse(BaseModel):
+    items: list[Flashcard]
+    count: int
 
 
 class FlashcardReviewRequest(BaseModel):
@@ -355,8 +416,11 @@ class FlashcardReviewResponse(BaseModel):
 
 
 class FlashcardReviewSessionSummary(BaseModel):
+    """Public summary of a flashcard review session returned by history endpoints."""
+
     id: int
     deck_id: Optional[int] = None
+    deck_name_snapshot: Optional[str] = None
     review_mode: str
     tag_filter: Optional[str] = None
     scope_key: str
@@ -364,7 +428,14 @@ class FlashcardReviewSessionSummary(BaseModel):
     started_at: Optional[str] = None
     last_activity_at: Optional[str] = None
     completed_at: Optional[str] = None
+    cards_reviewed: int = 0
     client_id: str
+
+    @field_validator("cards_reviewed", mode="before")
+    @classmethod
+    def _default_null_cards_reviewed(cls, value: Any) -> Any:
+        """Treat legacy NULL aggregate values as an empty completed-review count."""
+        return 0 if value is None else value
 
 
 class FlashcardNextReviewResponse(BaseModel):

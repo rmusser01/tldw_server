@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import BaseModel, HttpUrl, field_validator
 
 from tldw_Server_API.app.api.v1.schemas._compat import Field
+from tldw_Server_API.app.api.v1.schemas.pagination import PagePaginationMeta
 
 
 class CollectionsFeedCreateRequest(BaseModel):
@@ -78,3 +79,4 @@ class CollectionsFeed(BaseModel):
 class CollectionsFeedsListResponse(BaseModel):
     items: list[CollectionsFeed]
     total: int
+    pagination: PagePaginationMeta

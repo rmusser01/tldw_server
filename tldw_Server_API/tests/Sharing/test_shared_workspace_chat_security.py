@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from contextlib import contextmanager
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -51,9 +52,11 @@ async def test_chat_with_shared_workspace_hides_internal_pipeline_errors(monkeyp
     async def _failing_pipeline(**kwargs):
         raise RuntimeError("trace=/Users/private/rag-stack.txt")
 
+    fake_logger = MagicMock()
     monkeypatch.setattr(sharing, "_get_repo", lambda: _RepoStub())
     monkeypatch.setattr(sharing, "_get_audit_service", lambda: _AuditStub())
     monkeypatch.setattr(sharing, "_validate_user_has_share_access", _allow_share_access)
+    monkeypatch.setattr(sharing, "logger", fake_logger)
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_owner",
         _get_owner_chacha_db,
@@ -88,6 +91,7 @@ async def test_chat_with_shared_workspace_hides_internal_pipeline_errors(monkeyp
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Chat request failed"
     assert excinfo.value.__cause__ is None
+    fake_logger.error.assert_called_once_with("Shared workspace chat failed")
 
 
 @pytest.mark.asyncio

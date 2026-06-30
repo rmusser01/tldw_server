@@ -167,6 +167,7 @@
     "providerChangeHelper": "打开下方的提供商选择器，在浏览器、tldw、OpenAI 或 Supersonic 之间切换。",
     "changeProvider": "更换提供商",
     "title": "TTS 游乐场",
+    "routeTitle": "文本转语音",
     "subtitle": "试用文本转语音并调整提供商、模型和音色。",
     "currentProvider": "当前提供商",
     "settingsIntro": "调整你的 TTS 提供商、模型和音色。这些设置会在从聊天或媒体播放音频时复用。",

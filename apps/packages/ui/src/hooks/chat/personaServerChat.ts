@@ -14,6 +14,7 @@ type EnsurePersonaServerChatArgs = {
   serverChatAssistantKind: "character" | "persona" | null
   serverChatAssistantId: string | null
   serverChatPersonaMemoryMode: "read_only" | "read_write" | null
+  serverChatMetaLoaded?: boolean
   serverChatState: string | null
   serverChatTopic: string | null
   serverChatClusterId: string | null
@@ -101,6 +102,7 @@ export const ensurePersonaServerChat = async ({
   serverChatAssistantKind,
   serverChatAssistantId,
   serverChatPersonaMemoryMode,
+  serverChatMetaLoaded = false,
   serverChatState,
   serverChatTopic,
   serverChatClusterId,
@@ -136,14 +138,20 @@ export const ensurePersonaServerChat = async ({
       ? serverChatIdOverride.trim()
       : null
   const resolvedServerChatId = overrideChatId || serverChatId
-  const personaMemoryMode =
-    serverChatPersonaMemoryMode ?? DEFAULT_PERSONA_MEMORY_MODE
   const assistantId = String(assistant.id)
+  const isMatchingPersonaChat =
+    Boolean(resolvedServerChatId) &&
+    serverChatMetaLoaded &&
+    serverChatAssistantKind === "persona" &&
+    Boolean(serverChatAssistantId) &&
+    String(serverChatAssistantId) === assistantId
+  const personaMemoryMode = isMatchingPersonaChat
+    ? serverChatPersonaMemoryMode ?? DEFAULT_PERSONA_MEMORY_MODE
+    : DEFAULT_PERSONA_MEMORY_MODE
   const shouldResetServerChat =
     Boolean(resolvedServerChatId) &&
-    (serverChatAssistantKind !== "persona" ||
-      !serverChatAssistantId ||
-      String(serverChatAssistantId) !== assistantId)
+    serverChatMetaLoaded &&
+    !isMatchingPersonaChat
 
   if (shouldResetServerChat) {
     resetAssistantServerChatState({
@@ -169,37 +177,20 @@ export const ensurePersonaServerChat = async ({
       assistant_kind: "persona",
       assistant_id: assistantId,
       persona_memory_mode: personaMemoryMode,
-      state: serverChatState || "in-progress",
-      topic_label: serverChatTopic || undefined,
-      cluster_id: serverChatClusterId || undefined,
-      source: serverChatSource || undefined,
-      external_ref: serverChatExternalRef || undefined
+      state: "in-progress",
+      topic_label: undefined,
+      cluster_id: undefined,
+      source: undefined,
+      external_ref: undefined
     }, scope ? { scope } : undefined)
 
     let rawId: string | number | undefined
+    const createdMeta =
+      created && typeof created === "object"
+        ? (created as Record<string, unknown>)
+        : null
     if (created && typeof created === "object") {
       rawId = created.id ?? created.chat_id
-      setServerChatState(
-        normalizeConversationState(
-          created.state ?? created.conversation_state ?? null
-        )
-      )
-      setServerChatVersion(
-        typeof created.version === "number" ? created.version : null
-      )
-      setServerChatTopic(created.topic_label ?? null)
-      setServerChatClusterId(created.cluster_id ?? null)
-      setServerChatSource(created.source ?? null)
-      setServerChatExternalRef(created.external_ref ?? null)
-      setServerChatTitle(String(created.title ?? ""))
-      setServerChatCharacterId(created.character_id ?? null)
-      setServerChatAssistantKind(created.assistant_kind ?? "persona")
-      setServerChatAssistantId(
-        created.assistant_id != null ? String(created.assistant_id) : assistantId
-      )
-      setServerChatPersonaMemoryMode(
-        created.persona_memory_mode ?? personaMemoryMode
-      )
     } else if (typeof created === "string" || typeof created === "number") {
       rawId = created
     }
@@ -210,6 +201,62 @@ export const ensurePersonaServerChat = async ({
     }
     chatId = normalizedId
     setServerChatId(normalizedId)
+    const createdState =
+      typeof createdMeta?.state === "string"
+        ? createdMeta.state
+        : typeof createdMeta?.conversation_state === "string"
+          ? createdMeta.conversation_state
+          : "in-progress"
+    const createdVersion =
+      typeof createdMeta?.version === "number" ? createdMeta.version : null
+    const createdTopic =
+      typeof createdMeta?.topic_label === "string"
+        ? createdMeta.topic_label
+        : null
+    const createdClusterId =
+      typeof createdMeta?.cluster_id === "string" ? createdMeta.cluster_id : null
+    const createdSource =
+      typeof createdMeta?.source === "string" ? createdMeta.source : null
+    const createdExternalRef =
+      typeof createdMeta?.external_ref === "string"
+        ? createdMeta.external_ref
+        : null
+    const createdTitle =
+      typeof createdMeta?.title === "string" ? createdMeta.title : ""
+    const createdCharacterId =
+      typeof createdMeta?.character_id === "string" ||
+      typeof createdMeta?.character_id === "number"
+        ? createdMeta.character_id
+        : null
+    const createdAssistantKind =
+      createdMeta?.assistant_kind === "character" ||
+      createdMeta?.assistant_kind === "persona"
+        ? createdMeta.assistant_kind
+        : "persona"
+    const createdAssistantId =
+      typeof createdMeta?.assistant_id === "string" ||
+      typeof createdMeta?.assistant_id === "number"
+        ? String(createdMeta.assistant_id)
+        : assistantId
+    const createdPersonaMemoryMode =
+      createdMeta?.persona_memory_mode === "read_only" ||
+      createdMeta?.persona_memory_mode === "read_write"
+        ? createdMeta.persona_memory_mode
+        : personaMemoryMode
+
+    setServerChatState(
+      normalizeConversationState(createdState)
+    )
+    setServerChatVersion(createdVersion)
+    setServerChatTopic(createdTopic)
+    setServerChatClusterId(createdClusterId)
+    setServerChatSource(createdSource)
+    setServerChatExternalRef(createdExternalRef)
+    setServerChatTitle(createdTitle)
+    setServerChatCharacterId(createdCharacterId)
+    setServerChatAssistantKind(createdAssistantKind)
+    setServerChatAssistantId(createdAssistantId)
+    setServerChatPersonaMemoryMode(createdPersonaMemoryMode)
     setServerChatMetaLoaded(true)
     invalidateServerChatHistory()
   } else {

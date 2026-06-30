@@ -1,13 +1,10 @@
-import dayjs from "dayjs"
-import relativeTime from "dayjs/plugin/relativeTime"
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { FlashcardEditDrawer } from "../FlashcardEditDrawer"
 import { FLASHCARDS_DRAWER_WIDTH_PX } from "../../constants"
 import type { Flashcard } from "@/services/flashcards"
 import { DEFAULT_SCHEDULER_SETTINGS_ENVELOPE } from "../../utils/scheduler-settings"
-
-dayjs.extend(relativeTime)
+import { formatFlashcardAbsoluteDateTime } from "../../utils/date-display"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -119,6 +116,7 @@ describe("FlashcardEditDrawer scheduling metadata panel", () => {
             client_id: "1",
             version: 1,
             scheduler_type: "sm2_plus",
+            review_prompt_side: "front",
             scheduler_settings: DEFAULT_SCHEDULER_SETTINGS_ENVELOPE
           }
         ]}
@@ -135,8 +133,15 @@ describe("FlashcardEditDrawer scheduling metadata panel", () => {
     expect(screen.getByText("Relearns")).toBeInTheDocument()
     expect(screen.getByText("2")).toBeInTheDocument()
 
-    const expectedDueAbsolute = dayjs(dueAt).format("YYYY-MM-DD HH:mm")
-    const expectedLastReviewedAbsolute = dayjs(lastReviewedAt).format("YYYY-MM-DD HH:mm")
+    const expectedDueAbsolute = formatFlashcardAbsoluteDateTime(dueAt)
+    const expectedLastReviewedAbsolute =
+      formatFlashcardAbsoluteDateTime(lastReviewedAt)
+    expect(expectedDueAbsolute).not.toBeNull()
+    expect(expectedLastReviewedAbsolute).not.toBeNull()
+    if (expectedDueAbsolute == null || expectedLastReviewedAbsolute == null) {
+      throw new Error("Expected valid scheduling timestamp labels")
+    }
+
     expect(
       screen.getByText((content) => content.includes(expectedDueAbsolute))
     ).toBeInTheDocument()

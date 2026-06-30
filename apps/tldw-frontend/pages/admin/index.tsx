@@ -1,5 +1,6 @@
-import { RouteRedirect } from '@web/components/navigation/RouteRedirect';
+import dynamic from "next/dynamic"
 
-export default function AdminRedirectPage() {
-  return <RouteRedirect to="/admin/server" />;
-}
+export default dynamic(
+  () => import("@/components/Option/Admin/AdminOperationsOverviewPage"),
+  { ssr: false }
+)

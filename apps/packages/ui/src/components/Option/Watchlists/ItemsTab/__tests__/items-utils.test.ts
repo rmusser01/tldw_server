@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ScrapedItem, WatchlistSource } from "@/types/watchlists"
 import {
+  buildServerItemViewCreatePayload,
   buildDefaultItemsViewPresets,
   DEFAULT_ITEMS_SORT_MODE,
   extractImageUrl,
   filterSourcesForReader,
+  getMigratableItemsViewPresets,
   getInitialSourceRenderCount,
   getNextSourceRenderCount,
   isSystemItemsViewPresetId,
@@ -29,7 +31,8 @@ import {
   SOURCE_LIST_SCROLL_EXPAND_THRESHOLD_PX,
   shouldExpandSourceRenderWindow,
   shouldReloadItemsAfterReviewMutation,
-  stripHtmlToText
+  stripHtmlToText,
+  toServerItemSortMode
 } from "../items-utils"
 
 const makeSource = (overrides: Partial<WatchlistSource> = {}): WatchlistSource => ({
@@ -457,6 +460,65 @@ describe("items view preset persistence helpers", () => {
     expect(isSystemItemsViewPresetId("system-unread-today")).toBe(true)
     expect(isSystemItemsViewPresetId("custom-view")).toBe(false)
     expect(isSystemItemsViewPresetId(null)).toBe(false)
+  })
+
+  it("builds server saved-view create payloads from legacy presets", () => {
+    expect(toServerItemSortMode("unreadFirst")).toBe("unread_first")
+    expect(toServerItemSortMode("reviewedFirst")).toBe("created_desc")
+
+    expect(
+      buildServerItemViewCreatePayload({
+        id: "custom-critical",
+        name: "Critical unread",
+        sourceId: 7,
+        smartFilter: "unread",
+        statusFilter: "ingested",
+        searchQuery: "CVE-2026-4242",
+        sortMode: "unreadFirst"
+      })
+    ).toEqual({
+      name: "Critical unread",
+      filters: {
+        source_id: 7,
+        smart_filter: "unread",
+        status: "ingested",
+        q: "CVE-2026-4242"
+      },
+      sort: "unread_first",
+      is_default: false
+    })
+  })
+
+  it("returns only custom legacy presets for explicit server migration", () => {
+    const storage = {
+      getItem: (key: string) =>
+        key === ITEMS_VIEW_PRESETS_STORAGE_KEY
+          ? JSON.stringify([
+              {
+                id: "system-unread-today",
+                name: "Unread today",
+                sourceId: null,
+                smartFilter: "todayUnread",
+                statusFilter: "ingested",
+                sortMode: "unreadFirst",
+                searchQuery: ""
+              },
+              {
+                id: "custom-view",
+                name: "Custom",
+                sourceId: null,
+                smartFilter: "all",
+                statusFilter: "all",
+                sortMode: "newest",
+                searchQuery: ""
+              }
+            ])
+          : null
+    }
+
+    expect(getMigratableItemsViewPresets(storage).map((preset) => preset.id)).toEqual([
+      "custom-view"
+    ])
   })
 })
 

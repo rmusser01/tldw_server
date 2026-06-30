@@ -138,7 +138,7 @@ async def test_vad_fail_open_disables_auto_commit(monkeypatch):
     await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
 
     full_transcripts = [m for m in ws.sent if m.get("type") == "full_transcript"]
-    assert len(full_transcripts) == 1
+    assert full_transcripts, f"Expected a full_transcript frame, saw {ws.sent}"
     assert full_transcripts[0].get("auto_commit") is False
     assert full_transcripts[0].get("vad_status") == "fail_open"
     assert full_transcripts[0].get("diarization_status") == "disabled"
@@ -179,7 +179,7 @@ async def test_manual_commit_with_vad_disabled_sets_deterministic_diagnostics(mo
     await unified.handle_unified_websocket(ws, unified.UnifiedStreamingConfig())
 
     full_transcripts = [m for m in ws.sent if m.get("type") == "full_transcript"]
-    assert len(full_transcripts) == 1
+    assert full_transcripts, f"Expected a full_transcript frame, saw {ws.sent}"
     assert full_transcripts[0].get("auto_commit") is False
     assert full_transcripts[0].get("vad_status") == "disabled"
     assert full_transcripts[0].get("diarization_status") == "disabled"

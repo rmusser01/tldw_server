@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
-  Alert,
   Button,
   Descriptions,
   Drawer,
   Empty,
+  Pagination,
   Spin,
   Switch,
   Table,
@@ -16,6 +16,9 @@ import {
 import type { ColumnsType } from "antd/es/table"
 import { Download } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { LOADING_STATE_LABEL } from "@/design-system"
+import { Alert } from "@/components/ui"
+import { RecoveryCallout, type RecoveryState } from "@/components/ui/state"
 import { useWatchlistsStore } from "@/store/watchlists"
 import {
   cancelWatchlistRun,
@@ -23,7 +26,11 @@ import {
   fetchWatchlistOutputs,
   fetchWatchlistSources,
   fetchScrapedItems,
+  getWatchlistRunDiagnostics,
+  getWatchlistRunAudio,
   getRunDetails,
+  retryWatchlistRunAudio,
+  retryWatchlistRunDelivery,
   triggerWatchlistRun,
   updateScrapedItem
 } from "@/services/watchlists"
@@ -32,11 +39,18 @@ import {
   parseWatchlistsRunStreamPayload
 } from "@/services/watchlists-stream"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
-import type { RunDetailResponse, ScrapedItem } from "@/types/watchlists"
+import type { RunDetailResponse, ScrapedItem, WatchlistRunAudioStatus } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { StatusTag } from "../shared"
+import { isWatchlistRunTerminal } from "../shared/runStatus"
 import { mapWatchlistsError } from "../shared/watchlists-error"
 import { classifyRunFailure, getRunFailureHint } from "./run-notifications"
+import {
+  type AudioArtifactSummary,
+  createOutputMetadataLabels,
+  getAudioStatusSummary
+} from "../OutputsTab/outputMetadata"
+import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
 import {
   getFocusableActiveElement,
   restoreFocusToElement
@@ -55,7 +69,7 @@ type StreamConnectionState =
   | "disconnected"
   | "error"
 
-const SOURCE_LOOKUP_LIMIT = 1000
+const SOURCE_LOOKUP_LIMIT = 200
 
 /** Maps failure kind → [i18n key, fallback] pairs for the "Common causes" section */
 const COMMON_CAUSES_BY_KIND: Record<string, [string, string][]> = {
@@ -85,12 +99,31 @@ const COMMON_CAUSES_BY_KIND: Record<string, [string, string][]> = {
   ]
 }
 
+const getRecoveryStateForSeverity = (
+  severity: ReturnType<typeof mapWatchlistsError>["severity"] | string | null | undefined
+): RecoveryState => {
+  if (severity === "error") return "error"
+  return "degraded"
+}
+
+const formatRunStatCount = (value: RunDetailResponse["stats"] extends infer Stats
+  ? Stats extends Record<string, infer StatValue>
+    ? StatValue
+    : unknown
+  : unknown): React.ReactNode => {
+  if (typeof value === "number" || typeof value === "string") return value
+  if (typeof value === "boolean") return value ? "Yes" : "No"
+  return 0
+}
+
 export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   runId,
   open,
   onClose
 }) => {
   const { t } = useTranslation(["watchlists", "common"])
+  const { isConstrained } = useWatchlistsViewport()
+  const outputMetadataLabels = useMemo(() => createOutputMetadataLabels(t), [t])
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<RunDetailResponse | null>(null)
   const [error, setError] = useState<ReturnType<typeof mapWatchlistsError> | null>(null)
@@ -107,9 +140,15 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const [streamingEnabled, setStreamingEnabled] = useState(true)
   const [cancelState, setCancelState] = useState<"idle" | "cancelling" | "failed-to-cancel">("idle")
   const [retryingRun, setRetryingRun] = useState(false)
+  const [retryingDelivery, setRetryingDelivery] = useState(false)
+  const [retryingAudio, setRetryingAudio] = useState(false)
+  const [exportingDiagnostics, setExportingDiagnostics] = useState(false)
   const [sourceNamesById, setSourceNamesById] = useState<Record<number, string>>({})
   const [linkedOutputCount, setLinkedOutputCount] = useState<number | null>(null)
   const [linkedOutputsLoading, setLinkedOutputsLoading] = useState(false)
+  const [audioStatus, setAudioStatus] = useState<WatchlistRunAudioStatus | null>(null)
+  const [audioStatusLoading, setAudioStatusLoading] = useState(false)
+  const [audioStatusError, setAudioStatusError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const translationRef = useRef(t)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -125,8 +164,36 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   const setOutputsRunFilter = useWatchlistsStore((s) => s.setOutputsRunFilter)
   const openJobForm = useWatchlistsStore((s) => s.openJobForm)
 
+  const audioTaskId = useMemo(() => {
+    const stats = data?.stats as Record<string, unknown> | null | undefined
+    const value = stats?.audio_briefing_task_id ?? stats?.audio_task_id
+    if (typeof value === "string" && value.trim()) return value.trim()
+    if (typeof value === "number" && Number.isFinite(value)) return String(value)
+    return null
+  }, [data?.stats])
+
+  const audioSummary = useMemo(() => {
+    const liveSummary = getAudioStatusSummary(audioStatus, outputMetadataLabels)
+    if (liveSummary.requested) return liveSummary
+    return getAudioStatusSummary(data?.stats, outputMetadataLabels)
+  }, [audioStatus, data?.stats, outputMetadataLabels])
+
   const downloadCsv = (content: string, filename: string): void => {
     const blob = new Blob([content], { type: "text/csv;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
+  }
+
+  const downloadJson = (content: unknown, filename: string): void => {
+    const blob = new Blob([JSON.stringify(content, null, 2)], {
+      type: "application/json;charset=utf-8"
+    })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement("a")
     anchor.href = url
@@ -313,6 +380,45 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
   useEffect(() => {
     let active = true
 
+    if (!open || !runId || !audioTaskId) {
+      setAudioStatus(null)
+      setAudioStatusLoading(false)
+      setAudioStatusError(null)
+      return () => {
+        active = false
+      }
+    }
+
+    setAudioStatusLoading(true)
+    setAudioStatusError(null)
+    getWatchlistRunAudio(runId)
+      .then((result) => {
+        if (!active) return
+        setAudioStatus(result)
+      })
+      .catch((err) => {
+        console.warn("Failed to resolve run audio status:", err)
+        if (!active) return
+        setAudioStatus(null)
+        setAudioStatusError(
+          err instanceof Error
+            ? err.message
+            : t("watchlists:runs.detail.audioStatusError", "Failed to load audio status")
+        )
+      })
+      .finally(() => {
+        if (!active) return
+        setAudioStatusLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [audioTaskId, open, runId, t])
+
+  useEffect(() => {
+    let active = true
+
     if (!open || !runId) {
       setLinkedOutputCount(null)
       setLinkedOutputsLoading(false)
@@ -493,9 +599,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
             return
           }
 
-          const status = String(currentStatusRef.current || "").toLowerCase()
-          const terminal = status === "completed" || status === "failed" || status === "cancelled"
-          if (terminal) {
+          if (isWatchlistRunTerminal(currentStatusRef.current)) {
             setStreamState("disconnected")
             return
           }
@@ -747,6 +851,130 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
     }
   ]
 
+  const getItemTitle = (item: ScrapedItem): string =>
+    item.title || item.url || t("watchlists:runs.detail.itemsUntitled", "Untitled")
+
+  const renderItemSource = (sourceId: number) => {
+    const sourceReference = t(
+      "watchlists:runs.detail.itemsSourceReference",
+      "#{{id}}",
+      { id: sourceId }
+    )
+    const sourceName = sourceNamesById[sourceId]
+    if (!sourceName) return sourceReference
+    return sourceName
+  }
+
+  const renderItemStatus = (item: ScrapedItem) => {
+    const normalized = String(item.status || "").toLowerCase()
+    const label =
+      normalized === "ingested"
+        ? t("watchlists:runs.detail.itemsStatusInBriefing", "Included in briefing")
+        : normalized === "filtered"
+          ? t("watchlists:runs.detail.itemsStatusFilteredOut", "Excluded from briefing")
+          : item.status
+    return (
+      <Tag color={normalized === "ingested" ? "green" : "default"}>
+        {label}
+      </Tag>
+    )
+  }
+
+  const renderConstrainedItems = () => (
+    <div className="space-y-3" data-testid="watchlists-run-items-constrained-list">
+      {items.map((item) => {
+        const title = getItemTitle(item)
+        return (
+          <article
+            key={item.id}
+            className="rounded-lg border border-border bg-surface p-3"
+            data-testid={`watchlists-run-item-card-${item.id}`}
+          >
+            <div className="space-y-1">
+              <div className="font-medium text-text">{title}</div>
+              {item.summary && (
+                <div className="text-xs text-text-muted line-clamp-2">{item.summary}</div>
+              )}
+            </div>
+
+            <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.detail.itemsColumns.status", "Status")}
+                </div>
+                {renderItemStatus(item)}
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.detail.itemsColumns.source", "Source")}
+                </div>
+                <span className="text-text-muted">{renderItemSource(item.source_id)}</span>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.detail.itemsColumns.published", "Published")}
+                </div>
+                <span className="text-text-muted">
+                  {item.published_at ? formatRelativeTime(item.published_at, t) : "-"}
+                </span>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:runs.detail.itemsColumns.created", "Ingested")}
+                </div>
+                <span className="text-text-muted">
+                  {item.created_at ? formatRelativeTime(item.created_at, t) : "-"}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-2">
+                <Switch
+                  checked={item.reviewed}
+                  onChange={(checked) => handleToggleReviewed(item, checked)}
+                  loading={updatingItemIds.includes(item.id)}
+                  size="small"
+                  aria-label={t("watchlists:runs.detail.toggleReviewedAria", "Toggle reviewed for {{title}}", {
+                    title
+                  })}
+                />
+                <span className="text-xs text-text-muted">
+                  {item.reviewed
+                    ? t("watchlists:runs.detail.reviewed", "Reviewed")
+                    : t("watchlists:runs.detail.needsReview", "Needs review")}
+                </span>
+              </span>
+              {item.url ? (
+                <a href={item.url} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">
+                  {t("watchlists:runs.detail.openSource", "Open source")}
+                </a>
+              ) : null}
+            </div>
+          </article>
+        )
+      })}
+      <div className="text-xs text-text-subtle">
+        {t("watchlists:runs.detail.itemsTotal", "{{total}} items", { total: itemsTotal })}
+      </div>
+      {itemsTotal > itemsPageSize && (
+        <Pagination
+          current={itemsPage}
+          pageSize={itemsPageSize}
+          total={itemsTotal}
+          showSizeChanger
+          showTotal={(total) => t("watchlists:runs.detail.itemsTotal", "{{total}} items", { total })}
+          onChange={(page, pageSize) => {
+            setItemsPage(page)
+            if (pageSize !== itemsPageSize) {
+              setItemsPageSize(pageSize)
+            }
+          }}
+        />
+      )}
+    </div>
+  )
+
   const streamStateColorMap: Record<StreamConnectionState, string> = {
     connecting: "blue",
     connected: "green",
@@ -800,6 +1028,82 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
     }
   }
 
+  const handleRetryDelivery = async () => {
+    if (!runId || retryingDelivery) return
+    setRetryingDelivery(true)
+    try {
+      const result = await retryWatchlistRunDelivery(runId)
+      if (!result.retried) {
+        message.warning(
+          result.message || t("watchlists:runs.detail.deliveryRetrySkipped", "Delivery retry was not started.")
+        )
+        return
+      }
+      message.success(
+        t("watchlists:runs.detail.deliveryRetrySuccess", "Delivery retry completed for output #{{id}}.", {
+          id: result.output_id ?? "-"
+        })
+      )
+      void loadRunDetails()
+    } catch (err) {
+      console.error("Failed to retry delivery:", err)
+      message.error(t("watchlists:runs.detail.deliveryRetryError", "Failed to retry delivery"))
+    } finally {
+      setRetryingDelivery(false)
+    }
+  }
+
+  const handleRetryAudio = async () => {
+    if (!runId || retryingAudio) return
+    setRetryingAudio(true)
+    setAudioStatusError(null)
+    try {
+      const result = await retryWatchlistRunAudio(runId)
+      if (!result.retried) {
+        message.warning(
+          result.message || t("watchlists:runs.detail.audioRetrySkipped", "Audio retry was not started.")
+        )
+        return
+      }
+      if (result.task_id) {
+        setAudioStatusError(null)
+        setAudioStatus((prev) => ({
+          ...(prev || { run_id: runId }),
+          run_id: runId,
+          task_id: result.task_id,
+          status: "pending",
+          audio_uri: null,
+          download_url: null,
+          error: null
+        }))
+      }
+      message.success(
+        t("watchlists:runs.detail.audioRetrySuccess", "Audio retry queued.")
+      )
+      void loadRunDetails()
+    } catch (err) {
+      console.error("Failed to retry audio:", err)
+      message.error(t("watchlists:runs.detail.audioRetryError", "Failed to retry audio"))
+    } finally {
+      setRetryingAudio(false)
+    }
+  }
+
+  const handleDownloadDiagnostics = async () => {
+    if (!runId || exportingDiagnostics) return
+    setExportingDiagnostics(true)
+    try {
+      const diagnostics = await getWatchlistRunDiagnostics(runId)
+      downloadJson(diagnostics, `watchlists_run_${runId}_diagnostics_${Date.now()}.json`)
+      message.success(t("watchlists:runs.detail.diagnosticsExported", "Diagnostics downloaded"))
+    } catch (err) {
+      console.error("Failed to download run diagnostics:", err)
+      message.error(t("watchlists:runs.detail.diagnosticsExportError", "Failed to download diagnostics"))
+    } finally {
+      setExportingDiagnostics(false)
+    }
+  }
+
   const handleEditMonitor = () => {
     if (!data?.job_id) return
     setActiveTab("jobs")
@@ -820,6 +1124,150 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
     onClose()
   }
 
+  const renderAudioStatusPanel = () => {
+    const displayAudioTaskId = audioStatus?.task_id || audioTaskId
+    if (!displayAudioTaskId && !audioSummary.requested) return null
+
+    const hasFinalAudio = Boolean(audioSummary.downloadUrl || audioSummary.finalArtifact)
+    const hasAudioArtifacts = Boolean(
+      audioSummary.scriptArtifact ||
+        audioSummary.speakerArtifacts.length > 0 ||
+        audioSummary.finalArtifact
+    )
+    const statusText = audioStatusLoading
+      ? t("watchlists:runs.detail.audioStatusLoading", LOADING_STATE_LABEL)
+      : audioStatusError
+        ? t("watchlists:runs.detail.audioStatusUnavailable", "Unknown")
+        : audioSummary.statusLabel
+    const renderArtifact = (artifact: AudioArtifactSummary, key: string) => (
+      <div key={key}>
+        <div className="font-medium text-text">{artifact.label}</div>
+        {artifact.displayName ? <div>{artifact.displayName}</div> : null}
+        {artifact.downloadUrl ? (
+          <a
+            href={artifact.downloadUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary hover:underline"
+            aria-label={t("watchlists:runs.detail.openAudioArtifactAria", "Open {{label}}", {
+              label: artifact.label
+            })}
+          >
+            {t("watchlists:runs.detail.openAudioArtifact", "Open")}
+          </a>
+        ) : null}
+      </div>
+    )
+
+    return (
+      <div
+        className="rounded-lg border border-border bg-surface p-3 space-y-2"
+        data-testid="watchlists-run-audio-status"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-medium text-text">
+              {t("watchlists:runs.detail.audioStatusTitle", "Audio briefing")}
+            </div>
+            <div className="text-xs text-text-muted">
+              {displayAudioTaskId
+                ? t("watchlists:runs.detail.audioTask", "Task {{taskId}}", {
+                    taskId: displayAudioTaskId
+                  })
+                : t("watchlists:runs.detail.audioNoTask", "No audio task created")}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Tag color={audioStatusError ? "red" : audioSummary.statusColor}>
+              {statusText}
+            </Tag>
+            {audioSummary.stale && (
+              <Tag color="gold">{t("watchlists:runs.detail.audioStale", "Stale")}</Tag>
+            )}
+          </div>
+        </div>
+
+        {audioSummary.supersededBy && (
+          <div className="text-xs text-warning">
+            {t("watchlists:runs.detail.audioSupersededBy", "Superseded by {{requestId}}", {
+              requestId: audioSummary.supersededBy
+            })}
+          </div>
+        )}
+
+        {audioStatusError ? (
+          <div className="text-xs text-danger">{audioStatusError}</div>
+        ) : audioSummary.fallbackReason ? (
+          audioSummary.status === "fallback" ? (
+            <div className="text-xs text-warning">
+              {t("watchlists:runs.detail.audioFallback", "Fallback: {{reason}}", {
+                reason: audioSummary.fallbackReason
+              })}
+            </div>
+          ) : (
+            <div className="text-xs text-warning">
+              {t("watchlists:runs.detail.audioReason", "Reason: {{reason}}", {
+                reason: audioSummary.fallbackReason
+              })}
+            </div>
+          )
+        ) : null}
+
+        {hasFinalAudio && (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-medium text-text">
+              {t("watchlists:runs.detail.audioFinalAvailable", "Final audio available")}
+            </span>
+            {audioSummary.downloadUrl && (
+              <a
+                href={audioSummary.downloadUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-primary hover:underline"
+              >
+                {t("watchlists:runs.detail.audioDownloadFinal", "Download final audio")}
+              </a>
+            )}
+          </div>
+        )}
+
+        {hasAudioArtifacts && (
+          <div className="space-y-2" data-testid="watchlists-run-audio-artifacts">
+            <div className="text-sm font-medium text-text">
+              {t("watchlists:runs.detail.audioArtifactsLabel", "Audio artifacts")}
+            </div>
+            <div className="grid gap-2 text-xs text-text-muted sm:grid-cols-2">
+              {audioSummary.scriptArtifact && (
+                renderArtifact(audioSummary.scriptArtifact, "script")
+              )}
+              {audioSummary.speakerArtifacts.map((artifact, index) => (
+                renderArtifact(artifact, `${artifact.speakerId || artifact.label}-${index}`)
+              ))}
+              {audioSummary.finalArtifact && (
+                renderArtifact(audioSummary.finalArtifact, "final")
+              )}
+            </div>
+          </div>
+        )}
+
+        {(displayAudioTaskId ||
+          audioSummary.status === "queue_unavailable" ||
+          audioSummary.status === "enqueue_failed" ||
+          audioSummary.status === "failed") && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="small"
+              onClick={handleRetryAudio}
+              loading={retryingAudio}
+            >
+              {t("watchlists:runs.detail.retryAudio", "Retry audio")}
+            </Button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const tabItems = [
     {
       key: "stats",
@@ -828,19 +1276,21 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
         <div className="space-y-4">
           {data && (
             <Alert
-              type="info"
-              showIcon
+              variant="info"
               title={t("watchlists:runs.detail.linkageTitle", "Run linkage")}
-              description={t(
-                "watchlists:runs.detail.linkageDescription",
-                "Monitor #{{jobId}} produced {{count}} report{{plural}} for this run.",
-                {
-                  jobId: data.job_id,
-                  count: linkedOutputCount ?? 0,
-                  plural: linkedOutputCount === 1 ? "" : "s"
-                }
-              )}
-              action={(
+            >
+              <div className="space-y-2">
+                <p>
+                  {t(
+                    "watchlists:runs.detail.linkageDescription",
+                    "Monitor #{{jobId}} produced {{count}} report{{plural}} for this run.",
+                    {
+                      jobId: data.job_id,
+                      count: linkedOutputCount ?? 0,
+                      plural: linkedOutputCount === 1 ? "" : "s"
+                    }
+                  )}
+                </p>
                 <div className="flex flex-wrap gap-2">
                   <Button size="small" onClick={handleEditMonitor}>
                     {t("watchlists:runs.detail.openMonitor", "Open monitor")}
@@ -853,10 +1303,28 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                   >
                     {t("watchlists:runs.detail.openRunOutputs", "Open reports for this run")}
                   </Button>
+                  <Button
+                    size="small"
+                    loading={retryingDelivery}
+                    disabled={(linkedOutputCount ?? 0) <= 0}
+                    onClick={handleRetryDelivery}
+                  >
+                    {t("watchlists:runs.detail.retryDelivery", "Retry delivery")}
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<Download className="h-3.5 w-3.5" />}
+                    loading={exportingDiagnostics}
+                    onClick={handleDownloadDiagnostics}
+                  >
+                    {t("watchlists:runs.detail.downloadDiagnostics", "Download diagnostics")}
+                  </Button>
                 </div>
-              )}
-            />
+              </div>
+            </Alert>
           )}
+
+          {renderAudioStatusPanel()}
 
           {data && (
             <Descriptions column={2} size="small" bordered>
@@ -873,16 +1341,16 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                 {data.finished_at ? formatRelativeTime(data.finished_at, t) : "-"}
               </Descriptions.Item>
               <Descriptions.Item label={t("watchlists:runs.detail.statsLabels.itemsFound", "Items Found")}>
-                {data.stats?.items_found ?? 0}
+                {formatRunStatCount(data.stats?.items_found)}
               </Descriptions.Item>
               <Descriptions.Item label={t("watchlists:runs.detail.statsLabels.itemsIngested", "Items Ingested")}>
-                {data.stats?.items_ingested ?? 0}
+                {formatRunStatCount(data.stats?.items_ingested)}
               </Descriptions.Item>
               <Descriptions.Item label={t("watchlists:runs.detail.statsLabels.itemsFiltered", "Items Filtered")}>
-                {data.stats?.items_filtered ?? 0}
+                {formatRunStatCount(data.stats?.items_filtered)}
               </Descriptions.Item>
               <Descriptions.Item label={t("watchlists:runs.detail.statsLabels.errors", "Errors")}>
-                {data.stats?.items_errored ?? 0}
+                {formatRunStatCount(data.stats?.items_errored)}
               </Descriptions.Item>
               <Descriptions.Item label={t("watchlists:runs.detail.statsLabels.monitor", "Monitor")}>
                 <Button size="small" type="link" className="px-0" onClick={handleEditMonitor}>
@@ -894,40 +1362,32 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
 
           {data?.error_msg && (
             <div className="mt-4 space-y-3">
-              <Alert
-                type="warning"
-                showIcon
+              <RecoveryCallout
+                state="degraded"
                 title={t("watchlists:runs.detail.remediationTitle", "Suggested recovery steps")}
-                description={remediationHint || t(
+                message={remediationHint || t(
                   "watchlists:runs.detail.remediationFallback",
                   "Open logs and adjust source or monitor settings, then retry."
                 )}
-                action={(
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="small"
-                      type="primary"
-                      onClick={handleRetryRun}
-                      loading={retryingRun}
-                    >
-                      {t("watchlists:runs.detail.retryRun", "Retry run")}
-                    </Button>
-                    <Button
-                      size="small"
-                      onClick={handleEditMonitor}
-                    >
-                      {t("watchlists:runs.detail.editMonitor", "Edit monitor schedule")}
-                    </Button>
-                    {showSourceRecoveryAction && (
-                      <Button
-                        size="small"
-                        onClick={handleOpenSources}
-                      >
-                        {t("watchlists:runs.detail.openSources", "Review source settings")}
-                      </Button>
-                    )}
-                  </div>
-                )}
+                primaryAction={{
+                  label: t("watchlists:runs.detail.retryRun", "Retry run"),
+                  onClick: handleRetryRun,
+                  loading: retryingRun
+                }}
+                secondaryActions={[
+                  {
+                    label: t("watchlists:runs.detail.editMonitor", "Edit monitor schedule"),
+                    onClick: handleEditMonitor
+                  },
+                  ...(showSourceRecoveryAction
+                    ? [
+                        {
+                          label: t("watchlists:runs.detail.openSources", "Review source settings"),
+                          onClick: handleOpenSources
+                        }
+                      ]
+                    : [])
+                ]}
               />
               <div className="p-3 bg-danger/10 border border-danger/30 rounded text-sm text-danger font-mono">
                 {data.error_msg}
@@ -935,17 +1395,15 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
               {/* Common causes by failure kind */}
               {failureKind && failureKind !== "unknown" && (
                 <Alert
-                  type="info"
-                  showIcon
-                  message={t("watchlists:runs.detail.commonCausesTitle", "Common causes")}
-                  description={
-                    <ul className="list-disc pl-4 text-sm space-y-1">
-                      {(COMMON_CAUSES_BY_KIND[failureKind] ?? []).map(([key, fallback]) => (
-                        <li key={key}>{t(key, fallback)}</li>
-                      ))}
-                    </ul>
-                  }
-                />
+                  variant="info"
+                  title={t("watchlists:runs.detail.commonCausesTitle", "Common causes")}
+                >
+                  <ul className="list-disc pl-4 text-sm space-y-1">
+                    {(COMMON_CAUSES_BY_KIND[failureKind] ?? []).map(([key, fallback]) => (
+                      <li key={key}>{t(key, fallback)}</li>
+                    ))}
+                  </ul>
+                </Alert>
               )}
             </div>
           )}
@@ -956,8 +1414,7 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                 {t("watchlists:runs.detail.filteredSampleTitle", "Filtered item sample")}
               </div>
               <Alert
-                type="info"
-                showIcon
+                variant="info"
                 title={t(
                   "watchlists:runs.detail.filteredSampleSummary",
                   "Showing {{count}} recently filtered item{{plural}} for quick diagnosis.",
@@ -966,11 +1423,12 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
                     plural: data.filtered_sample.length === 1 ? "" : "s"
                   }
                 )}
-                description={t(
+              >
+                {t(
                   "watchlists:runs.detail.filteredSampleHelp",
                   "Use this sample with filter tallies below to tune include/exclude rules."
                 )}
-              />
+              </Alert>
               <div className="space-y-2">
                 {data.filtered_sample.map((sample, index) => {
                   const record = typeof sample === "object" && sample !== null
@@ -1059,21 +1517,21 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
           </div>
           {streamError && (
             <Alert
-              type="error"
-              showIcon
+              variant="error"
               className="mb-3"
               title={t("watchlists:runs.detail.streamErrorTitle", "Stream error")}
-              description={streamError}
-            />
+            >
+              {streamError}
+            </Alert>
           )}
           {data?.truncated && (
             <Alert
-              type="warning"
-              showIcon
+              variant="warning"
               className="mb-3"
               title={t("watchlists:runs.detail.logsTruncated", "Logs truncated")}
-              description={t("watchlists:runs.detail.logsTruncatedDesc", "Showing the most recent log output.")}
-            />
+            >
+              {t("watchlists:runs.detail.logsTruncatedDesc", "Showing the most recent log output.")}
+            </Alert>
           )}
           {data?.log_text ? (
             <pre className="bg-bg text-text p-4 rounded-lg font-mono text-xs max-h-96 overflow-auto whitespace-pre-wrap border border-border">
@@ -1103,25 +1561,30 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
               image={Empty.PRESENTED_IMAGE_SIMPLE}
             />
           ) : (
-            <Table
-              dataSource={items}
-              columns={itemColumns}
-              rowKey="id"
-              loading={itemsLoading}
-              pagination={{
-                current: itemsPage,
-                pageSize: itemsPageSize,
-                total: itemsTotal,
-                showSizeChanger: true,
-                onChange: (page, pageSize) => {
-                  setItemsPage(page)
-                  if (pageSize !== itemsPageSize) {
-                    setItemsPageSize(pageSize)
+            isConstrained ? (
+              renderConstrainedItems()
+            ) : (
+              <Table
+                dataSource={items}
+                columns={itemColumns}
+                rowKey="id"
+                aria-label={t("watchlists:runs.detail.itemsTableAria", "Run items table")}
+                loading={itemsLoading}
+                pagination={{
+                  current: itemsPage,
+                  pageSize: itemsPageSize,
+                  total: itemsTotal,
+                  showSizeChanger: true,
+                  onChange: (page, pageSize) => {
+                    setItemsPage(page)
+                    if (pageSize !== itemsPageSize) {
+                      setItemsPageSize(pageSize)
+                    }
                   }
-                }
-              }}
-              size="small"
-            />
+                }}
+                size="small"
+              />
+            )
           )}
         </div>
       )
@@ -1169,27 +1632,21 @@ export const RunDetailDrawer: React.FC<RunDetailDrawerProps> = ({
       placement="right"
       onClose={onClose}
       open={open}
-      styles={{ wrapper: { width: 600 } }}
+      styles={{ wrapper: { width: isConstrained ? "100vw" : 600 } }}
     >
       {loading ? (
         <div className="flex items-center justify-center py-12">
           <Spin size="large" />
         </div>
       ) : error ? (
-        <Alert
-          type={error.severity}
-          showIcon
-          message={error.title}
-          description={error.description}
-          action={(
-            <Button
-              size="small"
-              type="primary"
-              onClick={() => void loadRunDetails()}
-            >
-              {t("watchlists:errors.retry", "Retry")}
-            </Button>
-          )}
+        <RecoveryCallout
+          state={getRecoveryStateForSeverity(error.severity)}
+          title={error.title}
+          message={error.description}
+          primaryAction={{
+            label: t("watchlists:errors.retry", "Retry"),
+            onClick: () => void loadRunDetails()
+          }}
         />
       ) : data ? (
         <Tabs items={tabItems} />

@@ -4,7 +4,6 @@ import {
   Radio,
   Button,
   Space,
-  Alert,
   Spin,
   message,
   Upload,
@@ -33,6 +32,7 @@ import { useTranslation } from "react-i18next"
 import { bgRequest, bgUpload } from "@/services/background-proxy"
 import { getProcessPathForType, inferUploadMediaTypeFromFile } from "@/services/tldw/media-routing"
 import { useWorkflowsStore } from "@/store/workflows"
+import { Alert } from "@/components/ui/primitives/Alert"
 import { WizardShell } from "../WizardShell"
 import { ANALYZE_BOOK_WORKFLOW } from "../workflow-definitions"
 
@@ -93,7 +93,6 @@ const SUPPORTED_FILE_TYPES = [
   ".epub",
   ".txt",
   ".md",
-  ".doc",
   ".docx"
 ]
 
@@ -276,21 +275,19 @@ const SelectStep: React.FC = () => {
     return (
       <div className="space-y-4">
         <Alert
-          type="success"
-          showIcon
+          variant="success"
           icon={<CheckCircle className="h-4 w-4" />}
           title={t("workflows:analyzeBook.bookSelected", "Book selected")}
-          description={
-            <div className="mt-2">
-              <p className="font-medium">{bookInfo.title}</p>
-              <p className="text-xs text-text-muted flex items-center gap-1 mt-1">
-                <FileText className="h-3 w-3" />
-                {bookInfo.fileType.toUpperCase()} -{" "}
-                {bookInfo.content.length.toLocaleString()} characters
-              </p>
-            </div>
-          }
-        />
+        >
+          <div className="mt-2">
+            <p className="font-medium">{bookInfo.title}</p>
+            <p className="text-xs text-text-muted flex items-center gap-1 mt-1">
+              <FileText className="h-3 w-3" />
+              {bookInfo.fileType.toUpperCase()} -{" "}
+              {bookInfo.content.length.toLocaleString()} characters
+            </p>
+          </div>
+        </Alert>
         <Button
           onClick={() => {
             setBookInfo(null)
@@ -327,7 +324,7 @@ const SelectStep: React.FC = () => {
           <p className="ant-upload-hint text-xs text-text-muted">
             {t(
               "workflows:analyzeBook.supportedFormats",
-              "Supports PDF, EPUB, TXT, MD, DOC, DOCX"
+              "Supports PDF, EPUB, TXT, MD, DOCX"
             )}
           </p>
         </Dragger>
@@ -477,19 +474,19 @@ const ChunkingStep: React.FC = () => {
 
       {warningCount > 0 && (
         <Alert
-          type="warning"
-          showIcon
+          variant="warning"
           icon={<AlertTriangle className="h-4 w-4" />}
           title={t(
             "workflows:analyzeBook.chunkingWarning",
             "{{count}} chapters may need review",
             { count: warningCount }
           )}
-          description={t(
+        >
+          {t(
             "workflows:analyzeBook.chunkingWarningDesc",
             "Some chapters appear too short or too long. You can adjust the chapter pattern below."
           )}
-        />
+        </Alert>
       )}
 
       <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -994,18 +991,18 @@ const ReviewStep: React.FC = () => {
   return (
     <div className="space-y-4">
       <Alert
-        type="success"
-        showIcon
+        variant="success"
         icon={<CheckCircle className="h-4 w-4" />}
         title={t(
           "workflows:analyzeBook.analysisComplete",
           "Analysis Complete"
         )}
-        description={t(
+      >
+        {t(
           "workflows:analyzeBook.analysisCompleteDesc",
           "Your book analysis is ready. You can edit, save, or export the results below."
         )}
-      />
+      </Alert>
 
       {config?.scope === "whole" && analysis.wholeBook && (
         <AnalysisSection

@@ -16,6 +16,7 @@ import pytest
 # Local Imports
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 
 
 #
@@ -50,6 +51,10 @@ def temp_db(client_id: str = None):
                     db.close_connection()
                 except Exception as close_err:
                     logging.warning(f"Error closing temp DB {db_path} during cleanup: {close_err}")
+            try:
+                reset_managed_sqlite_backends(sqlite_targets=[str(db_path)], mode="hard")
+            except Exception as reset_err:
+                logging.warning(f"Error resetting temp DB backend {db_path} during cleanup: {reset_err}")
             # TemporaryDirectory context manager handles directory removal
             logging.debug(f"Temporary directory {temp_dir} will be removed.")
 

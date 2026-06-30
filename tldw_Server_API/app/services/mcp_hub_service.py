@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+from collections import deque
+from datetime import datetime, timezone
 import inspect
 import json
 import os
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from loguru import logger
 
@@ -54,6 +58,237 @@ async def _await_if_needed(value: Any) -> Any:
     return value
 
 
+class McpHubEventBus:
+    """Bounded in-process stream for MCP Hub governance events.
+
+    Durable audit remains the source of record. This bus exposes the same
+    mutation events to live UI clients with bounded replay for reconnects.
+    """
+
+    def __init__(self, *, max_events: int = 512, max_queue_size: int = 256) -> None:
+        self._events: deque[dict[str, Any]] = deque(maxlen=max_events)
+        self._subscribers: list[asyncio.Queue[dict[str, Any] | None]] = []
+        self._lock = asyncio.Lock()
+        self._max_queue_size = max_queue_size
+
+    async def publish(self, event: dict[str, Any]) -> str:
+        payload = dict(event)
+        event_id = str(payload.get("event_id") or uuid4())
+        payload["event_id"] = event_id
+        payload.setdefault("source", "mcp_hub")
+        payload.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+
+        async with self._lock:
+            self._events.append(dict(payload))
+            dead: list[asyncio.Queue[dict[str, Any] | None]] = []
+            for queue in self._subscribers:
+                try:
+                    queue.put_nowait(dict(payload))
+                except asyncio.QueueFull:
+                    try:
+                        queue.get_nowait()
+                        queue.put_nowait(dict(payload))
+                    except (asyncio.QueueEmpty, asyncio.QueueFull):
+                        dead.append(queue)
+            for queue in dead:
+                try:
+                    self._subscribers.remove(queue)
+                except ValueError:
+                    pass
+        return event_id
+
+    async def subscribe(self) -> asyncio.Queue[dict[str, Any] | None]:
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=self._max_queue_size)
+        async with self._lock:
+            self._subscribers.append(queue)
+        return queue
+
+    async def unsubscribe(self, queue: asyncio.Queue[dict[str, Any] | None]) -> None:
+        async with self._lock:
+            try:
+                self._subscribers.remove(queue)
+            except ValueError:
+                pass
+
+    async def replay(
+        self,
+        *,
+        after_event_id: str | None = None,
+        event_types: set[str] | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        async with self._lock:
+            events = [dict(event) for event in self._events]
+
+        if after_event_id:
+            start_index = None
+            for index, event in enumerate(events):
+                if str(event.get("event_id") or "") == str(after_event_id):
+                    start_index = index + 1
+                    break
+            events = events[start_index:] if start_index is not None else []
+
+        if event_types:
+            events = [event for event in events if str(event.get("event_type") or "") in event_types]
+        if limit is not None:
+            events = events[: max(0, limit)]
+        return events
+
+
+_mcp_hub_event_bus: McpHubEventBus | None = None
+_mcp_hub_event_bus_lock = asyncio.Lock()
+
+
+async def get_mcp_hub_event_bus() -> McpHubEventBus:
+    global _mcp_hub_event_bus
+    if _mcp_hub_event_bus is None:
+        async with _mcp_hub_event_bus_lock:
+            if _mcp_hub_event_bus is None:
+                _mcp_hub_event_bus = McpHubEventBus()
+    return _mcp_hub_event_bus
+
+
+async def publish_mcp_hub_event(
+    *,
+    event_type: str,
+    action: str,
+    actor_id: int | None,
+    resource_type: str,
+    resource_id: str,
+    metadata: dict[str, Any] | None = None,
+    event_id: str | None = None,
+) -> str:
+    bus = await get_mcp_hub_event_bus()
+    return await bus.publish(
+        {
+            "event_id": event_id,
+            "event_type": event_type,
+            "action": action,
+            "actor_id": actor_id,
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "metadata": dict(metadata or {}),
+        }
+    )
+
+
+def _load_audit_json_object(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except (TypeError, ValueError):
+            return {}
+    return {}
+
+
+def _audit_row_to_mcp_hub_event(row: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = _load_audit_json_object(row.get("metadata"))
+    action = str(metadata.get("action") or row.get("action") or "").strip()
+    resource_type = str(metadata.get("resource_type") or row.get("resource_type") or "").strip()
+    resource_id = str(metadata.get("resource_id") or row.get("resource_id") or "").strip()
+    if not action or not resource_type or not resource_id:
+        return None
+
+    event_type = _mcp_hub_event_type_for_action(action)
+    actor_id = metadata.get("actor_id")
+    if actor_id is None:
+        actor_id = row.get("context_user_id") or row.get("tenant_user_id")
+    try:
+        actor_id = int(actor_id) if actor_id is not None else None
+    except (TypeError, ValueError):
+        actor_id = None
+
+    event = {
+        "event_id": str(row.get("event_id") or ""),
+        "event_type": event_type,
+        "action": action,
+        "actor_id": actor_id,
+        "resource_type": resource_type,
+        "resource_id": resource_id,
+        "metadata": metadata,
+        "source": "mcp_hub.audit",
+        "created_at": row.get("timestamp") or row.get("created_at"),
+    }
+    owner_scope_type = metadata.get("owner_scope_type")
+    owner_scope_id = metadata.get("owner_scope_id")
+    if owner_scope_type is not None:
+        event["owner_scope_type"] = owner_scope_type
+    if owner_scope_id is not None:
+        event["owner_scope_id"] = owner_scope_id
+    return event
+
+
+def _mcp_hub_event_type_for_action(action: str) -> str:
+    normalized = str(action or "").strip()
+    if normalized.startswith("mcp_hub."):
+        return normalized
+    return f"mcp_hub.{normalized}"
+
+
+def _mcp_hub_scope_metadata(row: dict[str, Any] | None, **extra: Any) -> dict[str, Any]:
+    metadata = dict(extra)
+    if row:
+        if "owner_scope_type" in row:
+            metadata["owner_scope_type"] = row.get("owner_scope_type")
+        if "owner_scope_id" in row:
+            metadata["owner_scope_id"] = row.get("owner_scope_id")
+    return metadata
+
+
+async def replay_mcp_hub_audit_events(
+    *,
+    principal_user_id: int | None,
+    user_id: str | None = None,
+    after_event_id: str | None = None,
+    event_types: set[str] | None = None,
+    limit: int | None = None,
+    allow_cross_tenant: bool = False,
+) -> list[dict[str, Any]]:
+    """Replay MCP Hub events from durable unified audit storage.
+
+    The live event bus is intentionally bounded. This helper reconstructs the
+    public MCP Hub SSE event shape from the durable audit rows written by
+    `emit_mcp_hub_audit`.
+    """
+    query_limit = max(limit or 1000, 1000)
+    query_limit = min(query_limit, 5000)
+    tenant_user_id = user_id
+    if tenant_user_id is None and principal_user_id is not None:
+        tenant_user_id = str(principal_user_id)
+    svc = await get_or_create_audit_service_for_user_id_optional(principal_user_id)
+    rows = await svc.query_events(
+        event_types=[AuditEventType.CONFIG_CHANGED],
+        categories=[AuditEventCategory.SYSTEM],
+        endpoint="/api/v1/mcp/hub",
+        limit=query_limit,
+        user_id=None if allow_cross_tenant else tenant_user_id,
+        allow_cross_tenant=allow_cross_tenant,
+    )
+    events = [
+        event
+        for row in reversed(rows)
+        if (event := _audit_row_to_mcp_hub_event(dict(row))) is not None
+    ]
+
+    if after_event_id:
+        start_index = None
+        for index, event in enumerate(events):
+            if str(event.get("event_id") or "") == str(after_event_id):
+                start_index = index + 1
+                break
+        events = events[start_index:] if start_index is not None else []
+
+    if event_types:
+        events = [event for event in events if str(event.get("event_type") or "") in event_types]
+    if limit is not None:
+        events = events[: max(0, limit)]
+    return events
+
+
 async def emit_mcp_hub_audit(
     *,
     action: str,
@@ -70,7 +305,7 @@ async def emit_mcp_hub_audit(
             endpoint="/api/v1/mcp/hub",
             method="INTERNAL",
         )
-        await svc.log_event(
+        audit_event_id = await svc.log_event(
             event_type=AuditEventType.CONFIG_CHANGED,
             category=AuditEventCategory.SYSTEM,
             context=ctx,
@@ -86,6 +321,15 @@ async def emit_mcp_hub_audit(
             },
         )
         await svc.flush(raise_on_failure=False)
+        await publish_mcp_hub_event(
+            event_id=audit_event_id,
+            event_type=_mcp_hub_event_type_for_action(action),
+            action=action,
+            actor_id=actor_id,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            metadata=metadata,
+        )
     except Exception as exc:
         logger.warning("MCP hub audit emission failed for action={}: {}", action, exc)
 
@@ -1698,7 +1942,7 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_permission_profile",
                 resource_id=str(row.get("id") or ""),
-                metadata={"name": row.get("name"), "owner_scope_type": row.get("owner_scope_type")},
+                metadata=_mcp_hub_scope_metadata(row, name=row.get("name")),
             )
         )
         return row
@@ -1729,7 +1973,7 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_path_scope_object",
                 resource_id=str(row.get("id") or ""),
-                metadata={"name": row.get("name"), "owner_scope_type": row.get("owner_scope_type")},
+                metadata=_mcp_hub_scope_metadata(row, name=row.get("name")),
             )
         )
         return row
@@ -1765,7 +2009,7 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_workspace_set_object",
                 resource_id=str(row.get("id") or ""),
-                metadata={"name": row.get("name"), "owner_scope_type": row.get("owner_scope_type")},
+                metadata=_mcp_hub_scope_metadata(row, name=row.get("name")),
             )
         )
         return row
@@ -1814,7 +2058,7 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_workspace_set_object",
                     resource_id=str(row.get("id") or workspace_set_object_id),
-                    metadata={"name": row.get("name"), "owner_scope_type": row.get("owner_scope_type")},
+                    metadata=_mcp_hub_scope_metadata(row, name=row.get("name")),
                 )
             )
         return row
@@ -1834,6 +2078,7 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_workspace_set_object",
                     resource_id=str(workspace_set_object_id),
+                    metadata=_mcp_hub_scope_metadata(row, name=row.get("name")),
                 )
             )
         return deleted
@@ -1875,7 +2120,7 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_workspace_set_object",
                 resource_id=str(workspace_set_object_id),
-                metadata={"workspace_id": workspace_id},
+                metadata=_mcp_hub_scope_metadata(owner, workspace_id=workspace_id),
             )
         )
         return row
@@ -1895,7 +2140,7 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_workspace_set_object",
                     resource_id=str(workspace_set_object_id),
-                    metadata={"workspace_id": workspace_id},
+                    metadata=_mcp_hub_scope_metadata(owner, workspace_id=workspace_id),
                 )
             )
         return deleted
@@ -1927,7 +2172,7 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_shared_workspace",
                 resource_id=str(row.get("id") or ""),
-                metadata={"workspace_id": row.get("workspace_id"), "owner_scope_type": row.get("owner_scope_type")},
+                metadata=_mcp_hub_scope_metadata(row, workspace_id=row.get("workspace_id")),
             )
         )
         return row
@@ -1988,7 +2233,7 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_shared_workspace",
                     resource_id=str(row.get("id") or shared_workspace_id),
-                    metadata={"workspace_id": row.get("workspace_id"), "owner_scope_type": row.get("owner_scope_type")},
+                    metadata=_mcp_hub_scope_metadata(row, workspace_id=row.get("workspace_id")),
                 )
             )
         return row
@@ -2007,6 +2252,7 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_shared_workspace",
                     resource_id=str(shared_workspace_id),
+                    metadata=_mcp_hub_scope_metadata(row, workspace_id=row.get("workspace_id")),
                 )
             )
         return deleted
@@ -2044,12 +2290,13 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_path_scope_object",
                     resource_id=str(row.get("id") or path_scope_object_id),
-                    metadata={"name": row.get("name"), "owner_scope_type": row.get("owner_scope_type")},
+                    metadata=_mcp_hub_scope_metadata(row, name=row.get("name")),
                 )
             )
         return row
 
     async def delete_path_scope_object(self, path_scope_object_id: int, *, actor_id: int | None) -> bool:
+        row = await self.repo.get_path_scope_object(path_scope_object_id)
         deleted = await self.repo.delete_path_scope_object(path_scope_object_id)
         if deleted:
             await _await_if_needed(
@@ -2058,6 +2305,7 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_path_scope_object",
                     resource_id=str(path_scope_object_id),
+                    metadata=_mcp_hub_scope_metadata(row, name=(row or {}).get("name")),
                 )
             )
         return deleted
@@ -2096,12 +2344,13 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_permission_profile",
                     resource_id=str(row.get("id") or profile_id),
-                    metadata={"name": row.get("name"), "owner_scope_type": row.get("owner_scope_type")},
+                    metadata=_mcp_hub_scope_metadata(row, name=row.get("name")),
                 )
             )
         return row
 
     async def delete_permission_profile(self, profile_id: int, *, actor_id: int | None) -> bool:
+        row = await self.repo.get_permission_profile(profile_id)
         deleted = await self.repo.delete_permission_profile(profile_id)
         if deleted:
             await _await_if_needed(
@@ -2110,7 +2359,7 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_permission_profile",
                     resource_id=str(profile_id),
-                    metadata=None,
+                    metadata=_mcp_hub_scope_metadata(row, name=(row or {}).get("name")),
                 )
             )
         return deleted
@@ -2163,7 +2412,11 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_policy_assignment",
                 resource_id=str(row.get("id") or ""),
-                metadata={"target_type": row.get("target_type"), "target_id": row.get("target_id")},
+                metadata=_mcp_hub_scope_metadata(
+                    row,
+                    target_type=row.get("target_type"),
+                    target_id=row.get("target_id"),
+                ),
             )
         )
         return row
@@ -2230,12 +2483,17 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_policy_assignment",
                     resource_id=str(row.get("id") or assignment_id),
-                    metadata={"target_type": row.get("target_type"), "target_id": row.get("target_id")},
+                    metadata=_mcp_hub_scope_metadata(
+                        row,
+                        target_type=row.get("target_type"),
+                        target_id=row.get("target_id"),
+                    ),
                 )
             )
         return row
 
     async def delete_policy_assignment(self, assignment_id: int, *, actor_id: int | None) -> bool:
+        assignment = await self.repo.get_policy_assignment(assignment_id)
         existing_override = await self.repo.get_policy_override_by_assignment(assignment_id)
         if existing_override:
             await self.repo.delete_policy_override_by_assignment(assignment_id)
@@ -2245,7 +2503,7 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_policy_override",
                     resource_id=str(existing_override.get("id") or ""),
-                    metadata={"assignment_id": assignment_id},
+                    metadata=_mcp_hub_scope_metadata(assignment, assignment_id=assignment_id),
                 )
             )
         deleted = await self.repo.delete_policy_assignment(assignment_id)
@@ -2256,7 +2514,7 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_policy_assignment",
                     resource_id=str(assignment_id),
-                    metadata=None,
+                    metadata=_mcp_hub_scope_metadata(assignment),
                 )
             )
         return deleted
@@ -2309,7 +2567,11 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_policy_assignment_workspace",
                 resource_id=f"{assignment_id}:{workspace_value}",
-                metadata={"assignment_id": assignment_id, "workspace_id": workspace_value},
+                metadata=_mcp_hub_scope_metadata(
+                    assignment,
+                    assignment_id=assignment_id,
+                    workspace_id=workspace_value,
+                ),
             )
         )
         return row
@@ -2350,7 +2612,11 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_policy_assignment_workspace",
                     resource_id=f"{assignment_id}:{workspace_id}",
-                    metadata={"assignment_id": assignment_id, "workspace_id": workspace_id},
+                    metadata=_mcp_hub_scope_metadata(
+                        assignment,
+                        assignment_id=assignment_id,
+                        workspace_id=workspace_id,
+                    ),
                 )
             )
         return deleted
@@ -2388,6 +2654,7 @@ class McpHubService:
                         "assignment_id": assignment_id,
                         "broadens_access": bool(row.get("broadens_access")),
                         "is_active": bool(row.get("is_active")),
+                        **_mcp_hub_scope_metadata(await self.repo.get_policy_assignment(assignment_id)),
                     },
                 )
             )
@@ -2403,7 +2670,10 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_policy_override",
                     resource_id=str((existing or {}).get("id") or ""),
-                    metadata={"assignment_id": assignment_id},
+                    metadata=_mcp_hub_scope_metadata(
+                        await self.repo.get_policy_assignment(assignment_id),
+                        assignment_id=assignment_id,
+                    ),
                 )
             )
         return deleted
@@ -2436,7 +2706,7 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_approval_policy",
                 resource_id=str(row.get("id") or ""),
-                metadata={"name": row.get("name"), "mode": row.get("mode")},
+                metadata=_mcp_hub_scope_metadata(row, name=row.get("name"), mode=row.get("mode")),
             )
         )
         return row
@@ -2475,12 +2745,13 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_approval_policy",
                     resource_id=str(row.get("id") or approval_policy_id),
-                    metadata={"name": row.get("name"), "mode": row.get("mode")},
+                    metadata=_mcp_hub_scope_metadata(row, name=row.get("name"), mode=row.get("mode")),
                 )
             )
         return row
 
     async def delete_approval_policy(self, approval_policy_id: int, *, actor_id: int | None) -> bool:
+        row = await self.repo.get_approval_policy(approval_policy_id)
         deleted = await self.repo.delete_approval_policy(approval_policy_id)
         if deleted:
             await _await_if_needed(
@@ -2489,7 +2760,7 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_approval_policy",
                     resource_id=str(approval_policy_id),
-                    metadata=None,
+                    metadata=_mcp_hub_scope_metadata(row, name=(row or {}).get("name")),
                 )
             )
         return deleted
@@ -2559,7 +2830,7 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_acp_profile",
                 resource_id=str(row.get("id") or ""),
-                metadata={"name": row.get("name"), "owner_scope_type": row.get("owner_scope_type")},
+                metadata=_mcp_hub_scope_metadata(row, name=row.get("name")),
             )
         )
         return row
@@ -2615,12 +2886,13 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_acp_profile",
                     resource_id=str(row.get("id") or profile_id),
-                    metadata={"name": row.get("name"), "owner_scope_type": row.get("owner_scope_type")},
+                    metadata=_mcp_hub_scope_metadata(row, name=row.get("name")),
                 )
             )
         return row
 
     async def delete_acp_profile(self, profile_id: int, *, actor_id: int | None) -> bool:
+        row = await self.repo.get_acp_profile(profile_id)
         deleted = await self.repo.delete_acp_profile(profile_id)
         if deleted:
             await _await_if_needed(
@@ -2629,7 +2901,7 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_acp_profile",
                     resource_id=str(profile_id),
-                    metadata=None,
+                    metadata=_mcp_hub_scope_metadata(row, name=(row or {}).get("name")),
                 )
             )
         return deleted
@@ -2682,6 +2954,7 @@ class McpHubService:
                     "name": row.get("name"),
                     "transport": row.get("transport"),
                     "enabled": row.get("enabled"),
+                    **_mcp_hub_scope_metadata(row),
                 },
             )
         )
@@ -2749,6 +3022,7 @@ class McpHubService:
                     "name": row.get("name"),
                     "transport": row.get("transport"),
                     "enabled": row.get("enabled"),
+                    **_mcp_hub_scope_metadata(row),
                 },
             )
         )
@@ -2845,6 +3119,7 @@ class McpHubService:
                     "required_permission": self._credential_slot_required_permission(
                         normalized_privilege_class
                     ),
+                    **_mcp_hub_scope_metadata(server),
                 },
             )
         )
@@ -2905,7 +3180,7 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_external_server",
                 resource_id=server_id,
-                metadata=metadata,
+                metadata={**metadata, **_mcp_hub_scope_metadata(await self.repo.get_external_server(server_id))},
             )
         )
         return row
@@ -2928,7 +3203,10 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_external_server",
                     resource_id=server_id,
-                    metadata={"slot_name": slot_name},
+                    metadata=_mcp_hub_scope_metadata(
+                        await self.repo.get_external_server(server_id),
+                        slot_name=slot_name,
+                    ),
                 )
             )
         return deleted
@@ -2962,7 +3240,11 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_external_server",
                 resource_id=server_id,
-                metadata={"slot_name": slot_name, "key_hint": stored.get("key_hint")},
+                metadata=_mcp_hub_scope_metadata(
+                    await self.repo.get_external_server(server_id),
+                    slot_name=slot_name,
+                    key_hint=stored.get("key_hint"),
+                ),
             )
         )
         return {
@@ -2988,7 +3270,10 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_external_server",
                     resource_id=server_id,
-                    metadata={"slot_name": slot_name},
+                    metadata=_mcp_hub_scope_metadata(
+                        await self.repo.get_external_server(server_id),
+                        slot_name=slot_name,
+                    ),
                 )
             )
         return cleared
@@ -3146,6 +3431,7 @@ class McpHubService:
                     "slot_name": slot_name,
                     "binding_mode": "grant",
                     "managed_secret_ref_id": managed_secret_ref_id,
+                    **_mcp_hub_scope_metadata(target_row),
                     **(
                         await self._binding_audit_privilege_metadata(
                             external_server_id=external_server_id,
@@ -3165,7 +3451,7 @@ class McpHubService:
         slot_name: str | None = None,
         actor_id: int | None,
     ) -> bool:
-        await self._resolve_binding_target(binding_target_type="profile", binding_target_id=profile_id)
+        target_row = await self._resolve_binding_target(binding_target_type="profile", binding_target_id=profile_id)
         deleted = await self.repo.delete_credential_binding(
             binding_target_type="profile",
             binding_target_id=str(profile_id),
@@ -3175,13 +3461,17 @@ class McpHubService:
         if deleted:
             await _await_if_needed(
                 emit_mcp_hub_audit(
-                action="mcp_hub.profile_credential_binding.delete",
-                actor_id=actor_id,
-                resource_type="mcp_permission_profile",
-                resource_id=str(profile_id),
-                metadata={"external_server_id": external_server_id, "slot_name": slot_name},
+                    action="mcp_hub.profile_credential_binding.delete",
+                    actor_id=actor_id,
+                    resource_type="mcp_permission_profile",
+                    resource_id=str(profile_id),
+                    metadata=_mcp_hub_scope_metadata(
+                        target_row,
+                        external_server_id=external_server_id,
+                        slot_name=slot_name,
+                    ),
+                )
             )
-        )
         return deleted
 
     async def list_assignment_credential_bindings(
@@ -3236,6 +3526,7 @@ class McpHubService:
                     "slot_name": slot_name,
                     "binding_mode": binding_mode,
                     "managed_secret_ref_id": managed_secret_ref_id if binding_mode == "grant" else None,
+                    **_mcp_hub_scope_metadata(target_row),
                     **(
                         await self._binding_audit_privilege_metadata(
                             external_server_id=external_server_id,
@@ -3257,7 +3548,7 @@ class McpHubService:
         slot_name: str | None = None,
         actor_id: int | None,
     ) -> bool:
-        await self._resolve_binding_target(binding_target_type="assignment", binding_target_id=assignment_id)
+        target_row = await self._resolve_binding_target(binding_target_type="assignment", binding_target_id=assignment_id)
         deleted = await self.repo.delete_credential_binding(
             binding_target_type="assignment",
             binding_target_id=str(assignment_id),
@@ -3267,13 +3558,17 @@ class McpHubService:
         if deleted:
             await _await_if_needed(
                 emit_mcp_hub_audit(
-                action="mcp_hub.assignment_credential_binding.delete",
-                actor_id=actor_id,
-                resource_type="mcp_policy_assignment",
-                resource_id=str(assignment_id),
-                metadata={"external_server_id": external_server_id, "slot_name": slot_name},
+                    action="mcp_hub.assignment_credential_binding.delete",
+                    actor_id=actor_id,
+                    resource_type="mcp_policy_assignment",
+                    resource_id=str(assignment_id),
+                    metadata=_mcp_hub_scope_metadata(
+                        target_row,
+                        external_server_id=external_server_id,
+                        slot_name=slot_name,
+                    ),
+                )
             )
-        )
         return deleted
 
     async def resolve_effective_external_access(
@@ -3307,12 +3602,16 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_policy_assignment",
                 resource_id=str(assignment_id),
-                metadata={"server_count": len(summary.get("servers") or [])},
+                metadata=_mcp_hub_scope_metadata(
+                    assignment,
+                    server_count=len(summary.get("servers") or []),
+                ),
             )
         )
         return summary
 
     async def delete_external_server(self, server_id: str, *, actor_id: int | None) -> bool:
+        server = await self.repo.get_external_server(server_id)
         deleted = await self.repo.delete_external_server(server_id)
         if deleted:
             await _await_if_needed(
@@ -3321,7 +3620,7 @@ class McpHubService:
                     actor_id=actor_id,
                     resource_type="mcp_external_server",
                     resource_id=server_id,
-                    metadata=None,
+                    metadata=_mcp_hub_scope_metadata(server),
                 )
             )
         return deleted
@@ -3380,7 +3679,7 @@ class McpHubService:
                 actor_id=actor_id,
                 resource_type="mcp_external_server",
                 resource_id=server_id,
-                metadata={"key_hint": stored.get("key_hint")},
+                metadata=_mcp_hub_scope_metadata(server, key_hint=stored.get("key_hint")),
             )
         )
         secret_configured = bool(stored)

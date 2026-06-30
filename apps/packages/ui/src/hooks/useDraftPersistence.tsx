@@ -5,17 +5,20 @@ import { createLocalRegistryBucket } from "@/services/settings/local-bucket"
 const DRAFT_BUCKET_PREFIX = "registry:draft:"
 const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
-type DraftMetadataPrimitive = string | number | boolean | null
+export type DraftMetadataPrimitive = string | number | boolean | null
 
-type DraftMetadataValue = DraftMetadataPrimitive | DraftMetadataObject | DraftMetadataArray
+export type DraftMetadataValue =
+  | DraftMetadataPrimitive
+  | DraftMetadataObject
+  | DraftMetadataArray
 
-interface DraftMetadataObject {
+export interface DraftMetadataObject {
   [key: string]: DraftMetadataValue
 }
 
-type DraftMetadataArray = DraftMetadataValue[]
+export type DraftMetadataArray = DraftMetadataValue[]
 
-type DraftMetadata = DraftMetadataObject
+export type DraftMetadata = DraftMetadataObject
 
 type DraftPayload = {
   content: string

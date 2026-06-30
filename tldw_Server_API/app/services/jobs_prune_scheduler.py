@@ -73,7 +73,9 @@ def _int_optional(env_name: str, config_key: str) -> int | None:
     try:
         return int(raw)
     except Exception as exc:
-        logger.debug(f"jobs_prune: invalid {env_name} value {raw!r}: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            f"jobs_prune: invalid {env_name}; using default"
+        )
         return None
 
 
@@ -178,7 +180,7 @@ async def start_jobs_prune_scheduler() -> asyncio.Task | None:
             try:
                 await _run_once()
             except Exception as exc:
-                logger.warning(f"Jobs prune run failed: {exc}")
+                logger.bind(error_type=type(exc).__name__).warning("Jobs prune run failed")
             await asyncio.sleep(interval)
 
     task = asyncio.create_task(_runner(), name="jobs_prune_scheduler")

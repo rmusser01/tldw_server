@@ -10,6 +10,7 @@ import { useTldwApiClient } from "@/hooks/useTldwApiClient"
 import type { TldwApiClient } from "@/services/tldw/TldwApiClient"
 import type {
   CreateIngestionSourceRequest,
+  IngestionSourceDirectoryBrowseResponse,
   IngestionSourceItem,
   IngestionSourceItemFilters,
   IngestionSourceItemsListResponse,
@@ -19,17 +20,24 @@ import type {
   UpdateIngestionSourceRequest
 } from "@/types/ingestion-sources"
 
-type IngestionSourcesApiClient = Pick<
-  TldwApiClient,
+type IngestionSourceApiMethodName =
   | "listIngestionSources"
   | "getIngestionSource"
   | "listIngestionSourceItems"
+  | "browseIngestionSourceDirectories"
   | "createIngestionSource"
   | "updateIngestionSource"
   | "syncIngestionSource"
   | "uploadIngestionSourceArchive"
   | "reattachIngestionSourceItem"
->
+
+type BoundApiMethod<T> = T extends (this: any, ...args: infer Args) => infer Result
+  ? (...args: Args) => Result
+  : T
+
+type IngestionSourcesApiClient = {
+  [Key in IngestionSourceApiMethodName]: BoundApiMethod<TldwApiClient[Key]>
+}
 
 export const ingestionSourceKeys = {
   all: () => ["ingestion-sources"] as const,
@@ -39,7 +47,9 @@ export const ingestionSourceKeys = {
   itemsRoot: (sourceId: string) =>
     [...ingestionSourceKeys.all(), "items", String(sourceId)] as const,
   items: (sourceId: string, filters?: IngestionSourceItemFilters) =>
-    [...ingestionSourceKeys.itemsRoot(sourceId), filters ?? {}] as const
+    [...ingestionSourceKeys.itemsRoot(sourceId), filters ?? {}] as const,
+  directoryBrowse: (path: string | null) =>
+    [...ingestionSourceKeys.all(), "directory-browse", path ?? "roots"] as const
 }
 
 const useResolvedApiClient = (api?: IngestionSourcesApiClient): IngestionSourcesApiClient => {
@@ -83,6 +93,20 @@ export const useIngestionSourceItemsQuery = (
     queryKey: ingestionSourceKeys.items(sourceId ?? "unknown", filters),
     queryFn: () => client.listIngestionSourceItems(String(sourceId), filters),
     enabled: Boolean(sourceId) && (options?.enabled ?? true)
+  })
+}
+
+export const useIngestionSourceDirectoryBrowseQuery = (
+  path?: string | null,
+  api?: IngestionSourcesApiClient,
+  options?: { enabled?: boolean }
+): UseQueryResult<IngestionSourceDirectoryBrowseResponse, Error> => {
+  const client = useResolvedApiClient(api)
+  const normalizedPath = typeof path === "string" && path.trim().length > 0 ? path.trim() : null
+  return useQuery({
+    queryKey: ingestionSourceKeys.directoryBrowse(normalizedPath),
+    queryFn: () => client.browseIngestionSourceDirectories(normalizedPath),
+    enabled: options?.enabled ?? true
   })
 }
 

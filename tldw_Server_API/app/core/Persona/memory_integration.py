@@ -633,8 +633,8 @@ def retrieve_top_memories(
             query_text=query_text,
             top_k=top_k,
         )
-    except Exception as exc:
-        logger.debug(f"persona memory retrieval skipped: {exc}")
+    except Exception:
+        logger.debug("persona memory retrieval skipped")
         return []
 
 
@@ -699,8 +699,8 @@ def persist_persona_turn(
         if write_mode == "chacha_only":
             return chacha_ok
         return legacy_ok
-    except Exception as exc:
-        logger.debug(f"persona turn persistence skipped: {exc}")
+    except Exception:
+        logger.debug("persona turn persistence skipped")
         return False
 
 

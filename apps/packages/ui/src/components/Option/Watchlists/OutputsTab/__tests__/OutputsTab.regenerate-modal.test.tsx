@@ -331,4 +331,30 @@ describe("OutputsTab regenerate modal", () => {
     expect(setActiveTab).toHaveBeenCalledWith("runs")
     expect(openRunDetail).toHaveBeenCalledWith(91)
   })
+
+  it("renders delivery state only when output metadata contains delivery statuses", async () => {
+    mocks.storeStateRef.current = baseState({
+      outputs: [
+        buildOutput({
+          id: 18,
+          metadata: {
+            deliveries: {
+              email: { channel: "email", status: "sent" }
+            }
+          }
+        }),
+        buildOutput({
+          id: 19,
+          title: "Manual Brief",
+          metadata: {}
+        })
+      ],
+      outputsTotal: 2
+    })
+
+    render(<OutputsTab />)
+
+    expect(screen.getByTestId("outputs-row-18")).toHaveTextContent("email Sent")
+    expect(screen.getByTestId("outputs-row-19")).toHaveTextContent("-")
+  })
 })

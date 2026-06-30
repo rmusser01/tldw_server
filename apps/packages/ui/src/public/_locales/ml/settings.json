@@ -3352,5 +3352,29 @@
   },
   "generalSettings_settings_chatRichTextStyles_quoteBackgroundColor": {
     "message": "ഉദ്ധരണി പശ്ചാത്തല നിറം"
+  },
+  "navigation_connect": {
+    "message": "കണക്ഷൻ"
+  },
+  "navigation_aiModels": {
+    "message": "AI & മോഡലുകൾ"
+  },
+  "navigation_experience": {
+    "message": "അനുഭവം"
+  },
+  "navigation_knowledgeWorkspace": {
+    "message": "അറിവും വർക്ക്‌സ്പേസും"
+  },
+  "navigation_safetyAdmin": {
+    "message": "സുരക്ഷയും അഡ്മിനും"
+  },
+  "providerKeys_navTitle": {
+    "message": "പ്രൊവൈഡർ കീകൾ"
+  },
+  "navigation_dataManagement": {
+    "message": "ഡാറ്റ മാനേജ്മെന്റ്"
+  },
+  "dataManagement_navTitle": {
+    "message": "ഡാറ്റ മാനേജ്മെന്റ്"
   }
 }

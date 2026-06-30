@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_token_scope
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard
 from tldw_Server_API.app.api.v1.API_Deps.backpressure import (
     guard_backpressure_and_quota,
 )
@@ -17,6 +17,10 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
 )
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     IngestWebContentRequest,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
+    async_resolve_chunking_options_and_plan,
+    attach_chunking_plan_to_result,
 )
 from tldw_Server_API.app.services.web_scraping_service import (
     ingest_web_content_orchestrate,
@@ -30,7 +34,7 @@ router = APIRouter()
     dependencies=[
         Depends(guard_backpressure_and_quota),
         Depends(
-            require_token_scope(
+            TokenScopeGuard(
                 "any",
                 require_if_present=True,
                 endpoint_id="media.ingest",
@@ -74,8 +78,8 @@ async def ingest_web_content(
         # parsing / validation) so client-facing 4xx semantics are not
         # converted into generic 500s.
         raise
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Web content ingestion failed: {}", exc, exc_info=True)
+    except Exception:  # noqa: BLE001
+        logger.error("Web content ingestion failed")
         raise HTTPException(
             status_code=500,
             detail="Failed to ingest web content",
@@ -87,16 +91,7 @@ async def ingest_web_content(
     scrape_method = request.scrape_method
     logger.info("Selected scrape method: {}", scrape_method)
 
-    # Scrape method validation / logging.
-    scrape_method = request.scrape_method
-    logger.info("Selected scrape method: {}", scrape_method)
-
     if not raw_results:
-        return {
-            "status": "warning",
-            "message": "No articles were successfully scraped for this request.",
-            "results": [],
-        }
         return {
             "status": "warning",
             "message": "No articles were successfully scraped for this request.",
@@ -114,7 +109,17 @@ async def ingest_web_content(
     # Optional chunking stub (kept for behavioural parity with legacy).
     if request.perform_chunking:
         logger.info("Performing chunking on each article (placeholder).")
-        # Real chunking logic would go here.
+        for item in raw_results:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content")
+            _, chunking_plan = await async_resolve_chunking_options_and_plan(
+                request,
+                media_type="web",
+                source_name=str(item.get("url") or ""),
+                extracted_text=content if isinstance(content, str) else None,
+            )
+            attach_chunking_plan_to_result(item, chunking_plan)
 
     # Timestamp results when requested.
     if request.timestamp_option:

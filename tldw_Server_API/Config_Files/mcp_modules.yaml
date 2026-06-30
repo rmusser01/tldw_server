@@ -64,14 +64,76 @@ modules:
     max_concurrent: 10
     settings: {}
 
+  - id: prompts
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.prompts_module:PromptsModule
+    enabled: true
+    name: Prompts
+    version: "1.0.0"
+    department: knowledge
+    max_concurrent: 10
+    settings:
+      prompt_list_page_size: 50
+      max_rendered_prompt_chars: 100000
+      config_prompts:
+        enabled: true
+        entries: []
+        # Example entries; replace entries: [] with explicit entries like these
+        # to publish config prompts through MCP.
+        # entries:
+        #   - id: rag.retrieval_guidance
+        #     module: rag
+        #     key: retrieval_guidance
+        #     title: Retrieval Guidance
+        #   - id: chat.summary
+        #     title: Conversation Summary
+        #     messages:
+        #       - role: system
+        #         module: chat
+        #         key: summary_system
+        #       - role: user
+        #         module: chat
+        #         key: summary_user
+        #   - id: mcp.search_knowledge
+        #     module: mcp
+        #     key: search_knowledge
+        #     title: Search Knowledge
+
+  - id: persona_visuals
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.persona_visuals_module:PersonaVisualsModule
+    enabled: false
+    name: Persona Visuals
+    version: "1.0.0"
+    department: persona
+    max_concurrent: 10
+    description: Persona visual pack draft and runtime state tools
+    settings: {}
+
   - id: filesystem
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule
-    enabled: true
+    # Disabled by default because it exposes local file/workspace access.
+    # Set enabled: true only for deployments that intentionally grant this capability.
+    enabled: false
     name: Filesystem
     version: "1.0.0"
     department: system
     max_concurrent: 16
     settings: {}
+
+  - id: codegraph
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.codegraph_module:CodeGraphModule
+    enabled: false
+    name: CodeGraph
+    version: "0.1.0"
+    department: code
+    max_concurrent: 4
+    settings:
+      index_base_dir: Databases/codegraph
+      max_file_size_bytes: 1048576
+      foreground_max_files: 500
+      foreground_max_bytes: 50000000
+      max_index_seconds: 20
+      max_context_chars: 35000
+      max_search_results: 100
 
   - id: knowledge
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.knowledge_module:KnowledgeModule
@@ -84,7 +146,9 @@ modules:
 
   - id: run_command
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module:RunCommandModule
-    enabled: true
+    # Disabled by default because it can run configured local command families.
+    # Set enabled: true only for deployments that intentionally grant this capability.
+    enabled: false
     name: Run Command
     version: "0.1.0"
     department: system

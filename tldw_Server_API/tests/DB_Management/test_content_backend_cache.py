@@ -68,6 +68,7 @@ class _FakeBackend:
         self.execute_calls: list[tuple[str, tuple | None, _FakeConnection | None]] = []
         self.execute_many_calls: list[tuple[str, list | None, _FakeConnection | None]] = []
         self.create_tables_calls: list[tuple[str, _FakeConnection | None]] = []
+        self.existing_tables: set[str] = set()
         self.config = type(
             "_FakeConfig",
             (),
@@ -96,6 +97,17 @@ class _FakeBackend:
 
     def create_tables(self, ddl: str, connection=None) -> None:
         self.create_tables_calls.append((ddl, connection))
+        for table_name in (
+            "search_analytics",
+            "document_performance",
+            "feedback_analytics",
+            "analytics_events",
+        ):
+            if table_name in ddl:
+                self.existing_tables.add(table_name)
+
+    def table_exists(self, table_name: str, connection=None) -> bool:
+        return table_name in self.existing_tables
 
     def get_table_info(self, _table: str):
         return []
@@ -644,9 +656,9 @@ def test_analytics_database_keeps_transaction_backend_pinned_across_rotation(mon
     monkeypatch.setattr(
         analytics_db.AnalyticsDatabase,
         "_resolve_backend",
-        lambda self, *, db_path, backend, config: (holder["backend"], True),
+        lambda self, *, db_path, backend, config: holder["backend"],
     )
-    monkeypatch.setattr(analytics_db.AnalyticsDatabase, "_initialize_database", lambda self: None)
+    monkeypatch.setattr(analytics_db.AnalyticsDatabase, "_ensure_bootstrap_for_backend", lambda self, backend: None)
 
     db = analytics_db.AnalyticsDatabase(db_path="analytics.db")
 
@@ -686,10 +698,9 @@ def test_analytics_database_initialization_uses_pinned_backend_during_refresh(
     monkeypatch.setattr(
         analytics_db.AnalyticsDatabase,
         "_resolve_backend",
-        lambda self, *, db_path, backend, config: (holder["backend"], True),
+        lambda self, *, db_path, backend, config: holder["backend"],
     )
     monkeypatch.setattr(analytics_db.AnalyticsDatabase, "_bootstrapped_backend_targets", set())
-
     _ = analytics_db.AnalyticsDatabase(db_path="analytics.db")
 
     assert len(old_backend.create_tables_calls) == 1
@@ -789,16 +800,20 @@ def test_analytics_database_bootstrap_runs_once_per_shared_target_across_instanc
     shared_backend = _FakeBackend(label="shared")
     bootstrap_calls: list[str] = []
 
+    def fake_bootstrap(self, backend, target_identifier=None):
+        bootstrap_calls.append(target_identifier or self._describe_backend(backend))
+        backend.existing_tables.update(analytics_db.AnalyticsDatabase._REQUIRED_BOOTSTRAP_TABLES)
+
     monkeypatch.setattr(analytics_db.AnalyticsDatabase, "_bootstrapped_backend_targets", set())
     monkeypatch.setattr(
         analytics_db.AnalyticsDatabase,
         "_resolve_backend",
-        lambda self, *, db_path, backend, config: (shared_backend, True),
+        lambda self, *, db_path, backend, config: shared_backend,
     )
     monkeypatch.setattr(
         analytics_db.AnalyticsDatabase,
-        "_initialize_database",
-        lambda self: bootstrap_calls.append(self._backend_target_key(self._backend) or "<none>"),
+        "_bootstrap_backend_schema",
+        fake_bootstrap,
     )
 
     _ = analytics_db.AnalyticsDatabase(db_path="analytics.db")
@@ -918,6 +933,22 @@ def test_watchlists_database_pins_backend_for_multi_query_write_operations(
         "created_at": "2026-04-16T00:00:00+00:00",
         "updated_at": "2026-04-16T00:00:00+00:00",
     }
+    watchlist_row = {
+        "id": 201,
+        "user_id": "1",
+        "name": "Imported Watchlist",
+        "description": "Pinned backend test watchlist.",
+        "objective": "Verify backend pinning.",
+        "domain": "general",
+        "status": "active",
+        "priority": "medium",
+        "tags_json": "[]",
+        "archived_at": None,
+        "deleted_at": None,
+        "restore_expires_at": None,
+        "created_at": "2026-04-16T00:00:00+00:00",
+        "updated_at": "2026-04-16T00:00:00+00:00",
+    }
 
     def make_execute(backend: _FakeBackend):
         def execute(query: str, params=None, connection=None) -> QueryResult:
@@ -926,10 +957,14 @@ def test_watchlists_database_pins_backend_for_multi_query_write_operations(
                 if backend is old_backend:
                     holder["backend"] = new_backend
                 return QueryResult(rows=[{"id": 101}], rowcount=1, lastrowid=101)
+            if "FROM watchlists" in query:
+                return QueryResult(rows=[watchlist_row], rowcount=1)
             if "FROM sources WHERE id" in query:
                 return QueryResult(rows=[source_row], rowcount=1)
             if "FROM source_tags" in query:
                 return QueryResult(rows=[], rowcount=0)
+            if "INSERT INTO watchlist_sources" in query:
+                return QueryResult(rows=[], rowcount=1)
             return QueryResult(rows=[], rowcount=0)
 
         return execute
@@ -959,12 +994,13 @@ def test_watchlists_database_pins_backend_for_multi_query_write_operations(
         name="Created source",
         url="https://example.invalid/created",
         source_type="rss",
+        watchlist_id=201,
     )
 
     assert source.id == 101
-    assert [query for query, _params, _connection in old_backend.execute_calls] == [
-        "INSERT INTO sources",
-        "SELECT id, user_id, name, url, source_type, active, settings_json, last_scraped_at, etag, last_modified, defer_until, status, consec_not_modified, consec_errors, created_at, updated_at FROM sources WHERE id = ? AND user_id = ?",
-        "SELECT t.name FROM source_tags st JOIN tags t ON st.tag_id = t.id WHERE st.source_id = ?",
-    ]
+    old_queries = [query for query, _params, _connection in old_backend.execute_calls]
+    assert old_queries[0] == "INSERT INTO sources"
+    assert any("FROM watchlists" in query for query in old_queries)
+    assert any("FROM sources WHERE id" in query for query in old_queries)
+    assert any("INSERT INTO watchlist_sources" in query for query in old_queries)
     assert new_backend.execute_calls == []

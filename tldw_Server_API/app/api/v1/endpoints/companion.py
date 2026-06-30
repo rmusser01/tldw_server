@@ -17,6 +17,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     get_personalization_db_for_user,
     get_usage_event_logger,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.companion import (
     CompanionActivityCreate,
     CompanionActivityDetail,
@@ -277,7 +278,18 @@ async def list_companion_activity(
         offset,
     )
     await asyncio.to_thread(log.log_event, "companion.activity.view", metadata={"count": len(items)})
-    return CompanionActivityListResponse(items=items, total=total, limit=limit, offset=offset)
+    return CompanionActivityListResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=build_offset_pagination_meta(
+            total=total,
+            offset=offset,
+            limit=limit,
+            count=len(items),
+        ),
+    )
 
 
 @router.get(

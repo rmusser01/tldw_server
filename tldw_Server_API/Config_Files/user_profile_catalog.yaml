@@ -300,3 +300,32 @@ entries:
     editable_by: [platform_admin]
     sensitivity: internal
     ui: toggle
+
+  - key: preferences.ui.composer_variant
+    label: Composer Style
+    description: Chat composer layout variant (v1 Terminal Stack, v3 Split Brief, v5 Radial Command).
+    type: string
+    enum: [v1, v3, v5]
+    default: v1
+    editable_by: [user]
+    sensitivity: public
+    ui: select
+
+  - key: preferences.ui.composer_enabled
+    label: Enable New Composer
+    description: Opt into the experimental nextgen composer on /chat and the extension sidepanel. When true, the picked variant renders instead of the legacy composer.
+    type: boolean
+    default: false
+    editable_by: [user]
+    sensitivity: public
+    ui: toggle
+
+  - key: preferences.ui.theme_migration_version
+    label: Theme Migration Version
+    description: Internal marker tracking theme-preference migrations that have been applied to this user. Set automatically by the app; not user-editable.
+    type: integer
+    minimum: 0
+    default: 0
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number

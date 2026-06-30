@@ -30,6 +30,11 @@ vi.mock("../settings-nav", () => ({
           icon: IconStub,
           beta: true,
         },
+        {
+          to: "/settings/model",
+          labelToken: "settings:modelSettings.navTitle",
+          icon: IconStub,
+        },
       ],
     },
   ],
@@ -145,6 +150,20 @@ describe("settings navigation wayfinding", () => {
     expect(screen.queryByText("beta")).not.toBeInTheDocument();
     expect(screen.getByTestId("settings-beta-badges-toggle")).toHaveTextContent(
       "Show beta badges",
+    );
+  });
+
+  it("renders a route h1 and avoids a forced mobile nav strip", () => {
+    renderSettingsLayout("/settings/model");
+
+    expect(
+      screen.getByRole("heading", {
+        level: 1,
+        name: "Model settings",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("settings-nav-group-server")).not.toHaveClass(
+      "min-w-max",
     );
   });
 });

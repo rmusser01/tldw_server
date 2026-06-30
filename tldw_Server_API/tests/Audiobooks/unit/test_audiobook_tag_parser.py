@@ -60,3 +60,69 @@ def test_build_chapters_from_markers_respects_offsets_and_ids():
     assert chapters[0].end_offset == text.index("Two.")
     assert chapters[1].chapter_id == "custom_id"
     assert chapters[1].start_offset == text.index("Two.")
+
+
+def test_build_chapters_from_markers_deduplicates_ids_with_warnings():
+    text = "One.\nTwo.\nThree."
+    markers = [
+        ChapterMarker(offset=0, chapter_id="ch_002", title="One"),
+        ChapterMarker(offset=text.index("Two."), chapter_id=None, title="Two"),
+        ChapterMarker(offset=text.index("Three."), chapter_id="ch_002", title="Three"),
+    ]
+    warnings: list[str] = []
+
+    chapters = build_chapters_from_markers(text, markers, warnings=warnings)
+
+    assert [chapter.chapter_id for chapter in chapters] == ["ch_002", "ch_003", "ch_002_2"]
+    assert "generated_chapter_id_collision:ch_002" in warnings
+    assert "duplicate_chapter_id:ch_002" in warnings
+
+
+def test_generated_chapter_collision_warnings_do_not_cascade_from_generated_ids():
+    text = "One.\nTwo.\nThree.\nFour."
+    markers = [
+        ChapterMarker(offset=0, chapter_id="ch_002", title="One"),
+        ChapterMarker(offset=text.index("Two."), chapter_id=None, title="Two"),
+        ChapterMarker(offset=text.index("Three."), chapter_id=None, title="Three"),
+        ChapterMarker(offset=text.index("Four."), chapter_id=None, title="Four"),
+    ]
+    warnings: list[str] = []
+
+    chapters = build_chapters_from_markers(text, markers, warnings=warnings)
+
+    assert [chapter.chapter_id for chapter in chapters] == ["ch_002", "ch_003", "ch_004", "ch_005"]
+    assert warnings == ["generated_chapter_id_collision:ch_002"]
+
+
+def test_parse_tagged_text_rejects_invalid_speed_markers():
+    raw = (
+        "[[speed=nan]]\n"
+        "[[speed=inf]]\n"
+        "[[speed=0.1]]\n"
+        "[[speed=4.5]]\n"
+        "[[speed=1.25]]\n"
+        "Narration.\n"
+    )
+
+    result = parse_tagged_text(raw)
+
+    assert [marker.value for marker in result.speed_markers] == [1.25]
+    assert result.warnings.count("invalid_speed:nan") == 1
+    assert result.warnings.count("invalid_speed:inf") == 1
+    assert result.warnings.count("invalid_speed:0.1") == 1
+    assert result.warnings.count("invalid_speed:4.5") == 1
+
+
+def test_parse_tagged_text_rejects_out_of_range_timestamps():
+    raw = (
+        "[[ts=00:60:00.000]]\n"
+        "[[ts=00:00:60.000]]\n"
+        "[[ts=00:01:02.345]]\n"
+        "Narration.\n"
+    )
+
+    result = parse_tagged_text(raw)
+
+    assert [marker.time_ms for marker in result.ts_markers] == [62345]
+    assert "invalid_ts:00:60:00.000" in result.warnings
+    assert "invalid_ts:00:00:60.000" in result.warnings

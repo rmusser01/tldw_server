@@ -1,5 +1,6 @@
 import React from "react"
-import { Alert, Button, Modal, Skeleton } from "antd"
+import { Button, Modal, Skeleton } from "antd"
+import { Alert } from "@/components/ui/primitives/Alert"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { formatRelativeTimestamp } from "./listUtils"
 
@@ -135,21 +136,21 @@ export function DictionaryVersionHistoryModal({
     >
       {errorMessage ? (
         <Alert
-          type="error"
-          showIcon
+          variant="error"
           className="mb-3"
           title="Version history failed"
-          description={errorMessage}
-        />
+        >
+          {errorMessage}
+        </Alert>
       ) : null}
       {revertMessage ? (
         <Alert
-          type="success"
-          showIcon
+          variant="success"
           className="mb-3"
           title="Revision restored"
-          description={revertMessage}
-        />
+        >
+          {revertMessage}
+        </Alert>
       ) : null}
 
       {versionsStatus === "loading" ? (

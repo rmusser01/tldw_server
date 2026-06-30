@@ -41,15 +41,15 @@ def _generate_with_llm(prompt: str, provider: Optional[str], model: Optional[str
                     if isinstance(resp, dict):
                         return resp.get("text") or resp.get("content") or str(resp)
                     return str(resp)
-                except Exception as e:  # pragma: no cover - defensive
-                    logger.warning(f"HyDE LLM generation failed: {e}")
+                except Exception:  # pragma: no cover - defensive
+                    logger.warning("HyDE LLM generation failed")
                     return ""
 
         client = _LLMClient(provider, model)
         out = client.generate(prompt)
         return out.strip() if isinstance(out, str) else None
-    except Exception as e:
-        logger.debug(f"HyDE LLM utility unavailable: {e}")
+    except Exception:
+        logger.debug("HyDE LLM utility unavailable")
         return None
 
 
@@ -104,6 +104,6 @@ async def embed_text(text: str) -> Optional[list]:
             if isinstance(vec, (list, tuple)):
                 return list(vec)
         return None
-    except Exception as e:
-        logger.warning(f"HyDE embedding failed: {e}")
+    except Exception:
+        logger.warning("HyDE embedding failed")
         return None

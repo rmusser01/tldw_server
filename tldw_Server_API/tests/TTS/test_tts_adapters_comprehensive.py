@@ -15,6 +15,24 @@ import base64
 def clear_tts_env(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
+
+    async def _fake_fetch_user_voices(self):
+        self._user_voices = [
+            VoiceInfo(
+                id="rachel",
+                name="Rachel",
+                gender="female",
+                language="en",
+                description="test voice",
+                use_case=[],
+            )
+        ]
+
+    monkeypatch.setattr(
+        ElevenLabsAdapter,
+        "_fetch_user_voices",
+        _fake_fetch_user_voices,
+    )
     return None
 #
 # Local Imports

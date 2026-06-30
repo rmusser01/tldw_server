@@ -67,18 +67,36 @@ const defaultSerde: Required<SerdeOptions> = {
 export class Storage {
   private backend: StorageBackend
   private serde: Required<SerdeOptions>
+  private area: StorageOptions["area"]
   private watchers = new Map<string, Set<WatchCallback>>()
 
   constructor(options: StorageOptions = {}) {
     this.backend = getBackend()
+    this.area = options.area || "local"
     this.serde = {
       ...defaultSerde,
       ...(options.serde || {})
     }
   }
 
+  private storageKey(key: string): string {
+    if (this.area === "local") return key
+    return `plasmo-${this.area}:${key}`
+  }
+
+  private unscopedKey(key: string): string | null {
+    if (this.area === "local") {
+      return key.startsWith("plasmo-sync:") || key.startsWith("plasmo-session:")
+        ? null
+        : key
+    }
+
+    const prefix = `plasmo-${this.area}:`
+    return key.startsWith(prefix) ? key.slice(prefix.length) : null
+  }
+
   async get<T = unknown>(key: string): Promise<T | undefined> {
-    const raw = this.backend.getItem(key)
+    const raw = this.backend.getItem(this.storageKey(key))
     if (raw == null) return undefined
     return this.serde.deserializer(raw) as T
   }
@@ -86,22 +104,24 @@ export class Storage {
   async getAll(): Promise<Record<string, unknown>> {
     const entries: Record<string, unknown> = {}
     for (let i = 0; i < this.backend.length; i += 1) {
-      const key = this.backend.key(i)
+      const storedKey = this.backend.key(i)
+      if (!storedKey) continue
+      const key = this.unscopedKey(storedKey)
       if (!key) continue
-      entries[key] = this.serde.deserializer(this.backend.getItem(key))
+      entries[key] = this.serde.deserializer(this.backend.getItem(storedKey))
     }
     return entries
   }
 
   async set<T = unknown>(key: string, value: T): Promise<void> {
     const prev = await this.get(key)
-    this.backend.setItem(key, this.serde.serializer(value))
+    this.backend.setItem(this.storageKey(key), this.serde.serializer(value))
     this.emitWatch(key, { oldValue: prev, newValue: value })
   }
 
   async remove(key: string): Promise<void> {
     const prev = await this.get(key)
-    this.backend.removeItem(key)
+    this.backend.removeItem(this.storageKey(key))
     this.emitWatch(key, { oldValue: prev, newValue: undefined })
   }
 
@@ -110,7 +130,14 @@ export class Storage {
   }
 
   async clear(): Promise<void> {
-    this.backend.clear()
+    const keys: string[] = []
+    for (let i = 0; i < this.backend.length; i += 1) {
+      const storedKey = this.backend.key(i)
+      if (storedKey && this.unscopedKey(storedKey)) {
+        keys.push(storedKey)
+      }
+    }
+    keys.forEach((key) => this.backend.removeItem(key))
   }
 
   watch(map: Record<string, WatchCallback>): () => void {

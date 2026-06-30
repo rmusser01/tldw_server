@@ -6,7 +6,9 @@
  */
 
 import React from "react"
+import type { TFunction } from "i18next"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import type { JSONContent } from "@tiptap/react"
 import type { MessageInstance } from "antd/es/message/interface"
 import {
   cloneWritingSession,
@@ -24,13 +26,15 @@ import {
   DEFAULT_SETTINGS,
   getChatModeFromPayload,
   getPromptFromPayload,
+  getPromptRichFromPayload,
   getSettingsFromPayload,
   getTemplateNameFromPayload,
   getThemeNameFromPayload,
   isVersionConflictError,
-  mergePayloadIntoSession,
+  mergePendingPayloadIntoSession,
   normalizeStringArrayValue,
   SAVE_DEBOUNCE_MS,
+  shouldClearPendingSessionSave,
   type PendingSave,
   type SessionUsageMap,
   type WritingSessionPayload,
@@ -56,8 +60,44 @@ export interface UseWritingSessionManagementDeps {
   apiProviderOverride: string | undefined
   setApiProvider: (provider: string) => void
   isGenerating: boolean
-  t: (key: string, fallback?: string, opts?: Record<string, unknown>) => string
+  suspendEditorPromptSync?: boolean
+  t: TFunction
 }
+
+type PromptSelection = { start: number; end: number }
+type PromptUpdateOptions =
+  | PromptSelection
+  | {
+      selection?: PromptSelection
+      promptRich?: JSONContent | null
+    }
+
+const isPromptSelection = (
+  options: PromptUpdateOptions | undefined
+): options is PromptSelection =>
+  Boolean(options) &&
+  typeof (options as PromptSelection).start === "number" &&
+  typeof (options as PromptSelection).end === "number"
+
+const getPromptSelection = (
+  options: PromptUpdateOptions | undefined
+): PromptSelection | undefined => {
+  if (!options) return undefined
+  return isPromptSelection(options) ? options : options.selection
+}
+
+const getPromptRichOption = (
+  options: PromptUpdateOptions | undefined
+): JSONContent | null | undefined => {
+  if (!options || isPromptSelection(options)) return undefined
+  if (!Object.prototype.hasOwnProperty.call(options, "promptRich")) {
+    return undefined
+  }
+  return options.promptRich ?? null
+}
+
+const serializePromptRich = (promptRich: JSONContent | null): string | null =>
+  promptRich ? JSON.stringify(promptRich) : null
 
 export function useWritingSessionManagement(deps: UseWritingSessionManagementDeps) {
   const {
@@ -74,6 +114,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     apiProviderOverride,
     setApiProvider,
     isGenerating,
+    suspendEditorPromptSync = false,
     t
   } = deps
 
@@ -116,11 +157,14 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
   const sessionSchemaVersionRef = React.useRef<Record<string, number>>({})
   const lastLoadedSessionIdRef = React.useRef<string | null>(null)
   const lastSavedPromptRef = React.useRef<Record<string, string>>({})
+  const lastSavedPromptRichRef = React.useRef<Record<string, string | null>>({})
   const lastSavedSettingsRef =
     React.useRef<Record<string, WritingSessionSettings>>({})
   const lastSavedTemplateNameRef = React.useRef<Record<string, string | null>>({})
   const lastSavedThemeNameRef = React.useRef<Record<string, string | null>>({})
   const lastSavedChatModeRef = React.useRef<Record<string, boolean>>({})
+  const editorPromptRichRef = React.useRef<JSONContent | null>(null)
+  const promptSyncSuspendedRef = React.useRef(suspendEditorPromptSync)
 
   // --- Queries ---
   const {
@@ -282,6 +326,8 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       sessionVersionRef.current[session.id] = session.version
       sessionSchemaVersionRef.current[session.id] = session.schema_version
       lastSavedPromptRef.current[session.id] = getPromptFromPayload(session.payload)
+      lastSavedPromptRichRef.current[session.id] =
+        serializePromptRich(getPromptRichFromPayload(session.payload))
       lastSavedSettingsRef.current[session.id] = getSettingsFromPayload(session.payload)
       lastSavedTemplateNameRef.current[session.id] =
         getTemplateNameFromPayload(session.payload)
@@ -318,6 +364,9 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         delete pendingSaveMapRef.current[session.id]
       }
       if (activeSessionId === session.id) {
+        if (!pendingPayload || pendingPayload === payload.payload) {
+          editorPromptRichRef.current = getPromptRichFromPayload(session.payload)
+        }
         setLastSavedAt(Date.now())
         if (!pendingSaveMapRef.current[session.id]) {
           setIsDirty(false)
@@ -392,12 +441,14 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     (
       sessionId: string,
       prompt: string,
+      promptRich: JSONContent | null,
       nextSettings: WritingSessionSettings,
       templateName: string | null,
       themeName: string | null,
       nextChatMode: boolean
     ) => {
       const lastPrompt = lastSavedPromptRef.current[sessionId] ?? ""
+      const lastPromptRich = lastSavedPromptRichRef.current[sessionId] ?? null
       const lastSettings =
         lastSavedSettingsRef.current[sessionId] ?? DEFAULT_SETTINGS
       const lastTemplate = lastSavedTemplateNameRef.current[sessionId] ?? null
@@ -405,6 +456,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       const lastChatMode = lastSavedChatModeRef.current[sessionId] ?? false
       return (
         prompt !== lastPrompt ||
+        serializePromptRich(promptRich) !== lastPromptRich ||
         !areSettingsEqual(nextSettings, lastSettings) ||
         templateName !== lastTemplate ||
         themeName !== lastTheme ||
@@ -412,6 +464,26 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       )
     },
     []
+  )
+
+  const resolveSessionPromptDraft = React.useCallback(
+    (
+      sessionId: string,
+      payload: Record<string, unknown> | null | undefined
+    ) => {
+      if (!suspendEditorPromptSync) {
+        return {
+          prompt: editorText,
+          promptRich: editorPromptRichRef.current
+        }
+      }
+      const sessionPayload = pendingSaveMapRef.current[sessionId] ?? payload
+      return {
+        prompt: getPromptFromPayload(sessionPayload),
+        promptRich: getPromptRichFromPayload(sessionPayload)
+      }
+    },
+    [editorText, suspendEditorPromptSync]
   )
 
   // --- Session select ---
@@ -496,11 +568,15 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
   ])
 
   React.useEffect(() => {
+    const wasPromptSyncSuspended = promptSyncSuspendedRef.current
+    promptSyncSuspendedRef.current = suspendEditorPromptSync
     if (!activeSessionDetail) {
       if (lastLoadedSessionIdRef.current === null) {
+        editorPromptRichRef.current = null
         return
       }
       setEditorText("")
+      editorPromptRichRef.current = null
       setSettings(cloneDefaultSettings())
       setStopStringsInput("")
       setBannedTokensInput("")
@@ -520,6 +596,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     sessionSchemaVersionRef.current[activeSessionDetail.id] =
       activeSessionDetail.schema_version
     const nextPrompt = getPromptFromPayload(activeSessionDetail.payload)
+    const nextPromptRich = getPromptRichFromPayload(activeSessionDetail.payload)
     const nextSettings = getSettingsFromPayload(activeSessionDetail.payload)
     const nextTemplateName = getTemplateNameFromPayload(activeSessionDetail.payload)
     const nextThemeName = getThemeNameFromPayload(activeSessionDetail.payload)
@@ -530,7 +607,10 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     )
     const lastLoadedId = lastLoadedSessionIdRef.current
     if (activeSessionDetail.id !== lastLoadedId) {
-      setEditorText(nextPrompt)
+      if (!suspendEditorPromptSync) {
+        setEditorText(nextPrompt)
+        editorPromptRichRef.current = nextPromptRich
+      }
       setSettings(nextSettings)
       setStopStringsInput(nextSettings.stop.join("\n"))
       setBannedTokensInput(
@@ -553,6 +633,8 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       setIsDirty(false)
       setLastSavedAt(Date.now())
       lastSavedPromptRef.current[activeSessionDetail.id] = nextPrompt
+      lastSavedPromptRichRef.current[activeSessionDetail.id] =
+        serializePromptRich(nextPromptRich)
       lastSavedSettingsRef.current[activeSessionDetail.id] = nextSettings
       lastSavedTemplateNameRef.current[activeSessionDetail.id] = nextTemplateName
       lastSavedThemeNameRef.current[activeSessionDetail.id] = nextThemeName
@@ -566,9 +648,23 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       lastLoadedSessionIdRef.current = activeSessionDetail.id
       return
     }
+    if (wasPromptSyncSuspended && !suspendEditorPromptSync) {
+      const sessionPromptPayload =
+        pendingSaveMapRef.current[activeSessionDetail.id] ??
+        activeSessionDetail.payload
+      const sessionPrompt = getPromptFromPayload(sessionPromptPayload)
+      const sessionPromptRich = getPromptRichFromPayload(sessionPromptPayload)
+      if (editorText !== sessionPrompt) {
+        setEditorText(sessionPrompt)
+      }
+      editorPromptRichRef.current = sessionPromptRich
+    }
     if (!isDirty) {
-      if (editorText !== nextPrompt) {
+      if (!suspendEditorPromptSync && editorText !== nextPrompt) {
         setEditorText(nextPrompt)
+      }
+      if (!suspendEditorPromptSync) {
+        editorPromptRichRef.current = nextPromptRich
       }
       if (!areSettingsEqual(settings, nextSettings)) {
         setSettings(nextSettings)
@@ -601,6 +697,8 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       }
       setLastSavedAt(Date.now())
       lastSavedPromptRef.current[activeSessionDetail.id] = nextPrompt
+      lastSavedPromptRichRef.current[activeSessionDetail.id] =
+        serializePromptRich(nextPromptRich)
       lastSavedSettingsRef.current[activeSessionDetail.id] = nextSettings
       lastSavedTemplateNameRef.current[activeSessionDetail.id] = nextTemplateName
       lastSavedThemeNameRef.current[activeSessionDetail.id] = nextThemeName
@@ -617,6 +715,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     selectedModel,
     setApiProvider,
     setSelectedModel,
+    suspendEditorPromptSync,
     settings
   ])
 
@@ -629,37 +728,82 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
   }, [])
 
   // --- Prompt/settings change helpers ---
+  const applySessionPayloadPatch = React.useCallback(
+    (patcher: (payload: WritingSessionPayload) => WritingSessionPayload) => {
+      if (!activeSessionDetail) return
+      const { prompt, promptRich } = resolveSessionPromptDraft(
+        activeSessionDetail.id,
+        activeSessionDetail.payload
+      )
+      const basePayload = mergePendingPayloadIntoSession(
+        activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
+        prompt,
+        settings,
+        selectedTemplateName,
+        selectedThemeName,
+        chatMode,
+        { promptRich }
+      )
+      const nextPayload = patcher(basePayload)
+      pendingSaveMapRef.current[activeSessionDetail.id] = nextPayload
+      setIsDirty(true)
+      scheduleSave(activeSessionDetail.id, nextPayload)
+    },
+    [
+      activeSessionDetail,
+      chatMode,
+      resolveSessionPromptDraft,
+      scheduleSave,
+      selectedTemplateName,
+      selectedThemeName,
+      settings
+    ]
+  )
+
   const applyPromptValue = React.useCallback(
     (
       nextValue: string,
-      selection?: { start: number; end: number }
+      options?: PromptUpdateOptions
     ) => {
+      const selection = getPromptSelection(options)
+      const promptRichOption = getPromptRichOption(options)
+      const promptRich =
+        promptRichOption === undefined ? editorPromptRichRef.current : promptRichOption
       setEditorText(nextValue)
-      if (!activeSessionDetail) return
-      const nextPayload = mergePayloadIntoSession(
+      editorPromptRichRef.current = promptRich
+      if (!activeSessionDetail) return selection
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
+        pendingSaveMapRef.current[activeSessionDetail.id],
         nextValue,
         settings,
         selectedTemplateName,
         selectedThemeName,
-        chatMode
+        chatMode,
+        { promptRich }
       )
       const isDirtyNext = computeDirty(
         activeSessionDetail.id,
         nextValue,
+        promptRich,
         settings,
         selectedTemplateName,
         selectedThemeName,
         chatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
       } else {
         scheduleSave(activeSessionDetail.id, nextPayload)
       }
-      // selection is handled by the caller (editor focus)
-      return selection // pass through for caller to use
+      return selection
     },
     [
       activeSessionDetail,
@@ -683,24 +827,36 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       if (typeof nextStopInput === "string") {
         setStopStringsInput(nextStopInput)
       }
-      const nextPayload = mergePayloadIntoSession(
+      const { prompt, promptRich } = resolveSessionPromptDraft(
+        activeSessionDetail.id,
+        activeSessionDetail.payload
+      )
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
-        editorText,
+        pendingSaveMapRef.current[activeSessionDetail.id],
+        prompt,
         nextSettings,
         selectedTemplateName,
         selectedThemeName,
-        chatMode
+        chatMode,
+        { promptRich }
       )
       const isDirtyNext = computeDirty(
         activeSessionDetail.id,
-        editorText,
+        prompt,
+        promptRich,
         nextSettings,
         selectedTemplateName,
         selectedThemeName,
         chatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
         return
       }
@@ -711,7 +867,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       chatMode,
       clearPendingSave,
       computeDirty,
-      editorText,
+      resolveSessionPromptDraft,
       scheduleSave,
       selectedTemplateName,
       selectedThemeName
@@ -730,24 +886,36 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     (nextTemplateName: string | null) => {
       setSelectedTemplateName(nextTemplateName)
       if (!activeSessionDetail) return
-      const nextPayload = mergePayloadIntoSession(
+      const { prompt, promptRich } = resolveSessionPromptDraft(
+        activeSessionDetail.id,
+        activeSessionDetail.payload
+      )
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
-        editorText,
+        pendingSaveMapRef.current[activeSessionDetail.id],
+        prompt,
         settings,
         nextTemplateName,
         selectedThemeName,
-        chatMode
+        chatMode,
+        { promptRich }
       )
       const isDirtyNext = computeDirty(
         activeSessionDetail.id,
-        editorText,
+        prompt,
+        promptRich,
         settings,
         nextTemplateName,
         selectedThemeName,
         chatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
         return
       }
@@ -758,7 +926,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       chatMode,
       clearPendingSave,
       computeDirty,
-      editorText,
+      resolveSessionPromptDraft,
       scheduleSave,
       settings,
       selectedThemeName
@@ -769,24 +937,36 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     (nextThemeName: string | null) => {
       setSelectedThemeName(nextThemeName)
       if (!activeSessionDetail) return
-      const nextPayload = mergePayloadIntoSession(
+      const { prompt, promptRich } = resolveSessionPromptDraft(
+        activeSessionDetail.id,
+        activeSessionDetail.payload
+      )
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
-        editorText,
+        pendingSaveMapRef.current[activeSessionDetail.id],
+        prompt,
         settings,
         selectedTemplateName,
         nextThemeName,
-        chatMode
+        chatMode,
+        { promptRich }
       )
       const isDirtyNext = computeDirty(
         activeSessionDetail.id,
-        editorText,
+        prompt,
+        promptRich,
         settings,
         selectedTemplateName,
         nextThemeName,
         chatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
         return
       }
@@ -797,7 +977,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       chatMode,
       clearPendingSave,
       computeDirty,
-      editorText,
+      resolveSessionPromptDraft,
       scheduleSave,
       selectedTemplateName,
       settings
@@ -808,24 +988,36 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     (nextChatMode: boolean) => {
       setChatMode(nextChatMode)
       if (!activeSessionDetail) return
-      const nextPayload = mergePayloadIntoSession(
+      const { prompt, promptRich } = resolveSessionPromptDraft(
+        activeSessionDetail.id,
+        activeSessionDetail.payload
+      )
+      const nextPayload = mergePendingPayloadIntoSession(
         activeSessionDetail.payload,
-        editorText,
+        pendingSaveMapRef.current[activeSessionDetail.id],
+        prompt,
         settings,
         selectedTemplateName,
         selectedThemeName,
-        nextChatMode
+        nextChatMode,
+        { promptRich }
       )
       const isDirtyNext = computeDirty(
         activeSessionDetail.id,
-        editorText,
+        prompt,
+        promptRich,
         settings,
         selectedTemplateName,
         selectedThemeName,
         nextChatMode
       )
-      setIsDirty(isDirtyNext)
-      if (!isDirtyNext) {
+      const shouldClearPendingSave = shouldClearPendingSessionSave(
+        activeSessionDetail.payload,
+        nextPayload,
+        isDirtyNext
+      )
+      setIsDirty(!shouldClearPendingSave)
+      if (shouldClearPendingSave) {
         clearPendingSave(activeSessionDetail.id)
         return
       }
@@ -835,7 +1027,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
       activeSessionDetail,
       clearPendingSave,
       computeDirty,
-      editorText,
+      resolveSessionPromptDraft,
       scheduleSave,
       selectedTemplateName,
       selectedThemeName,
@@ -895,6 +1087,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
     handleTemplateChange,
     handleThemeChange,
     handleChatModeChange,
+    applySessionPayloadPatch,
     scheduleSave,
     clearPendingSave,
     computeDirty,

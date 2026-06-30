@@ -10,6 +10,7 @@ const extensionRouteRegistryRelativePath =
 const webRouteRelativePath = "apps/packages/ui/src/routes/option-scheduled-tasks.tsx"
 const extensionRouteRelativePath =
   "apps/tldw-frontend/extension/routes/option-scheduled-tasks.tsx"
+const hostedResultsAliasRelativePath = "apps/tldw-frontend/pages/scheduled-tasks/results.tsx"
 
 const resolveWorkspaceRoot = (startDirectory: string): string => {
   let currentDirectory = startDirectory
@@ -39,6 +40,7 @@ const extensionRouteRegistrySource = readFileSync(
   "utf8"
 )
 const extensionRoutePath = resolve(workspaceRoot, extensionRouteRelativePath)
+const hostedResultsAliasPath = resolve(workspaceRoot, hostedResultsAliasRelativePath)
 
 describe("scheduled tasks route wiring", () => {
   it("registers the scheduled tasks route shell", () => {
@@ -50,6 +52,14 @@ describe("scheduled tasks route wiring", () => {
   it("registers the scheduled tasks page in both web and extension route registries", () => {
     expect(webRouteRegistrySource).toContain('path: "/scheduled-tasks"')
     expect(extensionRouteRegistrySource).toContain('path: "/scheduled-tasks"')
+  })
+
+  it("registers scheduled tasks Results aliases across route surfaces", () => {
+    expect(webRouteRegistrySource).toContain('path: "/scheduled-tasks/results"')
+    expect(extensionRouteRegistrySource).toContain('path: "/scheduled-tasks/results"')
+    expect(existsSync(hostedResultsAliasPath)).toBe(true)
+    const hostedResultsAliasSource = readFileSync(hostedResultsAliasPath, "utf8")
+    expect(hostedResultsAliasSource).toContain("option-scheduled-tasks")
   })
 
   it("uses a dedicated extension scheduled tasks route shell", () => {

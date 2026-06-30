@@ -9,6 +9,7 @@ import {
   scheduleWorkspaceUndoAction,
   undoWorkspaceAction
 } from "../../undo-manager"
+import { renderWorkspaceMessageActionContent } from "../../workspace-message-content"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -150,15 +151,16 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
           const undoMessageKey = `workspace-artifact-undo-${undoHandle.id}`
           const maybeOpen = (messageApi as { open?: (config: unknown) => void })
             .open
+          const deleteContent = t(
+            "playground:studio.undoDeleteOutput",
+            "Output deleted."
+          )
           const messageConfig = {
             key: undoMessageKey,
             type: "warning",
             duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-            content: t(
-              "playground:studio.undoDeleteOutput",
-              "Output deleted."
-            ),
-            btn: (
+            content: renderWorkspaceMessageActionContent(
+              deleteContent,
               <Button
                 size="small"
                 type="link"
@@ -182,9 +184,7 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
               messageApi as { warning?: (content: string) => void }
             ).warning
             if (typeof maybeWarning === "function") {
-              maybeWarning(
-                t("playground:studio.undoDeleteOutput", "Output deleted.")
-              )
+              maybeWarning(deleteContent)
             }
           }
         }

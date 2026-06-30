@@ -17,6 +17,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import 
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
     apply_sqlite_core_media_schema,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_schema import (
+    ensure_sqlite_document_workspace_schema,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
@@ -129,6 +132,7 @@ class SupportsSqlitePostCoreStructures(Protocol):
     _CLAIMS_TABLE_SQL: str
     _MEDIA_FILES_TABLE_SQL: str
     _TTS_HISTORY_TABLE_SQL: str
+    _AUDIO_PRESETS_TABLE_SQL: str
     _CURRENT_SCHEMA_VERSION: int
     db_path_str: str
     is_memory_db: bool
@@ -151,6 +155,8 @@ def ensure_sqlite_post_core_structures(
     db._ensure_sqlite_data_tables(conn)
     ensure_sqlite_fts_structures(db, conn)
     conn.executescript(_SQLITE_COLLECTIONS_AND_CONTENT_ITEMS_SQL)
+    conn.executescript(db._AUDIO_PRESETS_TABLE_SQL)
+    ensure_sqlite_document_workspace_schema(conn)
     db._ensure_sqlite_visibility_columns(conn)
     db._ensure_sqlite_source_hash_column(conn)
     db._ensure_sqlite_claims_extensions(conn)
@@ -198,11 +204,13 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                 raise SchemaError(
                     f"Schema applied, but final DB version is {final_db_version}, expected {target_version}."
                 )
+            ensure_sqlite_post_core_structures(db, conn)
             logger.info("Database schema initialized to version {}.", target_version)
         elif current_db_version < target_version:
             try:
                 if db.is_memory_db:
                     apply_sqlite_core_media_schema(db, conn)
+                    ensure_sqlite_post_core_structures(db, conn)
                 else:
                     conn.close()
 

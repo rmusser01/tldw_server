@@ -6,6 +6,7 @@ that a user (or their org/team) has sufficient storage quota remaining.
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from loguru import logger
@@ -13,6 +14,12 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
     AuthnzStorageQuotasRepo,
 )
+
+
+def _quota_fail_open_enabled() -> bool:
+    """Return True when quota check errors should allow writes."""
+    value = os.getenv("STORAGE_QUOTA_FAIL_OPEN", "0").strip().lower()
+    return value in {"1", "true", "yes", "on"}
 
 
 async def check_storage_quota(
@@ -63,18 +70,22 @@ async def check_storage_quota(
         elif team_id is not None:
             status = await repo.check_quota_status(team_id=team_id)
     except Exception as exc:
+        fail_open = _quota_fail_open_enabled()
         logger.warning(
             "Storage quota check failed for user_id={}: {}",
             user_id,
-            exc,
+            type(exc).__name__,
         )
-        # Fail-open: allow uploads if quota check itself fails
         return {
-            "allowed": True,
+            "allowed": fail_open,
             "used_mb": 0.0,
             "quota_mb": None,
             "remaining_mb": None,
-            "reason": f"Quota check error (fail-open): {exc}",
+            "reason": (
+                "Quota check unavailable (fail-open)"
+                if fail_open
+                else "Quota check unavailable"
+            ),
         }
 
     if not status.get("has_quota", False):

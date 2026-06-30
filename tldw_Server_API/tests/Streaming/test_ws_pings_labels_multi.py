@@ -1,9 +1,15 @@
 import time
 import json
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
+from tldw_Server_API.tests.Audio.ws_test_helpers import ws_session_or_skip
+
+os.environ.setdefault("MINIMAL_TEST_INCLUDE_AUDIO", "1")
+os.environ.setdefault("AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH", "1")
 
 
 @pytest.mark.asyncio
@@ -14,14 +20,16 @@ async def test_ws_pings_label_isolation_across_endpoints(monkeypatch):
     and MCP WS (via MCP_WS_PING_INTERVAL). Each connection should increment only
     its own labeled counter series.
     """
+    # Short ping intervals
+    monkeypatch.setenv("STREAM_HEARTBEAT_INTERVAL_S", "0.05")
+    monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
+    monkeypatch.setenv("AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH", "1")
+    # MCP config expects integer seconds; use 1s for reliable triggering
+    monkeypatch.setenv("MCP_WS_PING_INTERVAL", "1")
+
     from tldw_Server_API.app.main import app
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
     from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
-
-    # Short ping intervals
-    monkeypatch.setenv("STREAM_HEARTBEAT_INTERVAL_S", "0.05")
-    # MCP config expects integer seconds; use 1s for reliable triggering
-    monkeypatch.setenv("MCP_WS_PING_INTERVAL", "1")
 
     settings = get_settings()
     audio_token = settings.SINGLE_USER_API_KEY
@@ -32,6 +40,11 @@ async def test_ws_pings_label_isolation_across_endpoints(monkeypatch):
         get_mcp_server().config.ws_ping_interval = 1
     except Exception:
         _ = None
+    try:
+        from tldw_Server_API.app.core.Streaming import streams
+        streams._STREAM_METRICS_REGISTERED = False
+    except (ImportError, AttributeError):
+        pass
 
     reg = get_metrics_registry()
     audio_labels = {"component": "audio", "endpoint": "audio_unified_ws", "transport": "ws"}
@@ -63,7 +76,10 @@ async def test_ws_pings_label_isolation_across_endpoints(monkeypatch):
             pytest.skip("MCP WebSocket endpoint not available in this build")
 
         # Keep both connections open long enough for a few pings
-        with audio_ws, mcp_ws:
+        with ws_session_or_skip(audio_ws), ws_session_or_skip(
+            mcp_ws,
+            reason="MCP WebSocket endpoint not available in this build",
+        ):
             # Allow multiple audio pings; concurrently exercise MCP send path
             time.sleep(0.25)
             try:

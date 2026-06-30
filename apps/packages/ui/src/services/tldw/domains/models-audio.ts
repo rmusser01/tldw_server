@@ -1,6 +1,33 @@
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery } from "../client-utils"
+import { getNormalizedTldwModels } from "../model-normalization"
 import { appendPathQuery } from "../path-utils"
+import {
+  type TldwProvidersResponse
+} from "../model-provider-availability"
+import type {
+  LlamacppAsset,
+  LlamacppAcquisitionJobListResponse,
+  LlamacppAcquisitionJobResponse,
+  LlamacppAssetDownloadRequest,
+  LlamacppAssetImportPreviewResponse,
+  LlamacppAssetsResponse,
+  LlamacppConfigResponse,
+  LlamacppConfigUpdateRequest,
+  LlamacppHardwareSnapshotResponse,
+  LlamacppInventoryItem,
+  LlamacppInventoryResponse,
+  LlamacppLifecycleActionResponse,
+  LlamacppLogTailResponse,
+  LlamacppProfile,
+  LlamacppProfileCreateRequest,
+  LlamacppProfileListResponse,
+  LlamacppProfileUpdateRequest,
+  LlamacppRuntimeListResponse,
+  LlamacppUseInChatResponse,
+  LlamacppValidationRequest,
+  LlamacppValidationResponse
+} from "@/types/llamacpp-admin"
 import type {
   TldwModel,
   ImageBackend,
@@ -11,16 +38,27 @@ import type {
   MlxStatus,
   MlxLoadRequest,
   MlxUnloadRequest,
+  TtsProviderUnloadResponse,
 } from "../TldwApiClient"
+import type {
+  AudioPresetCreatePayload,
+  AudioPresetKind,
+  AudioPresetListResponse,
+  AudioPresetUpdatePayload,
+  AudioPresetValidationResponse,
+  AudioPreset
+} from "@/types/audio-presets"
 
 /**
  * Minimal interface for the TldwApiClient methods referenced via `this`.
  */
 export interface TldwApiClientCore {
   getModelsMetadata(options?: { refreshOpenRouter?: boolean }): Promise<any>
+  getProviders(): Promise<TldwProvidersResponse>
   createImageArtifact(request: any): Promise<any>
   ensureConfigForRequest(requireAuth: boolean): Promise<any>
   request<T>(init: any, requireAuth?: boolean): Promise<T>
+  requestWithCurrentConfig<T>(init: any, requireAuth?: boolean): Promise<T>
   upload<T>(init: any, requireAuth?: boolean): Promise<T>
 }
 
@@ -33,104 +71,14 @@ export const modelsAudioMethods = {
       refreshOpenRouter?: boolean
     }
   ): Promise<TldwModel[]> {
-    const meta = await this.getModelsMetadata(options)
-    const list =
-      Array.isArray(meta) && meta.length > 0
-        ? meta
-        : meta && typeof meta === "object" && Array.isArray((meta as any).models)
-          ? (meta as any).models
-          : []
-
-    const toNonEmptyString = (value: unknown): string | null => {
-      if (typeof value !== "string") return null
-      const trimmed = value.trim()
-      return trimmed.length > 0 ? trimmed : null
-    }
-    const isLikelyModelId = (value: string): boolean => {
-      if (/\s/.test(value)) return false
-      return /[/:._-]/.test(value)
-    }
-
-    return list.map((m: any) => {
-      const rawModel =
-        toNonEmptyString(m.model) || toNonEmptyString(m.model_id)
-      const rawName = toNonEmptyString(m.name)
-      const rawId = toNonEmptyString(m.id)
-      const canonicalModelId =
-        rawModel ||
-        (rawName && isLikelyModelId(rawName) ? rawName : null) ||
-        rawId ||
-        rawName ||
-        "unknown-model"
-      const displayName =
-        rawName && !isLikelyModelId(rawName) && rawName !== canonicalModelId
-          ? `${rawName} (${canonicalModelId})`
-          : canonicalModelId
-
-      return {
-        id: canonicalModelId,
-        name: displayName,
-        provider: String(m.provider || "default"),
-        description: m.description,
-        capabilities: Array.isArray(m.capabilities)
-          ? m.capabilities
-          : Array.isArray(m.features)
-            ? m.features
-            : typeof m.capabilities === "object"
-              ? m.capabilities
-              : undefined,
-        context_length:
-          typeof m.context_length === "number"
-            ? m.context_length
-            : typeof m.context_window === "number"
-              ? m.context_window
-              : typeof m.contextLength === "number"
-                ? m.contextLength
-                : undefined,
-        vision: Boolean(
-          (m.capabilities && m.capabilities.vision) ?? m.vision
-        ),
-        function_calling: Boolean(
-          (m.capabilities &&
-            (m.capabilities.function_calling || m.capabilities.tool_use)) ??
-            m.function_calling
-        ),
-        json_output: Boolean(
-          (m.capabilities && m.capabilities.json_mode) ?? m.json_output
-        ),
-        type: typeof m.type === "string" ? m.type : undefined,
-        modalities:
-          m.modalities && typeof m.modalities === "object"
-            ? {
-                input: Array.isArray(m.modalities.input)
-                  ? m.modalities.input.map((v: any) => String(v))
-                  : undefined,
-                output: Array.isArray(m.modalities.output)
-                  ? m.modalities.output.map((v: any) => String(v))
-                  : undefined
-              }
-            : {
-                input: Array.isArray(m.input_modality)
-                  ? m.input_modality.map((v: any) => String(v))
-                  : Array.isArray(m.input_modalities)
-                    ? m.input_modalities.map((v: any) => String(v))
-                    : typeof m.input_modality === "string"
-                      ? [String(m.input_modality)]
-                      : undefined,
-                output: Array.isArray(m.output_modality)
-                  ? m.output_modality.map((v: any) => String(v))
-                  : Array.isArray(m.output_modalities)
-                    ? m.output_modalities.map((v: any) => String(v))
-                    : typeof m.output_modality === "string"
-                      ? [String(m.output_modality)]
-                      : undefined
-              }
-      }
-    })
+    return await getNormalizedTldwModels(this, options)
   },
 
-  async getProviders(): Promise<any> {
-    return await bgRequest<any>({ path: '/api/v1/llm/providers', method: 'GET' })
+  async getProviders(): Promise<TldwProvidersResponse> {
+    return await bgRequest<TldwProvidersResponse>({
+      path: '/api/v1/llm/providers',
+      method: 'GET'
+    })
   },
 
   async getModelsMetadata(options?: {
@@ -298,6 +246,123 @@ export const modelsAudioMethods = {
     })
   },
 
+  async getLlamacppConfig(): Promise<LlamacppConfigResponse> {
+    return await bgRequest<LlamacppConfigResponse>({
+      path: "/api/v1/llamacpp/config",
+      method: "GET"
+    })
+  },
+
+  async updateLlamacppConfig(
+    payload: LlamacppConfigUpdateRequest
+  ): Promise<LlamacppConfigResponse> {
+    return await bgRequest<LlamacppConfigResponse>({
+      path: "/api/v1/llamacpp/config",
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async validateLlamacpp(
+    payload: LlamacppValidationRequest
+  ): Promise<LlamacppValidationResponse> {
+    return await bgRequest<LlamacppValidationResponse>({
+      path: "/api/v1/llamacpp/validate",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async getLlamacppInventory(): Promise<LlamacppInventoryResponse> {
+    return await bgRequest<LlamacppInventoryResponse>({
+      path: "/api/v1/llamacpp/inventory",
+      method: "GET"
+    })
+  },
+
+  async getLlamacppAssets(): Promise<LlamacppAssetsResponse> {
+    return await bgRequest<LlamacppAssetsResponse>({
+      path: "/api/v1/llamacpp/assets",
+      method: "GET"
+    })
+  },
+
+  async registerLlamacppModelPath(path: string): Promise<LlamacppInventoryItem> {
+    return await bgRequest<LlamacppInventoryItem>({
+      path: "/api/v1/llamacpp/models/register-path",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  },
+
+  async registerLlamacppAssetPath(path: string): Promise<LlamacppAsset> {
+    return await bgRequest<LlamacppAsset>({
+      path: "/api/v1/llamacpp/assets/register-path",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  },
+
+  async importLlamacppAssetFolder(path: string): Promise<LlamacppAsset> {
+    return await bgRequest<LlamacppAsset>({
+      path: "/api/v1/llamacpp/assets/import-folder",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  },
+
+  async previewLlamacppAssetFolder(
+    path: string
+  ): Promise<LlamacppAssetImportPreviewResponse> {
+    return await bgRequest<LlamacppAssetImportPreviewResponse>({
+      path: "/api/v1/llamacpp/assets/import-folder/preview",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: { path }
+    })
+  },
+
+  async startLlamacppAssetDownload(
+    payload: LlamacppAssetDownloadRequest
+  ): Promise<LlamacppAcquisitionJobResponse> {
+    return await bgRequest<LlamacppAcquisitionJobResponse>({
+      path: "/api/v1/llamacpp/assets/downloads",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async listLlamacppAssetDownloads(): Promise<LlamacppAcquisitionJobListResponse> {
+    return await bgRequest<LlamacppAcquisitionJobListResponse>({
+      path: "/api/v1/llamacpp/assets/downloads",
+      method: "GET"
+    })
+  },
+
+  async getLlamacppAssetDownload(
+    jobId: string | number
+  ): Promise<LlamacppAcquisitionJobResponse> {
+    return await bgRequest<LlamacppAcquisitionJobResponse>({
+      path: `/api/v1/llamacpp/assets/downloads/${encodeURIComponent(String(jobId))}`,
+      method: "GET"
+    })
+  },
+
+  async cancelLlamacppAssetDownload(
+    jobId: string | number
+  ): Promise<LlamacppAcquisitionJobResponse> {
+    return await bgRequest<LlamacppAcquisitionJobResponse>({
+      path: `/api/v1/llamacpp/assets/downloads/${encodeURIComponent(String(jobId))}`,
+      method: "DELETE"
+    })
+  },
+
   async startLlamacppServer(
     modelFilename: string,
     serverArgs?: Record<string, any>
@@ -313,12 +378,163 @@ export const modelsAudioMethods = {
     })
   },
 
+  async startLlamacppModel(
+    modelId: string,
+    serverArgs?: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    return await bgRequest<Record<string, unknown>>({
+      path: "/api/v1/llamacpp/start-by-model",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {
+        model_id: modelId,
+        server_args: serverArgs || {}
+      }
+    })
+  },
+
   async stopLlamacppServer(): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/llamacpp/stop_server",
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: {}
+    })
+  },
+
+  async useLlamacppInChat(): Promise<LlamacppUseInChatResponse> {
+    return await bgRequest<LlamacppUseInChatResponse>({
+      path: "/api/v1/llamacpp/use-in-chat",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async tailLlamacppLogs(lines?: number): Promise<LlamacppLogTailResponse> {
+    const query = buildQuery(lines === undefined ? {} : { lines })
+    return await bgRequest<LlamacppLogTailResponse>({
+      path: `/api/v1/llamacpp/logs/tail${query}`,
+      method: "GET"
+    })
+  },
+
+  async listLlamacppProfiles(): Promise<LlamacppProfileListResponse> {
+    return await bgRequest<LlamacppProfileListResponse>({
+      path: "/api/v1/llamacpp/profiles",
+      method: "GET"
+    })
+  },
+
+  async createLlamacppProfile(
+    payload: LlamacppProfileCreateRequest
+  ): Promise<LlamacppProfile> {
+    return await bgRequest<LlamacppProfile>({
+      path: "/api/v1/llamacpp/profiles",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async updateLlamacppProfile(
+    profileId: string,
+    payload: LlamacppProfileUpdateRequest
+  ): Promise<LlamacppProfile> {
+    return await bgRequest<LlamacppProfile>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async deleteLlamacppProfile(
+    profileId: string
+  ): Promise<{ profile_id: string; deleted: boolean }> {
+    return await bgRequest<{ profile_id: string; deleted: boolean }>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
+      method: "DELETE"
+    })
+  },
+
+  async startLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/start`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async stopLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/stop`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async pauseLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/pause`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async resumeLlamacppProfile(
+    profileId: string
+  ): Promise<LlamacppLifecycleActionResponse> {
+    return await bgRequest<LlamacppLifecycleActionResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/resume`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async useLlamacppProfileInChat(
+    profileId: string
+  ): Promise<LlamacppUseInChatResponse> {
+    return await bgRequest<LlamacppUseInChatResponse>({
+      path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/use-in-chat`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: {}
+    })
+  },
+
+  async listLlamacppInstances(): Promise<LlamacppRuntimeListResponse> {
+    return await bgRequest<LlamacppRuntimeListResponse>({
+      path: "/api/v1/llamacpp/instances",
+      method: "GET"
+    })
+  },
+
+  async tailLlamacppInstanceLogs(
+    profileId: string,
+    lines?: number
+  ): Promise<LlamacppLogTailResponse> {
+    const query = buildQuery(lines === undefined ? {} : { lines })
+    return await bgRequest<LlamacppLogTailResponse>({
+      path: `/api/v1/llamacpp/instances/${encodeURIComponent(profileId)}/logs/tail${query}`,
+      method: "GET"
+    })
+  },
+
+  async getLlamacppHardware(): Promise<LlamacppHardwareSnapshotResponse> {
+    return await bgRequest<LlamacppHardwareSnapshotResponse>({
+      path: "/api/v1/llamacpp/hardware",
+      method: "GET"
     })
   },
 
@@ -358,6 +574,18 @@ export const modelsAudioMethods = {
     })
   },
 
+  async unloadTtsProvider(provider: string): Promise<TtsProviderUnloadResponse> {
+    const normalizedProvider = String(provider || "").trim()
+    if (!normalizedProvider) {
+      throw new Error("provider is required to unload a TTS provider.")
+    }
+
+    return await bgRequest<TtsProviderUnloadResponse>({
+      path: `/api/v1/audio/tts/providers/${encodeURIComponent(normalizedProvider)}/unload`,
+      method: "POST"
+    })
+  },
+
   // ── Audio: Transcription & TTS ──
 
   async getTranscriptionModels(
@@ -381,6 +609,93 @@ export const modelsAudioMethods = {
     return await bgRequest<any>({
       path: `/api/v1/audio/transcriptions/health${query}`,
       method: "GET"
+    })
+  },
+
+  async getTranscriptionCapabilities(
+    this: TldwApiClientCore,
+    options?: { timeoutMs?: number }
+  ): Promise<any> {
+    await this.ensureConfigForRequest(true)
+    return await bgRequest<any>({
+      path: "/api/v1/audio/transcriptions/capabilities",
+      method: "GET",
+      timeoutMs: options?.timeoutMs
+    })
+  },
+
+  async listAudioPresets(
+    this: TldwApiClientCore,
+    options?: {
+      kind?: AudioPresetKind
+      favorite?: boolean
+      is_default?: boolean
+      limit?: number
+      offset?: number
+      timeoutMs?: number
+    }
+  ): Promise<AudioPresetListResponse> {
+    await this.ensureConfigForRequest(true)
+    const query = buildQuery({
+      kind: options?.kind,
+      favorite: options?.favorite,
+      is_default: options?.is_default,
+      limit: options?.limit,
+      offset: options?.offset
+    })
+    return await this.requestWithCurrentConfig<AudioPresetListResponse>({
+      path: `/api/v1/audio/presets${query}`,
+      method: "GET",
+      timeoutMs: options?.timeoutMs
+    })
+  },
+
+  async createAudioPreset(
+    this: TldwApiClientCore,
+    payload: AudioPresetCreatePayload
+  ): Promise<AudioPreset> {
+    await this.ensureConfigForRequest(true)
+    return await this.requestWithCurrentConfig<AudioPreset>({
+      path: "/api/v1/audio/presets",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async updateAudioPreset(
+    this: TldwApiClientCore,
+    presetId: string,
+    payload: AudioPresetUpdatePayload
+  ): Promise<AudioPreset> {
+    await this.ensureConfigForRequest(true)
+    return await this.requestWithCurrentConfig<AudioPreset>({
+      path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}`,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: payload
+    })
+  },
+
+  async deleteAudioPreset(
+    this: TldwApiClientCore,
+    presetId: string
+  ): Promise<void> {
+    await this.ensureConfigForRequest(true)
+    await this.requestWithCurrentConfig<void>({
+      path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}`,
+      method: "DELETE"
+    })
+  },
+
+  async validateAudioPreset(
+    this: TldwApiClientCore,
+    presetId: string
+  ): Promise<AudioPresetValidationResponse> {
+    await this.ensureConfigForRequest(true)
+    return await this.requestWithCurrentConfig<AudioPresetValidationResponse>({
+      path: `/api/v1/audio/presets/${encodeURIComponent(presetId)}/validate`,
+      method: "POST"
     })
   },
 

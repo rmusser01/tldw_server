@@ -424,6 +424,15 @@ class DatabasePool:
             pytest_active = False
         return test_mode or pytest_active
 
+    @property
+    def backend_type(self) -> str:
+        """Return the configured AuthNZ database backend without exposing internals."""
+        if self.pool is not None:
+            return "postgres"
+        if self._initialized:
+            return "sqlite"
+        return "postgres" if self._should_use_postgres() else "sqlite"
+
     @staticmethod
     def _resolve_sqlite_paths(url: str) -> tuple[str, bool, Optional[str]]:
         """Resolve sqlite connection string, uri flag, and filesystem path.
@@ -440,6 +449,8 @@ class DatabasePool:
             if fs_path.startswith("//"):
                 fs_path = fs_path[1:]
             fs_path = unquote(fs_path or "")
+            if re.match(r"^/[A-Za-z]:[\\/]", fs_path):
+                fs_path = fs_path[1:]
             return url, True, fs_path or None
 
         if not scheme.startswith("sqlite"):

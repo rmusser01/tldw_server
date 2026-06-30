@@ -475,6 +475,39 @@ class TestOrgInviteService:
         mock_orgs_repo.add_org_member.assert_called_once_with(org_id=1, user_id=100, role="member")
 
     @pytest.mark.asyncio
+    async def test_redeem_invite_org_member_add_error_is_sanitized(
+        self,
+        service,
+        mock_invites_repo,
+        mock_orgs_repo,
+    ):
+        """Org membership failures should not expose repository internals."""
+        tomorrow = (datetime.utcnow() + timedelta(days=1)).isoformat()
+        mock_invites_repo.get_invite_by_code.return_value = {
+            "id": 1,
+            "org_id": 1,
+            "org_name": "Test Org",
+            "is_active": True,
+            "expires_at": tomorrow,
+            "uses_count": 0,
+            "max_uses": 5,
+            "role_to_grant": "member",
+        }
+        mock_orgs_repo.get_org_member.return_value = None
+        mock_orgs_repo.add_org_member.side_effect = RuntimeError(
+            "org repo failed at /private/orgs.db"
+        )
+
+        result = await service.redeem_invite(code="VALIDCODE", user_id=100)
+
+        assert result.success is False
+        assert result.message == "Failed to join organization"
+        assert "org repo failed" not in (result.message or "")
+        assert "/private/orgs.db" not in (result.message or "")
+        mock_invites_repo.record_redemption.assert_not_called()
+        mock_invites_repo.increment_uses_count.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_redeem_invite_with_team(self, service, mock_invites_repo, mock_orgs_repo):
         """Redeeming team invite should add to both org and team."""
         tomorrow = (datetime.utcnow() + timedelta(days=1)).isoformat()

@@ -5,6 +5,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
+    build_chacha_rls_sql,
     ensure_prompt_studio_rls,
 )
 
@@ -71,6 +72,17 @@ def test_ensure_prompt_studio_rls_raises_on_partial_failure():
         pytest.fail("transaction should not commit after a partial failure")
     if conn.rolled_back is not True:
         pytest.fail("transaction should roll back after a partial failure")
+
+
+def test_chacha_rls_includes_workspace_resource_memberships_tenant_policy():
+    sql = "\n".join(build_chacha_rls_sql())
+
+    assert "ALTER TABLE IF EXISTS workspace_resource_memberships ENABLE ROW LEVEL SECURITY" in sql
+    assert "ALTER TABLE IF EXISTS workspace_resource_memberships FORCE ROW LEVEL SECURITY" in sql
+    assert "DROP POLICY IF EXISTS workspace_resource_memberships_tenant_isolation" in sql
+    assert "CREATE POLICY workspace_resource_memberships_tenant_isolation" in sql
+    assert "ON workspace_resource_memberships" in sql
+    assert "client_id = current_setting('app.current_user_id', true)" in sql
 
 
 def test_run_pg_rls_auto_ensure_logs_success_only_after_both_installers_pass(monkeypatch):

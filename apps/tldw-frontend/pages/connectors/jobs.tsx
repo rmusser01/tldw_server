@@ -1,13 +1,5 @@
-import { RoutePlaceholder } from '@web/components/navigation/RoutePlaceholder';
+import { ConnectorRoutePlaceholder } from '@web/components/navigation/ConnectorRoutePlaceholder';
 
 export default function ConnectorJobsRedirectPage() {
-  return (
-    <RoutePlaceholder
-      title="Connector Jobs Is Coming Soon"
-      description="Connector job orchestration is planned for this route."
-      plannedPath="/connectors/jobs"
-      primaryCtaHref="/connectors"
-      primaryCtaLabel="Open Connectors Hub"
-    />
-  );
+  return <ConnectorRoutePlaceholder route="/connectors/jobs" />;
 }

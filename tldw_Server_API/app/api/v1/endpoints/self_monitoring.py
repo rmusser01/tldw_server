@@ -25,7 +25,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from tldw_Server_API.app.api.v1.API_Deps.guardian_deps import get_guardian_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.guardian_deps import (
+    get_guardian_db_for_user,
+)
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.guardian_schemas import (
     CrisisResource,
     CrisisResourceList,
@@ -43,13 +46,15 @@ from tldw_Server_API.app.api.v1.schemas.guardian_schemas import (
     SelfMonitoringRuleResponse,
     SelfMonitoringRuleUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.DB_Management.Guardian_DB import GuardianDB
 from tldw_Server_API.app.core.Monitoring.self_monitoring_service import (
     CRISIS_DISCLAIMER,
     CRISIS_RESOURCES,
+    SelfMonitoringOwnerDbResolutionError,
     SelfMonitoringService,
     get_self_monitoring_service,
+    resolve_partner_approval_guardian_db,
 )
 
 router = APIRouter()
@@ -234,7 +239,11 @@ def approve_deactivation(
     db: GuardianDB = Depends(get_guardian_db_for_user),
 ):
     """Approve deactivation of a rule (partner_approval bypass mode)."""
-    svc = _get_service(db)
+    try:
+        owner_db = resolve_partner_approval_guardian_db(db, body.owner_user_id)
+    except SelfMonitoringOwnerDbResolutionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    svc = _get_service(owner_db)
     result = svc.approve_deactivation(rule_id, _user_id(user), body.token)
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "Failed"))
@@ -261,7 +270,15 @@ def list_alerts(
         offset=offset,
     )
     items = [_alert_response(a) for a in alerts]
-    return SelfMonitoringAlertList(items=items, total=len(items))
+    total = db.count_self_monitoring_alerts(_user_id(user), rule_id=rule_id, unread_only=unread_only)
+    pagination = build_offset_pagination_meta(total=total, limit=limit, offset=offset, count=len(items))
+    return SelfMonitoringAlertList(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        pagination=pagination,
+    )
 
 
 @router.post("/alerts/mark-read", response_model=DetailResponse)

@@ -23,8 +23,26 @@ def test_base_url_override_allowed(monkeypatch):
     args = _base_args()
     args.update({"base_url": "https://example.com/v1", "trusted_base_url_override": True})
     provider, request, _internal = chat_service._build_adapter_request_from_chat_args(args)
-    assert provider == "openai"
-    assert request["base_url"] == "https://example.com/v1"
+    assert provider == "openai"  # nosec B101
+    assert request["base_url"] == "https://example.com/v1"  # nosec B101
+
+
+def test_base_url_override_allowlist_accepts_provider_alias(monkeypatch):
+    monkeypatch.setattr(byok_helpers, "resolve_byok_base_url_allowlist", lambda: {"oai"})
+    monkeypatch.setattr(byok_helpers, "validate_base_url_override", lambda value: value)
+    args = _base_args()
+    args.update(
+        {
+            "api_provider": "oai",
+            "base_url": "https://example.com/v1",
+            "trusted_base_url_override": True,
+        }
+    )
+
+    provider, request, _internal = chat_service._build_adapter_request_from_chat_args(args)
+
+    assert provider == "openai"  # nosec B101
+    assert request["base_url"] == "https://example.com/v1"  # nosec B101
 
 
 def test_base_url_override_rejected_when_untrusted(monkeypatch):
@@ -43,6 +61,37 @@ def test_base_url_override_rejected_when_not_allowlisted(monkeypatch):
         chat_service._build_adapter_request_from_chat_args(args)
 
 
+@pytest.mark.parametrize(
+    ("provider", "override_key", "expected_provider"),
+    [
+        ("llama.cpp", "api_url", "llama.cpp"),
+        ("llama-cpp", "api_url", "llama.cpp"),
+        ("tabby_api", "api_url", "tabbyapi"),
+        ("vllm", "vllm_api_url", "vllm"),
+        ("ollama", "ollama_api_url", "ollama"),
+    ],
+)
+def test_local_provider_request_url_overrides_rejected(
+    provider: str,
+    override_key: str,
+    expected_provider: str,
+) -> None:
+    args = _base_args()
+    args.update(
+        {
+            "api_provider": provider,
+            "model": "local-model",
+            override_key: "http://127.0.0.1:1234/v1",
+        }
+    )
+
+    with pytest.raises(ChatBadRequestError) as exc_info:
+        chat_service._build_adapter_request_from_chat_args(args)
+
+    assert exc_info.value.provider == expected_provider  # nosec B101
+    assert override_key in exc_info.value.message  # nosec B101
+
+
 def test_build_adapter_request_omits_internal_chat_metadata() -> None:
     args = _base_args()
     args.update(
@@ -58,5 +107,5 @@ def test_build_adapter_request_omits_internal_chat_metadata() -> None:
 
     provider, request, _internal = chat_service._build_adapter_request_from_chat_args(args)
 
-    assert provider == "openai"
-    assert not any(key.startswith("_chat_") for key in request)
+    assert provider == "openai"  # nosec B101
+    assert not any(key.startswith("_chat_") for key in request)  # nosec B101

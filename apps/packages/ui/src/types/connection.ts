@@ -72,18 +72,6 @@ export const deriveConnectionUxState = (
     return "demo_mode"
   }
 
-  // Explicit onboarding steps when unconfigured.
-  if (phase === ConnectionPhase.UNCONFIGURED) {
-    if (configStep === "url") {
-      return "configuring_url"
-    }
-    if (configStep === "auth") {
-      return "configuring_auth"
-    }
-    return "unconfigured"
-  }
-
-  // Any active check maps to a testing state.
   // Treat offline bypass the same as a healthy connection for UX.
   if (offlineBypass && isConnected) {
     return "connected_ok"
@@ -99,6 +87,17 @@ export const deriveConnectionUxState = (
   // Any active check maps to a testing state.
   if (phase === ConnectionPhase.SEARCHING || isChecking) {
     return "testing"
+  }
+
+  // Explicit onboarding steps when unconfigured.
+  if (phase === ConnectionPhase.UNCONFIGURED) {
+    if (configStep === "url") {
+      return "configuring_url"
+    }
+    if (configStep === "auth") {
+      return "configuring_auth"
+    }
+    return "unconfigured"
   }
 
   if (phase === ConnectionPhase.CONNECTED) {

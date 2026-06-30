@@ -4,7 +4,7 @@
 
 **Goal:** Execute the approved RAG architecture and maintainability review and produce one evidence-backed stage report per slice plus a final synthesis for the `tldw_Server_API/app/core/RAG` surface and its direct API boundaries.
 
-**Architecture:** This is a read-first, staged audit plan. Execution starts with a broad architecture survey and fixed review scaffold, then moves through the unified pipeline, API/schema boundaries, retrieval seams, and reranking or post-retrieval seams in order. Each stage writes findings before suggested actions, uses only the smallest relevant test set to confirm or sharpen claims, and commits docs-only review artifacts that later remediation work can reference. Prefer executing the review in a dedicated git worktree; if that is not available, keep the run docs-only and never revert or disturb unrelated workspace changes.
+**Architecture:** This is a read-first, staged audit plan. Execution starts with a broad architecture survey and fixed review scaffold, then moves through the unified pipeline, API/schema boundaries, retrieval seams, and reranking or post-retrieval seams in order. Each stage writes findings before suggested actions, uses only the smallest relevant test set to confirm or sharpen claims, and commits docs-only review artifacts that later remediation work can reference. Prefer executing the review in a dedicated git worktree; if that is not available, keep the run docs-only and never revert or disturb unrelated workspace changes. In this isolated worktree, activate the shared project virtualenv with `source ../../.venv/bin/activate` from the worktree root before running Python or pytest commands.
 
 **Tech Stack:** Python 3, FastAPI, SQLite, ChromaDB/pgvector adapters, pytest, ripgrep, git, Markdown
 
@@ -105,13 +105,13 @@
 **Goal:** Create the review scaffold, capture the exact source and test surface, record hotspot size and churn, and assign any secondary hotspots to later stages so no important seam is left unowned.
 **Success Criteria:** Review artifacts exist under `Docs/superpowers/reviews/rag/`, the seed-set inventory and git-history baseline are recorded, hotspot modules are named explicitly, and the Stage 1 exit note routes any newly discovered hotspot into a later stage.
 **Tests:** None
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 2: Unified Pipeline Orchestration
 **Goal:** Review `unified_pipeline.py` and its closest type contracts as the central orchestration layer.
 **Success Criteria:** Phase ordering, ownership boundaries, parameter sprawl, and metadata or response-shaping leakage are documented with evidence and tied to concrete tests where available.
 **Tests:** `test_unified_pipeline.py`, `unit/test_unified_pipeline.py`, `unit/test_unified_pipeline_decomposition.py`, `unit/test_unified_pipeline_focused.py`, `unit/test_unified_pipeline_profile_metadata.py`, `unit/test_pipeline_generation_controls.py`, `unit/test_pipeline_post_verification_metadata.py`, `unit/test_unified_pipeline_structured_writer.py`
-**Status:** Not Started
+**Status:** Complete
 
 ## Stage 3: API, Schema, and Request Boundaries
 **Goal:** Review endpoint, schema, profile-default, and request-mapping ownership around the RAG API surfaces.
@@ -149,7 +149,7 @@
 - Create: `Docs/superpowers/reviews/rag/2026-04-07-stage6-test-gaps-and-synthesis.md`
 - Test: none
 
-- [ ] **Step 1: Create the review output directory**
+- [x] **Step 1: Create the review output directory**
 
 Run:
 ```bash
@@ -158,7 +158,7 @@ mkdir -p Docs/superpowers/reviews/rag
 
 Expected: the `Docs/superpowers/reviews/rag` directory exists and no source files change.
 
-- [ ] **Step 1.5: Verify the execution environment is safe for a docs-only staged review**
+- [x] **Step 1.5: Verify the execution environment is safe for a docs-only staged review**
 
 Run:
 ```bash
@@ -168,7 +168,7 @@ git status --short
 
 Expected: ideally this runs inside a dedicated worktree; if it does not, record that the review must remain docs-only and that unrelated local changes must not be touched or reverted.
 
-- [ ] **Step 2: Create one markdown file per stage with a fixed review template**
+- [x] **Step 2: Create one markdown file per stage with a fixed review template**
 
 Each stage file should contain:
 ```markdown
@@ -184,7 +184,7 @@ Each stage file should contain:
 ## Exit Note
 ```
 
-- [ ] **Step 3: Write `Docs/superpowers/reviews/rag/README.md`**
+- [x] **Step 3: Write `Docs/superpowers/reviews/rag/README.md`**
 
 Document:
 - the stage order `1 -> 2 -> 3 -> 4 -> 5 -> 6`
@@ -193,11 +193,11 @@ Document:
 - the rule that uncertain items are labeled as probable risks or assumptions instead of confirmed defects
 - the rule that later stage summaries point back to the stage files instead of replacing them
 
-- [ ] **Step 4: Capture the scoped source inventory**
+- [x] **Step 4: Capture the scoped source inventory**
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 rg --files \
   tldw_Server_API/app/core/RAG \
   tldw_Server_API/app/api/v1/endpoints/rag_unified.py \
@@ -209,11 +209,11 @@ rg --files \
 
 Expected: a stable source list that captures the core RAG tree plus the direct API boundary files.
 
-- [ ] **Step 5: Capture the scoped test inventory**
+- [x] **Step 5: Capture the scoped test inventory**
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 rg --files \
   tldw_Server_API/tests/RAG \
   tldw_Server_API/tests/RAG_NEW \
@@ -223,7 +223,7 @@ rg --files \
 
 Expected: a stable list of direct RAG and RAG-adjacent tests that later stages can cite.
 
-- [ ] **Step 6: Capture hotspot size and recent-history baselines**
+- [x] **Step 6: Capture hotspot size and recent-history baselines**
 
 Run:
 ```bash
@@ -234,14 +234,18 @@ wc -l \
   tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py
 
 git log --oneline -n 20 -- \
-  tldw_Server_API/app/core/RAG \
-  tldw_Server_API/app/api/v1/endpoints/rag_unified.py \
-  tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py
+  tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py
+git log --oneline -n 20 -- \
+  tldw_Server_API/app/api/v1/endpoints/rag_unified.py
+git log --oneline -n 20 -- \
+  tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py
+git log --oneline -n 20 -- \
+  tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py
 ```
 
 Expected: a size map and churn baseline that justify which files deserve deeper review first.
 
-- [ ] **Step 7: Map the initial seed-set ownership surface**
+- [x] **Step 7: Map the initial seed-set ownership surface**
 
 Run:
 ```bash
@@ -252,12 +256,12 @@ rg -n "async def unified_rag_pipeline|async def agentic_rag_pipeline|def _build_
   tldw_Server_API/app/core/RAG/rag_service/types.py \
   tldw_Server_API/app/core/RAG/rag_service/vector_stores/factory.py \
   tldw_Server_API/app/api/v1/endpoints/rag_unified.py \
-  tldw_Server_API/app/api/v1/utils/rag_cache.py
+  tldw_Server_API/app/api/v1/utils/rag_cache.py | sort
 ```
 
 Expected: a compact map of the ownership seams that Stage 1 must route into later stages.
 
-- [ ] **Step 8: Write the Stage 1 report**
+- [x] **Step 8: Write the Stage 1 report**
 
 Record:
 - the scoped source and test inventories
@@ -265,7 +269,7 @@ Record:
 - any newly discovered secondary hotspots and the stage they belong to
 - the Stage 1 exit note that assigns unowned seams before deeper review begins
 
-- [ ] **Step 9: Verify the workspace starts in a safe state**
+- [x] **Step 9: Verify the workspace starts in a safe state**
 
 Run:
 ```bash
@@ -274,7 +278,7 @@ git status --short
 
 Expected: unrelated local changes may exist, but the RAG review setup itself only adds docs under `Docs/superpowers/reviews/rag/` and this plan file.
 
-- [ ] **Step 10: Commit the scaffold and Stage 1 survey**
+- [x] **Step 10: Commit the scaffold and Stage 1 survey**
 
 Run:
 ```bash
@@ -301,7 +305,7 @@ Expected: one docs-only commit captures the review workspace and Stage 1 invento
 - Test: `tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_post_verification_metadata.py`
 - Test: `tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_structured_writer.py`
 
-- [ ] **Step 1: Map the orchestration entry points and phase toggles**
+- [x] **Step 1: Map the orchestration entry points and phase toggles**
 
 Run:
 ```bash
@@ -312,7 +316,7 @@ rg -n "async def unified_rag_pipeline|async def unified_batch_pipeline|def simpl
 
 Expected: a compact map of the public entry points, major flags, and response-shaping fields.
 
-- [ ] **Step 2: Trace phase ownership inside `unified_pipeline.py`**
+- [x] **Step 2: Trace phase ownership inside `unified_pipeline.py`**
 
 Confirm:
 - where query preparation ends and retrieval begins
@@ -320,18 +324,18 @@ Confirm:
 - where metadata and response-shaping logic are embedded instead of delegated
 - whether internal helper sections behave like hidden sub-pipelines
 
-- [ ] **Step 3: Review the focused pipeline tests and extract the protected invariants**
+- [x] **Step 3: Review the focused pipeline tests and extract the protected invariants**
 
 For each listed test file, record:
 - the main orchestration invariant it protects
 - whether it checks decomposition boundaries or only happy-path behavior
 - which probable risks can be upgraded or downgraded because of it
 
-- [ ] **Step 4: Run the targeted unified-pipeline tests**
+- [x] **Step 4: Run the targeted unified-pipeline tests**
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/RAG_NEW/test_unified_pipeline.py \
   tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline.py \
@@ -345,7 +349,7 @@ python -m pytest \
 
 Expected: tests collect and mostly pass; any failure either sharpens a pipeline finding or must be explained as environment-specific noise.
 
-- [ ] **Step 5: Write the Stage 2 report**
+- [x] **Step 5: Write the Stage 2 report**
 
 Record:
 - ranked findings with severity and confidence
@@ -353,7 +357,7 @@ Record:
 - suggested refactor directions that reduce coupling without turning into a rewrite plan
 - the exit note for what Stage 3 must verify at the endpoint boundary
 
-- [ ] **Step 6: Commit the Stage 2 report**
+- [x] **Step 6: Commit the Stage 2 report**
 
 Run:
 ```bash
@@ -417,7 +421,7 @@ For each listed test file, record:
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py \
   tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_response_mapping.py \
@@ -456,6 +460,8 @@ Expected: one docs-only commit contains the Stage 3 report.
 - Modify: `Docs/superpowers/reviews/rag/2026-04-07-stage4-retrieval-boundaries-and-data-sources.md`
 - Inspect: `tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py`
 - Inspect: `tldw_Server_API/app/core/RAG/rag_service/query_expansion.py`
+- Inspect: `tldw_Server_API/app/core/RAG/rag_service/hyde.py`
+- Inspect: `tldw_Server_API/app/core/RAG/rag_service/query_classifier.py`
 - Inspect: `tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py`
 - Inspect: `tldw_Server_API/app/core/RAG/rag_service/media_search.py`
 - Inspect: `tldw_Server_API/app/core/RAG/rag_service/web_fallback.py`
@@ -484,6 +490,8 @@ Run:
 rg -n "class (.*Retriever|.*Adapter)|def (retrieve|search|expand|initialize|create_|delete_by_filter|get_shared_cache|lookup|store|merge)|DataSource|index_namespace|vector_store_type" \
   tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py \
   tldw_Server_API/app/core/RAG/rag_service/query_expansion.py \
+  tldw_Server_API/app/core/RAG/rag_service/hyde.py \
+  tldw_Server_API/app/core/RAG/rag_service/query_classifier.py \
   tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py \
   tldw_Server_API/app/core/RAG/rag_service/media_search.py \
   tldw_Server_API/app/core/RAG/rag_service/web_fallback.py \
@@ -499,7 +507,7 @@ Expected: a concise map of the retrieval seams, factory entry points, and cache 
 
 Confirm:
 - how database retrievers expose source-specific behavior
-- where query expansion or fallback logic leaks retrieval-policy knowledge
+- where query expansion, HYDE, query classification, or fallback logic leaks retrieval-policy knowledge
 - how vector-store factories and adapters couple settings, user namespaces, and collection names
 - whether semantic caching is owned cleanly or bleeds assumptions across the API and core layers
 
@@ -514,7 +522,7 @@ For each listed test file, record:
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/RAG_NEW/unit/test_retrieval.py \
   tldw_Server_API/tests/RAG_NEW/unit/test_vector_store_parity.py \
@@ -617,7 +625,7 @@ For each listed test file, record:
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/RAG_NEW/unit/test_two_tier_reranker.py \
   tldw_Server_API/tests/RAG_NEW/unit/test_pipeline_two_tier_gate.py \
@@ -697,7 +705,7 @@ Record:
 
 Run:
 ```bash
-source .venv/bin/activate
+source ../../.venv/bin/activate
 python -m pytest \
   tldw_Server_API/tests/RAG_NEW/unit/test_unified_pipeline_decomposition.py \
   tldw_Server_API/tests/RAG_NEW/unit/test_rag_unified_search_agent_defaults.py \

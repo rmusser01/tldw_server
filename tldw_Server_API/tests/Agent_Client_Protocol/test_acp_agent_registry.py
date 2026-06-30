@@ -5,6 +5,7 @@ import os
 import tempfile
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -28,6 +29,10 @@ agents:
     env: {}
     requires_api_key: null
     default: false
+    support_state: supported_with_caveats
+    verification_level: stub_smoke_tested
+    compatibility_notes: Stub protocol coverage only
+    compatibility_docs_url: /docs-static/Development/ACP_Compatibility_Matrix.md
 """
 
 
@@ -98,6 +103,27 @@ agents:
     assert entry.mcp_llm_model == "gpt-4o"
     assert entry.mcp_max_iterations == 7
     assert entry.mcp_refresh_tools is True
+
+
+def test_registry_loads_compatibility_fields_from_yaml(registry_file):
+    """YAML-defined compatibility fields should populate registry entries and availability."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
+
+    reg = AgentRegistry(yaml_path=registry_file)
+    reg.load()
+
+    entry = reg.get_entry("test_agent")
+    assert entry is not None
+    assert entry.support_state == "supported_with_caveats"
+    assert entry.verification_level == "stub_smoke_tested"
+    assert entry.compatibility_notes == "Stub protocol coverage only"
+    assert entry.compatibility_docs_url == "/docs-static/Development/ACP_Compatibility_Matrix.md"
+
+    availability = entry.check_availability()
+    assert availability["support_state"] == "supported_with_caveats"
+    assert availability["verification_level"] == "stub_smoke_tested"
+    assert availability["compatibility_notes"] == "Stub protocol coverage only"
+    assert availability["compatibility_docs_url"] == "/docs-static/Development/ACP_Compatibility_Matrix.md"
 
 
 def test_registry_get_entry_none(registry_file):
@@ -286,8 +312,187 @@ def test_registry_loads_new_agent_types():
     types = {e.type for e in entries}
     assert "aider" in types
     assert "goose" in types
+    assert "hermes" in types
     assert "continue_dev" in types
     assert "claude_code" in types
+
+
+def test_default_agents_yaml_includes_hermes_native_acp_entrypoint() -> None:
+    """Hermes is shipped as a native ACP profile with its accept-hooks stdio entrypoint."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
+
+    real_yaml = os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "agents.yaml",
+    )
+    real_yaml = os.path.abspath(real_yaml)
+    registry = AgentRegistry(yaml_path=real_yaml)
+
+    entry = registry.get_entry("hermes")
+
+    assert entry is not None
+    assert entry.name == "Hermes"
+    assert entry.entrypoint_strategy == "native_acp"
+    assert entry.command == "hermes"
+    assert entry.acp_command == "hermes"
+    assert entry.acp_args == ["acp", "--accept-hooks"]
+    assert entry.support_state == "supported_with_caveats"
+    assert entry.verification_level == "live_e2e_tested"
+
+
+def test_default_agents_yaml_includes_goose_backend_live_e2e_metadata() -> None:
+    """Goose is shipped as a native ACP profile with backend live-E2E evidence."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
+
+    real_yaml = os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "agents.yaml",
+    )
+    real_yaml = os.path.abspath(real_yaml)
+    registry = AgentRegistry(yaml_path=real_yaml)
+
+    entry = registry.get_entry("goose")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "native_acp"
+    assert entry.command == "goose"
+    assert entry.acp_command == "goose"
+    assert entry.acp_args == ["acp"]
+    assert entry.support_state == "supported_with_caveats"
+    assert entry.verification_level == "live_e2e_tested"
+    assert "backend live E2E" in entry.compatibility_notes
+    assert "commit f9ff03f88" in entry.compatibility_notes
+
+
+def test_default_agents_yaml_includes_opencode_backend_live_e2e_metadata() -> None:
+    """OpenCode is shipped as a native ACP profile with backend live-E2E evidence."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
+
+    real_yaml = os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "agents.yaml",
+    )
+    real_yaml = os.path.abspath(real_yaml)
+    registry = AgentRegistry(yaml_path=real_yaml)
+
+    entry = registry.get_entry("opencode")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "native_acp"
+    assert entry.command == "opencode"
+    assert entry.acp_command == "opencode"
+    assert entry.acp_args == ["acp"]
+    assert entry.support_state == "supported_with_caveats"
+    assert entry.verification_level == "live_e2e_tested"
+    assert "backend live E2E" in entry.compatibility_notes
+    assert "local llama.cpp" in entry.compatibility_notes
+    assert "commit 53c018269" in entry.compatibility_notes
+
+
+def test_default_agents_yaml_includes_codex_backend_live_e2e_metadata() -> None:
+    """Codex is shipped as an external adapter profile with backend live-E2E evidence."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
+
+    real_yaml = os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "agents.yaml",
+    )
+    real_yaml = os.path.abspath(real_yaml)
+    registry = AgentRegistry(yaml_path=real_yaml)
+
+    entry = registry.get_entry("codex")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "external_acp_adapter"
+    assert entry.command == "codex"
+    assert entry.acp_command == "codex-acp"
+    assert entry.acp_args == []
+    assert entry.support_state == "supported_with_caveats"
+    assert entry.verification_level == "live_e2e_tested"
+    assert entry.certification_blocker is None
+    assert entry.adapter_package == "@zed-industries/codex-acp"
+    assert entry.adapter_version == "0.15.0"
+    assert entry.credential_policy == "delegated_to_adapter"
+    assert "backend live E2E" in entry.compatibility_notes
+    assert "codex/acp-codex-orchestration-progress" in entry.compatibility_notes
+
+
+def test_default_agents_yaml_keeps_aider_as_unverified_adapter_candidate() -> None:
+    """Aider can expose an adapter candidate while remaining uncertified for ACP support."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import AgentRegistry
+
+    real_yaml = os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "agents.yaml",
+    )
+    real_yaml = os.path.abspath(real_yaml)
+    registry = AgentRegistry(yaml_path=real_yaml)
+
+    entry = registry.get_entry("aider")
+
+    assert entry is not None
+    assert entry.entrypoint_strategy == "external_acp_adapter"
+    assert entry.command == "aider"
+    assert entry.acp_command == "aider-acp"
+    assert entry.acp_args == []
+    assert entry.adapter_source == "jorgejhms/aider-acp"
+    assert entry.adapter_docs_url == "https://github.com/jorgejhms/aider-acp"
+    assert entry.adapter_package == "aider-acp"
+    assert entry.adapter_version_policy == "operator_managed"
+    assert entry.adapter_install_source == "operator_managed"
+    assert entry.credential_policy == "delegated_to_adapter"
+    assert entry.support_state == "documented_unverified"
+    assert entry.verification_level == "documented_only"
+    assert "external adapter candidate" in entry.compatibility_notes
+    assert "not installed or live-E2E certified" in entry.compatibility_notes
+
+
+def test_default_runner_home_config_exposes_goose_backend_profile() -> None:
+    """The bundled runner config should know the same Goose profile used by the API registry."""
+    runner_config = os.path.abspath(os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "acp_runner_home", ".tldw-agent", "config.yaml",
+    ))
+
+    with open(runner_config, "r", encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle)
+
+    entries = {
+        entry["type"]: entry
+        for entry in payload["agents"]["agents"]
+    }
+
+    goose = entries["goose"]
+    assert goose["command"] == "goose"
+    assert goose["args"] == ["acp"]
+    assert "TERM=xterm-256color" in goose["env"]
+    assert "HOME=${TLDW_ACP_HOST_HOME}" in goose["env"]
+
+
+def test_default_runner_home_config_exposes_codex_external_adapter_profile() -> None:
+    """The bundled runner config should launch Codex through codex-acp."""
+    runner_config = os.path.abspath(os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "Config_Files", "acp_runner_home", ".tldw-agent", "config.yaml",
+    ))
+
+    with open(runner_config, "r", encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle)
+
+    entries = {
+        entry["type"]: entry
+        for entry in payload["agents"]["agents"]
+    }
+
+    codex = entries["codex"]
+    assert codex["command"] == "codex"
+    assert codex["entrypoint_strategy"] == "external_acp_adapter"
+    assert codex["acp_command"] == "codex-acp"
+    assert codex["acp_args"] == []
+    assert codex["adapter_package"] == "@zed-industries/codex-acp"
+    assert codex["adapter_version"] == "0.15.0"
+    assert codex["credential_policy"] == "delegated_to_adapter"
+    assert "HOME=${TLDW_ACP_HOST_HOME}" in codex["env"]
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +526,10 @@ agents:
 
 
 class TestDynamicRegistration:
+    """Tests for database-backed dynamic ACP agent registrations."""
+
     def test_register_agent(self, db_registry):
+        """Registering an agent should add it to the active registry."""
         entry = db_registry.register_agent(
             type="my_agent", name="My Agent", command="my-agent-cli",
         )
@@ -329,26 +537,31 @@ class TestDynamicRegistration:
         assert db_registry.get_entry("my_agent") is not None
 
     def test_deregister_agent(self, db_registry):
+        """Deregistering a dynamic agent should remove it from lookups."""
         db_registry.register_agent(type="tmp", name="Tmp", command="tmp")
         assert db_registry.deregister_agent("tmp") is True
         assert db_registry.get_entry("tmp") is None
 
     def test_deregister_nonexistent(self, db_registry):
+        """Deregistering an unknown dynamic agent should report no-op."""
         assert db_registry.deregister_agent("nonexistent") is False
 
     def test_yaml_entries_preserved_after_register(self, db_registry):
+        """Registering dynamic agents should not remove YAML-defined entries."""
         assert db_registry.get_entry("claude_code") is not None
         db_registry.register_agent(type="new", name="New", command="new")
         assert db_registry.get_entry("claude_code") is not None
         assert db_registry.get_entry("new") is not None
 
     def test_api_overrides_yaml_same_type(self, db_registry):
+        """A dynamic registration should override a YAML entry with the same type."""
         db_registry.register_agent(type="claude_code", name="Custom Claude", command="my-claude")
         entry = db_registry.get_entry("claude_code")
         assert entry.name == "Custom Claude"
         assert entry.command == "my-claude"
 
     def test_update_agent(self, db_registry):
+        """Updating a dynamic agent should persist changed fields in the registry."""
         db_registry.register_agent(type="my_agent", name="My Agent", command="cmd")
         updated = db_registry.update_agent("my_agent", name="Updated Agent", description="new desc")
         assert updated is not None
@@ -356,6 +569,7 @@ class TestDynamicRegistration:
         assert updated.description == "new desc"
 
     def test_update_nonexistent(self, db_registry):
+        """Updating an unknown dynamic agent should return None."""
         assert db_registry.update_agent("nonexistent", name="foo") is None
 
     def test_persistence_across_reload(self, db_registry):

@@ -452,9 +452,9 @@ class AuthnzBillingRepo:
         if not updates:
             return await self.get_org_subscription(org_id)
 
-        # SECURITY: Verify column names are in the allowed whitelist before dynamic SQL
-        # This assertion should never fail since we filtered above, but provides defense-in-depth
-        assert all(k in allowed_fields for k in updates), "Invalid column name in updates"
+        # SECURITY: Verify column names are in the allowed whitelist before dynamic SQL.
+        if any(k not in allowed_fields for k in updates):
+            raise ValueError("Invalid column name in updates")
 
         try:
             async with self.db_pool.transaction() as conn:

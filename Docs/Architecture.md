@@ -30,7 +30,7 @@ Think of the architecture as:
 
 The goal is to keep endpoints thin, push logic into core modules, and keep storage access centralized via `core/DB_Management/` and the vector store adapters.
 
-For a visual diagram, see `README.md` (Architecture Diagram) and `Docs/Code_Documentation/Code_Map.md`.
+For a visual diagram, see `README.md` (Architecture Diagram) and `Docs/Code_Documentation/Code_Map.md`. For detailed backend data flow and process diagrams, see `Docs/Code_Documentation/Data_Flow_Atlas.md`.
 
 ---
 
@@ -198,7 +198,7 @@ This section highlights common flows a new contributor will likely touch.
 ### 5.1 Media Ingestion → Chunking → Embeddings → RAG
 
 1. Client calls one of the `POST /api/v1/media/process-*` endpoints (e.g., `/process-documents`, `/process-videos`, `/process-audios`) or `/api/v1/media/add` when also persisting to the Media DB.
-2. Endpoint in `app/api/v1/endpoints/media.py`:
+2. Endpoint package `app/api/v1/endpoints/media/`:
    - Validates input and resolves user/context.
    - Calls into `core/Ingestion_Media_Processing/`.
 3. Ingestion module:
@@ -278,8 +278,9 @@ Note: `<USER_DB_BASE_DIR>` is defined in `tldw_Server_API.app.core.config`, defa
 - Per-user prompts DB under `<USER_DB_BASE_DIR>/<user_id>/prompts_user_dbs/user_prompts_v2.sqlite`.
 
 ### Evaluations DB
-- `Databases/evaluations.db`.
-- Centralized schema for evaluations, metrics, and audit logs.
+- Per-user SQLite DB under `<USER_DB_BASE_DIR>/<user_id>/evaluations/evaluations.db`.
+- Stores evaluations, metrics, and audit logs for the resolved user context.
+- Root-level `Databases/evaluations.db` may exist as a legacy/fallback path; use `DatabasePaths.get_evaluations_db_path(user_id)` for normal access.
 
 ### Vector Store
 - Default: ChromaDB, usually per-user under `<USER_DB_BASE_DIR>/<user_id>/chroma_storage/`.

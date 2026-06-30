@@ -93,8 +93,8 @@ contextual fields automatically. Similar helpers can be added for domain-specifi
 events-mirror the pattern so tests can stub them easily.
 
 ### Export & Reporting
-The service exposes `export_events(...)` (CSV/JSONL), `get_daily_stats(...)`,
-`get_recent_events(...)`, and other query helpers used by the API endpoints in
+The service exposes `query_events(...)`, `count_events(...)`, `export_events(...)`
+(CSV/JSONL), `get_security_summary(...)`, and other query helpers used by the API endpoints in
 `app/api/v1/endpoints/audit.py`. Keep export code async (it uses the same pooled
 connection and locks) to avoid blocking the event loop.
 

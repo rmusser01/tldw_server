@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     get_eval_request_user,
     require_eval_permissions,
@@ -19,7 +20,7 @@ from tldw_Server_API.app.api.v1.schemas.synthetic_eval_schemas import (
     SyntheticEvalReviewActionRecord,
     SyntheticEvalReviewRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.synthetic_eval_service import (
     get_synthetic_eval_service_for_user,
@@ -99,7 +100,17 @@ async def list_synthetic_queue(
         limit=limit,
         offset=offset,
     )
-    return SyntheticEvalQueueResponse.model_validate(queue)
+    return SyntheticEvalQueueResponse.model_validate(
+        {
+            **queue,
+            "pagination": build_offset_pagination_meta(
+                total=queue["total"],
+                limit=limit,
+                offset=offset,
+                count=len(queue["data"]),
+            ),
+        }
+    )
 
 
 @synthetic_router.post(

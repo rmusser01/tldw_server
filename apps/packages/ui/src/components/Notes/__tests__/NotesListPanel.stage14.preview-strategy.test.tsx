@@ -57,6 +57,7 @@ describe("NotesListPanel stage 14 preview strategy", () => {
         selectedId={null}
         onSelectNote={vi.fn()}
         onChangePage={vi.fn()}
+        onCreateNote={vi.fn()}
         onResetEditor={vi.fn()}
         onOpenSettings={vi.fn()}
         onOpenHealth={vi.fn()}

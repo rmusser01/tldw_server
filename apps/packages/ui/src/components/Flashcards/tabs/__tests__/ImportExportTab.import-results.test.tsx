@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ImportExportTab } from "../ImportExportTab"
 import { FLASHCARDS_HELP_LINKS, FLASHCARDS_LAYOUT_GUARDRAILS } from "../../constants"
@@ -38,7 +39,8 @@ const messageSpies = {
 }
 const showUndoNotificationMock = vi.fn()
 const invalidateQueriesMock = vi.fn()
-const { useQueryMock } = vi.hoisted(() => ({
+const { translationOverrides, useQueryMock } = vi.hoisted(() => ({
+  translationOverrides: new Map<string, string>(),
   useQueryMock: vi.fn()
 }))
 
@@ -73,6 +75,8 @@ vi.mock("react-i18next", () => ({
             defaultValue?: string
           }
     ) => {
+      const override = translationOverrides.get(key)
+      if (override !== undefined) return override
       if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
       if (defaultValueOrOptions?.defaultValue) {
         return defaultValueOrOptions.defaultValue.replace(
@@ -149,9 +153,27 @@ const createApkgFile = (
   return file
 }
 
+const openTransferTask = async (
+  label: string,
+  panelTestId: "flashcards-import-task-panel" | "flashcards-export-task-panel"
+) => {
+  const user = userEvent.setup()
+  await user.click(screen.getByText(label))
+  const panel = screen.getByTestId(panelTestId)
+  expect(panel).toBeVisible()
+  expect(panel).not.toHaveClass("hidden")
+  return panel
+}
+
+const openImportTask = () => openTransferTask("Import file", "flashcards-import-task-panel")
+
+const openExportTask = () =>
+  openTransferTask("Export backup", "flashcards-export-task-panel")
+
 describe("ImportExportTab import result details", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    translationOverrides.clear()
     invalidateQueriesMock.mockReset()
     useQueryMock.mockReturnValue({
       data: 42,
@@ -255,6 +277,7 @@ describe("ImportExportTab import result details", () => {
 
   it("shows expandable import help references for columns/delimiter/json mapping", async () => {
     render(<ImportExportTab />)
+    await openImportTask()
 
     expect(screen.getByTestId("flashcards-import-help-accordion")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-import-help-columns")).toBeInTheDocument()
@@ -295,6 +318,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
       target: {
@@ -303,7 +327,9 @@ describe("ImportExportTab import result details", () => {
     })
     fireEvent.click(screen.getByTestId("flashcards-import-button"))
 
-    expect(await screen.findByText("Last import: 2 imported, 1 skipped")).toBeInTheDocument()
+    const lastResultAlert = await screen.findByTestId("flashcards-import-last-result")
+    expect(lastResultAlert).toHaveAttribute("data-ds-component", "Alert")
+    expect(screen.getByText("Last import: 2 imported, 1 skipped")).toBeInTheDocument()
     expect(screen.getByText("Line 15")).toBeInTheDocument()
     expect(screen.getByText("Missing required field: Front")).toBeInTheDocument()
     expect(
@@ -334,6 +360,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
       target: {
@@ -354,6 +381,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
       target: {
@@ -361,12 +389,36 @@ describe("ImportExportTab import result details", () => {
       }
     })
 
-    expect(screen.getByTestId("flashcards-import-preflight-warning")).toBeInTheDocument()
+    const preflightWarning = screen.getByTestId("flashcards-import-preflight-warning")
+    expect(preflightWarning).toBeInTheDocument()
+    expect(preflightWarning).toHaveAttribute("data-ds-component", "Alert")
     expect(
       screen.getByText(
         "Selected delimiter (Tab) may be incorrect. This sample looks Comma-delimited."
       )
     ).toBeInTheDocument()
+  })
+
+  it("documents current invalid import failure preserving input and exiting loading", async () => {
+    const invalidPayload = "invalid import payload"
+    vi.mocked(useImportFlashcardsMutation).mockReturnValue({
+      mutateAsync: vi.fn().mockRejectedValue(new Error("Invalid import payload")),
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+    await openImportTask()
+
+    fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
+      target: { value: invalidPayload }
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^import$/i }))
+
+    await waitFor(() => {
+      expect(messageSpies.error).toHaveBeenCalledWith("Invalid import payload")
+    })
+    expect(screen.getByRole("button", { name: /^import$/i })).toBeEnabled()
+    expect(screen.getByDisplayValue(invalidPayload)).toBeInTheDocument()
   })
 
   it("requires confirmation before importing very large batches", async () => {
@@ -383,6 +435,7 @@ describe("ImportExportTab import result details", () => {
     const rows = Array.from({ length: 301 }, (_, idx) => `Deck\tFront ${idx}\tBack ${idx}`).join("\n")
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
       target: {
@@ -423,6 +476,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -475,6 +529,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -537,6 +592,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -569,6 +625,49 @@ describe("ImportExportTab import result details", () => {
         reverse: false
       })
     ])
+  })
+
+  it("renders structured preview warnings with design-system alerts", async () => {
+    const previewMutateAsync = vi.fn().mockResolvedValue({
+      detected_format: "qa_labels",
+      skipped_blocks: 1,
+      errors: [{ line: 3, error: "Skipped unlabeled block" }],
+      drafts: [
+        {
+          front: "What is ATP?",
+          back: "Primary energy currency.",
+          line_start: 1,
+          line_end: 2,
+          tags: []
+        }
+      ]
+    })
+    vi.mocked(usePreviewStructuredQaImportMutation).mockReturnValue({
+      mutateAsync: previewMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+    await openImportTask()
+
+    const formatSelect = screen.getByTestId("flashcards-import-format")
+    fireEvent.mouseDown(
+      formatSelect.querySelector(".ant-select-selector") ?? formatSelect
+    )
+    fireEvent.click(screen.getByText("Structured Q&A"))
+
+    fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
+      target: { value: "Q: What is ATP?\nA: Primary energy currency.\nNotes only." }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-structured-preview-button"))
+
+    const previewWarning = await screen.findByTestId(
+      "flashcards-structured-preview-errors"
+    )
+    expect(previewWarning).toHaveAttribute("data-ds-component", "Alert")
+    expect(previewWarning).toHaveTextContent("Preview warnings")
+    expect(previewWarning).toHaveTextContent("Line 3")
+    expect(previewWarning).toHaveTextContent("Skipped unlabeled block")
   })
 
   it("keeps selected invalid structured drafts in the editor when saving", async () => {
@@ -613,6 +712,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -652,6 +752,162 @@ describe("ImportExportTab import result details", () => {
     )
   })
 
+  it("keeps structured drafts editable when bulk save returns zero created cards without details", async () => {
+    const previewMutateAsync = vi.fn().mockResolvedValue({
+      detected_format: "qa_labels",
+      skipped_blocks: 0,
+      errors: [],
+      drafts: [
+        {
+          front: "What is ATP?",
+          back: "Primary energy currency.",
+          line_start: 1,
+          line_end: 2,
+          tags: []
+        }
+      ]
+    })
+    const createBulkMutateAsync = vi.fn().mockResolvedValue({
+      items: [],
+      count: 0,
+      total: 0
+    })
+    vi.mocked(usePreviewStructuredQaImportMutation).mockReturnValue({
+      mutateAsync: previewMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardsBulkMutation).mockReturnValue({
+      mutateAsync: createBulkMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+    await openImportTask()
+
+    const formatSelect = screen.getByTestId("flashcards-import-format")
+    fireEvent.mouseDown(
+      formatSelect.querySelector(".ant-select-selector") ?? formatSelect
+    )
+    fireEvent.click(screen.getByText("Structured Q&A"))
+
+    fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
+      target: { value: "Q: What is ATP?\nA: Primary energy currency." }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-structured-preview-button"))
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("What is ATP?")).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId("flashcards-structured-save-button"))
+
+    await waitFor(() => {
+      expect(createBulkMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(screen.getByDisplayValue("What is ATP?")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("Primary energy currency.")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-structured-draft-selected-0")).toBeChecked()
+    expect(messageSpies.success).not.toHaveBeenCalledWith("Saved 0 structured cards.")
+    expect(messageSpies.warning).toHaveBeenCalledWith(
+      "No structured cards were saved. Details are unavailable."
+    )
+    expect(showUndoNotificationMock).not.toHaveBeenCalled()
+    const result = screen.getByTestId("flashcards-import-last-result")
+    expect(result).toHaveTextContent("No cards imported")
+    expect(result).toHaveTextContent("Row-level details are unavailable")
+    expect(screen.getByTestId("flashcards-transfer-summary-last-action")).toHaveTextContent(
+      "Import Flashcards · No structured cards were saved. Details are unavailable."
+    )
+  })
+
+  it("keeps structured drafts editable when zero created cards still have local errors", async () => {
+    const previewMutateAsync = vi.fn().mockResolvedValue({
+      detected_format: "qa_labels",
+      skipped_blocks: 1,
+      errors: [{ line: 9, error: "Skipped unlabeled block" }],
+      drafts: [
+        {
+          front: "What is ATP?",
+          back: "Energy.",
+          line_start: 1,
+          line_end: 2,
+          tags: []
+        },
+        {
+          front: "What is glycolysis after repeated repetition?",
+          back: "Cytosolic glucose breakdown.",
+          line_start: 4,
+          line_end: 5,
+          tags: []
+        }
+      ]
+    })
+    const createBulkMutateAsync = vi.fn().mockResolvedValue({
+      items: [],
+      count: 0,
+      total: 0
+    })
+    vi.mocked(usePreviewStructuredQaImportMutation).mockReturnValue({
+      mutateAsync: previewMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardsBulkMutation).mockReturnValue({
+      mutateAsync: createBulkMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useImportLimitsQuery).mockReturnValue({
+      data: {
+        max_field_length: 16
+      }
+    } as any)
+
+    render(<ImportExportTab />)
+    await openImportTask()
+
+    const formatSelect = screen.getByTestId("flashcards-import-format")
+    fireEvent.mouseDown(
+      formatSelect.querySelector(".ant-select-selector") ?? formatSelect
+    )
+    fireEvent.click(screen.getByText("Structured Q&A"))
+
+    fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
+      target: { value: "Q: What is ATP?\nA: Energy.\n\nNotes without labels" }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-structured-preview-button"))
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("What is ATP?")).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByTestId("flashcards-structured-save-button"))
+
+    await waitFor(() => {
+      expect(createBulkMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(screen.getByDisplayValue("What is ATP?")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("Energy.")).toBeInTheDocument()
+    expect(
+      screen.getByDisplayValue("What is glycolysis after repeated repetition?")
+    ).toBeInTheDocument()
+    expect(screen.getByDisplayValue("Cytosolic glucose breakdown.")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-structured-draft-selected-0")).toBeChecked()
+    expect(screen.getByTestId("flashcards-structured-draft-selected-1")).toBeChecked()
+    expect(messageSpies.success).not.toHaveBeenCalledWith(
+      "Saved 0 structured cards, skipped 2 drafts."
+    )
+    expect(messageSpies.warning).toHaveBeenCalledWith(
+      "No structured cards were saved. Review 2 errors below and retry."
+    )
+    expect(showUndoNotificationMock).not.toHaveBeenCalled()
+    const result = screen.getByTestId("flashcards-import-last-result")
+    expect(result).toHaveTextContent("Import validation failed")
+    expect(result).toHaveTextContent("Skipped unlabeled block")
+    expect(result).toHaveTextContent("Field too long: Front (> 16 bytes)")
+    expect(screen.getByTestId("flashcards-transfer-summary-last-action")).toHaveTextContent(
+      "Import Flashcards · No structured cards were saved. Review 2 errors below and retry."
+    )
+  })
+
   it("allows clearing the structured target deck without auto-restoring the first deck", async () => {
     vi.mocked(useDecksQuery).mockReturnValue({
       data: [
@@ -668,6 +924,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -708,6 +965,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -745,6 +1003,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     const formatSelect = screen.getByTestId("flashcards-import-format")
     fireEvent.mouseDown(
@@ -765,7 +1024,7 @@ describe("ImportExportTab import result details", () => {
     expect(screen.queryByText("Confirm large import")).not.toBeInTheDocument()
   })
 
-  it("maps export options and filters to export params", async () => {
+  it("maps export options and normalized tag filters to preview and export params", async () => {
     vi.mocked(useDecksQuery).mockReturnValue({
       data: [
         {
@@ -787,6 +1046,7 @@ describe("ImportExportTab import result details", () => {
     vi.mocked(exportFlashcards).mockResolvedValue("Deck,Front,Back\nBiology,Q,A")
 
     render(<ImportExportTab />)
+    await openExportTask()
 
     const deckSelect = screen.getByTestId("flashcards-export-deck")
     fireEvent.mouseDown(deckSelect.querySelector(".ant-select-selector") ?? deckSelect)
@@ -794,7 +1054,7 @@ describe("ImportExportTab import result details", () => {
     fireEvent.click(biologyOptions[biologyOptions.length - 1])
 
     fireEvent.change(screen.getByTestId("flashcards-export-tag"), {
-      target: { value: "chapter-1" }
+      target: { value: "Chapter-1" }
     })
     fireEvent.change(screen.getByTestId("flashcards-export-query"), {
       target: { value: "mitosis" }
@@ -815,6 +1075,20 @@ describe("ImportExportTab import result details", () => {
         "42 cards from Biology"
       )
     })
+    expect(screen.getByTestId("flashcards-export-preview")).toHaveAttribute(
+      "data-ds-component",
+      "Alert"
+    )
+    const exportPreviewQuery = useQueryMock.mock.calls
+      .map(([options]) => options as any)
+      .findLast((options) => options.queryKey?.[0] === "flashcards:export-preview-count")
+    expect(exportPreviewQuery.queryKey[2]).toBe("chapter-1")
+    await exportPreviewQuery.queryFn()
+    expect(listFlashcards).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tag: "chapter-1"
+      })
+    )
 
     fireEvent.click(screen.getByTestId("flashcards-export-button"))
 
@@ -833,26 +1107,232 @@ describe("ImportExportTab import result details", () => {
     })
   })
 
+  it("serializes object payloads before creating JSON export blobs", async () => {
+    const jsonPayload = {
+      cards: [
+        {
+          front: "Question",
+          back: "Answer"
+        }
+      ]
+    }
+    vi.mocked(exportFlashcards).mockResolvedValue(jsonPayload as any)
+    const createObjectURLMock = vi.fn((_blob: Blob | MediaSource) => "blob:mock")
+    ;(URL as any).createObjectURL = createObjectURLMock
+
+    render(<ImportExportTab />)
+    await openExportTask()
+
+    const formatSelect = screen.getByTestId("flashcards-export-format")
+    fireEvent.mouseDown(formatSelect.querySelector(".ant-select-selector") ?? formatSelect)
+    fireEvent.click(screen.getByText("JSON"))
+    fireEvent.click(screen.getByTestId("flashcards-export-button"))
+
+    await waitFor(() => {
+      expect(createObjectURLMock).toHaveBeenCalledTimes(1)
+    })
+    const blob = createObjectURLMock.mock.calls[0][0] as Blob
+    await expect(blob.text()).resolves.toBe(JSON.stringify(jsonPayload, null, 2))
+  })
+
   it("renders transfer summary cards for formats, limits, and last action", () => {
     vi.mocked(useImportLimitsQuery).mockReturnValue({
       data: {
-        max_cards_per_import: 500,
-        max_content_size_bytes: 1048576
+        max_lines: 500,
+        max_line_length: 32768,
+        max_field_length: 1048576
       }
     } as any)
 
     render(<ImportExportTab />)
 
+    expect(screen.queryByText("Transfer summary")).not.toBeInTheDocument()
+    expect(screen.getByText("Import/export summary")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-transfer-summary")).toBeInTheDocument()
     expect(screen.getByTestId("flashcards-transfer-summary-formats")).toHaveTextContent(
-      "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, APKG"
+      "Import: CSV, TSV, JSON, JSONL, Structured Q&A, APKG · Author: Generate, Image Occlusion · Export: TSV, CSV, JSON, APKG"
     )
-    expect(screen.getByTestId("flashcards-transfer-summary-limits")).toHaveTextContent(
-      "500 cards · 1048576 bytes"
+    const limits = screen.getByTestId("flashcards-transfer-summary-limits")
+    expect(limits).toHaveTextContent(`${(500).toLocaleString()} lines`)
+    expect(limits).toHaveTextContent(`${(32768).toLocaleString()} bytes per line`)
+    expect(limits).toHaveTextContent(`${(1048576).toLocaleString()} bytes per field`)
+    expect(limits).not.toHaveTextContent(
+      /\{\{(?:cards|bytes|lines|lineBytes|fieldBytes|maxLines|maxLineBytes|maxFieldBytes)\}\}/
     )
     expect(screen.getByTestId("flashcards-transfer-summary-last-action")).toHaveTextContent(
-      "No transfer actions yet in this session."
+      "No import/export actions yet in this session."
     )
+  })
+
+  it("falls back to concrete import limit copy when a translation leaves placeholders unresolved", () => {
+    translationOverrides.set(
+      "option:flashcards.transferSummaryLimitsValue",
+      "{{maxLines}} lines / {{maxLineBytes}} bytes per line / {{maxFieldBytes}} bytes per field"
+    )
+    vi.mocked(useImportLimitsQuery).mockReturnValue({
+      data: {
+        max_lines: 500,
+        max_line_length: 32768,
+        max_field_length: 1048576
+      }
+    } as any)
+
+    render(<ImportExportTab />)
+
+    const limits = screen.getByTestId("flashcards-transfer-summary-limits")
+    expect(limits).toHaveTextContent("500 lines / 32,768 bytes per line / 1,048,576 bytes per field")
+    expect(limits).not.toHaveTextContent("{{maxLines}}")
+    expect(limits).not.toHaveTextContent("{{maxLineBytes}}")
+    expect(limits).not.toHaveTextContent("{{maxFieldBytes}}")
+  })
+
+  it("keeps invalid import payloads editable and shows retryable validation recovery", async () => {
+    const mutateAsync = vi.fn().mockRejectedValue(
+      new Error("Missing required field: Back on line 2")
+    )
+    vi.mocked(useImportFlashcardsMutation).mockReturnValue({
+      mutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+    await openImportTask()
+
+    const invalidPayload = "Deck\tFront\tBack\nBiology\tQuestion\t"
+    fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
+      target: {
+        value: invalidPayload
+      }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-import-button"))
+
+    const recoveryAlert = await screen.findByTestId("flashcards-import-last-result")
+    expect(recoveryAlert).toHaveAttribute("data-ds-component", "Alert")
+    expect(recoveryAlert).toHaveTextContent("Import validation failed")
+    expect(recoveryAlert).toHaveTextContent("Missing required field: Back on line 2")
+    expect(recoveryAlert).toHaveTextContent("No cards were created.")
+    expect(recoveryAlert).toHaveTextContent(
+      "Your pasted content is still below. Fix the highlighted issue and import again."
+    )
+    expect(screen.getByTestId("flashcards-import-textarea")).toHaveValue(invalidPayload)
+    expect(screen.getByTestId("flashcards-import-button")).toBeEnabled()
+    expect(screen.getByTestId("flashcards-import-button")).not.toHaveClass("ant-btn-loading")
+    expect(messageSpies.error).toHaveBeenCalledWith(
+      "Missing required field: Back on line 2"
+    )
+  })
+
+  it.each([400, 422])(
+    "classifies HTTP %i import rejection as validation",
+    async (status) => {
+      const error = Object.assign(
+        new Error("Missing required field: Back on line 2"),
+        { status }
+      )
+      const mutateAsync = vi.fn().mockRejectedValue(error)
+      vi.mocked(useImportFlashcardsMutation).mockReturnValue({
+        mutateAsync,
+        isPending: false
+      } as any)
+
+      render(<ImportExportTab />)
+      await openImportTask()
+
+      const invalidPayload = "Deck\tFront\tBack\nBiology\tQuestion\t"
+      fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
+        target: {
+          value: invalidPayload
+        }
+      })
+      fireEvent.click(screen.getByTestId("flashcards-import-button"))
+
+      const recoveryAlert = await screen.findByTestId("flashcards-import-last-result")
+      expect(recoveryAlert).toHaveTextContent("Import validation failed")
+      expect(recoveryAlert).toHaveTextContent(
+        "Your pasted content is still below. Fix the highlighted issue and import again."
+      )
+      expect(recoveryAlert).not.toHaveTextContent(
+        "Details are unavailable; check connection/API status and retry."
+      )
+      expect(screen.getByTestId("flashcards-import-textarea")).toHaveValue(invalidPayload)
+    }
+  )
+
+  it.each([
+    [401, "invalid API key"],
+    [403, "invalid API key"],
+    [500, "invalid response"]
+  ])(
+    "classifies HTTP %i import rejection as operational",
+    async (status, errorText) => {
+      const error = Object.assign(new Error(errorText), { status })
+      const mutateAsync = vi.fn().mockRejectedValue(error)
+      vi.mocked(useImportFlashcardsMutation).mockReturnValue({
+        mutateAsync,
+        isPending: false
+      } as any)
+
+      render(<ImportExportTab />)
+      await openImportTask()
+
+      const payload = "Deck\tFront\tBack\nBiology\tQuestion\tAnswer"
+      fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
+        target: {
+          value: payload
+        }
+      })
+      fireEvent.click(screen.getByTestId("flashcards-import-button"))
+
+      const recoveryAlert = await screen.findByTestId("flashcards-import-last-result")
+      expect(recoveryAlert).toHaveTextContent("Import failed")
+      expect(recoveryAlert).toHaveTextContent(errorText)
+      expect(recoveryAlert).toHaveTextContent(
+        "Details are unavailable; check connection/API status and retry."
+      )
+      expect(recoveryAlert).not.toHaveTextContent(
+        "Fix the highlighted issue and import again."
+      )
+      expect(screen.getByTestId("flashcards-import-textarea")).toHaveValue(payload)
+    }
+  )
+
+  it("classifies status-less JSON endpoint request failures as operational", async () => {
+    const error = new Error("Failed to fetch (POST /api/v1/flashcards/import/json)")
+    const mutateAsync = vi.fn().mockRejectedValue(error)
+    vi.mocked(useImportFlashcardsJsonMutation).mockReturnValue({
+      mutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+    await openImportTask()
+
+    const payload = JSON.stringify([{ front: "Question", back: "Answer" }])
+    const formatSelect = screen.getByTestId("flashcards-import-format")
+    fireEvent.mouseDown(
+      formatSelect.querySelector(".ant-select-selector") ?? formatSelect
+    )
+    fireEvent.click(screen.getByText("JSON / JSONL"))
+    fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
+      target: {
+        value: payload
+      }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-import-button"))
+
+    const recoveryAlert = await screen.findByTestId("flashcards-import-last-result")
+    expect(recoveryAlert).toHaveTextContent("Import failed")
+    expect(recoveryAlert).toHaveTextContent(
+      "Failed to fetch (POST /api/v1/flashcards/import/json)"
+    )
+    expect(recoveryAlert).toHaveTextContent(
+      "Details are unavailable; check connection/API status and retry."
+    )
+    expect(recoveryAlert).not.toHaveTextContent("Import validation failed")
+    expect(recoveryAlert).not.toHaveTextContent(
+      "Fix the highlighted issue and import again."
+    )
+    expect(screen.getByTestId("flashcards-import-textarea")).toHaveValue(payload)
   })
 
   it("updates transfer summary after import actions", async () => {
@@ -871,6 +1351,7 @@ describe("ImportExportTab import result details", () => {
     } as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
       target: {
@@ -996,6 +1477,68 @@ describe("ImportExportTab import result details", () => {
     })
   })
 
+  it("shows an inline retryable recovery state after partial generated-card saves", async () => {
+    const generateMutateAsync = vi.fn().mockResolvedValue({
+      flashcards: [
+        { front: "Card A", back: "Back A", tags: ["a"], model_type: "basic" },
+        { front: "Card B", back: "Back B", tags: ["b"], model_type: "basic" },
+        { front: "Card C", back: "Back C", tags: ["c"], model_type: "basic" }
+      ],
+      count: 3
+    })
+    const createCardMutateAsync = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("save failed"))
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({})
+
+    vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
+      mutateAsync: generateMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+      mutateAsync: createCardMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), {
+      target: { value: "Interleaved retry case" }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+
+    await waitFor(() => {
+      expect(generateMutateAsync).toHaveBeenCalledTimes(1)
+    })
+
+    fireEvent.click(screen.getByTestId("flashcards-generate-save-button"))
+
+    await waitFor(() => {
+      expect(createCardMutateAsync).toHaveBeenCalledTimes(3)
+    })
+    const status = screen.getByTestId("flashcards-generate-save-status")
+    expect(status).toHaveTextContent("Saved 2 cards; 1 failed.")
+    expect(status).toHaveTextContent(
+      "Only failed drafts remain below. Review them, then retry saving."
+    )
+    expect(status).toHaveAttribute("data-ds-component", "Alert")
+    expect(screen.getByTestId("flashcards-transfer-summary-last-action")).toHaveTextContent(
+      "Generate Flashcards · Saved 2 cards; 1 failed."
+    )
+    expect(screen.getByDisplayValue("Card B")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("flashcards-generate-save-retry"))
+
+    await waitFor(() => {
+      expect(createCardMutateAsync).toHaveBeenCalledTimes(4)
+    })
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue("Card B")).not.toBeInTheDocument()
+    })
+  })
+
   it("keeps generated drafts when all generated-card saves fail", async () => {
     const generateMutateAsync = vi.fn().mockResolvedValue({
       flashcards: [
@@ -1038,6 +1581,153 @@ describe("ImportExportTab import result details", () => {
 
     expect(screen.getByDisplayValue("Fail A")).toBeInTheDocument()
     expect(screen.getByDisplayValue("Fail B")).toBeInTheDocument()
+  })
+
+  it("shows an inline retryable recovery state when all generated-card saves fail", async () => {
+    const generateMutateAsync = vi.fn().mockResolvedValue({
+      flashcards: [
+        { front: "Fail A", back: "Back A", tags: ["a"], model_type: "basic" },
+        { front: "Fail B", back: "Back B", tags: ["b"], model_type: "basic" }
+      ],
+      count: 2
+    })
+    const createCardMutateAsync = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("save failed"))
+      .mockRejectedValueOnce(new Error("save failed"))
+
+    vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
+      mutateAsync: generateMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+      mutateAsync: createCardMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), {
+      target: { value: "All fail retry case" }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+
+    await waitFor(() => {
+      expect(generateMutateAsync).toHaveBeenCalledTimes(1)
+    })
+
+    fireEvent.click(screen.getByTestId("flashcards-generate-save-button"))
+
+    await waitFor(() => {
+      expect(createCardMutateAsync).toHaveBeenCalledTimes(2)
+    })
+    const status = screen.getByTestId("flashcards-generate-save-status")
+    expect(status).toHaveTextContent("Failed to save generated cards.")
+    expect(status).toHaveTextContent(
+      "All generated drafts are still available. Check the deck and draft content, then retry saving."
+    )
+    expect(screen.getByTestId("flashcards-transfer-summary-last-action")).toHaveTextContent(
+      "Generate Flashcards · Failed to save generated cards."
+    )
+    expect(screen.getByTestId("flashcards-generate-save-retry")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("Fail A")).toBeInTheDocument()
+    expect(screen.getByDisplayValue("Fail B")).toBeInTheDocument()
+  })
+
+  it("shows inline recovery when generated-card deck resolution fails", async () => {
+    const generateMutateAsync = vi.fn().mockResolvedValue({
+      flashcards: [
+        { front: "Needs deck", back: "Back", tags: ["deck"], model_type: "basic" }
+      ],
+      count: 1
+    })
+    const createCardMutateAsync = vi.fn()
+
+    vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
+      mutateAsync: generateMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+      mutateAsync: createCardMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), {
+      target: { value: "Deck validation case" }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+
+    await waitFor(() => {
+      expect(generateMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    fireEvent.change(screen.getByTestId("flashcards-generate-new-deck-name"), {
+      target: { value: " " }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-save-button"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("flashcards-generate-save-status")).toHaveTextContent(
+        "Enter a deck name."
+      )
+    })
+    expect(messageSpies.error).toHaveBeenCalledWith("Enter a deck name.")
+    expect(createCardMutateAsync).not.toHaveBeenCalled()
+    expect(screen.getByTestId("flashcards-transfer-summary-last-action")).toHaveTextContent(
+      "Generate Flashcards · Enter a deck name."
+    )
+    expect(screen.getByDisplayValue("Needs deck")).toBeInTheDocument()
+  })
+
+  it("clears retryable generated-card save status when the remaining draft is removed", async () => {
+    const generateMutateAsync = vi.fn().mockResolvedValue({
+      flashcards: [
+        { front: "Saved draft", back: "Back A", tags: ["a"], model_type: "basic" },
+        { front: "Remaining draft", back: "Back B", tags: ["b"], model_type: "basic" }
+      ],
+      count: 2
+    })
+    const createCardMutateAsync = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("save failed"))
+
+    vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
+      mutateAsync: generateMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+      mutateAsync: createCardMutateAsync,
+      isPending: false
+    } as any)
+
+    render(<ImportExportTab />)
+
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), {
+      target: { value: "Remove retry case" }
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+
+    await waitFor(() => {
+      expect(generateMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-save-button"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("flashcards-generate-save-status")).toHaveTextContent(
+        "Saved 1 cards; 1 failed."
+      )
+    })
+    expect(screen.getByDisplayValue("Remaining draft")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }))
+
+    await waitFor(() => {
+      expect(screen.queryByDisplayValue("Remaining draft")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("flashcards-generate-save-status")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("flashcards-generate-save-retry")).not.toBeInTheDocument()
+    })
   })
 
   it("attaches source attribution when launched from deep-link intent", async () => {
@@ -1097,6 +1787,60 @@ describe("ImportExportTab import result details", () => {
     )
   })
 
+  it("preserves manual source attribution for selected-page generate handoffs", async () => {
+    const generateMutateAsync = vi.fn().mockResolvedValue({
+      flashcards: [
+        {
+          front: "Captured front",
+          back: "Captured back",
+          tags: ["page"],
+          model_type: "basic"
+        }
+      ],
+      count: 1
+    })
+    const createCardMutateAsync = vi.fn().mockResolvedValue({})
+    vi.mocked(useGenerateFlashcardsMutation).mockReturnValue({
+      mutateAsync: generateMutateAsync,
+      isPending: false
+    } as any)
+    vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+      mutateAsync: createCardMutateAsync,
+      isPending: false
+    } as any)
+
+    render(
+      <ImportExportTab
+        generateIntent={{
+          text: "Highlighted page passage",
+          sourceType: "manual",
+          sourceId: "https://example.test/source",
+          sourceTitle: "Captured Page"
+        }}
+      />
+    )
+
+    expect(screen.getByTestId("flashcards-generate-source-context")).toHaveTextContent(
+      "Captured Page"
+    )
+
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+    await waitFor(() => {
+      expect(generateMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    fireEvent.click(screen.getByTestId("flashcards-generate-save-button"))
+
+    await waitFor(() => {
+      expect(createCardMutateAsync).toHaveBeenCalledTimes(1)
+    })
+    expect(createCardMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source_ref_type: "manual",
+        source_ref_id: "https://example.test/source"
+      })
+    )
+  })
+
   it("offers undo rollback for the latest import batch", async () => {
     const mutateAsync = vi.fn().mockResolvedValue({
       imported: 2,
@@ -1116,6 +1860,7 @@ describe("ImportExportTab import result details", () => {
     vi.mocked(deleteFlashcard).mockResolvedValue(undefined as any)
 
     render(<ImportExportTab />)
+    await openImportTask()
 
     fireEvent.change(screen.getByTestId("flashcards-import-textarea"), {
       target: {

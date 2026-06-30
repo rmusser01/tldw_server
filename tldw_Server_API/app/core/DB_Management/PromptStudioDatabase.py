@@ -2784,6 +2784,10 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
                             lease_owner = COALESCE(%s, lease_owner)
                         FROM locked
                         WHERE q.id = locked.id
+                          AND (
+                              q.status = 'queued'
+                              OR (q.status = 'processing' AND (q.leased_until IS NULL OR q.leased_until < NOW()))
+                          )
                         RETURNING q.*, locked.was_reclaim
                         """.format_map(locals()),  # nosec B608
                         (owner_value,),

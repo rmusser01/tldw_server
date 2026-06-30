@@ -26,6 +26,7 @@ import {
   scheduleWorkspaceUndoAction,
   undoWorkspaceAction
 } from "../undo-manager"
+import { renderWorkspaceMessageActionContent } from "../workspace-message-content"
 
 const { TextArea } = Input
 
@@ -783,15 +784,16 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
     const undoMessageKey = `workspace-note-clear-undo-${undoHandle.id}`
     const maybeOpen = (messageApi as { open?: (config: unknown) => void }).open
+    const clearContent = t(
+      "playground:studio.noteCleared",
+      "Note cleared."
+    )
     const messageConfig = {
       key: undoMessageKey,
       type: "warning",
       duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
-      content: t(
-        "playground:studio.noteCleared",
-        "Note cleared."
-      ),
-      btn: (
+      content: renderWorkspaceMessageActionContent(
+        clearContent,
         <Button
           size="small"
           type="link"
@@ -815,7 +817,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         messageApi as { warning?: (content: string) => void }
       ).warning
       if (typeof maybeWarning === "function") {
-        maybeWarning(t("playground:studio.noteCleared", "Note cleared."))
+        maybeWarning(clearContent)
       }
     }
   }
@@ -900,8 +902,14 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             size="small"
             icon={<X className="h-3.5 w-3.5" />}
             onClick={handleClear}
-            aria-label={t("common:clear", "Clear")}
-            title={t("common:clear", "Clear")}
+            aria-label={t(
+              "playground:studio.clearCurrentNote",
+              "Clear current note"
+            )}
+            title={t(
+              "playground:studio.clearCurrentNote",
+              "Clear current note"
+            )}
             disabled={!currentNote.content && !currentNote.title && !currentNote.id}
           />
           {onCollapse && (
@@ -975,6 +983,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           hideSavedIndicator()
           updateNoteTitle(e.target.value)
         }}
+        aria-label={t("playground:studio.noteTitleLabel", "Note title")}
         placeholder={t("playground:studio.noteTitlePlaceholder", "Note title...")}
         size="small"
         className="mb-2 shrink-0"
@@ -993,6 +1002,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         className="mb-2 shrink-0"
       >
         <Input
+          aria-label={t("playground:studio.noteKeywordsLabel", "Note keywords")}
           placeholder={t(
             "playground:studio.noteKeywordsPlaceholder",
             "Keywords (comma-separated)..."
@@ -1058,6 +1068,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
               hideSavedIndicator()
               updateNoteContent(e.target.value)
             }}
+            aria-label={t("playground:studio.noteContentLabel", "Note content")}
             placeholder={t(
               "playground:studio.notesPlaceholder",
               "Jot down notes, ideas, or observations..."
@@ -1131,6 +1142,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         {/* Search input */}
         <Input
           prefix={<Search className="h-4 w-4 text-text-muted" />}
+          aria-label={t("playground:studio.searchNotesLabel", "Search notes")}
           placeholder={t("playground:studio.searchNotes", "Search notes...")}
           value={searchQuery}
           onChange={(e) => {

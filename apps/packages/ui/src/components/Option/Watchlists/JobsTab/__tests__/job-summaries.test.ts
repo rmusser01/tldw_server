@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { WatchlistFilter } from "@/types/watchlists"
 import {
   buildScopeTooltipLines,
+  summarizeOutputLinkage,
   summarizeFilters,
   summarizeOverflowList,
   summarizeScopeCounts
@@ -77,5 +78,33 @@ describe("job summary helpers", () => {
       "Include keyword: ai, safety +1",
       "Exclude author: spam-bot"
     ])
+  })
+
+  it("only summarizes delivery channels with explicit enabled flags", () => {
+    expect(
+      summarizeOutputLinkage(
+        {
+          auto_output: { enabled: true },
+          deliveries: {
+            email: { recipients: ["digest@example.com"] },
+            chatbook: { title: "Daily Digest" }
+          }
+        },
+        t
+      )
+    ).toBe("Create a report after each scheduled run • Template: default • Reports tab only • Text report only")
+
+    expect(
+      summarizeOutputLinkage(
+        {
+          auto_output: { enabled: true },
+          deliveries: {
+            email: { enabled: true, recipients: ["digest@example.com"] },
+            chatbook: { enabled: true, title: "Daily Digest" }
+          }
+        },
+        t
+      )
+    ).toBe("Create a report after each scheduled run • Template: default • Deliver by email • Save to Chatbook • Text report only")
   })
 })

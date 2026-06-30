@@ -33,7 +33,7 @@ ARXIV_DEFAULT_PAGE_SIZE = 10
 
 
 def fetch_arxiv_pdf_url(paper_id: str) -> Optional[str]:
-    base_url = f"http://export.arxiv.org/api/query?id_list={paper_id}"
+    base_url = f"https://export.arxiv.org/api/query?id_list={paper_id}"
     try:
         r = fetch(method="GET", url=base_url, timeout=10)
         if r.status_code >= 400:
@@ -44,8 +44,8 @@ def fetch_arxiv_pdf_url(paper_id: str) -> Optional[str]:
         if pdf_link_tag and pdf_link_tag.has_attr('href'):
             return pdf_link_tag['href']
         return None
-    except _ARXIV_NONCRITICAL_EXCEPTIONS as e:
-        print(f"**Error fetching PDF URL for {paper_id}:** {e}")
+    except _ARXIV_NONCRITICAL_EXCEPTIONS:
+        print("**Error fetching arXiv PDF URL.**")
         return None
 
 
@@ -72,30 +72,34 @@ def search_arxiv_custom_api(query: Optional[str], author: Optional[str], year: O
         total_results = int(total_results_tag.text) if total_results_tag and total_results_tag.text.isdigit() else 0
 
         return parsed_entries, total_results, None
-    except _ARXIV_NONCRITICAL_EXCEPTIONS as e:
-        error_msg = f"arXiv API request failed: {e}"
+    except TimeoutError:
+        error_msg = "arXiv API request timed out."
+        print(f"**Error:** {error_msg}")
+        return None, 0, error_msg
+    except _ARXIV_NONCRITICAL_EXCEPTIONS:
+        error_msg = "arXiv API request failed."
         print(f"**Error:** {error_msg}")
         return None, 0, error_msg
 
 
 def fetch_arxiv_xml(paper_id: str) -> Optional[str]:
-    base_url = "http://export.arxiv.org/api/query?id_list="
+    base_url = "https://export.arxiv.org/api/query?id_list="
     try:
         r = fetch(method="GET", url=base_url + paper_id, timeout=10)
         if r.status_code >= 400:
             return None
         time.sleep(1)  # Keep delay
         return r.text
-    except _ARXIV_NONCRITICAL_EXCEPTIONS as e:
-        print(f"**Error fetching XML for {paper_id}:** {e}")
+    except _ARXIV_NONCRITICAL_EXCEPTIONS:
+        print("**Error fetching arXiv XML.**")
         return None
 
 
 def parse_arxiv_feed(xml_content: bytes) -> list[dict[str, Any]]:
     try:
         soup = BeautifulSoup(xml_content, 'lxml-xml')
-    except FeatureNotFound as e:
-        print(f"Warning: Failed to use 'lxml-xml' parser ({e}). Falling back to Python's built-in 'xml' parser.")
+    except FeatureNotFound:
+        print("Warning: Failed to use 'lxml-xml' parser. Falling back to Python's built-in 'xml' parser.")
         print("For potentially better performance and XML feature support, consider installing lxml: pip install lxml")
         soup = BeautifulSoup(xml_content, 'xml') # Fallback
 
@@ -161,7 +165,7 @@ def parse_arxiv_feed(xml_content: bytes) -> list[dict[str, Any]]:
 
 def build_query_url(query: Optional[str], author: Optional[str], year: Optional[str], start: int,
                     max_results: int = ARXIV_DEFAULT_PAGE_SIZE) -> str:
-    base_url = "http://export.arxiv.org/api/query?"  # HTTP, not HTTPS for export.arxiv.org
+    base_url = "https://export.arxiv.org/api/query?"
     search_terms = []
 
     if query:
@@ -238,14 +242,14 @@ def get_arxiv_by_id(paper_id: str) -> tuple[Optional[dict[str, Any]], Optional[s
             return None, None  # treat as not found
         try:
             parsed = parse_arxiv_feed(xml_text.encode("utf-8"))
-        except _ARXIV_NONCRITICAL_EXCEPTIONS as e:
-            return None, f"Failed to parse arXiv XML: {e}"
+        except _ARXIV_NONCRITICAL_EXCEPTIONS:
+            return None, "Failed to parse arXiv XML."
         if not parsed:
             return None, None
         # parse_arxiv_feed already returns dict with required keys
         return parsed[0], None
-    except _ARXIV_NONCRITICAL_EXCEPTIONS as e:
-        return None, f"Unexpected error fetching arXiv paper: {e}"
+    except _ARXIV_NONCRITICAL_EXCEPTIONS:
+        return None, "Failed to fetch arXiv paper."
 
 #
 # End of Arxiv.py

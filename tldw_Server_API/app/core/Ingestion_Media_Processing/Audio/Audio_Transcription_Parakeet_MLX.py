@@ -461,7 +461,7 @@ def transcribe_with_parakeet_mlx(
             # Already a file path
             audio_path = Path(audio_data)
             if not audio_path.exists():
-                return f"[Error: Audio file not found: {audio_path}]"
+                return "[Error: Audio file not found]"
             audio_file_path = str(audio_path)
 
         elif isinstance(audio_data, np.ndarray):
@@ -583,12 +583,12 @@ def transcribe_with_parakeet_mlx(
 
     except ImportError as e:
         logger.exception(f"Missing required library: {e}")
-        return f"[Error: Missing required library: {e}]"
+        return "[Error: Missing required library]"
     except Exception as e:
         import traceback
         logger.exception(f"Error during Parakeet MLX transcription: {e}")
         logger.exception(f"Traceback: {traceback.format_exc()}")
-        return f"[Error: Transcription failed: {str(e)}]"
+        return "[Error: Parakeet MLX transcription failed]"
 
 
 @dataclass
@@ -757,7 +757,7 @@ def transcribe_streaming_mlx(
 
     except Exception as e:
         logger.exception(f"Error in streaming transcription: {e}")
-        yield f"[Error: {str(e)}]"
+        yield "[Error: Parakeet MLX streaming transcription failed]"
     finally:
         if session is not None:
             session.close()

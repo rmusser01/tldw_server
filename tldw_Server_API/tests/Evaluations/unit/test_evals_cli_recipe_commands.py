@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from click.testing import CliRunner
 
 from tldw_Server_API.app.core.Evaluations.recipe_runs_service import (
@@ -167,7 +169,7 @@ def test_recipes_list_command_uses_public_cli(monkeypatch):
 
     assert result.exit_code == 0
     assert "summarization_quality" in result.output
-    assert captured["db_path"] == "/tmp/recipes.db"
+    assert Path(captured["db_path"]).parts[-2:] == ("tmp", "recipes.db")
 
 
 def test_recipes_validate_dataset_command_outputs_validation_payload(monkeypatch):

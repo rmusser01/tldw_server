@@ -225,7 +225,7 @@ async with audit_operation(service, AuditEventType.DATA_READ, ctx,
 - Missing events: ensure `await flush()` is called before shutdown; prefer DI and `await stop()` on app shutdown.
 - PII not redacting: verify patterns and `AUDIT_PII_*` settings; confirm fields are strings or in `metadata`.
 - Slow queries: verify indexes were created (service creates on init); filter narrowing with indexed fields (`timestamp`, `context_*`, `event_type`, `category`).
-- Admin requirement: export/count endpoints enforce admin via claim-first dependencies (`require_roles("admin")` / `require_permissions(...)`); override those deps in tests accordingly.
+- Admin requirement: export/count endpoints enforce admin via claim-first dependencies (`RequireRole("admin")` / `RequirePermission(...)`); override those deps in tests accordingly.
 
 ## Security Notes
 

@@ -1,7 +1,8 @@
 import React from "react"
-import { Alert, Button, Drawer, Form, Input, Select, Collapse, Tooltip, Space, Tag, Modal, Grid } from "antd"
+import { Button, Drawer, Form, Input, Select, Collapse, Tooltip, Tag, Modal, Grid } from "antd"
 import { useTranslation } from "react-i18next"
 import { ChevronDown, ChevronUp, Info, Cloud, Plus, Trash2 } from "lucide-react"
+import { Alert } from "@/components/ui/primitives"
 import type {
   FewShotExample,
   PromptFormat,
@@ -868,33 +869,31 @@ export const PromptDrawer: React.FC<PromptDrawerProps> = ({
         {/* Draft recovery banner */}
         {hasDraft && draftData && (
           <Alert
-            type="info"
-            showIcon
+            variant="info"
             className="mb-4"
             title={t("managePrompts.drawer.draftRecovered", {
               defaultValue: "Unsaved draft found ({{age}})",
               age: formatDraftAge(draftData.savedAt)
             })}
-            action={
-              <Space>
-                <Button
-                  size="small"
-                  type="primary"
-                  onClick={() => {
-                    const recovered = applyDraft()
-                    if (recovered) {
-                      form.setFieldsValue(recovered)
-                    }
-                  }}
-                >
-                  {t("common:restore", { defaultValue: "Restore" })}
-                </Button>
-                <Button size="small" onClick={dismissDraft}>
-                  {t("common:dismiss", { defaultValue: "Dismiss" })}
-                </Button>
-              </Space>
-            }
-          />
+          >
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => {
+                  const recovered = applyDraft()
+                  if (recovered) {
+                    form.setFieldsValue(recovered)
+                  }
+                }}
+              >
+                {t("common:restore", { defaultValue: "Restore" })}
+              </Button>
+              <Button size="small" onClick={dismissDraft}>
+                {t("common:dismiss", { defaultValue: "Dismiss" })}
+              </Button>
+            </div>
+          </Alert>
         )}
 
         {/* Section: Identity */}
@@ -956,16 +955,16 @@ export const PromptDrawer: React.FC<PromptDrawerProps> = ({
           <div className="space-y-4">
             {promptFormat === "structured" && (
               <Alert
-                type="info"
-                showIcon
+                variant="info"
                 title={t("managePrompts.drawer.multiSectionTitle", {
                   defaultValue: "Multi-section prompt mode"
                 })}
-                description={t("managePrompts.drawer.multiSectionDescription", {
+              >
+                {t("managePrompts.drawer.multiSectionDescription", {
                   defaultValue:
                     "This prompt uses a block-based structure with separate sections for instructions, context, and examples. The text fields above are read-only summaries. Use the block editor below to make changes."
                 })}
-              />
+              </Alert>
             )}
             <Form.Item
               name="system_prompt"

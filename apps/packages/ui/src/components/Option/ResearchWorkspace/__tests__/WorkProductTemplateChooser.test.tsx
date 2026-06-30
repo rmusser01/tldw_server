@@ -57,23 +57,53 @@ describe("WorkProductTemplateChooser", () => {
     expect(executiveBrief).toBeDisabled()
   })
 
-  it("keeps other roadmap templates visible but unavailable in this slice", async () => {
+  it("selects executive brief when it is the actionable work product", async () => {
     const user = userEvent.setup()
     const onSelectTemplate = vi.fn()
-    renderChooser({ selectedSourceCount: 3, onSelectTemplate })
+    renderChooser({ selectedSourceCount: 1, onSelectTemplate })
 
-    for (const name of [
-      /research dossier/i,
-      /competitive market memo/i,
-      /technical project spec/i
-    ]) {
+    await user.click(screen.getByRole("button", { name: /executive brief/i }))
+
+    expect(onSelectTemplate).toHaveBeenCalledWith("executive_brief")
+  })
+
+  it("hides planned roadmap templates from the end-user chooser", () => {
+    renderChooser({ selectedSourceCount: 3 })
+
+    expect(
+      screen.queryByRole("button", { name: /research dossier/i })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /competitive market memo/i })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /technical project spec/i })
+    ).not.toBeInTheDocument()
+  })
+
+  it("does not show planned status copy in the default end-user state", () => {
+    renderChooser({ selectedSourceCount: 1 })
+
+    expect(screen.queryByText(/planned/i)).not.toBeInTheDocument()
+  })
+
+  it("enables literature review templates when selected sources meet requirements", async () => {
+    const user = userEvent.setup()
+    const onSelectTemplate = vi.fn()
+    renderChooser({ selectedSourceCount: 2, onSelectTemplate })
+
+    for (const [name, templateId] of [
+      [/literature matrix/i, "literature_matrix"],
+      [/corpus gap finder/i, "corpus_gap_finder"],
+      [/evidence-bound hypotheses/i, "evidence_bound_hypotheses"],
+      [/research proposal pack/i, "research_proposal_pack"]
+    ] as const) {
       const templateButton = screen.getByRole("button", { name })
-      expect(templateButton).toHaveAttribute("aria-disabled", "true")
-      expect(templateButton).toBeDisabled()
+      expect(templateButton).toBeEnabled()
+      expect(templateButton).not.toHaveAttribute("aria-disabled", "true")
       await user.click(templateButton)
+      expect(onSelectTemplate).toHaveBeenLastCalledWith(templateId)
     }
-
-    expect(onSelectTemplate).not.toHaveBeenCalled()
   })
 
   it("uses native disabled behavior while output generation is in flight", async () => {

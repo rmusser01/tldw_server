@@ -1,7 +1,10 @@
 import React, { useEffect, useReducer, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { buildChatThreadPath } from '@/routes/route-paths';
+import {
+  buildChatThreadPath,
+  buildResearchWorkspaceReturnPath,
+} from '@/routes/route-paths';
 import { useToast } from '@web/components/ui/ToastProvider';
 import {
   approveResearchCheckpoint,
@@ -18,6 +21,7 @@ import {
   type ResearchBundle,
   type ResearchCheckpointSummary,
   type ResearchContradiction,
+  type ResearchRunCreateRequest,
   type ResearchOutlineCheckpointPayload,
   type ResearchOutlineSeedSection,
   type ResearchPlanCheckpointPayload,
@@ -41,15 +45,23 @@ const TRUST_ARTIFACT_NAMES = [
 
 const TRUST_READY_PHASES = new Set(['awaiting_outline_review', 'packaging', 'completed']);
 const TRUST_INVALIDATION_PHASES = new Set(['collecting', 'synthesizing']);
+const MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH = 128;
+const MAX_RESEARCH_SOURCE_TITLE_SEARCH_PARAM_LENGTH = 240;
 
 type ResearchLaunchParams = {
   query: string | null;
   sourcePolicy: string | null;
   autonomyMode: string | null;
   autorun: boolean;
+  from: string | null;
   runId: string | null;
   chatId: string | null;
   launchMessageId: string | null;
+  sourceWorkspaceId: string | null;
+  sourceArtifactId: string | null;
+  sourceArtifactTemplate: string | null;
+  sourceArtifactTitle: string | null;
+  followUp: ResearchRunCreateRequest['follow_up'] | null;
 };
 
 type ConsoleState = {
@@ -393,30 +405,69 @@ function deriveTrustView(
   };
 }
 
+function parseBoundedLaunchSearchParam(
+  params: URLSearchParams,
+  key: string,
+  maxLength: number
+): string | null {
+  const trimmed = params.get(key)?.trim();
+  return trimmed ? trimmed.slice(0, maxLength).trim() || null : null;
+}
+
 function parseResearchLaunchParams(search: string): ResearchLaunchParams {
   const params = new URLSearchParams(search);
   const query = params.get('query')?.trim() || null;
   const sourcePolicy = params.get('source_policy')?.trim() || null;
   const autonomyMode = params.get('autonomy_mode')?.trim() || null;
+  const from = params.get('from')?.trim() || null;
   const runId = params.get('run')?.trim() || null;
   const chatId = params.get('chat_id')?.trim() || null;
   const launchMessageId = params.get('launch_message_id')?.trim() || null;
+  const sourceWorkspaceId = parseBoundedLaunchSearchParam(
+    params,
+    'source_workspace_id',
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  );
+  const sourceArtifactId = parseBoundedLaunchSearchParam(
+    params,
+    'source_artifact_id',
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  );
+  const sourceArtifactTemplate = parseBoundedLaunchSearchParam(
+    params,
+    'source_artifact_template',
+    MAX_RESEARCH_SOURCE_ID_SEARCH_PARAM_LENGTH
+  );
+  const sourceArtifactTitle = parseBoundedLaunchSearchParam(
+    params,
+    'source_artifact_title',
+    MAX_RESEARCH_SOURCE_TITLE_SEARCH_PARAM_LENGTH
+  );
+  const followUp = parseResearchLaunchFollowUp(params.get('follow_up'));
   return {
     query,
     sourcePolicy,
     autonomyMode,
     autorun: params.get('autorun') === '1',
+    from,
     runId,
     chatId,
     launchMessageId,
+    sourceWorkspaceId,
+    sourceArtifactId,
+    sourceArtifactTemplate,
+    sourceArtifactTitle,
+    followUp,
   };
 }
 
-function replaceResearchLaunchUrl(runId: string | null) {
+function replaceResearchLaunchUrl(runId: string | null, launchParams: ResearchLaunchParams | null) {
   if (typeof window === 'undefined') {
     return;
   }
   const nextUrl = new URL(window.location.href);
+  const sourceWorkspaceId =
+    launchParams?.from === 'research-workspace' ? launchParams.sourceWorkspaceId : null;
   nextUrl.searchParams.delete('query');
   nextUrl.searchParams.delete('source_policy');
   nextUrl.searchParams.delete('autonomy_mode');
@@ -424,6 +475,24 @@ function replaceResearchLaunchUrl(runId: string | null) {
   nextUrl.searchParams.delete('from');
   nextUrl.searchParams.delete('chat_id');
   nextUrl.searchParams.delete('launch_message_id');
+  nextUrl.searchParams.delete('follow_up');
+  nextUrl.searchParams.delete('source_workspace_id');
+  nextUrl.searchParams.delete('source_artifact_id');
+  nextUrl.searchParams.delete('source_artifact_template');
+  nextUrl.searchParams.delete('source_artifact_title');
+  if (sourceWorkspaceId) {
+    nextUrl.searchParams.set('from', 'research-workspace');
+    nextUrl.searchParams.set('source_workspace_id', sourceWorkspaceId);
+    if (launchParams?.sourceArtifactId) {
+      nextUrl.searchParams.set('source_artifact_id', launchParams.sourceArtifactId);
+    }
+    if (launchParams?.sourceArtifactTemplate) {
+      nextUrl.searchParams.set('source_artifact_template', launchParams.sourceArtifactTemplate);
+    }
+    if (launchParams?.sourceArtifactTitle) {
+      nextUrl.searchParams.set('source_artifact_title', launchParams.sourceArtifactTitle);
+    }
+  }
   if (runId) {
     nextUrl.searchParams.set('run', runId);
   } else {
@@ -431,6 +500,153 @@ function replaceResearchLaunchUrl(runId: string | null) {
   }
   const search = nextUrl.searchParams.toString();
   window.history.replaceState({}, '', `${nextUrl.pathname}${search ? `?${search}` : ''}${nextUrl.hash}`);
+}
+
+function normalizeLaunchString(value: unknown, maxLength: number): string {
+  return String(value ?? '').trim().slice(0, maxLength).trim();
+}
+
+function normalizeLaunchCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0;
+}
+
+function normalizeLaunchOutline(value: unknown): NonNullable<
+  NonNullable<ResearchRunCreateRequest['follow_up']>['background']
+>['outline'] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(asObjectRecord(item)))
+    .map((item) => {
+      const title = normalizeLaunchString(item.title, 500);
+      const focusArea = normalizeLaunchString(item.focus_area, 200);
+      return {
+        title,
+        ...(focusArea ? { focus_area: focusArea } : {}),
+      };
+    })
+    .filter((item) => item.title.length > 0)
+    .slice(0, 7);
+}
+
+function normalizeLaunchClaims(value: unknown): NonNullable<
+  NonNullable<ResearchRunCreateRequest['follow_up']>['background']
+>['key_claims'] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(asObjectRecord(item)))
+    .map((item, index) => {
+      const claimId =
+        normalizeLaunchString(item.claim_id, 128) || `launch-follow-up-claim-${index + 1}`;
+      const text = normalizeLaunchString(item.text, 4000);
+      return {
+        claim_id: claimId,
+        text,
+      };
+    })
+    .filter((item) => item.text.length > 0)
+    .slice(0, 5);
+}
+
+function normalizeLaunchUnresolvedQuestions(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const normalized: string[] = [];
+  value.forEach((item) => {
+    const candidate = normalizeLaunchString(item, 1800);
+    if (candidate && !normalized.includes(candidate)) {
+      normalized.push(candidate);
+    }
+  });
+  return normalized.slice(0, 5);
+}
+
+function parseResearchLaunchFollowUp(raw: string | null): ResearchRunCreateRequest['follow_up'] | null {
+  if (!raw) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const record = asObjectRecord(parsed);
+  if (!record) {
+    return null;
+  }
+  const question = normalizeLaunchString(record.question, 4000);
+  if (!question) {
+    return null;
+  }
+  const backgroundRecord = asObjectRecord(record.background);
+  if (!backgroundRecord) {
+    return { question };
+  }
+  const verificationSummary = asObjectRecord(backgroundRecord.verification_summary);
+  const sourceTrustSummary = asObjectRecord(backgroundRecord.source_trust_summary);
+  return {
+    question,
+    background: {
+      question: normalizeLaunchString(backgroundRecord.question, 4000) || question,
+      outline: normalizeLaunchOutline(backgroundRecord.outline),
+      key_claims: normalizeLaunchClaims(backgroundRecord.key_claims),
+      unresolved_questions: normalizeLaunchUnresolvedQuestions(backgroundRecord.unresolved_questions),
+      verification_summary: {
+        supported_claim_count: normalizeLaunchCount(verificationSummary?.supported_claim_count),
+        unsupported_claim_count: normalizeLaunchCount(verificationSummary?.unsupported_claim_count),
+      },
+      source_trust_summary: {
+        high_trust_count: normalizeLaunchCount(sourceTrustSummary?.high_trust_count),
+        low_trust_count: normalizeLaunchCount(sourceTrustSummary?.low_trust_count),
+      },
+    },
+  };
+}
+
+function buildResearchRunCreatePayload(
+  query: string,
+  launchParams: ResearchLaunchParams | null
+): ResearchRunCreateRequest {
+  const followUp = launchParams?.followUp
+    ? {
+        ...launchParams.followUp,
+        question: query,
+        ...(launchParams.followUp.background
+          ? {
+              background: {
+                ...launchParams.followUp.background,
+                question: query,
+              },
+            }
+          : {}),
+      }
+    : null;
+
+  return {
+    query,
+    source_policy: launchParams?.sourcePolicy ?? 'balanced',
+    autonomy_mode: launchParams?.autonomyMode ?? 'checkpointed',
+    ...(launchParams?.chatId
+      ? {
+          chat_handoff: {
+            chat_id: launchParams.chatId,
+            ...(launchParams.launchMessageId ? { launch_message_id: launchParams.launchMessageId } : {}),
+          },
+        }
+      : {}),
+    ...(followUp
+      ? {
+          follow_up: followUp,
+        }
+      : {}),
+  };
 }
 
 type PlanCheckpointEditorState = {
@@ -834,21 +1050,9 @@ export default function ResearchRunsPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const createdRun = await createResearchRun({
-          query: launchParams.query!,
-          source_policy: launchParams.sourcePolicy ?? 'balanced',
-          autonomy_mode: launchParams.autonomyMode ?? 'checkpointed',
-          ...(launchParams.chatId
-            ? {
-                chat_handoff: {
-                  chat_id: launchParams.chatId,
-                  ...(launchParams.launchMessageId
-                    ? { launch_message_id: launchParams.launchMessageId }
-                    : {}),
-                },
-              }
-            : {}),
-        });
+        const createdRun = await createResearchRun(
+          buildResearchRunCreatePayload(launchParams.query!, launchParams)
+        );
         if (cancelled) {
           return;
         }
@@ -858,7 +1062,7 @@ export default function ResearchRunsPage() {
         setSelectedRunId(createdRun.id);
         dispatch({ type: 'replace-run', run: createdRun });
         setQuestion('');
-        replaceResearchLaunchUrl(createdRun.id);
+        replaceResearchLaunchUrl(createdRun.id, launchParams);
         setLaunchParams((current) =>
           current
             ? {
@@ -868,6 +1072,7 @@ export default function ResearchRunsPage() {
                 runId: createdRun.id,
                 chatId: null,
                 launchMessageId: null,
+                followUp: null,
               }
             : current
         );
@@ -935,6 +1140,26 @@ export default function ResearchRunsPage() {
         researchReturnRunId: selectedRun.id,
       })
     : null;
+  const hasResearchWorkspaceReturnContext =
+    launchParams?.from === 'research-workspace' && Boolean(launchParams.sourceWorkspaceId);
+  const researchWorkspaceReturnRunId = selectedRun?.id ?? launchParams?.runId ?? null;
+  const researchWorkspaceReturnHref =
+    hasResearchWorkspaceReturnContext
+      ? buildResearchWorkspaceReturnPath({
+          sourceWorkspaceId: launchParams?.sourceWorkspaceId,
+          sourceArtifactId: launchParams?.sourceArtifactId,
+          sourceArtifactTemplate: launchParams?.sourceArtifactTemplate,
+          sourceArtifactTitle: launchParams?.sourceArtifactTitle,
+          researchRunId: researchWorkspaceReturnRunId,
+        })
+      : null;
+  const researchWorkspaceSourceLabel =
+    hasResearchWorkspaceReturnContext
+      ? launchParams?.sourceArtifactTitle ||
+        launchParams?.sourceArtifactTemplate ||
+        launchParams?.sourceArtifactId ||
+        null
+      : null;
   const trustView = deriveTrustView(state.bundle, state.artifactContents);
   const loadedTrustArtifactNames = TRUST_ARTIFACT_NAMES.filter(
     (artifactName) => state.artifactContents[artifactName] !== undefined
@@ -979,17 +1204,29 @@ export default function ResearchRunsPage() {
       return;
     }
     try {
-      const createdRun = await createResearchRun({
-        query: trimmed,
-        source_policy: 'balanced',
-        autonomy_mode: 'checkpointed',
-      });
+      const createdRun = await createResearchRun(
+        buildResearchRunCreatePayload(trimmed, launchParams)
+      );
       queryClient.setQueryData<ResearchRunListItem[]>(['research-runs'], (current) =>
         upsertListItem(current, createdRun, trimmed)
       );
       setSelectedRunId(createdRun.id);
       dispatch({ type: 'replace-run', run: createdRun });
       setQuestion('');
+      replaceResearchLaunchUrl(createdRun.id, launchParams);
+      setLaunchParams((current) =>
+        current
+          ? {
+              ...current,
+              autorun: false,
+              query: null,
+              runId: createdRun.id,
+              chatId: null,
+              launchMessageId: null,
+              followUp: null,
+            }
+          : current
+      );
     } catch (error) {
       show({
         title: 'Run creation failed',
@@ -1327,6 +1564,11 @@ export default function ResearchRunsPage() {
                   {selectedRun.status} · {selectedRun.phase} · {selectedRun.control_state}
                 </p>
               )}
+              {researchWorkspaceSourceLabel && (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Source artifact: {researchWorkspaceSourceLabel}
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               {backToChatHref && (
@@ -1335,6 +1577,14 @@ export default function ResearchRunsPage() {
                   href={backToChatHref}
                 >
                   Back to Chat
+                </a>
+              )}
+              {researchWorkspaceReturnHref && (
+                <a
+                  className="rounded-full border border-border px-3 py-2 text-sm hover:bg-muted"
+                  href={researchWorkspaceReturnHref}
+                >
+                  Back to Research Workspace
                 </a>
               )}
               <button

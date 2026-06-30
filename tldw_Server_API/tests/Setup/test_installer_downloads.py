@@ -23,13 +23,20 @@ def fake_hf_module(tmp_path, monkeypatch):
     cache_dir = tmp_path / "hf_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def hf_hub_download(*, repo_id: str, filename: str, force_download: bool = False):  # noqa: ARG001
+    def hf_hub_download(*, repo_id: str, filename: str, revision: str | None = None, force_download: bool = False):  # noqa: ARG001
         # Create a deterministic source file in the fake cache
         src = cache_dir / Path(filename).name
         src.write_bytes(b"FAKE_MODEL_CONTENT")
         return str(src)
 
-    def snapshot_download(*, repo_id: str, local_dir: str, allow_patterns=None, force_download: bool = False):  # noqa: ARG001
+    def snapshot_download(
+        *,
+        repo_id: str,
+        local_dir: str,
+        revision: str | None = None,
+        allow_patterns=None,
+        force_download: bool = False,
+    ):  # noqa: ARG001
         # Populate the requested local_dir with a 'voices' subtree and one file
         root = Path(local_dir)
         voices = root / "voices"
@@ -121,7 +128,14 @@ def test_download_hf_dir_raises_if_subdir_missing(tmp_path, monkeypatch):
 
 
     """If the requested subdir is not present in snapshot, raise FileNotFoundError."""
-    def empty_snapshot_download(*, repo_id: str, local_dir: str, allow_patterns=None, force_download: bool = False):  # noqa: ARG001
+    def empty_snapshot_download(
+        *,
+        repo_id: str,
+        local_dir: str,
+        revision: str | None = None,
+        allow_patterns=None,
+        force_download: bool = False,
+    ):  # noqa: ARG001
         # Do not create the expected subdir
         return str(local_dir)
 

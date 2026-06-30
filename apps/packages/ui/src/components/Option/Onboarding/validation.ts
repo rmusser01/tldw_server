@@ -18,7 +18,7 @@ export type ValidationResult = {
   errorKind?: ConnectionErrorKind
 }
 
-const isConnectivityErrorKind = (
+export const isConnectivityErrorKind = (
   kind: ConnectionErrorKind
 ): kind is Exclude<ConnectionErrorKind, "auth_invalid" | "server_error" | null> => {
   return (
@@ -69,6 +69,29 @@ const extractStatusAndMessage = (
   }
 
   return { status, message }
+}
+
+const isLoopbackServerUrl = (serverUrl: string): boolean => {
+  try {
+    const hostname = new URL(serverUrl).hostname.toLowerCase()
+    return (
+      hostname === "localhost" ||
+      hostname === "::1" ||
+      hostname === "[::1]" ||
+      hostname === "0.0.0.0" ||
+      /^127(?:\.\d{1,3}){3}$/.test(hostname)
+    )
+  } catch {
+    return false
+  }
+}
+
+const isGenericBrowserFetchFailure = (message: string | null): boolean => {
+  const normalized = (message ?? "").toLowerCase()
+  return (
+    normalized.includes("failed to fetch") ||
+    normalized.includes("networkerror when attempting to fetch resource")
+  )
 }
 
 export const categorizeConnectionError = (
@@ -166,16 +189,21 @@ export const validateApiKey = async (
       t(
         "settings:onboarding.errors.apiKeyValidationFailed",
         "API key validation failed"
-      )
+    )
     const categorized = categorizeConnectionError(status, message)
-    const errorKind = categorized ?? "auth_invalid"
+    const normalizedKind =
+      isLoopbackServerUrl(serverUrl) && isGenericBrowserFetchFailure(message)
+        ? "refused"
+        : categorized
+    const errorKind = normalizedKind ?? "auth_invalid"
 
-    // Connectivity/CORS failures should not be treated as invalid credentials.
-    // Allow onboarding to proceed to the health step, which provides clearer
-    // network diagnostics and supports "continue anyway" flows.
-    if (isConnectivityErrorKind(categorized)) {
+    // Connectivity/CORS failures should stop in setup with network recovery
+    // guidance, not be mislabeled as invalid credentials.
+    if (isConnectivityErrorKind(normalizedKind)) {
       return {
-        success: true
+        success: false,
+        errorKind: normalizedKind,
+        error: errorMessage
       }
     }
 

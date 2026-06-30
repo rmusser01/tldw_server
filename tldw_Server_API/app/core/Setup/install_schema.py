@@ -22,7 +22,7 @@ STT_ENGINES = {
     'nemo_canary',
 }
 
-TTS_ENGINES = {'kokoro', 'kitten_tts', 'dia', 'higgs', 'vibevoice', 'echo_tts', 'pocket_tts', 'neutts'}
+TTS_ENGINES = {'kokoro', 'kitten_tts', 'dia', 'higgs', 'vibevoice', 'echo_tts', 'pocket_tts', 'neutts', 'omnivoice'}
 
 
 class STTInstall(BaseModel):
@@ -64,6 +64,9 @@ class EmbeddingsInstall(BaseModel):
     huggingface: list[str] = Field(default_factory=list)
     custom: list[str] = Field(default_factory=list)
     onnx: list[str] = Field(default_factory=list)
+    trusted_custom_model_acknowledged: bool = Field(
+        default=False,
+    )
 
     @model_validator(mode='before')
     @classmethod
@@ -75,6 +78,15 @@ class EmbeddingsInstall(BaseModel):
             entries = normalised.get(key) or []
             normalised[key] = [item.strip() for item in entries if item and item.strip()]
         return normalised
+
+    @model_validator(mode='after')
+    def _validate_custom_trust_acknowledgement(self) -> EmbeddingsInstall:
+        self.huggingface = list(dict.fromkeys(self.huggingface))
+        self.custom = list(dict.fromkeys(self.custom))
+        self.onnx = list(dict.fromkeys(self.onnx))
+        if self.custom and not self.trusted_custom_model_acknowledged:
+            raise ValueError("custom embedding trust acknowledgement is required")
+        return self
 
 
 class InstallPlan(BaseModel):

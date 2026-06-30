@@ -24,6 +24,16 @@ interface ConfigContextType {
   reloadBootstrapConfig: () => Promise<void>;
 }
 
+type StoredTldwConfig = {
+  authMode?: unknown;
+  apiKey?: unknown;
+  apiBearer?: unknown;
+  accessToken?: unknown;
+  refreshToken?: unknown;
+  serverUrl?: unknown;
+  [key: string]: unknown;
+};
+
 const DEFAULT_HOST = (typeof window !== 'undefined' && window.location?.origin) || (process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:8000');
 const DEPLOYMENT_ENV = {
   NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
@@ -41,6 +51,149 @@ function getDefaultHost(): string {
   const pageOrigin = getPageOrigin();
   const resolvedOrigin = resolvePublicApiOrigin(DEPLOYMENT_ENV, pageOrigin);
   return resolvedOrigin || pageOrigin || DEFAULT_HOST;
+}
+
+function normalizeTextValue(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeApiKeyValue(value: unknown): string | null {
+  const normalized = normalizeTextValue(value);
+  if (!normalized || /\s/.test(normalized)) return null;
+  return normalized;
+}
+
+function normalizeBearerValue(value: unknown): string | null {
+  const normalized = normalizeTextValue(value);
+  if (!normalized) return null;
+  const stripped = normalized.replace(/^Bearer\s+/i, '').trim();
+  if (!stripped || /\s/.test(stripped)) return null;
+  return stripped;
+}
+
+function readStoredTldwConfig(): StoredTldwConfig | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem('tldwConfig');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as StoredTldwConfig;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredValue(key: string): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return normalizeTextValue(window.localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+
+function isTheme(value: string | null): value is Theme {
+  return value === 'light' || value === 'dark' || value === 'system';
+}
+
+function getStoredApiKey(storedConfig: StoredTldwConfig | null): string | null {
+  if (normalizeTextValue(storedConfig?.authMode) === 'single-user') {
+    const canonicalKey = normalizeApiKeyValue(storedConfig?.apiKey);
+    if (canonicalKey) return canonicalKey;
+  }
+  return normalizeApiKeyValue(readStoredValue('apiKey'));
+}
+
+function getStoredApiBearer(storedConfig: StoredTldwConfig | null): string | null {
+  if (normalizeTextValue(storedConfig?.authMode) === 'multi-user') {
+    const canonicalBearer =
+      normalizeBearerValue(storedConfig?.accessToken) ||
+      normalizeBearerValue(storedConfig?.apiBearer);
+    if (canonicalBearer) return canonicalBearer;
+  }
+  return normalizeBearerValue(readStoredValue('accessToken'));
+}
+
+function loadBrowserConfig(current?: AppConfig): AppConfig {
+  const storedConfig = readStoredTldwConfig();
+  const deploymentMode = resolveDeploymentMode(DEPLOYMENT_ENV);
+  const canonicalHost = normalizeTextValue(storedConfig?.serverUrl);
+  const legacyHost = readStoredValue('tldw-api-host');
+  const apiBaseHost =
+    deploymentMode === 'quickstart'
+      ? getDefaultHost()
+      : canonicalHost || legacyHost || current?.apiBaseHost || getDefaultHost();
+  const storedVersion = readStoredValue('tldw-api-version');
+  const apiVersion = storedVersion || current?.apiVersion || process.env.NEXT_PUBLIC_API_VERSION || 'v1';
+  const storedTheme = readStoredValue('theme') || readStoredValue('tldw-theme');
+  const theme = isTheme(storedTheme) ? storedTheme : current?.theme || 'dark';
+  const envApiKey = normalizeApiKeyValue(process.env.NEXT_PUBLIC_X_API_KEY);
+  const envApiBearer = normalizeBearerValue(process.env.NEXT_PUBLIC_API_BEARER);
+  const xApiKey = envApiKey || getStoredApiKey(storedConfig) || undefined;
+  const apiBearer = envApiBearer || getStoredApiBearer(storedConfig) || undefined;
+
+  return {
+    apiBaseHost,
+    apiVersion,
+    xApiKey,
+    apiBearer,
+    theme,
+    csrfToken: current?.csrfToken ?? null,
+  };
+}
+
+function writeBrowserConfig(config: AppConfig): void {
+  if (typeof window === 'undefined') return;
+
+  window.localStorage.setItem('tldw-api-host', config.apiBaseHost);
+  window.localStorage.setItem('tldw-api-version', config.apiVersion);
+  window.localStorage.setItem('theme', config.theme);
+  window.localStorage.removeItem('tldw-theme');
+
+  const existingConfig = readStoredTldwConfig();
+  const envApiKey = normalizeApiKeyValue(process.env.NEXT_PUBLIC_X_API_KEY);
+  const envApiBearer = normalizeBearerValue(process.env.NEXT_PUBLIC_API_BEARER);
+  const apiKey = normalizeApiKeyValue(config.xApiKey);
+  const apiBearer = normalizeBearerValue(config.apiBearer);
+  const shouldPersistApiKey = !!apiKey && apiKey !== envApiKey;
+  const shouldPersistApiBearer = !!apiBearer && apiBearer !== envApiBearer;
+
+  if (!existingConfig && !shouldPersistApiKey && !shouldPersistApiBearer) {
+    return;
+  }
+
+  const nextConfig: StoredTldwConfig = { ...(existingConfig || {}) };
+  nextConfig.serverUrl = config.apiBaseHost;
+
+  if (shouldPersistApiKey) {
+    nextConfig.authMode = 'single-user';
+    nextConfig.apiKey = apiKey;
+    delete nextConfig.accessToken;
+    delete nextConfig.refreshToken;
+    window.localStorage.setItem('apiKey', apiKey);
+    window.localStorage.removeItem('accessToken');
+  } else if (!apiKey && normalizeTextValue(nextConfig.authMode) === 'single-user') {
+    delete nextConfig.apiKey;
+    window.localStorage.removeItem('apiKey');
+  }
+
+  if (shouldPersistApiBearer) {
+    nextConfig.authMode = 'multi-user';
+    nextConfig.accessToken = apiBearer;
+    delete nextConfig.apiKey;
+    window.localStorage.setItem('accessToken', apiBearer);
+    window.localStorage.removeItem('apiKey');
+  } else if (!apiBearer && normalizeTextValue(nextConfig.authMode) === 'multi-user') {
+    delete nextConfig.accessToken;
+    window.localStorage.removeItem('accessToken');
+  }
+
+  window.localStorage.setItem('tldwConfig', JSON.stringify(nextConfig));
 }
 
 function computeBaseURL(host: string, version: string) {
@@ -93,19 +246,10 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
         csrfToken: null,
       };
     }
-    const storedHost = localStorage.getItem('tldw-api-host');
-    const apiBaseHost =
-      resolveDeploymentMode(DEPLOYMENT_ENV) === 'quickstart'
-        ? getDefaultHost()
-        : storedHost || getDefaultHost();
-    const storedVersion = localStorage.getItem('tldw-api-version') || (process.env.NEXT_PUBLIC_API_VERSION || 'v1');
-    const storedKey = process.env.NEXT_PUBLIC_X_API_KEY || '';
-    const storedBearer = process.env.NEXT_PUBLIC_API_BEARER || '';
-    const storedTheme = (localStorage.getItem('theme') || localStorage.getItem('tldw-theme') || 'dark') as Theme;
-    return { apiBaseHost, apiVersion: storedVersion, xApiKey: storedKey || undefined, apiBearer: storedBearer || undefined, theme: storedTheme, csrfToken: null };
+    return loadBrowserConfig();
   });
 
-  // Initialize axios baseURL and theme on mount
+  // Initialize API baseURL and theme on mount
   useEffect(() => {
     const current = computeBaseURL(config.apiBaseHost, config.apiVersion);
     if (getApiBaseUrl() !== current) {
@@ -115,26 +259,34 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist config changes and update axios baseURL
+  // Persist config changes and update API baseURL
   useEffect(() => {
     if (typeof window === 'undefined') return;
     setRuntimeApiKey(config.xApiKey);
     setRuntimeApiBearer(config.apiBearer);
     // Persist
     try {
-      localStorage.setItem('tldw-api-host', config.apiBaseHost);
-      localStorage.setItem('tldw-api-version', config.apiVersion);
-      localStorage.setItem('theme', config.theme);
-      localStorage.removeItem('tldw-theme');
+      writeBrowserConfig(config);
     } catch {
       // localStorage may be unavailable in some contexts
     }
-    // Apply axios base URL
+    // Apply API base URL
     const nextBase = computeBaseURL(config.apiBaseHost, config.apiVersion);
     api.defaults.baseURL = nextBase;
     // Apply theme
     applyTheme(config.theme);
   }, [config]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleConfigUpdated = () => {
+      setConfig((current) => loadBrowserConfig(current));
+    };
+    window.addEventListener('tldw:config-updated', handleConfigUpdated);
+    return () => {
+      window.removeEventListener('tldw:config-updated', handleConfigUpdated);
+    };
+  }, []);
 
   const setApiBaseHost = (host: string) => setConfig((c) => ({ ...c, apiBaseHost: host }));
   const setApiVersion = (ver: string) => setConfig((c) => ({ ...c, apiVersion: ver || 'v1' }));

@@ -199,6 +199,7 @@ export const QuizPlayground: React.FC = () => {
 
   const handleTabChange = React.useCallback((nextTabRaw: string) => {
     const nextTab = nextTabRaw as QuizTabKey
+    defaultTabResolved.current = true
     if (activeTab === "create" && nextTab !== "create" && createTabDirty) {
       const shouldLeave = window.confirm(
         t("option:quiz.unsavedCreateConfirm", {
@@ -271,15 +272,13 @@ export const QuizPlayground: React.FC = () => {
             {t("common:search", { defaultValue: "Search" })}
           </Button>
         </div>
-        {(totalQuizzes > 0 || totalAttempts > 0) && (
-          <Button
-            onClick={handleResetActiveTab}
-            size="small"
-            data-testid="quiz-reset-current-tab"
-          >
-            {t("option:quiz.resetCurrentTab", { defaultValue: "Reset Current Tab" })}
-          </Button>
-        )}
+        <Button
+          onClick={handleResetActiveTab}
+          size="small"
+          data-testid="quiz-reset-current-tab"
+        >
+          {t("option:quiz.resetCurrentTab", { defaultValue: "Reset Current Tab" })}
+        </Button>
       </div>
       <div ref={tabsRef}>
         <Tabs

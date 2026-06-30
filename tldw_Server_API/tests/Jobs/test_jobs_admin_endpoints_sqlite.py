@@ -156,3 +156,45 @@ def test_crypto_rotate_endpoint_sqlite(monkeypatch, tmp_path):
         # Execute requires X-Confirm; still safe as envelopes may not match provided keys
         r2 = client.post("/api/v1/jobs/crypto/rotate", headers={**headers, "X-Confirm": "true"}, json={**body, "dry_run": False})
         assert r2.status_code == 200
+
+
+def test_job_events_list_returns_public_attrs_shape_sqlite(monkeypatch, tmp_path):
+    _setup_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
+    ensure_jobs_tables(Path(os.environ["JOBS_DB_PATH"]))
+    app, headers = _client(monkeypatch)
+    jm = JobManager()
+    jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="download",
+        payload={},
+        owner_user_id="u1",
+    )
+    jm.create_job(
+        domain="chatbooks",
+        queue="default",
+        job_type="download",
+        payload={},
+        owner_user_id="u1",
+    )
+
+    with TestClient(app, headers=headers) as client:
+        response = client.get(
+            "/api/v1/jobs/events",
+            params={
+                "after_id": 0,
+                "domain": "media_ingest",
+                "queue": "default",
+                "job_type": "download",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["domain"] == "media_ingest"
+    assert body[0]["event_type"] == "job.created"
+    assert isinstance(body[0]["attrs"], dict)
+    assert body[0]["attrs"]["owner_user_id"] == "u1"
+    assert "attrs_json" not in body[0]

@@ -135,7 +135,7 @@ class HealthChecker:
                 component_results[name] = ComponentHealth(
                     name=name,
                     status=HealthStatus.UNHEALTHY,
-                    message=f"Check failed: {str(result)}"
+                    message="Check failed"
                 )
             else:
                 component_results[name] = result
@@ -192,7 +192,7 @@ class HealthChecker:
             return ComponentHealth(
                 name=name,
                 status=HealthStatus.UNHEALTHY,
-                message=str(e)
+                message="Check failed"
             )
 
     async def _check_system_health(self) -> ComponentHealth:
@@ -244,7 +244,7 @@ class HealthChecker:
             return ComponentHealth(
                 name="system",
                 status=HealthStatus.UNHEALTHY,
-                message=f"System check failed: {e}"
+                message="System check failed"
             )
 
     async def _check_provider_health(self) -> ComponentHealth:
@@ -286,7 +286,7 @@ class HealthChecker:
             return ComponentHealth(
                 name="providers",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Provider check failed: {e}"
+                message="Provider check failed"
             )
 
     async def _check_cache_health(self) -> ComponentHealth:
@@ -318,7 +318,7 @@ class HealthChecker:
             return ComponentHealth(
                 name="cache",
                 status=HealthStatus.DEGRADED,
-                message=f"Cache check failed: {e}"
+                message="Cache check failed"
             )
 
     async def _check_database_health(self) -> ComponentHealth:
@@ -356,7 +356,7 @@ class HealthChecker:
             return ComponentHealth(
                 name="database",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Database check failed: {e}"
+                message="Database check failed"
             )
 
     async def _check_rate_limiter_health(self) -> ComponentHealth:
@@ -385,7 +385,7 @@ class HealthChecker:
             return ComponentHealth(
                 name="rate_limiter",
                 status=HealthStatus.DEGRADED,
-                message=f"Rate limiter check failed: {e}"
+                message="Rate limiter check failed"
             )
 
     async def _check_dlq_health(self) -> ComponentHealth:
@@ -417,7 +417,7 @@ class HealthChecker:
             return ComponentHealth(
                 name="dlq",
                 status=HealthStatus.DEGRADED,
-                message=f"DLQ check failed: {e}"
+                message="DLQ check failed"
             )
 
     async def _check_connection_pool_health(self) -> ComponentHealth:
@@ -456,7 +456,7 @@ class HealthChecker:
             return ComponentHealth(
                 name="connection_pools",
                 status=HealthStatus.DEGRADED,
-                message=f"Connection pool check failed: {e}"
+                message="Connection pool check failed"
             )
 
     async def _check_config_health(self) -> ComponentHealth:
@@ -483,7 +483,7 @@ class HealthChecker:
             return ComponentHealth(
                 name="config",
                 status=HealthStatus.UNHEALTHY,
-                message=f"Config check failed: {e}"
+                message="Config check failed"
             )
 
     def _calculate_overall_status(

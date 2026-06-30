@@ -20,6 +20,8 @@ import {
 } from "lucide-react"
 import type { SessionMetadata } from "@/services/agent/storage"
 import type { AgentStatus } from "@/services/agent/types"
+import { getDesignSystemState, type DesignSystemStateKey } from "@/design-system"
+import { Badge, getBadgeVariantForDesignSystemSeverity } from "@/components/ui/primitives"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 
 interface SessionHistoryPanelProps {
@@ -40,57 +42,64 @@ const StatusBadge: FC<{
     AgentStatus,
     {
       icon: FC<{ className?: string }>
-      color: string
+      stateKey: DesignSystemStateKey
       labelKey: string
       labelDefault: string
     }
   > = {
     idle: {
       icon: Clock,
-      color: "text-text-subtle bg-surface2",
+      stateKey: "empty",
       labelKey: "statusIdle",
       labelDefault: "Idle"
     },
     running: {
       icon: Loader2,
-      color: "text-primary bg-primary/10",
+      stateKey: "retrying",
       labelKey: "statusRunning",
       labelDefault: "Running"
     },
     waiting_approval: {
       icon: Pause,
-      color: "text-warn bg-warn/10",
+      stateKey: "degraded",
       labelKey: "statusPaused",
       labelDefault: "Paused"
     },
     complete: {
       icon: CheckCircle,
-      color: "text-success bg-success/10",
+      stateKey: "ready",
       labelKey: "statusComplete",
       labelDefault: "Complete"
     },
     error: {
       icon: XCircle,
-      color: "text-danger bg-danger/10",
+      stateKey: "error",
       labelKey: "statusError",
       labelDefault: "Error"
     },
     cancelled: {
       icon: AlertCircle,
-      color: "text-warn bg-warn/10",
+      stateKey: "degraded",
       labelKey: "statusCancelled",
       labelDefault: "Cancelled"
     }
   }
 
-  const { icon: Icon, color, labelKey, labelDefault } =
+  const { icon: Icon, stateKey, labelKey, labelDefault } =
     config[status] || config.idle
+  const state = getDesignSystemState(stateKey)
 
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${color}`}>
-      <Icon className={`size-3 ${status === "running" ? "animate-spin" : ""}`} />
+    <Badge
+      variant={getBadgeVariantForDesignSystemSeverity(state.severity)}
+      size="md"
+    >
+      <Icon
+        aria-hidden="true"
+        className={`size-3 ${status === "running" ? "animate-spin" : ""}`}
+      />
       {t(labelKey, labelDefault)}
-    </span>
+    </Badge>
   )
 }
 

@@ -31,11 +31,18 @@ import {
   Library,
   ListTodo,
   PenLine,
-  ShieldCheck
+  ShieldCheck,
+  SquareTerminal,
+  Workflow
 } from "lucide-react"
 import { Navigate } from "react-router-dom"
 import { ALL_TARGETS, type PlatformTarget } from "@/config/platform"
 import { createSettingsRoute } from "./settings-route"
+import {
+  MODERATION_PLAYGROUND_LEGACY_PATH,
+  MODERATION_REVIEW_PATH,
+  MODERATION_RULES_PATH
+} from "@/routes/route-paths"
 
 export type RouteKind = "options" | "sidepanel"
 
@@ -103,7 +110,12 @@ const OptionTldwSettings = createSettingsRoute(
   () => import("~/components/Option/Settings/tldw"),
   "TldwSettings"
 )
+const OptionProviderKeysSettings = createSettingsRoute(
+  () => import("~/components/Option/Settings/ProviderKeysSettings"),
+  "ProviderKeysSettings"
+)
 const OptionMedia = lazy(() => import("./option-media"))
+const OptionMediaCollection = lazy(() => import("./option-media-collection"))
 const OptionMediaMulti = lazy(() => import("./option-media-multi"))
 const OptionNotes = lazy(() => import("./option-notes"))
 const OptionWorldBooks = createSettingsRoute(
@@ -186,6 +198,8 @@ const OptionSources = lazy(() => import("./option-sources"))
 const OptionSourcesNew = lazy(() => import("./option-sources-new"))
 const OptionSourcesDetail = lazy(() => import("./option-sources-detail"))
 const OptionWritingPlayground = lazy(() => import("./option-writing-playground"))
+const OptionModerationReview = lazy(() => import("./option-moderation-review"))
+const OptionModerationRules = lazy(() => import("./option-moderation-rules"))
 const OptionModerationPlayground = lazy(() => import("./option-moderation-playground"))
 const OptionFamilyGuardrailsWizard = lazy(
   () => import("./option-family-guardrails-wizard")
@@ -197,6 +211,8 @@ const OptionGuardianSettings = createSettingsRoute(
 const OptionResearchWorkspace = lazy(
   () => import("./option-research-workspace")
 )
+const OptionChatWorkspace = lazy(() => import("./option-chat-workspace"))
+const OptionExplainer = lazy(() => import("./option-explainer"))
 const OptionAdminSources = lazy(() => import("./option-admin-sources"))
 
 const ERROR_BOUNDARY_TEST_ENABLED = process.env.NODE_ENV !== "production"
@@ -240,6 +256,17 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
       labelToken: "settings:tldw.serverNav",
       icon: ServerIcon,
       order: 1
+    }
+  },
+  {
+    kind: "options",
+    path: "/settings/provider-keys",
+    element: <OptionProviderKeysSettings />,
+    nav: {
+      group: "server",
+      labelToken: "settings:providerKeys.navTitle",
+      icon: ServerIcon,
+      order: 1.5
     }
   },
   {
@@ -488,6 +515,29 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   },
   {
     kind: "options",
+    path: "/chat-workspace",
+    element: <OptionChatWorkspace />,
+    nav: {
+      group: "workspace",
+      labelToken: "option:header.chatWorkspace",
+      icon: SquareTerminal,
+      order: 1
+    }
+  },
+  {
+    kind: "options",
+    path: "/explainer",
+    element: <OptionExplainer />,
+    nav: {
+      group: "workspace",
+      labelToken: "option:header.explainer",
+      icon: Workflow,
+      order: 0.5,
+      beta: true
+    }
+  },
+  {
+    kind: "options",
     path: "/flashcards",
     element: <OptionFlashcards />,
     nav: {
@@ -523,14 +573,30 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   },
   {
     kind: "options",
-    path: "/moderation-playground",
-    element: <OptionModerationPlayground />,
+    path: MODERATION_REVIEW_PATH,
+    element: <OptionModerationReview />,
     nav: {
       group: "server",
-      labelToken: "option:moderationPlayground.nav",
+      labelToken: "option:moderationReview.nav",
       icon: ShieldCheck,
       order: 12
     }
+  },
+  {
+    kind: "options",
+    path: MODERATION_RULES_PATH,
+    element: <OptionModerationRules />,
+    nav: {
+      group: "server",
+      labelToken: "option:moderationRules.nav",
+      icon: ShieldCheck,
+      order: 12.1
+    }
+  },
+  {
+    kind: "options",
+    path: MODERATION_PLAYGROUND_LEGACY_PATH,
+    element: <OptionModerationPlayground />
   },
   {
     kind: "options",
@@ -584,6 +650,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
       icon: ListTodo,
       order: 3.4
     }
+  },
+  {
+    kind: "options",
+    path: "/scheduled-tasks/results",
+    element: <OptionScheduledTasks />
   },
   { kind: "options", path: "/kanban", element: <OptionKanbanPlayground /> },
   {
@@ -660,6 +731,11 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
   },
   {
     kind: "options",
+    path: "/media-collections/:collectionId",
+    element: <OptionMediaCollection />
+  },
+  {
+    kind: "options",
     path: "/content-review",
     element: <OptionContentReview />,
     nav: {
@@ -680,10 +756,9 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
       order: 3
     }
   },
-  // Extension intentionally supports thread routes only for now.
-  // Shared-token deep links (/knowledge/shared/:shareToken) are deferred pending product direction.
   { kind: "options", path: "/knowledge", element: <OptionKnowledgeWorkspace /> },
   { kind: "options", path: "/knowledge/thread/:threadId", element: <OptionKnowledgeWorkspace /> },
+  { kind: "options", path: "/knowledge/shared/:shareToken", element: <OptionKnowledgeWorkspace /> },
   { kind: "options", path: "/world-books", element: <OptionWorldBooksWorkspace /> },
   { kind: "options", path: "/dictionaries", element: <OptionDictionariesWorkspace /> },
   { kind: "options", path: "/characters", element: <OptionCharactersWorkspace /> },
@@ -756,6 +831,12 @@ export const ROUTE_DEFINITIONS: RouteDefinition[] = [
     targets: ALL_TARGETS
   },
   { kind: "sidepanel", path: "/", element: <SidepanelChat /> },
+  {
+    kind: "sidepanel",
+    path: "/chat",
+    element: <SidepanelChat />,
+    targets: ALL_TARGETS
+  },
   {
     kind: "sidepanel",
     path: "/agent",

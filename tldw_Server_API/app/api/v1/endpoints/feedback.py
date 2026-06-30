@@ -6,9 +6,10 @@ from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.feedback_schemas import (
     ErrorDetail,
     ExplicitFeedbackRequest,
@@ -18,7 +19,6 @@ from tldw_Server_API.app.api.v1.schemas.feedback_schemas import (
     FeedbackRecord,
     FeedbackUpdateRequest,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.RAG.rag_service.analytics_system import UnifiedFeedbackSystem, UserFeedbackStore
 
@@ -238,12 +238,7 @@ async def submit_explicit_feedback(
                             user_notes=updated_notes,
                         )
                     except (CharactersRAGDBError, HTTPException, ValueError) as e:
-                        logger.exception(
-                            "Failed to merge feedback update for feedback_id={} dedupe_key={}: {}",
-                            existing.feedback_id,
-                            dedupe_key,
-                            e,
-                        )
+                        logger.exception("Failed to merge feedback update")
                         raise HTTPException(
                             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="merge_feedback_update_failed",
@@ -272,14 +267,14 @@ async def submit_explicit_feedback(
         raise
     except Exception as exc:
         await _clear_idempotency_record(db, dedupe_key)
-        logger.exception("Unexpected error in submit_feedback: {}", exc)
+        logger.exception("Unexpected error in submit_feedback")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
         ) from exc
 
     if result.get("errors"):
-        logger.warning("Explicit feedback errors: {}", result.get("errors"))
+        logger.warning("Explicit feedback completed with errors")
 
     feedback_id = result.get("feedback_id")
     if resolved_conversation_id and not feedback_id:
@@ -304,12 +299,7 @@ async def submit_explicit_feedback(
                 user_notes=final_user_notes,
             )
         except (CharactersRAGDBError, HTTPException, ValueError) as e:
-            logger.exception(
-                "Failed to finalize idempotency merge for feedback_id={} dedupe_key={}: {}",
-                feedback_id,
-                dedupe_key,
-                e,
-            )
+            logger.exception("Failed to finalize idempotency merge")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="merge_feedback_update_failed",
@@ -337,18 +327,60 @@ async def list_feedback(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> FeedbackListResponse:
-    conversation = db.get_conversation_by_id(conversation_id)
-    if not conversation or conversation.get("deleted"):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
-    _ensure_conversation_owner(conversation, current_user)
+    try:
+        conversation = db.get_conversation_by_id(conversation_id)
+        if not conversation or conversation.get("deleted"):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        _ensure_conversation_owner(conversation, current_user)
 
+        store = UnifiedFeedbackSystem(chacha_db=db)
+        if not store.user_feedback:
+            return FeedbackListResponse(ok=True, feedback=[])
+
+        rows = await store.user_feedback.get_conversation_feedback(conversation_id)
+        records = [FeedbackRecord(**row) for row in rows]
+        return FeedbackListResponse(ok=True, feedback=records)
+    except HTTPException:
+        raise
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list feedback") from exc
+
+
+# ---------------------------------------------------------------------------
+# GET  /feedback/{feedback_id}  – get a single feedback entry
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/{feedback_id}",
+    response_model=FeedbackRecord,
+    summary="Get a feedback entry",
+    dependencies=[Depends(check_rate_limit)],
+    responses={
+        403: {"model": ErrorDetail, "description": "Forbidden – not the conversation owner"},
+        404: {"model": ErrorDetail, "description": "Feedback record not found"},
+    },
+)
+async def get_feedback(
+    feedback_id: str,
+    current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+) -> FeedbackRecord:
     store = UnifiedFeedbackSystem(chacha_db=db)
     if not store.user_feedback:
-        return FeedbackListResponse(ok=True, feedback=[])
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
 
-    rows = await store.user_feedback.get_conversation_feedback(conversation_id)
-    records = [FeedbackRecord(**row) for row in rows]
-    return FeedbackListResponse(ok=True, feedback=records)
+    record = await store.user_feedback.get_feedback_by_id(feedback_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
+
+    conv_id = record.get("conversation_id")
+    if conv_id:
+        conversation = db.get_conversation_by_id(conv_id)
+        if not conversation or conversation.get("deleted"):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
+        _ensure_conversation_owner(conversation, current_user)
+
+    return FeedbackRecord(**record)
 
 
 # ---------------------------------------------------------------------------
@@ -370,23 +402,28 @@ async def delete_feedback(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> FeedbackDeleteResponse:
-    store = UnifiedFeedbackSystem(chacha_db=db)
-    if not store.user_feedback:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
+    try:
+        store = UnifiedFeedbackSystem(chacha_db=db)
+        if not store.user_feedback:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
 
-    record = await store.user_feedback.get_feedback_by_id(feedback_id)
-    if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
+        record = await store.user_feedback.get_feedback_by_id(feedback_id)
+        if not record:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
 
-    # Validate ownership via conversation
-    conv_id = record.get("conversation_id")
-    if conv_id:
-        conversation = db.get_conversation_by_id(conv_id)
-        if conversation:
-            _ensure_conversation_owner(conversation, current_user)
+        # Validate ownership via conversation
+        conv_id = record.get("conversation_id")
+        if conv_id:
+            conversation = db.get_conversation_by_id(conv_id)
+            if conversation:
+                _ensure_conversation_owner(conversation, current_user)
 
-    deleted = await store.user_feedback.delete_feedback(feedback_id)
-    return FeedbackDeleteResponse(ok=True, deleted=deleted)
+        deleted = await store.user_feedback.delete_feedback(feedback_id)
+        return FeedbackDeleteResponse(ok=True, deleted=deleted)
+    except HTTPException:
+        raise
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete feedback") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -409,24 +446,29 @@ async def update_feedback(
     current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> ExplicitFeedbackResponse:
-    store = UnifiedFeedbackSystem(chacha_db=db)
-    if not store.user_feedback:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
+    try:
+        store = UnifiedFeedbackSystem(chacha_db=db)
+        if not store.user_feedback:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
 
-    record = await store.user_feedback.get_feedback_by_id(feedback_id)
-    if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
+        record = await store.user_feedback.get_feedback_by_id(feedback_id)
+        if not record:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback record not found")
 
-    # Validate ownership via conversation
-    conv_id = record.get("conversation_id")
-    if conv_id:
-        conversation = db.get_conversation_by_id(conv_id)
-        if conversation:
-            _ensure_conversation_owner(conversation, current_user)
+        # Validate ownership via conversation
+        conv_id = record.get("conversation_id")
+        if conv_id:
+            conversation = db.get_conversation_by_id(conv_id)
+            if conversation:
+                _ensure_conversation_owner(conversation, current_user)
 
-    await store.user_feedback.merge_feedback_update(
-        feedback_id,
-        issues=payload.issues,
-        user_notes=payload.user_notes,
-    )
-    return ExplicitFeedbackResponse(ok=True, feedback_id=feedback_id)
+        await store.user_feedback.merge_feedback_update(
+            feedback_id,
+            issues=payload.issues,
+            user_notes=payload.user_notes,
+        )
+        return ExplicitFeedbackResponse(ok=True, feedback_id=feedback_id)
+    except HTTPException:
+        raise
+    except CharactersRAGDBError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update feedback") from exc

@@ -79,6 +79,20 @@ def test_project_crud_list(prompt_studio_dual_backend_client):
     data = lst.json()
     assert data.get("success") is True
     assert isinstance(data.get("data"), list)
+    assert data.get("metadata") == {
+        "page": 1,
+        "per_page": 10,
+        "total": 1,
+        "total_pages": 1,
+    }
+    assert data.get("pagination") == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": False,
+    }
     # Get project details
     getp = client.get(f"/api/v1/prompt-studio/projects/get/{pid}")
     assert getp.status_code == 200
@@ -111,8 +125,22 @@ def test_prompt_create_list_under_project(prompt_studio_dual_backend_client):
     assert pr.status_code in (200, 201), f"{backend_label}: {pr.text}"
 
     # List prompts (endpoint definition depends on app; verify at least one is retrievable via project get)
-    gp = client.get(f"/api/v1/prompt-studio/projects/get/{pid}")
-    assert gp.status_code == 200
+    plist = client.get(
+        f"/api/v1/prompt-studio/prompts",
+        params={"project_id": pid, "page": 1, "per_page": 20},
+    )
+    assert plist.status_code == 200
+    plist_data = plist.json()
+    assert plist_data.get("success") is True
+    assert isinstance(plist_data.get("data"), list)
+    assert plist_data.get("pagination") == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 20,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": False,
+    }
 
 
 def test_test_cases_and_evaluations_flow(prompt_studio_dual_backend_client):
@@ -165,6 +193,14 @@ def test_test_cases_and_evaluations_flow(prompt_studio_dual_backend_client):
     tlist_data = tlist.json()
     assert tlist_data.get("success") is True
     assert isinstance(tlist_data.get("data"), list)
+    assert tlist_data.get("pagination") == {
+        "mode": "page",
+        "page": 1,
+        "per_page": 10,
+        "total": 1,
+        "total_pages": 1,
+        "has_more": False,
+    }
 
     # Create an evaluation (synchronous path)
     ev = client.post(

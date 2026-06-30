@@ -26,6 +26,12 @@ describe("useFileSearch", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(tldwClient.initialize).mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: vi.fn()
+      }
+    })
   })
 
   const createHook = (resolvedQuery = "knowledge query") => {
@@ -83,6 +89,7 @@ describe("useFileSearch", () => {
     expect(result.current.results).toHaveLength(1)
     expect(result.current.results[0].metadata?.title).toBe("Quarterly Report")
     expect(result.current.results[0].metadata?.media_id).toBe(42)
+    expect(result.current.results[0].metadata?.origin).toBe("media-library")
   })
 
   it("sets query error and skips search when resolved query is empty", async () => {
@@ -136,6 +143,35 @@ describe("useFileSearch", () => {
     expect(tldwClient.getMediaDetails).toHaveBeenCalledWith(
       42,
       expect.objectContaining({ include_content: true })
+    )
+  })
+
+  it("copies full media-library content as markdown", async () => {
+    vi.mocked(tldwClient.getMediaDetails).mockResolvedValue({
+      content: {
+        text: "Full media body content"
+      }
+    })
+
+    const { result } = createHook("quarterly report")
+    const mediaResult = {
+      content: "Short snippet",
+      metadata: {
+        id: 42,
+        media_id: 42,
+        title: "Quarterly Report",
+        type: "pdf",
+        url: "/api/v1/media/42",
+        origin: "media-library"
+      }
+    }
+
+    await act(async () => {
+      await result.current.copyResult(mediaResult, "markdown")
+    })
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      expect.stringContaining("Full media body content")
     )
   })
 

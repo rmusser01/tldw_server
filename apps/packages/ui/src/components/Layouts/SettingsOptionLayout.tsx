@@ -97,6 +97,12 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
   const currentBreadcrumbLabel = currentNavItem
     ? t(currentNavItem.labelToken)
     : null;
+  const routeHeadingLabel =
+    location.pathname === "/settings/model"
+      ? t("settings:modelSettings.heading", "Model settings")
+      : location.pathname === "/settings"
+        ? t("settings:heading", "Settings")
+        : currentBreadcrumbLabel || t("settings:heading", "Settings");
   const hasVisibleBetaItems = React.useMemo(
     () =>
       settingsNavGroups.some((group) =>
@@ -113,11 +119,11 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   return (
-    <div className="flex min-h-screen  w-full flex-col">
-      <main className="relative w-full flex-1">
+    <div className="flex min-h-screen w-full min-w-0 flex-col">
+      <main className="relative w-full min-w-0 flex-1">
         <div className="mx-auto w-full h-full custom-scrollbar overflow-y-auto">
-          <div className="flex flex-col lg:flex-row lg:gap-x-16 lg:px-24">
-            <aside className="lg:sticky lg:mt-0 mt-14 lg:top-0 z-20 bg-surface border-b border-border lg:border-0 lg:bg-transparent">
+          <div className="flex min-w-0 flex-col lg:flex-row lg:gap-x-16 lg:px-24">
+            <aside className="lg:sticky lg:mt-0 mt-14 lg:top-0 z-20 min-w-0 bg-surface border-b border-border lg:w-64 lg:shrink-0 lg:border-0 lg:bg-transparent">
               <nav
                 className="w-full overflow-x-auto px-4 py-4 sm:px-6 lg:px-0 lg:py-0 lg:mt-20"
                 aria-label={t(
@@ -176,7 +182,11 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                       return null;
                     }
                     return (
-                      <div key={group.key} className="min-w-max lg:min-w-0">
+                      <div
+                        key={group.key}
+                        className="min-w-0"
+                        data-testid={`settings-nav-group-${group.key}`}
+                      >
                         <div className="mb-2 flex flex-col gap-1">
                           <span className="text-xs font-semibold uppercase tracking-wide text-text-muted ">
                             {t(group.titleToken)}
@@ -266,7 +276,7 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                 ) : null}
               </nav>
             </aside>
-            <main className="relative flex-1 px-4 py-8 sm:px-6 lg:px-0 lg:py-20">
+            <main className="relative min-w-0 flex-1 px-4 py-8 sm:px-6 lg:px-0 lg:py-20">
               {/* Close button over right of content area */}
               <div className="absolute right-4 top-4 lg:right-0 lg:top-6 lg:translate-x-[-1rem]">
                 <button
@@ -286,7 +296,10 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                   <span>{t("common:close", "Close")}</span>
                 </button>
               </div>
-              <div className="mx-auto max-w-4xl space-y-8 sm:space-y-10">
+              <div className="mx-auto w-full min-w-0 max-w-4xl space-y-8 sm:space-y-10">
+                <h1 className="text-2xl font-semibold text-text">
+                  {routeHeadingLabel}
+                </h1>
                 {currentBreadcrumbLabel ? (
                   <div
                     className="rounded-md border border-border bg-surface2 px-3 py-2"

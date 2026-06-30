@@ -36,7 +36,9 @@ def _enumerate_user_ids() -> list[int]:
     try:
         base = DatabasePaths.get_user_db_base_dir()
     except _KANBAN_PURGE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug(f"kanban_purge: failed to resolve user db base dir: {exc}")
+        logger.bind(error_type=type(exc).__name__).debug(
+            "kanban_purge: failed to resolve user db base dir"
+        )
         return []
 
     uids: list[int] = []
@@ -95,7 +97,9 @@ async def start_kanban_purge_scheduler() -> asyncio.Task | None:
                         **totals,
                     )
             except _KANBAN_PURGE_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"kanban_purge: purge run failed: {exc}")
+                logger.bind(error_type=type(exc).__name__).debug(
+                    "kanban_purge: purge run failed"
+                )
             await asyncio.sleep(interval)
 
     task = asyncio.create_task(_runner(), name="kanban_purge_scheduler")

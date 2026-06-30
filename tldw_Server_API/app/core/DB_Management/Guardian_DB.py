@@ -1911,6 +1911,27 @@ class GuardianDB:
             finally:
                 conn.close()
 
+    def count_self_monitoring_alerts(
+        self,
+        user_id: str,
+        rule_id: str | None = None,
+        unread_only: bool = False,
+    ) -> int:
+        with self._lock:
+            conn = self._connect()
+            try:
+                query = "SELECT COUNT(*) as cnt FROM self_monitoring_alerts WHERE user_id = ?"
+                params: list[Any] = [str(user_id)]
+                if rule_id:
+                    query += " AND rule_id = ?"
+                    params.append(rule_id)
+                if unread_only:
+                    query += " AND is_read = 0"
+                row = conn.execute(query, params).fetchone()
+                return int(row["cnt"]) if row else 0
+            finally:
+                conn.close()
+
     def mark_alerts_read(self, user_id: str, alert_ids: list[str]) -> int:
         if not alert_ids:
             return 0
@@ -2038,6 +2059,157 @@ class GuardianDB:
                 )
             finally:
                 conn.close()
+
+    def update_escalation_for_trigger(
+        self,
+        rule: SelfMonitoringRule,
+        user_id: str,
+        session_id: str | None,
+    ) -> dict[str, Any]:
+        """Atomically update escalation counters for one rule trigger."""
+        info: dict[str, Any] = {"escalated": False, "effective_action": rule.action}
+        if rule.escalation_session_threshold <= 0 and rule.escalation_window_threshold <= 0:
+            return info
+
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                begin_immediate_if_needed(conn)
+                row = conn.execute(
+                    "SELECT * FROM escalation_state WHERE rule_id = ? AND user_id = ?",
+                    (rule.id, str(user_id)),
+                ).fetchone()
+
+                if row:
+                    if session_id and row["session_id"] != session_id:
+                        session_count = 1
+                    else:
+                        session_count = int(row["session_trigger_count"] or 0) + 1
+                else:
+                    session_count = 1
+
+                if rule.escalation_window_days > 0 and rule.escalation_window_threshold > 0:
+                    since = (now - timedelta(days=rule.escalation_window_days)).isoformat()
+                    count_row = conn.execute(
+                        "SELECT COUNT(*) AS cnt FROM self_monitoring_alerts "
+                        "WHERE user_id = ? AND rule_id = ? AND created_at >= ?",
+                        (str(user_id), rule.id, since),
+                    ).fetchone()
+                    window_count = int(count_row["cnt"] if count_row else 0) + 1
+                elif row:
+                    window_count = int(row["window_trigger_count"] or 0) + 1
+                else:
+                    window_count = 1
+
+                if row and row["cooldown_until"]:
+                    try:
+                        cooldown_dt = datetime.fromisoformat(row["cooldown_until"])
+                        if now >= cooldown_dt:
+                            self._upsert_escalation_state_with_connection(
+                                conn,
+                                rule_id=rule.id,
+                                user_id=user_id,
+                                session_id=session_id,
+                                session_trigger_count=session_count,
+                                window_trigger_count=window_count,
+                                current_escalated_action=None,
+                                escalated_at=None,
+                                cooldown_until=None,
+                                updated_at=now_iso,
+                            )
+                            conn.commit()
+                            return info
+                    except (ValueError, TypeError):
+                        pass
+
+                escalated = False
+                escalated_action = None
+
+                if (
+                    rule.escalation_session_threshold > 0
+                    and session_count >= rule.escalation_session_threshold
+                    and rule.escalation_session_action
+                ):
+                    escalated = True
+                    escalated_action = rule.escalation_session_action
+
+                if (
+                    rule.escalation_window_threshold > 0
+                    and window_count >= rule.escalation_window_threshold
+                    and rule.escalation_window_action
+                ):
+                    escalated = True
+                    escalated_action = rule.escalation_window_action
+
+                cooldown_until_iso = None
+                if escalated and rule.cooldown_minutes > 0:
+                    cooldown_until_iso = (now + timedelta(minutes=rule.cooldown_minutes)).isoformat()
+
+                self._upsert_escalation_state_with_connection(
+                    conn,
+                    rule_id=rule.id,
+                    user_id=user_id,
+                    session_id=session_id,
+                    session_trigger_count=session_count,
+                    window_trigger_count=window_count,
+                    current_escalated_action=escalated_action if escalated else None,
+                    escalated_at=now_iso if escalated else None,
+                    cooldown_until=cooldown_until_iso,
+                    updated_at=now_iso,
+                )
+                conn.commit()
+
+                if escalated and escalated_action:
+                    info["escalated"] = True
+                    info["effective_action"] = escalated_action
+                    info["session_trigger_count"] = session_count
+                    info["window_trigger_count"] = window_count
+                    info["escalated_action"] = escalated_action
+                return info
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+    @staticmethod
+    def _upsert_escalation_state_with_connection(
+        conn: sqlite3.Connection,
+        *,
+        rule_id: str,
+        user_id: str,
+        session_id: str | None,
+        session_trigger_count: int,
+        window_trigger_count: int,
+        current_escalated_action: str | None,
+        escalated_at: str | None,
+        cooldown_until: str | None,
+        updated_at: str,
+    ) -> None:
+        conn.execute(
+            """INSERT INTO escalation_state
+            (rule_id, user_id, session_id, session_trigger_count,
+             window_trigger_count, current_escalated_action,
+             escalated_at, cooldown_until, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(rule_id, user_id) DO UPDATE SET
+                session_id = excluded.session_id,
+                session_trigger_count = excluded.session_trigger_count,
+                window_trigger_count = excluded.window_trigger_count,
+                current_escalated_action = excluded.current_escalated_action,
+                escalated_at = excluded.escalated_at,
+                cooldown_until = excluded.cooldown_until,
+                updated_at = excluded.updated_at""",
+            (
+                rule_id, str(user_id), session_id,
+                session_trigger_count, window_trigger_count,
+                current_escalated_action, escalated_at,
+                cooldown_until, updated_at,
+            ),
+        )
 
     def reset_escalation_state(self, rule_id: str, user_id: str) -> bool:
         with self._lock:

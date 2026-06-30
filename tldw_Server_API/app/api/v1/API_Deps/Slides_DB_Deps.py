@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import Depends, HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Slides.slides_db import SchemaError, SlidesDatabase, SlidesDatabaseError
@@ -30,7 +31,10 @@ def cleanup_slides_db_cache() -> None:
             try:
                 db.close_connection()
             except Exception as exc:
-                logger.warning("Failed to close Slides DB for user {} on shutdown: {}", user_id, exc)
+                logger.warning(
+                    "Failed to close Slides DB connection on shutdown; error_type={}",
+                    type(exc).__name__,
+                )
         _slides_db_instances.clear()
 
 
@@ -55,22 +59,24 @@ def get_slides_db_for_user(
                     oldest_db.close_connection()
                 except Exception as exc:
                     logger.warning(
-                        "Failed to close Slides DB for evicted user {}: {}",
-                        oldest_key,
-                        exc,
+                        "Failed to close evicted Slides DB connection; error_type={}",
+                        type(exc).__name__,
                     )
             db_path = _get_slides_db_path_for_user(user_id)
             db_instance = SlidesDatabase(db_path=str(db_path), client_id=str(current_user.id))
             _slides_db_instances[db_key] = db_instance
             return db_instance
         except (SlidesDatabaseError, SchemaError) as exc:
-            logger.error("Failed to initialize Slides DB for user {}: {}", user_id, exc)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Slides DB unavailable",
-            ) from exc
+            logger.error(
+                "Failed to initialize Slides DB; error_type={}",
+                type(exc).__name__,
+            )
+            raise map_db_error_to_http(exc, default_detail="Slides DB unavailable") from exc
         except Exception as exc:
-            logger.error("Unexpected Slides DB init failure for user {}: {}", user_id, exc)
+            logger.error(
+                "Unexpected Slides DB init failure; error_type={}",
+                type(exc).__name__,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Slides DB unavailable",
@@ -85,15 +91,13 @@ def try_get_slides_db_for_user(
         return get_slides_db_for_user(current_user=current_user)
     except HTTPException as exc:
         logger.debug(
-            "Slides DB unavailable for user {}: {}",
-            getattr(current_user, "id", None),
-            exc,
+            "Slides DB unavailable during best-effort lookup; status_code={}",
+            exc.status_code,
         )
         return None
     except Exception as exc:
-        logger.exception(
-            "Unexpected Slides DB init failure for user {}: {}",
-            getattr(current_user, "id", None),
-            exc,
+        logger.error(
+            "Unexpected Slides DB init failure during best-effort lookup; error_type={}",
+            type(exc).__name__,
         )
         return None

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from loguru import logger
 
 
@@ -16,7 +18,9 @@ def resolve_policy_permission_tier(tool_name: str) -> str | None:
             return None
         return resolver(tool_name)
     except Exception as policy_error:
-        logger.debug("Failed to resolve ACP permission tier from admin policy store", exc_info=policy_error)
+        logger.bind(error_type=type(policy_error).__name__).debug(
+            "Failed to resolve ACP permission tier from admin policy store"
+        )
         return None
 
 
@@ -27,13 +31,38 @@ def determine_permission_tier(tool_name: str) -> str:
         return policy_tier
 
     tool_lower = tool_name.lower()
+    tokens = set(re.findall(r"[a-z0-9]+", tool_lower))
 
-    auto_patterns = ["read", "get", "list", "search", "find", "view", "show", "glob", "grep", "status"]
-    if any(pattern in tool_lower for pattern in auto_patterns):
-        return "auto"
-
-    individual_patterns = ["delete", "remove", "exec", "run", "shell", "bash", "terminal", "push", "force"]
-    if any(pattern in tool_lower for pattern in individual_patterns):
+    individual_tokens = {
+        "alter",
+        "bash",
+        "create",
+        "delete",
+        "destroy",
+        "drop",
+        "exec",
+        "execute",
+        "force",
+        "kill",
+        "modify",
+        "patch",
+        "post",
+        "put",
+        "push",
+        "remove",
+        "reset",
+        "rm",
+        "run",
+        "shell",
+        "terminal",
+        "update",
+        "write",
+    }
+    if tokens & individual_tokens:
         return "individual"
+
+    auto_tokens = {"read", "get", "list", "search", "find", "view", "show", "glob", "grep", "status"}
+    if tokens & auto_tokens:
+        return "auto"
 
     return "batch"

@@ -63,10 +63,12 @@ export function usePromptPaletteCommands(
 
     // --- Static mode: no query → favorites + recent ---
     if (!isSearching) {
-      const getLastUsed = (p: (typeof active)[number]): number =>
-        typeof p.lastUsedAt === "number" && Number.isFinite(p.lastUsedAt)
-          ? p.lastUsedAt
+      const getLastUsed = (p: (typeof active)[number]): number => {
+        const lastUsedAt = (p as { lastUsedAt?: unknown }).lastUsedAt
+        return typeof lastUsedAt === "number" && Number.isFinite(lastUsedAt)
+          ? lastUsedAt
           : 0
+      }
 
       const favorites = active
         .filter((p) => p.favorite)

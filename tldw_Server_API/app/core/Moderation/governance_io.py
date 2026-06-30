@@ -132,8 +132,8 @@ def import_governance_rules(
             )
             id_remap[old_id] = new_gp.id
             counts["governance_policies"] += 1
-        except (ValueError, TypeError, KeyError) as e:
-            logger.warning(f"Failed to import governance policy: {e}")
+        except (ValueError, TypeError, KeyError):
+            logger.warning("Failed to import governance policy")
             continue
 
     # Import self-monitoring rules
@@ -178,8 +178,8 @@ def import_governance_rules(
                 enabled=rule_data.get("enabled", True),
             )
             counts["self_monitoring_rules"] += 1
-        except (ValueError, TypeError, KeyError) as e:
-            logger.warning(f"Failed to import self-monitoring rule: {e}")
+        except (ValueError, TypeError, KeyError):
+            logger.warning("Failed to import self-monitoring rule")
             continue
 
     return counts

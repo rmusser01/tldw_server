@@ -38,9 +38,11 @@ import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { useTldwAudioStatus } from "@/hooks/useTldwAudioStatus"
 import { getSourceFeedbackKey } from "@/utils/feedback"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import type { ChatScope } from "@/types/chat-scope"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useStoreMessageOption } from "@/store/option"
 import type { MessageVariant } from "@/store/option"
+import type { MessageMetadataExtra } from "@/store/option/types"
 import { useStoreChatModelSettings } from "@/store/model"
 import { EDIT_MESSAGE_EVENT } from "@/utils/timeline-actions"
 import type { Character } from "@/types/character"
@@ -65,6 +67,9 @@ import {
   resolveAvatarColumnAlignment,
   resolveMessageRenderSide
 } from "./message-layout"
+import { DynamicMessageRenderer } from "@/components/Common/DynamicUI/DynamicMessageRenderer"
+import { DynamicUISourceFallback } from "@/components/Common/DynamicUI/DynamicUISourceFallback"
+import { normalizeDynamicUIEnvelope } from "@/utils/dynamic-ui"
 import { formatCost } from "@/utils/model-pricing"
 import {
   resolveMessageCostUsd,
@@ -81,11 +86,14 @@ import {
   resolveImageGenerationMetadata,
   type ImageGenerationRequestSnapshot
 } from "@/utils/image-generation-chat"
+import { hasVisibleAssistantResponse } from "./message-visibility"
 import { isDeepResearchCompletionMetadata } from "@/components/Option/Playground/research-chat-context"
 import {
   DEFAULT_TLDW_TTS_MODEL,
   DEFAULT_TTS_PROVIDER
 } from "@/services/tts"
+import type { DynamicUISurface } from "@/types/dynamic-ui"
+import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
 
@@ -146,6 +154,43 @@ const ErrorBubble: React.FC<{
     </div>
   )
 }
+
+const EmptyAssistantResponseNotice: React.FC<{
+  summary: string
+  detail: string
+  recoveryActions: Array<{
+    id: string
+    label: string
+    onClick: () => void
+  }>
+}> = ({ summary, detail, recoveryActions }) => (
+  <div
+    role="status"
+    aria-live="polite"
+    aria-label={summary}
+    className="rounded-md border border-warn/30 bg-warn/10 p-3 text-sm text-warn">
+    <p className="font-semibold">{summary}</p>
+    <p className="mt-1 text-xs text-warn">{detail}</p>
+    {recoveryActions.length > 0 && (
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="sr-only">
+          Recommended next actions:{" "}
+          {recoveryActions.map((action) => action.label).join(", ")}
+        </span>
+        {recoveryActions.map((action) => (
+          <button
+            key={action.id}
+            type="button"
+            onClick={action.onClick}
+            className="rounded border border-warn/40 bg-surface px-2 py-1 text-[11px] font-medium text-warn transition hover:bg-warn/10"
+          >
+            {action.label}
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+)
 
 type Props = {
   message: string
@@ -233,7 +278,9 @@ type Props = {
   messageSteeringForceNarrate?: boolean
   onMessageSteeringForceNarrateChange?: (enabled: boolean) => void
   onClearMessageSteering?: () => void
-  metadataExtra?: Record<string, unknown>
+  metadataExtra?: MessageMetadataExtra
+  dynamicUISurface?: DynamicUISurface
+  onDynamicUIAction?: (payload: unknown) => void
   researchActions?: MessageResearchActions
   onRegenerateImage?: (payload: {
     messageId?: string
@@ -261,7 +308,7 @@ type Props = {
   onDeleteAllImageVariants?: (payload: {
     messageId?: string
   }) => void
-  scope?: string
+  scope?: ChatScope
 }
 
 export type MessageResearchActions = {
@@ -302,6 +349,10 @@ export const PlaygroundMessage = (props: Props) => {
     moodConfidenceDefault
   )
   const [userPersonaImage] = useStorage("chatUserPersonaImage", "")
+  const [renderMermaidDiagrams] = useStorage(
+    "renderMermaidDiagrams",
+    DEFAULT_CHAT_SETTINGS.renderMermaidDiagrams
+  )
   const [ttsProvider] = useStorage("ttsProvider", DEFAULT_TTS_PROVIDER)
   const [tldwTtsModel] = useStorage("tldwTtsModel", DEFAULT_TLDW_TTS_MODEL)
   const { t } = useTranslation(["common", "playground"])
@@ -431,6 +482,12 @@ export const PlaygroundMessage = (props: Props) => {
     partialResponseSaved &&
     !interruptedGeneration &&
     !errorPayload
+  const hasVisibleAssistantResponseContent = hasVisibleAssistantResponse({
+    message: props.message,
+    message_type: props.message_type,
+    images: props.images,
+    toolCalls: props.toolCalls
+  })
   const messageTimestamp = React.useMemo(() => {
     const info = props.generationInfo as
       | { created_at?: string | number; createdAt?: string | number; timestamp?: string | number }
@@ -1148,6 +1205,20 @@ export const PlaygroundMessage = (props: Props) => {
     props.isStreaming &&
     !errorPayload &&
     !renderGreetingMarkdown
+  const isActiveStreamingMessage = props.isStreaming && isLastMessage
+  const enableAssistantMermaidDiagrams =
+    props.isBot &&
+    !isSystemMessage &&
+    renderMermaidDiagrams !== false &&
+    !isActiveStreamingMessage
+  const mermaidArtifactBaseContextId =
+    props.messageId ||
+    props.serverMessageId ||
+    `${props.conversationInstanceId || "local"}-message-${props.currentMessageIndex}`
+  const dynamicUIEnvelope = normalizeDynamicUIEnvelope(
+    props.metadataExtra?.dynamic_ui
+  )
+  const resolvedDynamicUISurface = props.dynamicUISurface ?? "artifact"
 
   const shouldShowLoadingStatus =
     props.isBot &&
@@ -1525,6 +1596,40 @@ export const PlaygroundMessage = (props: Props) => {
     props.onRegenerate,
     t
   ])
+  const emptyResponseRecoveryActions = React.useMemo(
+    () => [
+      {
+        id: "retry",
+        label: t(
+          "playground:errorRecovery.retrySameModel",
+          "Retry same model"
+        ),
+        onClick: () => props.onRegenerate()
+      },
+      {
+        id: "switch",
+        label: t(
+          "playground:errorRecovery.switchModel",
+          "Switch model"
+        ),
+        onClick: handleOpenModelSettings
+      },
+      {
+        id: "fallback",
+        label: t(
+          "playground:errorRecovery.tryProviderFallback",
+          "Try provider fallback"
+        ),
+        onClick: handleEnableProviderFallback
+      }
+    ],
+    [
+      handleEnableProviderFallback,
+      handleOpenModelSettings,
+      props.onRegenerate,
+      t
+    ]
+  )
 
   const actionRowVisibility = isProMode
     ? "flex"
@@ -1533,6 +1638,16 @@ export const PlaygroundMessage = (props: Props) => {
     ? "hidden"
     : "inline-flex group-hover:hidden"
   const showInlineActions = !props.isProcessing && !editMode
+  const showEmptyAssistantResponse =
+    props.isBot &&
+    !isSystemMessage &&
+    !props.isStreaming &&
+    !props.isProcessing &&
+    !errorPayload &&
+    !interruptedGeneration &&
+    !showPartialSaveMarker &&
+    !isImageGenerationAssistantEvent &&
+    !hasVisibleAssistantResponseContent
 
   const handleThumbUp = React.useCallback(() => {
     void submitThumb("up")
@@ -2062,12 +2177,13 @@ export const PlaygroundMessage = (props: Props) => {
             <Tooltip
               title={
                 fallbackAudit.fallbackApplied && fallbackAudit.requestedTarget && fallbackAudit.resolvedTarget
-                  ? t("playground:routing.fallbackTooltip",
+                  ? String(t("playground:routing.fallbackTooltip",
                       "Requested: {{requested}}. Fell back to: {{resolved}}",
                       {
                         requested: fallbackAudit.requestedTarget,
                         resolved: fallbackAudit.resolvedTarget
                       } as any)
+                    )
                   : undefined
               }
             >
@@ -2077,9 +2193,9 @@ export const PlaygroundMessage = (props: Props) => {
               >
                 {fallbackAudit.resolvedTarget && (
                   <span>
-                    {t("playground:routing.using", "Using: {{target}}", {
+                    {String(t("playground:routing.using", "Using: {{target}}", {
                       target: fallbackAudit.resolvedTarget
-                    } as any)}
+                    } as any))}
                   </span>
                 )}
                 {!fallbackAudit.resolvedTarget && fallbackAuditPolicyLabel}
@@ -2406,6 +2522,38 @@ export const PlaygroundMessage = (props: Props) => {
                   >
                     {props.message}
                   </p>
+                ) : !props.isStreaming && dynamicUIEnvelope ? (
+                  props.messageId ? (
+                    <DynamicMessageRenderer
+                      envelope={dynamicUIEnvelope}
+                      sourceMessageId={props.messageId}
+                      sourceText={dynamicUIEnvelope.source}
+                      surface={resolvedDynamicUISurface}
+                      onAction={props.onDynamicUIAction}
+                    />
+                  ) : (
+                    <DynamicUISourceFallback
+                      source={dynamicUIEnvelope.source}
+                      surface={resolvedDynamicUISurface}
+                      error="Dynamic UI actions require a saved assistant message id."
+                    />
+                  )
+                ) : showEmptyAssistantResponse ? (
+                  <EmptyAssistantResponseNotice
+                    summary={
+                      t(
+                        "playground:errorRecovery.emptyResponseSummary",
+                        "No response text was returned."
+                      ) as string
+                    }
+                    detail={
+                      t(
+                        "playground:errorRecovery.emptyResponseDetail",
+                        "The request completed, but the assistant did not return visible content."
+                      ) as string
+                    }
+                    recoveryActions={emptyResponseRecoveryActions}
+                  />
                 ) : renderGreetingMarkdown ? (
                   <React.Suspense
                     fallback={
@@ -2419,6 +2567,9 @@ export const PlaygroundMessage = (props: Props) => {
                       className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                       searchQuery={props.searchQuery}
                       codeBlockVariant="compact"
+                      artifactContextId={`${mermaidArtifactBaseContextId}-greeting`}
+                      enableMermaidArtifactActions={enableAssistantMermaidDiagrams}
+                      enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                     />
                   </React.Suspense>
                 ) : (
@@ -2437,6 +2588,7 @@ export const PlaygroundMessage = (props: Props) => {
                             markdownBaseClasses={MARKDOWN_BASE_CLASSES}
                             searchQuery={props.searchQuery}
                             t={t}
+                            enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                           />
                         )
                       }
@@ -2455,6 +2607,9 @@ export const PlaygroundMessage = (props: Props) => {
                             className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                             searchQuery={props.searchQuery}
                             codeBlockVariant="github"
+                            artifactContextId={`${mermaidArtifactBaseContextId}-segment-${i}`}
+                            enableMermaidArtifactActions={enableAssistantMermaidDiagrams}
+                            enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                           />
                         </React.Suspense>
                       )

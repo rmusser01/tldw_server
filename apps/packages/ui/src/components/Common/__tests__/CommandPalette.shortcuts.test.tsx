@@ -1,7 +1,7 @@
 import React from "react"
 import { describe, it, expect, vi } from "vitest"
-import { fireEvent, render, screen, within } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { MemoryRouter, useLocation } from "react-router-dom"
 import { CommandPalette } from "../CommandPalette"
 import {
   formatShortcut,
@@ -9,6 +9,7 @@ import {
   type ShortcutModifier
 } from "@/hooks/useKeyboardShortcuts"
 import type { ShortcutConfig } from "@/hooks/keyboard/useShortcutConfig"
+import { CHAT_PATH } from "@/routes/route-paths"
 
 const mockShortcutConfig: ShortcutConfig = {
   focusTextarea: { key: "Escape", shiftKey: true },
@@ -18,6 +19,7 @@ const mockShortcutConfig: ShortcutConfig = {
   toggleWebSearch: { key: "w", altKey: true },
   toggleQuickChatHelper: { key: "h", ctrlKey: true, shiftKey: true },
   modePlayground: { key: "1", altKey: true },
+  modeSources: { key: "2", altKey: true },
   modeMedia: { key: "3", altKey: true },
   modeKnowledge: { key: "4", altKey: true },
   modeNotes: { key: "5", altKey: true },
@@ -70,6 +72,39 @@ const expectedShortcutLabel = (shortcut: {
   })
 
 describe("CommandPalette shortcut hints", () => {
+  const LocationProbe = () => {
+    const location = useLocation()
+
+    return <div data-testid="current-route">{location.pathname}</div>
+  }
+
+  it("routes the Go to Chat command to the chat page", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+        <LocationProbe />
+      </MemoryRouter>
+    )
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+
+    const goToChat = await screen.findByRole("option", { name: /Go to Chat/i })
+
+    expect(goToChat).toHaveAttribute("data-command-id", "nav-chat")
+    expect(goToChat).toHaveAttribute("data-target-path", CHAT_PATH)
+
+    fireEvent.click(goToChat)
+
+    expect(screen.getByTestId("current-route")).toHaveTextContent(CHAT_PATH)
+  })
+
   it("shows configured shortcut hints only for actions with real keyboard bindings", async () => {
     render(
       <MemoryRouter>
@@ -206,5 +241,167 @@ describe("CommandPalette shortcut hints", () => {
     fireEvent.keyDown(window, { key: "k", ctrlKey: true })
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
+  })
+
+  it("focuses the palette search field and restores focus to the event opener on Escape", async () => {
+    render(
+      <MemoryRouter>
+        <button type="button">Open palette from header</button>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    const opener = screen.getByRole("button", { name: "Open palette from header" })
+    opener.focus()
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+
+    const searchInput = await screen.findByRole("textbox", {
+      name: "Search commands"
+    })
+    expect(searchInput).toHaveFocus()
+
+    fireEvent.keyDown(searchInput, { key: "k", ctrlKey: true })
+    expect(searchInput).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: "Escape" })
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    )
+    await waitFor(() => expect(opener).toHaveFocus())
+  })
+
+  it("restores focus to the keyboard shortcut opener after closing", async () => {
+    render(
+      <MemoryRouter>
+        <input aria-label="composer" />
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    const composer = screen.getByRole("textbox", { name: "composer" })
+    composer.focus()
+
+    fireEvent.keyDown(composer, { key: "k", ctrlKey: true })
+
+    expect(
+      await screen.findByRole("textbox", { name: "Search commands" })
+    ).toHaveFocus()
+
+    fireEvent.keyDown(document, { key: "Escape" })
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    )
+    await waitFor(() => expect(composer).toHaveFocus())
+  })
+
+  it("routes the Go to Chat command to the chat page", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+        <LocationProbe />
+      </MemoryRouter>
+    )
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+
+    const goToChat = await screen.findByRole("option", { name: /Go to Chat/i })
+    fireEvent.click(goToChat)
+
+    expect(screen.getByTestId("current-route")).toHaveTextContent("/chat")
+  })
+
+  it("closes on Escape while the palette is open", async () => {
+    render(
+      <MemoryRouter>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+
+    // While open, Escape is handled (default prevented) and closes the palette.
+    const defaultNotPrevented = fireEvent.keyDown(document, { key: "Escape" })
+    expect(defaultNotPrevented).toBe(false)
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    )
+  })
+
+  it("does not swallow Escape while the palette is closed", () => {
+    render(
+      <MemoryRouter>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    // Closed: the Escape shortcut must be inactive so Escape stays available for
+    // other overlays (antd Drawer/Modal). fireEvent returns true when no handler
+    // called preventDefault.
+    const defaultNotPrevented = fireEvent.keyDown(document, { key: "Escape" })
+    expect(defaultNotPrevented).toBe(true)
+  })
+
+  it("routes the Go to MCP Hub command to the product hub page", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <CommandPalette
+          onNewChat={vi.fn()}
+          onToggleRag={vi.fn()}
+          onToggleWebSearch={vi.fn()}
+          onIngestPage={vi.fn()}
+          onSwitchModel={vi.fn()}
+          onToggleSidebar={vi.fn()}
+        />
+        <LocationProbe />
+      </MemoryRouter>
+    )
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+
+    const goToMcpHub = await screen.findByRole("option", {
+      name: /Go to MCP Hub/i
+    })
+    fireEvent.click(goToMcpHub)
+
+    expect(screen.getByTestId("current-route")).toHaveTextContent("/mcp-hub")
   })
 })

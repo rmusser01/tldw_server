@@ -19,4 +19,26 @@ describe("ReviewTab scope-change guard", () => {
     expect(suggestionBranch).toContain("onReviewDeckChange(targetId)")
     expect(suggestionBranch).not.toContain("setActiveReviewSessionId(null)")
   })
+
+  it("keeps dashboard deck switches from pre-clearing active review session teardown", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "..", "ReviewTab.tsx"),
+      "utf8"
+    )
+    const dashboardReviewHandler =
+      source.match(
+        /const handleDashboardReviewDeck = React\.useCallback\([\s\S]*?const handleDashboardCramDeck/
+      )?.[0] ?? ""
+    const dashboardCramHandler =
+      source.match(
+        /const handleDashboardCramDeck = React\.useCallback\([\s\S]*?const reviewScopeKey/
+      )?.[0] ?? ""
+
+    expect(dashboardReviewHandler.length).toBeGreaterThan(0)
+    expect(dashboardCramHandler.length).toBeGreaterThan(0)
+    expect(dashboardReviewHandler).toContain("onReviewDeckChange(deckId)")
+    expect(dashboardCramHandler).toContain("onReviewDeckChange(deckId)")
+    expect(dashboardReviewHandler).not.toContain("setActiveReviewSessionId(null)")
+    expect(dashboardCramHandler).not.toContain("setActiveReviewSessionId(null)")
+  })
 })

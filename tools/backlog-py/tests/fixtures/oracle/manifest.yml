@@ -1,0 +1,149 @@
+upstream_version: "1.44.0"
+source_kind: "npm-release"
+source_ref: "backlog.md@1.44.0"
+package_metadata_sha256: "b890dde4a33480361ff34195192e1c0a23d6c7dc1c47b095933a29c7ccb4eee6"
+generated_at: "2026-05-10"
+fixtures:
+  - name: "cli:help"
+    command: ["backlog", "--help"]
+    agent_critical: true
+  - name: "cli:task-list-plain"
+    command: ["backlog", "task", "list", "--plain"]
+    agent_critical: true
+  - name: "cli:task-view-plain"
+    command: ["backlog", "task", "1", "--plain"]
+    agent_critical: true
+  - name: "cli:search-plain"
+    command: ["backlog", "search", "Backlog.md", "--plain"]
+    agent_critical: true
+  - name: "cli:config-list"
+    command: ["backlog", "config", "list"]
+    agent_critical: true
+  - name: "cli:board"
+    command: ["backlog", "board"]
+    agent_critical: true
+  - name: "cli:task-create"
+    command: ["backlog", "task", "create", "Temporary smoke task", "--status", "To Do", "--plain"]
+    agent_critical: true
+  - name: "cli:task-edit"
+    command: ["backlog", "task", "edit", "TASK-1", "--append-notes", "Updated from fixture", "--plain"]
+    agent_critical: true
+  - name: "cli:doc-list"
+    command: ["backlog", "doc", "list"]
+    agent_critical: true
+  - name: "cli:doc-view"
+    command: ["backlog", "doc", "view", "guides/setup.md"]
+    agent_critical: true
+  - name: "cli:doc-create"
+    command: ["backlog", "doc", "create", "guides/setup.md", "--title", "Setup Guide", "--content", "Fixture body"]
+    agent_critical: true
+  - name: "cli:doc-update"
+    command: ["backlog", "doc", "update", "guides/setup.md", "--title", "Updated Setup"]
+    agent_critical: true
+  - name: "cli:milestone-list"
+    command: ["backlog", "milestone", "list"]
+    agent_critical: true
+  - name: "cli:milestone-add"
+    command: ["backlog", "milestone", "add", "Alpha"]
+    agent_critical: true
+  - name: "cli:milestone-rename"
+    command: ["backlog", "milestone", "rename", "Alpha", "Beta"]
+    agent_critical: true
+  - name: "cli:milestone-remove"
+    command: ["backlog", "milestone", "remove", "Beta"]
+    agent_critical: true
+  - name: "cli:milestone-archive"
+    command: ["backlog", "milestone", "archive", "Release 1"]
+    agent_critical: true
+  - name: "cli:config-dod-defaults-get"
+    command: ["backlog", "config", "dod-defaults-get"]
+    agent_critical: true
+  - name: "cli:config-dod-defaults-upsert"
+    command: ["backlog", "config", "dod-defaults-upsert", "Tests pass"]
+    agent_critical: true
+  - name: "mcp:workflow-overview"
+    resource: "backlog://workflow/overview"
+    agent_critical: true
+  - name: "mcp:task-workflow-alias"
+    resource: "backlog://docs/task-workflow"
+    agent_critical: true
+  - name: "mcp:task-search"
+    tool: "task_search"
+    agent_critical: true
+  - name: "mcp:task-view"
+    tool: "task_view"
+    agent_critical: true
+  - name: "mcp:task-create"
+    tool: "task_create"
+    agent_critical: true
+  - name: "mcp:task-edit"
+    tool: "task_edit"
+    agent_critical: true
+  - name: "mcp:document-list"
+    tool: "document_list"
+    agent_critical: true
+  - name: "mcp:document-search"
+    tool: "document_list"
+    agent_critical: true
+  - name: "mcp:document-view"
+    tool: "document_view"
+    agent_critical: true
+  - name: "mcp:document-create"
+    tool: "document_create"
+    agent_critical: true
+  - name: "mcp:document-update"
+    tool: "document_update"
+    agent_critical: true
+  - name: "mcp:milestone-list"
+    tool: "milestone_list"
+    agent_critical: true
+  - name: "mcp:milestone-add"
+    tool: "milestone_add"
+    agent_critical: true
+  - name: "mcp:milestone-rename"
+    tool: "milestone_rename"
+    agent_critical: true
+  - name: "mcp:milestone-remove"
+    tool: "milestone_remove"
+    agent_critical: true
+  - name: "mcp:milestone-archive"
+    tool: "milestone_archive"
+    agent_critical: true
+  - name: "mcp:definition-of-done-defaults-get"
+    tool: "definition_of_done_defaults_get"
+    agent_critical: true
+  - name: "mcp:definition-of-done-defaults-upsert"
+    tool: "definition_of_done_defaults_upsert"
+    agent_critical: true
+  - name: "browser:kanban-drag-drop"
+    command: ["backlog", "browser"]
+    agent_critical: false
+    classification: "browser-deferred"
+  - name: "cli:interactive-board"
+    command: ["backlog", "board"]
+    agent_critical: false
+    classification: "interactive-deferred"
+  - name: "cli:rich-colored-output"
+    command: ["backlog", "task", "list"]
+    agent_critical: false
+    classification: "interactive-deferred"
+  - name: "cli:shell-completion-install"
+    command: ["backlog", "completion", "install"]
+    agent_critical: false
+    classification: "completion-deferred"
+  - name: "core:on-status-change"
+    command: ["backlog", "task", "edit", "TASK-1", "--status", "Done"]
+    agent_critical: false
+    classification: "automation-deferred"
+  - name: "git:remote-operations"
+    command: ["backlog", "task", "create", "Remote operation example"]
+    agent_critical: false
+    classification: "git-deferred"
+  - name: "git:auto-commit"
+    command: ["backlog", "task", "create", "Auto commit example"]
+    agent_critical: false
+    classification: "git-deferred"
+  - name: "git:hook-bypass"
+    command: ["backlog", "task", "create", "Hook bypass example"]
+    agent_critical: false
+    classification: "git-deferred"

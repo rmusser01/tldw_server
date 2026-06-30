@@ -16,6 +16,22 @@ import type {
   ReferenceImageCandidate,
   ReferenceImageListResponse
 } from "../TldwApiClient"
+import {
+  normalizePlaylistPreflightResponse,
+  type ApiPlaylistPreflightResponse,
+  type PlaylistPreflightResult
+} from "@/services/tldw/playlist-preflight"
+import {
+  normalizeMediaCollectionItem,
+  normalizeMediaCollectionListResponse,
+  normalizeMediaCollectionResponse,
+  type ApiMediaCollection,
+  type ApiMediaCollectionItem,
+  type ApiMediaCollectionListResponse,
+  type MediaCollection,
+  type MediaCollectionItem,
+  type MediaCollectionList
+} from "@/services/tldw/conference-collections"
 
 /**
  * Builds a query string from a record of parameters.
@@ -121,6 +137,136 @@ export const mediaMethods = {
     })
   },
 
+  async preflightPlaylist(payload: {
+    url: string
+    max_items?: number
+    maxItems?: number
+    timeout_seconds?: number
+    timeoutMs?: number
+  }): Promise<PlaylistPreflightResult> {
+    const { timeoutMs, maxItems, max_items, timeout_seconds, ...rest } = payload || {}
+    const requestedTimeoutSeconds =
+      typeof timeout_seconds === "number"
+        ? timeout_seconds
+        : typeof timeoutMs === "number"
+          ? Math.ceil(timeoutMs / 1000)
+          : undefined
+    const body: Record<string, unknown> = {
+      ...rest,
+      max_items: max_items ?? maxItems
+    }
+    if (typeof body.max_items === "undefined") {
+      delete body.max_items
+    }
+    if (typeof requestedTimeoutSeconds === "number" && Number.isFinite(requestedTimeoutSeconds)) {
+      body.timeout_seconds = Math.min(60, Math.max(1, Math.ceil(requestedTimeoutSeconds)))
+    }
+    const response = await bgRequest<ApiPlaylistPreflightResponse>({
+      path: "/api/v1/media/playlists/preflight",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      timeoutMs
+    })
+    return normalizePlaylistPreflightResponse(response)
+  },
+
+  async createMediaCollection(
+    payload: Record<string, any>,
+    options?: { timeoutMs?: number }
+  ): Promise<MediaCollection> {
+    const response = await bgRequest<ApiMediaCollection>({
+      path: "/api/v1/media/collections",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+      timeoutMs: options?.timeoutMs
+    })
+    return normalizeMediaCollectionResponse(response)
+  },
+
+  async listMediaCollections(
+    params?: {
+      kind?: string
+      page?: number
+      size?: number
+    },
+    options?: { timeoutMs?: number; signal?: AbortSignal }
+  ): Promise<MediaCollectionList> {
+    const query = buildQuery(params as Record<string, any>)
+    const response = await bgRequest<ApiMediaCollectionListResponse>({
+      path: `/api/v1/media/collections${query}`,
+      method: "GET",
+      timeoutMs: options?.timeoutMs,
+      abortSignal: options?.signal
+    })
+    return normalizeMediaCollectionListResponse(response)
+  },
+
+  async getMediaCollection(
+    collectionId: number | string,
+    options?: { timeoutMs?: number; signal?: AbortSignal }
+  ): Promise<MediaCollection> {
+    const id = encodeURIComponent(String(collectionId))
+    const response = await bgRequest<ApiMediaCollection>({
+      path: `/api/v1/media/collections/${id}`,
+      method: "GET",
+      timeoutMs: options?.timeoutMs,
+      abortSignal: options?.signal
+    })
+    return normalizeMediaCollectionResponse(response)
+  },
+
+  async updateMediaCollection(
+    collectionId: number | string,
+    payload: Record<string, any>,
+    options?: { timeoutMs?: number }
+  ): Promise<MediaCollection> {
+    const id = encodeURIComponent(String(collectionId))
+    const response = await bgRequest<ApiMediaCollection>({
+      path: `/api/v1/media/collections/${id}`,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+      timeoutMs: options?.timeoutMs
+    })
+    return normalizeMediaCollectionResponse(response)
+  },
+
+  async addMediaCollectionItem(
+    collectionId: number | string,
+    payload: Record<string, any>,
+    options?: { timeoutMs?: number }
+  ): Promise<MediaCollectionItem> {
+    const id = encodeURIComponent(String(collectionId))
+    const response = await bgRequest<ApiMediaCollectionItem>({
+      path: `/api/v1/media/collections/${id}/items`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+      timeoutMs: options?.timeoutMs
+    })
+    return normalizeMediaCollectionItem(response)
+  },
+
+  async updateMediaCollectionItem(
+    collectionId: number | string,
+    itemId: number | string,
+    payload: Record<string, any>,
+    options?: { timeoutMs?: number }
+  ): Promise<MediaCollectionItem> {
+    const id = encodeURIComponent(String(collectionId))
+    const item = encodeURIComponent(String(itemId))
+    const response = await bgRequest<ApiMediaCollectionItem>({
+      path: `/api/v1/media/collections/${id}/items/${item}`,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+      timeoutMs: options?.timeoutMs
+    })
+    return normalizeMediaCollectionItem(response)
+  },
+
   async getMediaIngestJob(
     jobId: number | string,
     options?: { timeoutMs?: number }
@@ -214,7 +360,7 @@ export const mediaMethods = {
     options?: { signal?: AbortSignal }
   ): Promise<ReferenceImageListResponse> {
     const response = await bgRequest<any>({
-      path: "/api/v1/files/reference-images" as PathOrUrl,
+      path: "/api/v1/files/reference-images" as AllowedPath,
       method: "GET",
       abortSignal: options?.signal
     })
@@ -248,14 +394,16 @@ export const mediaMethods = {
 
   async updateMediaKeywords(
     mediaId: string | number,
-    payload: { keywords: string[]; mode?: "add" | "remove" | "set" }
+    payload: { keywords: string[]; mode?: "add" | "remove" | "set" },
+    options?: { suppressBackendUnavailableEvent?: boolean }
   ): Promise<{ media_id: number; keywords: string[] }> {
     const id = encodeURIComponent(String(mediaId))
     return await bgRequest<{ media_id: number; keywords: string[] }>({
       path: `/api/v1/media/${id}/keywords`,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })
   },
 
@@ -447,6 +595,7 @@ export const mediaMethods = {
       include_versions?: boolean
       include_version_content?: boolean
       signal?: AbortSignal
+      suppressBackendUnavailableEvent?: boolean
     }
   ): Promise<any> {
     const id = encodeURIComponent(String(mediaId))
@@ -458,7 +607,8 @@ export const mediaMethods = {
     return await bgRequest<any>({
       path: `/api/v1/media/${id}${query}`,
       method: "GET",
-      abortSignal: options?.signal
+      abortSignal: options?.signal,
+      suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })
   },
 
@@ -1344,3 +1494,5 @@ export const mediaMethods = {
     })
   }
 }
+
+export type MediaMethods = typeof mediaMethods

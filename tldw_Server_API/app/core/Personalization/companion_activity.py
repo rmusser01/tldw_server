@@ -5,12 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import traceback
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.feature_flags import is_personalization_enabled
+from tldw_Server_API.app.core.Personalization.companion_user_ids import (
+    resolve_existing_companion_storage_user_id,
+)
 
 
 def _open_db_for_user(user_id: str | int) -> tuple[PersonalizationDB, str]:
@@ -18,7 +22,8 @@ def _open_db_for_user(user_id: str | int) -> tuple[PersonalizationDB, str]:
     normalized_user_id = str(user_id or "").strip()
     if not normalized_user_id:
         raise ValueError("user_id is required")
-    return PersonalizationDB.for_user(user_id), normalized_user_id
+    storage_user_id = resolve_existing_companion_storage_user_id(normalized_user_id)
+    return PersonalizationDB.for_user(storage_user_id), normalized_user_id
 
 
 def _profile_opted_in(db: PersonalizationDB, user_id: str) -> bool:
@@ -52,6 +57,69 @@ def _payload_fingerprint(payload: dict[str, Any] | None) -> str:
     except Exception:
         serialized = json.dumps({"unserializable": True}, sort_keys=True, ensure_ascii=True)
     return hashlib.sha1(serialized.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+
+
+def _exception_reason(exc: BaseException) -> str:
+    return type(exc).__name__
+
+
+def _log_ref(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return "na"
+    return hashlib.sha1(normalized.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+
+
+def _traceback_summary(exc: BaseException) -> list[dict[str, Any]]:
+    frames = traceback.extract_tb(exc.__traceback__)
+    return [
+        {"function": frame.name, "line": frame.lineno}
+        for frame in frames[-4:]
+    ]
+
+
+def _log_activity_exception(
+    *,
+    level: str,
+    message: str,
+    exc: BaseException,
+    operation: str,
+    user_id: str | int | None,
+    event_type: str | None = None,
+    source_type: str | None = None,
+    source_id: str | int | None = None,
+    dedupe_key: str | None = None,
+    event_count: int | None = None,
+) -> None:
+    reason = _exception_reason(exc)
+    context = {
+        "operation": operation,
+        "reason": reason,
+        "user_ref": _log_ref(user_id),
+        "event_type": event_type or "na",
+        "source_type": source_type or "na",
+        "source_ref": _log_ref(source_id),
+        "dedupe_ref": _log_ref(dedupe_key),
+        "event_count": event_count,
+        "trace": _traceback_summary(exc),
+    }
+    logger.bind(**context).log(
+        level,
+        (
+            "{}: reason={} operation={} user_ref={} event_type={} "
+            "source_type={} source_ref={} dedupe_ref={} event_count={} trace={}"
+        ),
+        message,
+        reason,
+        context["operation"],
+        context["user_ref"],
+        context["event_type"],
+        context["source_type"],
+        context["source_ref"],
+        context["dedupe_ref"],
+        context["event_count"],
+        context["trace"],
+    )
 
 
 def record_companion_activity(
@@ -91,10 +159,30 @@ def record_companion_activity(
         if _unique_conflict(exc):
             logger.debug("companion activity duplicate skipped: {}", dedupe_key)
             return None
-        logger.debug("companion activity insert skipped: {}", exc)
+        _log_activity_exception(
+            level="DEBUG",
+            message="companion activity insert skipped",
+            exc=exc,
+            operation="record_companion_activity.insert",
+            user_id=user_id,
+            event_type=event_type,
+            source_type=source_type,
+            source_id=source_id,
+            dedupe_key=dedupe_key,
+        )
         return None
     except Exception as exc:
-        logger.debug("companion activity capture skipped: {}", exc)
+        _log_activity_exception(
+            level="DEBUG",
+            message="companion activity capture skipped",
+            exc=exc,
+            operation="record_companion_activity",
+            user_id=user_id,
+            event_type=event_type,
+            source_type=source_type,
+            source_id=source_id,
+            dedupe_key=dedupe_key,
+        )
         return None
 
 
@@ -128,19 +216,13 @@ def record_companion_activity_events_bulk(
             events=safe_events,
         )
     except Exception as exc:
-        sample_event_types = [str(event.get("event_type", "")) for event in events[:3]]
-        sample_dedupe_keys = [
-            str(event.get("dedupe_key", ""))
-            for event in events[:3]
-            if str(event.get("dedupe_key", "")).strip()
-        ]
-        logger.warning(
-            "companion activity bulk capture skipped for user={} batch_size={} sample_event_types={} sample_dedupe_keys={} error={}",
-            normalized_user_id or str(user_id or ""),
-            len(events),
-            sample_event_types,
-            sample_dedupe_keys,
-            exc,
+        _log_activity_exception(
+            level="WARNING",
+            message="companion activity bulk capture skipped",
+            exc=exc,
+            operation="record_companion_activity_events_bulk",
+            user_id=normalized_user_id or user_id,
+            event_count=len(events),
         )
         return []
 
@@ -154,6 +236,32 @@ def _truncate_text(value: str | None, *, max_length: int) -> str | None:
     if len(normalized) <= max_length:
         return normalized
     return normalized[: max_length - 3].rstrip() + "..."
+
+
+def _retained_text_metadata(field_name: str, value: Any, *, max_chars: int = 240) -> dict[str, Any]:
+    text = " ".join(str(value or "").strip().split())
+    if not text:
+        return {
+            f"{field_name}_preview": None,
+            f"{field_name}_char_count": 0,
+            f"{field_name}_digest": "na",
+            f"{field_name}_truncated": False,
+        }
+    digest = hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
+    safe_limit = max(8, int(max_chars))
+    suffix = "... [truncated]"
+    if len(text) <= safe_limit:
+        preview = text
+    elif safe_limit <= len(suffix):
+        preview = text[:safe_limit]
+    else:
+        preview = f"{text[: safe_limit - len(suffix)]}{suffix}"
+    return {
+        f"{field_name}_preview": preview,
+        f"{field_name}_char_count": len(text),
+        f"{field_name}_digest": digest,
+        f"{field_name}_truncated": len(text) > safe_limit,
+    }
 
 
 def _normalize_companion_tags(tags: list[str] | None) -> list[str]:
@@ -269,7 +377,7 @@ def record_reading_item_updated(*, user_id: str | int | None, item: Any) -> str 
             "title": getattr(item, "title", None),
             "status": getattr(item, "status", None),
             "favorite": bool(getattr(item, "favorite", False)),
-            "notes": getattr(item, "notes", None),
+            **_retained_text_metadata("notes", getattr(item, "notes", None)),
         },
     )
 
@@ -379,8 +487,8 @@ def _reading_highlight_metadata(highlight: Any, *, item_title: str | None = None
         "item_id": getattr(highlight, "item_id", None),
         "title": item_title,
         "item_title": item_title,
-        "quote": getattr(highlight, "quote", None),
-        "note": getattr(highlight, "note", None),
+        **_retained_text_metadata("quote", getattr(highlight, "quote", None)),
+        **_retained_text_metadata("note", getattr(highlight, "note", None)),
         "color": getattr(highlight, "color", None),
         "state": getattr(highlight, "state", None),
         "anchor_strategy": getattr(highlight, "anchor_strategy", None),
@@ -1061,8 +1169,8 @@ def _watchlist_item_tags(item: Any) -> list[str]:
             tags = tags_fn()
             if isinstance(tags, list):
                 return [str(tag) for tag in tags if str(tag).strip()]
-        except Exception as exc:
-            logger.debug("watchlist item tags() lookup skipped: {}", exc)
+        except Exception:
+            logger.debug("watchlist item tags() lookup skipped")
 
     raw_tags_json = _value(item, "tags_json")
     if isinstance(raw_tags_json, str) and raw_tags_json.strip():
@@ -1070,8 +1178,8 @@ def _watchlist_item_tags(item: Any) -> list[str]:
             parsed = json.loads(raw_tags_json)
             if isinstance(parsed, list):
                 return [str(tag) for tag in parsed if str(tag).strip()]
-        except Exception as exc:
-            logger.debug("watchlist item tags_json parse skipped: {}", exc)
+        except Exception:
+            logger.debug("watchlist item tags_json parse skipped")
 
     return []
 

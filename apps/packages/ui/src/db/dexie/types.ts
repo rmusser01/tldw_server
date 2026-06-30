@@ -65,6 +65,7 @@ export type Message = {
   clusterId?: string;
   modelId?: string;
   generationInfo?: any;
+  metadataExtra?: Record<string, unknown>;
   modelName?: string;
   modelImage?: string;
   documents?: ChatDocuments;
@@ -430,6 +431,25 @@ export type SttRecordingRow = {
   mimeType: string
   durationMs: number
   createdAt: number
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Media Read-Along Audio Cache Types
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type MediaReadAlongAudioCacheEntry = {
+  id: string
+  createdAt: number
+  lastUsedAt: number
+  mediaId: string
+  mediaKind: string
+  segmentId: string
+  settingsSignature: string
+  textHash: string
+  mimeType: string
+  format: string
+  blob: Blob
+  sizeBytes: number
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

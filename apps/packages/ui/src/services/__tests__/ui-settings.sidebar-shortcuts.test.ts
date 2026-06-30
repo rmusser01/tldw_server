@@ -20,24 +20,35 @@ const LEGACY_DEFAULT_SELECTION = [
 ]
 
 describe("sidebar shortcut defaults", () => {
-  it("includes deep research and moderation playground in the default selection", () => {
+  it("includes deep research and moderation review in the default selection", () => {
     expect(DEFAULT_SIDEBAR_SHORTCUT_SELECTION).toContain("deep-research")
-    expect(DEFAULT_SIDEBAR_SHORTCUT_SELECTION).toContain("moderation-playground")
+    expect(DEFAULT_SIDEBAR_SHORTCUT_SELECTION).toContain("moderation-review")
+    expect(DEFAULT_SIDEBAR_SHORTCUT_SELECTION).not.toContain("moderation-playground")
     expect(DEFAULT_SIDEBAR_SHORTCUT_SELECTION).not.toContain("chat-dictionaries")
-    expect(DEFAULT_SIDEBAR_SHORTCUT_SELECTION).toHaveLength(10)
+    expect(DEFAULT_SIDEBAR_SHORTCUT_SELECTION).toHaveLength(15)
   })
 
-  it("migrates legacy default selection to include deep research and moderation playground", () => {
+  it("migrates legacy default selection to include deep research and moderation review", () => {
     const normalized = normalizeSettingValue(
       SIDEBAR_SHORTCUT_SELECTION_SETTING,
       LEGACY_DEFAULT_SELECTION
     )
 
     expect(normalized).toContain("deep-research")
-    expect(normalized).toContain("moderation-playground")
+    expect(normalized).toContain("moderation-review")
+    expect(normalized).not.toContain("moderation-playground")
     expect(normalized).not.toContain("prompt-studio")
     expect(normalized).not.toContain("chat-dictionaries")
-    expect(normalized).toHaveLength(10)
+    expect(normalized).toHaveLength(15)
+  })
+
+  it("maps stored moderation playground shortcuts to content rules", () => {
+    const normalized = normalizeSettingValue(SIDEBAR_SHORTCUT_SELECTION_SETTING, [
+      "quick-ingest",
+      "moderation-playground"
+    ])
+
+    expect(normalized).toEqual(["quick-ingest", "moderation-rules"])
   })
 
   it("keeps custom user selections unchanged", () => {

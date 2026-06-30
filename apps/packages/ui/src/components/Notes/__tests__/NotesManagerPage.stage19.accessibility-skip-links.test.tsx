@@ -190,4 +190,53 @@ describe("NotesManagerPage stage 19 accessibility skip links and labels", () => 
     const splitTextarea = screen.getByLabelText("Note content")
     expect(splitTextarea.tagName).toBe("TEXTAREA")
   })
+
+  it("labels the primary note fields and sidebar search controls", () => {
+    renderPage()
+
+    expect(screen.getByLabelText("Note title")).toHaveAttribute("placeholder", "Title")
+    expect(screen.getByRole("combobox", { name: "Note tags" })).toBeInTheDocument()
+    expect(screen.getByLabelText("Search notes")).toHaveAttribute(
+      "placeholder",
+      "Search notes... (use quotes for exact match)"
+    )
+    expect(screen.getByRole("combobox", { name: "Filter by tag" })).toBeInTheDocument()
+  })
+
+  it("moves focus to save failure recovery and links fields to the save status", async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+      if (path.startsWith("/api/v1/notes/?")) {
+        return {
+          items: [],
+          pagination: { total_items: 0, total_pages: 1 }
+        }
+      }
+      if (path === "/api/v1/notes/" && method === "POST") {
+        throw new Error("Server unavailable")
+      }
+      return {}
+    })
+
+    renderPage()
+
+    const titleInput = screen.getByLabelText("Note title")
+    const contentInput = screen.getByLabelText("Note content")
+    fireEvent.change(titleInput, { target: { value: "Failed save note" } })
+    fireEvent.change(contentInput, { target: { value: "Keep this draft visible." } })
+    fireEvent.click(screen.getByTestId("notes-save-button"))
+
+    const status = await screen.findByRole("alert", { name: "Note save status" })
+    expect(status).toHaveTextContent("Could not save")
+    await waitFor(() => {
+      expect(status).toHaveFocus()
+    })
+    expect(titleInput.getAttribute("aria-describedby")).toContain(
+      "notes-save-status-message"
+    )
+    expect(contentInput.getAttribute("aria-describedby")).toContain(
+      "notes-save-status-message"
+    )
+  })
 })

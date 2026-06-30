@@ -2,7 +2,6 @@ import React from "react"
 import {
   Button,
   Input,
-  Alert,
   Progress,
   Typography,
   Space,
@@ -36,9 +35,15 @@ import {
   OPENAI_TTS_VOICES,
   useTtsProviderData
 } from "@/hooks/useTtsProviderData"
+import { Alert } from "@/components/ui/primitives/Alert"
+import type {
+  Model as ElevenLabsModel,
+  Voice as ElevenLabsVoice
+} from "@/services/elevenlabs"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { PageShell } from "@/components/Common/PageShell"
 import { TtsProviderPanel } from "@/components/Option/TTS/TtsProviderPanel"
+import { StatePanel } from "@/components/ui/state"
 import { isTimeoutLikeError } from "@/utils/request-timeout"
 import { withTemplateFallback } from "@/utils/template-guards"
 
@@ -157,7 +162,7 @@ const TtsPlaygroundPage: React.FC = () => {
     if (typeof window === "undefined" || !window.speechSynthesis) return
     try {
       window.speechSynthesis.cancel()
-    } catch {}
+    } catch (_error) { void _error }
     browserQueueRef.current = []
     browserUtteranceRef.current = null
     setBrowserIsSpeaking(false)
@@ -261,8 +266,9 @@ const TtsPlaygroundPage: React.FC = () => {
   }
 
   const isTtsDisabled = ttsSettings?.ttsEnabled === false
+  const isServerAudioUnavailable = isTldw && !hasAudio
   const handlePlay = async () => {
-    if (!text.trim() || isTtsDisabled) return
+    if (!text.trim() || isTtsDisabled || isServerAudioUnavailable) return
     stopBrowserSpeech()
     clearSegments()
     setActiveSegmentIndex(null)
@@ -434,13 +440,18 @@ const TtsPlaygroundPage: React.FC = () => {
       )
     : !text.trim()
       ? t("playground:tts.playDisabledNoText", "Enter text to enable Play.")
-      : ttsSettings?.ttsProvider === "elevenlabs" &&
-          !isElevenLabsConfigured
+      : isServerAudioUnavailable
         ? t(
-            "playground:tts.playDisabledElevenLabs",
-            "Add an ElevenLabs API key, voice, and model to enable Play."
+            "playground:tts.playDisabledServerAudioUnavailable",
+            "Open Speech Settings or switch to Browser TTS before generating audio."
           )
-        : null
+        : ttsSettings?.ttsProvider === "elevenlabs" &&
+            !isElevenLabsConfigured
+          ? t(
+              "playground:tts.playDisabledElevenLabs",
+              "Add an ElevenLabs API key, voice, and model to enable Play."
+            )
+          : null
   const isPlayDisabled = isGenerating || Boolean(playDisabledReason)
   const canStop =
     provider === "browser"
@@ -487,14 +498,14 @@ const TtsPlaygroundPage: React.FC = () => {
     if (!el) return
     try {
       el.scrollIntoView({ block: "center" })
-    } catch {}
+    } catch (_error) { void _error }
     ;(el as HTMLElement).focus()
   }
 
   return (
     <PageShell maxWidthClassName="max-w-3xl" className="py-6">
-      <Title level={3} className="!mb-1">
-        {t("playground:tts.title", "TTS Playground")}
+      <Title level={1} className="!mb-1 !text-2xl">
+        {t("playground:tts.routeTitle", "Text to Speech")}
       </Title>
       <Text type="secondary">
         {t(
@@ -522,12 +533,15 @@ const TtsPlaygroundPage: React.FC = () => {
 
       {capabilities?.ffmpegAvailable === false && (
         <Alert
-          type="warning"
-          showIcon
+          variant="warning"
           className="mt-3 mb-0"
-          message={t("playground:tts.ffmpegWarningTitle", "ffmpeg not detected")}
-          description={t("playground:tts.ffmpegWarningBody", "Some audio processing features require ffmpeg. Install it for full functionality.")}
-        />
+          title={t("playground:tts.ffmpegWarningTitle", "ffmpeg not detected")}
+        >
+          {t(
+            "playground:tts.ffmpegWarningBody",
+            "Some audio processing features require ffmpeg. Install it for full functionality."
+          )}
+        </Alert>
       )}
 
       <div className="mt-4 space-y-4">
@@ -545,12 +559,13 @@ const TtsPlaygroundPage: React.FC = () => {
         </div>
 
         {isTldw && !hasAudio && (
-          <Alert
-            type="info"
-            showIcon
-            className="mb-4"
-            message={t("playground:tts.noProviderTitle", "No TTS provider detected on your server")}
-            description={
+          <StatePanel
+            state="setup_required"
+            title={t(
+              "playground:tts.noProviderTitle",
+              "No TTS provider detected on your server"
+            )}
+            message={
               <Trans
                 i18nKey="playground:tts.noProviderDescription"
                 defaults="Your tldw server doesn't have a TTS engine configured yet. <settingsLink>Open Speech Settings</settingsLink> to configure one, or switch to <strong>Browser</strong> TTS which works without any setup."
@@ -560,25 +575,8 @@ const TtsPlaygroundPage: React.FC = () => {
                 }}
               />
             }
-          />
-        )}
-
-        {isTldw && !hasAudio && (
-          <Alert
-            type="info"
-            showIcon
             className="mb-4"
-            message={t("playground:tts.noProviderTitle", "No TTS provider detected on your server")}
-            description={
-              <Trans
-                i18nKey="playground:tts.noProviderDescription"
-                defaults="Your tldw server doesn't have a TTS engine configured yet. <settingsLink>Open Speech Settings</settingsLink> to configure one, or switch to <strong>Browser</strong> TTS which works without any setup."
-                components={{
-                  settingsLink: <Link to="/settings/speech" />,
-                  strong: <strong />
-                }}
-              />
-            }
+            data-testid="tts-no-provider-recovery"
           />
         )}
 
@@ -622,40 +620,38 @@ const TtsPlaygroundPage: React.FC = () => {
 
             {showElevenLabsHint && (
               <Alert
-                type={hasElevenLabsKey ? "warning" : "info"}
-                showIcon
+                variant={hasElevenLabsKey ? "warning" : "info"}
                 title={elevenLabsHintTitle}
-                description={
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span>
-                      {hasElevenLabsLoadError && isTimeoutLikeError(elevenLabsError)
-                        ? elevenLabsTimeoutBody
-                        : elevenLabsHintBody}
-                    </span>
-                    {hasElevenLabsKey && (
-                      <Button
-                        size="small"
-                        type="link"
-                        onClick={() => {
-                          void refetchElevenLabs()
-                        }}
-                      >
-                        {t("common:retry", "Retry")}
-                      </Button>
-                    )}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>
+                    {hasElevenLabsLoadError && isTimeoutLikeError(elevenLabsError)
+                      ? elevenLabsTimeoutBody
+                      : elevenLabsHintBody}
+                  </span>
+                  {hasElevenLabsKey && (
                     <Button
                       size="small"
                       type="link"
-                      onClick={handleElevenLabsApiKeyFocus}
+                      onClick={() => {
+                        void refetchElevenLabs()
+                      }}
                     >
-                      {t(
-                        "playground:tts.elevenLabsMissingCta",
-                        "Set API key in Settings"
-                      )}
+                      {t("common:retry", "Retry")}
                     </Button>
-                  </div>
-                }
-              />
+                  )}
+                  <Button
+                    size="small"
+                    type="link"
+                    onClick={handleElevenLabsApiKeyFocus}
+                  >
+                    {t(
+                      "playground:tts.elevenLabsMissingCta",
+                      "Set API key in Settings"
+                    )}
+                  </Button>
+                </div>
+              </Alert>
             )}
 
             {ttsSettings?.ttsProvider === "elevenlabs" && elevenLabsData && (
@@ -679,7 +675,7 @@ const TtsPlaygroundPage: React.FC = () => {
                       style={{ minWidth: 160 }}
                       placeholder="Select voice"
                       className="focus-ring"
-                      options={elevenLabsData.voices.map((v: any) => ({
+                      options={elevenLabsData.voices.map((v: ElevenLabsVoice) => ({
                         label: v.name,
                         value: v.voice_id
                       }))}
@@ -699,7 +695,7 @@ const TtsPlaygroundPage: React.FC = () => {
                       style={{ minWidth: 160 }}
                       placeholder="Select model"
                       className="focus-ring"
-                      options={elevenLabsData.models.map((m: any) => ({
+                      options={elevenLabsData.models.map((m: ElevenLabsModel) => ({
                         label: m.name,
                         value: m.model_id
                       }))}

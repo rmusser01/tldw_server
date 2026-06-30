@@ -47,8 +47,8 @@ class PromptTemplate:
         """Format the template with provided variables."""
         try:
             return self.template.format(**kwargs)
-        except KeyError as e:
-            logger.warning(f"Missing variable in template '{self.name}': {e}")
+        except KeyError:
+            logger.warning(f"Missing variable in template '{self.name}'")
             # Return template with missing variables as-is
             return self.template
 

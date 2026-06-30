@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import contextlib
-import fnmatch
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -17,10 +17,12 @@ from pathlib import Path
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_truthy
+
 from ..models import RunPhase, RunSpec, RunStatus, RuntimeType
 from ..runtime_capabilities import RuntimePreflightResult
 from ..streams import get_hub
 from .lima_enforcer import build_lima_enforcer
+from .resource_limits import collect_runner_artifacts, log_limit_counters
 
 _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -42,6 +44,7 @@ _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS = (
 )
 
 _OWNER_EXEC_ONLY_FILE_MODE = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _truthy(v: str | None) -> bool:
@@ -338,6 +341,7 @@ class LimaRunner:
         """Execute a real run in a Lima VM."""
         started = datetime.utcnow()
         hub = get_hub()
+        max_log_bytes = self._max_log_bytes()
 
         with contextlib.suppress(_LIMA_RUNNER_NONCRITICAL_EXCEPTIONS):
             hub.publish_event(run_id, "start", {
@@ -348,64 +352,74 @@ class LimaRunner:
 
         # Create temp directory for this run
         run_dir = tempfile.mkdtemp(prefix="tldw_lima_")
-        workspace = os.path.join(run_dir, "workspace")
-        os.makedirs(workspace, exist_ok=True)
-
-        # Copy session workspace files
-        if session_workspace and os.path.isdir(session_workspace):
-            self._copy_tree(session_workspace, workspace)
-
-        # Write inline files
-        for (path, data) in (spec.files_inline or []):
-            safe_path = path.lstrip("/\\").replace("..", "_")
-            full = os.path.join(workspace, safe_path)
-            os.makedirs(os.path.dirname(full), exist_ok=True)
-            with open(full, "wb") as f:
-                f.write(data)
-
-        # Write entry script
-        self._write_entry_script(workspace, list(spec.command or []))
-
-        # Write environment file
-        self._write_env_file(workspace, spec.env or {})
-
-        # Generate Lima config
-        cpu = int(spec.cpu) if spec.cpu else 2
-        memory_mb = int(spec.memory_mb) if spec.memory_mb else 2048
-        net_policy = (spec.network_policy or "deny_all").lower()
-        if net_policy == "allowlist":
-            raise RuntimeError("strict_allowlist_not_supported")
-
-        lima_config = _generate_lima_config(
-            workspace_host_path=workspace,
-            cpu=cpu,
-            memory_mb=memory_mb,
-            env=spec.env or {},
-            network_policy=net_policy,
-        )
-
-        # Write Lima config to YAML file
-        config_path = os.path.join(run_dir, "lima.yaml")
         try:
-            import yaml
-            with open(config_path, "w") as f:
-                yaml.safe_dump(lima_config, f)
-        except ImportError:
-            # Fallback to JSON-like YAML if pyyaml not available
-            with open(config_path, "w") as f:
-                json.dump(lima_config, f, indent=2)
+            workspace = os.path.join(run_dir, "workspace")
+            os.makedirs(workspace, exist_ok=True)
 
-        # Generate unique VM name
-        vm_name = f"tldw-sbx-{run_id[:12]}"
+            # Copy session workspace files
+            if session_workspace and os.path.isdir(session_workspace):
+                self._copy_tree(session_workspace, workspace)
 
-        # Register VM for cancellation
-        with LimaRunner._active_lock:
-            LimaRunner._active_vm[run_id] = vm_name
-            LimaRunner._active_run_dir[run_id] = run_dir
+            # Write inline files
+            for (path, data) in (spec.files_inline or []):
+                safe_path = path.lstrip("/\\").replace("..", "_")
+                full = os.path.join(workspace, safe_path)
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+                with open(full, "wb") as f:
+                    f.write(data)
+
+            # Write entry script
+            self._write_entry_script(workspace, list(spec.command or []))
+
+            # Write environment file
+            self._write_env_file(workspace, spec.env or {})
+
+            # Generate Lima config
+            cpu = int(spec.cpu) if spec.cpu else 2
+            memory_mb = int(spec.memory_mb) if spec.memory_mb else 2048
+            net_policy = (spec.network_policy or "deny_all").lower()
+            if net_policy == "allowlist":
+                raise RuntimeError("strict_allowlist_not_supported")
+
+            lima_config = _generate_lima_config(
+                workspace_host_path=workspace,
+                cpu=cpu,
+                memory_mb=memory_mb,
+                env=spec.env or {},
+                network_policy=net_policy,
+            )
+
+            # Write Lima config to YAML file
+            config_path = os.path.join(run_dir, "lima.yaml")
+            try:
+                import yaml
+                with open(config_path, "w") as f:
+                    yaml.safe_dump(lima_config, f)
+            except ImportError:
+                # Fallback to JSON-like YAML if pyyaml not available
+                with open(config_path, "w") as f:
+                    json.dump(lima_config, f, indent=2)
+
+            # Generate unique VM name
+            vm_name = f"tldw-sbx-{run_id[:12]}"
+
+            # Register VM for cancellation
+            with LimaRunner._active_lock:
+                LimaRunner._active_vm[run_id] = vm_name
+                LimaRunner._active_run_dir[run_id] = run_dir
+        except BaseException:
+            # Re-raise after cleanup so interrupts do not leak setup directories.
+            with contextlib.suppress(_LIMA_RUNNER_NONCRITICAL_EXCEPTIONS):
+                shutil.rmtree(run_dir, ignore_errors=True)
+            with LimaRunner._active_lock:
+                LimaRunner._active_vm.pop(run_id, None)
+                LimaRunner._active_run_dir.pop(run_id, None)
+            raise
 
         exit_code: int | None = None
         image_digest: str | None = None
         artifacts_map: dict[str, bytes] = {}
+        artifact_counters: dict[str, int] = {}
         message = "Lima execution"
 
         try:
@@ -475,12 +489,19 @@ class LimaRunner:
                     with open(log_path, "rb") as f:
                         log_data = f.read()
                     if log_data:
-                        hub.publish_stdout(run_id, log_data, 10 * 1024 * 1024)
+                        hub.publish_stdout(run_id, log_data, max_log_bytes)
                 except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
                     pass
 
             # Collect artifacts
-            artifacts_map = self._collect_artifacts(workspace, spec.capture_patterns)
+            artifact_result = collect_runner_artifacts(
+                workspace,
+                spec.capture_patterns,
+                exclude_names={"entry.sh", "run.log", ".env"},
+                exclude_hidden=True,
+            )
+            artifacts_map = artifact_result.artifacts
+            artifact_counters = artifact_result.counters
 
             # Compute image digest based on Lima config hash
             try:
@@ -542,7 +563,6 @@ class LimaRunner:
             log_bytes_total = int(hub.get_log_bytes(run_id))
         except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
             log_bytes_total = 0
-
         art_bytes = sum(len(v) for v in artifacts_map.values()) if artifacts_map else 0
 
         usage: dict[str, int] = {
@@ -552,6 +572,8 @@ class LimaRunner:
             "log_bytes": int(log_bytes_total),
             "artifact_bytes": int(art_bytes),
         }
+        usage.update(log_limit_counters(hub, run_id, max_log_bytes))
+        usage.update(artifact_counters)
 
         return RunStatus(
             id="",
@@ -598,8 +620,10 @@ fi
 start_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 start_ms=$(date +%s%3N 2>/dev/null || date +%s)
 # Run command, capture stdout/stderr
+set +e
 /bin/sh -lc "{user_cmd}" > {log_path} 2>&1
 exit_code=$?
+set -e
 end_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 end_ms=$(date +%s%3N 2>/dev/null || date +%s)
 duration_ms=$((end_ms - start_ms))
@@ -616,15 +640,17 @@ exit $exit_code
     @staticmethod
     def _write_env_file(workspace: str, env: dict[str, str]) -> None:
         """Write environment variables to a file for sourcing in the VM."""
+        import shlex
+
         if not env:
             return
         lines = []
         for k, v in env.items():
             key = str(k).strip()
-            if not key:
+            if not _ENV_KEY_RE.fullmatch(key):
                 continue
             val = str(v).replace("\n", " ")
-            lines.append(f"export {key}='{val}'")
+            lines.append(f"export {key}={shlex.quote(val)}")
         if lines:
             Path(workspace, ".env").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -632,11 +658,7 @@ exit $exit_code
     def _tail_log(run_id: str, log_path: str, stop_flag: dict[str, bool]) -> None:
         """Tail the log file and stream to hub."""
         hub = get_hub()
-        max_log = None
-        try:
-            max_log = int(os.getenv("SANDBOX_MAX_LOG_BYTES", "10485760"))
-        except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
-            max_log = 10 * 1024 * 1024
+        max_log = LimaRunner._max_log_bytes()
 
         # Wait for log file to appear
         deadline = time.time() + 10
@@ -660,38 +682,21 @@ exit $exit_code
             return
 
     @staticmethod
+    def _max_log_bytes() -> int:
+        """Return the configured Lima stream log cap in bytes."""
+        try:
+            return int(os.getenv("SANDBOX_MAX_LOG_BYTES", "10485760"))
+        except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
+            return 10 * 1024 * 1024
+
+    @staticmethod
     def _collect_artifacts(
         workspace: str, capture_patterns: list[str] | None
     ) -> dict[str, bytes]:
         """Collect artifacts matching the capture patterns."""
-        if not capture_patterns:
-            return {}
-
-        artifacts_map: dict[str, bytes] = {}
-
-        try:
-            for root, _dirs, files in os.walk(workspace):
-                for fn in files:
-                    full = os.path.join(root, fn)
-                    rel = os.path.relpath(full, workspace)
-                    rel_posix = rel.replace(os.sep, "/")
-
-                    # Skip internal files
-                    if rel_posix.startswith("."):
-                        continue
-                    if rel_posix in ("entry.sh", "run.log", ".env"):
-                        continue
-
-                    if any(
-                        fnmatch.fnmatchcase(rel_posix, pat)
-                        for pat in capture_patterns
-                    ):
-                        try:
-                            with open(full, "rb") as rf:
-                                artifacts_map[rel_posix] = rf.read()
-                        except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
-                            pass
-        except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
-            pass
-
-        return artifacts_map
+        return collect_runner_artifacts(
+            workspace,
+            capture_patterns,
+            exclude_names={"entry.sh", "run.log", ".env"},
+            exclude_hidden=True,
+        ).artifacts

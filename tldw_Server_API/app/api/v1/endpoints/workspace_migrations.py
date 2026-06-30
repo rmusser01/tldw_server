@@ -5,9 +5,9 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,
@@ -21,7 +21,7 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceMigrationFinalizeRequest,
     WorkspaceMigrationResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -32,19 +32,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 router = APIRouter()
 
 
-def _map_chacha_error_to_http(exc: Exception, *, default_detail: str) -> HTTPException:
-    if isinstance(exc, ConflictError):
-        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
-    if isinstance(exc, InputError):
-        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    logger.error("{}: {}", default_detail, exc)
-    return HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=default_detail,
-    )
-
-
 def _loads_json(value: Any, fallback: Any) -> Any:
+    """Return decoded JSON for string values, or the fallback for invalid input."""
     if value is None:
         return fallback
     if isinstance(value, (dict, list)):
@@ -155,7 +144,7 @@ def _require_migration(db: CharactersRAGDB, migration_id: str) -> dict[str, Any]
     dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Create a Research Workspace migration session",
 )
-def create_workspace_migration(
+async def create_workspace_migration(
     body: WorkspaceMigrationCreateRequest,
     response: Response,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -166,7 +155,7 @@ def create_workspace_migration(
     try:
         row, created = db.upsert_workspace_migration_session(body.model_dump(mode="json"))
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
-        raise _map_chacha_error_to_http(
+        raise map_db_error_to_http(
             exc,
             default_detail="Failed to create workspace migration",
         ) from exc
@@ -181,7 +170,7 @@ def create_workspace_migration(
     dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
     summary="List Research Workspace migration sessions",
 )
-def list_workspace_migrations(
+async def list_workspace_migrations(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
 ) -> list[WorkspaceMigrationResponse]:
@@ -190,7 +179,7 @@ def list_workspace_migrations(
     try:
         rows = db.list_workspace_migration_sessions(limit=100)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
-        raise _map_chacha_error_to_http(
+        raise map_db_error_to_http(
             exc,
             default_detail="Failed to list workspace migrations",
         ) from exc
@@ -203,7 +192,7 @@ def list_workspace_migrations(
     dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
     summary="Get a Research Workspace migration session",
 )
-def get_workspace_migration(
+async def get_workspace_migration(
     migration_id: str,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
@@ -215,7 +204,7 @@ def get_workspace_migration(
     except HTTPException:
         raise
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
-        raise _map_chacha_error_to_http(
+        raise map_db_error_to_http(
             exc,
             default_detail="Failed to fetch workspace migration",
         ) from exc
@@ -228,7 +217,7 @@ def get_workspace_migration(
     dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Accept a Research Workspace migration chunk receipt",
 )
-def put_workspace_migration_chunk(
+async def put_workspace_migration_chunk(
     migration_id: str,
     chunk_id: str,
     body: WorkspaceMigrationChunkUploadRequest,
@@ -244,7 +233,7 @@ def put_workspace_migration_chunk(
             body.model_dump(mode="json"),
         )
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
-        raise _map_chacha_error_to_http(
+        raise map_db_error_to_http(
             exc,
             default_detail="Failed to accept workspace migration chunk",
         ) from exc
@@ -257,7 +246,7 @@ def put_workspace_migration_chunk(
     dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Finalize a Research Workspace migration session",
 )
-def finalize_workspace_migration(
+async def finalize_workspace_migration(
     migration_id: str,
     body: WorkspaceMigrationFinalizeRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -285,7 +274,7 @@ def finalize_workspace_migration(
     except HTTPException:
         raise
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
-        raise _map_chacha_error_to_http(
+        raise map_db_error_to_http(
             exc,
             default_detail="Failed to finalize workspace migration",
         ) from exc
@@ -298,7 +287,7 @@ def finalize_workspace_migration(
     dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Acknowledge local legacy deletion for a migration",
 )
-def acknowledge_workspace_migration_client_delete(
+async def acknowledge_workspace_migration_client_delete(
     migration_id: str,
     body: WorkspaceMigrationClientDeleteAckRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -312,7 +301,7 @@ def acknowledge_workspace_migration_client_delete(
             {"acknowledged_manifest_hash": body.acknowledged_manifest_hash},
         )
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
-        raise _map_chacha_error_to_http(
+        raise map_db_error_to_http(
             exc,
             default_detail="Failed to record workspace migration client delete acknowledgement",
         ) from exc

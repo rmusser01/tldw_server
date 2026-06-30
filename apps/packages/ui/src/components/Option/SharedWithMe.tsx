@@ -1,6 +1,7 @@
 import React from "react"
-import { CopyOutlined } from "@ant-design/icons"
+import { CopyOutlined, ExportOutlined } from "@ant-design/icons"
 import { Button, Card, Empty, List, Space, Spin, Tag, Typography, message } from "antd"
+import { useNavigate } from "react-router-dom"
 
 import { useCloneWorkspace, useSharedWithMe } from "@/hooks/useSharing"
 import {
@@ -18,6 +19,7 @@ const isValidAccessLevel = (accessLevel: string): accessLevel is AccessLevel =>
 export const SharedWithMe: React.FC = () => {
   const { data, isLoading, error } = useSharedWithMe()
   const cloneWorkspace = useCloneWorkspace()
+  const navigate = useNavigate()
   const shares = Array.isArray(data) ? data : []
   const [messageApi, messageContext] = message.useMessage()
 
@@ -82,6 +84,17 @@ export const SharedWithMe: React.FC = () => {
           return (
             <List.Item
               actions={[
+                <Button
+                  key="open"
+                  type="link"
+                  onClick={() =>
+                    navigate(`/research-workspace?shared=${share.share_id}`)
+                  }
+                  aria-label="Open shared workspace"
+                  icon={<ExportOutlined />}
+                >
+                  Open
+                </Button>,
                 <Button
                   key="clone"
                   disabled={!share.allow_clone}

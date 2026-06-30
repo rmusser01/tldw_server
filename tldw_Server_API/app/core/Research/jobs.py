@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +14,7 @@ from tldw_Server_API.app.core.Research.artifact_store import ResearchArtifactSto
 from tldw_Server_API.app.core.Research.broker import ResearchBroker
 from tldw_Server_API.app.core.Research.chat_handoff import deliver_research_chat_handoff
 from tldw_Server_API.app.core.Research.exporter import build_final_package
+from tldw_Server_API.app.core.Research.limits import ResearchLimits, ensure_limit_available
 from tldw_Server_API.app.core.Research.models import (
     ResearchEvidenceNote,
     ResearchPlan,
@@ -84,6 +87,46 @@ def _checkpoint_event_payload(*, checkpoint: Any, phase: str | None) -> dict[str
     }
 
 
+def _limits_from_session(session: Any) -> ResearchLimits | None:
+    payload = session.limits_json if isinstance(getattr(session, "limits_json", None), dict) else {}
+    required = ("max_searches", "max_fetched_docs", "max_runtime_seconds")
+    if not any(key in payload for key in required):
+        return None
+    try:
+        unlimited = 2_147_483_647
+        return ResearchLimits(
+            max_searches=int(payload["max_searches"]) if "max_searches" in payload else unlimited,
+            max_fetched_docs=int(payload["max_fetched_docs"]) if "max_fetched_docs" in payload else unlimited,
+            max_runtime_seconds=int(payload["max_runtime_seconds"]) if "max_runtime_seconds" in payload else unlimited,
+        )
+    except (TypeError, ValueError):
+        raise ValueError("research_limit_invalid") from None
+
+
+def _enforce_limit_available(limits: ResearchLimits | None, usage: dict[str, int], key: str) -> None:
+    if limits is None:
+        return
+    error = ensure_limit_available(limits, usage, key)
+    if error is not None:
+        raise ValueError(f"{error.code}:{error.limit_key}")
+
+
+def _update_runtime_usage(*, usage: dict[str, int], started_at: float) -> None:
+    usage["runtime_seconds"] = int(max(0, time.monotonic() - started_at))
+
+
+async def _write_json_artifact(artifact_store: ResearchArtifactStore, **kwargs: Any) -> Any:
+    return await asyncio.to_thread(artifact_store.write_json, **kwargs)
+
+
+async def _write_jsonl_artifact(artifact_store: ResearchArtifactStore, **kwargs: Any) -> Any:
+    return await asyncio.to_thread(artifact_store.write_jsonl, **kwargs)
+
+
+async def _write_text_artifact(artifact_store: ResearchArtifactStore, **kwargs: Any) -> Any:
+    return await asyncio.to_thread(artifact_store.write_text, **kwargs)
+
+
 def enqueue_research_phase_job(
     *,
     jm: Any,
@@ -100,6 +143,7 @@ def enqueue_research_phase_job(
         "session_id": session_id,
         "phase": phase,
         "checkpoint_id": checkpoint_id,
+        "owner_user_id": str(owner_user_id),
         "policy_version": int(policy_version),
     }
     if isinstance(payload_overrides, dict):
@@ -206,7 +250,8 @@ async def _handle_planning_phase(
         follow_up_background=follow_up_background,
     )
 
-    artifact_store.write_json(
+    await _write_json_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="plan.json",
@@ -214,7 +259,8 @@ async def _handle_planning_phase(
         phase=session.phase,
         job_id=job_id,
     )
-    artifact_store.write_json(
+    await _write_json_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="provider_config.json",
@@ -277,6 +323,9 @@ async def _handle_collecting_phase(
     pinned_source_ids = set(approved_sources.get("pinned_source_ids", []))
     recollect = approved_sources.get("recollect", {}) if isinstance(approved_sources.get("recollect"), dict) else {}
     recollect_enabled = bool(recollect.get("enabled"))
+    limits = _limits_from_session(session)
+    usage = {"searches": 0, "fetched_docs": 0, "runtime_seconds": 0}
+    started_at = time.monotonic()
 
     sources_by_fingerprint: dict[str, dict[str, Any]] = {}
     evidence_notes: list[dict[str, Any]] = []
@@ -313,6 +362,13 @@ async def _handle_collecting_phase(
                 evidence_notes.append(dict(note))
 
     for focus_area in plan.focus_areas:
+        halted = _halt_for_cancel_during_phase(db=db, session_id=session.id)
+        if halted is not None:
+            return halted
+        _update_runtime_usage(usage=usage, started_at=started_at)
+        _enforce_limit_available(limits, usage, "runtime_seconds")
+        _enforce_limit_available(limits, usage, "searches")
+        _enforce_limit_available(limits, usage, "fetched_docs")
         result = await broker.collect_focus_area(
             session_id=session.id,
             owner_user_id=session.owner_user_id,
@@ -324,6 +380,12 @@ async def _handle_collecting_phase(
                 "recollect": dict(recollect),
             },
         )
+        usage["searches"] += 1
+        usage["fetched_docs"] += len(result.sources)
+        _update_runtime_usage(usage=usage, started_at=started_at)
+        _enforce_limit_available(limits, usage, "runtime_seconds")
+        if limits is not None and usage["fetched_docs"] > limits.max_fetched_docs:
+            raise ValueError("research_limit_exceeded:fetched_docs")
         for source in result.sources:
             serialized = asdict(source)
             if serialized["source_id"] in dropped_source_ids:
@@ -363,6 +425,9 @@ async def _handle_collecting_phase(
             if gap not in gap_set:
                 gap_set.add(gap)
                 remaining_gaps.append(gap)
+        halted = _halt_for_cancel_during_phase(db=db, session_id=session.id)
+        if halted is not None:
+            return halted
 
     source_registry = list(sources_by_fingerprint.values())
     attempted_lane_total = sum(lane_attempts.values())
@@ -385,7 +450,8 @@ async def _handle_collecting_phase(
         "review_directives": approved_sources if approved_sources else None,
     }
 
-    artifact_store.write_json(
+    await _write_json_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="source_registry.json",
@@ -395,7 +461,8 @@ async def _handle_collecting_phase(
         phase="collecting",
         job_id=job_id,
     )
-    artifact_store.write_jsonl(
+    await _write_jsonl_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="evidence_notes.jsonl",
@@ -403,7 +470,8 @@ async def _handle_collecting_phase(
         phase="collecting",
         job_id=job_id,
     )
-    artifact_store.write_json(
+    await _write_json_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="collection_summary.json",
@@ -609,6 +677,9 @@ async def _handle_synthesizing_phase(
         outline_seed=outline_seed if approved_outline_locked else None,
         approved_outline_locked=approved_outline_locked,
     )
+    halted = _halt_for_control_before_phase(db=db, session_id=session.id)
+    if halted is not None:
+        return halted
 
     outline_payload = {
         "query": plan.query,
@@ -619,7 +690,8 @@ async def _handle_synthesizing_phase(
         "claims": [asdict(claim) for claim in result.claims],
     }
 
-    artifact_store.write_json(
+    await _write_json_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="outline_v1.json",
@@ -627,7 +699,8 @@ async def _handle_synthesizing_phase(
         phase="synthesizing",
         job_id=job_id,
     )
-    artifact_store.write_json(
+    await _write_json_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="claims.json",
@@ -635,7 +708,8 @@ async def _handle_synthesizing_phase(
         phase="synthesizing",
         job_id=job_id,
     )
-    artifact_store.write_text(
+    await _write_text_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="report_v1.md",
@@ -644,7 +718,8 @@ async def _handle_synthesizing_phase(
         job_id=job_id,
         content_type="text/markdown",
     )
-    artifact_store.write_json(
+    await _write_json_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="synthesis_summary.json",
@@ -652,7 +727,8 @@ async def _handle_synthesizing_phase(
         phase="synthesizing",
         job_id=job_id,
     )
-    artifact_store.write_json(
+    await _write_json_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="verification_summary.json",
@@ -660,7 +736,8 @@ async def _handle_synthesizing_phase(
         phase="synthesizing",
         job_id=job_id,
     )
-    artifact_store.write_json(
+    await _write_json_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="unsupported_claims.json",
@@ -668,7 +745,8 @@ async def _handle_synthesizing_phase(
         phase="synthesizing",
         job_id=job_id,
     )
-    artifact_store.write_json(
+    await _write_json_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="contradictions.json",
@@ -676,7 +754,8 @@ async def _handle_synthesizing_phase(
         phase="synthesizing",
         job_id=job_id,
     )
-    artifact_store.write_json(
+    await _write_json_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="source_trust.json",
@@ -770,7 +849,8 @@ async def _handle_packaging_phase(
         source_trust=list(source_trust_payload.get("sources", [])),
     )
 
-    artifact_store.write_json(
+    await _write_json_artifact(
+        artifact_store,
         owner_user_id=session.owner_user_id,
         session_id=session.id,
         artifact_name="bundle.json",
@@ -867,6 +947,15 @@ def _halt_for_control_before_phase(*, db: ResearchSessionsDB, session_id: str) -
             "checkpoint_id": updated.latest_checkpoint_id,
             "artifacts_written": 0,
         }
+    return None
+
+
+def _halt_for_cancel_during_phase(*, db: ResearchSessionsDB, session_id: str) -> dict[str, Any] | None:
+    session = db.get_session(session_id)
+    if session is None:
+        raise KeyError(session_id)
+    if session.control_state == "cancel_requested":
+        return _cancel_session(db=db, session_id=session_id)
     return None
 
 

@@ -10,7 +10,7 @@ from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobReq
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 
 
 def _load_generation_modules():
@@ -238,6 +238,82 @@ def test_validate_citation_payload_preserves_bundle_locator_over_conflicting_mod
     assert citation["locator"]["media_id"] == 42  # nosec B101
     assert citation["locator"]["timestamp_seconds"] == 61  # nosec B101
     assert citation["locator"]["chunk_id"] == "chunk-99"  # nosec B101
+
+
+def test_validate_citation_payload_requires_citation_text_to_match_bundle_evidence(
+    db: CharactersRAGDB,
+    bundle: Any,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, service_mod = _load_generation_modules()
+    service, _ = _build_service(db, monkeypatch, [])
+
+    with pytest.raises(service_mod.StudyPackValidationError, match="citation_text"):
+        service._validate_citation_payload(
+            {
+                "source_type": "note",
+                "source_id": "note-1",
+                "citation_text": "This unsupported citation is not in the note evidence.",
+            },
+            bundle_lookup={
+                ("note", "note-1"): bundle.items[0],
+            },
+        )
+
+
+def test_extract_json_payload_rejects_embedded_or_trailing_json(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _, service_mod = _load_generation_modules()
+    service, _ = _build_service(db, monkeypatch, [])
+
+    with pytest.raises(service_mod.StudyPackMalformedResponseError, match="valid JSON"):
+        service._extract_json_payload('preface {"cards": []} trailing prose')
+
+
+def test_destination_deck_name_checks_exact_candidates_beyond_list_window(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service, _ = _build_service(db, monkeypatch, [])
+
+    class WindowedDeckDb:
+        def list_decks(self, **_: Any) -> list[dict[str, str]]:
+            return [{"name": f"aaa-{index:05d}"} for index in range(10_000)]
+
+        def get_deck_by_name(self, name: str, *, include_deleted: bool = False) -> dict[str, str] | None:
+            if name == "zzzz-existing":
+                return {"name": name}
+            return None
+
+    service.note_db = WindowedDeckDb()
+
+    assert service._next_destination_deck_name("zzzz-existing") == "zzzz-existing (2)"  # nosec B101
+
+
+def test_destination_deck_name_fallback_lists_decks_once(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    service, _ = _build_service(db, monkeypatch, [])
+
+    class ListOnlyDeckDb:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def list_decks(self, **_: Any) -> list[dict[str, str]]:
+            self.calls += 1
+            return [
+                {"name": "Fallback Pack"},
+                {"name": "Fallback Pack (2)"},
+            ]
+
+    deck_db = ListOnlyDeckDb()
+    service.note_db = deck_db
+
+    assert service._next_destination_deck_name("Fallback Pack") == "Fallback Pack (3)"  # nosec B101
+    assert deck_db.calls == 1  # nosec B101
 
 
 async def test_create_study_pack_from_request_uses_collision_safe_deck_suffixing(

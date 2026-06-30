@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useState } from "react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
 import {
   Alert,
   Button,
   Modal,
+  Pagination,
   Space,
   Switch,
   Table,
@@ -11,7 +12,7 @@ import {
   message
 } from "antd"
 import type { ColumnsType } from "antd/es/table"
-import { Edit2, Eye, Play, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { Copy, Edit2, Eye, Play, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
 import { useWatchlistsStore } from "@/store/watchlists"
@@ -21,6 +22,7 @@ import {
   fetchWatchlistGroups,
   fetchWatchlistJobs,
   fetchWatchlistSources,
+  createWatchlistJob,
   restoreWatchlistJob,
   triggerWatchlistRun,
   updateWatchlistJob
@@ -42,8 +44,10 @@ import {
 } from "./job-summaries"
 import { JobPreviewModal } from "./JobPreviewModal"
 import { mapWatchlistsError } from "../shared/watchlists-error"
+import { useWatchlistsViewport } from "../shared/useWatchlistsViewport"
+import { buildClonedWatchlistJobPayload } from "./clone-utils"
 
-const SCOPE_CATALOG_LIMIT = 1000
+const SCOPE_CATALOG_LIMIT = 200
 const JOBS_ADVANCED_COLUMNS_STORAGE_KEY = "watchlists:jobs:advanced-columns:v1"
 
 const readStoredDisclosureState = (key: string): boolean | null => {
@@ -78,6 +82,7 @@ const isAudioBriefingEnabled = (outputPrefs: unknown): boolean => {
 export const JobsTab: React.FC = () => {
   const { t } = useTranslation(["watchlists", "common"])
   const { showUndoNotification } = useUndoNotification()
+  const { isConstrained } = useWatchlistsViewport()
 
   // Store state
   const jobs = useWatchlistsStore((s) => s.jobs)
@@ -87,6 +92,7 @@ export const JobsTab: React.FC = () => {
   const jobsPageSize = useWatchlistsStore((s) => s.jobsPageSize)
   const jobFormOpen = useWatchlistsStore((s) => s.jobFormOpen)
   const jobFormEditId = useWatchlistsStore((s) => s.jobFormEditId)
+  const selectedWatchlistId = useWatchlistsStore((s) => s.selectedWatchlistId)
 
   // Store actions
   const setJobs = useWatchlistsStore((s) => s.setJobs)
@@ -102,6 +108,8 @@ export const JobsTab: React.FC = () => {
 
   // Local state
   const [triggeringJobId, setTriggeringJobId] = useState<number | null>(null)
+  const cloningJobIdsRef = useRef<Set<number>>(new Set())
+  const [cloningJobIds, setCloningJobIds] = useState<Set<number>>(() => new Set())
   const [previewJob, setPreviewJob] = useState<WatchlistJob | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [sourceNamesById, setSourceNamesById] = useState<Record<number, string>>({})
@@ -111,12 +119,14 @@ export const JobsTab: React.FC = () => {
     const stored = readStoredDisclosureState(JOBS_ADVANCED_COLUMNS_STORAGE_KEY)
     return stored ?? false
   })
+  const previousSelectedWatchlistIdRef = useRef<number | null>(selectedWatchlistId)
 
   // Fetch jobs
   const loadJobs = useCallback(async () => {
     setJobsLoading(true)
     try {
       const result = await fetchWatchlistJobs({
+        watchlist_id: selectedWatchlistId ?? undefined,
         page: jobsPage,
         size: jobsPageSize
       })
@@ -134,9 +144,17 @@ export const JobsTab: React.FC = () => {
     } finally {
       setJobsLoading(false)
     }
-  }, [jobsPage, jobsPageSize, setJobs, setJobsLoading, t])
+  }, [jobsPage, jobsPageSize, selectedWatchlistId, setJobs, setJobsLoading, t])
 
   // Initial load
+  useEffect(() => {
+    if (previousSelectedWatchlistIdRef.current === selectedWatchlistId) return
+    previousSelectedWatchlistIdRef.current = selectedWatchlistId
+    if (jobsPage !== 1) {
+      setJobsPage(1)
+    }
+  }, [jobsPage, selectedWatchlistId, setJobsPage])
+
   useEffect(() => {
     loadJobs()
   }, [loadJobs])
@@ -144,7 +162,11 @@ export const JobsTab: React.FC = () => {
   const loadScopeCatalog = useCallback(async () => {
     try {
       const [sourcesResult, groupsResult] = await Promise.all([
-        fetchWatchlistSources({ page: 1, size: SCOPE_CATALOG_LIMIT }),
+        fetchWatchlistSources({
+          watchlist_id: selectedWatchlistId ?? undefined,
+          page: 1,
+          size: SCOPE_CATALOG_LIMIT
+        }),
         fetchWatchlistGroups({ page: 1, size: SCOPE_CATALOG_LIMIT })
       ])
 
@@ -163,7 +185,7 @@ export const JobsTab: React.FC = () => {
     } catch (err) {
       console.warn("Failed to fetch monitor scope catalog:", err)
     }
-  }, [])
+  }, [selectedWatchlistId])
 
   useEffect(() => {
     void loadScopeCatalog()
@@ -307,6 +329,7 @@ export const JobsTab: React.FC = () => {
       okText: t("common:delete", "Delete"),
       okButtonProps: { danger: true },
       cancelText: t("common:cancel", "Cancel"),
+      onCancel: () => undefined,
       onOk: () => executeDelete(job.id)
     })
   }
@@ -324,6 +347,47 @@ export const JobsTab: React.FC = () => {
       message.error(t("watchlists:jobs.runError", "Failed to trigger run"))
     } finally {
       setTriggeringJobId(null)
+    }
+  }
+
+  const startCloningJob = useCallback((jobId: number) => {
+    if (cloningJobIdsRef.current.has(jobId)) {
+      return false
+    }
+    const next = new Set(cloningJobIdsRef.current)
+    next.add(jobId)
+    cloningJobIdsRef.current = next
+    setCloningJobIds(next)
+    return true
+  }, [])
+
+  const finishCloningJob = useCallback((jobId: number) => {
+    if (!cloningJobIdsRef.current.has(jobId)) {
+      return
+    }
+    const next = new Set(cloningJobIdsRef.current)
+    next.delete(jobId)
+    cloningJobIdsRef.current = next
+    setCloningJobIds(next)
+  }, [])
+
+  const handleCloneJob = async (job: WatchlistJob) => {
+    if (!startCloningJob(job.id)) return
+    try {
+      const cloned = await createWatchlistJob(buildClonedWatchlistJobPayload(job))
+      addJob(cloned)
+      message.success(
+        t(
+          "watchlists:jobs.cloneSuccess",
+          "Monitor cloned as a paused copy. Review and enable it when ready."
+        )
+      )
+      void loadJobs()
+    } catch (err) {
+      console.error("Failed to clone job:", err)
+      message.error(t("watchlists:jobs.cloneError", "Failed to clone monitor"))
+    } finally {
+      finishCloningJob(job.id)
     }
   }
 
@@ -549,6 +613,16 @@ export const JobsTab: React.FC = () => {
               onClick={() => openJobForm(record.id)}
             />
           </Tooltip>
+          <Tooltip title={t("watchlists:jobs.clone", "Clone")}>
+            <Button
+              type="text"
+              size="small"
+              aria-label={t("watchlists:jobs.cloneMonitorAria", "Clone {{name}}", { name: record.name })}
+              icon={<Copy className="h-4 w-4" />}
+              onClick={() => handleCloneJob(record)}
+              loading={cloningJobIds.has(record.id)}
+            />
+          </Tooltip>
           <Tooltip title={t("common:delete", "Delete")}>
             <Button
               type="text"
@@ -577,14 +651,189 @@ export const JobsTab: React.FC = () => {
     ? allColumns
     : allColumns.filter((column) => defaultColumnKeys.has(resolveColumnKey(column)))
 
+  const renderFilterSummary = (job: WatchlistJob) => {
+    const summary = summarizeFilters(job.job_filters?.filters, t)
+    if (summary.count === 0) {
+      return (
+        <span className="text-text-subtle" data-testid={`job-filters-summary-${job.id}`}>
+          {t("watchlists:jobs.noFilters", "No filters")}
+        </span>
+      )
+    }
+    return (
+      <div className="flex items-center gap-2" data-testid={`job-filters-summary-${job.id}`}>
+        <Tag>{summary.count}</Tag>
+        <span className="min-w-0 truncate text-sm text-text-muted">{summary.preview}</span>
+      </div>
+    )
+  }
+
+  const renderConstrainedJobList = () => (
+    <div className="space-y-3" data-testid="watchlists-jobs-constrained-list">
+      {(Array.isArray(jobs) ? jobs : []).map((job) => {
+        const runNowLabel = job.active
+          ? t("watchlists:jobs.runNow", "Run Now")
+          : t("watchlists:jobs.runNowDisabledHint", "Activate this monitor to run it manually")
+        return (
+          <article
+            key={job.id}
+            className="rounded-lg border border-border bg-surface p-3"
+            data-testid={`watchlists-job-card-${job.id}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-text">{job.name}</span>
+                  {isAudioBriefingEnabled(job.output_prefs) && (
+                    <Tag color="purple" data-testid={`job-audio-enabled-chip-${job.id}`}>
+                      {t("watchlists:jobs.audioEnabledChip", "Audio on")}
+                    </Tag>
+                  )}
+                </div>
+                {job.description ? (
+                  <div className="text-xs text-text-muted">{job.description}</div>
+                ) : null}
+              </div>
+              <span className="inline-flex shrink-0 items-center gap-2">
+                <Switch
+                  checked={job.active}
+                  size="small"
+                  aria-label={t("watchlists:jobs.toggleActiveAria", "Toggle active for {{name}}", { name: job.name })}
+                  onChange={() => handleToggleActive(job)}
+                />
+                <span className="text-xs text-text-muted">
+                  {job.active ? t("common:enabled", "Enabled") : t("common:disabled", "Disabled")}
+                </span>
+              </span>
+            </div>
+
+            <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:jobs.columns.schedule", "Schedule")}
+                </div>
+                <CronDisplay expression={job.schedule_expr} />
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:jobs.columns.scope", "Feeds")}
+                </div>
+                <span className="text-sm text-text-muted" data-testid={`job-scope-summary-${job.id}`}>
+                  {summarizeScopeCounts(job.scope, t)}
+                </span>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:jobs.columns.filters", "Filters")}
+                </div>
+                {renderFilterSummary(job)}
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:jobs.outputLinkage.label", "Output linkage")}
+                </div>
+                <div className="text-sm text-text-muted" data-testid={`job-output-linkage-${job.id}`}>
+                  {summarizeOutputLinkage(job.output_prefs, t)}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:jobs.columns.lastRun", "Last run")}
+                </div>
+                <span className="text-sm text-text-muted">
+                  {job.last_run_at ? formatRelativeTime(job.last_run_at, t) : t("watchlists:jobs.never", "Never")}
+                </span>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-text-subtle">
+                  {t("watchlists:jobs.columns.nextRun", "Next run")}
+                </div>
+                <span className="text-sm text-text-muted">
+                  {job.next_run_at
+                    ? formatRelativeTime(job.next_run_at, t)
+                    : job.schedule_expr
+                      ? t("watchlists:jobs.pending", "Pending")
+                      : t("watchlists:jobs.notScheduled", "Not scheduled")}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              <Button
+                type="text"
+                size="small"
+                aria-label={runNowLabel}
+                icon={<Play className="h-4 w-4" />}
+                onClick={() => handleTriggerRun(job.id)}
+                loading={triggeringJobId === job.id}
+                disabled={!job.active}
+              />
+              <Button
+                type="text"
+                size="small"
+                aria-label={t("watchlists:jobs.previewForMonitorAria", "Preview {{name}}", { name: job.name })}
+                icon={<Eye className="h-4 w-4" />}
+                onClick={() => {
+                  setPreviewJob(job)
+                  setPreviewOpen(true)
+                }}
+              />
+              <Button
+                type="text"
+                size="small"
+                aria-label={t("watchlists:jobs.editMonitorAria", "Edit {{name}}", { name: job.name })}
+                icon={<Edit2 className="h-4 w-4" />}
+                onClick={() => openJobForm(job.id)}
+              />
+              <Button
+                type="text"
+                size="small"
+                aria-label={t("watchlists:jobs.cloneMonitorAria", "Clone {{name}}", { name: job.name })}
+                icon={<Copy className="h-4 w-4" />}
+                onClick={() => handleCloneJob(job)}
+                loading={cloningJobIds.has(job.id)}
+              />
+              <Button
+                type="text"
+                size="small"
+                danger
+                aria-label={t("watchlists:jobs.deleteMonitorAria", "Delete {{name}}", { name: job.name })}
+                icon={<Trash2 className="h-4 w-4" />}
+                onClick={() => requestDeleteConfirmation(job)}
+              />
+            </div>
+          </article>
+        )
+      })}
+      <div className="text-xs text-text-subtle">
+        {t("watchlists:jobs.totalItems", "{{total}} monitors", { total: jobsTotal })}
+      </div>
+      {jobsTotal > jobsPageSize && (
+        <Pagination
+          current={jobsPage}
+          pageSize={jobsPageSize}
+          total={jobsTotal}
+          showSizeChanger
+          showTotal={(total) => t("watchlists:jobs.totalItems", "{{total}} monitors", { total })}
+          onChange={(page, pageSize) => {
+            setJobsPage(page)
+            if (pageSize !== jobsPageSize) {
+              setJobsPageSize(pageSize)
+            }
+          }}
+        />
+      )}
+    </div>
+  )
+
   return (
     <div className="space-y-4">
       {/* Toolbar */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="text-sm text-text-muted">
           {t("watchlists:jobs.description", "Create monitors that automatically fetch and process updates from your feeds.")}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="small"
             type={showAdvancedColumns ? "default" : "dashed"}
@@ -635,36 +884,40 @@ export const JobsTab: React.FC = () => {
         />
       )}
 
-      {/* Table */}
-      <Table
-        dataSource={Array.isArray(jobs) ? jobs : []}
-        columns={columns}
-        rowKey="id"
-        aria-label={t("watchlists:jobs.tableAria", "Monitors table")}
-        loading={jobsLoading}
-        pagination={{
-          current: jobsPage,
-          pageSize: jobsPageSize,
-          total: jobsTotal,
-          showSizeChanger: true,
-          showTotal: (total) =>
-            t("watchlists:jobs.totalItems", "{{total}} monitors", { total }),
-          onChange: (page, pageSize) => {
-            setJobsPage(page)
-            if (pageSize !== jobsPageSize) {
-              setJobsPageSize(pageSize)
+      {isConstrained ? (
+        renderConstrainedJobList()
+      ) : (
+        <Table
+          dataSource={Array.isArray(jobs) ? jobs : []}
+          columns={columns}
+          rowKey="id"
+          aria-label={t("watchlists:jobs.tableAria", "Monitors table")}
+          loading={jobsLoading}
+          pagination={{
+            current: jobsPage,
+            pageSize: jobsPageSize,
+            total: jobsTotal,
+            showSizeChanger: true,
+            showTotal: (total) =>
+              t("watchlists:jobs.totalItems", "{{total}} monitors", { total }),
+            onChange: (page, pageSize) => {
+              setJobsPage(page)
+              if (pageSize !== jobsPageSize) {
+                setJobsPageSize(pageSize)
+              }
             }
-          }
-        }}
-        size="middle"
-        scroll={{ x: 900 }}
-      />
+          }}
+          size="middle"
+          scroll={{ x: 900 }}
+        />
+      )}
 
       {/* Job Form Modal */}
       <JobFormModal
         open={jobFormOpen}
         onClose={closeJobForm}
         initialValues={editingJob}
+        watchlistId={selectedWatchlistId}
         onSuccess={() => {
           closeJobForm()
           loadJobs()

@@ -15,7 +15,7 @@ export const PageShell: React.FC<PageShellProps> = ({
   return (
     <div
       className={classNames(
-        "w-full mx-auto px-4 sm:px-6 lg:px-8",
+        "w-full min-w-0 mx-auto px-4 sm:px-6 lg:px-8",
         maxWidthClassName,
         className || ""
       )}>
@@ -23,4 +23,3 @@ export const PageShell: React.FC<PageShellProps> = ({
     </div>
   )
 }
-

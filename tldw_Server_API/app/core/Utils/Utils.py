@@ -63,10 +63,20 @@ from tldw_Server_API.app.core.http_client import RetryPolicy, download, fetch
 logging = logger
 
 def extract_text_from_segments(segments, include_timestamps=True):
-    logger.trace(f"Segments received: {segments}")
+    """Extract transcript text from nested segment structures without logging raw content."""
+    def _describe_segment_shape(data):
+        """Summarize segment container shape for redacted diagnostic logs."""
+        if isinstance(data, list):
+            return f"list length={len(data)}"
+        if isinstance(data, dict):
+            return f"dict keys={len(data)}"
+        return type(data).__name__
+
+    logger.trace(f"Segments received: type={type(segments).__name__}, shape={_describe_segment_shape(segments)}")
     logger.trace(f"Type of segments: {type(segments)}")
 
     def _format_seconds_value(value):
+        """Format numeric timestamp values without unnecessary trailing zeros."""
         try:
             number = float(value)
         except (TypeError, ValueError):
@@ -76,6 +86,7 @@ def extract_text_from_segments(segments, include_timestamps=True):
         return f"{number:.2f}".rstrip("0").rstrip(".")
 
     def extract_text_recursive(data):
+        """Walk nested segment data and collect transcript text entries."""
         results = []
         if isinstance(data, dict):
             if 'Text' in data and isinstance(data['Text'], str):
@@ -100,7 +111,10 @@ def extract_text_from_segments(segments, include_timestamps=True):
     if pieces:
         return '\n'.join(pieces)
 
-    logging.error(f"Unable to extract text from segments: {segments}")
+    logger.error(
+        f"Unable to extract text from segments: type={type(segments).__name__}, "
+        f"shape={_describe_segment_shape(segments)}"
+    )
     return "Error: Unable to extract transcription"
 
 #
@@ -191,6 +205,7 @@ def get_project_relative_path(relative_path: str | os.PathLike[AnyStr]) -> str:
     return path
 
 def get_chromadb_path():
+    """Return the project-local ChromaDB storage path."""
     path = os.path.join(get_project_root(), 'Databases', 'chroma_db')
     logging.trace(f"ChromaDB path: {path}")
     return path
@@ -229,6 +244,7 @@ openai_tts_voices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
 
 
 def format_api_name(api):
+    """Return a display name for a configured API provider key."""
     name_mapping = {
         "openai": "OpenAI",
         "anthropic": "Anthropic",
@@ -264,6 +280,7 @@ def format_api_name(api):
 # logging.basicConfig(filename='debug-runtime.log', encoding='utf-8', level=logging.DEBUG)
 
 def format_metadata_as_text(metadata):
+    """Format media metadata mappings into a human-readable multi-line summary."""
     if not metadata:
         return "No metadata available"
 
@@ -312,6 +329,7 @@ def format_metadata_as_text(metadata):
 
 
 def convert_to_seconds(time_str):
+    """Convert seconds or HH:MM:SS-like duration values to whole seconds."""
     if not time_str:
         return 0
 
@@ -320,6 +338,7 @@ def convert_to_seconds(time_str):
         return 0
 
     def _as_int(value: float) -> int:
+        """Round a non-negative duration component to an integer second."""
         if value < 0:
             raise ValueError("Time values must be non-negative")
         quantized = Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
@@ -380,6 +399,7 @@ def truncate_content(content: str | None, max_length: int = 200) -> str | None:
 #
 # File-saving Function Definitions
 def save_to_file(video_urls, filename):
+    """Write a list of video URLs to a newline-delimited text file."""
     with open(filename, 'w') as file:
         file.write('\n'.join(video_urls))
     logging.info(f"Video URLs saved to {filename}")
@@ -457,7 +477,7 @@ def smart_download(url: str, tmp_dir: Path) -> Path:
 
 
 def download_file(url, dest_path, expected_checksum=None, max_retries=3, delay=5):
-    dest_path + '.tmp'
+    """Download a URL to disk with retries, resume support, and optional checksum validation."""
     dest_dir = os.path.dirname(dest_path)
     if dest_dir:
         os.makedirs(dest_dir, exist_ok=True)
@@ -497,6 +517,7 @@ def download_file_if_missing(url: str, local_path: str) -> None:
         raise
 
 def create_download_directory(title):
+    """Create and return a sanitized Results subdirectory for downloaded media."""
     base_dir = "Results"
     # Remove characters that are illegal in Windows filenames and normalize
     safe_title = normalize_title(title, preserve_spaces=False)
@@ -511,6 +532,7 @@ def create_download_directory(title):
 
 
 def safe_read_file(file_path):
+    """Read a text file using detected or fallback encodings, returning an error string on failure."""
     encodings = ['utf-8', 'utf-16', 'ascii', 'latin-1', 'iso-8859-1', 'cp1252', 'utf-8-sig']
 
     logging.info(f"Attempting to read file: {file_path}")
@@ -577,6 +599,7 @@ def generate_unique_filename(base_path, base_filename):
 
 
 def generate_unique_identifier(file_path):
+    """Build a local identifier from file timestamp, content hash, and filename."""
     filename = os.path.basename(file_path)
     timestamp = int(time.time())
 
@@ -600,6 +623,7 @@ def generate_unique_identifier(file_path):
 
 # Helper function to validate URL format
 def is_valid_url(url: str) -> bool:
+    """Return whether a string matches the accepted URL pattern."""
     regex = re.compile(
         r'^(?:http|ftp)s?://'  # http:// or https://
         r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'  # domain...
@@ -612,6 +636,7 @@ def is_valid_url(url: str) -> bool:
 
 
 def verify_checksum(file_path, expected_checksum):
+    """Return whether a file's SHA-256 digest matches the expected checksum."""
     sha256_hash = hashlib.sha256()
     with open(file_path, 'rb') as f:
         for byte_block in iter(lambda: f.read(4096), b''):
@@ -620,6 +645,7 @@ def verify_checksum(file_path, expected_checksum):
 
 
 def normalize_title(title, preserve_spaces=False):
+    """Normalize a title into a filesystem-safe ASCII name."""
     # Normalize the string to 'NFKD' form and encode to 'ascii' ignoring non-ascii characters
     title = unicodedata.normalize('NFKD', title).encode('ascii', 'ignore').decode('ascii')
 
@@ -642,6 +668,7 @@ def normalize_title(title, preserve_spaces=False):
 
 
 def clean_youtube_url(url):
+    """Remove playlist query parameters from a YouTube URL."""
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query)
     if 'list' in query_params:
@@ -696,6 +723,7 @@ def sanitize_filename(filename, *, max_total_length: int | None = None, extensio
 
 
 def format_transcription(content):
+    """Convert escaped transcript newlines into simple HTML line breaks."""
     # Replace '\n' with actual line breaks
     content = content.replace('\\n', '\n')
     # Split the content by newlines first
@@ -735,6 +763,7 @@ def sanitize_user_input(message):
     return message
 
 def format_file_path(file_path, fallback_path=None):
+    """Return an existing file path, falling back to an alternate path when available."""
     if file_path and os.path.exists(file_path):
         logging.debug(f"File exists: {file_path}")
         return file_path
@@ -795,6 +824,7 @@ def get_db_config():
 temp_files = []
 
 def save_temp_file(file):
+    """Persist an uploaded file-like object to a unique path in the system temp directory."""
     global temp_files
     temp_dir = tempfile.gettempdir()
 
@@ -821,6 +851,7 @@ def save_temp_file(file):
     return temp_path
 
 def cleanup_temp_files():
+    """Delete temporary files recorded by save_temp_file."""
     global temp_files
     for file_path in temp_files:
         if os.path.exists(file_path):
@@ -832,6 +863,7 @@ def cleanup_temp_files():
     temp_files.clear()
 
 def generate_unique_id():
+    """Return a unique uploaded-file identifier."""
     return f"uploaded_file_{uuid.uuid4()}"
 
 class FileProcessor:
@@ -927,6 +959,7 @@ class ZipValidator:
 
     @staticmethod
     def _is_malicious_zip_path(filename: str) -> bool:
+        """Return whether a zip entry path attempts absolute or parent traversal."""
         normalized = filename.replace("\\", "/")
         if normalized.startswith("/") or normalized.startswith("//"):
             return True
@@ -988,6 +1021,7 @@ class ZipValidator:
             return False, f"Error processing zip file: {str(e)}", []
 
 def format_text_with_line_breaks(text):
+    """Insert HTML line breaks after sentence-ending punctuation."""
     # Split the text into sentences and add line breaks
     sentences = text.replace('. ', '.<br>').replace('? ', '?<br>').replace('! ', '!<br>')
     return sentences
@@ -1063,15 +1097,13 @@ def extract_media_id_from_result_string(result_msg: str | None) -> str | None:
         return None
 
 def is_valid_date(date_string): # Placeholder
+    """Return whether a string is a YYYY-MM-DD date."""
     try:
         datetime.strptime(date_string, '%Y-%m-%d')
         return True
     except ValueError:
         return False
 
-
-def get_user_database_path():
-    return None
 
 #
 # End of Utils.py

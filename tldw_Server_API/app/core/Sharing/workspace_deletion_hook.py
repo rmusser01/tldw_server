@@ -24,7 +24,7 @@ async def on_workspace_deleted(workspace_id: str, owner_user_id: int) -> None:
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
         from tldw_Server_API.app.core.AuthNZ.repos.shared_workspace_repo import SharedWorkspaceRepo
 
-        pool = get_db_pool()
+        pool = await get_db_pool()
         repo = SharedWorkspaceRepo(db_pool=pool)
 
         # Revoke all workspace shares
@@ -45,5 +45,9 @@ async def on_workspace_deleted(workspace_id: str, owner_user_id: int) -> None:
             owner_user_id=owner_user_id,
             metadata={"trigger": "workspace_deletion"},
         )
-    except Exception as exc:
-        logger.warning(f"workspace_deletion_hook failed for {workspace_id}: {exc}")
+    except Exception:
+        logger.warning(
+            "workspace_deletion_hook failed; workspace_id={} owner_user_id={}",
+            workspace_id,
+            owner_user_id,
+        )

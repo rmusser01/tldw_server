@@ -3,6 +3,7 @@ import type { MessageInstance } from "antd/es/message/interface"
 import { tldwClient, type VisualStyleRecord } from "@/services/tldw/TldwApiClient"
 import { tldwModels, type ModelInfo } from "@/services/tldw"
 import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import {
   createQuestion,
   createQuiz,
@@ -21,6 +22,8 @@ import {
 import type { TFunction } from "i18next"
 import type {
   ArtifactReviewChecklistItem,
+  ArtifactSourceCoverage,
+  ArtifactSkippedSource,
   ArtifactSourceLineage,
   ArtifactType,
   GeneratedArtifact,
@@ -38,12 +41,31 @@ import {
   type FlashcardDraft,
   type QuizQuestionDraft,
 } from "./useQuizParsing"
+import {
+  LiteratureSourceCoverageError,
+  buildCorpusGapMessages,
+  buildEvidenceBoundHypothesesMessages,
+  buildLiteratureMatrixMessages,
+  buildLiteratureSourceCoverage,
+  buildResearchProposalMessages,
+  findCompatibleLiteratureArtifact,
+  findCompatibleLiteratureMatrixArtifact,
+  formatEvidenceBoundHypothesesMarkdown,
+  formatLiteratureMatrixMarkdown,
+  isLiteratureSourceCoverageError,
+  normalizeCorpusGapResponse,
+  normalizeEvidenceBoundHypothesesResponse,
+  normalizeLiteratureMatrixResponse,
+  normalizeResearchProposalMarkdown,
+  type LiteratureWorkProductSourceContext
+} from "../literature-workproducts"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STUDIO_GENERATION_RAG_TIMEOUT_MS = 120000
+const STUDIO_GENERATION_CHAT_TIMEOUT_MS = 180000
 const STUDIO_SOURCE_CHAR_LIMIT = 6000
 const STUDIO_TOTAL_SOURCE_CHAR_LIMIT = 18000
 const FLASHCARD_GENERATION_TEXT_LIMIT = 8000
@@ -56,6 +78,15 @@ const TEXT_FAILURE_SENTINELS: Partial<Record<ArtifactType, string[]>> = {
   mindmap: ["Mind map generation failed"],
   slides: ["Slides generation failed"],
   data_table: ["Data table generation failed"]
+}
+
+const normalizeStudioChatModelId = (value: unknown): string => {
+  if (typeof value !== "string") return ""
+  const trimmed = value.trim()
+  if (trimmed.toLowerCase().startsWith("tldw:")) {
+    return trimmed.slice(5).trim()
+  }
+  return trimmed
 }
 
 const KNOWN_ERROR_RESPONSE_TEXTS = new Set([
@@ -71,6 +102,50 @@ const STUDIO_DEFAULT_SUMMARY_INSTRUCTION =
 const ESTIMATED_COST_PER_1K_TOKENS_USD = 0.003
 
 const DEFAULT_SLIDES_VISUAL_STYLE_ID = "minimal-academic"
+
+const normalizeStudioApiProviderForRequest = (
+  provider: string | undefined
+): string | undefined => {
+  const rawProvider = String(provider || "").trim().toLowerCase()
+  if (!rawProvider || rawProvider === "__auto__") return undefined
+
+  const compactProvider = rawProvider.replace(/\s+/g, "")
+  const normalizedProvider = compactProvider.replace(/_/g, "-")
+  if (
+    normalizedProvider === "custom-openai-api" ||
+    normalizedProvider === "custom-openai" ||
+    normalizedProvider === "openai-compatible" ||
+    normalizedProvider === "customopenai"
+  ) {
+    return "custom-openai-api"
+  }
+
+  const numberedCustomProvider =
+    normalizedProvider.match(/^custom-openai-api-(\d{1,2})$/) ||
+    normalizedProvider.match(/^custom-openai-(\d{1,2})$/) ||
+    normalizedProvider.match(/^openai-compatible-(\d{1,2})$/) ||
+    compactProvider.match(/^custom_openai_api_?(\d{1,2})$/) ||
+    compactProvider.match(/^custom_openai(\d{1,2})_api$/) ||
+    compactProvider.match(/^customopenaiapi(\d{1,2})$/) ||
+    compactProvider.match(/^customopenai(\d{1,2})$/)
+
+  if (numberedCustomProvider) {
+    return `custom-openai-api-${numberedCustomProvider[1]}`
+  }
+
+  return rawProvider
+}
+
+const resolveStudioModelSelection = (value: unknown) => {
+  const normalized = normalizeStudioChatModelId(value)
+  const parsed = parseProviderQualifiedModelSelection(normalized)
+  const modelId = normalizeStudioChatModelId(parsed.modelId || normalized)
+  return {
+    rawModelId: normalized,
+    modelId,
+    provider: parsed.provider
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -116,11 +191,17 @@ type GenerationResult = {
   totalTokens?: number
   totalCostUsd?: number
   data?: Record<string, unknown>
+  sourceCoverage?: ArtifactSourceCoverage
 }
 
-type StudioSourceContext = {
+type StudioSourceContext = LiteratureWorkProductSourceContext & {
   title: string
   text: string
+}
+
+type StudioSourceContextLoadResult = {
+  sourceContexts: StudioSourceContext[]
+  skippedSources: ArtifactSkippedSource[]
 }
 
 type WorkspaceStudyMaterialsMode = StudyMaterialsPolicy | null | undefined
@@ -194,6 +275,11 @@ const buildQuizSourceBundle = (
 const buildBundledQuizQuestionCount = (mediaCount: number): number => {
   const normalizedMediaCount = Math.max(1, mediaCount)
   return Math.min(8, Math.max(6, normalizedMediaCount * 3))
+}
+
+const buildBundledFlashcardCount = (sourceCount: number): number => {
+  const normalizedSourceCount = Math.max(1, sourceCount)
+  return Math.min(10, Math.max(6, normalizedSourceCount * 3))
 }
 
 const extractJsonPayloadText = (value: string): string => {
@@ -669,9 +755,33 @@ const extractUsageMetrics = (payload: unknown): UsageMetrics => {
 const buildMissingContentError = (label: string): Error =>
   new Error(`No usable ${label} content was returned.`)
 
-const loadStudioSourceContexts = async (
+const buildSkippedStudioSource = (
+  detail: {
+    sourceId: string
+    mediaId: number
+    title: string
+    sourceStatus?: WorkspaceSource["status"]
+  },
+  reason: ArtifactSkippedSource["reason"]
+): ArtifactSkippedSource => ({
+  sourceId: detail.sourceId,
+  mediaId: detail.mediaId,
+  title: detail.title,
+  reason
+})
+
+const getMissingTextSkipReason = (
+  sourceStatus: WorkspaceSource["status"] | undefined
+): ArtifactSkippedSource["reason"] => {
+  if (typeof sourceStatus !== "string") {
+    return "unknown"
+  }
+  return sourceStatus === "ready" ? "missing_text" : "unready"
+}
+
+const loadStudioSourceContextBundle = async (
   options: SourceContentGenerationOptions
-): Promise<StudioSourceContext[]> => {
+): Promise<StudioSourceContextLoadResult> => {
   const sourceByMediaId = new Map(
     options.selectedSources.map((source) => [source.mediaId, source])
   )
@@ -686,6 +796,9 @@ const loadStudioSourceContexts = async (
       const source = sourceByMediaId.get(mediaId)
       const sourceMeta = isRecord(detail) && isRecord(detail.source) ? detail.source : null
       return {
+        sourceId: source?.id || `media-${mediaId}`,
+        mediaId,
+        sourceStatus: source?.status,
         title:
           source?.title ||
           (typeof sourceMeta?.title === "string" ? sourceMeta.title : "") ||
@@ -697,23 +810,46 @@ const loadStudioSourceContexts = async (
 
   let remainingChars = STUDIO_TOTAL_SOURCE_CHAR_LIMIT
   const sourceContexts: StudioSourceContext[] = []
+  const skippedSources: ArtifactSkippedSource[] = []
   for (const detail of mediaDetails) {
-    if (!detail.text || remainingChars <= 0) {
+    const sourceText = detail.text.trim()
+    if (!sourceText) {
+      skippedSources.push(
+        buildSkippedStudioSource(
+          detail,
+          getMissingTextSkipReason(detail.sourceStatus)
+        )
+      )
       continue
     }
-    const clippedText = detail.text
+    if (remainingChars <= 0) {
+      skippedSources.push(buildSkippedStudioSource(detail, "context_limit"))
+      continue
+    }
+    const clippedText = sourceText
       .slice(0, Math.min(STUDIO_SOURCE_CHAR_LIMIT, remainingChars))
       .trim()
     if (!clippedText) {
+      skippedSources.push(buildSkippedStudioSource(detail, "context_limit"))
       continue
     }
     sourceContexts.push({
+      sourceId: detail.sourceId,
+      mediaId: detail.mediaId,
       title: detail.title,
-      text: clippedText
+      text: clippedText,
+      truncated: sourceText.length > clippedText.length
     })
     remainingChars -= clippedText.length
   }
 
+  return { sourceContexts, skippedSources }
+}
+
+const loadStudioSourceContexts = async (
+  options: SourceContentGenerationOptions
+): Promise<StudioSourceContext[]> => {
+  const { sourceContexts } = await loadStudioSourceContextBundle(options)
   return sourceContexts
 }
 
@@ -921,7 +1057,10 @@ ${sourceText}`
       top_p: options.topP,
       max_tokens: options.maxTokens
     },
-    { signal: options.abortSignal }
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
   )
 
   const { content: rawContent, usage } =
@@ -972,7 +1111,10 @@ ${sourceText}`
           ? Math.min(options.maxTokens, options.maxOutputTokens)
           : options.maxTokens
     },
-    { signal: options.abortSignal }
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
   )
 
   const { content: rawContent, usage } =
@@ -1178,7 +1320,10 @@ ${sourceText}`
       top_p: options.topP,
       max_tokens: quizMaxTokens
     },
-    { signal: options.abortSignal }
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
   )
 
   const { content: rawContent, usage } = await readChatCompletionResponsePayload(response)
@@ -1324,7 +1469,7 @@ async function generateFlashcards(
 
   const generationRequest: FlashcardsGenerateRequest = {
     text: sourceText,
-    num_cards: 12,
+    num_cards: buildBundledFlashcardCount(sourceContexts.length),
     difficulty: "mixed",
     provider: options.apiProvider,
     model:
@@ -1482,7 +1627,10 @@ ${sourceContexts
     temperature: options.temperature,
     top_p: options.topP,
     max_tokens: options.maxTokens
-  }, { signal: options.abortSignal })
+  }, {
+    signal: options.abortSignal,
+    timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+  })
 
   const content = (await readChatCompletionResponseText(response)).trim()
   if (!content) {
@@ -1540,7 +1688,10 @@ ${sourceText}`
       top_p: options.topP,
       max_tokens: options.maxTokens
     },
-    { signal: options.abortSignal }
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
   )
   const { content: rawScript, usage } = await readChatCompletionResponsePayload(response)
   const script = rawScript.trim()
@@ -1684,6 +1835,351 @@ Requirements:
   })
 }
 
+async function generateLiteratureMatrix(
+  options: SourceContentGenerationOptions & {
+    template: WorkProductTemplate
+  }
+): Promise<GenerationResult> {
+  const model = typeof options.model === "string" ? options.model.trim() : ""
+  if (!model) {
+    throw new Error("Select a chat model before generating a Literature Matrix.")
+  }
+
+  const { sourceContexts, skippedSources } =
+    await loadStudioSourceContextBundle(options)
+  const sourceCoverage = buildLiteratureSourceCoverage({
+    selectedSources: options.selectedSources,
+    usableContexts: sourceContexts,
+    skippedSources,
+    minimumUsableSources: options.template.minUsableSources,
+    sourceContextCharLimit: {
+      perSource: STUDIO_SOURCE_CHAR_LIMIT,
+      total: STUDIO_TOTAL_SOURCE_CHAR_LIMIT
+    }
+  })
+
+  if (!sourceCoverage.minimumUsableSourcesMet) {
+    throw new LiteratureSourceCoverageError(
+      `At least ${options.template.minUsableSources} usable source contexts are required for ${options.template.label}.`,
+      sourceCoverage
+    )
+  }
+
+  const messages = buildLiteratureMatrixMessages(sourceContexts)
+  const response = await tldwClient.createChatCompletion(
+    {
+      model,
+      api_provider: options.apiProvider,
+      messages: [
+        {
+          role: "system",
+          content: messages.system
+        },
+        {
+          role: "user",
+          content: messages.user
+        }
+      ],
+      temperature: options.temperature,
+      top_p: options.topP,
+      max_tokens: options.maxTokens,
+      response_format: { type: "json_object" }
+    },
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
+  )
+
+  const { content: rawContent, usage } =
+    await readChatCompletionResponsePayload(response)
+  const table = normalizeLiteratureMatrixResponse(rawContent)
+
+  return {
+    content: formatLiteratureMatrixMarkdown(table),
+    data: { table },
+    sourceCoverage,
+    ...usage
+  }
+}
+
+async function generateCorpusGapFinder(
+  options: SourceContentGenerationOptions & {
+    template: WorkProductTemplate
+    generatedArtifacts: GeneratedArtifact[]
+  }
+): Promise<GenerationResult> {
+  const model = typeof options.model === "string" ? options.model.trim() : ""
+  if (!model) {
+    throw new Error("Select a chat model before generating a Corpus Gap Finder.")
+  }
+
+  const { sourceContexts, skippedSources } =
+    await loadStudioSourceContextBundle(options)
+  const sourceCoverage = buildLiteratureSourceCoverage({
+    selectedSources: options.selectedSources,
+    usableContexts: sourceContexts,
+    skippedSources,
+    minimumUsableSources: options.template.minUsableSources,
+    sourceContextCharLimit: {
+      perSource: STUDIO_SOURCE_CHAR_LIMIT,
+      total: STUDIO_TOTAL_SOURCE_CHAR_LIMIT
+    }
+  })
+
+  if (!sourceCoverage.minimumUsableSourcesMet) {
+    throw new LiteratureSourceCoverageError(
+      `At least ${options.template.minUsableSources} usable source contexts are required for ${options.template.label}.`,
+      sourceCoverage
+    )
+  }
+
+  const compatibleMatrix = findCompatibleLiteratureMatrixArtifact(
+    options.generatedArtifacts,
+    sourceContexts
+  )
+  const messages = buildCorpusGapMessages(
+    sourceContexts,
+    compatibleMatrix?.content
+  )
+  const response = await tldwClient.createChatCompletion(
+    {
+      model,
+      api_provider: options.apiProvider,
+      messages: [
+        {
+          role: "system",
+          content: messages.system
+        },
+        {
+          role: "user",
+          content: messages.user
+        }
+      ],
+      temperature: options.temperature,
+      top_p: options.topP,
+      max_tokens: options.maxTokens,
+      response_format: { type: "json_object" }
+    },
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
+  )
+
+  const { content: rawContent, usage } =
+    await readChatCompletionResponsePayload(response)
+  const table = normalizeCorpusGapResponse(rawContent)
+
+  return {
+    content: formatLiteratureMatrixMarkdown(table),
+    data: { table },
+    sourceCoverage,
+    ...usage
+  }
+}
+
+async function generateEvidenceBoundHypotheses(
+  options: SourceContentGenerationOptions & {
+    template: WorkProductTemplate
+    generatedArtifacts: GeneratedArtifact[]
+  }
+): Promise<GenerationResult> {
+  const model = typeof options.model === "string" ? options.model.trim() : ""
+  if (!model) {
+    throw new Error(
+      "Select a chat model before generating Evidence-Bound Hypotheses."
+    )
+  }
+
+  const { sourceContexts, skippedSources } =
+    await loadStudioSourceContextBundle(options)
+  const sourceCoverage = buildLiteratureSourceCoverage({
+    selectedSources: options.selectedSources,
+    usableContexts: sourceContexts,
+    skippedSources,
+    minimumUsableSources: options.template.minUsableSources,
+    sourceContextCharLimit: {
+      perSource: STUDIO_SOURCE_CHAR_LIMIT,
+      total: STUDIO_TOTAL_SOURCE_CHAR_LIMIT
+    }
+  })
+
+  if (!sourceCoverage.minimumUsableSourcesMet) {
+    throw new LiteratureSourceCoverageError(
+      `At least ${options.template.minUsableSources} usable source contexts are required for ${options.template.label}.`,
+      sourceCoverage
+    )
+  }
+
+  const compatibleMatrix = findCompatibleLiteratureArtifact(
+    options.generatedArtifacts,
+    sourceContexts,
+    "literature_matrix"
+  )
+  const compatibleGapFinder = findCompatibleLiteratureArtifact(
+    options.generatedArtifacts,
+    sourceContexts,
+    "corpus_gap_finder"
+  )
+  const messages = buildEvidenceBoundHypothesesMessages(
+    sourceContexts,
+    [
+      compatibleMatrix
+        ? { label: "Literature Matrix", content: compatibleMatrix.content ?? "" }
+        : null,
+      compatibleGapFinder
+        ? {
+            label: "Corpus Gap Finder",
+            content: compatibleGapFinder.content ?? ""
+          }
+        : null
+    ].filter(
+      (artifact): artifact is { label: string; content: string } =>
+        artifact !== null && artifact.content.trim().length > 0
+    )
+  )
+  const response = await tldwClient.createChatCompletion(
+    {
+      model,
+      api_provider: options.apiProvider,
+      messages: [
+        {
+          role: "system",
+          content: messages.system
+        },
+        {
+          role: "user",
+          content: messages.user
+        }
+      ],
+      temperature: options.temperature,
+      top_p: options.topP,
+      max_tokens: options.maxTokens,
+      response_format: { type: "json_object" }
+    },
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
+  )
+
+  const { content: rawContent, usage } =
+    await readChatCompletionResponsePayload(response)
+  const hypotheses = normalizeEvidenceBoundHypothesesResponse(rawContent)
+
+  return {
+    content: formatEvidenceBoundHypothesesMarkdown(hypotheses),
+    data: { hypotheses },
+    sourceCoverage,
+    ...usage
+  }
+}
+
+async function generateResearchProposalPack(
+  options: SourceContentGenerationOptions & {
+    template: WorkProductTemplate
+    generatedArtifacts: GeneratedArtifact[]
+  }
+): Promise<GenerationResult> {
+  const model = typeof options.model === "string" ? options.model.trim() : ""
+  if (!model) {
+    throw new Error("Select a chat model before generating a Research Proposal Pack.")
+  }
+
+  const { sourceContexts, skippedSources } =
+    await loadStudioSourceContextBundle(options)
+  const sourceCoverage = buildLiteratureSourceCoverage({
+    selectedSources: options.selectedSources,
+    usableContexts: sourceContexts,
+    skippedSources,
+    minimumUsableSources: options.template.minUsableSources,
+    sourceContextCharLimit: {
+      perSource: STUDIO_SOURCE_CHAR_LIMIT,
+      total: STUDIO_TOTAL_SOURCE_CHAR_LIMIT
+    }
+  })
+
+  if (!sourceCoverage.minimumUsableSourcesMet) {
+    throw new LiteratureSourceCoverageError(
+      `At least ${options.template.minUsableSources} usable source contexts are required for ${options.template.label}.`,
+      sourceCoverage
+    )
+  }
+
+  const compatibleArtifacts = [
+    {
+      label: "Literature Matrix",
+      artifact: findCompatibleLiteratureArtifact(
+        options.generatedArtifacts,
+        sourceContexts,
+        "literature_matrix"
+      )
+    },
+    {
+      label: "Corpus Gap Finder",
+      artifact: findCompatibleLiteratureArtifact(
+        options.generatedArtifacts,
+        sourceContexts,
+        "corpus_gap_finder"
+      )
+    },
+    {
+      label: "Evidence-Bound Hypotheses",
+      artifact: findCompatibleLiteratureArtifact(
+        options.generatedArtifacts,
+        sourceContexts,
+        "evidence_bound_hypotheses"
+      )
+    }
+  ]
+    .map(({ label, artifact }) =>
+      artifact?.content ? { label, content: artifact.content } : null
+    )
+    .filter(
+      (artifact): artifact is { label: string; content: string } =>
+        artifact !== null && artifact.content.trim().length > 0
+    )
+
+  const messages = buildResearchProposalMessages(
+    sourceContexts,
+    sourceCoverage,
+    compatibleArtifacts
+  )
+  const response = await tldwClient.createChatCompletion(
+    {
+      model,
+      api_provider: options.apiProvider,
+      messages: [
+        {
+          role: "system",
+          content: messages.system
+        },
+        {
+          role: "user",
+          content: messages.user
+        }
+      ],
+      temperature: options.temperature,
+      top_p: options.topP,
+      max_tokens: options.maxTokens
+    },
+    {
+      signal: options.abortSignal,
+      timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
+    }
+  )
+
+  const { content: rawContent, usage } =
+    await readChatCompletionResponsePayload(response)
+
+  return {
+    content: normalizeResearchProposalMarkdown(rawContent),
+    sourceCoverage,
+    ...usage
+  }
+}
+
 async function generateDataTable(
   options: SourceContentGenerationOptions
 ): Promise<GenerationResult> {
@@ -1726,6 +2222,9 @@ ${sourceContexts
     temperature: options.temperature,
     top_p: options.topP,
     max_tokens: options.maxTokens
+  }, {
+    signal: options.abortSignal,
+    timeoutMs: STUDIO_GENERATION_CHAT_TIMEOUT_MS
   })
 
   const content = (await readChatCompletionResponseText(response)).trim()
@@ -1923,6 +2422,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
   // Chat models state
   const [chatModels, setChatModels] = useState<ModelInfo[]>([])
   const [loadingChatModels, setLoadingChatModels] = useState(false)
+  const [selectedUnavailableModel, setSelectedUnavailableModel] =
+    useState<ModelInfo | null>(null)
 
   // Slides visual styles state
   const [slidesVisualStyles, setSlidesVisualStyles] = useState<VisualStyleRecord[]>([])
@@ -1961,6 +2462,65 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    const selectedModelRaw =
+      typeof selectedModel === "string" ? selectedModel.trim() : ""
+    const selectedModelId = normalizeStudioChatModelId(selectedModelRaw)
+    if (!selectedModelId) {
+      setSelectedUnavailableModel(null)
+      return
+    }
+
+    const selectedMatchesSelectableModel = chatModels.some((model) => {
+      const modelId = normalizeStudioChatModelId(model.id)
+      return modelId.length > 0 && modelId === selectedModelId
+    })
+    if (selectedMatchesSelectableModel) {
+      setSelectedUnavailableModel(null)
+      return
+    }
+
+    const isUnavailableModel = (model: ModelInfo | null): model is ModelInfo => {
+      if (!model) return false
+      if (model.isConfigured === false) return true
+      if (model.providerEnabled === false) return true
+      const availability = model.availability?.trim().toLowerCase()
+      return Boolean(
+        availability &&
+          ["disabled", "failed", "not-configured", "unavailable"].includes(
+            availability
+          )
+      )
+    }
+
+    let cancelled = false
+    const candidateIds = Array.from(
+      new Set([selectedModelRaw, selectedModelId].filter(Boolean))
+    )
+
+    void (async () => {
+      for (const candidateId of candidateIds) {
+        try {
+          const model = await tldwModels.getModel(candidateId)
+          if (cancelled) return
+          if (isUnavailableModel(model)) {
+            setSelectedUnavailableModel(model)
+            return
+          }
+        } catch {
+          if (cancelled) return
+        }
+      }
+      if (!cancelled) {
+        setSelectedUnavailableModel(null)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [chatModels, selectedModel])
 
   // Load slides visual styles on mount
   useEffect(() => {
@@ -2031,33 +2591,44 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
   const resolveStudioChatRuntime = React.useCallback(async () => {
     const normalizeProviderValue = (value: unknown) =>
       typeof value === "string" && value.trim().length > 0
-        ? value.trim().toLowerCase()
+        ? normalizeStudioApiProviderForRequest(value)
+        : undefined
+    const providerCandidatesForModel = (model: ModelInfo | undefined) =>
+      [
+        normalizeProviderValue(model?.chatProvider),
+        normalizeProviderValue(model?.provider)
+      ].filter((provider): provider is string => Boolean(provider))
+    const providerForModel = (model: ModelInfo | undefined) =>
+      providerCandidatesForModel(model)[0]
+    const normalizedProviderOverride =
+      normalizedApiProvider !== "__auto__"
+        ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
         : undefined
 
     const pickRuntime = (models: ModelInfo[]) => {
-      const selectedModelId =
-        typeof selectedModel === "string" && selectedModel.trim().length > 0
-          ? selectedModel.trim()
-          : undefined
+      const selectedModelSelection = resolveStudioModelSelection(selectedModel)
+      const selectedModelId = selectedModelSelection.modelId || undefined
       const providerFiltered =
-        normalizedApiProvider === "__auto__"
+        !normalizedProviderOverride
           ? models
           : models.filter(
               (model) =>
-                String(model.provider || "").trim().toLowerCase() ===
-                normalizedApiProvider
+                providerCandidatesForModel(model).includes(normalizedProviderOverride)
             )
       if (selectedModelId) {
         const matchedModel = models.find(
           (model) =>
-            typeof model.id === "string" && model.id.trim() === selectedModelId
+            typeof model.id === "string" &&
+            [selectedModelId, selectedModelSelection.rawModelId].includes(
+              normalizeStudioChatModelId(model.id)
+            )
         )
         return {
           model: selectedModelId,
           provider:
-            normalizedApiProvider !== "__auto__"
-              ? normalizedApiProvider
-              : normalizeProviderValue(matchedModel?.provider)
+            normalizedProviderOverride ||
+            normalizeProviderValue(selectedModelSelection.provider) ||
+            providerForModel(matchedModel)
         }
       }
 
@@ -2071,8 +2642,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       return {
         model: fallbackModel?.id?.trim() || undefined,
         provider:
-          normalizeProviderValue(fallbackModel?.provider) ||
-          (normalizedApiProvider !== "__auto__" ? normalizedApiProvider : undefined)
+          providerForModel(fallbackModel) ||
+          normalizedProviderOverride
       }
     }
 
@@ -2238,6 +2809,10 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           : null
         const isExecutiveBriefTemplate =
           workProductTemplate?.id === "executive_brief"
+        const isEvidenceBoundHypothesesTemplate =
+          workProductTemplate?.id === "evidence_bound_hypotheses"
+        const isResearchProposalTemplate =
+          workProductTemplate?.id === "research_proposal_pack"
         const templateMetadata = workProductTemplate
           ? {
               templateId: workProductTemplate.id,
@@ -2271,6 +2846,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               presentationId: undefined,
               presentationVersion: undefined,
               data: undefined,
+              sourceCoverage: undefined,
               errorMessage: undefined,
               ...templateMetadata
             })
@@ -2337,13 +2913,26 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               maxTokens: resolvedNumPredict,
               abortSignal: activeAbort.signal
             }
-            result =
-              isExecutiveBriefTemplate && workProductTemplate
-                ? await generateExecutiveBrief({
-                    ...reportOptions,
-                    template: workProductTemplate
-                  })
-                : await generateReport(reportOptions)
+            if (isExecutiveBriefTemplate && workProductTemplate) {
+              result = await generateExecutiveBrief({
+                ...reportOptions,
+                template: workProductTemplate
+              })
+            } else if (isEvidenceBoundHypothesesTemplate && workProductTemplate) {
+              result = await generateEvidenceBoundHypotheses({
+                ...reportOptions,
+                template: workProductTemplate,
+                generatedArtifacts
+              })
+            } else if (isResearchProposalTemplate && workProductTemplate) {
+              result = await generateResearchProposalPack({
+                ...reportOptions,
+                template: workProductTemplate,
+                generatedArtifacts
+              })
+            } else {
+              result = await generateReport(reportOptions)
+            }
             break
           }
           case "compare_sources":
@@ -2426,7 +3015,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               selectedSources,
               model: await resolveStudioChatModel(),
               apiProvider:
-                normalizedApiProvider !== "__auto__" ? normalizedApiProvider : undefined,
+                normalizedApiProvider !== "__auto__"
+                  ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
+                  : undefined,
               temperature: resolvedTemperature,
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,
@@ -2439,7 +3030,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               selectedSources,
               model: await resolveStudioChatModel(),
               apiProvider:
-                normalizedApiProvider !== "__auto__" ? normalizedApiProvider : undefined,
+                normalizedApiProvider !== "__auto__"
+                  ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
+                  : undefined,
               temperature: resolvedTemperature,
               topP: resolvedTopP,
               maxTokens: resolvedNumPredict,
@@ -2473,17 +3066,48 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             break
           }
           case "data_table":
-            result = await generateDataTable({
-              mediaIds,
-              selectedSources,
-              model: await resolveStudioChatModel(),
-              apiProvider:
-                normalizedApiProvider !== "__auto__" ? normalizedApiProvider : undefined,
-              temperature: resolvedTemperature,
-              topP: resolvedTopP,
-              maxTokens: resolvedNumPredict,
-              abortSignal: activeAbort.signal
-            })
+            if (workProductTemplate?.id === "literature_matrix") {
+              const matrixRuntime = await resolveStudioChatRuntime()
+              result = await generateLiteratureMatrix({
+                mediaIds,
+                selectedSources,
+                model: matrixRuntime.model,
+                apiProvider: matrixRuntime.provider,
+                temperature: resolvedTemperature,
+                topP: resolvedTopP,
+                maxTokens: resolvedNumPredict,
+                abortSignal: activeAbort.signal,
+                template: workProductTemplate
+              })
+            } else if (workProductTemplate?.id === "corpus_gap_finder") {
+              const gapRuntime = await resolveStudioChatRuntime()
+              result = await generateCorpusGapFinder({
+                mediaIds,
+                selectedSources,
+                model: gapRuntime.model,
+                apiProvider: gapRuntime.provider,
+                temperature: resolvedTemperature,
+                topP: resolvedTopP,
+                maxTokens: resolvedNumPredict,
+                abortSignal: activeAbort.signal,
+                template: workProductTemplate,
+                generatedArtifacts
+              })
+            } else {
+              result = await generateDataTable({
+                mediaIds,
+                selectedSources,
+                model: await resolveStudioChatModel(),
+                apiProvider:
+                  normalizedApiProvider !== "__auto__"
+                    ? normalizeStudioApiProviderForRequest(normalizedApiProvider)
+                    : undefined,
+                temperature: resolvedTemperature,
+                topP: resolvedTopP,
+                maxTokens: resolvedNumPredict,
+                abortSignal: activeAbort.signal
+              })
+            }
             break
           default:
             throw new Error(`Unsupported output type: ${type}`)
@@ -2508,6 +3132,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           audioFormat: result.audioFormat,
           presentationId: result.presentationId,
           presentationVersion: result.presentationVersion,
+          sourceCoverage: result.sourceCoverage,
           totalTokens:
             result.totalTokens ||
             (result.content
@@ -2537,8 +3162,12 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
         )
       } catch (error) {
         const generationWasAborted = isAbortLikeError(error)
+        const sourceCoverage = isLiteratureSourceCoverageError(error)
+          ? error.sourceCoverage
+          : undefined
         if (artifact) {
           updateArtifactStatus(artifact.id, "failed", {
+            sourceCoverage,
             errorMessage: generationWasAborted
               ? t(
                   "playground:studio.generateCancelled",
@@ -2602,6 +3231,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
     generationPhase,
     chatModels,
     loadingChatModels,
+    selectedUnavailableModel,
     recentOutputTypes,
     slidesVisualStyles,
     slidesVisualStylesLoading,

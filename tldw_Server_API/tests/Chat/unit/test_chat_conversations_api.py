@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_router
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
 
 
@@ -189,6 +189,66 @@ def test_conversation_endpoints_expose_normalized_assistant_identity(tmp_path):
     assert metadata["assistant_kind"] == "persona"
     assert metadata["assistant_id"] == "garden-helper"
     assert metadata["character_id"] is None
+
+
+def test_update_conversation_maps_conflict_error(tmp_path, monkeypatch):
+    db_path = tmp_path / "chacha.db"
+    db = CharactersRAGDB(db_path=str(db_path), client_id="user-1")
+    app = _build_app(db)
+    conversation_id = db.add_conversation(
+        {
+            "assistant_kind": "persona",
+            "assistant_id": "conflict-helper",
+            "persona_memory_mode": "read_only",
+            "title": "Conflict thread",
+            "client_id": "user-1",
+        }
+    )
+    conversation = db.get_conversation_by_id(conversation_id)
+    assert conversation is not None
+
+    def _raise_conflict(_conversation_id: str, _update_data: dict, _expected_version: int):
+        raise ConflictError("conversation update conflict")
+
+    monkeypatch.setattr(db, "update_conversation", _raise_conflict)
+
+    response = app.patch(
+        f"/api/v1/chat/conversations/{conversation_id}",
+        json={"version": conversation["version"], "title": "Updated"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "conversation update conflict"
+
+
+def test_update_conversation_maps_input_error(tmp_path, monkeypatch):
+    db_path = tmp_path / "chacha.db"
+    db = CharactersRAGDB(db_path=str(db_path), client_id="user-1")
+    app = _build_app(db)
+    conversation_id = db.add_conversation(
+        {
+            "assistant_kind": "persona",
+            "assistant_id": "invalid-helper",
+            "persona_memory_mode": "read_only",
+            "title": "Invalid thread",
+            "client_id": "user-1",
+        }
+    )
+    conversation = db.get_conversation_by_id(conversation_id)
+    assert conversation is not None
+
+    def _raise_input_error(_conversation_id: str, _update_data: dict, _expected_version: int):
+        raise InputError("invalid conversation update")
+
+    monkeypatch.setattr(db, "update_conversation", _raise_input_error)
+
+    response = app.patch(
+        f"/api/v1/chat/conversations/{conversation_id}",
+        json={"version": conversation["version"], "title": "Updated"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid conversation update"
 
 
 def test_get_chat_conversation_returns_metadata_for_knowledge_clients(tmp_path):
@@ -695,6 +755,47 @@ def test_conversation_alias_emits_validation_outcome_metric(tmp_path, monkeypatc
     assert len(registry.observe_calls) == 1
     assert registry.observe_calls[0][2] == {
         "query_strategy": "none",
+        "order_by": "recency",
+        "deleted_scope": "active",
+        "outcome": "validation",
+    }
+    assert debug_calls == []
+    assert error_calls == []
+
+
+def test_conversation_alias_maps_db_input_error_with_validation_metric(tmp_path, monkeypatch):
+    db_path = tmp_path / "chacha.db"
+    db = CharactersRAGDB(db_path=str(db_path), client_id="user-1")
+    app = _build_app(db)
+    registry, debug_calls, error_calls = _install_conversation_observability_spies(monkeypatch)
+
+    def raise_input_error(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise InputError("invalid conversation filter")
+
+    monkeypatch.setattr(db, "search_conversations_page", raise_input_error, raising=False)
+
+    resp = app.get(
+        "/api/v1/chats/conversations",
+        params={"query": "Quota"},
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid conversation filter"
+    assert registry.increment_calls == [
+        (
+            "chat_conversation_search_requests_total",
+            {
+                "query_strategy": "fts",
+                "order_by": "recency",
+                "deleted_scope": "active",
+                "outcome": "validation",
+            },
+            1,
+        )
+    ]
+    assert len(registry.observe_calls) == 1
+    assert registry.observe_calls[0][2] == {
+        "query_strategy": "fts",
         "order_by": "recency",
         "deleted_scope": "active",
         "outcome": "validation",

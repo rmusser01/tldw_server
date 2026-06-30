@@ -25,7 +25,7 @@ describe("Watchlists terminology contract", () => {
     expect(canonical.feeds).toBe("Feeds")
     expect(canonical.monitors).toBe("Monitors")
     expect(canonical.activity).toBe("Activity")
-    expect(canonical.articles).toBe("Articles")
+    expect(canonical.articles).toBe("Updates")
     expect(canonical.reports).toBe("Reports")
 
     for (const [aliasKey, tabKeyPath, sectionKeyPath] of pairs) {
@@ -43,12 +43,13 @@ describe("Watchlists terminology contract", () => {
     expect(getNestedValue(labels, "quickActions.sources")).toBe("Set up feeds")
     expect(getNestedValue(labels, "quickActions.jobs")).toBe("Configure monitors")
     expect(getNestedValue(labels, "quickActions.runs")).toBe("Check activity")
-    expect(getNestedValue(labels, "quickActions.items")).toBe("Review articles")
+    expect(getNestedValue(labels, "quickActions.items")).toBe("Review updates")
     expect(getNestedValue(labels, "quickActions.outputs")).toBe("View reports")
 
     expect(getNestedValue(labels, "help.tabs.sources")).toBe("Feeds setup")
     expect(getNestedValue(labels, "help.tabs.jobs")).toBe("Monitor scheduling")
     expect(getNestedValue(labels, "help.tabs.outputs")).toBe("Reports guidance")
     expect(getNestedValue(labels, "help.tabs.runs")).toBe("Activity guidance")
+    expect(getNestedValue(labels, "help.tabs.items")).toBe("Updates review")
   })
 })

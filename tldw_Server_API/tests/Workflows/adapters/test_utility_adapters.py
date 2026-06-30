@@ -917,6 +917,29 @@ async def test_sandbox_exec_adapter_template_interpolation(monkeypatch):
     assert "Code length:" in result["stdout"]
 
 
+@pytest.mark.asyncio
+async def test_sandbox_exec_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test sandbox exec adapter does not expose backend exception details."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+
+    class ExplodingSandboxService:
+        def start_run_scaffold(self, **kwargs):
+            raise RuntimeError("sandbox backend exploded at /private/sandbox-cache")
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Sandbox.service.SandboxService",
+        ExplodingSandboxService,
+    )
+
+    result = await run_sandbox_exec_adapter(
+        {"code": "print('hello')", "language": "python"},
+        {"user_id": "1"},
+    )
+
+    assert result == {"error": "sandbox_exec_error"}
+
+
 # =============================================================================
 # Tests for run_screenshot_capture_adapter
 # =============================================================================
@@ -1005,6 +1028,29 @@ async def test_screenshot_capture_adapter_url_validation(monkeypatch):
     assert "url_blocked" in result["error"]
 
 
+@pytest.mark.asyncio
+async def test_screenshot_capture_adapter_sanitizes_backend_errors(monkeypatch):
+    """Test screenshot capture does not expose browser exception details."""
+    monkeypatch.delenv("TEST_MODE", raising=False)
+    monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
+
+    from tldw_Server_API.app.core.Security import egress
+
+    class MockPolicyResult:
+        allowed = True
+        reason = None
+
+    def raise_browser_error():
+        raise RuntimeError("browser backend exploded at /private/browser-cache")
+
+    monkeypatch.setattr(egress, "evaluate_url_policy", lambda url: MockPolicyResult())
+    monkeypatch.setattr("playwright.async_api.async_playwright", raise_browser_error)
+
+    result = await run_screenshot_capture_adapter({"url": "https://example.com"}, {})
+
+    assert result == {"error": "screenshot_capture_error"}
+
+
 # =============================================================================
 # Tests for run_schedule_workflow_adapter
 # =============================================================================
@@ -1091,6 +1137,22 @@ async def test_schedule_workflow_adapter_template_interpolation():
 
     assert result["scheduled"] is True
     assert result["workflow_id"] == "dynamic_workflow"
+
+
+@pytest.mark.asyncio
+async def test_schedule_workflow_adapter_sanitizes_runtime_errors():
+    """Test schedule workflow adapter hides runtime exception details."""
+
+    class ExplodingDelay:
+        def __int__(self):
+            raise RuntimeError("scheduler backend exploded at /private/scheduler-cache")
+
+    result = await run_schedule_workflow_adapter(
+        {"workflow_id": "test_workflow", "delay_seconds": ExplodingDelay()},
+        {"tenant_id": "test_tenant"},
+    )
+
+    assert result == {"scheduled": False, "error": "schedule_workflow_error"}
 
 
 # =============================================================================

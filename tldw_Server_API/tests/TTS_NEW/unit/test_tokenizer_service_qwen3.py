@@ -5,6 +5,7 @@ import types
 import numpy as np
 import pytest
 import soundfile as sf
+from fastapi import HTTPException
 
 from tldw_Server_API.app.core.Audio import tokenizer_service
 
@@ -79,6 +80,103 @@ def test_load_qwen3_tokenizer_uses_from_pretrained_when_available(monkeypatch):
     tokenizer = tokenizer_service._load_qwen3_tokenizer("Qwen/Qwen3-TTS-Tokenizer-12Hz", allow_download=True)
     assert tokenizer.model == "Qwen/Qwen3-TTS-Tokenizer-12Hz"
     assert tokenizer.local_files_only is False
+
+
+def test_load_qwen3_tokenizer_fails_closed_when_local_only_not_supported(monkeypatch):
+    module = types.ModuleType("qwen_tts")
+
+    class DownloadOnlyTokenizer:
+        @classmethod
+        def from_pretrained(cls, model_id):
+            instance = cls()
+            instance.model = model_id
+            return instance
+
+    module.Qwen3TTSTokenizer = DownloadOnlyTokenizer
+    monkeypatch.setitem(sys.modules, "qwen_tts", module)
+
+    with pytest.raises(HTTPException) as exc_info:
+        tokenizer_service._load_qwen3_tokenizer("Qwen/Qwen3-TTS-Tokenizer-12Hz", allow_download=False)
+
+    assert exc_info.value.status_code == 501
+    assert "local-only" in str(exc_info.value.detail)
+
+    tokenizer = tokenizer_service._load_qwen3_tokenizer("Qwen/Qwen3-TTS-Tokenizer-12Hz", allow_download=True)
+    assert tokenizer.model == "Qwen/Qwen3-TTS-Tokenizer-12Hz"
+
+
+def test_load_qwen3_tokenizer_loader_function_fails_closed_without_download_permission(monkeypatch):
+    module = types.ModuleType("qwen_tts")
+
+    def load_tokenizer(model_id):
+        return {"model": model_id}
+
+    module.load_tokenizer = load_tokenizer
+    monkeypatch.setitem(sys.modules, "qwen_tts", module)
+
+    with pytest.raises(HTTPException) as exc_info:
+        tokenizer_service._load_qwen3_tokenizer("Qwen/Qwen3-TTS-Tokenizer-12Hz", allow_download=False)
+
+    assert exc_info.value.status_code == 501
+    assert "local-only" in str(exc_info.value.detail)
+
+    tokenizer = tokenizer_service._load_qwen3_tokenizer("Qwen/Qwen3-TTS-Tokenizer-12Hz", allow_download=True)
+    assert tokenizer == {"model": "Qwen/Qwen3-TTS-Tokenizer-12Hz"}
+
+
+def test_load_qwen3_tokenizer_loader_function_honors_local_files_only(monkeypatch):
+    module = types.ModuleType("qwen_tts")
+
+    def load_tokenizer(model_id, local_files_only=False):
+        return {"model": model_id, "local_files_only": local_files_only}
+
+    module.load_tokenizer = load_tokenizer
+    monkeypatch.setitem(sys.modules, "qwen_tts", module)
+
+    tokenizer = tokenizer_service._load_qwen3_tokenizer("Qwen/Qwen3-TTS-Tokenizer-12Hz", allow_download=False)
+    assert tokenizer == {"model": "Qwen/Qwen3-TTS-Tokenizer-12Hz", "local_files_only": True}
+
+    tokenizer = tokenizer_service._load_qwen3_tokenizer("Qwen/Qwen3-TTS-Tokenizer-12Hz", allow_download=True)
+    assert tokenizer == {"model": "Qwen/Qwen3-TTS-Tokenizer-12Hz", "local_files_only": False}
+
+
+def test_decode_base64_payload_rejects_invalid_input():
+    with pytest.raises(HTTPException) as exc_info:
+        tokenizer_service._decode_base64_payload("not valid base64", request_id="req-tokenizer")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["request_id"] == "req-tokenizer"
+
+
+def test_read_audio_from_raw_pcm_rejects_invalid_sample_rate():
+    with pytest.raises(HTTPException) as exc_info:
+        tokenizer_service._read_audio_from_bytes(b"\x00\x00", sample_rate_hint=0, request_id="req-tokenizer")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["request_id"] == "req-tokenizer"
+
+
+def test_read_audio_from_raw_pcm_rejects_odd_byte_length():
+    with pytest.raises(HTTPException) as exc_info:
+        tokenizer_service._read_audio_from_bytes(b"\x00", sample_rate_hint=24000, request_id="req-tokenizer")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["request_id"] == "req-tokenizer"
+
+
+def test_load_qwen3_tokenizer_sanitizes_missing_package_detail(monkeypatch):
+    def _raise_missing_package(name):
+        assert name == "qwen_tts"
+        raise ModuleNotFoundError("qwen_tts unavailable at /private/qwen/token")
+
+    monkeypatch.setattr(tokenizer_service.importlib, "import_module", _raise_missing_package)
+
+    with pytest.raises(HTTPException) as exc_info:
+        tokenizer_service._load_qwen3_tokenizer("Qwen/Qwen3-TTS-Tokenizer-12Hz", allow_download=False)
+
+    assert exc_info.value.status_code == 501
+    assert exc_info.value.detail == "qwen-tts package not available"
+    assert "/private/qwen/token" not in str(exc_info.value.detail)
 
 
 def test_load_qwen3_tokenizer_maps_model_path_error(monkeypatch):

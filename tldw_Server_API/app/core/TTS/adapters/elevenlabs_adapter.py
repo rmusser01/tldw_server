@@ -54,6 +54,11 @@ def _is_http_status_error(exc: Exception) -> bool:
     return exc.__class__.__name__ == "HTTPStatusError"
 
 
+def _safe_exception_label(exc: BaseException) -> str:
+    """Return a non-sensitive exception identifier for logs."""
+    return type(exc).__name__
+
+
 _ELEVENLABS_HTTP_EXCEPTIONS: tuple[type[BaseException], ...] = ()
 if httpx is not None:
     _ELEVENLABS_HTTP_EXCEPTIONS = (httpx.HTTPError,)
@@ -239,7 +244,10 @@ class ElevenLabsAdapter(TTSAdapter):
         except TTSProviderNotConfiguredError:
             return False
         except _ELEVENLABS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"{self.provider_name}: Initialization failed: {e}")
+            logger.error(
+                f"{self.provider_name}: Initialization failed; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             self._status = ProviderStatus.ERROR
             raise TTSProviderInitializationError(
                 f"Failed to initialize {self.provider_name}",
@@ -278,7 +286,10 @@ class ElevenLabsAdapter(TTSAdapter):
                 logger.warning(f"{self.provider_name}: Failed to fetch voices: {response.status_code}")
 
         except _ELEVENLABS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"{self.provider_name}: Error fetching voices: {e}")
+            logger.error(
+                f"{self.provider_name}: Error fetching voices; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
 
     async def get_capabilities(self) -> TTSCapabilities:
         """Get ElevenLabs TTS capabilities"""
@@ -327,7 +338,10 @@ class ElevenLabsAdapter(TTSAdapter):
         try:
             validate_tts_request(request, provider=self.provider_key)
         except Exception as e:
-            logger.error(f"{self.provider_name} request validation failed: {e}")
+            logger.error(
+                f"{self.provider_name} request validation failed; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             raise
 
         # Prepare voice ID
@@ -376,7 +390,10 @@ class ElevenLabsAdapter(TTSAdapter):
         except (TTSProviderNotConfiguredError, TTSAuthenticationError, TTSRateLimitError, TTSQuotaExceededError, TTSValidationError):
             raise
         except _ELEVENLABS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"{self.provider_name} generation error: {e}")
+            logger.error(
+                f"{self.provider_name} generation error; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             raise TTSGenerationError(
                 f"Failed to generate speech with {self.provider_name}",
                 provider=self.provider_name,
@@ -436,10 +453,12 @@ class ElevenLabsAdapter(TTSAdapter):
             if _is_http_status_error(e):
                 response = getattr(e, "response", None)
                 status = getattr(response, "status_code", None)
-                body = getattr(response, "text", "")
-                logger.error(f"{self.provider_name} HTTP error: {status} - {body}")
+                logger.error(f"{self.provider_name} HTTP error: {status} - response body redacted")
                 self._raise_mapped_http_error(e)
-            logger.error(f"{self.provider_name} streaming error: {e}")
+            logger.error(
+                f"{self.provider_name} streaming error; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             raise
 
     async def _generate_complete_elevenlabs(
@@ -487,7 +506,10 @@ class ElevenLabsAdapter(TTSAdapter):
         except Exception as e:
             if _is_http_status_error(e):
                 self._raise_mapped_http_error(e)
-            logger.error(f"{self.provider_name} non-stream error: {e}")
+            logger.error(
+                f"{self.provider_name} non-stream error; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
             raise
 
     def _get_voice_id(self, voice_name: str) -> str:
@@ -507,7 +529,7 @@ class ElevenLabsAdapter(TTSAdapter):
                 return voice.id
 
         # Default to Rachel
-        logger.warning(f"{self.provider_name}: Voice '{voice_name}' not found, using default")
+        logger.warning(f"{self.provider_name}: Voice not found, using default")
         return self.DEFAULT_VOICES["rachel"].id
 
     def _select_model(self, request: TTSRequest) -> str:
@@ -569,7 +591,10 @@ class ElevenLabsAdapter(TTSAdapter):
                 self.client = None
                 logger.debug(f"{self.provider_name}: HTTP client closed")
             except (AttributeError, OSError, RuntimeError) as e:
-                logger.warning(f"{self.provider_name}: Error closing HTTP client: {e}")
+                logger.warning(
+                    f"{self.provider_name}: Error closing HTTP client; "
+                    f"exception_type={_safe_exception_label(e)}"
+                )
 
     def map_voice(self, voice_id: str) -> str:
         """Map generic voice ID to ElevenLabs voice"""

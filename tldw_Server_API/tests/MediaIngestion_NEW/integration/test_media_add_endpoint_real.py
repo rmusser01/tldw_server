@@ -48,9 +48,12 @@ def client_with_auth():
     app.dependency_overrides[get_auth_principal] = override_principal
     settings = get_settings()
     headers = {"X-API-KEY": settings.SINGLE_USER_API_KEY}
-    with TestClient(app, headers=headers) as client:
+    client = TestClient(app, headers=headers)
+    try:
         yield client
-    app.dependency_overrides.clear()
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
 
 
 def test_add_document_with_content_real(client_with_auth: TestClient, tmp_path):
@@ -133,6 +136,10 @@ def test_list_and_search_media_after_add(client_with_auth: TestClient, tmp_path)
     assert "pagination" in data and isinstance(data["pagination"], dict)
     for key in ("page", "results_per_page", "total_pages", "total_items"):
         assert key in data["pagination"]
+    assert data["pagination"]["mode"] == "page"
+    assert data["pagination"]["per_page"] == 5
+    assert data["pagination"]["total"] >= len(data["items"])
+    assert isinstance(data["pagination"]["has_more"], bool)
     # Validate an item shape if present (with keywords)
     if data["items"]:
         item = data["items"][0]
@@ -161,6 +168,10 @@ def test_list_and_search_media_after_add(client_with_auth: TestClient, tmp_path)
     assert "pagination" in sdata and isinstance(sdata["pagination"], dict)
     for key in ("page", "results_per_page", "total_pages", "total_items"):
         assert key in sdata["pagination"]
+    assert sdata["pagination"]["mode"] == "page"
+    assert sdata["pagination"]["per_page"] == 5
+    assert sdata["pagination"]["total"] >= len(sdata["items"])
+    assert isinstance(sdata["pagination"]["has_more"], bool)
     assert any("Alpha" in item.get("title", "") for item in sdata.get("items", []))
 
 

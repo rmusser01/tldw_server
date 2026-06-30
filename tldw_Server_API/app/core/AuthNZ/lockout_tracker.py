@@ -50,8 +50,8 @@ class LockoutTracker:
             self._repo = AuthnzRateLimitsRepo(self.db_pool)
         try:
             await self._repo.ensure_schema()
-        except Exception as exc:
-            logger.warning(f"LockoutTracker schema ensure warning: {exc}")
+        except Exception:
+            logger.warning("LockoutTracker schema ensure warning")
         self._initialized = True
 
     def _get_repo(self) -> AuthnzRateLimitsRepo:

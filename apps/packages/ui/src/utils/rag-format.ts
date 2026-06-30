@@ -6,6 +6,7 @@ export type RagPinnedResult = {
   snippet: string
   type?: string
   mediaId?: number
+  contextOrigin?: "media-library"
 }
 
 export type RagCopyFormat = "markdown" | "text"

@@ -22,7 +22,7 @@ async def get_cleanup_settings() -> dict[str, Any]:
         interval = int(app_settings.get("EPHEMERAL_CLEANUP_INTERVAL_SEC", 1800))
         return {"enabled": enabled, "interval_sec": interval}
     except Exception as exc:
-        logger.error(f"Failed to get cleanup settings: {exc}")
+        logger.error("Failed to get cleanup settings")
         raise HTTPException(status_code=500, detail="Failed to get cleanup settings") from exc
 
 
@@ -39,7 +39,7 @@ async def set_cleanup_settings(payload: AdminCleanupSettingsUpdate) -> dict[str,
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to set cleanup settings: {exc}")
+        logger.error("Failed to set cleanup settings")
         raise HTTPException(status_code=500, detail="Failed to set cleanup settings") from exc
 
 
@@ -58,7 +58,7 @@ async def get_notes_title_settings() -> dict[str, Any]:
             "strategies": ["heuristic", "llm", "llm_fallback"],
         }
     except Exception as exc:
-        logger.error(f"Failed to get notes title settings: {exc}")
+        logger.error("Failed to get notes title settings")
         raise HTTPException(status_code=500, detail="Failed to get notes title settings") from exc
 
 
@@ -83,7 +83,7 @@ async def set_notes_title_settings(payload: NotesTitleSettingsUpdate) -> dict[st
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to set notes title settings: {exc}")
+        logger.error("Failed to set notes title settings")
         raise HTTPException(status_code=500, detail="Failed to set notes title settings") from exc
 
 
@@ -148,13 +148,13 @@ async def get_risk_weights() -> dict[str, Any]:
         try:
             payload = json.loads(str(raw_payload))
         except json.JSONDecodeError as exc:
-            logger.warning("Failed to decode persisted risk weights; falling back to defaults: {}", exc)
+            logger.warning("Failed to decode persisted risk weights; falling back to defaults")
             return _copy_default_risk_weights()
         return _validate_risk_weights(payload)
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to get risk weights: {exc}")
+        logger.error("Failed to get risk weights")
         raise HTTPException(status_code=500, detail="Failed to get risk weights") from exc
 
 
@@ -182,5 +182,5 @@ async def set_risk_weights(weights: dict[str, Any]) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Failed to set risk weights: {exc}")
+        logger.error("Failed to set risk weights")
         raise HTTPException(status_code=500, detail="Failed to set risk weights") from exc

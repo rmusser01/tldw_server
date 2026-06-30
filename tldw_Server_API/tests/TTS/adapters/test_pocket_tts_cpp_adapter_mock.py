@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import numpy as np
 import pytest
 
+from tldw_Server_API.app.core.TTS.adapters import pocket_tts_cpp_adapter as pocket_tts_cpp_mod
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, ProviderStatus, TTSRequest
 from tldw_Server_API.app.core.TTS.adapters.pocket_tts_cpp_adapter import PocketTTSCppAdapter
 from tldw_Server_API.app.core.TTS.adapters.pocket_tts_cpp_runtime import (
@@ -88,6 +89,19 @@ def _provider_managed_extras(voice_path: Path) -> dict[str, str]:
     }
 
 
+def _capture_pocket_tts_cpp_logs(level: str = "DEBUG") -> tuple[list[str], int]:
+    messages: list[str] = []
+    sink_id = pocket_tts_cpp_mod.logger.add(
+        lambda message: messages.append(
+            f"{message.record['message']}\n"
+            f"{message.record.get('extra', {})}\n"
+            f"{message.record.get('exception')}"
+        ),
+        level=level,
+    )
+    return messages, sink_id
+
+
 @pytest.mark.asyncio
 async def test_capabilities_do_not_advertise_streaming_for_provider_selection(tmp_path):
     adapter = _build_adapter(tmp_path)
@@ -165,6 +179,59 @@ async def test_non_streaming_generation_uses_provider_voice_path_and_stdout_for_
     assert response.metadata["transport"] == "stdout"
     assert "--stdout" in captured["cmd"]
     assert str(voice_path) in captured["cmd"]
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_generation_failure_log_sanitizes_exception_text(tmp_path, monkeypatch):
+    adapter = _build_adapter(tmp_path, prefer_stdout=True)
+    adapter._initialized = True
+    adapter._status = ProviderStatus.AVAILABLE
+
+    voice_path = tmp_path / "voices" / "providers" / "pocket_tts_cpp" / "custom_voice-secret.wav"
+    voice_path.parent.mkdir(parents=True, exist_ok=True)
+    voice_path.write_bytes(_make_wav_bytes())
+    raw_marker = "RAW_POCKET_TTS_CPP_GENERATION_SECRET_MARKER token=secret"
+
+    class _FakeProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return b"pcm", b""
+
+    async def _fake_create_subprocess_exec(*cmd, **kwargs):
+        return _FakeProcess()
+
+    async def _fake_convert_stdout_audio(stdout: bytes, target_format: AudioFormat) -> bytes:
+        raise RuntimeError(raw_marker)
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.TTS.adapters.pocket_tts_cpp_adapter.asyncio.create_subprocess_exec",
+        _fake_create_subprocess_exec,
+        raising=True,
+    )
+    monkeypatch.setattr(adapter, "_convert_stdout_audio", _fake_convert_stdout_audio)
+
+    request = TTSRequest(
+        text="hello world",
+        voice="custom:voice-secret",
+        format=AudioFormat.PCM,
+        stream=False,
+        extra_params=_provider_managed_extras(voice_path),
+    )
+    messages, sink_id = _capture_pocket_tts_cpp_logs(level="ERROR")
+
+    try:
+        with pytest.raises(TTSGenerationError) as exc_info:
+            await adapter.generate(request)
+    finally:
+        pocket_tts_cpp_mod.logger.remove(sink_id)
+
+    assert raw_marker in exc_info.value.details["error"]
+    rendered_logs = "\n".join(messages)
+    assert "PocketTTS.cpp generation failed" in rendered_logs
+    assert "RAW_POCKET_TTS_CPP_GENERATION_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
+    assert "exception_type=RuntimeError" in rendered_logs
 
 
 @pytest.mark.asyncio
@@ -421,6 +488,37 @@ async def test_streaming_generation_forced_cli_still_probes_feasibility(tmp_path
         await adapter.generate(request)
 
     assert probe_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_cli_streaming_probe_fallback_log_sanitizes_exception_text(tmp_path, monkeypatch):
+    adapter = _build_adapter(tmp_path)
+    adapter._initialized = True
+    adapter._status = ProviderStatus.AVAILABLE
+
+    voice_path = tmp_path / "voices" / "providers" / "pocket_tts_cpp" / "custom_voice-probe-secret.wav"
+    voice_path.parent.mkdir(parents=True, exist_ok=True)
+    voice_path.write_bytes(_make_wav_bytes())
+    raw_marker = "RAW_POCKET_TTS_CPP_PROBE_SECRET_MARKER token=secret"
+
+    async def _fake_probe() -> bool:
+        raise RuntimeError(raw_marker)
+
+    monkeypatch.setattr(adapter, "_probe_cli_streaming_support", _fake_probe)
+    messages, sink_id = _capture_pocket_tts_cpp_logs(level="WARNING")
+
+    try:
+        supported = await adapter._get_cli_streaming_support(voice_path)
+    finally:
+        pocket_tts_cpp_mod.logger.remove(sink_id)
+
+    assert supported is False
+    assert adapter._cli_streaming_supported is False
+    rendered_logs = "\n".join(messages)
+    assert "PocketTTS.cpp CLI streaming probe failed" in rendered_logs
+    assert "RAW_POCKET_TTS_CPP_PROBE_SECRET_MARKER" not in rendered_logs
+    assert "token=secret" not in rendered_logs
+    assert "exception_type=RuntimeError" in rendered_logs
 
 
 @pytest.mark.asyncio

@@ -7,8 +7,8 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
     get_db_transaction,
-    require_roles,
 )
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     ToolCatalogCreateRequest,
@@ -32,7 +32,7 @@ router = APIRouter()
         "Filters: Optional `org_id` and/or `team_id` parameters restrict results to a given scope.\n"
         "Without filters, returns all catalogs."
     ),
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def list_tool_catalogs(
     org_id: int | None = Query(None),
@@ -52,7 +52,7 @@ async def list_tool_catalogs(
         )
         return [ToolCatalogResponse(**r) for r in rows]
     except Exception as exc:
-        logger.error("Failed to list tool catalogs: {}", exc)
+        logger.error("Failed to list tool catalogs")
         raise HTTPException(status_code=500, detail="Failed to list tool catalogs") from exc
 
 
@@ -67,7 +67,7 @@ async def list_tool_catalogs(
         "Scope: Set `org_id` for org-owned, `team_id` for team-owned, or neither for global.\n"
         "Name must be unique per (name, org_id, team_id)."
     ),
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def create_tool_catalog(
     payload: ToolCatalogCreateRequest,
@@ -98,7 +98,7 @@ async def create_tool_catalog(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to create tool catalog: {}", exc)
+        logger.error("Failed to create tool catalog")
         raise HTTPException(status_code=500, detail="Failed to create tool catalog") from exc
 
 
@@ -110,7 +110,7 @@ async def create_tool_catalog(
         "RBAC: Admin-only.\n\n"
         "Scope: Works for any catalog (global/org/team)."
     ),
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def delete_tool_catalog(
     catalog_id: int,
@@ -126,7 +126,7 @@ async def delete_tool_catalog(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to delete tool catalog {}: {}", catalog_id, exc)
+        logger.error("Failed to delete tool catalog")
         raise HTTPException(status_code=500, detail="Failed to delete tool catalog") from exc
 
 
@@ -138,7 +138,7 @@ async def delete_tool_catalog(
         "List tools included in the specified catalog.\n\n"
         "RBAC: Admin-only."
     ),
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def list_tool_catalog_entries(
     catalog_id: int,
@@ -161,7 +161,7 @@ async def list_tool_catalog_entries(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to list tool catalog entries for {}: {}", catalog_id, exc)
+        logger.error("Failed to list tool catalog entries")
         raise HTTPException(status_code=500, detail="Failed to list tool catalog entries") from exc
 
 
@@ -174,7 +174,7 @@ async def list_tool_catalog_entries(
         "Add a tool entry to the catalog. Idempotent per (catalog_id, tool_name).\n\n"
         "RBAC: Admin-only."
     ),
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def add_tool_catalog_entry(
     catalog_id: int,
@@ -193,7 +193,7 @@ async def add_tool_catalog_entry(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Failed to add tool catalog entry to {}: {}", catalog_id, exc)
+        logger.error("Failed to add tool catalog entry")
         raise HTTPException(status_code=500, detail="Failed to add tool catalog entry") from exc
 
 
@@ -201,10 +201,9 @@ async def add_tool_catalog_entry(
     "/mcp/tool_catalogs/{catalog_id}/entries/{tool_name}",
     summary="Remove tool from catalog (admin)",
     description=(
-        "Remove a tool entry from the catalog. Returns 200 whether or not the entry existed.\n\n"
-        "RBAC: Admin-only."
+        "Remove a tool entry from the catalog. Returns 200 whether or not the entry existed.\n\n" "RBAC: Admin-only."
     ),
-    dependencies=[Depends(require_roles("admin"))],
+    dependencies=[Depends(RequireRole("admin"))],
 )
 async def delete_tool_catalog_entry(
     catalog_id: int,
@@ -221,12 +220,7 @@ async def delete_tool_catalog_entry(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(
-            "Failed to delete tool catalog entry {} from {}: {}",
-            tool_name,
-            catalog_id,
-            exc,
-        )
+        logger.error("Failed to delete tool catalog entry")
         raise HTTPException(status_code=500, detail="Failed to delete tool catalog entry") from exc
 
 
@@ -303,6 +297,6 @@ async def get_mcp_tool_usage(
             modules=module_usage,
             tools=tool_usage,
         )
-    except ImportError as exc:
-        logger.warning("MCP metrics module unavailable: {}", exc)
+    except ImportError:
+        logger.warning("MCP metrics module unavailable")
         return MCPToolUsageResponse(period_seconds=period_seconds, modules={}, tools={})

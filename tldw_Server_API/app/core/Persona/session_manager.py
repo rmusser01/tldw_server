@@ -152,11 +152,14 @@ class SessionManager:
     def _trim_pending_plans_locked(self, session: Session) -> None:
         if len(session.pending_plans) <= self._max_pending_plans_per_session:
             return
-        ordered_plan_ids = sorted(
-            session.pending_plans,
-            key=lambda pid: session.pending_plans[pid].created_at,
-            reverse=True,
-        )
+        ordered_plan_ids = [
+            plan_id
+            for _, plan_id in sorted(
+                enumerate(session.pending_plans),
+                key=lambda item: (session.pending_plans[item[1]].created_at, item[0]),
+                reverse=True,
+            )
+        ]
         keep_ids = set(ordered_plan_ids[: self._max_pending_plans_per_session])
         drop_ids = [plan_id for plan_id in session.pending_plans if plan_id not in keep_ids]
         for plan_id in drop_ids:

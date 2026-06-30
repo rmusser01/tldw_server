@@ -56,6 +56,12 @@ describe("SharedWorkspacesTab", () => {
     const user = userEvent.setup()
     render(<SharedWorkspacesTab />)
 
+    expect(
+      screen.getByText(/Shared Workspaces are MCP Hub path-trust records/i)
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("link", { name: /manage canonical Workspaces/i })
+    ).toHaveAttribute("href", "#/workspaces")
     expect(await screen.findByText("Shared Docs")).toBeTruthy()
     expect(screen.getByText("/srv/shared/docs")).toBeTruthy()
     expect(await screen.findByText(/may conflict with other visible shared roots/i)).toBeTruthy()

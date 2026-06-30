@@ -33,6 +33,46 @@ Rules
   - `tldw_Server_API.app.core.MCP_unified.modules.implementations`
   - The server logs and ignores entries outside this namespace.
 - If `modules:` is empty and `MCP_ENABLE_MEDIA_MODULE=1`, MediaModule is auto-enabled with defaults.
+- Enabled modules appear in the `/api/v1/mcp/status` `surface` summary, grouped by risk tier.
+- Disabled high-risk modules appear in `surface.disabled_available` with `requires_explicit_opt_in: true` and a `next_action`.
+
+Capability Risk Tiers
+- `read_only`: Reads/searches existing TLDW data, such as `media`, `knowledge`, `chats`, `prompts`, and `mcp_discovery`.
+- `write`: Creates or changes TLDW data/artifacts, such as `notes`, `template`, `quizzes`, `flashcards`, `kanban`, `slides`, and `governance`.
+- `local_files`: Reads, writes, indexes, or scopes local files/workspaces, such as `filesystem` and `codegraph`.
+- `external_network`: Connects to external servers, such as `external_federation`.
+- `local_process`: Runs configured local commands or sandbox workloads, such as `run_command` and `sandbox`.
+- `unknown`: Custom modules that have not been classified yet.
+
+Before enabling a high-risk tier, verify the relevant module settings, RBAC permissions, and runtime policy. The tier explains capability shape; it does not grant execution permission.
+
+Safer Default Migration
+- Local filesystem and local command execution modules are disabled by default.
+- Existing explicit YAML entries with `enabled: true` still opt in and continue to load.
+- Missing-YAML fallback only registers `filesystem` when `MCP_ENABLE_FILESYSTEM_MODULE=true`.
+- To restore previous local behavior, copy the relevant entries from `tldw_Server_API/Config_Files/mcp_modules.local_opt_in.example.yaml`, set only the modules this deployment needs to `enabled: true`, restart TLDW Server, and recheck `/api/v1/mcp/status`.
+
+Opt-in example:
+
+```yaml
+modules:
+  - id: filesystem
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule
+    enabled: true
+    name: Filesystem
+    version: "1.0.0"
+    department: system
+    settings: {}
+
+  - id: run_command
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module:RunCommandModule
+    enabled: true
+    name: Run Command
+    version: "0.1.0"
+    department: system
+    settings:
+      spill_dir: ${MCP_RUN_COMMAND_SPILL_DIR:-.mcp/spills}
+```
 
 Runtime Controls
 - `max_concurrent`: Limits concurrent calls per module (0 disables guard).

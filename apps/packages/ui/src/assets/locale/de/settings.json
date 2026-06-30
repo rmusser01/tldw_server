@@ -3,7 +3,13 @@
     "serverAndAuth": "Server & Authentifizierung",
     "knowledgeTools": "Wissenswerkzeuge",
     "workspace": "Arbeitsbereich",
-    "about": "Info"
+    "about": "Info",
+    "connect": "Verbindung",
+    "aiModels": "KI & Modelle",
+    "experience": "Erlebnis",
+    "knowledgeWorkspace": "Wissen & Arbeitsbereich",
+    "safetyAdmin": "Sicherheit & Verwaltung",
+    "dataManagement": "Datenverwaltung"
   },
   "healthNav": "Status",
   "worldBooksNav": "Weltbücher",
@@ -1669,5 +1675,11 @@
     "subtitle": "Konfigurieren Sie Standardwerte, Presets und Verhalten für den Schnellimport."
   },
   "acpPlaygroundNav": "ACP-Spielplatz",
-  "skillsNav": "Fähigkeiten"
+  "skillsNav": "Fähigkeiten",
+  "providerKeys": {
+    "navTitle": "Anbieter-Schlüssel"
+  },
+  "dataManagement": {
+    "navTitle": "Datenverwaltung"
+  }
 }

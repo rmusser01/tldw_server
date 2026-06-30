@@ -10,17 +10,19 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from loguru import logger
 from starlette import status
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user, TokenScopeGuard, User
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_token_scope
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_cursor_pagination_meta
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     TTSHistoryDetailResponse,
     TTSHistoryFavoriteUpdate,
     TTSHistoryListItem,
     TTSHistoryListResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.TTS.utils import compute_tts_history_text_hash, parse_bool
 
@@ -105,7 +107,7 @@ def _parse_json_field(raw: Any) -> Any:
     summary="List TTS history entries.",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
     ],
     response_model=TTSHistoryListResponse,
 )
@@ -142,7 +144,7 @@ async def list_tts_history(
         try:
             text_hash = compute_tts_history_text_hash(text_exact, cfg.get("hash_key"))
         except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("TTS history: failed to compute text_exact hash: {}", exc)
+            logger.debug("TTS history: failed to compute text_exact hash")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="TTS history hash key not configured",
@@ -165,22 +167,25 @@ async def list_tts_history(
         list_start = time.monotonic()
     except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS:
         list_start = None
-    rows = media_db.list_tts_history(
-        user_id=str(request_user.id),
-        q=q,
-        text_hash=text_hash,
-        favorite=favorite,
-        provider=provider,
-        model=model,
-        voice_id=voice_id,
-        voice_name=voice_name,
-        created_from=from_,
-        created_to=to,
-        cursor_created_at=cursor_created_at,
-        cursor_id=cursor_id,
-        limit=limit + 1,
-        offset=offset,
-    )
+    try:
+        rows = media_db.list_tts_history(
+            user_id=str(request_user.id),
+            q=q,
+            text_hash=text_hash,
+            favorite=favorite,
+            provider=provider,
+            model=model,
+            voice_id=voice_id,
+            voice_name=voice_name,
+            created_from=from_,
+            created_to=to,
+            cursor_created_at=cursor_created_at,
+            cursor_id=cursor_id,
+            limit=limit + 1,
+            offset=offset,
+        )
+    except DatabaseError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to list TTS history") from exc
     with contextlib.suppress(_TTS_HISTORY_NONCRITICAL_EXCEPTIONS):
         log_counter(
             "tts_history_reads_total",
@@ -233,8 +238,16 @@ async def list_tts_history(
         try:
             next_cursor = _encode_cursor(last_row.get("created_at"), int(last_row.get("id")))
         except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("TTS history: failed to build next cursor: {}", exc)
-            next_cursor = None
+            logger.error(
+                "TTS history: failed to build next cursor for id={} created_at={}",
+                last_row.get("id"),
+                last_row.get("created_at"),
+                exc_info=True,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to list TTS history",
+            ) from exc
 
     total = None
     if include_total:
@@ -243,18 +256,21 @@ async def list_tts_history(
             total_start = time.monotonic()
         except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS:
             total_start = None
-        total = media_db.count_tts_history(
-            user_id=str(request_user.id),
-            q=q,
-            text_hash=text_hash,
-            favorite=favorite,
-            provider=provider,
-            model=model,
-            voice_id=voice_id,
-            voice_name=voice_name,
-            created_from=from_,
-            created_to=to,
-        )
+        try:
+            total = media_db.count_tts_history(
+                user_id=str(request_user.id),
+                q=q,
+                text_hash=text_hash,
+                favorite=favorite,
+                provider=provider,
+                model=model,
+                voice_id=voice_id,
+                voice_name=voice_name,
+                created_from=from_,
+                created_to=to,
+            )
+        except DatabaseError as exc:
+            raise map_db_error_to_http(exc, default_detail="Failed to list TTS history") from exc
         if total_start is not None:
             with contextlib.suppress(_TTS_HISTORY_NONCRITICAL_EXCEPTIONS):
                 log_histogram(
@@ -269,6 +285,12 @@ async def list_tts_history(
         limit=limit,
         offset=offset,
         next_cursor=next_cursor,
+        pagination=build_cursor_pagination_meta(
+            limit=limit,
+            cursor=cursor,
+            next_cursor=next_cursor,
+            has_more=has_more,
+        ),
     )
 
 
@@ -277,7 +299,7 @@ async def list_tts_history(
     summary="Get TTS history entry details.",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
     ],
     response_model=TTSHistoryDetailResponse,
 )
@@ -291,11 +313,14 @@ async def get_tts_history_entry(
         detail_start = time.monotonic()
     except _TTS_HISTORY_NONCRITICAL_EXCEPTIONS:
         detail_start = None
-    row = media_db.get_tts_history_entry(
-        user_id=str(request_user.id),
-        history_id=int(history_id),
-        include_deleted=False,
-    )
+    try:
+        row = media_db.get_tts_history_entry(
+            user_id=str(request_user.id),
+            history_id=int(history_id),
+            include_deleted=False,
+        )
+    except DatabaseError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to fetch TTS history entry") from exc
     with contextlib.suppress(_TTS_HISTORY_NONCRITICAL_EXCEPTIONS):
         log_counter(
             "tts_history_reads_total",
@@ -343,7 +368,7 @@ async def get_tts_history_entry(
     summary="Update TTS history entry fields.",
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
     ],
 )
 async def update_tts_history_entry(
@@ -352,11 +377,14 @@ async def update_tts_history_entry(
     request_user: User = Depends(get_request_user),
     media_db: Any = Depends(get_media_db_for_user),
 ):
-    updated = media_db.update_tts_history_favorite(
-        user_id=str(request_user.id),
-        history_id=int(history_id),
-        favorite=bool(payload.favorite),
-    )
+    try:
+        updated = media_db.update_tts_history_favorite(
+            user_id=str(request_user.id),
+            history_id=int(history_id),
+            favorite=bool(payload.favorite),
+        )
+    except DatabaseError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to update TTS history entry") from exc
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="History entry not found")
     return {"id": int(history_id), "favorite": bool(payload.favorite)}
@@ -365,9 +393,11 @@ async def update_tts_history_entry(
 @router.delete(
     "/history/{history_id}",
     summary="Delete a TTS history entry (soft delete).",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
     dependencies=[
         Depends(check_rate_limit),
-        Depends(require_token_scope("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
+        Depends(TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.history", count_as="call")),
     ],
 )
 async def delete_tts_history_entry(
@@ -375,10 +405,13 @@ async def delete_tts_history_entry(
     request_user: User = Depends(get_request_user),
     media_db: Any = Depends(get_media_db_for_user),
 ):
-    deleted = media_db.soft_delete_tts_history_entry(
-        user_id=str(request_user.id),
-        history_id=int(history_id),
-    )
+    try:
+        deleted = media_db.soft_delete_tts_history_entry(
+            user_id=str(request_user.id),
+            history_id=int(history_id),
+        )
+    except DatabaseError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to delete TTS history entry") from exc
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="History entry not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -16,6 +16,8 @@ from starlette.responses import StreamingResponse
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.chat_documents_deps import get_document_generator_service
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.document_generator_schemas import (
     AsyncGenerationResponse,
     BulkGenerateRequest,
@@ -46,10 +48,11 @@ from tldw_Server_API.app.core.Chat.document_generator import (
 from tldw_Server_API.app.core.Chat.document_generator import (
     GenerationStatus as GenStatus,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, InputError
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 
 router = APIRouter()
+MAX_GENERATED_DOCUMENTS_OFFSET = 10_000
 
 _CHAT_DOCS_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -74,6 +77,22 @@ _CHAT_DOCS_NONCRITICAL_EXCEPTIONS = (
 @router.post(
     "/documents/generate",
     response_model=Union[GenerateDocumentResponse, AsyncGenerationResponse],
+    responses={
+        200: {
+            "description": "Generated document result, async job metadata, or SSE stream.",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {"$ref": "#/components/schemas/GenerateDocumentResponse"},
+                            {"$ref": "#/components/schemas/AsyncGenerationResponse"},
+                        ]
+                    }
+                },
+                "text/event-stream": {},
+            },
+        },
+    },
     summary="Generate a document from conversation",
     description="Generate a document using conversation content and a template. May return async job metadata.",
     tags=["chat-documents"],
@@ -397,7 +416,7 @@ async def generate_document(
 
     except InputError as e:
         logger.warning(f"Input error generating document: {e}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        raise map_db_error_to_http(e) from e
     except ChatAPIError as e:
         logger.error(f"API error generating document: {e}")
         raise HTTPException(
@@ -465,9 +484,14 @@ async def get_job_status(
         )
     except HTTPException:
         raise
+    except CharactersRAGDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to get generation job status") from e
     except _CHAT_DOCS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error getting job status: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get generation job status",
+        ) from e
 
 
 @router.delete(
@@ -513,9 +537,14 @@ async def cancel_job(
         return {"message": f"Job {job_id} cancelled successfully"}
     except HTTPException:
         raise
+    except CharactersRAGDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to cancel generation job") from e
     except _CHAT_DOCS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error cancelling job: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to cancel generation job",
+        ) from e
 
 
 @router.get(
@@ -529,6 +558,12 @@ async def list_generated_documents(
     conversation_id: str | None = Query(None, min_length=1, description="Filter by conversation ID"),
     document_type: DocType | None = Query(None, description="Filter by document type"),
     limit: int = Query(50, ge=1, le=200, description="Maximum number of documents"),
+    offset: int = Query(
+        0,
+        ge=0,
+        le=MAX_GENERATED_DOCUMENTS_OFFSET,
+        description="Zero-based pagination offset",
+    ),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     service_cls: type[DocumentGeneratorService] = Depends(get_document_generator_service),
 ) -> DocumentListResponse:
@@ -538,23 +573,42 @@ async def list_generated_documents(
 
         doc_type = DocumentType(document_type.value) if document_type else None
 
-        documents = service.get_generated_documents(
+        paged_documents = service.get_generated_documents(
             conversation_id=conversation_id,
             document_type=doc_type,
             limit=limit,
+            offset=offset,
         )
 
-        doc_responses = [GeneratedDocument(**doc) for doc in documents]
+        count_documents = getattr(service, "count_generated_documents", None)
+        if callable(count_documents):
+            total = count_documents(conversation_id=conversation_id, document_type=doc_type)
+        else:
+            total = offset + len(paged_documents)
+
+        doc_responses = [GeneratedDocument(**doc) for doc in paged_documents]
+        pagination = build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(doc_responses),
+        )
 
         return DocumentListResponse(
             documents=doc_responses,
-            total=len(doc_responses),
+            total=total,
+            pagination=pagination,
             conversation_id=conversation_id,
             document_type=document_type,
         )
+    except CharactersRAGDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to list generated documents") from e
     except _CHAT_DOCS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error listing generated documents: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list generated documents",
+        ) from e
 
 
 @router.get(
@@ -584,9 +638,14 @@ async def get_generated_document(
         return GeneratedDocument(**doc)
     except HTTPException:
         raise
+    except CharactersRAGDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to get generated document") from e
     except _CHAT_DOCS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error getting document {document_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get generated document",
+        ) from e
 
 
 @router.delete(
@@ -615,9 +674,14 @@ async def delete_generated_document(
         return {"message": f"Document {document_id} deleted successfully"}
     except HTTPException:
         raise
+    except CharactersRAGDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to delete generated document") from e
     except _CHAT_DOCS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error deleting document {document_id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete generated document",
+        ) from e
 
 
 @router.post(
@@ -664,9 +728,14 @@ async def save_prompt_config(
         )
     except HTTPException:
         raise
+    except CharactersRAGDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to save prompt configuration") from e
     except _CHAT_DOCS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error saving prompt config: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save prompt configuration",
+        ) from e
 
 
 @router.get(
@@ -719,7 +788,10 @@ async def get_prompt_config(
         )
     except _CHAT_DOCS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error getting prompt config: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get prompt configuration",
+        ) from e
 
 
 @router.post(
@@ -762,9 +834,14 @@ async def bulk_generate_documents(
             estimated_time_seconds=estimated_time,
             message=f"Created {total_jobs} generation jobs",
         )
+    except CharactersRAGDBError as e:
+        raise map_db_error_to_http(e, default_detail="Failed to create bulk generation jobs") from e
     except _CHAT_DOCS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error creating bulk generation jobs: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create bulk generation jobs",
+        ) from e
 
 
 @router.get(
@@ -831,4 +908,7 @@ async def get_generation_statistics(
         )
     except _CHAT_DOCS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error getting generation statistics: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get generation statistics",
+        ) from e

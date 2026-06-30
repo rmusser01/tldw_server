@@ -61,18 +61,37 @@ def test_llamacpp_strict_filter_drops_top_k_from_payload_non_streaming():
         return_value=fake_settings,
     ):
 
-        chat_api_call(
+        response = chat_api_call(
             api_endpoint="llama.cpp",
             api_key=None,
             messages_payload=[{"role": "user", "content": "hello"}],
             topk=5,
             streaming=False,
+            extra_body={
+                "cache_prompt": True,
+                "cache_reuse": 128,
+                "prompt_cache": "/tmp/request-cache.bin",
+            },
+            inference_prefix_cache_intent={
+                "enabled": True,
+                "scope": ["world_books"],
+                "static_segment_fingerprint": "worldbook:v1",
+            },
             http_client_factory=lambda timeout: FakeClient(),
         )
 
     assert "top_k" not in captured_payload
+    assert "cache_prompt" not in captured_payload
+    assert "cache_reuse" not in captured_payload
+    assert "prompt_cache" not in captured_payload
+    assert "inference_prefix_cache_intent" not in captured_payload
     assert "messages" in captured_payload
     assert "stream" in captured_payload
+    diagnostics = response["tldw_local_cache_diagnostics"]
+    assert diagnostics["provider"] == "llama.cpp"
+    assert diagnostics["request_extension_keys"] == ["cache_prompt", "cache_reuse", "prompt_cache"]
+    assert diagnostics["billing_cache_authoritative"] is False
+    assert "/tmp/request-cache.bin" not in repr(diagnostics)
 
 
 @pytest.mark.unit

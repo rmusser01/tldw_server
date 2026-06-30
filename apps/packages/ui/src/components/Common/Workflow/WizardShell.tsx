@@ -1,7 +1,8 @@
 import React, { useCallback, useMemo } from "react"
-import { Steps, Card, Button, Alert, Progress } from "antd"
+import { Steps, Card, Button, Progress } from "antd"
 import { ArrowLeft, ArrowRight, X, Loader2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import { useWorkflowsStore } from "@/store/workflows"
 import type { WizardShellProps } from "@/types/workflows"
 
@@ -115,15 +116,19 @@ export const WizardShell: React.FC<WizardShellProps> = ({
 
       {/* Error alert */}
       {error && (
-        <Alert
+        <DesignSystemAlert
           title={t("workflows:error", "Error")}
-          description={error}
-          type="error"
-          showIcon
-          closable
-          onClose={() => setError(null)}
+          variant="error"
+          dismissible
+          dismissLabel={t(
+            "workflows:dismissWorkflowError",
+            "Dismiss workflow error"
+          )}
+          onDismiss={() => setError(null)}
           className="mb-4"
-        />
+        >
+          {error}
+        </DesignSystemAlert>
       )}
 
       {/* Processing indicator */}

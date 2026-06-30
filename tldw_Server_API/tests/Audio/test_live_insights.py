@@ -113,6 +113,39 @@ async def test_live_insights_final_summary():
 
 
 @pytest.mark.asyncio
+async def test_live_insights_error_sanitizes_llm_exception():
+    websocket = _DummyWebSocket()
+
+    def _failing_llm(**_kwargs):
+        raise RuntimeError("llm provider failed at /private/llm/config.json")
+
+    settings = LiveInsightSettings(
+        enabled=True,
+        provider="openai",
+        model="test-model",
+        live_updates=True,
+    )
+    engine = LiveMeetingInsights(websocket, settings, chat_call=_failing_llm)
+
+    await engine._generate_and_send(
+        [
+            {
+                "text": "The team discussed operational blockers.",
+                "is_final": True,
+                "segment_id": 1,
+            }
+        ],
+        stage="live",
+    )
+
+    error_messages = [message for message in websocket.messages if message.get("type") == "insight_error"]
+    assert error_messages
+    assert error_messages[-1]["message"] == "Live insights request failed"
+    assert "llm provider failed" not in str(error_messages)
+    assert "/private/llm/config.json" not in str(error_messages)
+
+
+@pytest.mark.asyncio
 async def test_live_insights_task_exceptions_retrieved():
     websocket = _DummyWebSocket()
     settings = LiveInsightSettings(

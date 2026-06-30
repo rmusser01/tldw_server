@@ -1,0 +1,61 @@
+---
+id: TASK-9924
+title: Fix Meetings module review findings
+status: Done
+assignee: []
+created_date: '2026-06-23 18:40'
+updated_date: '2026-06-24 04:19'
+labels:
+  - meetings
+  - review-hardening
+dependencies: []
+priority: high
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Address validated Meetings module review findings: sanitize SSE framing fields, make status transitions atomic, validate finalizable artifact kinds, and make finalization atomic/idempotent.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 SSE framing cannot be injected with newline-bearing event ids or event types.
+- [x] #2 Session status transitions are atomic and reject stale concurrent transitions.
+- [x] #3 Finalize include values reject unsupported final artifact kinds instead of silently skipping them.
+- [x] #4 Repeated finalize calls do not create duplicate final artifacts and partial artifact writes are avoided.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-06-23-meetings-review-hardening.md
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Replacement task created after an ID collision caused the original Meetings task file to disappear. Red checks: new SSE, stale-transition, unsupported finalize kind, empty include, and repeated-finalize tests failed against the prior implementation for expected reasons. Green checks: focused Meetings suite passed with --confcutdir=tldw_Server_API/tests/Meetings: 37 passed, 6 warnings in 18.23s. Security: Bandit on touched Meetings/API/DB source wrote /tmp/bandit_meetings_review_hardening.json with results_count=0 and no errors. Known skip: did not run test_meetings_routes_smoke.py because the developer guide calls out environment-specific heavy import crashes for that smoke path; focused endpoint coverage was run instead.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2476
+
+2026-06-24 rebase follow-up: Rebased `codex/meetings-review-hardening` onto latest `origin/dev` (`46595e31c`). PR review triage found no line comments or submitted reviews; issue comments were non-actionable bot status messages (Gemini quota, CodeRabbit skipped draft review). Re-ran focused Meetings suite on the rebased branch: 37 passed, 6 warnings in 2.42s. Re-ran Bandit on touched Meetings/API/DB source: `/tmp/bandit_meetings_review_hardening_worktree_rebase.json`, results empty and no errors.
+
+2026-06-24 PR comment follow-up: Rebased onto latest `origin/dev` (`3f3221aa8`). Addressed Qodo comments by adding docstrings to new helpers, adding explicit type hints to the new tests and nested helper, and fixing `include=[]` finalization so existing final artifacts are cleared transactionally. Red/green evidence: `test_finalize_session_empty_include_clears_existing_final_artifacts` failed before the fix with four stale artifacts remaining, then passed after the DB replacement-scope change. Verification: focused Meetings suite passed, 38 passed and 6 warnings in 4.82s. Security: Bandit on touched Meetings/API/DB source wrote `/tmp/bandit_meetings_review_hardening_pr_comments.json` with empty results and no errors.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed Meetings review findings by sanitizing SSE control fields, making service-driven status transitions conditional on the validated current status, rejecting unsupported final artifact kinds before writes, preserving explicit empty include lists, and replacing generated final artifacts atomically/idempotently. Follow-up review comments were addressed by documenting new helpers, typing new tests, and clearing stale persisted final artifacts when `include=[]` is used after prior finalization. Added regression coverage and verified the focused Meetings suite plus Bandit on touched source.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

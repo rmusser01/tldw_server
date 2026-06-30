@@ -7,7 +7,6 @@ Stage 1 scaffold: topic scoring from event tags, no embedding integration yet.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,6 +18,9 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Personalization.companion_derivations import derive_companion_knowledge_cards
+from tldw_Server_API.app.core.Personalization.companion_user_ids import (
+    resolve_existing_companion_storage_user_id,
+)
 
 _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS = (
     asyncio.CancelledError,
@@ -33,18 +35,20 @@ _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS = (
 )
 
 
-def _resolve_user_id_to_int(user_id: str) -> int:
-    """Convert a user_id string to a numeric value, mirroring personalization_deps logic."""
-    try:
-        return int(user_id)
-    except (ValueError, TypeError):
-        digest = hashlib.sha1(str(user_id).encode("utf-8"), usedforsecurity=False).digest()
-        return int.from_bytes(digest[:4], byteorder="big", signed=False)
+def _resolve_user_storage_id(user_id: str) -> str:
+    """Return the shared personalization storage id for logical user ids."""
+    return resolve_existing_companion_storage_user_id(user_id)
 
 
 @dataclass
 class ConsolidationConfig:
     interval_seconds: int = 1800  # default 30 minutes
+
+
+@dataclass(frozen=True)
+class ConsolidationTarget:
+    logical_user_id: str
+    storage_user_id: str
 
 
 class PersonalizationConsolidationService:
@@ -99,11 +103,14 @@ class PersonalizationConsolidationService:
         while not self._shutdown.is_set():
             try:
                 logger.debug("Consolidation tick")
-                user_ids = self._enumerate_user_ids()
-                for uid in user_ids:
+                targets = self._enumerate_user_targets()
+                for target in targets:
                     if self._shutdown.is_set():
                         break
-                    self._consolidate_user(str(uid))
+                    self._consolidate_user(
+                        target.logical_user_id,
+                        storage_user_id=target.storage_user_id,
+                    )
             except _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Consolidation loop error (scaffold): {e}")
                 try:
@@ -118,9 +125,9 @@ class PersonalizationConsolidationService:
             except asyncio.TimeoutError:
                 continue
 
-    def _consolidate_user(self, user_id: str) -> None:
+    def _consolidate_user(self, user_id: str, *, storage_user_id: str | None = None) -> None:
         """Consolidate per-user topics from recent events."""
-        db = self._get_user_db(user_id)
+        db = self._get_user_db(user_id, storage_user_id=storage_user_id)
         # Use public thread-safe method instead of bypassing the lock
         events = db.list_recent_events(user_id)
         scores = self._score_topics_from_events(events)
@@ -204,6 +211,86 @@ class PersonalizationConsolidationService:
 
         return sorted(set(uids))
 
+    @staticmethod
+    def _enumerate_user_targets() -> list[ConsolidationTarget]:
+        """Return logical users paired with the storage IDs that own their DBs."""
+        try:
+            base = DatabasePaths.get_user_db_base_dir()
+        except _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug(f"personalization: failed to resolve user db base dir: {exc}")
+            try:
+                get_metrics_registry().increment(
+                    "app_warning_events_total",
+                    labels={"component": "personalization", "event": "user_db_dir_read_failed"},
+                )
+            except _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS:
+                logger.debug("metrics increment failed for personalization user_db_dir_read_failed")
+            return []
+
+        targets: list[ConsolidationTarget] = []
+        for path in base.iterdir():
+            if not path.is_dir():
+                continue
+            storage_user_id = path.name
+            if not storage_user_id.isdigit():
+                logger.debug(f"personalization: skipping non-int user dir {storage_user_id}")
+                try:
+                    get_metrics_registry().increment(
+                        "app_warning_events_total",
+                        labels={"component": "personalization", "event": "invalid_user_dir_name"},
+                    )
+                except _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("metrics increment failed for personalization invalid_user_dir_name")
+                continue
+            db_path = path / DatabasePaths.PERSONALIZATION_DB_NAME
+            if not db_path.is_file():
+                continue
+            try:
+                db = PersonalizationDB.for_path(db_path)
+                logical_user_ids = db.list_profile_user_ids()
+            except _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"personalization: failed to inspect profile ids for {storage_user_id}: {exc}")
+                try:
+                    get_metrics_registry().increment(
+                        "app_warning_events_total",
+                        labels={"component": "personalization", "event": "profile_id_scan_failed"},
+                    )
+                except _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("metrics increment failed for personalization profile_id_scan_failed")
+                continue
+            for logical_user_id in logical_user_ids:
+                targets.append(
+                    ConsolidationTarget(
+                        logical_user_id=str(logical_user_id),
+                        storage_user_id=storage_user_id,
+                    )
+                )
+
+        if not targets:
+            try:
+                logical_user_id = str(DatabasePaths.get_single_user_id())
+                targets = [
+                    ConsolidationTarget(
+                        logical_user_id=logical_user_id,
+                        storage_user_id=_resolve_user_storage_id(logical_user_id),
+                    )
+                ]
+            except _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS as exc:
+                logger.debug(f"personalization: failed to derive single_user_id: {exc}")
+                try:
+                    get_metrics_registry().increment(
+                        "app_warning_events_total",
+                        labels={"component": "personalization", "event": "single_user_id_fallback_failed"},
+                    )
+                except _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS:
+                    logger.debug("metrics increment failed for personalization single_user_id_fallback_failed")
+                targets = []
+
+        return sorted(
+            {target for target in targets},
+            key=lambda target: (target.logical_user_id, target.storage_user_id),
+        )
+
     def get_status(self) -> dict:
         """Return service status including last consolidation ticks."""
         running = bool(self._task and not self._task.done())
@@ -211,9 +298,9 @@ class PersonalizationConsolidationService:
         return {"running": running, "last_ticks": last, "user_count": len(self._last_tick)}
 
     @staticmethod
-    def _get_user_db(user_id: str) -> PersonalizationDB:
-        uid_int = _resolve_user_id_to_int(user_id)
-        return PersonalizationDB.for_user(uid_int)
+    def _get_user_db(user_id: str, *, storage_user_id: str | None = None) -> PersonalizationDB:
+        storage_user_id = storage_user_id or _resolve_user_storage_id(user_id)
+        return PersonalizationDB.for_user(storage_user_id)
 
     @staticmethod
     def _score_topics_from_events(events: list[dict]) -> dict[str, float]:

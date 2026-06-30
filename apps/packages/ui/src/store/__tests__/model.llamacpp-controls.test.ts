@@ -71,6 +71,14 @@ describe("llama.cpp chat model settings state", () => {
       modelSettings
     }
 
+    useSidepanelChatTabsStore.getState().upsertTab({
+      id: "tab-1",
+      label: "Tab 1",
+      historyId: null,
+      serverChatId: null,
+      serverChatTopic: null,
+      updatedAt: 1
+    })
     useSidepanelChatTabsStore.getState().setSnapshot("tab-1", snapshot)
     const restored = useSidepanelChatTabsStore.getState().getSnapshot("tab-1")
 

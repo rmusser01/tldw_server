@@ -1,10 +1,9 @@
 import pytest
-from fastapi.testclient import TestClient
+from starlette.requests import Request
 
-from tldw_Server_API.app.main import app as fastapi_app
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.api.v1.endpoints.audio.audio import get_tts_service
-from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import get_usage_event_logger
+import tldw_Server_API.app.api.v1.endpoints.audio.audio_tts as audio_tts
+from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
 
 pytestmark = pytest.mark.unit
@@ -13,12 +12,13 @@ pytestmark = pytest.mark.unit
 class _DummyLogger:
     def __init__(self):
         self.events = []
+
     def log_event(self, name, resource_id=None, tags=None, metadata=None):
         self.events.append((name, resource_id, tags, metadata))
 
 
 class _FakeTTSService:
-    async def generate_speech(
+    def generate_speech(
         self,
         request_data,
         provider=None,
@@ -30,52 +30,61 @@ class _FakeTTSService:
         metadata_only=False,
         request_id=None,
     ):
-        yield b"audio-bytes"
+        async def _gen():
+            yield b"audio-bytes"
+
+        return _gen()
 
 
-@pytest.fixture()
-def client_with_overrides(bypass_api_limits, monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+def _make_request() -> Request:
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/audio/speech",
+        "headers": [],
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("testclient", 12345),
+    }
+
+    async def _receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return Request(scope, _receive)
+
+
+@pytest.mark.asyncio
+async def test_tts_usage_event_logged(monkeypatch):
     dummy = _DummyLogger()
 
-    async def override_user():
-        return User(id=1, username="tester", email=None, is_active=True)
+    async def _resolve_tts_byok(*args, **kwargs):
+        _ = args, kwargs
+        return (1, {}, None)
 
-    def override_logger():
+    def _shim_attr(name: str):
+        if name == "_sanitize_speech_request":
+            return lambda *args, **kwargs: "openai"
+        if name == "_resolve_tts_byok":
+            return _resolve_tts_byok
+        raise NameError(name)
 
-        return dummy
+    monkeypatch.setattr(audio_tts, "_audio_shim_attr", _shim_attr, raising=True)
 
-    async def override_tts():
-        return _FakeTTSService()
-
-    # Apply overrides
-    fastapi_app.dependency_overrides[get_request_user] = override_user
-    fastapi_app.dependency_overrides[get_usage_event_logger] = override_logger
-    fastapi_app.dependency_overrides[get_tts_service] = override_tts
-
-    with bypass_api_limits(fastapi_app), TestClient(fastapi_app) as client:
-        yield client, dummy
-
-    fastapi_app.dependency_overrides.clear()
-
-
-def test_tts_usage_event_logged(client_with_overrides):
-
-
-    client, dummy = client_with_overrides
-    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-    payload = {
-        "model": "tts-1",
-        "input": "hello",
-        "voice": "alloy",
-        "response_format": "mp3",
-        "stream": False
-    }
-    r = client.post(
-        "/api/v1/audio/speech",
-        json=payload,
-        headers={"X-API-KEY": get_settings().SINGLE_USER_API_KEY},
+    response = await audio_tts.create_speech(
+        OpenAISpeechRequest(
+            model="tts-1",
+            input="hello",
+            voice="alloy",
+            response_format="mp3",
+            stream=False,
+        ),
+        _make_request(),
+        tts_service=_FakeTTSService(),
+        current_user=User(id=1, username="tester", email=None, is_active=True),
+        media_db=None,
+        usage_log=dummy,
     )
-    assert r.status_code == 200, r.text
-    # Ensure a usage event was logged
+
+    assert response.status_code == 200
+    assert response.body == b"audio-bytes"
     assert any(e[0] == "audio.tts" for e in dummy.events)

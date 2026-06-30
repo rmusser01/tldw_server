@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+from typing import Any
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
 from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPSandboxConfig
+from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPRunnerConfig
+from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import ACPRunnerClient
 from tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client import (
     ACPSandboxRunnerManager,
     SandboxSessionHandle,
@@ -20,6 +25,15 @@ from tldw_Server_API.app.core.Sandbox.runners.lima_runner import LimaRunner
 from tldw_Server_API.app.services.acp_runtime_policy_service import (
     ACPRuntimePolicySnapshot,
 )
+
+
+def _standard_runner_config(**overrides: Any) -> ACPRunnerConfig:
+    config: dict[str, Any] = {
+        "command": "echo",
+        "allowed_session_cwd_roots": ["/repo"],
+    }
+    config.update(overrides)
+    return ACPRunnerConfig(**config)
 
 
 @pytest.mark.unit
@@ -148,6 +162,374 @@ async def test_create_session_requires_authenticated_user_id() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_standard_runner_create_session_rejects_session_env_by_default() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            return _CallResult({"sessionId": "session-env"})
+
+    runner = ACPRunnerClient(_standard_runner_config())
+    fake_client = _FakeClient()
+    runner._client = fake_client
+    workspace_auth_value = f"workspace-{uuid4().hex}"
+
+    with pytest.raises(ACPResponseError, match="session env"):
+        await runner.create_session(
+            "/repo",
+            session_env={"WORKSPACE_TOKEN": workspace_auth_value},
+        )
+
+    assert fake_client.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_create_session_sends_session_env_when_enabled() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            return _CallResult({"sessionId": "session-env"})
+
+    runner = ACPRunnerClient(_standard_runner_config(allow_session_env=True))
+    fake_client = _FakeClient()
+    runner._client = fake_client
+    workspace_auth_value = f"workspace-{uuid4().hex}"
+
+    session_id = await runner.create_session(
+        "/repo",
+        session_env={"WORKSPACE_TOKEN": workspace_auth_value},
+    )
+
+    assert session_id == "session-env"
+    assert fake_client.calls == [
+        (
+            "session/new",
+            {"cwd": "/repo", "mcpServers": [], "env": {"WORKSPACE_TOKEN": workspace_auth_value}},
+        )
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_create_session_sends_explicit_empty_mcp_servers() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            return _CallResult({"sessionId": "session-empty-mcp"})
+
+    runner = ACPRunnerClient(_standard_runner_config())
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    session_id = await runner.create_session(
+        "/repo",
+        mcp_servers=[],
+        agent_type="hermes",
+    )
+
+    assert session_id == "session-empty-mcp"
+    assert fake_client.calls == [
+        ("session/new", {"cwd": "/repo", "mcpServers": [], "agentType": "hermes"})
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_create_session_retries_without_agent_type_for_native_acp() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            if payload.get("agentType") == "hermes":
+                raise ACPResponseError("Invalid params")
+            return _CallResult({"sessionId": "session-native-hermes"})
+
+    runner = ACPRunnerClient(_standard_runner_config())
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    session_id = await runner.create_session("/repo", agent_type="hermes")
+
+    assert session_id == "session-native-hermes"
+    assert fake_client.calls == [
+        ("session/new", {"cwd": "/repo", "mcpServers": [], "agentType": "hermes"}),
+        ("session/new", {"cwd": "/repo", "mcpServers": []}),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_create_session_retries_without_mcp_servers_for_legacy_acp() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            if "mcpServers" in payload:
+                raise ACPResponseError("Invalid params")
+            return _CallResult({"sessionId": "session-legacy-no-mcp"})
+
+    runner = ACPRunnerClient(_standard_runner_config())
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    session_id = await runner.create_session("/repo")
+
+    assert session_id == "session-legacy-no-mcp"
+    assert fake_client.calls == [
+        ("session/new", {"cwd": "/repo", "mcpServers": []}),
+        ("session/new", {"cwd": "/repo"}),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_create_session_retries_without_agent_type_then_mcp_servers() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, dict(payload)))
+            if payload.get("agentType") == "hermes" or "mcpServers" in payload:
+                raise ACPResponseError("Invalid params")
+            return _CallResult({"sessionId": "session-legacy-no-agent-mcp"})
+
+    runner = ACPRunnerClient(_standard_runner_config())
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    session_id = await runner.create_session("/repo", agent_type="hermes")
+
+    assert session_id == "session-legacy-no-agent-mcp"
+    assert fake_client.calls == [
+        ("session/new", {"cwd": "/repo", "mcpServers": [], "agentType": "hermes"}),
+        ("session/new", {"cwd": "/repo", "mcpServers": []}),
+        ("session/new", {"cwd": "/repo"}),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_create_session_rejects_cwd_outside_allowed_roots() -> None:
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            raise AssertionError("unsafe cwd should be rejected before runner call")
+
+    runner = ACPRunnerClient(_standard_runner_config())
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    with pytest.raises(ACPResponseError, match="cwd"):
+        await runner.create_session("/etc")
+
+    assert fake_client.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_create_session_rejects_stdio_mcp_by_default() -> None:
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            raise AssertionError("stdio MCP should be rejected before runner call")
+
+    runner = ACPRunnerClient(_standard_runner_config())
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    with pytest.raises(ACPResponseError, match="stdio MCP"):
+        await runner.create_session(
+            "/repo",
+            mcp_servers=[{"type": "stdio", "command": "python", "args": ["server.py"]}],
+        )
+
+    assert fake_client.calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_update_queue_is_bounded() -> None:
+    from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import ACP_SESSION_UPDATE_QUEUE_MAXLEN
+
+    runner = ACPRunnerClient(_standard_runner_config())
+    session_id = "bounded-session"
+
+    for index in range(ACP_SESSION_UPDATE_QUEUE_MAXLEN + 3):
+        await runner._handle_notification(
+            ACPMessage(
+                jsonrpc="2.0",
+                method="session/update",
+                params={"sessionId": session_id, "type": "progress", "index": index},
+            )
+        )
+
+    updates = runner.pop_updates(session_id, limit=ACP_SESSION_UPDATE_QUEUE_MAXLEN + 10)
+    assert len(updates) == ACP_SESSION_UPDATE_QUEUE_MAXLEN
+    assert updates[0]["index"] == 3
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_close_session_uses_standard_acp_close() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            if method == "session/close":
+                return _CallResult({})
+            raise AssertionError(f"unexpected method: {method}")
+
+    runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
+    fake_client = _FakeClient()
+    runner._client = fake_client
+    runner._updates["session-close"] = asyncio.Queue()
+    runner._session_owners["session-close"] = 7
+
+    await runner.close_session("session-close")
+
+    assert fake_client.calls == [
+        ("session/close", {"sessionId": "session-close"}),
+    ]
+    assert "session-close" not in runner._updates
+    assert "session-close" not in runner._session_owners
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_close_session_falls_back_to_private_runner_close() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            if method == "session/close":
+                raise ACPResponseError("method not found")
+            if method == "_tldw/session/close":
+                return _CallResult({})
+            raise AssertionError(f"unexpected method: {method}")
+
+    runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    await runner.close_session("session-close-legacy")
+
+    assert fake_client.calls == [
+        ("session/close", {"sessionId": "session-close-legacy"}),
+        ("_tldw/session/close", {"sessionId": "session-close-legacy"}),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_standard_runner_close_session_falls_back_on_json_rpc_method_not_found_code() -> None:
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeClient:
+        is_running = True
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            if method == "session/close":
+                raise ACPResponseError("unsupported", code=-32601)
+            if method == "_tldw/session/close":
+                return _CallResult({})
+            raise AssertionError(f"unexpected method: {method}")
+
+    runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
+    fake_client = _FakeClient()
+    runner._client = fake_client
+
+    await runner.close_session("session-close-code")
+
+    assert fake_client.calls == [
+        ("session/close", {"sessionId": "session-close-code"}),
+        ("_tldw/session/close", {"sessionId": "session-close-code"}),
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_create_session_rejects_unavailable_vz_macos_runtime(monkeypatch) -> None:
     manager = ACPSandboxRunnerManager(
         ACPSandboxConfig(
@@ -168,6 +550,8 @@ async def test_create_session_rejects_unavailable_vz_macos_runtime(monkeypatch) 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_create_session_rejects_seatbelt_without_standard_opt_in(monkeypatch) -> None:
+    import tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client as src
+
     manager = ACPSandboxRunnerManager(
         ACPSandboxConfig(
             enabled=True,
@@ -180,9 +564,235 @@ async def test_create_session_rejects_seatbelt_without_standard_opt_in(monkeypat
     monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "1")
     monkeypatch.setenv("TLDW_SANDBOX_SEATBELT_AVAILABLE", "1")
     monkeypatch.delenv("TLDW_SANDBOX_SEATBELT_STANDARD_ENABLED", raising=False)
+    monkeypatch.setattr(
+        src,
+        "collect_runtime_preflights",
+        lambda *, network_policy=None: {
+            RuntimeType.seatbelt: RuntimePreflightResult(
+                runtime=RuntimeType.seatbelt,
+                available=True,
+                supported_trust_levels=["trusted"],
+                enforcement_ready={"deny_all": True, "allowlist": True},
+            )
+        },
+    )
 
     with pytest.raises(ACPResponseError, match="seatbelt_standard_disabled"):
         await manager.create_session(cwd="/workspace", user_id=7)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sandbox_create_session_merges_config_and_session_env(monkeypatch) -> None:
+    config_workspace_auth_value = f"config-{uuid4().hex}"
+    session_workspace_auth_value = f"workspace-{uuid4().hex}"
+    manager = ACPSandboxRunnerManager(
+        ACPSandboxConfig(
+            enabled=True,
+            agent_command="/usr/local/bin/codex",
+            agent_env={
+                "CONFIG_ONLY": "yes",
+                "WORKSPACE_TOKEN": config_workspace_auth_value,
+            },
+            ssh_enabled=False,
+        )
+    )
+    monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "1")
+    monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "1")
+    monkeypatch.setattr(manager, "_validate_runtime_requirements", lambda _runtime: None)
+
+    import tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client as src
+
+    class _Obj:
+        def __init__(self, obj_id: str) -> None:
+            self.id = obj_id
+
+    capture: dict[str, object] = {}
+
+    class _FakeSandboxService:
+        def create_session(self, **kwargs):
+            capture["session_spec"] = kwargs.get("spec")
+            return _Obj("sandbox-session-env")
+
+        def start_run_scaffold(self, **kwargs):
+            capture["run_spec"] = kwargs.get("spec")
+            return _Obj("run-env")
+
+        def cancel_run(self, _run_id: str) -> None:
+            return None
+
+        def destroy_session(self, _session_id: str) -> None:
+            return None
+
+    class _FakeHub:
+        def subscribe_with_buffer(self, _run_id: str) -> asyncio.Queue:
+            return asyncio.Queue()
+
+        def push_stdin(self, _run_id: str, _data: bytes) -> None:
+            return None
+
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeStreamClient:
+        def __init__(self, send_bytes) -> None:
+            self._send_bytes = send_bytes
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        def set_notification_handler(self, _handler) -> None:
+            return None
+
+        def set_request_handler(self, _handler) -> None:
+            return None
+
+        async def start(self) -> None:
+            return None
+
+        async def call(self, method: str, payload: dict[str, object]):
+            self.calls.append((method, payload))
+            if method == "initialize":
+                return _CallResult({"agentCapabilities": {}})
+            if method == "session/new":
+                return _CallResult({"sessionId": "acp-session-env"})
+            if method == "_tldw/session/close":
+                return _CallResult({})
+            raise AssertionError(f"unexpected method: {method}")
+
+        async def close(self) -> None:
+            return None
+
+    class _Store:
+        def put_acp_session_control(self, **_kwargs) -> None:
+            return None
+
+        def delete_acp_session_control(self, _session_id: str) -> bool:
+            return True
+
+    monkeypatch.setattr(src.sandbox_ep, "_service", _FakeSandboxService(), raising=True)
+    monkeypatch.setattr(src, "get_hub", lambda: _FakeHub())
+    monkeypatch.setattr(src, "ACPStreamClient", _FakeStreamClient)
+    monkeypatch.setattr(manager, "_get_sandbox_store", lambda: _Store())
+
+    session_id = await manager.create_session(
+        cwd="/workspace",
+        user_id=7,
+        session_env={"WORKSPACE_TOKEN": session_workspace_auth_value},
+    )
+
+    assert session_id == "acp-session-env"
+    run_spec = capture["run_spec"]
+    agent_env = json.loads(run_spec.env["ACP_AGENT_ENV_JSON"])
+    assert agent_env == {
+        "CONFIG_ONLY": "yes",
+        "WORKSPACE_TOKEN": session_workspace_auth_value,
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_create_session_persists_stream_backed_control_for_vz_linux(monkeypatch) -> None:
+    manager = ACPSandboxRunnerManager(
+        ACPSandboxConfig(
+            enabled=True,
+            runtime="vz_linux",
+            network_policy="deny_all",
+            agent_command="/usr/local/bin/codex",
+            ssh_enabled=False,
+        )
+    )
+    monkeypatch.setenv("SANDBOX_BACKGROUND_EXECUTION", "1")
+    monkeypatch.setenv("SANDBOX_ENABLE_EXECUTION", "1")
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_AVAILABLE", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_MACOS_HELPER_READY", "1")
+    monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", "1")
+
+    import tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client as src
+
+    class _Obj:
+        def __init__(self, obj_id: str) -> None:
+            self.id = obj_id
+
+    capture: dict[str, object] = {}
+    persisted: dict[str, object] = {}
+
+    class _FakeSandboxService:
+        def __init__(self) -> None:
+            self.cancelled: list[str] = []
+            self.destroyed: list[str] = []
+
+        def create_session(self, **kwargs):
+            capture["session_spec"] = kwargs.get("spec")
+            return _Obj("sandbox-session-vz")
+
+        def start_run_scaffold(self, **kwargs):
+            capture["run_spec"] = kwargs.get("spec")
+            return _Obj("run-vz")
+
+        def cancel_run(self, run_id: str) -> None:
+            self.cancelled.append(run_id)
+
+        def destroy_session(self, session_id: str) -> None:
+            self.destroyed.append(session_id)
+
+    class _FakeHub:
+        def subscribe_with_buffer(self, run_id: str) -> asyncio.Queue:
+            return asyncio.Queue()
+
+        def push_stdin(self, run_id: str, data: bytes) -> None:
+            return None
+
+    class _CallResult:
+        def __init__(self, result: dict[str, object]) -> None:
+            self.result = result
+
+    class _FakeStreamClient:
+        def __init__(self, send_bytes) -> None:
+            self._send_bytes = send_bytes
+
+        def set_notification_handler(self, handler) -> None:
+            return None
+
+        def set_request_handler(self, handler) -> None:
+            return None
+
+        async def start(self) -> None:
+            return None
+
+        async def call(self, method: str, payload: dict[str, object]):
+            if method == "initialize":
+                return _CallResult({"agentCapabilities": {}})
+            if method == "session/new":
+                return _CallResult({"sessionId": "acp-session-vz"})
+            if method == "_tldw/session/close":
+                return _CallResult({})
+            raise AssertionError(f"unexpected method: {method}")
+
+        async def close(self) -> None:
+            return None
+
+    class _Store:
+        def put_acp_session_control(self, **kwargs) -> None:
+            persisted.update(kwargs)
+
+        def delete_acp_session_control(self, session_id: str) -> bool:
+            return True
+
+    fake_service = _FakeSandboxService()
+    monkeypatch.setattr(src.sandbox_ep, "_service", fake_service, raising=True)
+    monkeypatch.setattr(src, "get_hub", lambda: _FakeHub())
+    monkeypatch.setattr(src, "ACPStreamClient", _FakeStreamClient)
+    monkeypatch.setattr(manager, "_get_sandbox_store", lambda: _Store())
+
+    session_id = await manager.create_session(cwd="/workspace", user_id=7)
+
+    assert session_id == "acp-session-vz"
+    assert getattr(capture.get("session_spec"), "runtime", None) == RuntimeType.vz_linux
+    assert persisted["sandbox_session_id"] == "sandbox-session-vz"
+    assert persisted["run_id"] == "run-vz"
+
+    await manager.close_session(session_id)
 
 
 @pytest.mark.unit
@@ -751,6 +1361,70 @@ async def test_control_record_fallback_supports_access_and_metadata(monkeypatch)
     assert ssh_info[0] == "127.0.0.1"
     assert ssh_info[1] == 4022
     assert ssh_info[2] == "acp"
+
+
+@pytest.mark.unit
+def test_store_control_record_omits_ssh_private_key_by_default(monkeypatch) -> None:
+    manager = ACPSandboxRunnerManager(
+        ACPSandboxConfig(
+            enabled=True,
+            agent_command="/usr/local/bin/codex",
+            ssh_enabled=True,
+        )
+    )
+    persisted: dict[str, object] = {}
+
+    class _Store:
+        def put_acp_session_control(self, **kwargs) -> None:
+            persisted.update(kwargs)
+
+    handle = SandboxSessionHandle(
+        session_id="acp-session-key",
+        user_id=42,
+        sandbox_session_id="sandbox-key",
+        run_id="run-key",
+        client=MagicMock(),
+        reader_task=MagicMock(),
+        ssh_user="acp",
+        ssh_host="127.0.0.1",
+        ssh_port=4022,
+        ssh_private_key="PRIVATE-KEY-MATERIAL",
+    )
+    monkeypatch.setattr(manager, "_get_sandbox_store", lambda: _Store())
+
+    assert manager._store_control_record(handle, required=True) is True
+    assert persisted["ssh_private_key"] is None
+    assert manager._control_record_from_handle(handle)["ssh_private_key"] == "PRIVATE-KEY-MATERIAL"
+
+
+@pytest.mark.unit
+def test_sandbox_allowed_egress_hosts_fail_fast_until_enforced(monkeypatch) -> None:
+    import tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client as src
+
+    manager = ACPSandboxRunnerManager(
+        ACPSandboxConfig(
+            enabled=True,
+            runtime="docker",
+            network_policy="allowlist",
+            allowed_egress_hosts=["api.openai.com"],
+            agent_command="/usr/local/bin/codex",
+        )
+    )
+    monkeypatch.setattr(
+        src,
+        "collect_runtime_preflights",
+        lambda *, network_policy=None: {
+            RuntimeType.docker: RuntimePreflightResult(
+                runtime=RuntimeType.docker,
+                available=True,
+                supported_trust_levels=["standard"],
+                enforcement_ready={"deny_all": True, "allowlist": True},
+            )
+        },
+    )
+
+    with pytest.raises(ACPResponseError, match="allowed egress"):
+        manager._validate_runtime_requirements(RuntimeType.docker)
 
 
 @pytest.mark.unit

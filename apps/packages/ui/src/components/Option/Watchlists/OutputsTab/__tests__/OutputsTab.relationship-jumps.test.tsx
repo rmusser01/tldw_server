@@ -143,6 +143,7 @@ const baseState = (overrides: Record<string, unknown> = {}) => ({
   setOutputsJobFilter: vi.fn(),
   setOutputsRunFilter: vi.fn(),
   setRunsJobFilter: vi.fn(),
+  setRunsStatusFilter: vi.fn(),
   openRunDetail: vi.fn(),
   setActiveTab: vi.fn(),
   openJobForm: vi.fn(),
@@ -170,14 +171,20 @@ describe("OutputsTab relationship jump actions", () => {
   it("deep-links output rows to monitor and run destinations", () => {
     render(<OutputsTab />)
 
-    fireEvent.click(screen.getByTestId("watchlists-output-jump-monitor-44"))
+    fireEvent.click(screen.getByTestId("watchlists-output-open-job-44"))
     expect(mocks.storeStateRef.current.setActiveTab).toHaveBeenCalledWith("jobs")
     expect(mocks.storeStateRef.current.openJobForm).toHaveBeenCalledWith(7)
 
     fireEvent.click(screen.getByTestId("watchlists-outputs-advanced-toggle"))
-    fireEvent.click(screen.getByTestId("watchlists-output-jump-run-44"))
+    const statusFilterCallsBefore =
+      mocks.storeStateRef.current.setRunsStatusFilter.mock.calls.length
+    fireEvent.click(screen.getByTestId("watchlists-output-open-run-44"))
     expect(mocks.storeStateRef.current.setRunsJobFilter).toHaveBeenCalledWith(7)
-    expect(mocks.storeStateRef.current.setActiveTab).toHaveBeenCalledWith("runs")
+    expect(mocks.storeStateRef.current.setRunsStatusFilter).toHaveBeenCalledTimes(
+      statusFilterCallsBefore + 1
+    )
+    expect(mocks.storeStateRef.current.setRunsStatusFilter).toHaveBeenLastCalledWith(null)
+    expect(mocks.storeStateRef.current.setActiveTab).toHaveBeenLastCalledWith("runs")
     expect(mocks.storeStateRef.current.openRunDetail).toHaveBeenCalledWith(101)
   })
 })

@@ -1,0 +1,8 @@
+#cloud-config
+write_files:
+  - path: /etc/tldw-agent-guest.env
+    permissions: "0644"
+    content: |
+      TLDW_AGENT_GUEST_WORKSPACE_ROOT=/workspace
+runcmd:
+  - mkdir -p /workspace

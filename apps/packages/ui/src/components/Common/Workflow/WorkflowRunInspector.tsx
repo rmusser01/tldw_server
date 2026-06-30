@@ -1,5 +1,6 @@
-import { Empty, Tabs, Tag } from "antd"
+import { Tabs } from "antd"
 
+import { Badge, EmptyState } from "@/components/ui"
 import type {
   WorkflowRunInvestigation,
   WorkflowStepAttempt
@@ -19,12 +20,27 @@ const formatAttemptSubtitle = (attempt: WorkflowStepAttempt) => {
   return details.join(" • ")
 }
 
+const getAttemptStatusVariant = (
+  status: WorkflowStepAttempt["status"]
+): "danger" | "success" | "warning" | "secondary" => {
+  if (status === "failed") return "danger"
+  if (status === "completed" || status === "success") return "success"
+  if (status === "running") return "warning"
+  return "secondary"
+}
+
 export const WorkflowRunInspector = ({
   investigation,
   className = ""
 }: WorkflowRunInspectorProps) => {
   if (!investigation) {
-    return <Empty description="No run diagnostics available" />
+    return (
+      <EmptyState
+        variant="inline"
+        size="sm"
+        title="No run diagnostics available"
+      />
+    )
   }
 
   const failure = investigation.primary_failure
@@ -51,14 +67,20 @@ export const WorkflowRunInspector = ({
                   </h4>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     {failure?.reason_code_core && (
-                      <Tag color="error">{failure.reason_code_core}</Tag>
+                      <Badge variant="danger">{failure.reason_code_core}</Badge>
                     )}
-                    {failure?.category && <Tag>{failure.category}</Tag>}
-                    {failure?.blame_scope && <Tag>{failure.blame_scope}</Tag>}
+                    {failure?.category && (
+                      <Badge variant="secondary">{failure.category}</Badge>
+                    )}
+                    {failure?.blame_scope && (
+                      <Badge variant="secondary">{failure.blame_scope}</Badge>
+                    )}
                     {failure?.retryable !== undefined && (
-                      <Tag color={failure.retryable ? "success" : "default"}>
+                      <Badge
+                        variant={failure.retryable ? "success" : "secondary"}
+                      >
                         {failure.retryable ? "Retryable" : "Non-retryable"}
-                      </Tag>
+                      </Badge>
                     )}
                   </div>
                   {failure?.error_summary && (
@@ -83,9 +105,11 @@ export const WorkflowRunInspector = ({
                             <span className="font-medium text-sm">
                               Attempt {attempt.attempt_number}
                             </span>
-                            <Tag color={attempt.status === "failed" ? "error" : "default"}>
+                            <Badge
+                              variant={getAttemptStatusVariant(attempt.status)}
+                            >
                               {attempt.status}
-                            </Tag>
+                            </Badge>
                           </div>
                           {formatAttemptSubtitle(attempt) && (
                             <p className="mt-2 text-xs text-text-subtle">

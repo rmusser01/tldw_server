@@ -553,8 +553,10 @@ class TestCheckpointManagerListCheckpoints:
         manager = CheckpointManager(checkpoint_dir=tmp_path)
         cp1 = manager.create("ingestion", total_items=10)
         cp2 = manager.create("ingestion", total_items=10)
-        # Update cp1 so its updated_at is more recent
-        cp1 = manager.save_progress(cp1, {"item": 1})
+        # Force cp1 to be newer without relying on platform clock granularity.
+        newer_than_cp2 = datetime.fromisoformat(cp2.updated_at) + timedelta(seconds=1)
+        cp1 = cp1.model_copy(update={"updated_at": newer_than_cp2.isoformat()})
+        manager._save_atomic(cp1)
 
         result = manager.list_checkpoints()
         # Most recently updated should be first

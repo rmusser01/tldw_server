@@ -4,9 +4,10 @@
  */
 
 import React, { useMemo } from "react"
-import { Alert, Progress, Spin, Typography } from "antd"
+import { Progress, Spin, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 import type { EvaluationRateLimitStatus } from "@/services/evaluations"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 
 const { Text } = Typography
 
@@ -83,9 +84,8 @@ export const RateLimitsWidget: React.FC<RateLimitsWidgetProps> = ({
 
   if (isError) {
     return (
-      <Alert
-        type="warning"
-        showIcon
+      <DsAlert
+        variant="warning"
         title={t("evaluations:rateLimitsErrorTitle", {
           defaultValue: "Unable to fetch rate limits"
         })}
@@ -97,15 +97,15 @@ export const RateLimitsWidget: React.FC<RateLimitsWidgetProps> = ({
   // Show quota snapshot if available (from response headers)
   if (quotaSnapshot && quotaText) {
     return (
-      <Alert
-        type="info"
-        showIcon
+      <DsAlert
+        variant="info"
         title={t("evaluations:rateLimitsTitle", {
           defaultValue: "Evaluation limits"
         })}
-        description={quotaText}
         className={className}
-      />
+      >
+        {quotaText}
+      </DsAlert>
     )
   }
 

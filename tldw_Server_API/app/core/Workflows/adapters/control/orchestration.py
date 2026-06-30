@@ -87,6 +87,6 @@ async def run_workflow_call_adapter(config: dict[str, Any], context: dict[str, A
 
     except asyncio.TimeoutError:
         return {"error": "workflow_timeout", "run_id": run_id}
-    except Exception as e:
-        logger.exception(f"Workflow call error: {e}")
-        return {"error": str(e), "result": None}
+    except Exception:
+        logger.exception("Workflow call error")
+        return {"error": "workflow_call_error", "result": None}

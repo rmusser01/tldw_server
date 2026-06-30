@@ -189,4 +189,37 @@ describe("QuickIngestButton resume behavior", () => {
       "true"
     )
   })
+
+  it("hydrates first-source pending opens into the quick first-source preset", () => {
+    ;(window as typeof window & {
+      __tldwPendingQuickIngestOpen?: {
+        mode: "normal" | "intro"
+        at: number
+        detail: {
+          source: "first_source_milestone"
+          preferredPreset: "quick"
+          firstSource: true
+        }
+      }
+    }).__tldwPendingQuickIngestOpen = {
+      mode: "normal",
+      at: Date.now(),
+      detail: {
+        source: "first_source_milestone",
+        preferredPreset: "quick",
+        firstSource: true,
+      },
+    }
+
+    render(<QuickIngestModalHost />)
+
+    const session = useQuickIngestSessionStore.getState().session
+    expect(session?.selectedPreset).toBe("quick")
+    expect(session?.customBasePreset).toBe("quick")
+    expect(session?.presetConfig.storeRemote).toBe(true)
+    expect(session?.presetConfig.reviewBeforeStorage).toBe(false)
+    expect(session?.presetConfig.common.perform_analysis).toBe(false)
+    expect(session?.presetConfig.common.perform_chunking).toBe(true)
+    expect(session?.presetConfig.typeDefaults.document?.ocr).toBe(false)
+  })
 })

@@ -57,7 +57,7 @@ Expected: no output.
 **Files:**
 - Add/modify: `Docs/superpowers/specs/2026-05-23-research-workspace-hard-replacement-roadmap-design.md`
 - Add/modify: `backlog/tasks/task-463 - Design-Research-Workspace-hard-replacement-roadmap.md`
-- Add: `backlog/tasks/task-472 - Stabilize-Research-Workspace-prerequisite-stack.md`
+- Add: `backlog/tasks/task-575 - Stabilize-Research-Workspace-prerequisite-stack.md`
 - Add: `Docs/superpowers/plans/2026-05-23-research-workspace-prerequisite-stack-packaging-plan.md`
 
 - [ ] **Step 1: Cherry-pick the roadmap commits**
@@ -75,7 +75,7 @@ Expected: roadmap design and task tracking apply cleanly.
 Copy only:
 
 ```text
-backlog/tasks/task-472 - Stabilize-Research-Workspace-prerequisite-stack.md
+backlog/tasks/task-575 - Stabilize-Research-Workspace-prerequisite-stack.md
 Docs/superpowers/plans/2026-05-23-research-workspace-prerequisite-stack-packaging-plan.md
 ```
 
@@ -269,15 +269,15 @@ Expected: all pass.
 **Files:**
 - Modify as needed only inside the included Research Workspace scope.
 
-- [x] **Step 1: Run route and metadata tests**
+- [ ] **Step 1: Run route and metadata tests**
 
 Run selected route tests covering `/research-workspace` and the old-route absence.
 
-- [x] **Step 2: Start backend and WebUI**
+- [ ] **Step 2: Start backend and WebUI**
 
 Use a real backend and a WebUI dev server with `NEXT_PUBLIC_API_URL` pointed at that backend.
 
-- [x] **Step 3: Validate with CDP, not Computer Control**
+- [ ] **Step 3: Validate with CDP, not Computer Control**
 
 Open `/research-workspace` via CDP. Verify:
 - route loads;
@@ -286,17 +286,12 @@ Open `/research-workspace` via CDP. Verify:
 - old route returns normal 404;
 - source status/capability calls reach the backend.
 
-Verification notes:
-- Live FastAPI backend on `127.0.0.1:18001` validated `PUT /api/v1/workspaces/{id}`, `POST /api/v1/workspaces/{id}/sources`, `GET /sources/status`, and `GET /capabilities`.
-- Next.js WebUI on `127.0.0.1:3000` validated via Playwright/CDP. `/research-workspace` rendered the header and workspace trust panel; source status and capability API calls returned 200; `/workspace-playground` returned 404 and did not redirect.
-- CDP diagnostics surfaced and fixed an AntD `destroyOnClose` deprecation in `WorkspaceHeader`, invalid rich-description paragraph nesting in `EmptyState`, and missing package-level Vitest aliasing for `wxt/browser`.
-
 ### Task 9: Finalize Branch
 
 **Files:**
-- Modify: `backlog/tasks/task-472 - Stabilize-Research-Workspace-prerequisite-stack.md`
+- Modify: `backlog/tasks/task-575 - Stabilize-Research-Workspace-prerequisite-stack.md`
 
-- [x] **Step 1: Run final diff checks**
+- [ ] **Step 1: Run final diff checks**
 
 Run:
 
@@ -305,11 +300,11 @@ git diff --check
 git status --short
 ```
 
-- [x] **Step 2: Update Backlog task**
+- [ ] **Step 2: Update Backlog task**
 
 Record included file boundaries, excluded unrelated paths, verification commands, known skips, and final summary.
 
-- [x] **Step 3: Commit in reviewable chunks**
+- [ ] **Step 3: Commit in reviewable chunks**
 
 Suggested commits:
 1. `docs: add research workspace hard replacement roadmap`
@@ -317,8 +312,6 @@ Suggested commits:
 3. `feat: add research workspace migration safety and protocol`
 4. `feat: wire research workspace trust and status surfaces`
 
-- [x] **Step 4: Push and open PR**
+- [ ] **Step 4: Push and open PR**
 
 Expected: PR targets `main`, includes only the Research Workspace prerequisite stack, and explicitly excludes chat-workspace/prototype/writing changes.
-
-Result: Draft PR opened at https://github.com/rmusser01/tldw_server/pull/2040. Draft status is intentional because the AI-generated PR merge gate requires the human requester to own the final Change summary before merge.

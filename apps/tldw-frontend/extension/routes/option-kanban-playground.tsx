@@ -5,7 +5,7 @@ import { RouteErrorBoundary } from "@/components/Common/RouteErrorBoundary"
 
 const OptionKanbanPlayground = () => {
   return (
-    <RouteErrorBoundary routeId="kanban-playground" routeLabel="Kanban Playground">
+    <RouteErrorBoundary routeId="kanban" routeLabel="Kanban">
       <OptionLayout>
         <PageShell className="py-6" maxWidthClassName="max-w-7xl">
           <KanbanPlayground />

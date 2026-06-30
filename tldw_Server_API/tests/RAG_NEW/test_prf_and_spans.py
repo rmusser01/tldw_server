@@ -2,9 +2,14 @@
 Unit tests for PRF helper and metadata wiring for multi-vector/precomputed spans.
 """
 
+import io
+
+from loguru import logger
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
+from tldw_Server_API.app.core.RAG.rag_service import precomputed_spans
+from tldw_Server_API.app.core.RAG.rag_service.precomputed_spans import apply_precomputed_spans
 from tldw_Server_API.app.core.RAG.rag_service.prf import apply_prf, PRFConfig
 from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
@@ -38,6 +43,71 @@ async def test_apply_prf_mines_terms_and_expands_query():
     assert "expanded_query" in meta
     assert isinstance(meta.get("terms_used"), list)
     assert meta.get("doc_seed_count") == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_apply_prf_sanitizes_defensive_fallback_error_metadata_and_log():
+    """apply_prf should not leak backend exception text in fallback metadata or logs."""
+
+    class PathLeakingScore:
+        def __float__(self):
+            raise RuntimeError("sqlite failed opening /tmp/private/user_databases/42/Media_DB_v2.db")
+
+    docs = [
+        Document(
+            id="leaky",
+            content="Relevant result with enough terms to reach scoring.",
+            metadata={"title": "Sensitive Retrieval"},
+            source=DataSource.MEDIA_DB,
+            score=PathLeakingScore(),
+        )
+    ]
+    log_stream = io.StringIO()
+    sink_id = logger.add(log_stream, level="WARNING", format="{message}")
+    try:
+        expanded, meta = await apply_prf("safe query", docs, PRFConfig())
+    finally:
+        logger.remove(sink_id)
+
+    log_output = log_stream.getvalue()
+
+    assert expanded == "safe query"
+    assert meta == {
+        "enabled": False,
+        "base_query": "safe query",
+        "reason": "error",
+        "error": "PRF computation failed",
+    }
+    assert "/tmp/private/user_databases/42/Media_DB_v2.db" not in log_output
+    assert "sqlite failed opening" not in log_output
+    assert "/tmp/private/user_databases/42/Media_DB_v2.db" not in str(meta)
+    assert "sqlite failed opening" not in str(meta)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_precomputed_span_fallback_log_omits_logger_exception_details(monkeypatch):
+    """Precomputed span logging fallback should not retain raw logging exception details."""
+
+    calls: list[tuple[str, dict]] = []
+
+    class LoggerStub:
+        def debug(self, message, *args, **kwargs):
+            _ = args
+            calls.append((message, kwargs))
+            if len(calls) == 1:
+                raise RuntimeError("logger sink failed at /tmp/private/precomputed-spans.log")
+
+    monkeypatch.setattr(precomputed_spans, "logger", LoggerStub())
+
+    result = await apply_precomputed_spans("query", [])
+
+    assert result is None
+    assert calls[1][0] == "Precomputed span fallback logging failed"
+    rendered = repr(calls[1])
+    assert "precomputed-spans.log" not in rendered
+    assert "/tmp/private" not in rendered
 
 
 @pytest.mark.unit

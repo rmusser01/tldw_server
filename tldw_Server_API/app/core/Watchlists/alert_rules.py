@@ -43,6 +43,8 @@ ALERT_CONDITION_TYPE_VALUES = frozenset(condition.value for condition in AlertCo
 DEFAULT_ERROR_RATE_THRESHOLD = 0.5
 DEFAULT_ITEMS_BELOW_THRESHOLD = 1
 DEFAULT_ITEMS_ABOVE_THRESHOLD = 1000
+WATCHLIST_HEALTH_NOTIFICATION_TYPE = "watchlist_health_issue"
+WATCHLIST_LEGACY_ALERT_KIND = "watchlist_alert"
 
 
 def ensure_alert_rules_table(db_path: str) -> None:
@@ -169,7 +171,10 @@ def evaluate_rules_for_run(
             triggered.append({
                 "rule": rule,
                 "notification_kwargs": {
-                    "kind": "watchlist_alert",
+                    "kind": WATCHLIST_HEALTH_NOTIFICATION_TYPE,
+                    "type": WATCHLIST_HEALTH_NOTIFICATION_TYPE,
+                    "legacy_kind": WATCHLIST_LEGACY_ALERT_KIND,
+                    "category": "health",
                     "title": f"Alert: {rule.name}",
                     "message": detail,
                     "severity": rule.severity,

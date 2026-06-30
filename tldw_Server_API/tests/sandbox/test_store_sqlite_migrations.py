@@ -27,6 +27,20 @@ def test_sqlite_store_migrations_add_new_columns(tmp_path) -> None:
         );
         """
     )
+    con.execute(
+        """
+        CREATE TABLE sandbox_vz_sessions (
+            id TEXT PRIMARY KEY,
+            runtime TEXT,
+            vm_id TEXT,
+            template_id TEXT,
+            workspace_mount TEXT,
+            agent_ready INTEGER,
+            created_at REAL,
+            updated_at REAL
+        );
+        """
+    )
     con.commit()
     con.close()
 
@@ -60,4 +74,9 @@ def test_sqlite_store_migrations_add_new_columns(tmp_path) -> None:
     assert "workspace_id" in acp_cols
     assert "workspace_group_id" in acp_cols
     assert "scope_snapshot_id" in acp_cols
+
+    cur_vz = con2.execute("PRAGMA table_info(sandbox_vz_sessions)")
+    vz_cols = {row[1] for row in cur_vz.fetchall()}
+    assert "helper_instance_id" in vz_cols
+    assert "helper_started_at" in vz_cols
     con2.close()

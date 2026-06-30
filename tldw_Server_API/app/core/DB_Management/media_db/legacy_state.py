@@ -90,7 +90,7 @@ def mark_media_as_processed(
         with db_instance.transaction() as conn:
             media_row = db_instance._fetchone_with_connection(
                 conn,
-                "SELECT uuid, version, vector_processing FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT uuid, version, vector_processing, chunking_status FROM Media WHERE id = ? AND deleted = 0",
                 (media_id,),
             )
             if not media_row:
@@ -98,7 +98,8 @@ def mark_media_as_processed(
                     f"Attempted mark media {media_id} processed, but not found/deleted."
                 )
                 return
-            if media_row["vector_processing"] == 1:
+            chunking_status = str(media_row["chunking_status"] or "").strip().lower()
+            if media_row["vector_processing"] == 1 and chunking_status in {"completed", "complete", "done"}:
                 logger.debug(f"Media {media_id} already marked as processed.")
                 return
 
@@ -112,12 +113,13 @@ def mark_media_as_processed(
                 """
                 UPDATE Media
                 SET vector_processing = 1,
+                    chunking_status = ?,
                     last_modified = ?,
                     version = ?,
                     client_id = ?
                 WHERE id = ? AND version = ?
                 """,
-                (now, next_version, db_instance.client_id, media_id, current_version),
+                ("completed", now, next_version, db_instance.client_id, media_id, current_version),
             )
             if cursor.rowcount == 0:
                 raise ConflictError(

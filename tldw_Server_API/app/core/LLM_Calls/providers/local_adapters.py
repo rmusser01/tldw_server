@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.LLM_Calls.error_utils import (
     log_http_400_body,
     raise_chat_error_from_http,
 )
+from tldw_Server_API.app.core.LLM_Calls.local_cache_diagnostics import build_local_cache_diagnostic
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     _sanitize_payload_for_logging,
     merge_extra_body,
@@ -153,6 +154,8 @@ def _chat_with_openai_compatible_local_server(
         http_fetcher: Callable[..., Any] | None = None,  # Mirrors signature of _hc_fetch(method=..., url=..., ...)
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
+        app_config: dict[str, Any] | None = None,
+        inference_prefix_cache_intent: dict[str, Any] | None = None,
 ):
     logging.debug(f"{provider_name}: Chat request starting. API Base: {api_base_url}, Model: {model_name}")
 
@@ -251,6 +254,20 @@ def _chat_with_openai_compatible_local_server(
         }
         payload = {k: v for k, v in payload.items() if k in allowed_keys}
 
+    cache_diagnostic = build_local_cache_diagnostic(
+        provider=provider_name,
+        request={
+            "extra_body": extra_body,
+            "inference_prefix_cache_intent": inference_prefix_cache_intent,
+        },
+        payload=payload,
+        app_config=app_config,
+    )
+
+    def attach_cache_diagnostics(data: Any) -> Any:
+        if isinstance(data, dict) and cache_diagnostic.has_signal:
+            data.setdefault("tldw_local_cache_diagnostics", cache_diagnostic.to_metadata())
+        return data
 
     # Construct full API URL for chat completions
     chat_completions_path = "v1/chat/completions" # Standard OpenAI path
@@ -368,7 +385,7 @@ def _chat_with_openai_compatible_local_server(
                     response.raise_for_status()
                     data = response.json()
                     logging.debug(f"{provider_name}: Non-streaming request successful.")
-                    return data
+                    return attach_cache_diagnostics(data)
                 finally:
                     with contextlib.suppress(_LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS):
                         response.close()
@@ -390,7 +407,7 @@ def _chat_with_openai_compatible_local_server(
                     response.raise_for_status()
                     data = response.json()
                     logging.debug(f"{provider_name}: Non-streaming request successful.")
-                    return data
+                    return attach_cache_diagnostics(data)
                 finally:
                     with contextlib.suppress(_LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS):
                         response.close()
@@ -617,6 +634,7 @@ def _llama_request(
         http_fetcher: Callable[..., Any] | None = None,
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
+        inference_prefix_cache_intent: dict[str, Any] | None = None,
 ):
     if temperature is not None:
         if temp is not None and temp != temperature:
@@ -730,6 +748,8 @@ def _llama_request(
         http_fetcher=http_fetcher,
         extra_headers=extra_headers,
         extra_body=extra_body,
+        app_config=loaded_config_data,
+        inference_prefix_cache_intent=inference_prefix_cache_intent,
     )
 
 
@@ -1260,6 +1280,7 @@ def _vllm_request(
     http_fetcher: Callable[..., Any] | None = None,
     extra_headers: dict[str, str] | None = None,
     extra_body: dict[str, Any] | None = None,
+    inference_prefix_cache_intent: dict[str, Any] | None = None,
                                        # Could be loaded from cfg or passed if chat_api_call handles it
 ):
     if temp is not None:
@@ -1390,6 +1411,8 @@ def _vllm_request(
         http_fetcher=http_fetcher,
         extra_headers=extra_headers,
         extra_body=extra_body,
+        app_config=loaded_config_data,
+        inference_prefix_cache_intent=inference_prefix_cache_intent,
         # tools, tool_choice for vLLM? If supported, add to map and pass.
     )
 
@@ -1872,6 +1895,7 @@ class LlamaCppAdapter(_LocalAdapterBase):
             "app_config": request.get("app_config"),
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
+            "inference_prefix_cache_intent": request.get("inference_prefix_cache_intent"),
         }
 
 
@@ -2018,6 +2042,7 @@ class VLLMAdapter(_LocalAdapterBase):
             "app_config": request.get("app_config"),
             "extra_headers": request.get("extra_headers"),
             "extra_body": request.get("extra_body"),
+            "inference_prefix_cache_intent": request.get("inference_prefix_cache_intent"),
         }
 
 

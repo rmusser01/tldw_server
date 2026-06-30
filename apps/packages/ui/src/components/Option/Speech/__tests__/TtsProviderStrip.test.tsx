@@ -42,7 +42,7 @@ describe("TtsProviderStrip", () => {
   it("simplifies display for browser provider", () => {
     render(<TtsProviderStrip {...defaults} provider="browser" />)
 
-    expect(screen.getByText("Browser TTS")).toBeInTheDocument()
+    expect(screen.getByText("Browser local output")).toBeInTheDocument()
     expect(screen.queryByText("mp3")).not.toBeInTheDocument()
   })
 })

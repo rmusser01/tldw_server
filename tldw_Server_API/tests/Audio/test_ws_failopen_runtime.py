@@ -5,9 +5,8 @@ import time
 
 import numpy as np
 import pytest
-from fastapi.testclient import TestClient
 
-from tldw_Server_API.tests.Audio.ws_test_helpers import ws_session_or_skip
+from tldw_Server_API.tests.Audio.ws_test_helpers import ws_client_without_lifespan, ws_session_or_skip
 
 
 def _receive_ws_message(ws, *, timeout_s: float = 5.0):
@@ -64,7 +63,7 @@ async def test_ws_failopen_cap_exhausted_sends_error_and_closes(monkeypatch):
     settings = get_settings()
     token = settings.SINGLE_USER_API_KEY
 
-    with TestClient(app) as client:
+    with ws_client_without_lifespan(app) as client:
         try:
             ws = client.websocket_connect(
                 f"/api/v1/audio/stream/transcribe?token={token}"

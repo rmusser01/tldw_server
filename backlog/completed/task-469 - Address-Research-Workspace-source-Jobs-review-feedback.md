@@ -20,12 +20,6 @@ Follow-up to TASK-469. Fix code-review findings for workspace source job enqueue
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] Source creation still succeeds when Jobs manager construction is unavailable.
-- [x] Source creation still persists the source row when non-validation Jobs enqueue failures occur.
-- [x] Jobs validation/quota failures return HTTP 400 instead of a misleading successful enqueue response.
-- [x] Source status queries prioritize `workspace_source_ingest` Jobs before broad legacy `media_ingest` Jobs and choose source matches deterministically.
-- [x] Source status/capability endpoints expose non-sensitive failed-job messages and map ChaChaNotes workspace errors to correct HTTP statuses.
-- [x] Focused regression tests, full Workspaces tests, Bandit on touched production code, diff checks, and live backend smoke verification were recorded.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -37,15 +31,15 @@ Follow-up to TASK-469. Fix code-review findings for workspace source job enqueue
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed source Jobs review feedback. Added fail-open job manager resolution so source creation still persists when Jobs construction is unavailable, kept enqueue failures non-destructive, and made status projection query workspace_source_ingest Jobs first before broad legacy media_ingest Jobs. Added regression coverage for dependency construction failures and job-list prioritization. Verification: focused review-regression tests passed, full Workspaces suite passed, Bandit on touched production code reported zero findings, scoped diff check passed, and a live backend smoke verified source add/status plus idempotent job creation.
+Addressed source Jobs review feedback. Added fail-open job manager resolution so source creation still persists when Jobs construction is unavailable, kept enqueue failures non-destructive, and made status projection query workspace_source_ingest Jobs first before broad legacy media_ingest Jobs. Added regression coverage for dependency construction failures and job-list prioritization. Verification: focused review-regression tests passed, full Workspaces suite passed (60 passed), Bandit on the touched production endpoint reported zero findings, scoped diff check passed, and a live backend smoke verified source add/status plus idempotent job creation.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->

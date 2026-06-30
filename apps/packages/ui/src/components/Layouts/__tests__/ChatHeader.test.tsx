@@ -6,10 +6,15 @@ import { ChatHeader } from "../ChatHeader"
 
 vi.mock("antd", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  Input: ({ value, onChange, ...rest }: any) => (
+  Input: ({ value, onChange, onPressEnter, ...rest }: any) => (
     <input
       value={value}
       onChange={onChange}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          onPressEnter?.(event)
+        }
+      }}
       {...rest}
     />
   )
@@ -48,12 +53,12 @@ const createProps = (overrides: Partial<React.ComponentProps<typeof ChatHeader>>
   onTitleCommit: vi.fn(),
   onToggleSidebar: vi.fn(),
   sidebarCollapsed: false,
+  onOpenCompanionHome: vi.fn(),
   onOpenCommandPalette: vi.fn(),
   onOpenShortcutsModal: vi.fn(),
   onOpenSettings: vi.fn(),
   onToggleTheme: vi.fn(),
   themeMode: "dark" as const,
-  onClearChat: vi.fn(),
   onStartSavedChat: vi.fn(),
   onStartTemporaryChat: vi.fn(),
   onStartCharacterChat: vi.fn(),
@@ -99,13 +104,37 @@ describe("ChatHeader shortcut toggle", () => {
     )
   })
 
+  it("shows a Companion Home button immediately before the signpost shortcut toggle", () => {
+    const props = createProps()
+    render(<ChatHeader {...props} />)
+
+    const homeButton = screen.getByRole("button", { name: "Companion Home" })
+    const signpostButton = screen.getByRole("button", { name: "Show shortcuts" })
+    const headerBrand = homeButton.closest(".flex.items-center.gap-2.text-text")
+    const headerButtons: HTMLElement[] = Array.from(
+      headerBrand?.querySelectorAll("button") ?? []
+    )
+
+    expect(headerBrand).toBeTruthy()
+    expect(headerBrand).toContainElement(homeButton)
+    expect(headerBrand).toContainElement(signpostButton)
+    expect(headerButtons.indexOf(signpostButton)).toBe(
+      headerButtons.indexOf(homeButton) + 1
+    )
+
+    fireEvent.click(homeButton)
+    expect(props.onOpenCompanionHome).toHaveBeenCalledTimes(1)
+  })
+
   it("applies focus-visible ring classes to key header controls", () => {
     const props = createProps()
     render(<ChatHeader {...props} />)
 
     const controls = [
       screen.getByRole("button", { name: "Collapse sidebar" }),
+      screen.getByRole("button", { name: "Companion Home" }),
       screen.getByRole("button", { name: "Show shortcuts" }),
+      screen.getByRole("button", { name: "Search - Open command palette" }),
       screen.getByRole("button", { name: "New saved chat" }),
       screen.getByRole("button", { name: "Temporary chat (not saved)" }),
       screen.getByRole("button", { name: "Character chat" }),
@@ -120,6 +149,22 @@ describe("ChatHeader shortcut toggle", () => {
       expect(control.className).toContain("focus-visible:ring-offset-2")
       expect(control.className).toContain("focus-visible:ring-offset-bg")
     }
+  })
+
+  it("labels the search trigger as the command palette opener and keeps the shortcut hint visible", () => {
+    const props = createProps()
+    render(<ChatHeader {...props} />)
+
+    const trigger = screen.getByRole("button", {
+      name: "Search - Open command palette"
+    })
+
+    expect(trigger).toHaveAttribute("title", "Search")
+    expect(trigger).toHaveTextContent("Search")
+    expect(trigger).toHaveTextContent("Ctrl+K")
+
+    fireEvent.click(trigger)
+    expect(props.onOpenCommandPalette).toHaveBeenCalledTimes(1)
   })
 
   it("shows a theme toggle control and triggers toggle callback", () => {
@@ -149,6 +194,28 @@ describe("ChatHeader shortcut toggle", () => {
     expect(props.onStartCharacterChat).toHaveBeenCalledTimes(1)
   })
 
+  it("hides chat session actions when callbacks are omitted", () => {
+    render(
+      <ChatHeader
+        {...createProps({
+          onStartSavedChat: undefined,
+          onStartTemporaryChat: undefined,
+          onStartCharacterChat: undefined
+        })}
+      />
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "New saved chat" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Temporary chat (not saved)" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Character chat" })
+    ).not.toBeInTheDocument()
+  })
+
   it("hides temporary and character quick actions below the small breakpoint", () => {
     const props = createProps()
     render(<ChatHeader {...props} />)
@@ -165,6 +232,21 @@ describe("ChatHeader shortcut toggle", () => {
     expect(screen.getByRole("button", { name: "Character chat" }).className).toContain(
       "sm:inline-flex"
     )
+  })
+
+  it("allows the chat header control row to wrap on narrow screens", () => {
+    const props = createProps()
+    render(<ChatHeader {...props} />)
+
+    const headerRow = screen
+      .getByRole("button", { name: "New saved chat" })
+      .closest("header > div")
+    const actionsRow = screen
+      .getByRole("button", { name: "New saved chat" })
+      .parentElement
+
+    expect(headerRow?.className).toContain("flex-wrap")
+    expect(actionsRow?.className).toContain("flex-wrap")
   })
 
   it("shows mode badges for temporary and active character", () => {
@@ -198,6 +280,20 @@ describe("ChatHeader shortcut toggle", () => {
     render(<ChatHeader {...props} />)
 
     expect(screen.queryByText("Chat title")).not.toBeInTheDocument()
+  })
+
+  it("labels the title editor and keeps an untitled placeholder visible", () => {
+    const props = createProps({
+      chatTitle: "",
+      isEditingTitle: true
+    })
+
+    render(<ChatHeader {...props} />)
+
+    const titleInput = screen.getByRole("textbox", {
+      name: "Rename conversation"
+    })
+    expect(titleInput).toHaveAttribute("placeholder", "Untitled")
   })
 
   it("shows share controls and status when provided", () => {

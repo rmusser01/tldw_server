@@ -225,6 +225,7 @@ async def test_api_key_principal_subject_single_user_only_in_single_user_mode(
     monkeypatch.setenv("AUTH_MODE", auth_mode)
     monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "77")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "valid-key")
     reset_settings()
 
     class StubAPIKeyManager:
@@ -262,6 +263,6 @@ async def test_api_key_principal_subject_single_user_only_in_single_user_mode(
     assert ctx is not None
     assert getattr(ctx.principal, "subject", None) == expected_subject
 
-    for env_key in ("AUTH_MODE", "DATABASE_URL", "SINGLE_USER_FIXED_ID"):
+    for env_key in ("AUTH_MODE", "DATABASE_URL", "SINGLE_USER_FIXED_ID", "SINGLE_USER_API_KEY"):
         monkeypatch.delenv(env_key, raising=False)
     reset_settings()

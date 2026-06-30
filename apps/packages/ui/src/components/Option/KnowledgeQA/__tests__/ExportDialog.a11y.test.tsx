@@ -21,8 +21,41 @@ const state = {
   messages: [] as Array<{ role: string; content: string }>,
   currentThreadId: "thread-1" as string | null,
   results: [] as Array<{ id: string }>,
+  citations: [] as Array<{ index: number }>,
   answer: "Test answer" as string | null,
-  query: "What does this source say?"
+  answerTrustState: "cited_answer" as
+    | "cited_answer"
+    | "uncited_degraded_answer"
+    | "no_answer_insufficient_evidence"
+    | "no_results"
+    | "failed_search"
+    | "unsynced_local_result"
+    | "unknown_trust",
+  answerEvidenceOrigin: "local_library" as
+    | "local_library"
+    | "web_fallback"
+    | "mixed"
+    | "unknown_origin"
+    | null,
+  query: "What does this source say?",
+  settings: {
+    sources: ["media_db", "notes"],
+    include_media_ids: [42],
+    include_note_ids: ["note-a"],
+    top_k: 12,
+    generation_provider: "openai",
+    generation_model: "gpt-4o-mini",
+    enable_web_fallback: false,
+  },
+  preset: "balanced",
+  searchDetails: null as null | {
+    expandedQueries?: string[]
+    rerankingEnabled?: boolean
+    rerankingStrategy?: string
+    averageRelevance?: number | null
+    webFallbackTriggered?: boolean
+    webFallbackEngine?: string | null
+  },
 }
 
 vi.mock("../KnowledgeQAProvider", () => ({
@@ -30,8 +63,14 @@ vi.mock("../KnowledgeQAProvider", () => ({
     messages: state.messages,
     currentThreadId: state.currentThreadId,
     results: state.results,
+    citations: state.citations,
     answer: state.answer,
-    query: state.query
+    answerTrustState: state.answerTrustState,
+    answerEvidenceOrigin: state.answerEvidenceOrigin,
+    query: state.query,
+    settings: state.settings,
+    preset: state.preset,
+    searchDetails: state.searchDetails,
   })
 }))
 
@@ -76,8 +115,22 @@ describe("ExportDialog accessibility", () => {
     state.messages = []
     state.currentThreadId = "thread-1"
     state.results = []
+    state.citations = []
     state.answer = "Test answer"
+    state.answerTrustState = "cited_answer"
+    state.answerEvidenceOrigin = "local_library"
     state.query = "What does this source say?"
+    state.settings = {
+      sources: ["media_db", "notes"],
+      include_media_ids: [42],
+      include_note_ids: ["note-a"],
+      top_k: 12,
+      generation_provider: "openai",
+      generation_model: "gpt-4o-mini",
+      enable_web_fallback: false,
+    }
+    state.preset = "balanced"
+    state.searchDetails = null
   })
 
   it("exposes modal dialog semantics", () => {
@@ -379,8 +432,8 @@ describe("ExportDialog accessibility", () => {
     expect(screen.getByRole("button", { name: "Revoke link" })).toBeEnabled()
     expect(messageOpenMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "error",
-        content: "Unable to copy share link, but the link remains active.",
+        type: "warning",
+        content: "Share link created, but copying it to the clipboard failed.",
       })
     )
   })
@@ -422,6 +475,114 @@ describe("ExportDialog accessibility", () => {
         content: "Saved to Notes.",
       })
     )
+  })
+
+  it("exports citation mappings and optional settings snapshot for grounded review", async () => {
+    state.answer = "The planning document recommends staged rollout [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [
+      {
+        id: "source-1",
+        content: "Staged rollout recommendation and supporting evidence",
+        metadata: {
+          title: "Planning Memo",
+          source: "planning-memo.pdf",
+          url: "https://example.com/planning-memo",
+          page_number: 4,
+        },
+        score: 0.87,
+      } as any,
+    ]
+    state.messages = [
+      { role: "user", content: "What does the planning memo recommend?" },
+      { role: "assistant", content: "It recommends staged rollout [1]." },
+    ]
+    state.searchDetails = {
+      expandedQueries: ["rollout plan", "deployment stages"],
+      rerankingEnabled: true,
+      rerankingStrategy: "hybrid",
+      averageRelevance: 0.87,
+      webFallbackTriggered: false,
+      webFallbackEngine: null,
+    }
+
+    render(<ExportDialog open onClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByLabelText("Settings snapshot"))
+    fireEvent.click(screen.getByRole("button", { name: "Export" }))
+
+    await waitFor(() => expect(screen.getByText("Preview")).toBeInTheDocument())
+
+    const preview = screen.getByText((_, element) => {
+      if (!element || element.tagName.toLowerCase() !== "pre") return false
+      const text = element.textContent || ""
+      return (
+        text.includes("## Citations") &&
+        text.includes("[1] Planning Memo") &&
+        text.includes("maps to Source 1") &&
+        text.includes('"preset": "balanced"') &&
+        text.includes('"sources": [') &&
+        text.includes('"include_media_ids": [') &&
+        text.includes('"expandedQueries": [')
+      )
+    })
+
+    expect(preview).toBeInTheDocument()
+  })
+
+  it("requires acknowledgement before exporting unsupported draft answers", async () => {
+    state.answer = "Answer without citations."
+    state.answerTrustState = "uncited_degraded_answer"
+    state.answerEvidenceOrigin = "local_library"
+
+    render(<ExportDialog open onClose={vi.fn()} />)
+
+    expect(
+      screen.getByText(/This answer is an unsupported draft/i)
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Export" })).toBeDisabled()
+
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /I understand this unsupported draft/i,
+      })
+    )
+    expect(screen.getByRole("button", { name: "Export" })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }))
+
+    await waitFor(() => expect(screen.getByText("Preview")).toBeInTheDocument())
+    const preview = screen.getByText((_, element) => {
+      if (!element || element.tagName.toLowerCase() !== "pre") return false
+      const text = element.textContent || ""
+      return (
+        text.includes("Trust: unsupported draft") &&
+        text.includes("Answer status: Uncited answer") &&
+        text.includes("Evidence origin: local library")
+      )
+    })
+    expect(preview).toBeInTheDocument()
+  })
+
+  it("blocks answer-content export for failed and no-result searches", () => {
+    state.answer = null
+    state.answerTrustState = "failed_search"
+    state.answerEvidenceOrigin = null
+
+    const { rerender } = render(<ExportDialog open onClose={vi.fn()} />)
+
+    expect(
+      screen.getByText(/This search state cannot be exported as answer content/i)
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Export" })).toBeDisabled()
+
+    state.answerTrustState = "no_results"
+    rerender(<ExportDialog open onClose={vi.fn()} />)
+
+    expect(screen.getByRole("button", { name: "Export" })).toBeDisabled()
+    expect(
+      screen.getByText(/This search state cannot be exported as answer content/i)
+    ).toBeInTheDocument()
   })
 
   it("shows a user-visible error when Save to Notes fails", async () => {
@@ -573,6 +734,7 @@ describe("ExportDialog accessibility", () => {
       expect(messageOpenMock).toHaveBeenCalledWith(
         expect.objectContaining({
           type: "warning",
+          content: "Share link created, but copying it to the clipboard failed.",
         })
       )
     )

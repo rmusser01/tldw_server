@@ -9,7 +9,8 @@ import os
 import platform
 import shutil
 import signal
-import subprocess
+# Used without shell for managed process flags, exceptions, and cleanup.
+import subprocess  # nosec B404
 import sys
 import tempfile
 import time
@@ -81,6 +82,7 @@ class LlamafileHandler(BaseLLMHandler):
         # Corrected type hint for asyncio.subprocess.Process
         self._active_servers: dict[int, asyncio.subprocess.Process] = {}
         self._stream_tasks: dict[int, list[asyncio.Task]] = {}
+        self._lifecycle_lock = asyncio.Lock()
 
         # Apply environment overrides
         handler_utils.apply_env_overrides(self.config)
@@ -93,6 +95,24 @@ class LlamafileHandler(BaseLLMHandler):
         """Log defensively to avoid errors when sinks are closed during atexit."""
         handler_utils.safe_log(self.logger, level, msg, *args)
 
+    def _signal_managed_process_group(self, process: Any, sig: signal.Signals) -> int:
+        """Signal a process group only when it is owned by a real managed subprocess."""
+        if not isinstance(process, asyncio.subprocess.Process):
+            raise ProcessLookupError("Refusing to signal process group for non-asyncio process")
+
+        pid = getattr(process, "pid", None)
+        if not isinstance(pid, int) or pid <= 1:
+            raise ProcessLookupError(f"Refusing unsafe process group signal for PID {pid!r}")
+
+        pgid = os.getpgid(pid)
+        if pgid != pid:
+            raise PermissionError(f"Refusing to signal non-leader process group {pgid} for PID {pid}")
+        if pgid == os.getpgrp():
+            raise PermissionError("Refusing to signal current process group")
+
+        os.killpg(pgid, sig)
+        return pgid
+
     async def _terminate_process(self, process: asyncio.subprocess.Process) -> None:
         if process.returncode is not None:
             return
@@ -102,8 +122,7 @@ class LlamafileHandler(BaseLLMHandler):
                 process.terminate()
         else:
             try:
-                pgid = await asyncio.to_thread(os.getpgid, process.pid)
-                await asyncio.to_thread(os.killpg, pgid, signal.SIGTERM)
+                await asyncio.to_thread(self._signal_managed_process_group, process, signal.SIGTERM)
             except ProcessLookupError:
                 if hasattr(process, "terminate"):
                     process.terminate()
@@ -118,8 +137,7 @@ class LlamafileHandler(BaseLLMHandler):
                     process.kill()
             else:
                 try:
-                    pgid = await asyncio.to_thread(os.getpgid, process.pid)
-                    await asyncio.to_thread(os.killpg, pgid, signal.SIGKILL)
+                    await asyncio.to_thread(self._signal_managed_process_group, process, signal.SIGKILL)
                 except _LLAMAFILE_NONCRITICAL_EXCEPTIONS:
                     if hasattr(process, "kill"):
                         process.kill()
@@ -226,11 +244,21 @@ class LlamafileHandler(BaseLLMHandler):
     async def download_latest_llamafile_executable(self, force_download: bool = False) -> Path:
         """Downloads the latest llamafile binary if not present or if force_download is True."""
         output_path = self.llamafile_exe_path
+        expected_sha256 = str(getattr(self.config, "executable_sha256", "") or "").strip().lower()
         self.logger.info(f"Checking for llamafile executable at {output_path}...")
         if output_path.exists() and not force_download:
+            if expected_sha256 and not await asyncio.to_thread(verify_checksum, str(output_path), expected_sha256):
+                raise ModelDownloadError("Existing llamafile executable failed checksum verification.")
             self.logger.debug(f"{output_path.name} already exists. Skipping download.")
             await asyncio.to_thread(os.chmod, output_path, 0o755)  # Ensure executable
             return output_path
+
+        if not getattr(self.config, "allow_executable_auto_download", False):
+            raise ModelDownloadError(
+                "Llamafile executable auto-download is disabled. Configure a local executable or enable it explicitly."
+            )
+        if not expected_sha256:
+            raise ModelDownloadError("Llamafile executable auto-download requires executable_sha256.")
 
         repo = "Mozilla-Ocho/llamafile"
         latest_release_url = f"https://api.github.com/repos/{repo}/releases/latest"
@@ -328,7 +356,7 @@ class LlamafileHandler(BaseLLMHandler):
                     raise ModelDownloadError(f"No suitable llamafile asset found for tag {tag_name}.")
 
                 self.logger.info(
-                    f"Found asset: {chosen_asset_name}. Downloading Llamafile from {asset_url} to {output_path}...")
+                    f"Found asset: {chosen_asset_name}. Downloading Llamafile from {http_utils.redacted_url(asset_url)} to {output_path}...")
 
                 # Ensure the target directory exists
                 output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -343,6 +371,9 @@ class LlamafileHandler(BaseLLMHandler):
                         tmp_zip_path.unlink(missing_ok=True)
                 else:
                     await async_stream_download(asset_url, str(output_path))
+                if not await asyncio.to_thread(verify_checksum, str(output_path), expected_sha256):
+                    output_path.unlink(missing_ok=True)
+                    raise ModelDownloadError("Checksum verification failed for downloaded llamafile executable.")
                 await asyncio.to_thread(os.chmod, output_path, 0o755)
                 self.logger.info(f"Downloaded {output_path.name} successfully.")
                 return output_path
@@ -392,7 +423,7 @@ class LlamafileHandler(BaseLLMHandler):
                 return model_path
 
         self.models_dir.mkdir(parents=True, exist_ok=True)  # Ensure models dir exists
-        self.logger.info(f"Downloading model: {model_name} from {model_url} to {model_path}")
+        self.logger.info(f"Downloading model: {model_name} from {http_utils.redacted_url(model_url)} to {model_path}")
         try:
             from tldw_Server_API.app.core.Local_LLM.http_utils import async_stream_download
             await async_stream_download(model_url, str(model_path))
@@ -426,6 +457,10 @@ class LlamafileHandler(BaseLLMHandler):
 
     # --- Server Management ---
     async def start_server(self, model_filename: str, server_args: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        async with self._lifecycle_lock:
+            return await self._start_server_unlocked(model_filename, server_args=server_args)
+
+    async def _start_server_unlocked(self, model_filename: str, server_args: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         llamafile_exe = await self.download_latest_llamafile_executable()
         if not llamafile_exe or not llamafile_exe.exists():
             raise ServerError("Llamafile executable not found or could not be downloaded.")
@@ -604,6 +639,10 @@ class LlamafileHandler(BaseLLMHandler):
             raise ServerError(f"Exception starting llamafile: {e}") from e
 
     async def stop_server(self, port: Optional[int] = None, pid: Optional[int] = None) -> str:
+        async with self._lifecycle_lock:
+            return await self._stop_server_unlocked(port=port, pid=pid)
+
+    async def _stop_server_unlocked(self, port: Optional[int] = None, pid: Optional[int] = None) -> str:
         process_to_stop: Optional[asyncio.subprocess.Process] = None
         port_to_clear = None
 
@@ -614,24 +653,7 @@ class LlamafileHandler(BaseLLMHandler):
                     port_to_clear = p
                     break
             if not process_to_stop:
-                self.logger.warning(
-                    f"PID {pid} not in managed servers. Attempting to terminate externally (best effort).")
-                try:
-                    # This part is synchronous and for unmanaged processes
-                    target_pid = int(pid)
-                    if platform.system() == "Windows":
-                        subprocess.run(['taskkill', '/F', '/PID', str(target_pid)], check=True, capture_output=True)
-                    else:
-                        os.kill(target_pid, signal.SIGTERM)  # Can use os.killpg if it was started in a group
-                    return f"Attempted to send SIGTERM to unmanaged llamafile server with PID {pid}."
-                except ProcessLookupError:
-                    return f"No process found with PID {pid}."
-                except subprocess.CalledProcessError as e_taskkill:
-                    self.logger.exception(f"taskkill failed for PID {pid}: {e_taskkill.stderr.decode()}")
-                    return f"Failed to stop unmanaged PID {pid} with taskkill."
-                except Exception as e:
-                    self.logger.error(f"Error stopping unmanaged PID {pid}: {e}", exc_info=True)
-                    raise ServerError(f"Error stopping unmanaged PID {pid}: {e}") from e
+                return f"No managed llamafile server found with PID {pid}."
         elif port:
             if port in self._active_servers:
                 process_to_stop = self._active_servers[port]
@@ -649,62 +671,9 @@ class LlamafileHandler(BaseLLMHandler):
         try:
             # Check if still running using returncode
             if process_to_stop.returncode is None:
-                if platform.system() == "Windows":
-                    process_to_stop.terminate()
-                else:
-                    try:
-                        # Get process group ID (pgid) to terminate the entire group
-                        pgid = await asyncio.to_thread(os.getpgid, current_pid)
-                        await asyncio.to_thread(os.killpg, pgid, signal.SIGTERM)
-                        self.logger.info(f"Sent SIGTERM to process group {pgid} (leader PID: {current_pid}).")
-                    except ProcessLookupError:  # Process might have died just now
-                        self.logger.warning(
-                            f"Process {current_pid} not found during getpgid, likely already terminated.")
-                        # Fallback to terminating just the PID if getpgid fails for other reasons
-                        process_to_stop.terminate()
-                        self.logger.info(f"Sent SIGTERM to process PID {current_pid} (fallback).")
-
-                try:
-                    await asyncio.wait_for(process_to_stop.wait(), timeout=10)
-                    self.logger.info(
-                        f"Llamafile server PID {current_pid} terminated gracefully (return code: {process_to_stop.returncode}).")
-                except asyncio.TimeoutError:
-                    self.logger.warning(
-                        f"Llamafile server PID {current_pid} did not terminate gracefully after SIGTERM. Killing.")
-                    if platform.system() == "Windows":
-                        process_to_stop.kill()
-                    else:
-                        try:
-                            pgid = await asyncio.to_thread(os.getpgid, current_pid)
-                            await asyncio.to_thread(os.killpg, pgid, signal.SIGKILL)
-                            self.logger.info(f"Sent SIGKILL to process group {pgid} (leader PID: {current_pid}).")
-                        except ProcessLookupError:
-                            self.logger.warning(f"Process {current_pid} not found during getpgid for SIGKILL.")
-                            # Fallback: try direct SIGKILL to PID; if that fails, try process.kill() if available
-                            try:
-                                await asyncio.to_thread(os.kill, current_pid, signal.SIGKILL)
-                                self.logger.info(f"Sent SIGKILL to process PID {current_pid} (fallback).")
-                            except ProcessLookupError:
-                                self.logger.warning(
-                                    f"Process {current_pid} already exited when attempting SIGKILL fallback.")
-                            except _LLAMAFILE_NONCRITICAL_EXCEPTIONS as e_killpid:
-                                self.logger.debug(
-                                    f"os.kill fallback failed for PID {current_pid}: {e_killpid}; "
-                                    f"checking for process.kill() availability"
-                                )
-                                if hasattr(process_to_stop, "kill"):
-                                    try:
-                                        process_to_stop.kill()
-                                        self.logger.info(
-                                            f"Invoked process.kill() for PID {current_pid} (final fallback)."
-                                        )
-                                    except _LLAMAFILE_NONCRITICAL_EXCEPTIONS as e_pkill:
-                                        self.logger.warning(
-                                            f"process.kill() failed for PID {current_pid}: {e_pkill}")
-
-                    await process_to_stop.wait()  # Ensure it's reaped
-                    self.logger.info(
-                        f"Llamafile server PID {current_pid} killed (return code: {process_to_stop.returncode}).")
+                await self._terminate_process(process_to_stop)
+                self.logger.info(
+                    f"Llamafile server PID {current_pid} terminated (return code: {process_to_stop.returncode}).")
             else:
                 self.logger.info(
                     f"Llamafile server PID {current_pid} was already stopped (return code: {process_to_stop.returncode}).")
@@ -832,13 +801,13 @@ class LlamafileHandler(BaseLLMHandler):
                     else:
                         # For processes started with os.setsid, kill the process group
                         try:
-                            pgid = os.getpgid(pid)
-                            os.killpg(pgid, signal.SIGTERM)
+                            pgid = self._signal_managed_process_group(proc, signal.SIGTERM)
                             self._safe_log("debug", f"Sent SIGTERM to process group {pgid} (leader PID {pid}).")
                         except ProcessLookupError:
                             self._safe_log("warning",
                                 f"Process {pid} (or group) not found during SIGTERM, likely already terminated.")
-                            proc.terminate()
+                            if hasattr(proc, "terminate"):
+                                proc.terminate()
 
                     # Best-effort wait: try to reap using running event loop if available
                     try:
@@ -860,8 +829,7 @@ class LlamafileHandler(BaseLLMHandler):
                                     proc.kill()
                         else:
                             try:
-                                pgid = os.getpgid(pid)
-                                os.killpg(pgid, signal.SIGKILL)
+                                self._signal_managed_process_group(proc, signal.SIGKILL)
                             except _LLAMAFILE_NONCRITICAL_EXCEPTIONS:
                                 if hasattr(proc, "kill"):
                                     with contextlib.suppress(_LLAMAFILE_NONCRITICAL_EXCEPTIONS):

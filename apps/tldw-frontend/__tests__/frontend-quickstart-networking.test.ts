@@ -12,6 +12,16 @@ const validateNetworkingConfigPath = path.join(
   "validate-networking-config.mjs"
 )
 const makefilePath = path.join(repoRoot, "Makefile")
+const webuiComposePath = path.join(
+  repoRoot,
+  "Dockerfiles",
+  "docker-compose.webui.yml"
+)
+const singleUserComposePath = path.join(
+  repoRoot,
+  "Dockerfiles",
+  "docker-compose.single-user.yml"
+)
 
 const ORIGINAL_ENV = {
   NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
@@ -103,11 +113,28 @@ describe("frontend quickstart networking", () => {
     expect(rewrites).toEqual(
       expect.arrayContaining([
         {
+          source: "/api/v1/media",
+          destination: "http://app:8000/api/v1/media/",
+        },
+        {
+          source: "/api/:path*/",
+          destination: "http://app:8000/api/:path*/",
+        },
+        {
           source: "/api/:path*",
           destination: "http://app:8000/api/:path*",
         },
       ])
     )
+  })
+
+  it("preserves API trailing slashes so quickstart rewrites hit backend-canonical routes", async () => {
+    const nextConfig = await loadNextConfig({
+      NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "quickstart",
+      TLDW_INTERNAL_API_ORIGIN: "http://app:8000",
+    })
+
+    expect(nextConfig.skipTrailingSlashRedirect).toBe(true)
   })
 
   it("requires TLDW_INTERNAL_API_ORIGIN in quickstart mode", async () => {
@@ -207,6 +234,10 @@ describe("frontend quickstart networking", () => {
     expect(rewrites).toEqual(
       expect.arrayContaining([
         {
+          source: "/api/:path*/",
+          destination: "http://app:8000/api/:path*/",
+        },
+        {
           source: "/api/:path*",
           destination: "http://app:8000/api/:path*",
         },
@@ -221,5 +252,62 @@ describe("frontend quickstart networking", () => {
       "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE ?= quickstart"
     )
     expect(makefile).toContain("TLDW_INTERNAL_API_ORIGIN ?= http://app:8000")
+  })
+
+  it("keeps server single-user keys out of WebUI public compose interpolation", () => {
+    const makefile = readFileSync(makefilePath, "utf8")
+    const compose = readFileSync(webuiComposePath, "utf8")
+    const startTarget = makefile.match(
+      /start-docker-single:\n(?<recipe>[\s\S]*?)\n\nverify-docker-single:/
+    )
+
+    expect(startTarget?.groups?.recipe).toBeTruthy()
+    expect(startTarget?.groups?.recipe).not.toMatch(/grep '\^SINGLE_USER_API_KEY='/)
+    expect(compose).toContain("NEXT_PUBLIC_X_API_KEY: ${NEXT_PUBLIC_X_API_KEY:-}")
+    expect(compose).toContain("NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY:-}")
+    expect(compose).not.toContain("NEXT_PUBLIC_X_API_KEY:-${SINGLE_USER_API_KEY")
+    expect(makefile).toContain(
+      "docker compose --env-file \"$(TLDW_ENV_FILE)\" -f \"$(DOCKER_SINGLE_COMPOSE)\" -f \"$(DOCKER_WEBUI_COMPOSE)\""
+    )
+  })
+
+  it("keeps the resolved WebUI quickstart key out of echoed Make output", () => {
+    const makefile = readFileSync(makefilePath, "utf8")
+    const startTarget = makefile.match(
+      /start-docker-single:\n(?<recipe>[\s\S]*?)\n\nverify-docker-single:/
+    )
+
+    expect(startTarget?.groups?.recipe).toBeTruthy()
+    expect(startTarget?.groups?.recipe).not.toContain("grep '^SINGLE_USER_API_KEY='")
+    expect(startTarget?.groups?.recipe).not.toContain("cut -d= -f2-")
+    expect(startTarget?.groups?.recipe).not.toContain(
+      "NEXT_PUBLIC_X_API_KEY=\"$$(grep"
+    )
+  })
+
+  it("passes runtime auth env to the WebUI container without changing the loopback port binding", () => {
+    const compose = readFileSync(webuiComposePath, "utf8")
+
+    expect(compose).toContain("- AUTH_MODE=${AUTH_MODE:-single_user}")
+    expect(compose).toContain(
+      "- SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}"
+    )
+    expect(compose).toContain(
+      "- TLDW_WEBUI_EXPOSE_RUNTIME_AUTH=${TLDW_WEBUI_EXPOSE_RUNTIME_AUTH:-0}"
+    )
+    expect(compose).toContain('"127.0.0.1:8080:3000"')
+    expect(compose).toContain(
+      "- TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN:-http://app:8000}"
+    )
+  })
+
+  it("enables remote setup writes for the Docker single-user app service", () => {
+    const compose = readFileSync(singleUserComposePath, "utf8")
+
+    expect(compose).toContain("- TLDW_SETUP_ALLOW_REMOTE=${TLDW_SETUP_ALLOW_REMOTE:-1}")
+    expect(compose).toContain("- AUTH_MODE=${AUTH_MODE:-single_user}")
+    expect(compose).toContain(
+      "- SINGLE_USER_API_KEY=${SINGLE_USER_API_KEY:-change-me}"
+    )
   })
 })

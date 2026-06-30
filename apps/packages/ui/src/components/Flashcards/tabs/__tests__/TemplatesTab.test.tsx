@@ -143,6 +143,21 @@ describe("TemplatesTab", () => {
     expect(screen.getByRole("button", { name: "Create template" })).toBeInTheDocument()
   })
 
+  it("renders template load errors with the design-system alert", () => {
+    vi.mocked(useFlashcardTemplatesQuery).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error("Network offline")
+    } as any)
+
+    render(<TemplatesTab />)
+
+    const banner = screen.getByText("Could not load templates.").closest("[role='alert']")
+    expect(banner).toHaveAttribute("data-ds-component", "Alert")
+    expect(banner).toHaveTextContent("Could not load templates.")
+    expect(banner).toHaveTextContent("Network offline")
+  })
+
   it("lists existing templates and opens the selected template in the editor", () => {
     vi.mocked(useFlashcardTemplatesQuery).mockReturnValue({
       data: {

@@ -12,12 +12,12 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.Collections.reading_import_jobs import (
     READING_IMPORT_DOMAIN,
     READING_IMPORT_JOB_TYPE,
-    ReadingImportJobError,
     handle_reading_import_job,
     reading_import_queue,
     resolve_reading_import_file,
     stage_reading_import_file,
 )
+import tldw_Server_API.app.core.Collections.reading_import_jobs as reading_import_jobs_module
 from tldw_Server_API.app.core.Collections.reading_importers import (
     parse_instapaper_export,
     parse_pocket_export,
@@ -67,6 +67,17 @@ def test_parse_instapaper_export():
     assert item.notes == "Note A"
 
 
+def test_reading_import_max_bytes_invalid_env_uses_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Invalid READING_IMPORT_MAX_BYTES falls back without import-time failure."""
+    monkeypatch.setenv("READING_IMPORT_MAX_BYTES", "not-an-int")
+    reloaded = importlib.reload(reading_import_jobs_module)
+    try:
+        assert reloaded.MAX_READING_IMPORT_BYTES == 10 * 1024 * 1024
+    finally:
+        monkeypatch.delenv("READING_IMPORT_MAX_BYTES", raising=False)
+        importlib.reload(reading_import_jobs_module)
+
+
 @pytest.mark.usefixtures("client_with_user")
 def test_stage_and_resolve_import_file():
     path = stage_reading_import_file(
@@ -84,8 +95,8 @@ def test_stage_and_resolve_import_file():
 
 @pytest.mark.usefixtures("client_with_user")
 def test_resolve_import_file_rejects_invalid_token():
-    with pytest.raises(ReadingImportJobError):
-        resolve_reading_import_file(222, "../evil.json")
+    with pytest.raises(reading_import_jobs_module.ReadingImportJobError):
+        reading_import_jobs_module.resolve_reading_import_file(222, "../evil.json")
 
 
 @pytest.fixture()

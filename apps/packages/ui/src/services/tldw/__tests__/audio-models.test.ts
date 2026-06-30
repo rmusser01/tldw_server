@@ -39,6 +39,18 @@ describe("fetchTldwTtsModels", () => {
     expect(ids).toContain("KittenML/kitten-tts-mini-0.8")
   })
 
+  it("includes Chatterbox family variants in the fallback catalog", async () => {
+    const { fetchTldwTtsModels } = await import("../audio-models")
+
+    const models = await fetchTldwTtsModels()
+    const ids = models.map((entry) => entry.id)
+
+    expect(ids).toContain("chatterbox")
+    expect(ids).toContain("chatterbox-emotion")
+    expect(ids).toContain("chatterbox-multilingual")
+    expect(ids).toContain("chatterbox-turbo")
+  })
+
   it("normalizes OpenAPI description lists before returning models", async () => {
     mocks.getOpenAPISpec.mockResolvedValue({
       components: {

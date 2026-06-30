@@ -202,6 +202,9 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
     expect(await screen.findByTestId("notes-shortcuts-modal")).toHaveTextContent(
       "Ctrl/Cmd + S"
     )
+    expect(screen.getByTestId("notes-shortcuts-modal")).toHaveTextContent(
+      "Alt + Shift + D"
+    )
   })
 
   it("ignores '?' while typing in the editor and opens help from global context", async () => {

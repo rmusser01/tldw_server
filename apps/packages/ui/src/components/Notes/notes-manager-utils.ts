@@ -239,6 +239,26 @@ export const normalizeGraphNoteId = (rawId: string | number | null | undefined):
   return text
 }
 
+export const getNotesGraphEdgeLabel = (rawType: string | null | undefined): string => {
+  switch (String(rawType || '').toLowerCase()) {
+    case 'manual':
+      return 'Manual link'
+    case 'wikilink':
+      return 'Note link'
+    case 'backlink':
+      return 'Backlink'
+    case 'tag_membership':
+      return 'Tag'
+    case 'source_membership':
+      return 'Source'
+    default:
+      return 'Connection'
+  }
+}
+
+export const toSafeTestId = (value: string | number | null | undefined): string =>
+  String(value ?? 'unknown').replace(/[^a-z0-9_-]/gi, '_')
+
 export const parseSourceNodeId = (
   rawId: string | number | null | undefined
 ): { source: string; externalRef: string | null } | null => {
@@ -254,6 +274,64 @@ export const parseSourceNodeId = (
     source,
     externalRef: externalRefRaw.length > 0 ? externalRefRaw : null
   }
+}
+
+export const formatGraphEdgeTypeLabel = (edgeType: string | null | undefined): string => {
+  switch (String(edgeType || '').toLowerCase()) {
+    case 'manual':
+      return 'Manual link'
+    case 'wikilink':
+      return 'Note link'
+    case 'backlink':
+      return 'Backlink'
+    case 'tag_membership':
+      return 'Tag'
+    case 'source_membership':
+      return 'Source'
+    default:
+      return 'Connection'
+  }
+}
+
+const SOURCE_LABEL_BY_TYPE: Record<string, string> = {
+  web: 'Web source',
+  webpage: 'Web source',
+  browser: 'Web source',
+  clipper: 'Captured source',
+  yt: 'YouTube source',
+  youtube: 'YouTube source',
+  media: 'Media source'
+}
+
+export const formatSourceNodeLabel = (
+  sourceId: string | number | null | undefined,
+  fallbackLabel?: string | null
+): string => {
+  const parsed = parseSourceNodeId(sourceId)
+  if (!parsed) {
+    return String(fallbackLabel || sourceId || 'Linked source')
+  }
+  const trimmedFallback = String(fallbackLabel || '').trim()
+  const rawSourceId = String(sourceId || '').trim()
+  const externalRef = parsed.externalRef || ''
+  const rawFallbackValues = new Set(
+    [
+      rawSourceId,
+      externalRef,
+      `${parsed.source}:${externalRef}`,
+      `${parsed.source}: ${externalRef}`
+    ]
+      .filter(Boolean)
+      .map((value) => value.toLowerCase())
+  )
+  if (trimmedFallback && !rawFallbackValues.has(trimmedFallback.toLowerCase())) {
+    return trimmedFallback
+  }
+  const sourceType = parsed.source.toLowerCase()
+  const sourceLabel =
+    SOURCE_LABEL_BY_TYPE[sourceType] ||
+    `${parsed.source.charAt(0).toUpperCase()}${parsed.source.slice(1)} source`
+  return parsed.externalRef ? `${sourceLabel}: ${parsed.externalRef}` : sourceLabel
 }
 
 // 120px offset accounts for page header and padding
@@ -320,6 +398,10 @@ export type SaveNoteOptions = {
 }
 
 export type SaveIndicatorState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error'
+export type SaveRecoveryNotice = {
+  kind: 'error' | 'conflict'
+  message: string
+}
 export type NotesEditorMode = 'edit' | 'split' | 'preview'
 export type NotesInputMode = 'markdown' | 'wysiwyg'
 export type NotesSortOption = 'modified_desc' | 'created_desc' | 'title_asc' | 'title_desc'
@@ -437,7 +519,7 @@ export type ExportProgressState = {
   fetchedPages: number
   failedBatches: number
 }
-export type NotesListViewMode = 'list' | 'timeline' | 'moodboard'
+export type NotesListViewMode = 'list' | 'timeline' | 'inbox' | 'moodboard'
 export type MoodboardSummary = {
   id: number
   name: string

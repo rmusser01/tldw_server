@@ -1,10 +1,20 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { ConnectionPhase } from "@/types/connection"
+import { getDesignSystemState } from "@/design-system"
+import { ConnectionPhase, type ConnectionState } from "@/types/connection"
 import { WorkspaceStatusBar } from "../WorkspaceStatusBar"
 
-const connectionStoreState = {
+const registryLabels = vi.hoisted(() => ({
+  degraded: "Registry Degraded"
+}))
+
+type MockConnectionStoreState = {
+  state: ConnectionState
+  checkOnce: ReturnType<typeof vi.fn>
+}
+
+const connectionStoreState: MockConnectionStoreState = {
   state: {
     phase: ConnectionPhase.CONNECTED,
     serverUrl: "http://127.0.0.1:8000",
@@ -24,7 +34,7 @@ const connectionStoreState = {
     userPersona: null,
     lastConfigUpdatedAt: null,
     checksSinceConfigChange: 0,
-  },
+  } as ConnectionState,
   checkOnce: vi.fn(),
 }
 
@@ -50,6 +60,24 @@ vi.mock("@/store/connection", () => ({
     selector: (state: typeof connectionStoreState) => unknown
   ) => selector(connectionStoreState),
 }))
+
+vi.mock("@/design-system", async (importActual) => {
+  const actual = await importActual<typeof import("@/design-system")>()
+
+  return {
+    ...actual,
+    getDesignSystemState: vi.fn(
+      (key: Parameters<typeof actual.getDesignSystemState>[0]) => {
+        const state = actual.getDesignSystemState(key)
+
+        return {
+          ...state,
+          label: key === "degraded" ? registryLabels.degraded : state.label
+        }
+      }
+    )
+  }
+})
 
 describe("WorkspaceStatusBar", () => {
   beforeEach(() => {
@@ -89,7 +117,7 @@ describe("WorkspaceStatusBar", () => {
   it("shows retry for authentication errors", () => {
     connectionStoreState.state.phase = ConnectionPhase.ERROR
     connectionStoreState.state.isConnected = false
-    connectionStoreState.state.errorKind = "error_auth"
+    connectionStoreState.state.errorKind = "auth"
 
     render(<WorkspaceStatusBar />)
 
@@ -104,5 +132,61 @@ describe("WorkspaceStatusBar", () => {
     render(<WorkspaceStatusBar />)
 
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument()
+  })
+
+  it("uses the design-system registry label for degraded connection status", () => {
+    connectionStoreState.state.errorKind = "partial"
+
+    render(<WorkspaceStatusBar />)
+
+    expect(screen.getByTestId("workspace-statusbar-connection")).toHaveTextContent(
+      registryLabels.degraded
+    )
+    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("degraded")
+  })
+
+  it("prioritizes degraded workspace context over a healthy backend connection", () => {
+    render(
+      <WorkspaceStatusBar
+        workspaceContextStatus={{
+          label: "Workspace unavailable",
+          detail: "Server context unavailable",
+          severity: "warning"
+        }}
+      />
+    )
+
+    const status = screen.getByTestId("workspace-statusbar-connection")
+    expect(status).toHaveTextContent("Workspace unavailable")
+    expect(status).not.toHaveTextContent("Connected")
+  })
+
+  it("renders an actionable status details control when provided", () => {
+    const onClick = vi.fn()
+
+    render(
+      <WorkspaceStatusBar
+        statusMessages={["Legacy workspace data retained"]}
+        statusAction={{
+          label: "Details",
+          ariaLabel: "Review migration recovery details",
+          onClick
+        }}
+      />
+    )
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review migration recovery details" })
+    )
+
+    expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("labels the status region and supports compact mobile density", () => {
+    render(<WorkspaceStatusBar compact />)
+
+    const statusBar = screen.getByTestId("workspace-status-bar")
+    expect(statusBar).toHaveAccessibleName("Workspace status")
+    expect(statusBar).toHaveClass("min-h-6", "px-2")
   })
 })
