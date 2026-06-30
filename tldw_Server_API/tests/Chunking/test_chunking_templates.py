@@ -7,7 +7,6 @@ Tests database operations, API endpoints, and template application.
 import json
 import os
 import pytest
-import tempfile
 from pathlib import Path
 from typing import Dict, Any, List
 from unittest.mock import patch, MagicMock
@@ -37,10 +36,9 @@ from tldw_Server_API.app.api.v1.schemas.chunking_templates_schemas import (
 
 # Fixtures
 @pytest.fixture
-def temp_db():
+def temp_db(tmp_path):
     """Create a temporary database for testing with proper cleanup."""
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
-        db_path = tmp.name
+    db_path = str(tmp_path / "chunking_templates.db")
 
     # Initialize database with schema (including ChunkingTemplates table)
     db = MediaDatabase(db_path=db_path, client_id="test_client")

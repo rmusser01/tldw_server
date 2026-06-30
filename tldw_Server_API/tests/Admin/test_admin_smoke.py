@@ -55,6 +55,14 @@ def _cleanup_admin_smoke_state() -> None:
         close_all_kanban_db_instances()
         shutdown_kanban_executor(wait=True)
     with suppress(Exception):
+        from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
+            close_all_chacha_db_instances,
+            shutdown_chacha_executor,
+        )
+
+        shutdown_chacha_executor(wait=True)
+        close_all_chacha_db_instances()
+    with suppress(Exception):
         from tldw_Server_API.app.core.DB_Management.backends.factory import close_all_backends
 
         close_all_backends()
