@@ -90,7 +90,7 @@ bun run dev -- -p 8080
 # npm run dev -- -p 8080
 ```
 
-Open http://localhost:8080.
+Open http://127.0.0.1:8080.
 
 ## Verify
 
