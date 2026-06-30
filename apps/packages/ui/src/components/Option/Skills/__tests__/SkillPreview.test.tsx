@@ -40,6 +40,7 @@ const renderPreview = (props: Partial<React.ComponentProps<typeof SkillPreview>>
     <QueryClientProvider client={queryClient}>
       <SkillPreview
         skillName={props.skillName ?? "summarize"}
+        runtime={props.runtime}
         onClose={props.onClose ?? vi.fn()}
       />
     </QueryClientProvider>
@@ -103,6 +104,57 @@ describe("SkillPreview test-run semantics", () => {
     expect(within(dialog).getByRole("button", { name: "Render prompt only" })).toBeInTheDocument()
     expect(within(dialog).getByRole("button", { name: "Run test" })).toBeInTheDocument()
     expect(within(dialog).queryByRole("button", { name: "Preview" })).not.toBeInTheDocument()
+  })
+
+  it("shows selected runtime impact before running a skill", () => {
+    renderPreview({
+      runtime: {
+        execution_mode: "fork",
+        test_run_may_call_model: true,
+        declares_tools: true,
+        declared_tool_count: 2,
+        model_override: "gpt-4o",
+        auto_invocation_enabled: false
+      }
+    })
+
+    const dialog = screen.getByRole("dialog", { name: "Test run" })
+    expect(within(dialog).getByText("Runtime impact")).toBeInTheDocument()
+    expect(within(dialog).getByText("Fork")).toBeInTheDocument()
+    expect(within(dialog).getByText("Test may call model")).toBeInTheDocument()
+    expect(within(dialog).getByText("2 tools declared")).toBeInTheDocument()
+    expect(within(dialog).getByText("Model override")).toBeInTheDocument()
+    expect(within(dialog).getByText("Auto invocation off")).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(
+        "Render prompt only does not invoke fork, model, or tool execution."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("keeps fork execution disclosure separate from model-call allowance", () => {
+    renderPreview({
+      runtime: {
+        execution_mode: "fork",
+        test_run_may_call_model: false,
+        declares_tools: false,
+        declared_tool_count: 0,
+        model_override: null,
+        auto_invocation_enabled: true
+      }
+    })
+
+    const dialog = screen.getByRole("dialog", { name: "Test run" })
+    expect(within(dialog).getByText("Fork")).toBeInTheDocument()
+    expect(within(dialog).getByText("Prompt only by default")).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(
+        "Run test uses fork execution for this skill; model calls are disabled."
+      )
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).queryByText("Run test uses inline prompt execution for this skill.")
+    ).not.toBeInTheDocument()
   })
 
   it("runs the skill with supplied arguments from the explicit test action", async () => {

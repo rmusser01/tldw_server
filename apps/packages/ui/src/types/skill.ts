@@ -7,6 +7,15 @@ export type SkillContext = "inline" | "fork"
 export type SkillListSort = "name" | "context" | "created_at" | "last_modified"
 export type SkillListOrder = "asc" | "desc"
 
+export interface SkillRuntimeMetadata {
+  execution_mode: SkillContext
+  test_run_may_call_model: boolean
+  declares_tools: boolean
+  declared_tool_count: number
+  model_override: string | null
+  auto_invocation_enabled: boolean
+}
+
 export interface SkillsListParams {
   q?: string
   includeHidden?: boolean
@@ -27,7 +36,10 @@ export interface SkillSummary {
   argument_hint: string | null
   user_invocable: boolean
   disable_model_invocation: boolean
+  allowed_tools?: string[] | null
+  model?: string | null
   context: SkillContext
+  runtime?: SkillRuntimeMetadata | null
   version: number
 }
 
@@ -41,6 +53,7 @@ export interface SkillResponse {
   allowed_tools: string[] | null
   model: string | null
   context: SkillContext
+  runtime?: SkillRuntimeMetadata | null
   content: string
   raw_content?: string | null
   supporting_files: Record<string, string> | null

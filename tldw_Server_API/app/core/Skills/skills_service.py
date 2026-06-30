@@ -52,6 +52,7 @@ from tldw_Server_API.app.core.Skills.exceptions import (
     SkillStorageError,
     SkillValidationError,
 )
+from tldw_Server_API.app.core.Skills.runtime_metadata import build_skill_runtime_metadata
 from tldw_Server_API.app.core.Skills.skill_parser import SkillFrontmatter, SkillParser
 
 # Skill name validation pattern (same as in schemas)
@@ -1671,7 +1672,15 @@ class SkillsService:
                     "argument_hint": s.get("argument_hint"),
                     "user_invocable": bool(s.get("user_invocable")),
                     "disable_model_invocation": bool(s.get("disable_model_invocation")),
-                    "context": s.get("context", "inline"),
+                    "allowed_tools": s.get("allowed_tools"),
+                    "model": s.get("model"),
+                    "context": s.get("context") or "inline",
+                    "runtime": build_skill_runtime_metadata(
+                        context=s.get("context") or "inline",
+                        allowed_tools=s.get("allowed_tools"),
+                        model=s.get("model"),
+                        disable_model_invocation=bool(s.get("disable_model_invocation")),
+                    ),
                     "version": int(s.get("version") or 1),
                 }
                 for s in skills

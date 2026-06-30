@@ -66,7 +66,7 @@ vi.mock("../SkillDrawer", () => ({
 }))
 
 vi.mock("../SkillPreview", () => ({
-  SkillPreview: (props: { skillName: string | null }) => {
+  SkillPreview: (props: { skillName: string | null; runtime?: unknown }) => {
     skillPreviewMock(props)
     return props.skillName ? (
       <div data-testid="skill-preview-open">Test run: {props.skillName}</div>
@@ -1295,6 +1295,163 @@ describe("SkillsManager imports", () => {
       "argument_hint"
     )
   }, 10000)
+
+  it("lets power users show runtime declarations in the table", async () => {
+    const runtime = {
+      execution_mode: "fork" as const,
+      test_run_may_call_model: true,
+      declares_tools: true,
+      declared_tool_count: 2,
+      model_override: "gpt-4o",
+      auto_invocation_enabled: false
+    }
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [
+        {
+          ...makeSkill(5),
+          name: "runtime-skill",
+          context: "fork" as const,
+          allowed_tools: ["Read", "Bash(git *)"],
+          model: "gpt-4o",
+          runtime
+        }
+      ],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+
+    renderManager()
+
+    expect(await screen.findByText("runtime-skill")).toBeInTheDocument()
+    expect(screen.queryByRole("columnheader", { name: "Runtime" })).not.toBeInTheDocument()
+
+    fireEvent.click(await getColumnVisibilityOption("Runtime"))
+
+    expect(await screen.findByRole("columnheader", { name: "Runtime" })).toBeInTheDocument()
+    const row = screen.getByText("runtime-skill").closest("tr")
+    expect(row).not.toBeNull()
+    expect(within(row as HTMLTableRowElement).getByText("Fork")).toBeInTheDocument()
+    expect(within(row as HTMLTableRowElement).getByText("Test may call model")).toBeInTheDocument()
+    expect(within(row as HTMLTableRowElement).getByText("2 tools declared")).toBeInTheDocument()
+    expect(within(row as HTMLTableRowElement).getByText("Model override")).toBeInTheDocument()
+    expect(within(row as HTMLTableRowElement).getByText("Auto invocation off")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Test run runtime-skill" }))
+    expect(skillPreviewMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        skillName: "runtime-skill",
+        runtime
+      })
+    )
+  }, 10000)
+
+  it("falls back when runtime declarations are missing from legacy list responses", async () => {
+    window.localStorage.setItem(
+      "tldw:skills-manager:table-preferences:v1",
+      JSON.stringify({
+        density: "comfortable",
+        visibleColumns: ["description", "context", "runtime"]
+      })
+    )
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [
+        {
+          name: "legacy-runtime",
+          description: "Legacy response",
+          argument_hint: null,
+          user_invocable: true,
+          disable_model_invocation: false,
+          version: 1
+        } as any
+      ],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+
+    renderManager()
+
+    expect(await screen.findByText("legacy-runtime")).toBeInTheDocument()
+    expect(screen.getByRole("columnheader", { name: "Runtime" })).toBeInTheDocument()
+    const row = screen.getByText("legacy-runtime").closest("tr")
+    expect(row).not.toBeNull()
+    expect(within(row as HTMLTableRowElement).getByText("Inline")).toBeInTheDocument()
+    expect(
+      within(row as HTMLTableRowElement).getByText("Prompt only by default")
+    ).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Test run legacy-runtime" }))
+    expect(skillPreviewMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        skillName: "legacy-runtime",
+        runtime: {
+          execution_mode: "inline",
+          test_run_may_call_model: false,
+          declares_tools: false,
+          declared_tool_count: 0,
+          model_override: null,
+          auto_invocation_enabled: true
+        }
+      })
+    )
+  })
+
+  it("preserves an explicit runtime execution mode before falling back to skill context", async () => {
+    window.localStorage.setItem(
+      "tldw:skills-manager:table-preferences:v1",
+      JSON.stringify({
+        density: "comfortable",
+        visibleColumns: ["description", "context", "runtime"]
+      })
+    )
+    const runtime = {
+      execution_mode: "inline" as const,
+      test_run_may_call_model: false,
+      declares_tools: false,
+      declared_tool_count: 0,
+      model_override: null,
+      auto_invocation_enabled: true
+    }
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [
+        {
+          name: "explicit-inline-runtime",
+          description: "Runtime contract wins",
+          argument_hint: null,
+          user_invocable: true,
+          disable_model_invocation: false,
+          allowed_tools: null,
+          model: null,
+          context: "fork" as const,
+          runtime,
+          version: 1
+        }
+      ],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+
+    renderManager()
+
+    expect(await screen.findByText("explicit-inline-runtime")).toBeInTheDocument()
+    const row = screen.getByText("explicit-inline-runtime").closest("tr")
+    expect(row).not.toBeNull()
+    expect(within(row as HTMLTableRowElement).getByText("Inline")).toBeInTheDocument()
+    expect(within(row as HTMLTableRowElement).queryByText("Fork")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Test run explicit-inline-runtime" }))
+    expect(skillPreviewMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        skillName: "explicit-inline-runtime",
+        runtime
+      })
+    )
+  })
 
   it("restores persisted density and column visibility preferences", async () => {
     window.localStorage.setItem(

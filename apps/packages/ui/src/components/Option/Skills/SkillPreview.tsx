@@ -3,10 +3,11 @@ import { useMutation } from "@tanstack/react-query"
 import { Alert, Button, Input, Modal, Tag } from "antd"
 import { useTranslation } from "react-i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
-import type { SkillExecutionResult } from "@/types/skill"
+import type { SkillExecutionResult, SkillRuntimeMetadata } from "@/types/skill"
 
 interface SkillPreviewProps {
   skillName: string | null
+  runtime?: SkillRuntimeMetadata | null
   onClose: () => void
 }
 
@@ -14,6 +15,7 @@ type SkillRunMode = "dry-run" | "test-run"
 
 export const SkillPreview: React.FC<SkillPreviewProps> = ({
   skillName,
+  runtime,
   onClose
 }) => {
   const { t } = useTranslation(["option", "common"])
@@ -58,6 +60,32 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
     executeMutation.error instanceof Error
       ? executeMutation.error.message
       : t("option:skills.testRunError", { defaultValue: "Execution failed" })
+  const runtimeToolLabel = runtime
+    ? t("option:skills.runtimeDeclaredTools", {
+        defaultValue: `${runtime.declared_tool_count} tools declared`,
+        count: runtime.declared_tool_count
+      })
+    : ""
+  const testRunDisclosure = runtime
+    ? runtime.execution_mode === "fork"
+      ? runtime.test_run_may_call_model
+        ? t("option:skills.testRunForkMayCallModelDisclosure", {
+            defaultValue:
+              "Run test uses fork execution and may call the configured model for this skill."
+          })
+        : t("option:skills.testRunForkPromptOnlyDisclosure", {
+            defaultValue:
+              "Run test uses fork execution for this skill; model calls are disabled."
+          })
+      : runtime.test_run_may_call_model
+        ? t("option:skills.testRunInlineMayCallModelDisclosure", {
+            defaultValue:
+              "Run test uses inline prompt execution and may call the configured model for this skill."
+          })
+        : t("option:skills.testRunInlineDisclosure", {
+            defaultValue: "Run test uses inline prompt execution for this skill."
+          })
+    : ""
 
   return (
     <Modal
@@ -89,12 +117,68 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
           />
         </div>
 
-        <p className="m-0 text-sm text-text-muted">
-          {t("option:skills.testRunDisclosure", {
-            defaultValue:
-              "This renders the skill with your arguments. Fork-mode skills may call the configured model and allowed tools."
-          })}
-        </p>
+        {runtime ? (
+          <div className="rounded-md border border-border bg-surface p-3">
+            <h3 className="m-0 text-sm font-semibold text-text">
+              {t("option:skills.runtimeImpactTitle", { defaultValue: "Runtime impact" })}
+            </h3>
+            <div className="mt-2 flex flex-wrap gap-1">
+              <Tag color={runtime.execution_mode === "fork" ? "blue" : "green"}>
+                {runtime.execution_mode === "fork"
+                  ? t("option:skills.runtimeFork", { defaultValue: "Fork" })
+                  : t("option:skills.runtimeInline", { defaultValue: "Inline" })}
+              </Tag>
+              <Tag color={runtime.test_run_may_call_model ? "orange" : "default"}>
+                {runtime.test_run_may_call_model
+                  ? t("option:skills.runtimeMayCallModel", { defaultValue: "Test may call model" })
+                  : t("option:skills.runtimePromptOnly", { defaultValue: "Prompt only by default" })}
+              </Tag>
+              {runtime.declares_tools && (
+                <Tag color="geekblue">{runtimeToolLabel}</Tag>
+              )}
+              {runtime.model_override && (
+                <Tag>
+                  {t("option:skills.runtimeModelOverride", {
+                    defaultValue: "Model override"
+                  })}
+                </Tag>
+              )}
+              {!runtime.auto_invocation_enabled && (
+                <Tag color="warning">
+                  {t("option:skills.runtimeAutoOff", {
+                    defaultValue: "Auto invocation off"
+                  })}
+                </Tag>
+              )}
+            </div>
+            <div className="mt-2 space-y-1 text-sm text-text-muted">
+              <p className="m-0">
+                {t("option:skills.renderOnlyDisclosure", {
+                  defaultValue:
+                    "Render prompt only does not invoke fork, model, or tool execution."
+                })}
+              </p>
+              <p className="m-0">
+                {testRunDisclosure}
+              </p>
+              {runtime.declares_tools && (
+                <p className="m-0">
+                  {t("option:skills.declaredToolsDisclosure", {
+                    defaultValue:
+                      "Declared tools are declarations, not availability guarantees."
+                  })}
+                </p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="m-0 text-sm text-text-muted">
+            {t("option:skills.testRunDisclosure", {
+              defaultValue:
+                "This renders the skill with your arguments. Fork-mode skills may call the configured model and allowed tools."
+            })}
+          </p>
+        )}
 
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button

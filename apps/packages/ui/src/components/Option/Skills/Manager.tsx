@@ -42,6 +42,7 @@ import type {
   SkillImportPreviewResponse,
   SkillListOrder,
   SkillListSort,
+  SkillRuntimeMetadata,
   SkillSummary,
   SkillResponse,
   SkillsListResponse
@@ -94,6 +95,7 @@ type SkillOptionalColumnKey =
   | "argument_hint"
   | "user_invocable"
   | "model_invocation"
+  | "runtime"
 
 interface SkillSortState {
   field?: SkillListSort
@@ -115,7 +117,8 @@ const SKILL_OPTIONAL_COLUMN_KEYS: SkillOptionalColumnKey[] = [
   "context",
   "argument_hint",
   "user_invocable",
-  "model_invocation"
+  "model_invocation",
+  "runtime"
 ]
 
 const getResponseSkillName = (result: unknown): string | undefined => {
@@ -224,6 +227,27 @@ const saveSkillsTablePreferences = (preferences: SkillsTablePreferences) => {
     )
   } catch {
     // Preference persistence is best-effort; rendering must not depend on storage.
+  }
+}
+
+const getSkillRuntimeMetadata = (skill: SkillSummary | null | undefined): SkillRuntimeMetadata | null => {
+  if (!skill) return null
+
+  const declaredToolCount = Array.isArray(skill.allowed_tools) ? skill.allowed_tools.length : 0
+  const runtime = skill.runtime
+  const fallbackContext = skill.context === "fork" ? "fork" : "inline"
+  const runtimeExecutionMode = runtime?.execution_mode
+  const executionMode = runtimeExecutionMode === "fork" || runtimeExecutionMode === "inline"
+    ? runtimeExecutionMode
+    : fallbackContext
+
+  return {
+    execution_mode: executionMode,
+    test_run_may_call_model: runtime?.test_run_may_call_model ?? executionMode === "fork",
+    declares_tools: runtime?.declares_tools ?? declaredToolCount > 0,
+    declared_tool_count: runtime?.declared_tool_count ?? declaredToolCount,
+    model_override: runtime?.model_override ?? skill.model ?? null,
+    auto_invocation_enabled: runtime?.auto_invocation_enabled ?? !skill.disable_model_invocation
   }
 }
 
@@ -352,6 +376,14 @@ export const SkillsManager: React.FC = () => {
     const selectedNames = new Set(selectedSkillNames)
     return currentSkills.filter((skill) => selectedNames.has(skill.name))
   }, [currentSkills, selectedSkillNames])
+  const previewSkillSummary = React.useMemo(
+    () => currentSkills.find((skill) => skill.name === previewSkill) ?? null,
+    [currentSkills, previewSkill]
+  )
+  const previewRuntime = React.useMemo(
+    () => getSkillRuntimeMetadata(previewSkillSummary),
+    [previewSkillSummary]
+  )
   const selectedSkillCount = selectedSkillNames.length
   const totalSkills = data?.total ?? 0
   const hasSearch = searchQuery.length > 0
@@ -887,7 +919,8 @@ export const SkillsManager: React.FC = () => {
     context: t("option:skills.colContext", { defaultValue: "Mode" }),
     argument_hint: t("option:skills.colArgumentHint", { defaultValue: "Argument hint" }),
     user_invocable: t("option:skills.colVisibility", { defaultValue: "Visibility" }),
-    model_invocation: t("option:skills.colModelUse", { defaultValue: "Model use" })
+    model_invocation: t("option:skills.colModelUse", { defaultValue: "Model use" }),
+    runtime: t("option:skills.colRuntime", { defaultValue: "Runtime" })
   }
 
   const columnVisibilityMenuItems: MenuProps["items"] = SKILL_OPTIONAL_COLUMN_KEYS.map(
@@ -974,6 +1007,54 @@ export const SkillsManager: React.FC = () => {
                 : t("option:skills.modelAllowed", { defaultValue: "Model allowed" })}
             </Tag>
           )
+        }]
+      : []),
+    ...(isOptionalColumnVisible("runtime")
+      ? [{
+          title: optionalColumnLabels.runtime,
+          key: "runtime",
+          width: 260,
+          render: (_: unknown, record: SkillSummary) => {
+            const runtime = getSkillRuntimeMetadata(record)
+            if (!runtime) return "-"
+
+            const toolLabel = t("option:skills.runtimeDeclaredTools", {
+              defaultValue: `${runtime.declared_tool_count} tools declared`,
+              count: runtime.declared_tool_count
+            })
+
+            return (
+              <div className="flex flex-wrap gap-1">
+                <Tag color={runtime.execution_mode === "fork" ? "blue" : "green"}>
+                  {runtime.execution_mode === "fork"
+                    ? t("option:skills.runtimeFork", { defaultValue: "Fork" })
+                    : t("option:skills.runtimeInline", { defaultValue: "Inline" })}
+                </Tag>
+                <Tag color={runtime.test_run_may_call_model ? "orange" : "default"}>
+                  {runtime.test_run_may_call_model
+                    ? t("option:skills.runtimeMayCallModel", { defaultValue: "Test may call model" })
+                    : t("option:skills.runtimePromptOnly", { defaultValue: "Prompt only by default" })}
+                </Tag>
+                {runtime.declares_tools && (
+                  <Tag color="geekblue">{toolLabel}</Tag>
+                )}
+                {runtime.model_override && (
+                  <Tag>
+                    {t("option:skills.runtimeModelOverride", {
+                      defaultValue: "Model override"
+                    })}
+                  </Tag>
+                )}
+                {!runtime.auto_invocation_enabled && (
+                  <Tag color="warning">
+                    {t("option:skills.runtimeAutoOff", {
+                      defaultValue: "Auto invocation off"
+                    })}
+                  </Tag>
+                )}
+              </div>
+            )
+          }
         }]
       : []),
     {
@@ -1248,7 +1329,7 @@ export const SkillsManager: React.FC = () => {
               {preview.allowed_tools?.length ? (
                 <div className="sm:col-span-2">
                   <dt className="text-xs font-semibold uppercase text-text-muted">
-                    {t("option:skills.allowedTools", { defaultValue: "Allowed tools" })}
+                    {t("option:skills.declaredTools", { defaultValue: "Declared tools" })}
                   </dt>
                   <dd className="m-0 text-text">{preview.allowed_tools.join(", ")}</dd>
                 </div>
@@ -1813,6 +1894,7 @@ export const SkillsManager: React.FC = () => {
 
       <SkillPreview
         skillName={previewSkill}
+        runtime={previewRuntime}
         onClose={() => setPreviewSkill(null)}
       />
     </div>

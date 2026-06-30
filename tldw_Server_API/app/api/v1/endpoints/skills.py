@@ -61,6 +61,7 @@ from tldw_Server_API.app.core.Skills.exceptions import (
     SkillValidationError,
 )
 from tldw_Server_API.app.core.Skills.skill_executor import RequestContext, SkillExecutor
+from tldw_Server_API.app.core.Skills.runtime_metadata import build_skill_runtime_metadata
 from tldw_Server_API.app.core.Skills.skills_service import SkillsService
 
 router = APIRouter()
@@ -116,16 +117,26 @@ async def get_skills_service(
 
 def _skill_data_to_response(skill_data: dict) -> SkillResponse:
     """Convert skill data dict to SkillResponse."""
+    allowed_tools = skill_data.get("allowed_tools")
+    model = skill_data.get("model")
+    context = skill_data.get("context") or "inline"
+    disable_model_invocation = bool(skill_data.get("disable_model_invocation"))
     return SkillResponse(
         id=skill_data["id"],
         name=skill_data["name"],
         description=skill_data.get("description"),
         argument_hint=skill_data.get("argument_hint"),
-        disable_model_invocation=skill_data.get("disable_model_invocation", False),
+        disable_model_invocation=disable_model_invocation,
         user_invocable=skill_data.get("user_invocable", True),
-        allowed_tools=skill_data.get("allowed_tools"),
-        model=skill_data.get("model"),
-        context=skill_data.get("context", "inline"),
+        allowed_tools=allowed_tools,
+        model=model,
+        context=context,
+        runtime=build_skill_runtime_metadata(
+            context=context,
+            allowed_tools=allowed_tools,
+            model=model,
+            disable_model_invocation=disable_model_invocation,
+        ),
         content=skill_data["content"],
         supporting_files=skill_data.get("supporting_files"),
         directory_path=skill_data["directory_path"],
@@ -137,13 +148,25 @@ def _skill_data_to_response(skill_data: dict) -> SkillResponse:
 
 def _metadata_to_summary(metadata) -> SkillSummary:
     """Convert SkillMetadata to SkillSummary."""
+    allowed_tools = getattr(metadata, "allowed_tools", None)
+    model = getattr(metadata, "model", None)
+    context = getattr(metadata, "context", None) or "inline"
+    disable_model_invocation = bool(getattr(metadata, "disable_model_invocation", False))
     return SkillSummary(
         name=metadata.name,
         description=metadata.description,
         argument_hint=metadata.argument_hint,
         user_invocable=metadata.user_invocable,
-        disable_model_invocation=metadata.disable_model_invocation,
-        context=metadata.context,
+        disable_model_invocation=disable_model_invocation,
+        allowed_tools=allowed_tools,
+        model=model,
+        context=context,
+        runtime=build_skill_runtime_metadata(
+            context=context,
+            allowed_tools=allowed_tools,
+            model=model,
+            disable_model_invocation=disable_model_invocation,
+        ),
         version=metadata.version or 1,
     )
 
