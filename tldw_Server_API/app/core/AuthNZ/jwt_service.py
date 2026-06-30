@@ -176,7 +176,8 @@ class JWTService:
         user_id: int,
         username: str,
         role: str,
-        additional_claims: Optional[dict[str, Any]] = None
+        additional_claims: Optional[dict[str, Any]] = None,
+        expires_delta: Optional[timedelta] = None,
     ) -> str:
         """
         Create an access token for a user
@@ -186,12 +187,17 @@ class JWTService:
             username: User's username
             role: User's role
             additional_claims: Additional claims to include in token
+            expires_delta: Optional explicit access-token lifetime
 
         Returns:
             Encoded JWT access token
         """
-        # Calculate expiration dynamically from settings
-        expire = datetime.now(timezone.utc) + timedelta(minutes=self.settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        if expires_delta is not None and expires_delta.total_seconds() <= 0:
+            raise ValueError("expires_delta must be positive")
+
+        issued_at = datetime.now(timezone.utc)
+        ttl = expires_delta or timedelta(minutes=self.settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = issued_at + ttl
 
         # Build token payload
         payload = {
@@ -199,7 +205,7 @@ class JWTService:
             "username": username,
             "role": role,
             "exp": expire,
-            "iat": datetime.now(timezone.utc),
+            "iat": issued_at,
             "jti": str(uuid4()),  # JWT ID for tracking
             "type": "access"
         }
@@ -229,6 +235,26 @@ class JWTService:
         except _JWT_SERVICE_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to create access token: {e}")
             raise InvalidTokenError(f"Failed to create token: {e}") from e
+
+    def create_impersonation_access_token(
+        self,
+        *,
+        user_id: int,
+        username: str,
+        role: str,
+        impersonated_by: int,
+        expires_delta: timedelta,
+    ) -> str:
+        return self.create_access_token(
+            user_id=user_id,
+            username=username,
+            role=role,
+            additional_claims={
+                "impersonated_by": int(impersonated_by),
+                "impersonation": True,
+            },
+            expires_delta=expires_delta,
+        )
 
     def create_refresh_token(
         self,
