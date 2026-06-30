@@ -59,7 +59,7 @@ Wave 0 reconfirmation on current `origin/dev` found all three findings still ope
 - Modify: `tldw_Server_API/tests/AuthNZ/unit/test_jwt_service.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/jwt_service.py`
 
-- [ ] **Step 1: Add failing JWT service tests**
+- [x] **Step 1: Add failing JWT service tests**
 
 Append these tests to `tldw_Server_API/tests/AuthNZ/unit/test_jwt_service.py`:
 
@@ -118,7 +118,7 @@ def test_create_access_token_rejects_non_positive_expiry_override(jwt_service):
         )
 ```
 
-- [ ] **Step 2: Run the new JWT tests and verify they fail**
+- [x] **Step 2: Run the new JWT tests and verify they fail**
 
 Run:
 
@@ -133,7 +133,7 @@ PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider \
 
 Expected: fail because `expires_delta` and `create_impersonation_access_token` do not exist yet.
 
-- [ ] **Step 3: Implement expiry override and impersonation token helper**
+- [x] **Step 3: Implement expiry override and impersonation token helper**
 
 In `tldw_Server_API/app/core/AuthNZ/jwt_service.py`, update `create_access_token`:
 
@@ -179,13 +179,13 @@ Then set `"iat": issued_at` in the payload. Add this helper below `create_access
         )
 ```
 
-- [ ] **Step 4: Run JWT tests and verify they pass**
+- [x] **Step 4: Run JWT tests and verify they pass**
 
 Run the same command from Step 2.
 
 Expected: 3 passed.
 
-- [ ] **Step 5: Commit JWT token changes**
+- [x] **Step 5: Commit JWT token changes**
 
 Run:
 
@@ -205,7 +205,7 @@ Expected: commit succeeds.
 - Modify: `tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py`
 - Create: `tldw_Server_API/tests/AuthNZ/unit/test_impersonation_auth_context.py`
 
-- [ ] **Step 1: Add failing AuthContext propagation test**
+- [x] **Step 1: Add failing AuthContext propagation test**
 
 Create `tldw_Server_API/tests/AuthNZ/unit/test_impersonation_auth_context.py`:
 
@@ -304,7 +304,7 @@ async def test_impersonation_claims_populate_auth_context(monkeypatch):
     assert request.state.auth.principal.impersonated_by_user_id == 7
 ```
 
-- [ ] **Step 2: Run the AuthContext test and verify it fails**
+- [x] **Step 2: Run the AuthContext test and verify it fails**
 
 Run:
 
@@ -316,7 +316,7 @@ PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider \
 
 Expected: fail because impersonation fields are absent from `AuthPrincipal` or request state.
 
-- [ ] **Step 3: Add impersonation fields to `AuthPrincipal`**
+- [x] **Step 3: Add impersonation fields to `AuthPrincipal`**
 
 In `tldw_Server_API/app/core/AuthNZ/principal_model.py`, add these fields after `jti`:
 
@@ -331,7 +331,7 @@ In `tldw_Server_API/app/core/AuthNZ/principal_model.py`, add these fields after 
     )
 ```
 
-- [ ] **Step 4: Populate request state and principal fields**
+- [x] **Step 4: Populate request state and principal fields**
 
 In `verify_jwt_and_fetch_user`, after token membership claim extraction, add:
 
@@ -361,13 +361,13 @@ When constructing `AuthPrincipal`, pass:
             impersonated_by_user_id=impersonated_by_user_id,
 ```
 
-- [ ] **Step 5: Run the AuthContext test and verify it passes**
+- [x] **Step 5: Run the AuthContext test and verify it passes**
 
 Run the same command from Step 2.
 
 Expected: 1 passed.
 
-- [ ] **Step 6: Commit AuthContext propagation**
+- [x] **Step 6: Commit AuthContext propagation**
 
 Run:
 
@@ -387,7 +387,7 @@ Expected: commit succeeds.
 - Modify: `tldw_Server_API/app/api/v1/endpoints/admin/admin_impersonation.py`
 - Modify: `tldw_Server_API/tests/AuthNZ/test_admin_impersonation.py`
 
-- [ ] **Step 1: Add failing endpoint tests for repository lookup and short TTL**
+- [x] **Step 1: Add failing endpoint tests for repository lookup and short TTL**
 
 In `tldw_Server_API/tests/AuthNZ/test_admin_impersonation.py`, replace the current `test_success` body with this repository-based test:
 
@@ -447,7 +447,7 @@ In `tldw_Server_API/tests/AuthNZ/test_admin_impersonation.py`, replace the curre
         audit.assert_awaited_once()
 ```
 
-- [ ] **Step 2: Add failing mandatory-audit failure test**
+- [x] **Step 2: Add failing mandatory-audit failure test**
 
 Append:
 
@@ -496,7 +496,7 @@ Append:
         assert exc_info.value.detail == "Mandatory audit persistence unavailable"
 ```
 
-- [ ] **Step 3: Run endpoint tests and verify they fail**
+- [x] **Step 3: Run endpoint tests and verify they fail**
 
 Run:
 
@@ -508,7 +508,7 @@ PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider \
 
 Expected: fail because endpoint still imports DB pool directly and has no mandatory audit helper.
 
-- [ ] **Step 4: Add mandatory impersonation audit helper**
+- [x] **Step 4: Add mandatory impersonation audit helper**
 
 In `tldw_Server_API/app/services/admin_audit_service.py`, import `MandatoryAuditWriteError` and add:
 
@@ -527,7 +527,7 @@ async def emit_impersonation_issuance_audit_event(
             method="POST",
         )
         await svc.log_event(
-            event_type=AuditEventType.USER_UPDATED,
+            event_type=AuditEventType.AUTH_TOKEN_CREATED,
             category=AuditEventCategory.AUTHENTICATION,
             context=ctx,
             resource_type="user_impersonation",
@@ -548,9 +548,9 @@ async def emit_impersonation_issuance_audit_event(
         raise MandatoryAuditWriteError("impersonation issuance audit failed") from exc
 ```
 
-The chosen `AuditEventType.USER_UPDATED` is intentionally conservative because the current enum does not expose a dedicated impersonation event. The specific `action` and `resource_type` distinguish the event.
+Use `AuditEventType.AUTH_TOKEN_CREATED` with a specific `action` and `resource_type` so impersonation issuance is represented as token creation while remaining distinguishable in audit searches.
 
-- [ ] **Step 5: Refactor the impersonation endpoint**
+- [x] **Step 5: Refactor the impersonation endpoint**
 
 In `tldw_Server_API/app/api/v1/endpoints/admin/admin_impersonation.py`:
 
@@ -622,13 +622,13 @@ from tldw_Server_API.app.services.admin_audit_service import emit_impersonation_
             ) from exc
 ```
 
-- [ ] **Step 6: Run endpoint tests and verify they pass**
+- [x] **Step 6: Run endpoint tests and verify they pass**
 
 Run the command from Step 3.
 
 Expected: all impersonation endpoint tests pass.
 
-- [ ] **Step 7: Commit endpoint and audit changes**
+- [x] **Step 7: Commit endpoint and audit changes**
 
 Run:
 
@@ -649,7 +649,7 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `backlog/tasks/task-12073 - Plan-and-remediate-AuthNZ-impersonation-audit-findings.md`
 
-- [ ] **Step 1: Run focused AuthNZ tests**
+- [x] **Step 1: Run focused AuthNZ tests**
 
 Run:
 
@@ -664,7 +664,7 @@ PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 2: Run broader AuthNZ safety tests**
+- [x] **Step 2: Run broader AuthNZ safety tests**
 
 Run:
 
@@ -678,7 +678,7 @@ PYTHONDONTWRITEBYTECODE=1 python -m pytest -p no:cacheprovider \
 
 Expected: pass, or record unrelated pre-existing failures with evidence.
 
-- [ ] **Step 3: Run Bandit on touched production paths**
+- [x] **Step 3: Run Bandit on touched production paths**
 
 Run:
 
@@ -695,7 +695,7 @@ python -m bandit \
 
 Expected: no new high or medium findings in touched paths. If Bandit reports existing unrelated findings, record them explicitly.
 
-- [ ] **Step 4: Run whitespace and status checks**
+- [x] **Step 4: Run whitespace and status checks**
 
 Run:
 
@@ -706,7 +706,7 @@ git status --short --branch
 
 Expected: no whitespace errors; tracked changes limited to the AuthNZ remediation files and `TASK-12073`.
 
-- [ ] **Step 5: Update Backlog task evidence**
+- [x] **Step 5: Update Backlog task evidence**
 
 Use Backlog MCP to update `TASK-12073`:
 
@@ -715,7 +715,7 @@ Use Backlog MCP to update `TASK-12073`:
 - Add implementation notes listing exact test commands and Bandit command results.
 - Final summary must state whether `AUTH-001`, `AUTH-002`, and `AUTH-003` are closed or have residual risk.
 
-- [ ] **Step 6: Commit final task update**
+- [x] **Step 6: Commit final task update**
 
 Run:
 
@@ -737,3 +737,11 @@ Expected: commit succeeds.
 - Normal access token lifetime behavior remains unchanged.
 - No new request-body contract is introduced unless the worker also updates endpoint tests and docs.
 - Bandit is run over touched production paths before completion.
+
+## Completion Evidence
+
+- Focused AuthNZ remediation tests: 40 passed, 170 warnings.
+- Broader AuthNZ/AuthNZ_Unit safety tests: 1306 passed, 175 skipped, 10846 warnings.
+- Bandit on touched production paths: no high or medium findings; 13 low token-type literal false positives recorded in `TASK-12073`.
+- Endpoint search confirmed no remaining `get_db_pool`, `pool.acquire`, raw user/user-role `SELECT`, or generic `create_access_token` usage in `admin_impersonation.py`.
+- `TASK-12073` is marked Done with acceptance criteria and definition of done checked.
