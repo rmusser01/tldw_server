@@ -112,6 +112,30 @@ List bundled profile presets:
 mcp-unified-gateway list-presets
 ```
 
+Option A: duplicate a preset, then preview the new stored profile:
+
+```bash
+mcp-unified-gateway duplicate-preset project-researcher \
+  --profile-id <new-profile-id> --config ./gateway.json
+
+mcp-unified-gateway preview-profile-tools --profile <new-profile-id> \
+  --config ./gateway.json
+```
+
+Option B: create a profile from JSON, then preview the ID declared inside that
+file:
+
+```bash
+mcp-unified-gateway create-profile --profile-file ./profile.json \
+  --config ./gateway.json
+
+mcp-unified-gateway preview-profile-tools --profile <profile-id-from-json> \
+  --config ./gateway.json
+```
+
+For a minimal custom profile JSON template and the recommended discovery flow,
+see [USER_GUIDE.md](USER_GUIDE.md#3-work-with-profiles).
+
 Run the deterministic in-process smoke scenario:
 
 ```bash
@@ -144,6 +168,9 @@ mcp-unified-gateway tool-events report --group-by profile --config ./gateway.jso
 `explain-policy` explains one profile/tool decision before execution. It reports
 the effective `allow`, `ask`, or `deny` outcome, reason code, contributing
 policy state, and redacted subjects for a hypothetical tool call.
+It does not execute filesystem tools or fully validate authored
+`policy_document.path_grants`; verify those with safe runtime tool calls against
+representative allowed and denied paths.
 
 `preview-profile-tools` previews a profile's effective tool surface across
 installed tools and profile recommendations so operators can see which tools are
@@ -154,10 +181,10 @@ approval grants.
 Local CLI examples:
 
 ```bash
-mcp-unified-gateway explain-policy --profile researcher --tool fs.patch \
+mcp-unified-gateway explain-policy --profile <profile-id> --tool fs.patch \
   --args-json-file ./patch-args.json --config ./gateway.json
 
-mcp-unified-gateway preview-profile-tools --profile researcher \
+mcp-unified-gateway preview-profile-tools --profile <profile-id> \
   --category filesystem --config ./gateway.json
 ```
 
@@ -167,10 +194,10 @@ Remote CLI example:
 export MCP_UNIFIED_GATEWAY_URL=http://127.0.0.1:8000/mcp
 export MCP_UNIFIED_GATEWAY_ADMIN_KEY=replace-with-admin-key
 
-printf '{"path":"src/app.py"}' | mcp-unified-gateway explain-policy \
-  --remote --profile researcher --tool fs.read --args-stdin
+echo '{"path":"src/app.py"}' | mcp-unified-gateway explain-policy \
+  --remote --profile <profile-id> --tool fs.read --args-stdin
 
-mcp-unified-gateway preview-profile-tools --remote --profile researcher \
+mcp-unified-gateway preview-profile-tools --remote --profile <profile-id> \
   --category filesystem --session-id "$MCP_SESSION_ID" --exclude-denied
 ```
 
@@ -180,9 +207,9 @@ Admin API examples:
 curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/policy/explain" \
   -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"profile_id":"researcher","tool_name":"fs.read","arguments":{"path":"src/app.py"}}'
+  -d '{"profile_id":"<profile-id>","tool_name":"fs.read","arguments":{"path":"src/app.py"}}'
 
-curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/profiles/researcher/tool-preview" \
+curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/profiles/<profile-id>/tool-preview" \
   -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
   -H "Content-Type: application/json" \
   -d '{"category":"filesystem","include_denied":true,"session_id":"session-1"}'

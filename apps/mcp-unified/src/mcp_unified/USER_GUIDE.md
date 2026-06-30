@@ -6,6 +6,9 @@ credential grants, configuration snapshots, and remote runtime commands.
 
 The package is currently internal/experimental and distributed with the
 `tldw-server` source tree. It is not a separately published standalone package.
+The package CLI does not launch a supported end-user gateway server; remote
+runtime commands require an already running package-local gateway mounted by a
+host application.
 
 ## Publishing Readiness
 
@@ -51,6 +54,12 @@ Confirm the CLI is available:
 ```bash
 mcp-unified-gateway package-info
 ```
+
+When a host application mounts the package gateway, use `GET /mcp/status` for
+package-local readiness. The response reports static package boundary metadata,
+profile/external registry store persistence, default profile state, admin-auth
+configured state, external server counts, warnings, and next actions. For the
+embedded TLDW Server product, use `/api/v1/mcp/status` instead.
 
 For a quick standalone JSON-RPC smoke check, confirm the smoke client is also
 available and run the deterministic in-process fixture:
@@ -128,6 +137,120 @@ Show the current default:
 mcp-unified-gateway get-default-profile \
   --config ./gateway.json
 ```
+
+### Know Which Tools Are Available
+
+The standalone gateway does not have one static global tool list. The effective
+tool surface depends on the installed backend tools, registered external MCP
+servers, profile policy, credentials, workspace/path grants, approvals, and any
+session-scoped grants. Use discovery in this order:
+
+1. Start with presets to understand the intended role shape:
+
+   ```bash
+   mcp-unified-gateway list-presets
+   mcp-unified-gateway show-preset project-researcher
+   ```
+
+2. Create or duplicate a profile into the configured store.
+
+3. Preview that stored profile's effective tool surface:
+
+   ```bash
+   mcp-unified-gateway preview-profile-tools --profile <profile-id> \
+     --config ./gateway.json
+
+   mcp-unified-gateway preview-profile-tools --profile <profile-id> \
+     --category filesystem --exclude-denied --config ./gateway.json
+   ```
+
+4. For a running gateway, the final model-facing discovery surface is still the
+   MCP `tools/list` response for that authenticated session/profile. Profiles
+   can also expose bridge tools such as `tool_categories.list`, `tool_search`,
+   `tool_describe`, and `profile.tools.list` so clients can discover deferred
+   or recommended tools without expanding the direct executable surface.
+
+### Create A Custom Profile
+
+For most operators, duplicating a bundled preset is the safest starting point.
+When a preset is not close enough, create a profile JSON document and store it
+with `create-profile`.
+
+Minimal read-oriented profile:
+
+```json
+{
+  "id": "docs-researcher",
+  "name": "Docs Researcher",
+  "description": "Read-only documentation and workspace research profile.",
+  "policy_document": {
+    "allowed_tools": [
+      "tool_categories.list",
+      "tool_search",
+      "tool_describe",
+      "profile.tools.list",
+      "fs.list",
+      "fs.read",
+      "fs.stat",
+      "fs.glob",
+      "fs.grep"
+    ],
+    "capabilities": [
+      "filesystem.read"
+    ],
+    "path_scope_mode": "workspace_root",
+    "path_grants": [
+      {
+        "path": "docs",
+        "actions": ["read"]
+      },
+      {
+        "path": "src",
+        "actions": ["read"]
+      }
+    ]
+  },
+  "metadata": {
+    "agent_metadata": {
+      "ui_label": "Docs Researcher"
+    }
+  }
+}
+```
+
+Save the document as `docs-researcher.json`, then create and inspect it:
+
+```bash
+mcp-unified-gateway create-profile --profile-file ./docs-researcher.json \
+  --config ./gateway.json
+
+mcp-unified-gateway show-profile docs-researcher --config ./gateway.json
+```
+
+Validate the profile's tool surface before assigning it:
+
+```bash
+mcp-unified-gateway preview-profile-tools --profile docs-researcher \
+  --config ./gateway.json
+```
+
+Use `explain-policy` to inspect tool-level allow/ask/deny decisions,
+`permission_rules`, and runtime TTL grants for a hypothetical call:
+
+```bash
+echo '{"path":"docs/README.md"}' | mcp-unified-gateway explain-policy \
+  --profile docs-researcher --tool fs.read --args-stdin --config ./gateway.json
+```
+
+`explain-policy` does not execute filesystem tools and should not be treated as
+a full validation of authored `policy_document.path_grants`. Validate path
+grants with safe runtime tool calls against representative allowed and denied
+paths in the intended workspace/session before assigning the profile.
+
+If a tool is missing, first check whether the backend tool is installed or only
+recommended, then check `policy_document.allowed_tools`, path grants, external
+server registration, credential grants, and approval/session state. Use
+`patch-profile` for small policy updates after creation.
 
 ### Profile Tooling Discovery
 
@@ -396,10 +519,10 @@ approval grants.
 Local CLI examples:
 
 ```bash
-mcp-unified-gateway explain-policy --profile researcher --tool fs.patch \
+mcp-unified-gateway explain-policy --profile <profile-id> --tool fs.patch \
   --args-json-file ./patch-args.json --config ./gateway.json
 
-mcp-unified-gateway preview-profile-tools --profile researcher \
+mcp-unified-gateway preview-profile-tools --profile <profile-id> \
   --category filesystem --config ./gateway.json
 ```
 
@@ -409,10 +532,10 @@ Remote CLI example:
 export MCP_UNIFIED_GATEWAY_URL=http://127.0.0.1:8000/mcp
 export MCP_UNIFIED_GATEWAY_ADMIN_KEY=replace-with-admin-key
 
-printf '{"path":"src/app.py"}' | mcp-unified-gateway explain-policy \
-  --remote --profile researcher --tool fs.read --args-stdin
+echo '{"path":"src/app.py"}' | mcp-unified-gateway explain-policy \
+  --remote --profile <profile-id> --tool fs.read --args-stdin
 
-mcp-unified-gateway preview-profile-tools --remote --profile researcher \
+mcp-unified-gateway preview-profile-tools --remote --profile <profile-id> \
   --category filesystem --session-id "$MCP_SESSION_ID" --exclude-denied
 ```
 
@@ -422,9 +545,9 @@ Direct admin API examples:
 curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/policy/explain" \
   -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"profile_id":"researcher","tool_name":"fs.read","arguments":{"path":"src/app.py"}}'
+  -d '{"profile_id":"<profile-id>","tool_name":"fs.read","arguments":{"path":"src/app.py"}}'
 
-curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/profiles/researcher/tool-preview" \
+curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/profiles/<profile-id>/tool-preview" \
   -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
   -H "Content-Type: application/json" \
   -d '{"category":"filesystem","include_denied":true,"session_id":"session-1"}'
