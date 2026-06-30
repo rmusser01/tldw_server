@@ -76,6 +76,14 @@ class AuthPrincipal(BaseModel):
         default=None,
         description="JWT ID or similar opaque token identifier, when available.",
     )
+    impersonation: bool = Field(
+        default=False,
+        description="True when this principal was authenticated with an impersonation token.",
+    )
+    impersonated_by_user_id: int | None = Field(
+        default=None,
+        description="Admin actor user id when this is an impersonated request.",
+    )
 
     # Claims
     roles: list[str] = Field(
