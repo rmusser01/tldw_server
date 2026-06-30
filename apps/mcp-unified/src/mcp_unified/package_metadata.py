@@ -8,7 +8,7 @@ from typing import Final
 PACKAGE_NAME: Final = "mcp-unified"
 PACKAGE_IMPORT_NAME: Final = "mcp_unified"
 PACKAGE_STATUS: Final = "internal-experimental"
-PUBLISHING_STATUS: Final = "not-published"
+PUBLISHING_STATUS: Final = "published"
 LICENSE_EXPRESSION: Final = "GPL-3.0-only"
 SOURCE_DISTRIBUTION: Final = "tldw-server"
 DEPENDENCY_VERSION_POLICY: Final = "names-only"

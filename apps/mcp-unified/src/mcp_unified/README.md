@@ -4,9 +4,9 @@ MCP Unified is the standalone package boundary for the Model Context Protocol
 runtime and gateway being extracted from `tldw-server`.
 
 The package is currently internal/experimental. It is built and tested inside
-the `tldw-server` repository, but it is not published as an independent PyPI
-package yet. Treat this directory as the supported package-local integration
-surface for early standalone gateway work.
+the `tldw-server` repository and published on PyPI as the early standalone
+package boundary. Treat this directory as the supported package-local
+integration surface for early standalone gateway work.
 
 This package does not currently ship an end-user standalone gateway server
 launcher. `mcp-unified-gateway` commands manage local configuration or talk to
@@ -50,7 +50,7 @@ mcp-unified-gateway package-info
 Expected current status:
 
 - package status: `internal-experimental`
-- publishing status: `not-published`
+- publishing status: `published`
 - license expression: `GPL-3.0-only`
 
 The package ships `py.typed` as a PEP 561 marker so downstream type checkers can
@@ -58,10 +58,9 @@ recognize the inline type annotations when consuming built artifacts.
 
 ## Publishing Readiness
 
-Standalone package publishing is prepared but still guarded. The package
-metadata is PyPI-shaped, while the runtime metadata remains
-`internal-experimental` and `not-published` until maintainers intentionally
-promote it.
+Standalone package publishing is live but still guarded. The package metadata
+is PyPI-shaped, and the runtime metadata remains `internal-experimental` while
+reporting the PyPI publishing state as `published`.
 
 Run the full internal release candidate gate:
 
@@ -76,12 +75,27 @@ make mcp-unified-publish-dry-run
 ```
 
 Live TestPyPI or PyPI upload is not part of normal PR CI. It requires the manual
-workflow, maintainer-owned credentials, an explicit confirmation input, and the
-RC helper's publish opt-in guard.
+workflow, an explicit confirmation input, and the RC helper's publish opt-in
+guard. Production PyPI uploads use the repository's configured trusted
+publishing environment rather than a long-lived PyPI token.
+
+## Install From PyPI
+
+Install the published package boundary with the gateway extras:
+
+```bash
+python -m pip install "mcp-unified[gateway]"
+```
+
+For development tooling, install the optional development extras:
+
+```bash
+python -m pip install "mcp-unified[gateway,dev]"
+```
 
 ## Install From This Repository
 
-Use the package-local project file when testing the standalone boundary:
+Use the package-local project file when testing unpublished repository changes:
 
 ```bash
 python -m pip install -e "apps/mcp-unified[gateway]"
@@ -152,7 +166,7 @@ mcp-unified-gateway validate-config ./gateway.json
 
 When a host application mounts the package gateway, `GET /mcp/status` returns
 best-effort readiness metadata for that package-local mount. It includes package
-status (`internal-experimental`, `not-published`), runtime name/version,
+status (`internal-experimental`, `published`), runtime name/version,
 profile store persistence, default profile state, admin-auth configured state,
 external server counts, warnings, and next actions. It is not the embedded TLDW
 Server status endpoint; embedded users should call `/api/v1/mcp/status`.

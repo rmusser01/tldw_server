@@ -47,6 +47,12 @@ def _repo_root() -> Path:
     raise AssertionError("Unable to locate repository root from test path")
 
 
+def _standalone_project_root() -> Path:
+    """Return the package-local standalone project root."""
+
+    return _repo_root() / "apps" / "mcp-unified"
+
+
 def test_gateway_cli_validate_config_reports_success_json(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -303,7 +309,11 @@ def test_gateway_cli_list_presets_reports_builtin_summary(
         [sys.executable, "-m", "mcp_unified.gateway.cli", "list-presets"],
         check=False,
         cwd=_repo_root(),
-        env={**os.environ, "PYTHONWARNINGS": "ignore"},
+        env={
+            **os.environ,
+            "PYTHONPATH": str(_standalone_project_root() / "src"),
+            "PYTHONWARNINGS": "ignore",
+        },
         text=True,
         capture_output=True,
     )
@@ -2423,7 +2433,7 @@ def test_gateway_cli_memory_store_rejects_mutations_before_reading_payload_files
 def test_gateway_cli_project_script_is_registered() -> None:
     """Expose the package CLI through the installed project scripts."""
 
-    pyproject_path = _repo_root() / "pyproject.toml"
+    pyproject_path = _standalone_project_root() / "pyproject.toml"
     pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
 
     assert (
@@ -2435,7 +2445,7 @@ def test_gateway_cli_project_script_is_registered() -> None:
 def test_gateway_cli_package_info_reports_release_gate(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Expose conservative package-release metadata through the CLI."""
+    """Expose package-release metadata through the CLI."""
 
     exit_code = gateway_cli.main(["package-info"])
 
@@ -2446,7 +2456,7 @@ def test_gateway_cli_package_info_reports_release_gate(
     assert payload["ok"] is True
     assert payload["package_name"] == "mcp-unified"
     assert payload["package_status"] == "internal-experimental"
-    assert payload["publishing_status"] == "not-published"
+    assert payload["publishing_status"] == "published"
     assert payload["license_expression"] == "GPL-3.0-only"
     assert payload["dependency_version_policy"] == "names-only"
     assert {"httpx", "websockets"}.issubset(payload["base_dependencies"])
@@ -2454,7 +2464,7 @@ def test_gateway_cli_package_info_reports_release_gate(
 
 
 def test_standalone_gateway_docs_describe_package_release_gate() -> None:
-    """Document the current package boundary without implying PyPI readiness."""
+    """Document the current published package boundary and release gate."""
 
     docs_path = _repo_root() / "Docs" / "MCP_UNIFIED_STANDALONE_GATEWAY_ADMIN.md"
     docs = docs_path.read_text(encoding="utf-8")
@@ -2466,7 +2476,8 @@ def test_standalone_gateway_docs_describe_package_release_gate() -> None:
     # These are pytest assertions; nosec keeps Bandit B101 from flagging test checks.
     assert "py.typed" in docs  # nosec B101
     assert "PEP 561" in docs  # nosec B101
-    assert "not a separately published standalone package" in docs
+    assert "published on PyPI" in docs
+    assert "not a separately published standalone package" not in docs
 
 
 def _parse_cli_timestamp(value: str) -> datetime:
