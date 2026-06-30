@@ -169,12 +169,16 @@ Local audio setup can use host-side config and model files directly. After this 
 - If install fails due to Python version, rerun with `PYTHON=python3.12 make install-local` or another supported interpreter.
 - If startup fails on audio/video dependencies, verify `ffmpeg -version`.
 - If port `8000` is in use, stop the conflicting process or run `uvicorn` on another port.
+- If the WebUI port `8080` is in use, stop the conflicting process or start Next.js on another port with `bun run dev -- -p 8081`.
+- If `bun install` fails, verify Bun with `bun --version`, or use the npm fallback commands from the WebUI section.
+- If the WebUI loads but cannot reach the API, confirm `.env.local` uses the same host and port as the running API, usually `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000`.
 - If direct API calls return `401`, confirm `SINGLE_USER_API_KEY` in `tldw_Server_API/Config_Files/.env` and use it as `X-API-KEY`.
 - If WebUI setup cannot save provider settings, use `/setup` as the backend/operator recovery surface and inspect `tldw_Server_API/Config_Files/.env` only as a troubleshooting step.
 - On Windows, use WSL2 for the Makefile path or run the PowerShell equivalents.
 
 ## Optional Add-ons
 
-- Add the WebUI after the API is healthy: see [Local Profile: Add the WebUI](../../README.md#local-profile-add-the-webui).
-- Keep provider setup in the WebUI first-run wizard for the normal path; use file-based configuration only for recovery, automation, or advanced deployments.
+- Keep provider setup in the WebUI first-run wizard for the normal path; add provider API keys to `tldw_Server_API/Config_Files/.env` only for recovery, automation, or advanced deployments, then restart the server.
+- For deeper WebUI development details, see [Extension & Web UI Development Guide](../../apps/DEVELOPMENT.md) and [tldw-frontend README](../../apps/tldw-frontend/README.md).
+- For LAN, mobile, reverse-proxy, or custom-host browser access, see [Run the Web UI (WIP)](../../README.md#run-the-web-ui-wip).
 - Install development extras with `source .venv/bin/activate && pip install -e ".[dev]"`.
