@@ -475,7 +475,7 @@ class MCPServer:
         enabled = bool(module_config.get("enabled", True))
         return module_id, {
             "enabled": enabled,
-            "status": "configured" if enabled else "disabled",
+            "status": "not_loaded" if enabled else "disabled",
             "name": str(module_config.get("name") or module_id),
             "department": str(module_config.get("department") or "general"),
         }
@@ -568,6 +568,7 @@ class MCPServer:
         return {
             "degraded": "module_degraded",
             "inactive": "module_inactive",
+            "not_loaded": "module_not_loaded",
             "unhealthy": "module_unhealthy",
             "error": "module_error",
         }.get(normalized, "module_problem")
@@ -592,6 +593,7 @@ class MCPServer:
         for module_id, health in health_results.items():
             status_value = getattr(getattr(health, "status", ""), "value", getattr(health, "status", ""))
             status = str(status_value or "unknown")
+            seen.add(module_id)
             if status == "healthy":
                 continue
             raw_reason = str(getattr(health, "message", "") or "").strip()
@@ -627,6 +629,18 @@ class MCPServer:
                     self._mask_secrets(raw_reason),
                 )
             problems.append(self._problem_module_entry(module_id, status, source="registration"))
+            seen.add(module_id)
+
+        for module_id, payload in sorted(self._configured_modules_for_status.items()):
+            if module_id in seen or not isinstance(payload, dict):
+                continue
+            if payload.get("enabled") is not True:
+                continue
+            status = str(payload.get("status") or "not_loaded")
+            if status not in {"not_loaded", "inactive"}:
+                continue
+            problems.append(self._problem_module_entry(module_id, status, source="configuration"))
+            seen.add(module_id)
 
         return problems
 

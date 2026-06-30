@@ -68,7 +68,7 @@ def _disabled_next_action(module_name: str, tier: str) -> str:
     else:
         risk = "this capability"
     return (
-        f"Enable `{module_name}` in Config_Files/mcp_modules.yaml only if this "
+        f"Enable `{module_name}` in your MCP modules config only if this "
         f"deployment should expose {risk}; restart TLDW Server and recheck /api/v1/mcp/status."
     )
 
@@ -88,7 +88,8 @@ def describe_module_surface(modules: dict[str, Any]) -> dict[str, Any]:
             ("unknown", "No risk tier is registered yet."),
         )
         if not _is_enabled(payload):
-            if tier in EXPLICIT_OPT_IN_TIERS:
+            explicitly_disabled = isinstance(payload, dict) and payload.get("enabled") is False
+            if explicitly_disabled and tier in EXPLICIT_OPT_IN_TIERS:
                 disabled_available.append(
                     {
                         "id": module_name,

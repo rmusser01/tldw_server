@@ -170,6 +170,21 @@ def test_describe_module_surface_reports_disabled_available_high_risk_modules():
     assert surface["disabled_available_count"] == 3
     assert all(m["requires_explicit_opt_in"] is True for m in surface["disabled_available"])
     assert all(m["next_action"] for m in surface["disabled_available"])
+    assert all("your MCP modules config" in m["next_action"] for m in surface["disabled_available"])
+    assert all("Config_Files/mcp_modules.yaml" not in m["next_action"] for m in surface["disabled_available"])
+
+
+def test_describe_module_surface_does_not_advertise_not_loaded_modules_as_opt_ins():
+    """Configured-but-not-loaded modules should not look enabled or operator-disabled."""
+    from tldw_Server_API.app.core.MCP_unified.module_surface import describe_module_surface
+
+    surface = describe_module_surface({
+        "filesystem": {"enabled": True, "status": "not_loaded"},
+    })
+
+    assert surface["enabled_count"] == 0
+    assert surface["disabled_available_count"] == 0
+    assert "local_files" not in surface["tiers"]
 
 
 def test_default_mcp_modules_yaml_disables_local_file_and_process_modules():
@@ -595,27 +610,36 @@ class TestMCPServer:
         assert [m["id"] for m in status["surface"]["disabled_available"]] == ["filesystem", "run_command"]
         assert all(m["requires_explicit_opt_in"] for m in status["surface"]["disabled_available"])
 
-    async def test_server_status_does_not_enable_configured_but_unloaded_modules(self, monkeypatch):
-        """Configured modules should not appear enabled until their health is registered."""
+    async def test_server_status_reports_enabled_config_missing_from_health_as_not_loaded(self, monkeypatch):
+        """Configured enabled modules missing health should not appear as enabled surface modules."""
         server = MCPServer()
         server.initialized = True
         server._configured_modules_for_status = {
-            "media": {"enabled": True, "status": "configured"},
-            "filesystem": {"enabled": True, "status": "configured"},
-            "run_command": {"enabled": False, "status": "disabled"},
+            "media": {"enabled": True, "status": "not_loaded"},
+            "filesystem": {"enabled": True, "status": "not_loaded"},
         }
 
         async def _check_all_health():
             return {"media": ModuleHealth(status=HealthStatus.HEALTHY)}
 
+        async def _list_registrations():
+            return []
+
         monkeypatch.setattr(server.module_registry, "check_all_health", _check_all_health)
+        monkeypatch.setattr(server.module_registry, "list_registrations", _list_registrations)
 
         status = await server.get_status()
 
         assert status["surface"]["enabled_count"] == 1
         assert [m["id"] for m in status["surface"]["tiers"]["read_only"]["modules"]] == ["media"]
         assert "local_files" not in status["surface"]["tiers"]
-        assert [m["id"] for m in status["surface"]["disabled_available"]] == ["run_command"]
+        assert status["surface"]["disabled_available_count"] == 0
+        assert {
+            "id": "filesystem",
+            "status": "not_loaded",
+            "reason": "module_not_loaded",
+            "next_action": "Check module configuration and dependencies, then restart or disable the module.",
+        } in status["problem_modules"]
 
     async def test_server_status_includes_sanitized_problem_modules(self, monkeypatch):
         """Server status should expose actionable, canned module problem reasons."""

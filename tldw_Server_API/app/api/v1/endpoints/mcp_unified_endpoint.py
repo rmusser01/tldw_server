@@ -808,11 +808,12 @@ def _mcp_permission_detail(
     """Return an HTTP-friendly permission detail for MCP authorization errors."""
     if response.error is None or response.error.code != -32001:
         return None
+    error_data = response.error.data if isinstance(response.error.data, dict) else {}
     return {
         "message": response.error.message or "Insufficient permissions",
-        "hint": hint,
-        "reason_code": reason_code,
-        "next_action": next_action,
+        "hint": str(error_data.get("hint") or hint),
+        "reason_code": str(error_data.get("reason_code") or reason_code),
+        "next_action": str(error_data.get("next_action") or next_action),
     }
 
 

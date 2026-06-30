@@ -485,6 +485,81 @@ class ExternalRuntimeOperationResponse(BaseModel):
     errors: dict[str, Any] | None = None
 
 
+class GatewayStatusWarning(BaseModel):
+    """Non-secret readiness warning for the package-local gateway status."""
+
+    reason_code: str
+    message: str
+
+
+class GatewayPackageStatus(BaseModel):
+    """Package-boundary metadata for the package-local gateway status."""
+
+    package_name: str | None = None
+    package_import_name: str | None = None
+    package_status: str | None = None
+    publishing_status: str | None = None
+    source_distribution: str | None = None
+    dependency_version_policy: str | None = None
+
+
+class GatewayTransportStatus(BaseModel):
+    """Transport metadata for the package-local gateway status."""
+
+    base_path: str
+    mount_path: str
+
+
+class GatewayStoreReadinessStatus(BaseModel):
+    """Non-secret store readiness metadata for the package-local gateway status."""
+
+    model_config = ConfigDict(extra="allow")
+
+    kind: str
+    persistent: bool | None = None
+
+
+class GatewayDefaultProfileStatus(BaseModel):
+    """Default profile readiness metadata for the package-local gateway status."""
+
+    configured: bool
+    profile_id: str | None = None
+    source: str
+
+
+class GatewayAdminAuthStatus(BaseModel):
+    """Admin authentication readiness metadata without secret values."""
+
+    enabled: bool
+    configured: bool
+    header_name: str | None = None
+
+
+class GatewayExternalServersStatus(BaseModel):
+    """External MCP server count summary for the package-local gateway status."""
+
+    total: int
+    enabled: int
+    unavailable: int
+
+
+class GatewayReadinessStatusResponse(BaseModel):
+    """Response body for package-local gateway readiness status."""
+
+    status: str
+    name: str
+    version: str
+    transport: GatewayTransportStatus
+    package: GatewayPackageStatus
+    profile_store: GatewayStoreReadinessStatus
+    default_profile: GatewayDefaultProfileStatus
+    admin_auth: GatewayAdminAuthStatus
+    external_registry_store: GatewayStoreReadinessStatus
+    external_servers: GatewayExternalServersStatus
+    warnings: list[GatewayStatusWarning]
+    next_actions: list[str]
+
+
 class _GatewayAdminAuthHandlingRoute(APIRoute):
     """Route wrapper that keeps router-only admin auth failures JSON-stable."""
 
@@ -1732,12 +1807,16 @@ async def _gateway_readiness_status(
     *,
     profile_manager: GatewayProfileManager | None,
     external_registry_manager: GatewayExternalRegistryManager | None,
-    admin_auth: GatewayAdminAuthConfig,
+    admin_auth: GatewayAdminAuthConfig | None,
+    status_path: str,
 ) -> dict[str, Any]:
     """Return best-effort package-local gateway readiness metadata."""
 
     warnings: list[dict[str, str]] = []
     next_actions: list[str] = []
+    mount_path = status_path.rsplit("/status", 1)[0] if status_path.endswith("/status") else status_path
+    if not mount_path:
+        mount_path = "/"
     package_summary = package_metadata_summary()
     package_payload = {
         key: package_summary.get(key)
@@ -1791,7 +1870,9 @@ async def _gateway_readiness_status(
             )
             next_actions.append("Configure a default profile before relying on profile-scoped gateway calls.")
         except Exception:  # noqa: BLE001 - status must remain best-effort.
-            logger.exception("Default profile readiness check failed during gateway status.")
+            logger.opt(exception=True).warning(
+                "Gateway default profile readiness check failed"
+            )
             warnings.append(
                 _status_warning(
                     "default_profile_status_unavailable",
@@ -1843,7 +1924,9 @@ async def _gateway_readiness_status(
             )
             external_servers["unavailable"] = external_servers["total"]
         except Exception:  # noqa: BLE001 - status must remain best-effort.
-            logger.exception("External registry readiness check failed during gateway status.")
+            logger.opt(exception=True).warning(
+                "Gateway external registry readiness check failed"
+            )
             warnings.append(
                 _status_warning(
                     "external_registry_status_unavailable",
@@ -1860,12 +1943,18 @@ async def _gateway_readiness_status(
             )
         )
 
+    admin_auth_enabled = bool(admin_auth.enabled) if admin_auth is not None else False
+    admin_auth_configured = (
+        bool(admin_auth.api_key is not None or admin_auth.verifier is not None)
+        if admin_auth is not None
+        else False
+    )
     admin_auth_payload = {
-        "enabled": bool(admin_auth.enabled),
-        "configured": bool(admin_auth.api_key is not None or admin_auth.verifier is not None),
-        "header_name": admin_auth.header_name if admin_auth.enabled else None,
+        "enabled": admin_auth_enabled,
+        "configured": admin_auth_configured,
+        "header_name": admin_auth.header_name if admin_auth_enabled and admin_auth is not None else None,
     }
-    if admin_auth.enabled and not admin_auth_payload["configured"]:
+    if admin_auth_enabled and not admin_auth_payload["configured"]:
         warnings.append(
             _status_warning(
                 "admin_auth_not_configured",
@@ -1877,7 +1966,7 @@ async def _gateway_readiness_status(
         "status": "ok",
         "name": _runtime_name(runtime),
         "version": _runtime_version(runtime),
-        "transport": {"base_path": "package-local-mounted", "mount_path": "unknown"},
+        "transport": {"base_path": "package-local-mounted", "mount_path": mount_path},
         "package": package_payload,
         "profile_store": profile_store,
         "default_profile": default_profile,
@@ -1973,8 +2062,8 @@ def create_gateway_router(
             policy_explain_permission_checker=policy_explain_permission_checker,
         )
 
-    @router.get("/status", response_model=GatewayStatusResponse)
-    async def gateway_status() -> dict[str, Any]:
+    @router.get("/status", response_model=GatewayReadinessStatusResponse)
+    async def gateway_status(request: Request) -> dict[str, Any]:
         """Return best-effort package-local gateway readiness metadata."""
 
         return await _gateway_readiness_status(
@@ -1982,6 +2071,7 @@ def create_gateway_router(
             profile_manager=resolved_profile_manager,
             external_registry_manager=resolved_external_registry_manager,
             admin_auth=resolved_admin_auth,
+            status_path=str(request.url.path),
         )
 
     @router.post(
