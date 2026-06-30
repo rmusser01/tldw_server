@@ -12,8 +12,15 @@ from tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation import (
     ImpersonationTokenResponse,
     create_impersonation_token,
 )
-from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
+from tldw_Server_API.app.core.Audit.unified_audit_service import (
+    AuditEventCategory,
+    AuditEventType,
+    MandatoryAuditWriteError,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.services.admin_audit_service import (
+    emit_impersonation_issuance_audit_event,
+)
 
 
 class _LoggerStub:
@@ -148,6 +155,54 @@ class TestCreateImpersonationToken:
         assert exc_info.value.detail == "Mandatory audit persistence unavailable"  # nosec B101
 
     @pytest.mark.asyncio
+    async def test_rbac_failure_does_not_issue_token_or_audit(self):
+        principal = _admin_principal()
+
+        class UsersRepoStub:
+            @classmethod
+            async def from_pool(cls):
+                return cls()
+
+            async def get_user_by_id(self, user_id: int):
+                assert user_id == 42  # nosec B101
+                return {"id": 42, "username": "targetuser", "is_active": True, "role": "user"}
+
+        class RbacRepoStub:
+            def get_user_roles(self, user_id: int):
+                assert user_id == 42  # nosec B101
+                raise RuntimeError("rbac unavailable")
+
+        mock_jwt_svc = MagicMock()
+        mock_jwt_svc.create_impersonation_access_token = MagicMock(return_value="mock.jwt.token")
+        audit = AsyncMock()
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation.AuthnzUsersRepo",
+                UsersRepoStub,
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation.AuthnzRbacRepo",
+                return_value=RbacRepoStub(),
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation.get_jwt_service",
+                return_value=mock_jwt_svc,
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation.emit_impersonation_issuance_audit_event",
+                audit,
+            ),
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await create_impersonation_token(42, principal)
+
+        assert exc_info.value.status_code == 500  # nosec B101
+        assert exc_info.value.detail == "Impersonation token creation failed"  # nosec B101
+        mock_jwt_svc.create_impersonation_access_token.assert_not_called()
+        audit.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_user_not_found(self):
         principal = _admin_principal()
 
@@ -212,3 +267,35 @@ class TestCreateImpersonationToken:
         assert exc_info.value.status_code == 500  # nosec B101
         assert exc_info.value.detail == "Impersonation token creation failed"  # nosec B101
         assert logger_stub.error_records == [("Impersonation token creation failed", (), {})]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_impersonation_audit_helper_records_token_created_event():
+    service = MagicMock()
+    service.log_event = AsyncMock()
+    service.flush = AsyncMock()
+    lookup = AsyncMock(return_value=service)
+
+    with patch(
+        "tldw_Server_API.app.services.admin_audit_service.get_or_create_audit_service_for_user_id_optional",
+        lookup,
+    ):
+        await emit_impersonation_issuance_audit_event(
+            actor_id=1,
+            target_user_id=42,
+            expires_in_minutes=15,
+        )
+
+    lookup.assert_awaited_once_with(1)
+    service.log_event.assert_awaited_once()
+    kwargs = service.log_event.await_args.kwargs
+    assert kwargs["event_type"] is AuditEventType.AUTH_TOKEN_CREATED  # nosec B101
+    assert kwargs["category"] is AuditEventCategory.AUTHENTICATION  # nosec B101
+    assert kwargs["resource_type"] == "user_impersonation"  # nosec B101
+    assert kwargs["resource_id"] == "42"  # nosec B101
+    assert kwargs["action"] == "admin.impersonation.token_issued"  # nosec B101
+    assert kwargs["metadata"]["actor_id"] == 1  # nosec B101
+    assert kwargs["metadata"]["target_user_id"] == 42  # nosec B101
+    assert kwargs["metadata"]["expires_in_minutes"] == 15  # nosec B101
+    assert kwargs["metadata"]["impersonation"] is True  # nosec B101
+    service.flush.assert_awaited_once_with(raise_on_failure=True)

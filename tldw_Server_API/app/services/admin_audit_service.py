@@ -69,7 +69,7 @@ async def emit_impersonation_issuance_audit_event(
             method="POST",
         )
         await svc.log_event(
-            event_type=AuditEventType.USER_UPDATED,
+            event_type=AuditEventType.AUTH_TOKEN_CREATED,
             category=AuditEventCategory.AUTHENTICATION,
             context=ctx,
             resource_type="user_impersonation",

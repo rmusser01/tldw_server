@@ -96,13 +96,7 @@ async def create_impersonation_token(
             )
 
         # Determine the target user's role
-        try:
-            role_rows = AuthnzRbacRepo().get_user_roles(target_user_id)
-        except Exception:
-            logger.warning(
-                "Unable to load RBAC roles for impersonation target; falling back to user row role"
-            )
-            role_rows = []
+        role_rows = AuthnzRbacRepo().get_user_roles(target_user_id)
         target_role = _first_role_name(role_rows) or str(row.get("role") or "user")
 
         # Generate a short-lived access token with impersonation claim
