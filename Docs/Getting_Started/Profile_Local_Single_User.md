@@ -11,6 +11,7 @@ Prerequisites:
 - Python 3.10+
 - `ffmpeg`
 - Git
+- Bun for the WebUI (`npm` also works as a fallback)
 
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
@@ -105,11 +106,50 @@ curl -sS http://127.0.0.1:8000/api/v1/config/quickstart
 curl -sS http://127.0.0.1:8080 > /dev/null && echo "webui-ok"
 ```
 
+## Start the WebUI
+
+Keep the API server running at `http://127.0.0.1:8000`. In another terminal:
+
+```bash
+cd apps/tldw-frontend
+cp .env.local.example .env.local
+```
+
+Confirm `.env.local` points the WebUI at the local API:
+
+```bash
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+NEXT_PUBLIC_API_VERSION=v1
+# Optional in single-user mode:
+# NEXT_PUBLIC_X_API_KEY=your_single_user_api_key
+```
+
+`NEXT_PUBLIC_X_API_KEY` is browser-visible. Use it only for local single-user convenience, and avoid exposing this setup directly to the public internet.
+
+Install and start the WebUI:
+
+```bash
+bun install
+bun run dev -- -p 8080
+
+# npm fallback:
+# npm install
+# npm run dev -- -p 8080
+```
+
+Open http://localhost:8080.
+
+After starting the WebUI, verify it responds:
+
+```bash
+curl -sS http://127.0.0.1:8080 > /dev/null && echo "webui-ok"
+```
+
 ## First Value
 
 Open http://127.0.0.1:8080 to open the WebUI and complete first-time setup there. The setup completion gate is the first successful chat response from your selected hosted API key or local OpenAI-compatible provider. Immediately after that, add your first source so chat can use your own material.
 
-The CLI verify command still runs a provider-independent first-value ingest/search verification. It posts a small Markdown document to `/api/v1/media/add`, then searches for `tldw-onboarding-verification-unique` through `/api/v1/media/search`.
+If you prefer terminal verification, the CLI verify command still runs a provider-independent first-value ingest/search check. It posts a small Markdown document to `/api/v1/media/add`, then searches for `tldw-onboarding-verification-unique` through `/api/v1/media/search`.
 
 ```bash
 make verify-local-single
