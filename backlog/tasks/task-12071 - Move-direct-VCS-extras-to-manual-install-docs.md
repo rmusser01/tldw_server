@@ -4,7 +4,7 @@ title: Move direct VCS extras to manual install docs
 status: Done
 assignee: []
 created_date: '2026-06-29 19:53'
-updated_date: '2026-06-29 20:00'
+updated_date: '2026-06-30 01:06'
 labels:
   - packaging
   - pypi
@@ -36,6 +36,10 @@ Remove direct VCS dependencies from published package metadata so tldw-server ca
 
 <!-- SECTION:NOTES:BEGIN -->
 Removed direct VCS dependency entries from pyproject optional metadata for ocr_dots, ocr_points_transformers, and TTS_chatterbox while preserving normal PyPI-installable dependencies. Updated OCR and Chatterbox setup docs to direct users to manual source installs for dots.ocr, WePOINTS, and Perth. Verification: pyproject TOML parse passed; optional dependency scan reported zero direct URL deps; python -m build --no-isolation built wheel and sdist to /tmp/tldw_pypi_manual_ocr_dots_dist; twine check passed for both artifacts; wheel and sdist metadata inspection reported direct_url_requires=0. Isolated build without --no-isolation was skipped because sandboxed pip could not reach package indexes to install build-system packages.
+
+PR review follow-up: PointsReaderBackend.available() now requires the manual WePOINTS module for transformers mode, logs a specific WePOINTS-missing warning, and import errors from optional/manual dependencies are caught as runtime failures instead of escaping OCR flow. Added focused unit coverage for missing WePOINTS availability and ModuleNotFoundError handling. Verification: pytest tldw_Server_API/tests/MediaIngestion_NEW/test_ocr_backend_points.py -q passed (4 passed); optional dependency scan still reports direct-url-deps 0; git diff --check passed.
+
+Final review-fix verification: Bandit on points_reader.py passed with zero findings after the WePOINTS logging refinement.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

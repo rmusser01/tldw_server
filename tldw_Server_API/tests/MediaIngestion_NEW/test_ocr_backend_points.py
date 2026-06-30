@@ -51,3 +51,42 @@ def test_points_backend_sglang_mock(monkeypatch):
     )
     out = backend.ocr_image(png_bytes, lang="eng")
     assert isinstance(out, str) and out == "MOCK_TEXT"
+
+
+@pytest.mark.unit
+def test_points_transformers_requires_wepoints(monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.points_reader import (
+        PointsReaderBackend,
+    )
+
+    monkeypatch.setenv("POINTS_MODE", "transformers")
+
+    def fake_find_spec(name):
+        if name in {"transformers", "torch"}:
+            return object()
+        if name == "wepoints":
+            return None
+        raise AssertionError(f"unexpected module probe: {name}")
+
+    monkeypatch.setattr("importlib.util.find_spec", fake_find_spec)
+
+    assert PointsReaderBackend.available() is False
+
+
+@pytest.mark.unit
+def test_points_transformers_missing_optional_dependency_returns_empty(monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends import (
+        points_reader,
+    )
+
+    monkeypatch.setenv("POINTS_MODE", "transformers")
+    monkeypatch.setattr(points_reader.PointsReaderBackend, "available", classmethod(lambda cls: True))
+    monkeypatch.setattr(
+        points_reader,
+        "_ocr_via_transformers",
+        lambda image_path, prompt: (_ for _ in ()).throw(ModuleNotFoundError("No module named 'wepoints'")),
+    )
+
+    out = points_reader.PointsReaderBackend().ocr_image(b"not-a-real-image", lang="eng")
+
+    assert out == ""
