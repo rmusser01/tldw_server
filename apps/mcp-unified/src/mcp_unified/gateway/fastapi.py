@@ -351,6 +351,93 @@ class DeleteCredentialGrantResponse(BaseModel):
     store: StoreMetadataResponse
 
 
+class GatewayStatusStoreResponse(BaseModel):
+    """Best-effort readiness metadata for a gateway backing store."""
+
+    model_config = ConfigDict(extra="allow")
+
+    kind: str
+    persistent: bool | None = None
+
+
+class GatewayStatusPackageResponse(BaseModel):
+    """Package boundary metadata exposed by the gateway status endpoint."""
+
+    model_config = ConfigDict(extra="allow")
+
+    package_name: str | None = None
+    package_import_name: str | None = None
+    package_status: str | None = None
+    publishing_status: str | None = None
+    source_distribution: str | None = None
+    dependency_version_policy: str | None = None
+
+
+class GatewayStatusTransportResponse(BaseModel):
+    """Transport metadata exposed by the gateway status endpoint."""
+
+    model_config = ConfigDict(extra="allow")
+
+    base_path: str
+    mount_path: str
+
+
+class GatewayStatusDefaultProfileResponse(BaseModel):
+    """Default profile readiness metadata."""
+
+    model_config = ConfigDict(extra="allow")
+
+    configured: bool
+    profile_id: str | None = None
+    source: str
+
+
+class GatewayStatusAdminAuthResponse(BaseModel):
+    """Admin-auth readiness metadata without secret values."""
+
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool
+    configured: bool
+    header_name: str | None = None
+
+
+class GatewayStatusExternalServersResponse(BaseModel):
+    """External server readiness counts."""
+
+    model_config = ConfigDict(extra="allow")
+
+    total: int
+    enabled: int
+    unavailable: int
+
+
+class GatewayStatusWarningResponse(BaseModel):
+    """Non-secret readiness warning returned by gateway status."""
+
+    reason_code: str
+    message: str
+
+
+class GatewayStatusResponse(BaseModel):
+    """Response body for package-local gateway readiness status."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    name: str
+    version: str
+    transport: GatewayStatusTransportResponse
+    package: GatewayStatusPackageResponse
+    profile_store: GatewayStatusStoreResponse
+    default_profile: GatewayStatusDefaultProfileResponse
+    admin_auth: GatewayStatusAdminAuthResponse
+    external_registry_store: GatewayStatusStoreResponse
+    external_servers: GatewayStatusExternalServersResponse
+    warnings: list[GatewayStatusWarningResponse]
+    next_actions: list[str]
+
+
 class ExternalRuntimeServerStatusResponse(BaseModel):
     """Response row for one external MCP server runtime."""
 
@@ -1886,7 +1973,7 @@ def create_gateway_router(
             policy_explain_permission_checker=policy_explain_permission_checker,
         )
 
-    @router.get("/status")
+    @router.get("/status", response_model=GatewayStatusResponse)
     async def gateway_status() -> dict[str, Any]:
         """Return best-effort package-local gateway readiness metadata."""
 

@@ -2387,6 +2387,13 @@ def test_gateway_external_runtime_lifecycle_logs_unexpected_startup_exception(
 
 def test_gateway_status_includes_package_boundary_metadata() -> None:
     app = create_gateway_app(_FakeGatewayRuntime())
+    status_route = next(
+        route
+        for route in app.routes
+        if getattr(route, "path", None) == "/mcp/status"
+    )
+    assert getattr(status_route, "response_model", None) is gateway_fastapi.GatewayStatusResponse
+
     with TestClient(app) as client:
         response = client.get("/mcp/status")
 
