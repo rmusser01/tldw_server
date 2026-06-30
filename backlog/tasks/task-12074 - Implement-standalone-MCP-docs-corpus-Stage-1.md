@@ -4,7 +4,7 @@ title: Implement standalone MCP docs corpus Stage 1
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-30 14:47'
+updated_date: '2026-06-30 14:51'
 labels: []
 dependencies: []
 documentation:
@@ -42,6 +42,9 @@ Docs/superpowers/plans/2026-06-30-standalone-mcp-docs-corpus-stage1-plan.md
 
 - Added store-backed retrieval and bounded context-pack services with collection/keyword filter passthrough, scope-isolated search, document/collection/keyword listing, and character-budget enforcement.
 - Verification for Task 4: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/docs/test_docs_retrieval_context.py tldw_Server_API/tests/MCP_unified/docs/test_docs_schema_store.py tldw_Server_API/tests/MCP_unified/docs/test_docs_import_boundaries.py -v` passed 19 tests; Bandit on `mcp_unified/docs/retrieval` and `test_docs_retrieval_context.py` exited 0 with JSON written to `/tmp/bandit_task_12074_task4.json`.
+
+- Added Context7-compatible read aliases, the runtime-neutral DocsMCPToolProvider, provider exports, and store-backed collection/keyword management methods for the advertised write tools.
+- Verification for Tasks 5-6: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/docs/test_docs_mcp_provider.py tldw_Server_API/tests/MCP_unified/docs/test_docs_retrieval_context.py tldw_Server_API/tests/MCP_unified/docs/test_docs_import_boundaries.py -v` passed 13 tests; Bandit on `mcp_unified/docs` and `test_docs_mcp_provider.py` exited 0 with JSON written to `/tmp/bandit_task_12074_task5_6.json`.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

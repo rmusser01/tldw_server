@@ -460,6 +460,101 @@ class DocsCatalogStore:
         )
         return matches
 
+    def create_collection(self, *, scope: AccessScope, name: str, description: str = "") -> int:
+        owner_scope, profile_scope = _scope_values(scope)
+        normalized = _required_name(name, "collection")
+        with closing(self.connect()) as conn:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO docs_collections (owner_scope, profile_scope, name, description)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (owner_scope, profile_scope, normalized, description),
+                )
+                row = conn.execute(
+                    """
+                    SELECT id
+                    FROM docs_collections
+                    WHERE owner_scope = ? AND profile_scope = ? AND name = ?
+                    """,
+                    (owner_scope, profile_scope, normalized),
+                ).fetchone()
+                collection_id = int(row["id"])
+                conn.execute(
+                    """
+                    UPDATE docs_collections
+                    SET description = ?
+                    WHERE id = ? AND owner_scope = ? AND profile_scope = ?
+                    """,
+                    (description, collection_id, owner_scope, profile_scope),
+                )
+                return collection_id
+
+    def update_collection(self, *, scope: AccessScope, name: str, description: str) -> bool:
+        owner_scope, profile_scope = _scope_values(scope)
+        normalized = _required_name(name, "collection")
+        with closing(self.connect()) as conn:
+            with conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE docs_collections
+                    SET description = ?
+                    WHERE owner_scope = ? AND profile_scope = ? AND name = ?
+                    """,
+                    (description, owner_scope, profile_scope, normalized),
+                )
+                return cursor.rowcount > 0
+
+    def set_collection_membership(
+        self,
+        *,
+        scope: AccessScope,
+        collection: str,
+        document_id: int,
+        action: str,
+    ) -> str:
+        owner_scope, profile_scope = _scope_values(scope)
+        normalized_collection = _required_name(collection, "collection")
+        normalized_action = action.strip().lower()
+        if normalized_action not in {"add", "remove"}:
+            raise ValueError("action must be add or remove")
+
+        with closing(self.connect()) as conn:
+            with conn:
+                self._assert_document_in_scope(conn, owner_scope, profile_scope, document_id)
+                collection_id = self._ensure_collection(
+                    conn,
+                    owner_scope,
+                    profile_scope,
+                    normalized_collection,
+                )
+                if normalized_action == "add":
+                    cursor = conn.execute(
+                        """
+                        INSERT OR IGNORE INTO docs_collection_members (collection_id, document_id)
+                        VALUES (?, ?)
+                        """,
+                        (collection_id, document_id),
+                    )
+                    return "added" if cursor.rowcount else "unchanged"
+
+                cursor = conn.execute(
+                    """
+                    DELETE FROM docs_collection_members
+                    WHERE collection_id = ? AND document_id = ?
+                    """,
+                    (collection_id, document_id),
+                )
+                return "removed" if cursor.rowcount else "unchanged"
+
+    def apply_keywords(self, *, scope: AccessScope, document_id: int, keywords: Iterable[str]) -> None:
+        owner_scope, profile_scope = _scope_values(scope)
+        with closing(self.connect()) as conn:
+            with conn:
+                self._assert_document_in_scope(conn, owner_scope, profile_scope, document_id)
+                self._replace_document_keywords(conn, owner_scope, profile_scope, document_id, keywords)
+
     def _resolve_document_id(self, scope: AccessScope, name: str) -> int | None:
         owner_scope, profile_scope = _scope_values(scope)
         normalized = name.strip()
@@ -507,6 +602,52 @@ class DocsCatalogStore:
                 (owner_scope, profile_scope, normalized, normalized, normalized, normalized),
             ).fetchone()
             return int(row["id"]) if row is not None else None
+
+    @staticmethod
+    def _ensure_collection(
+        conn: sqlite3.Connection,
+        owner_scope: str,
+        profile_scope: str,
+        name: str,
+    ) -> int:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO docs_collections (owner_scope, profile_scope, name)
+            VALUES (?, ?, ?)
+            """,
+            (owner_scope, profile_scope, name),
+        )
+        row = conn.execute(
+            """
+            SELECT id
+            FROM docs_collections
+            WHERE owner_scope = ? AND profile_scope = ? AND name = ?
+            """,
+            (owner_scope, profile_scope, name),
+        ).fetchone()
+        return int(row["id"])
+
+    @staticmethod
+    def _assert_document_in_scope(
+        conn: sqlite3.Connection,
+        owner_scope: str,
+        profile_scope: str,
+        document_id: int,
+    ) -> None:
+        row = conn.execute(
+            """
+            SELECT id
+            FROM docs_documents
+            WHERE owner_scope = ? AND profile_scope = ? AND id = ?
+            """,
+            (owner_scope, profile_scope, document_id),
+        ).fetchone()
+        if row is None:
+            raise DocsError(
+                code="document_not_found",
+                message="Document not found in active scope.",
+                details={"document_id": document_id},
+            )
 
     @staticmethod
     def _backfill_scope_sentinels(conn: sqlite3.Connection) -> None:
@@ -855,6 +996,17 @@ def _optional_int(value: object) -> int | None:
     if value is None or value == "":
         return None
     return int(value)
+
+
+def _required_name(value: object, field_name: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise DocsError(
+            code="invalid_name",
+            message=f"{field_name} name must not be empty.",
+            details={"field": field_name},
+        )
+    return text
 
 
 def _normalized_names(names: Iterable[str]) -> tuple[str, ...]:
