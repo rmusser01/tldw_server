@@ -1,7 +1,7 @@
 import React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useTranslation } from "react-i18next"
 import {
-  Alert,
   Button,
   Input,
   List,
@@ -14,6 +14,7 @@ import {
   notification
 } from "antd"
 import { Trash2, Play, UploadCloud, Wand2 } from "lucide-react"
+import { Alert } from "@/components/ui/primitives/Alert"
 import type { TldwTtsProvidersInfo } from "@/services/tldw/audio-providers"
 import { getProviderLabel } from "@/utils/provider-registry"
 import {
@@ -85,6 +86,7 @@ export const VoiceCloningManager: React.FC<VoiceCloningManagerProps> = ({
   onSelectVoice,
   onSelectVoices
 }) => {
+  const { t } = useTranslation(["playground"])
   const queryClient = useQueryClient()
   const { data: customVoices = [], isLoading: voicesLoading } = useQuery<TldwCustomVoice[]>(
     {
@@ -306,19 +308,44 @@ export const VoiceCloningManager: React.FC<VoiceCloningManagerProps> = ({
 
   const voiceRoleError = React.useMemo(() => {
     if (!useVoiceRoles) return null
-    if (voiceCards.length < 1) return "Select at least one voice."
-    if (voiceCards.length > 4) return "Select up to four voices."
+    if (voiceCards.length < 1) {
+      return t(
+        "playground:tts.cloning.voiceRoleSelectAtLeastOne",
+        "Select at least one voice."
+      )
+    }
+    if (voiceCards.length > 4) {
+      return t(
+        "playground:tts.cloning.voiceRoleSelectUpToFour",
+        "Select up to four voices."
+      )
+    }
     const roles = new Set<string>()
     const voices = new Set<string>()
     for (const card of voiceCards) {
-      if (!card.voiceId) return "Each role needs a voice."
-      if (roles.has(card.role)) return "Roles must be unique."
-      if (voices.has(card.voiceId)) return "Voices must be unique."
+      if (!card.voiceId) {
+        return t(
+          "playground:tts.cloning.voiceRoleNeedsVoice",
+          "Each role needs a voice."
+        )
+      }
+      if (roles.has(card.role)) {
+        return t(
+          "playground:tts.cloning.voiceRoleUniqueRoles",
+          "Roles must be unique."
+        )
+      }
+      if (voices.has(card.voiceId)) {
+        return t(
+          "playground:tts.cloning.voiceRoleUniqueVoices",
+          "Voices must be unique."
+        )
+      }
       roles.add(card.role)
       voices.add(card.voiceId)
     }
     return null
-  }, [useVoiceRoles, voiceCards])
+  }, [t, useVoiceRoles, voiceCards])
 
   const roleVoiceOptions = React.useMemo(() => {
     return customVoices.map((voice) => ({
@@ -422,11 +449,17 @@ export const VoiceCloningManager: React.FC<VoiceCloningManagerProps> = ({
 
       {providerUnavailable && (
         <Alert
-          type="warning"
-          showIcon
-          title="Provider disabled on server"
-          description="Enable this provider in Config_Files/tts_providers_config.yaml to upload voices."
-        />
+          title={t(
+            "playground:tts.cloning.providerDisabledTitle",
+            "Provider disabled on server"
+          )}
+          variant="warning"
+        >
+          {t(
+            "playground:tts.cloning.providerDisabledBody",
+            "Enable this provider in Config_Files/tts_providers_config.yaml to upload voices."
+          )}
+        </Alert>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -555,11 +588,14 @@ export const VoiceCloningManager: React.FC<VoiceCloningManagerProps> = ({
               </div>
               {voiceRoleError && (
                 <Alert
-                  type="warning"
-                  showIcon
-                  title="Voice roles need attention"
-                  description={voiceRoleError}
-                />
+                  title={t(
+                    "playground:tts.cloning.voiceRolesAttentionTitle",
+                    "Voice roles need attention"
+                  )}
+                  variant="warning"
+                >
+                  {voiceRoleError}
+                </Alert>
               )}
             </>
           )}

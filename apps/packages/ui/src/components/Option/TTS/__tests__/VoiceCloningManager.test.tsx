@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { TldwTtsProvidersInfo } from "@/services/tldw/audio-providers"
+import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
 import { VoiceCloningManager } from "../VoiceCloningManager"
 
 const mocks = vi.hoisted(() => ({
@@ -17,6 +18,17 @@ const mocks = vi.hoisted(() => ({
   synthesizeSpeech: vi.fn(),
   notificationError: vi.fn(),
   notificationSuccess: vi.fn()
+}))
+
+const translationState = vi.hoisted(() => ({
+  overrides: {} as Record<string, string>
+}))
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, fallback?: string) =>
+      translationState.overrides[key] ?? fallback ?? key
+  })
 }))
 
 vi.mock("antd", async () => {
@@ -74,7 +86,9 @@ const rawServerError = (method: string, path: string, action: string) =>
     `Request failed: 500 (${method} ${path}) token=sk_secret_${action} /Users/alice/private/${action}.json`
   )
 
-const renderVoiceCloningManager = () => {
+const renderVoiceCloningManager = (
+  nextProvidersInfo: TldwTtsProvidersInfo | null = providersInfo
+) => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -88,7 +102,7 @@ const renderVoiceCloningManager = () => {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <VoiceCloningManager providersInfo={providersInfo} />
+      <VoiceCloningManager providersInfo={nextProvidersInfo} />
     </QueryClientProvider>
   )
 }
@@ -108,6 +122,7 @@ const expectSanitizedDescription = () => {
 describe("VoiceCloningManager", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    translationState.overrides = {}
     mocks.listCustomVoices.mockResolvedValue([customVoice])
     mocks.uploadCustomVoice.mockResolvedValue({
       voice_id: "new-voice",
@@ -198,5 +213,34 @@ describe("VoiceCloningManager", () => {
       )
     })
     expectSanitizedDescription()
+  })
+
+  it("renders disabled provider guidance with the design-system Alert primitive", async () => {
+    translationState.overrides = {
+      "playground:tts.cloning.providerDisabledTitle": "Translated provider disabled",
+      "playground:tts.cloning.providerDisabledBody": "Translated provider body"
+    }
+    renderVoiceCloningManager({ providers: {}, voices: {} })
+
+    await screen.findByText("Translated provider disabled")
+
+    expectInsideDesignSystemAlert("Translated provider disabled")
+    expectInsideDesignSystemAlert("Translated provider body")
+  })
+
+  it("renders voice role validation with the design-system Alert primitive", async () => {
+    const user = userEvent.setup()
+    translationState.overrides = {
+      "playground:tts.cloning.voiceRolesAttentionTitle": "Translated role warning",
+      "playground:tts.cloning.voiceRoleNeedsVoice": "Translated missing voice"
+    }
+    mocks.listCustomVoices.mockResolvedValueOnce([])
+    renderVoiceCloningManager()
+
+    await user.click(screen.getByRole("switch"))
+
+    await screen.findByText("Translated role warning")
+    expectInsideDesignSystemAlert("Translated role warning")
+    expectInsideDesignSystemAlert("Translated missing voice")
   })
 })
