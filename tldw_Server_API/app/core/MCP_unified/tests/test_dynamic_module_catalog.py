@@ -157,6 +157,21 @@ def test_default_mcp_modules_config_declares_prompts_module_with_empty_config_al
     assert prompts_module["settings"]["config_prompts"] == {"enabled": True, "entries": []}  # nosec B101
 
 
+def test_default_mcp_modules_config_declares_docs_module_without_web_acquisition() -> None:
+    config_path = Path("tldw_Server_API/Config_Files/mcp_modules.yaml")
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    modules = {module["id"]: module for module in data["modules"]}
+
+    docs_module = modules["docs"]
+
+    assert docs_module["enabled"] is True  # nosec B101
+    assert docs_module["class"] == (  # nosec B101
+        "tldw_Server_API.app.core.MCP_unified.modules.implementations.docs_module:DocsModule"
+    )
+    assert docs_module["department"] == "knowledge"  # nosec B101
+    assert docs_module["settings"]["enable_web_acquisition"] is False  # nosec B101
+
+
 @pytest.mark.asyncio
 async def test_server_skips_disabled_codegraph_module_from_config(monkeypatch, tmp_path: Path) -> None:
     from tldw_Server_API.app.core.MCP_unified.server import MCPServer

@@ -144,6 +144,20 @@ modules:
     max_concurrent: 10
     settings: {}
 
+  - id: docs
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.docs_module:DocsModule
+    enabled: true
+    name: Docs Corpus
+    version: "0.1.0"
+    department: knowledge
+    max_concurrent: 10
+    settings:
+      db_path: Databases/mcp_docs.db
+      trusted_roots:
+        - Docs
+      enable_web_acquisition: false
+      max_import_file_bytes: 2000000
+
   - id: run_command
     class: tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module:RunCommandModule
     # Disabled by default because it can run configured local command families.
