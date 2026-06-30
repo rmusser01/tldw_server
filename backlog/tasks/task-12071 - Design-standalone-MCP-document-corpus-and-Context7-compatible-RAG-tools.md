@@ -33,7 +33,9 @@ Write a design spec for a standalone-first MCP document corpus that supports doc
 <!-- SECTION:PLAN:BEGIN -->
 Reviewed the draft before implementation planning and tightened the spec around:
 - Stage 1 versus full-program acceptance criteria.
-- Local `docs.import_path` belonging to Stage 1, while Stage 2 is URL acquisition only.
+- Local `docs.import_path` belonging to Stage 1, while Stage 2 is optional URL acquisition only.
+- Baseline standalone install not requiring the web-scraping pipeline.
+- Existing tldw_server scraping code being a reference/copy-adapt source or host-adapter implementation, not a standalone runtime dependency.
 - Store-level owner/profile scope enforcement.
 - Current tldw_server module-loader shim requirements.
 - Config-backed standalone source profiles and future policy storage.
@@ -50,7 +52,7 @@ Reviewed the draft before implementation planning and tightened the spec around:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec written and revised after review for the standalone-first document corpus/RAG MCP module. The revision separates Stage 1 from full-program acceptance, moves local `docs.import_path` into Stage 1, adds store-level scope enforcement, documents the current tldw_server shim path, clarifies source-policy storage, splits collection/keyword tools by read/write behavior, and maps Context7 aliases to canonical docs.* authorization. Verification: unfinished-marker scan returned no matches in the spec/task. Bandit skipped because this task only changes documentation and Backlog.md task metadata.
+Design spec written and revised after review for the standalone-first document corpus/RAG MCP module. The revision separates Stage 1 from full-program acceptance, moves local `docs.import_path` into Stage 1, makes URL/web acquisition optional, requires the baseline standalone install to work without the web-scraping pipeline, treats existing tldw_server scraping code as a reference/copy-adapt source or host-adapter implementation rather than a mandatory runtime dependency, adds store-level scope enforcement, documents the current tldw_server shim path, clarifies source-policy storage, splits collection/keyword tools by read/write behavior, and maps Context7 aliases to canonical docs.* authorization. Verification: unfinished-marker scan returned no matches in the spec/task. Bandit skipped because this task only changes documentation and Backlog.md task metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

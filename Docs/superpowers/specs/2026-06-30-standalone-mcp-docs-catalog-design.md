@@ -33,8 +33,8 @@ runtime-neutral module through host adapters. The docs package must not import
 - Expose agent-friendly retrieval primitives, especially a bounded
   `docs.context` tool for RAG context composition.
 - Support local import from configured path scopes.
-- Support single-page URL ingestion behind source policy, approval, egress
-  safety checks, and audit records.
+- Support single-page URL ingestion as an optional web acquisition capability
+  behind source policy, approval, egress safety checks, and audit records.
 - Provide Context7-compatible aliases for package-like collections without
   requiring all content to use library/version semantics.
 - Keep optional embeddings, reranking, Playwright extraction, and crawling as
@@ -49,9 +49,12 @@ runtime-neutral module through host adapters. The docs package must not import
 - No mandatory package/library/version hierarchy.
 - No dependency on `tldw_server`, Media DB, ChromaDB, RAG services, or AuthNZ in
   the standalone package.
+- No mandatory web-scraping pipeline for baseline standalone install or local
+  corpus use.
 - No broad web crawler in v1. Bounded crawl and sitemap sync belong to a later
   stage using the same source policy.
 - No mandatory browser automation for URL ingestion in v1.
+- No runtime import dependency on the existing `tldw_server` scraping modules.
 - No redistribution/export workflow for scraped third-party docs in v1.
 - No arbitrary filesystem import outside configured trusted roots.
 - No URL fetch before required approval is granted.
@@ -84,6 +87,10 @@ This design intentionally does not make the new docs corpus depend on those
 host features. Instead:
 
 - standalone runtime uses the docs module directly with local SQLite;
+- the standalone web acquisition package can use the existing
+  `tldw_Server_API.app.core.Web_Scraping` and `tldw_Server_API.app.services`
+  web-scraping code as a reference implementation, and may copy or adapt stable
+  pieces when that is simpler and safer than sharing runtime dependencies;
 - `tldw_server` provides adapters for auth, path scopes, approval, audit, and
   optional host-provided sources;
 - future adapters can bridge Media/RAG content into the docs query surface.
@@ -149,6 +156,13 @@ Boundary requirements:
 - Host adapters may import both the standalone package and `tldw_Server_API`.
 - The in-tree `tldw_server` shim may live in the current implementation
   namespace only as registration glue.
+- Web acquisition dependencies and imports must be optional and lazy. Importing
+  the baseline docs package must not require Playwright, trafilatura,
+  `tldw_server`, cookie/session managers, crawler workers, or web-scraping
+  service startup.
+- If code is copied or adapted from `tldw_server` scraping modules, it should be
+  reduced to the standalone safety and ingestion contract instead of preserving
+  host-only service, Media DB, job, cookie, or AuthNZ coupling.
 - Import-boundary tests must enforce this.
 - Standalone examples should use the local SQLite store as the default state
   owner.
@@ -535,9 +549,41 @@ Compatibility aliases must authorize as the canonical operations they invoke:
   store-level access checks;
 - audit records should include both the alias name and canonical operation.
 
+## Optional Web Acquisition
+
+Web acquisition is optional. A baseline standalone install should support local
+document import, SQLite/FTS5 search, and `docs.context` without installing or
+initializing the web-scraping pipeline.
+
+The optional web acquisition layer can be implemented in the most stable
+long-term way for the standalone package:
+
+- copy or adapt focused, stable extraction/policy utilities from
+  `tldw_server` when sharing runtime dependencies would create unwanted
+  coupling;
+- use `tldw_server` scraping modules through host adapters only when running
+  inside `tldw_server`;
+- keep the standalone default to a minimal static HTTP fetch/extract path before
+  adding crawler, session, cookie, or browser automation features;
+- expose capability status through `docs.status` so agents can distinguish
+  `web_acquisition_disabled` from policy denials or extraction failures.
+
+`docs.ingest_url` should either be unavailable from tool discovery when web
+acquisition is disabled, or return a stable disabled-capability result before
+any network or policy action:
+
+```json
+{
+  "status": "capability_disabled",
+  "reason_code": "web_acquisition_disabled",
+  "message": "URL ingestion is not enabled in this standalone profile."
+}
+```
+
 ## Source Policy And URL Safety
 
-Source profile and approval state has deployment-specific storage:
+When web acquisition is enabled, source profile and approval state has
+deployment-specific storage:
 
 - standalone v1 loads trusted roots, source profiles, preapproved domains, and
   approval behavior from explicit configuration;
@@ -557,7 +603,7 @@ Source profiles:
 - `online_capable`: approved domains can be fetched directly; unknown domains
   require approval.
 
-URL ingestion must enforce:
+When web acquisition is enabled, URL ingestion must enforce:
 
 - allowed schemes: `http` and `https` only;
 - DNS resolution before connect;
@@ -638,6 +684,7 @@ Use stable machine-readable reason codes:
 - `content_type_denied`
 - `content_too_large`
 - `path_scope_denied`
+- `web_acquisition_disabled`
 - `document_not_found`
 - `collection_not_found`
 - `unsupported_import_format`
@@ -667,6 +714,8 @@ policy, approval, egress, or path-scope checks are unavailable.
 
 ### Stage 2: URL Acquisition
 
+- Optional web acquisition extra/profile. The baseline standalone package must
+  still run without this extra.
 - `docs.ingest_url` with approval-required flow and egress policy.
 - Static HTTP fetcher.
 - URL canonicalization, redirect handling, content-type allowlists, body limits,
@@ -691,6 +740,8 @@ policy, approval, egress, or path-scope checks are unavailable.
 - Optional Playwright/browser extraction extra.
 - Optional embedding and reranking adapters.
 - Jobs or scheduler integration where a host provides it.
+- Optional reuse/adaptation of richer `tldw_server` scraping pipeline behavior
+  when it can be separated from host-only service and Media DB coupling.
 
 ## Testing Strategy
 
@@ -706,6 +757,7 @@ Unit tests:
 - alias permission mapping to canonical `docs.*` operations
 - source policy config loading
 - collection/keyword write-tool classification
+- disabled web acquisition behavior
 - section/chunk offset precision
 - context budget enforcement
 - path-scope canonicalization
@@ -731,6 +783,7 @@ Boundary tests:
 
 - standalone docs package imports no `tldw_Server_API` modules
 - host adapters live outside the standalone docs package
+- baseline docs package imports without optional web acquisition dependencies
 - optional embedding/browser extras are not required for baseline FTS behavior
 
 Security tests:
@@ -748,6 +801,8 @@ Security tests:
 - A fresh standalone MCP server can ingest local Markdown, MDX, text, and static
   HTML into SQLite, search with FTS5, retrieve cited chunks, and return bounded
   `docs.context` packs.
+- The baseline standalone install works without installing or initializing a
+  web-scraping pipeline.
 - Documents can exist outside any collection.
 - Collections and keywords are optional metadata for grouping and filtering.
 - `docs.import_path` enforces trusted roots, path canonicalization, and symlink
@@ -765,6 +820,8 @@ Security tests:
 
 ## Full Program Acceptance Criteria
 
+- Web acquisition is optional: when disabled, `docs.ingest_url` is hidden or
+  returns `web_acquisition_disabled` before network or policy work.
 - `docs.ingest_url` never fetches before approval when policy requires
   approval.
 - URL ingest blocks private/link-local/loopback targets, disallowed schemes,
@@ -774,17 +831,26 @@ Security tests:
 - The built-in `tldw_server` MCP server exposes the same docs tools through a
   shim and host adapters without making the standalone package depend on
   `tldw_server`.
+- Existing `tldw_server` scraping code is used only as a reference, copied
+  subset, or host adapter implementation; it is not a mandatory standalone
+  runtime dependency.
 - Tests prove policy denials, approval-required flow, no-fetch-before-approval,
   `tldw_server` shim registration, and host adapter boundary behavior.
 
 ## Implementation Planning Notes
 
 The first implementation plan should start with Stage 1 only. Stage 1 should
-avoid URL networking, browser extraction, embeddings, and `tldw_server` Media/RAG
-bridging. That keeps the first slice small enough to prove the data model, MCP
-tool contracts, FTS retrieval, and package boundary before adding acquisition
-risk.
+avoid URL networking, browser extraction, web-scraping extras, embeddings, and
+`tldw_server` Media/RAG bridging. That keeps the first slice small enough to
+prove the data model, MCP tool contracts, FTS retrieval, and package boundary
+before adding acquisition risk.
 
 Later implementation plans can pull from the full-program acceptance criteria
 after the standalone corpus, store-level scope enforcement, and canonical tool
 contracts are stable.
+
+When planning optional URL acquisition, first audit the existing
+`tldw_Server_API.app.core.Web_Scraping` and `tldw_Server_API.app.services`
+scraping code for small reusable pieces. Prefer copy/adapt for stable standalone
+utilities and host adapters for `tldw_server`-specific service behavior; avoid a
+direct standalone runtime dependency on the host scraping pipeline.
