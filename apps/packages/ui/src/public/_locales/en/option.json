@@ -164,6 +164,9 @@
   "header_notes": {
     "message": "Notes"
   },
+  "header_explainer": {
+    "message": "Explainer"
+  },
   "header_companion": {
     "message": "Companion"
   },

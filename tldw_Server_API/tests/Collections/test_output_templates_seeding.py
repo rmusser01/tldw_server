@@ -129,3 +129,36 @@ def test_seed_watchlists_templates_does_not_override_user_template(seeded_db, mo
     assert refreshed.body == "User body"
     assert refreshed.description == "User description"
     assert json.loads(refreshed.metadata_json or "{}").get("seeded_from") is None
+
+
+def test_seed_watchlists_templates_rechecks_stale_existing_snapshot(seeded_db, monkeypatch):
+    monkeypatch.setenv("WATCHLISTS_SEED_OUTPUT_TEMPLATES", "false")
+
+    cdb = CollectionsDatabase.for_user(user_id=906)
+    cdb.create_output_template(
+        name="seeded",
+        type_="briefing_markdown",
+        format_="md",
+        body="User body",
+        description="User description",
+        is_default=False,
+    )
+
+    monkeypatch.setenv("WATCHLISTS_SEED_OUTPUT_TEMPLATES", "true")
+    monkeypatch.setattr(CollectionsDatabase, "_list_output_template_names", lambda self: set())
+
+    original_create = CollectionsDatabase.create_output_template
+
+    def fail_on_duplicate_insert(self, *args, **kwargs):
+        name = kwargs.get("name") if kwargs else (args[0] if args else None)
+        if name == "seeded":
+            raise AssertionError("seeding attempted duplicate insert")
+        return original_create(self, *args, **kwargs)
+
+    monkeypatch.setattr(CollectionsDatabase, "create_output_template", fail_on_duplicate_insert)
+
+    cdb_refresh = CollectionsDatabase.for_user(user_id=906)
+    refreshed = cdb_refresh.get_output_template_by_name("seeded")
+    assert refreshed.body == "User body"
+    assert refreshed.description == "User description"
+    assert json.loads(refreshed.metadata_json or "{}").get("seeded_from") is None

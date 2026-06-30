@@ -40,7 +40,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, ge
 from ....core.Chatbooks.chatbook_models import ContentType, ExportJob, ExportStatus
 from ....core.Chatbooks.chatbook_service import ChatbookService
 from ....core.Chatbooks.chatbook_validators import ChatbookValidator
-from ....core.Chatbooks.exceptions import JobError, QuotaExceededError
+from ....core.Chatbooks.exceptions import ExportError, JobError, QuotaExceededError
 from ....core.Chatbooks.quota_manager import QuotaManager
 from ....core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from ....core.DB_Management.db_path_utils import DatabasePaths
@@ -270,6 +270,10 @@ def _persist_completed_sync_export_job(
     output_path: str | Path,
 ) -> tuple[str, str, Path, int]:
     """Persist a sync export result as a completed job for job-backed downloads."""
+    service_user_id = str(getattr(service, "user_id", user_id))
+    if service_user_id != str(user_id):
+        logger.warning("Rejected sync export job persistence with mismatched user ownership")
+        raise HTTPException(status_code=500, detail="Export job ownership validation failed")
     job_id = str(uuid4())
     file_path = Path(output_path).resolve()
     expected_base = Path(service.export_dir).resolve()
@@ -294,7 +298,7 @@ def _persist_completed_sync_export_job(
 
     job = ExportJob(
         job_id=job_id,
-        user_id=user_id,
+        user_id=service_user_id,
         status=ExportStatus.COMPLETED,
         chatbook_name=chatbook_name,
         output_path=str(file_path),
@@ -516,6 +520,14 @@ async def create_chatbook(
         raise
     except QuotaExceededError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from None
+    except ExportError:
+        get_ps_logger(
+            request_id=ensure_request_id(request),
+            ps_component="endpoint",
+            ps_job_kind="chatbooks",
+            traceparent=ensure_traceparent(request),
+        ).exception("Chatbook export failed")
+        raise HTTPException(status_code=500, detail="An error occurred while creating the chatbook") from None
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
         # Log full traceback to aid debugging intermittent 500s in CI
         get_ps_logger(
@@ -599,6 +611,14 @@ async def continue_chatbook_export(
 
     except HTTPException:
         raise
+    except ExportError:
+        get_ps_logger(
+            request_id=ensure_request_id(request),
+            ps_component="endpoint",
+            ps_job_kind="chatbooks",
+            traceparent=ensure_traceparent(request),
+        ).exception("Chatbook continuation export failed")
+        raise HTTPException(status_code=500, detail="An error occurred while continuing the chatbook export") from None
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
         get_ps_logger(
             request_id=ensure_request_id(request),
@@ -701,7 +721,7 @@ async def import_chatbook(
                 detail="Media/embedding imports are not supported yet. Set import_media=false and import_embeddings=false.",
             )
         if import_request.content_selections:
-            unsupported = {"media", "embedding", "prompt", "evaluation", "generated_document"}
+            unsupported = {"media", "embedding", "prompt", "evaluation"}
             requested = []
             for content_type in import_request.content_selections:
                 ct_val = content_type.value if hasattr(content_type, "value") else str(content_type)

@@ -11037,8 +11037,18 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.workspace_migrations",
+        path="/workspace-migrations",
+    )
+    _install_fake_router_module(
+        monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.workspace_memberships",
+        path="/workspace-memberships",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.workspace_eligibility",
-        path="/workspace-eligibility/check",
+        path="/workspace-eligibility",
     )
     _install_fake_router_module(
         monkeypatch,
@@ -11162,6 +11172,9 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
         "tldw_Server_API.app.api.v1.endpoints.chatbooks",
         path="/chatbooks",
     )
+    fake_chatbooks = sys.modules["tldw_Server_API.app.api.v1.endpoints.chatbooks"]
+    setattr(fake_chatbooks, "_persist_completed_sync_export_job", lambda **_kwargs: None)
+    setattr(fake_chatbooks, "get_chatbook_service", lambda: None)
     _install_fake_router_module(
         monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.workflows",
@@ -11376,9 +11389,15 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_first_path["/workspaces/list"].prefix == "/api/v1/workspaces"
     assert by_first_path["/workspaces/list"].tags == ("workspaces",)
     assert by_first_path["/workspaces/list"].route_key == "workspaces"
-    assert by_first_path["/workspace-eligibility/check"].prefix == "/api/v1/workspace-eligibility"
-    assert by_first_path["/workspace-eligibility/check"].tags == ("workspaces",)
-    assert by_first_path["/workspace-eligibility/check"].route_key == "workspaces"
+    assert by_first_path["/workspace-migrations"].prefix == "/api/v1/workspaces"
+    assert by_first_path["/workspace-migrations"].tags == ("workspaces",)
+    assert by_first_path["/workspace-migrations"].route_key == "workspaces"
+    assert by_first_path["/workspace-memberships"].prefix == "/api/v1/workspace-memberships"
+    assert by_first_path["/workspace-memberships"].tags == ("workspaces",)
+    assert by_first_path["/workspace-memberships"].route_key == "workspace-memberships"
+    assert by_first_path["/workspace-eligibility"].prefix == "/api/v1/workspace-eligibility"
+    assert by_first_path["/workspace-eligibility"].tags == ("workspaces",)
+    assert by_first_path["/workspace-eligibility"].route_key == "workspaces"
     assert by_key["character-chat-sessions"].prefix == "/api/v1/chats"
     assert by_key["character-chat-sessions"].tags == ("character-chat-sessions",)
     assert by_key["character-memory"].prefix == "/api/v1/characters"
@@ -11438,6 +11457,8 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_key["slides"].tags == ("slides",)
     assert by_key["flashcards"].prefix == "/api/v1"
     assert by_key["flashcards"].tags == ("flashcards",)
+    assert by_key["explainer"].prefix == "/api/v1"
+    assert by_key["explainer"].tags == ("explainer",)
     assert by_key["quizzes"].prefix == "/api/v1"
     assert by_key["quizzes"].tags == ("quizzes",)
     assert by_key["study-suggestions"].prefix == "/api/v1"
