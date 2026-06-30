@@ -742,6 +742,8 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
     # Attach user id for downstream context (usage logging, RBAC rate limits)
     with contextlib.suppress(_USER_DB_NONCRITICAL_EXCEPTIONS):
         request.state.user_id = user.id
+        request.state.impersonation = token_impersonation
+        request.state.impersonated_by = token_impersonated_by
 
     team_ids: list[int] = []
     org_ids: list[int] = []
