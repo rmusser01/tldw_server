@@ -1,10 +1,10 @@
 ---
 id: TASK-12074
 title: Implement standalone MCP docs corpus Stage 1
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-06-30 14:56'
+updated_date: '2026-06-30 15:01'
 labels: []
 dependencies: []
 documentation:
@@ -53,15 +53,15 @@ Docs/superpowers/plans/2026-06-30-standalone-mcp-docs-corpus-stage1-plan.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented Stage 1 of the standalone MCP docs corpus: runtime-neutral mcp_unified.docs package, SQLite/FTS5 store, local Markdown/text/static HTML import path, scoped retrieval/context, collections/keywords, Context7-compatible read aliases, host DocsModule adapter, default MCP config registration, package install verification, focused tests, and Bandit validation. Web scraping remains intentionally unavailable in Stage 1; status reports web acquisition disabled and unavailable until the optional Stage 2 pipeline is installed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
