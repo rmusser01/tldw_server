@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import enOption from "@/assets/locale/en/option.json"
+import publicEnOption from "@/public/_locales/en/option.json"
 
 const REQUIRED_SKILLS_KEYS = [
   "skills.testRun",
@@ -24,12 +25,24 @@ const getPathValue = (source: unknown, key: string): unknown =>
     return (value as Record<string, unknown>)[segment]
   }, source)
 
+const getPublicLocaleValue = (source: unknown, key: string): unknown => {
+  const publicKey = key.replace(".", "_")
+  const entry = getPathValue(source, publicKey)
+  return entry && typeof entry === "object"
+    ? (entry as Record<string, unknown>).message
+    : undefined
+}
+
 describe("Skills locale keys", () => {
-  it("has required English WebUI option locale keys", () => {
+  it("has required English WebUI and extension option locale keys", () => {
     for (const key of REQUIRED_SKILLS_KEYS) {
-      const value = getPathValue(enOption as unknown, key)
-      expect(typeof value, `Missing or non-string locale key: ${key}`).toBe("string")
-      expect(String(value).trim().length).toBeGreaterThan(0)
+      const webuiValue = getPathValue(enOption as unknown, key)
+      expect(typeof webuiValue, `Missing or non-string WebUI locale key: ${key}`).toBe("string")
+      expect(String(webuiValue).trim().length).toBeGreaterThan(0)
+
+      const publicValue = getPublicLocaleValue(publicEnOption as unknown, key)
+      expect(typeof publicValue, `Missing or non-string public locale key: ${key}`).toBe("string")
+      expect(String(publicValue).trim()).toBe(String(webuiValue).trim())
     }
   })
 })

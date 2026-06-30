@@ -132,7 +132,7 @@ async function mockSkillsBeginnerApi(
         return
       }
       const body = route.request().postDataJSON() as { args?: string; dry_run?: boolean }
-      const args = body.args || "A long article about Skills UX"
+      const args = body.args ?? "A long article about Skills UX"
       await fulfillJson(route, {
         skill_name: "summarize",
         rendered_prompt: `Summarize this source: ${args}`,

@@ -24,6 +24,10 @@ const notificationMock = vi.hoisted(() => ({
 
 const skillDrawerMock = vi.hoisted(() => vi.fn())
 const skillPreviewMock = vi.hoisted(() => vi.fn())
+const closeLifecycleMockState = vi.hoisted(() => ({
+  drawerWasOpen: false,
+  previewWasOpen: false
+}))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientMock
@@ -59,6 +63,11 @@ vi.mock("../SkillDrawer", () => ({
     onSaved: (skillName?: string) => void
   }) => {
     skillDrawerMock(props)
+    if (closeLifecycleMockState.drawerWasOpen && !props.open) {
+      window.setTimeout(() => props.onAfterClose?.(), 0)
+    }
+    closeLifecycleMockState.drawerWasOpen = props.open
+
     return props.open ? (
       <div data-testid="skill-drawer-open">
         Skill drawer open
@@ -66,7 +75,6 @@ vi.mock("../SkillDrawer", () => ({
           type="button"
           onClick={() => {
             props.onClose()
-            window.setTimeout(() => props.onAfterClose?.(), 0)
           }}
         >
           Cancel drawer
@@ -75,7 +83,6 @@ vi.mock("../SkillDrawer", () => ({
           type="button"
           onClick={() => {
             props.onSaved("created-skill")
-            window.setTimeout(() => props.onAfterClose?.(), 0)
           }}
         >
           Complete create
@@ -93,6 +100,12 @@ vi.mock("../SkillPreview", () => ({
     onAfterClose?: () => void
   }) => {
     skillPreviewMock(props)
+    const isOpen = Boolean(props.skillName)
+    if (closeLifecycleMockState.previewWasOpen && !isOpen) {
+      window.setTimeout(() => props.onAfterClose?.(), 0)
+    }
+    closeLifecycleMockState.previewWasOpen = isOpen
+
     return props.skillName ? (
       <div data-testid="skill-preview-open">
         Test run: {props.skillName}
@@ -100,7 +113,6 @@ vi.mock("../SkillPreview", () => ({
           type="button"
           onClick={() => {
             props.onClose()
-            window.setTimeout(() => props.onAfterClose?.(), 0)
           }}
         >
           Close test run
@@ -133,6 +145,8 @@ describe("SkillsManager imports", () => {
       }
     })
     vi.clearAllMocks()
+    closeLifecycleMockState.drawerWasOpen = false
+    closeLifecycleMockState.previewWasOpen = false
     window.localStorage.clear()
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -341,7 +355,12 @@ describe("SkillsManager imports", () => {
       expect(tldwClientMock.seedSkills).toHaveBeenCalledWith({ overwrite: false })
     })
 
-    fireEvent.click(within(emptyState).getByRole("button", { name: "Create from template" }))
+    const createFromTemplateButton = within(emptyState).getByRole("button", {
+      name: "Create from template"
+    })
+    expect(createFromTemplateButton).toHaveAttribute("data-skill-action", "new")
+
+    fireEvent.click(createFromTemplateButton)
     expect(await screen.findByTestId("skill-drawer-open")).toBeInTheDocument()
 
     expect(within(emptyState).queryByRole("button", { name: "Import" })).not.toBeInTheDocument()

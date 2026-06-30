@@ -1318,6 +1318,7 @@ export const SkillsManager: React.FC = () => {
           })}
         </Button>
         <Button
+          data-skill-action="new"
           icon={<Plus size={14} />}
           onClick={(event) => handleNew(event.currentTarget)}
         >
