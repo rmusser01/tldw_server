@@ -1,11 +1,15 @@
 ---
 id: TASK-12072
 title: Update Local Single-User Setup guide with WebUI
-status: In Progress
+status: Done
+assignee: []
+created_date: ''
+updated_date: 2026-06-30 06:14
 labels:
 - docs
 - getting-started
 - webui
+dependencies: []
 modified_files:
 - Docs/Getting_Started/Profile_Local_Single_User.md
 - Docs/superpowers/specs/2026-06-30-local-single-user-webui-guide-design.md
@@ -20,9 +24,9 @@ Make Docs/Getting_Started/Profile_Local_Single_User.md self-contained for runnin
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Local single-user guide documents WebUI setup without requiring the README add-on section.
-- [ ] #2 Guide covers API/WebUI URLs, .env.local values, Bun/npm start path, verification, and common troubleshooting.
-- [ ] #3 Related docs links remain accurate and avoid conflicting localhost/127.0.0.1 guidance.
+- [x] #1 Local single-user guide documents WebUI setup without requiring the README add-on section.
+- [x] #2 Guide covers API/WebUI URLs, .env.local values, Bun/npm start path, verification, and common troubleshooting.
+- [x] #3 Related docs links remain accurate and avoid conflicting localhost/127.0.0.1 guidance.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -33,22 +37,35 @@ Docs/superpowers/plans/2026-06-30-local-single-user-webui-guide-implementation-p
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+<!-- SECTION:NOTES:BEGIN -->
+Implemented in commits 435f9eb9543ed3a9488da242c743ae951b9eb47f and ea1fc7fef9cbb3475ccc29c98229c4015bbeb5dd.
 
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+Verification:
+- Reviewed Docs/Getting_Started/Profile_Local_Single_User.md command order with sed -n 1,230p.
+- git diff --check -- Docs/Getting_Started/Profile_Local_Single_User.md passed.
+- Referenced files exist: apps/DEVELOPMENT.md, apps/tldw-frontend/README.md, and README.md.
+- README anchor exists: ### Run the Web UI (WIP).
+- Stale README-only wording check found no matches.
+- source .venv/bin/activate and python Helper_Scripts/docs/check_onboarding_command_boundaries.py passed.
+- Bandit skipped: documentation-only Markdown changes; no Python code touched.
+
+Subagent reviews:
+- Task 1 spec review passed; Task 1 quality review passed.
+- Task 2 spec review passed; Task 2 quality review passed.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Updated the local single-user setup guide so it is self-contained for API plus WebUI setup. The guide now includes WebUI prerequisites, `.env.local` values, Bun and npm start paths, WebUI verification, first-value guidance, troubleshooting for common local WebUI issues, and links to deeper WebUI and advanced networking docs.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
