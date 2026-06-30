@@ -53,6 +53,15 @@ def _standalone_project_root() -> Path:
     return _repo_root() / "apps" / "mcp-unified"
 
 
+def _standalone_pythonpath() -> str:
+    """Prepend the standalone source tree without discarding caller paths."""
+
+    paths = [str(_standalone_project_root() / "src")]
+    if existing := os.environ.get("PYTHONPATH"):
+        paths.append(existing)
+    return os.pathsep.join(paths)
+
+
 def test_gateway_cli_validate_config_reports_success_json(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -311,7 +320,7 @@ def test_gateway_cli_list_presets_reports_builtin_summary(
         cwd=_repo_root(),
         env={
             **os.environ,
-            "PYTHONPATH": str(_standalone_project_root() / "src"),
+            "PYTHONPATH": _standalone_pythonpath(),
             "PYTHONWARNINGS": "ignore",
         },
         text=True,

@@ -4,7 +4,7 @@ title: Update MCP Unified package status after PyPI publish
 status: Done
 assignee: []
 created_date: '2026-06-30 05:43'
-updated_date: '2026-06-30 05:52'
+updated_date: '2026-06-30 06:06'
 labels:
   - mcp
   - packaging
@@ -28,10 +28,16 @@ Reflect the successful first PyPI publish of mcp-unified 0.1.1 by updating packa
 - [x] #4 focused package metadata, CLI, and status tests pass
 <!-- AC:END -->
 
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+PR review follow-up: Qodo found the repo-wide MCP docs contract still enforced old not-published wording; Gemini found the CLI subprocess test overwrote PYTHONPATH. Verified both comments against current code and reopening the task for the minimal PR follow-up commit.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Updated MCP Unified metadata and package-local docs to reflect the successful PyPI publish while keeping package_status internal-experimental. Updated gateway/CLI/package-boundary tests and RC fixture evidence from not-published to published. Verified with the focused MCP package suite, Ruff, diff checks, package-info CLI, publish dry-run, and Bandit touched-scope scan.
+Updated MCP Unified metadata and package-local docs to reflect the successful PyPI publish while keeping package_status internal-experimental. Updated gateway/CLI/package-boundary tests and RC fixture evidence from not-published to published. PR review follow-up also updated the repo-wide MCP docs contract to allow PyPI-published guidance while continuing to forbid unsupported standalone server promises, and changed the CLI subprocess test to prepend the standalone source path without discarding an inherited PYTHONPATH. Verified with the focused MCP package/docs suite, Ruff, diff checks, package-info CLI, publish dry-run, and Bandit touched-scope scans.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
