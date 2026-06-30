@@ -41,7 +41,7 @@ class TestImpersonationTokenResponse:
             impersonated_user_id=42,
             impersonated_by=1,
         )
-        assert resp.token_type == "bearer"  # nosec
+        assert resp.token_type == "bearer"  # nosec B101, B105
         assert resp.expires_in_minutes == 15  # nosec B101
 
 
@@ -88,7 +88,7 @@ class TestCreateImpersonationToken:
         ):
             result = await create_impersonation_token(42, principal)
 
-        assert result.token == "mock.jwt.token"  # nosec
+        assert result.token == "mock.jwt.token"  # nosec B101, B105
         assert result.impersonated_user_id == 42  # nosec B101
         assert result.impersonated_by == 1  # nosec B101
         mock_jwt_svc.create_impersonation_access_token.assert_called_once()
