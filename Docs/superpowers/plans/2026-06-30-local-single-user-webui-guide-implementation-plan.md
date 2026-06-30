@@ -4,7 +4,7 @@
 
 **Goal:** Make the local single-user setup guide self-contained for running the local FastAPI server and the Next.js WebUI.
 
-**Architecture:** This is a documentation-only change. Keep the existing local API flow intact, insert the WebUI flow after API verification, and finish by updating troubleshooting, optional add-ons, and Backlog task state. No server, frontend, Makefile, Docker, or environment-template behavior changes are part of this plan.
+**Architecture:** This is a documentation-only change. Keep the existing local API flow intact, extend the current WebUI startup flow in the `## Start` section, and finish by updating verification, troubleshooting, optional add-ons, and Backlog task state. No server, frontend, Makefile, Docker, or environment-template behavior changes are part of this plan.
 
 **Tech Stack:** Markdown documentation, Backlog.md MCP task tracking, shell-based docs hygiene checks.
 
@@ -14,7 +14,7 @@
 
 - Modify: `Docs/Getting_Started/Profile_Local_Single_User.md`
   - Responsibility: canonical local single-user guide for API and WebUI setup.
-- Modify: `backlog/tasks/task-12072 - Update-Local-Single-User-Setup-guide-with-WebUI.md`
+- Modify: `backlog/tasks/task-12075 - Update-Local-Single-User-Setup-guide-with-WebUI.md`
   - Responsibility: task status, implementation notes, verification, and final summary.
 - Existing reference: `Docs/superpowers/specs/2026-06-30-local-single-user-webui-guide-design.md`
   - Responsibility: approved design constraints.
@@ -39,7 +39,7 @@ sed -n '1,180p' Docs/Getting_Started/Profile_Local_Single_User.md
 sed -n '1,220p' Docs/superpowers/specs/2026-06-30-local-single-user-webui-guide-design.md
 ```
 
-Expected: the guide still has API-only setup and an optional WebUI link, and the spec says the guide should become self-contained.
+Expected: the guide still has the local API setup, and the spec says the guide should become self-contained for the WebUI happy path.
 
 - [x] **Step 2: Add WebUI prerequisites to `Prepare`**
 
@@ -56,15 +56,11 @@ Prerequisites:
 
 Expected: the guide still lists the original API prerequisites and now names Bun for the WebUI.
 
-- [x] **Step 3: Insert `Start the WebUI` after API verification**
+- [x] **Step 3: Extend the WebUI startup path in `Start`**
 
-After the existing API manual spot checks block in `Docs/Getting_Started/Profile_Local_Single_User.md`, add:
+In `Docs/Getting_Started/Profile_Local_Single_User.md`, extend the existing WebUI startup block under `## Start` so it contains:
 
 ````markdown
-## Start the WebUI
-
-Keep the API server running at `http://127.0.0.1:8000`. In another terminal:
-
 ```bash
 cd apps/tldw-frontend
 cp .env.local.example .env.local
@@ -95,15 +91,13 @@ bun run dev -- -p 8080
 Open http://localhost:8080.
 ````
 
-Expected: the local guide contains the complete WebUI setup path and no longer requires the README add-on section for the happy path.
+Expected: the local guide contains one complete WebUI setup path and no longer requires the README add-on section for the happy path.
 
 - [x] **Step 4: Add WebUI verification**
 
-In the `Verify` section after the API manual spot checks, add a short WebUI spot check:
+In the `Verify` manual spot checks, include a WebUI spot check:
 
 ````markdown
-After starting the WebUI, verify it responds:
-
 ```bash
 curl -sS http://127.0.0.1:8080 > /dev/null && echo "webui-ok"
 ```
@@ -113,10 +107,12 @@ Expected: the guide verifies both services: API at `8000`, WebUI at `8080`.
 
 - [x] **Step 5: Update `First Value` for API or WebUI entry**
 
-Replace the first paragraph under `## First Value` with:
+Update the first-value copy so it recognizes the WebUI setup flow and preserves the provider-independent terminal check:
 
 ```markdown
-Use the WebUI at http://localhost:8080 for the first browser workflow, or run the provider-independent first-value ingest/search verification from the terminal. The verify command posts a small Markdown document to `/api/v1/media/add`, then searches for `tldw-onboarding-verification-unique` through `/api/v1/media/search`.
+Open http://127.0.0.1:8080 to open the WebUI and complete first-time setup there. The setup completion gate is the first successful chat response from your selected hosted API key or local OpenAI-compatible provider. Immediately after that, add your first source so chat can use your own material.
+
+If you prefer terminal verification, the CLI verify command still runs a provider-independent first-value ingest/search check. It posts a small Markdown document to `/api/v1/media/add`, then searches for `tldw-onboarding-verification-unique` through `/api/v1/media/search`.
 ```
 
 Expected: first-value guidance recognizes the WebUI as a valid local starting point while preserving the existing provider-independent verification command.
@@ -143,7 +139,7 @@ Expected: common WebUI local failures have direct fixes.
 Replace the current optional add-ons list with:
 
 ```markdown
-- Add provider API keys to `tldw_Server_API/Config_Files/.env`, then restart the server.
+- Keep provider setup in the WebUI first-run wizard for the normal path; add provider API keys to `tldw_Server_API/Config_Files/.env` only for recovery, automation, or advanced deployments, then restart the server.
 - For deeper WebUI development details, see [Extension & Web UI Development Guide](../../apps/DEVELOPMENT.md) and [tldw-frontend README](../../apps/tldw-frontend/README.md).
 - For LAN, mobile, reverse-proxy, or custom-host browser access, see [Run the Web UI (WIP)](../../README.md#run-the-web-ui-wip).
 - Install development extras with `source .venv/bin/activate && pip install -e ".[dev]"`.
@@ -153,7 +149,7 @@ Expected: the old "Add the WebUI" link is gone because the guide now contains th
 
 - [x] **Step 3: Check for stale README-only wording**
 
-Run:
+Run this against the guide:
 
 ```bash
 rg -n "Add the WebUI|Local Profile: Add the WebUI|does not include the WebUI by default" Docs/Getting_Started/Profile_Local_Single_User.md
@@ -165,7 +161,7 @@ Expected: no matches.
 
 **Files:**
 - Modify: `Docs/Getting_Started/Profile_Local_Single_User.md`
-- Modify: `backlog/tasks/task-12072 - Update-Local-Single-User-Setup-guide-with-WebUI.md`
+- Modify: `backlog/tasks/task-12075 - Update-Local-Single-User-Setup-guide-with-WebUI.md`
 
 - [x] **Step 1: Review the rendered command order in plain text**
 
@@ -175,7 +171,7 @@ Run:
 sed -n '1,220p' Docs/Getting_Started/Profile_Local_Single_User.md
 ```
 
-Expected: the order is Prepare, Start API, Verify API, Start WebUI, First Value, Audio Path, Troubleshoot, Optional Add-ons.
+Expected: the order is Prepare, Start, Verify, First Value, Audio Path, Troubleshoot, Optional Add-ons.
 
 - [x] **Step 2: Check Markdown whitespace**
 
@@ -221,11 +217,11 @@ else
 fi
 ```
 
-Expected: either the checker passes, or the skip message prints because the checker is absent. If the virtual environment is unavailable, record that verification blocker in `TASK-12072` and continue with the static checks above.
+Expected: either the checker passes, or the skip message prints because the checker is absent. If the virtual environment is unavailable, record that verification blocker in `TASK-12075` and continue with the static checks above.
 
 - [x] **Step 6: Record Bandit skip**
 
-Use Backlog MCP `task_edit` on `TASK-12072` and add implementation notes:
+Use Backlog MCP `task_edit` on `TASK-12075` and add implementation notes:
 
 ```text
 Bandit skipped: documentation-only Markdown changes; no Python code touched.
@@ -235,21 +231,21 @@ Expected: Backlog task notes explain why Bandit does not apply.
 
 - [x] **Step 7: Update Backlog final summary and acceptance criteria**
 
-Use Backlog MCP `task_edit` on `TASK-12072` to record:
+Use Backlog MCP `task_edit` on `TASK-12075` to record:
 
 ```text
 Final summary: Updated the local single-user guide to include self-contained WebUI prerequisites, env setup, start commands, verification, troubleshooting, and deeper-reference links.
 Verification: Markdown whitespace check passed; referenced docs exist; README WebUI anchor checked; onboarding docs checker result recorded.
 ```
 
-Expected: `TASK-12072` contains verification and final summary notes. Mark acceptance criteria and Definition of Done complete only after the guide edit and checks have actually passed.
+Expected: `TASK-12075` contains verification and final summary notes. Mark acceptance criteria and Definition of Done complete only after the guide edit and checks have actually passed.
 
 - [x] **Step 8: Commit the documentation update**
 
 Run:
 
 ```bash
-git add Docs/Getting_Started/Profile_Local_Single_User.md "backlog/tasks/task-12072 - Update-Local-Single-User-Setup-guide-with-WebUI.md"
+git add Docs/Getting_Started/Profile_Local_Single_User.md "backlog/tasks/task-12075 - Update-Local-Single-User-Setup-guide-with-WebUI.md"
 git commit -m "docs: add local webui setup guide"
 ```
 

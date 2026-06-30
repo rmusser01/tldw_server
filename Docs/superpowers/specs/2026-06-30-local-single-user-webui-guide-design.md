@@ -2,7 +2,7 @@
 
 Date: 2026-06-30
 Status: Implemented
-Backlog: TASK-12072
+Backlog: TASK-12075
 
 ## Summary
 
@@ -40,9 +40,11 @@ profile should carry the complete happy path.
 
 ## Current Repo Fit
 
-`Docs/Getting_Started/Profile_Local_Single_User.md` currently covers the local
-API profile and links to the README for WebUI setup. The README already contains
-the core local WebUI commands:
+`Docs/Getting_Started/Profile_Local_Single_User.md` covers the local API
+profile and, on the current base branch, already includes a concise WebUI start
+block. The guide still needs the complete local WebUI environment, auth warning,
+npm fallback, verification, troubleshooting, and deeper-reference cleanup. The
+README already contains the core local WebUI commands:
 
 - copy `apps/tldw-frontend/.env.local.example` to `.env.local`;
 - configure `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_API_VERSION`;
@@ -58,19 +60,18 @@ inline the essential commands and point to those files for deeper details.
 
 Use a fully self-contained local full-stack guide.
 
-The page keeps the existing API-first shape, then adds a WebUI path once the API
-has been verified. This ordering keeps failure modes simple: users first prove
-the backend is healthy, then connect the browser UI to that known-good backend.
+The page keeps the existing API-first shape and extends the WebUI path in the
+existing `## Start` section. Verification then checks both services. This keeps
+the final document aligned with the current base branch and avoids two separate
+WebUI startup sections.
 
 ## Document Structure
 
 Update `Profile_Local_Single_User.md` as follows:
 
 - **Prepare**: add Bun to prerequisites with Node/npm as an optional fallback.
-- **Start**: keep API startup unchanged and state that the API runs at
-  `http://127.0.0.1:8000`.
-- **Verify**: keep API verification unchanged.
-- **Start the WebUI**: add a new section after API verification with:
+- **Start**: keep API startup unchanged, state that the API runs at
+  `http://127.0.0.1:8000`, and extend the existing WebUI startup block with:
   - `cd apps/tldw-frontend`;
   - `cp .env.local.example .env.local`;
   - required `.env.local` values for the local API:
@@ -81,7 +82,7 @@ Update `Profile_Local_Single_User.md` as follows:
   - `bun run dev -- -p 8080`;
   - npm fallback commands;
   - browser URL `http://localhost:8080`.
-- **Verify**: add a WebUI spot check:
+- **Verify**: keep API verification unchanged and add a WebUI spot check:
   `curl -sS http://127.0.0.1:8080 > /dev/null && echo "webui-ok"`.
 - **First Value**: explain that users can start from the WebUI or rerun
   `make verify-local-single` for provider-independent ingest/search

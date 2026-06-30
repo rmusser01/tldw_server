@@ -1,10 +1,10 @@
 ---
-id: TASK-12072
+id: TASK-12075
 title: Update Local Single-User Setup guide with WebUI
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-06-30 06:24
+updated_date: 2026-06-30 07:17
 labels:
 - docs
 - getting-started
@@ -14,6 +14,7 @@ modified_files:
 - Docs/Getting_Started/Profile_Local_Single_User.md
 - Docs/superpowers/specs/2026-06-30-local-single-user-webui-guide-design.md
 - Docs/superpowers/plans/2026-06-30-local-single-user-webui-guide-implementation-plan.md
+- backlog/tasks/task-12075 - Update-Local-Single-User-Setup-guide-with-WebUI.md
 ---
 
 ## Description
@@ -38,30 +39,28 @@ Docs/superpowers/plans/2026-06-30-local-single-user-webui-guide-implementation-p
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implemented in commits 435f9eb9543ed3a9488da242c743ae951b9eb47f and ea1fc7fef9cbb3475ccc29c98229c4015bbeb5dd.
+Implemented on a clean PR branch based on origin/dev. The current base already included a compact WebUI block under ## Start, so the final guide extends that block with explicit .env.local values, browser-visible API-key guidance, Bun/npm commands, and a WebUI response check instead of adding a duplicate startup section.
 
 Verification:
-- Reviewed Docs/Getting_Started/Profile_Local_Single_User.md command order with sed -n 1,230p.
-- git diff --check -- Docs/Getting_Started/Profile_Local_Single_User.md passed.
+- Reviewed Docs/Getting_Started/Profile_Local_Single_User.md command order with sed.
+- git diff --check -- Docs/Getting_Started/Profile_Local_Single_User.md Docs/superpowers/specs/2026-06-30-local-single-user-webui-guide-design.md Docs/superpowers/plans/2026-06-30-local-single-user-webui-guide-implementation-plan.md passed.
 - Referenced files exist: apps/DEVELOPMENT.md, apps/tldw-frontend/README.md, and README.md.
 - README anchor exists: ### Run the Web UI (WIP).
-- Stale README-only wording check found no matches.
-- source .venv/bin/activate and python Helper_Scripts/docs/check_onboarding_command_boundaries.py passed.
+- Stale README-only wording check against the guide found no matches.
+- Helper_Scripts/docs/check_onboarding_command_boundaries.py passed.
 - Bandit skipped: documentation-only Markdown changes; no Python code touched.
 
 Subagent reviews:
 - Task 1 spec review passed; Task 1 quality review passed.
 - Task 2 spec review passed; Task 2 quality review passed.
 
-Final review fixes applied: clarified that `.env.local` must be edited to use the shown local API values, marked execution plan checklist items complete, and updated the design spec status to Implemented.
-
-Final review minor cleanup: aligned the implementation plan WebUI `.env.local` wording and env fence with the final guide.
+Final review fixes applied: clarified that .env.local must be edited to use the shown local API values, marked execution plan checklist items complete, updated the design spec status to Implemented, aligned plan wording with the final guide, and rebased the task record to TASK-12075 to avoid the existing TASK-12072 on origin/dev.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Updated the local single-user setup guide so it is self-contained for API plus WebUI setup. The guide now includes WebUI prerequisites, `.env.local` values, Bun and npm start paths, WebUI verification, first-value guidance, troubleshooting for common local WebUI issues, and links to deeper WebUI and advanced networking docs.
+Updated the local single-user setup guide so it is self-contained for API plus WebUI setup. The guide now includes WebUI prerequisites, .env.local values, Bun and npm start paths, WebUI verification, first-value guidance, troubleshooting for common local WebUI issues, and links to deeper WebUI and advanced networking docs.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

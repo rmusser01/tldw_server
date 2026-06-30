@@ -66,53 +66,6 @@ Start the WebUI in a second terminal when you are ready for the cohesive first-t
 ```bash
 cd apps/tldw-frontend
 cp .env.local.example .env.local
-bun install
-bun run dev -- -p 8080
-```
-
-Confirm `.env.local` contains:
-
-```bash
-NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
-NEXT_PUBLIC_API_VERSION=v1
-# Optional local single-user bootstrap auth:
-# NEXT_PUBLIC_X_API_KEY=your_single_user_api_key
-```
-
-If Bun is not installed, use the Bun install steps or npm fallback in [Local Profile: Add the WebUI](../../README.md#local-profile-add-the-webui).
-
-Then open http://127.0.0.1:8080 to open the WebUI.
-
-## Verify
-
-In another terminal:
-
-```bash
-make verify-local-single
-```
-
-PowerShell / no-`make` equivalent:
-
-```powershell
-.\.venv\Scripts\python -m tldw_Server_API.cli.wizard.cli verify --profile local-single --env-file tldw_Server_API/Config_Files/.env --base-url http://127.0.0.1:8000 --first-value
-```
-
-Manual spot checks:
-
-```bash
-curl -sS http://127.0.0.1:8000/health
-curl -sS http://127.0.0.1:8000/docs > /dev/null && echo "docs-ok"
-curl -sS http://127.0.0.1:8000/api/v1/config/quickstart
-curl -sS http://127.0.0.1:8080 > /dev/null && echo "webui-ok"
-```
-
-## Start the WebUI
-
-Keep the API server running at `http://127.0.0.1:8000`. In another terminal:
-
-```bash
-cd apps/tldw-frontend
-cp .env.local.example .env.local
 ```
 
 Edit `.env.local` so it points the WebUI at the local API:
@@ -139,9 +92,26 @@ bun run dev -- -p 8080
 
 Open http://localhost:8080.
 
-After starting the WebUI, verify it responds:
+## Verify
+
+In another terminal:
 
 ```bash
+make verify-local-single
+```
+
+PowerShell / no-`make` equivalent:
+
+```powershell
+.\.venv\Scripts\python -m tldw_Server_API.cli.wizard.cli verify --profile local-single --env-file tldw_Server_API/Config_Files/.env --base-url http://127.0.0.1:8000 --first-value
+```
+
+Manual spot checks:
+
+```bash
+curl -sS http://127.0.0.1:8000/health
+curl -sS http://127.0.0.1:8000/docs > /dev/null && echo "docs-ok"
+curl -sS http://127.0.0.1:8000/api/v1/config/quickstart
 curl -sS http://127.0.0.1:8080 > /dev/null && echo "webui-ok"
 ```
 
