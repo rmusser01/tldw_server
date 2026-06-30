@@ -13,7 +13,9 @@ describe("Layout chat sidebar reset signal", () => {
     const source = readFileSync(layoutSourcePath, "utf8")
 
     expect(source).toContain("chatSidebarOpenResetKey")
-    expect(source.match(/openResetKey=\{chatSidebarOpenResetKey\}/g)).toHaveLength(2)
+    expect(
+      source.match(/openResetKey=\{chatSidebarOpenResetKey\}/g)
+    ).toHaveLength(2)
   })
 
   it("increments the reset key only on explicit open paths", () => {
@@ -22,8 +24,12 @@ describe("Layout chat sidebar reset signal", () => {
     expect(source).toContain("signalChatSidebarOpen")
     expect(source).toContain("setChatSidebarOpenResetKey((value) => value + 1)")
     expect(source).toContain("if (!sidebarOpen) signalChatSidebarOpen()")
-    expect(source).toContain("if (chatSidebarCollapsed) signalChatSidebarOpen()")
-    expect(source).toContain('window.addEventListener("tldw:open-chat-sidebar", handler)')
+    expect(source).toContain(
+      "if (chatSidebarCollapsed) signalChatSidebarOpen()"
+    )
+    expect(source).toContain(
+      'window.addEventListener("tldw:open-chat-sidebar", handler)'
+    )
   })
 
   it("scopes chat desktop collapsed sidebar to an edge expand affordance", () => {
