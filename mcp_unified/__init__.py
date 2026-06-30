@@ -1,0 +1,1 @@
+"""Runtime-neutral MCP utilities."""

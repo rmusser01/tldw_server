@@ -517,6 +517,7 @@ tldw_Server_API = [
   "Databases/**/*.sql",
   "Samples/Workflows/*.json",
 ]
+mcp_unified = ["docs/store/schema.sql"]
 
 [tool.setuptools.exclude-package-data]
 tldw_Server_API = [
