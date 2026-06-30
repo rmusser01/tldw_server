@@ -256,6 +256,8 @@ class TestCreateImpersonationToken:
             pytest.param([object()], id="plain-object"),
             pytest.param([""], id="empty-string"),
             pytest.param([123], id="integer"),
+            pytest.param([{"name": "admin"}, object()], id="mixed-object"),
+            pytest.param([{"name": "admin"}, " "], id="mixed-blank-string"),
         ],
     )
     @pytest.mark.asyncio

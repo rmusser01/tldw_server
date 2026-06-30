@@ -51,21 +51,30 @@ def _clean_role_name(value: Any) -> str | None:
     return None
 
 
+def _role_name_from_row(row: Any) -> str | None:
+    if isinstance(row, str):
+        return _clean_role_name(row)
+    if isinstance(row, dict):
+        value = row.get("name") or row.get("role") or row.get("role_name")
+        return _clean_role_name(value)
+    value = (
+        getattr(row, "name", None)
+        or getattr(row, "role", None)
+        or getattr(row, "role_name", None)
+    )
+    return _clean_role_name(value)
+
+
 def _first_role_name(role_rows: list[Any]) -> str | None:
     if not role_rows:
         return None
-    first = role_rows[0]
-    if isinstance(first, str):
-        return _clean_role_name(first)
-    if isinstance(first, dict):
-        value = first.get("name") or first.get("role") or first.get("role_name")
-        return _clean_role_name(value)
-    value = (
-        getattr(first, "name", None)
-        or getattr(first, "role", None)
-        or getattr(first, "role_name", None)
-    )
-    return _clean_role_name(value)
+    normalized_roles = []
+    for row in role_rows:
+        role_name = _role_name_from_row(row)
+        if role_name is None:
+            return None
+        normalized_roles.append(role_name)
+    return normalized_roles[0] if normalized_roles else None
 
 
 # ---------------------------------------------------------------------------
