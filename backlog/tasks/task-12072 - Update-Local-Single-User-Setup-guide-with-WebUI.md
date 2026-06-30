@@ -9,6 +9,7 @@ labels:
 modified_files:
 - Docs/Getting_Started/Profile_Local_Single_User.md
 - Docs/superpowers/specs/2026-06-30-local-single-user-webui-guide-design.md
+- Docs/superpowers/plans/2026-06-30-local-single-user-webui-guide-implementation-plan.md
 ---
 
 ## Description
@@ -23,6 +24,12 @@ Make Docs/Getting_Started/Profile_Local_Single_User.md self-contained for runnin
 - [ ] #2 Guide covers API/WebUI URLs, .env.local values, Bun/npm start path, verification, and common troubleshooting.
 - [ ] #3 Related docs links remain accurate and avoid conflicting localhost/127.0.0.1 guidance.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-06-30-local-single-user-webui-guide-implementation-plan.md
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
