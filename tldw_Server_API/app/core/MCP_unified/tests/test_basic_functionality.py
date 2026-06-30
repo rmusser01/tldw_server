@@ -595,6 +595,28 @@ class TestMCPServer:
         assert [m["id"] for m in status["surface"]["disabled_available"]] == ["filesystem", "run_command"]
         assert all(m["requires_explicit_opt_in"] for m in status["surface"]["disabled_available"])
 
+    async def test_server_status_does_not_enable_configured_but_unloaded_modules(self, monkeypatch):
+        """Configured modules should not appear enabled until their health is registered."""
+        server = MCPServer()
+        server.initialized = True
+        server._configured_modules_for_status = {
+            "media": {"enabled": True, "status": "configured"},
+            "filesystem": {"enabled": True, "status": "configured"},
+            "run_command": {"enabled": False, "status": "disabled"},
+        }
+
+        async def _check_all_health():
+            return {"media": ModuleHealth(status=HealthStatus.HEALTHY)}
+
+        monkeypatch.setattr(server.module_registry, "check_all_health", _check_all_health)
+
+        status = await server.get_status()
+
+        assert status["surface"]["enabled_count"] == 1
+        assert [m["id"] for m in status["surface"]["tiers"]["read_only"]["modules"]] == ["media"]
+        assert "local_files" not in status["surface"]["tiers"]
+        assert [m["id"] for m in status["surface"]["disabled_available"]] == ["run_command"]
+
     async def test_server_status_includes_sanitized_problem_modules(self, monkeypatch):
         """Server status should expose actionable, canned module problem reasons."""
         server = MCPServer()

@@ -1911,6 +1911,7 @@ class MCPServer:
         surface_modules = {
             module_id: dict(payload)
             for module_id, payload in self._configured_modules_for_status.items()
+            if payload.get("enabled") is False
         }
         for module_id, health in health_results.items():
             entry = dict(surface_modules.get(module_id, {}))

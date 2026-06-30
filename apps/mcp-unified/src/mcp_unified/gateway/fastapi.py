@@ -1653,7 +1653,7 @@ async def _gateway_readiness_status(
     next_actions: list[str] = []
     package_summary = package_metadata_summary()
     package_payload = {
-        key: package_summary[key]
+        key: package_summary.get(key)
         for key in (
             "package_name",
             "package_import_name",
@@ -1663,7 +1663,7 @@ async def _gateway_readiness_status(
             "dependency_version_policy",
         )
     }
-    if package_payload["publishing_status"] == "not-published":
+    if package_payload.get("publishing_status") == "not-published":
         warnings.append(
             _status_warning(
                 "package_not_published",
@@ -1703,11 +1703,12 @@ async def _gateway_readiness_status(
                 )
             )
             next_actions.append("Configure a default profile before relying on profile-scoped gateway calls.")
-        except Exception as exc:  # noqa: BLE001 - status must remain best-effort.
+        except Exception:  # noqa: BLE001 - status must remain best-effort.
+            logger.exception("Default profile readiness check failed during gateway status.")
             warnings.append(
                 _status_warning(
                     "default_profile_status_unavailable",
-                    f"Default profile readiness check failed: {exc.__class__.__name__}.",
+                    "Default profile readiness check failed.",
                 )
             )
     else:
@@ -1727,12 +1728,20 @@ async def _gateway_readiness_status(
         external_registry_store = _read_store_metadata(external_registry_manager)
         try:
             all_result = await external_registry_manager.list_servers(enabled=None)
-            enabled_result = await external_registry_manager.list_servers(enabled=True)
             external_registry_store = _store_payload_from_result(all_result, external_registry_store)
             all_servers = all_result.get("servers", []) if isinstance(all_result, dict) else []
-            enabled_servers = enabled_result.get("servers", []) if isinstance(enabled_result, dict) else []
             total = len(all_servers) if isinstance(all_servers, list) else 0
-            enabled = len(enabled_servers) if isinstance(enabled_servers, list) else 0
+            enabled = 0
+            if isinstance(all_servers, list):
+                enabled = sum(
+                    1
+                    for server in all_servers
+                    if (
+                        server.get("enabled", True)
+                        if isinstance(server, dict)
+                        else getattr(server, "enabled", True)
+                    )
+                )
             external_servers = {
                 "total": total,
                 "enabled": enabled,
@@ -1746,11 +1755,12 @@ async def _gateway_readiness_status(
                 )
             )
             external_servers["unavailable"] = external_servers["total"]
-        except Exception as exc:  # noqa: BLE001 - status must remain best-effort.
+        except Exception:  # noqa: BLE001 - status must remain best-effort.
+            logger.exception("External registry readiness check failed during gateway status.")
             warnings.append(
                 _status_warning(
                     "external_registry_status_unavailable",
-                    f"External registry readiness check failed: {exc.__class__.__name__}.",
+                    "External registry readiness check failed.",
                 )
             )
             next_actions.append("Check external registry store configuration before using remote MCP servers.")

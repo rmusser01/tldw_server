@@ -834,8 +834,20 @@ def _is_anonymous_mcp_request(http_request: Request, auth: McpAuthContext) -> bo
 async def websocket_endpoint(
     websocket: WebSocket,
     client_id: Optional[str] = Query(None, description="Client identifier"),
-    token: Optional[str] = Query(None, description="Legacy query authentication token; disabled by default unless MCP_WS_ALLOW_QUERY_AUTH=true. Prefer headers or WebSocket subprotocol auth."),
-    api_key: Optional[str] = Query(None, description="Legacy query API key; disabled by default unless MCP_WS_ALLOW_QUERY_AUTH=true. Prefer headers or WebSocket subprotocol auth."),
+    token: Optional[str] = Query(
+        None,
+        description=(
+            "Legacy query authentication token; disabled by default unless "
+            "MCP_WS_ALLOW_QUERY_AUTH=true. Prefer headers or WebSocket subprotocol auth."
+        ),
+    ),
+    api_key: Optional[str] = Query(
+        None,
+        description=(
+            "Legacy query API key; disabled by default unless MCP_WS_ALLOW_QUERY_AUTH=true. "
+            "Prefer headers or WebSocket subprotocol auth."
+        ),
+    ),
     mcp_session_id: Optional[str] = Query(None, description="Stable MCP session identifier"),
     workspace_id: Optional[str] = Query(None, description="Trusted workspace identifier"),
     cwd: Optional[str] = Query(None, description="Current working directory within the workspace"),
