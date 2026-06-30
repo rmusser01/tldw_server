@@ -123,7 +123,7 @@ Installer flags:
 | ElevenLabs | Hosted API | `ELEVENLABS_API_KEY` | Yes (via ElevenLabs voices) | [TTS Setup Guide](../../STT-TTS/TTS-SETUP-GUIDE.md#commercial-providers) |
 | Kokoro ONNX | Local ONNX | `pip install -e ".[TTS_kokoro_onnx]"` + `espeak-ng` | No | [Getting Started](./Getting-Started-STT_and_TTS.md#option-b-kokoro-tts-local-onnx) |
 | NeuTTS Air | Local hybrid | `pip install -e ".[TTS_neutts]"` + `espeak-ng` | **Required** (reference audio + text) | [NeuTTS Runbook](../../STT-TTS/NEUTTS_TTS_SETUP.md) |
-| Chatterbox | Local PyTorch | `pip install -e ".[TTS_chatterbox]"` (+ `.[TTS_chatterbox_lang]` for multilingual) | Yes (5–20 s) | [Chatterbox Runbook](../../STT-TTS/CHATTERBOX_SETUP.md) |
+| Chatterbox | Local PyTorch | Manual runtime deps + `pip install chatterbox-tts` (+ `.[TTS_chatterbox_lang]` for multilingual preprocessing) | Yes (5–20 s) | [Chatterbox Runbook](../../STT-TTS/CHATTERBOX_SETUP.md) |
 | VibeVoice | Local PyTorch | `pip install -e ".[TTS_vibevoice]"` + clone [VibeVoice](https://github.com/microsoft/VibeVoice) | Yes (3–30 s) | [VibeVoice Guide](../../STT-TTS/VIBEVOICE_GETTING_STARTED.md) |
 | Higgs Audio V2 | Local PyTorch | `pip install -e ".[TTS_higgs]"` + install `bosonai/higgs-audio` | Yes (3–10 s) | [TTS Setup Guide](../../STT-TTS/TTS-SETUP-GUIDE.md#higgs-audio-v2-setup) |
 | Dia | Local PyTorch | `pip install torch transformers accelerate nltk spacy` | Yes (dialogue prompts) | [TTS Setup Guide](../../STT-TTS/TTS-SETUP-GUIDE.md#dia-setup) |
@@ -289,7 +289,7 @@ Each section highlights installation, configuration, and a smoke test.
 - **Verify**: use the sample curl from [NeuTTS Runbook](../../STT-TTS/NEUTTS_TTS_SETUP.md) and confirm the WAV plays back.
 
 ### Chatterbox
-- **Install**: `pip install -e ".[TTS_chatterbox]"`; add `.[TTS_chatterbox_lang]` if you plan to enable `use_multilingual`. If the runtime still reports missing `chatterbox`, install upstream with `pip install chatterbox-tts` (or from source).
+- **Install**: install the manual runtime dependencies from the Chatterbox runbook, then `pip install chatterbox-tts`; add `.[TTS_chatterbox_lang]` if you plan to enable `use_multilingual`.
 - **Models**: cache `ResembleAI/chatterbox` locally with `hf download ...`.
 - **Config**:
   ```yaml

@@ -90,3 +90,25 @@ def test_points_transformers_missing_optional_dependency_returns_empty(monkeypat
     out = points_reader.PointsReaderBackend().ocr_image(b"not-a-real-image", lang="eng")
 
     assert out == ""
+
+
+@pytest.mark.unit
+def test_points_sglang_import_error_does_not_fall_through_to_transformers(monkeypatch):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends import (
+        points_reader,
+    )
+
+    monkeypatch.setenv("POINTS_MODE", "sglang")
+    monkeypatch.setenv("POINTS_SGLANG_URL", "http://127.0.0.1:9999/v1/chat/completions")
+
+    def fail_sglang(image_path, prompt):
+        raise ModuleNotFoundError("No module named 'requests'")
+
+    def fail_transformers(image_path, prompt):
+        pytest.fail("SGLang import failures must not fall through to transformers")
+
+    monkeypatch.setattr(points_reader, "_ocr_via_sglang", fail_sglang)
+    monkeypatch.setattr(points_reader, "_ocr_via_transformers", fail_transformers)
+
+    with pytest.raises(ModuleNotFoundError):
+        points_reader.PointsReaderBackend().ocr_image(b"not-a-real-image", lang="eng")

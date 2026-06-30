@@ -4,7 +4,7 @@ title: Move direct VCS extras to manual install docs
 status: Done
 assignee: []
 created_date: '2026-06-29 19:53'
-updated_date: '2026-06-30 01:06'
+updated_date: '2026-06-30 02:08'
 labels:
   - packaging
   - pypi
@@ -40,12 +40,14 @@ Removed direct VCS dependency entries from pyproject optional metadata for ocr_d
 PR review follow-up: PointsReaderBackend.available() now requires the manual WePOINTS module for transformers mode, logs a specific WePOINTS-missing warning, and import errors from optional/manual dependencies are caught as runtime failures instead of escaping OCR flow. Added focused unit coverage for missing WePOINTS availability and ModuleNotFoundError handling. Verification: pytest tldw_Server_API/tests/MediaIngestion_NEW/test_ocr_backend_points.py -q passed (4 passed); optional dependency scan still reports direct-url-deps 0; git diff --check passed.
 
 Final review-fix verification: Bandit on points_reader.py passed with zero findings after the WePOINTS logging refinement.
+
+Additional PR review follow-up: removed the backend-named extras ocr_dots, ocr_points_transformers, and TTS_chatterbox from published package metadata and from the aggregate all extra so manual-only backends no longer look like successful extras installs. Updated OCR/POINTS/Chatterbox docs, including published WebUI docs, to use explicit manual install steps. Pinned the Perth manual install to the previously used commit ce86c49d029f42272c1902eccb675556b9ed2330. Scoped ImportError/ModuleNotFoundError handling to the POINTS transformers path with _POINTS_TRANSFORMERS_EXCEPTIONS and added a regression test ensuring explicit SGLang import errors do not fall through to transformers. Verification: POINTS backend tests passed (5 passed); pyproject parse/direct URL scan passed; package build --no-isolation succeeded; twine check passed; wheel metadata has direct_url_requires=0 and extras_removed_present=[]; Bandit on points_reader.py passed with zero findings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Moved source-only direct VCS dependencies out of published package metadata and into manual install documentation. Local package build and twine validation pass, and generated wheel/sdist metadata contains no direct git/URL Requires-Dist entries. Bandit was skipped because the touched files are package metadata and Markdown docs, not Python code.
+Moved source-only direct VCS dependencies out of published package metadata and into manual install documentation. Removed backend-named extras that would otherwise install successfully without the manual backend, kept the SGLang client and Chatterbox language preprocessing extras, and validated generated wheel metadata has no direct URL requirements or removed extras. Runtime handling now requires WePOINTS for POINTS transformers mode and scopes import-error handling to transformers so SGLang errors are not masked. Local package build, twine validation, focused POINTS tests, and Bandit on touched Python passed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

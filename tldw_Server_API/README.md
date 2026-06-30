@@ -165,8 +165,8 @@ Prompt and generation
 - Set `POINTS_PROMPT` to override the default extraction prompt (tables in HTML, others in Markdown).
 - Optional generation envs: `POINTS_MAX_NEW_TOKENS`, `POINTS_TEMPERATURE`, `POINTS_REPETITION_PENALTY`, `POINTS_TOP_P`, `POINTS_TOP_K`, `POINTS_DO_SAMPLE`.
 
-Install via extras/manual source setup (optional)
-- Local transformers path: `pip install .[ocr_points_transformers]`, then install WePOINTS manually from the upstream repo.
+Manual source setup (optional)
+- Local transformers path: install `transformers` and a CUDA/CPU-compatible `torch`, then install WePOINTS manually from the upstream repo.
 - SGLang client only: `pip install .[ocr_points_sglang]`
 
 Notes

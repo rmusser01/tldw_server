@@ -160,9 +160,9 @@ Environment
 Docs
 - See detailed guide at `Docs/OCR/POINTS-Reader.md`.
 
-Install via extras/manual source setup (optional)
-- Local transformers path: `pip install .[ocr_points_transformers]`
-  - Includes the PyPI-installable `transformers` and `torch` dependencies.
+Manual source setup (optional)
+- Local transformers path:
+  - Install `transformers` and a CUDA/CPU-compatible `torch`.
   - Install the WePOINTS toolkit manually from `https://github.com/WePOINTS/WePOINTS` before using `POINTS_MODE=transformers`.
 - SGLang client only: `pip install .[ocr_points_sglang]`
 

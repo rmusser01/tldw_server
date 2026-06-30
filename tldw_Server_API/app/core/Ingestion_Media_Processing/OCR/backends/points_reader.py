@@ -15,14 +15,17 @@ _TF_IMAGE_PROCESSOR = None
 _TF_LOCK = threading.Lock()
 _POINTS_RUNTIME_EXCEPTIONS = (
     ConnectionError,
-    ImportError,
-    ModuleNotFoundError,
     OSError,
     RuntimeError,
     TimeoutError,
     TypeError,
     ValueError,
     json.JSONDecodeError,
+)
+
+_POINTS_TRANSFORMERS_EXCEPTIONS = _POINTS_RUNTIME_EXCEPTIONS + (
+    ImportError,
+    ModuleNotFoundError,
 )
 
 _WEPOINTS_MODULE = "wepoints"
@@ -129,7 +132,7 @@ class PointsReaderBackend(OCRBackend):
 
             try:
                 return _ocr_via_transformers(img_path, prompt)
-            except _POINTS_RUNTIME_EXCEPTIONS as e:
+            except _POINTS_TRANSFORMERS_EXCEPTIONS as e:
                 if isinstance(e, (ImportError, ModuleNotFoundError)) and "wepoints" in str(e).lower():
                     logging.error(f"POINTS Transformers path failed: WePOINTS missing: {e}", exc_info=True)
                 else:
