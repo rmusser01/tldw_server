@@ -334,7 +334,7 @@ Payload shape:
 }
 ```
 
-Filter types: `keyword`, `author`, `date_range`, `regex`, `all`  
+Filter types: `keyword`, `author`, `date_range`, `regex`, `all`
 Actions: `include`, `exclude`, `flag`
 
 ## Include-only quick semantics

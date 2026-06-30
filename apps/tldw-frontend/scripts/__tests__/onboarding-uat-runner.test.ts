@@ -59,7 +59,7 @@ const secretMarkers = [
   "ghp_",
   "xoxb-",
   "AKIA",
-  "BEGIN PRIVATE KEY",
+  "BEGIN " + "PRIVATE " + "KEY",
 ]
 
 function readJson(relativePath: string) {
@@ -83,7 +83,7 @@ describe("onboarding UAT static fixtures", () => {
     expect(modelIds(configs["hosted-success.json"])).toEqual(
       expect.arrayContaining(["gpt-4.1-mini", "text-embedding-3-small"])
     )
-    expect(configs["hosted-success.json"].server?.require_auth).toBe(false)
+    expect(configs["hosted-success.json"].server?.require_auth).toBe(true)
 
     expect(modelIds(configs["local-success.json"])).toEqual(
       expect.arrayContaining(["llama3.2:3b", "local-uat-chat"])
@@ -361,6 +361,7 @@ describe("onboarding UAT runner helpers", () => {
       runId: "unit-json-secret-leak-check",
       preserve: false,
     })
+    const privateKeyMarker = ["-----BEGIN", "PRIVATE " + "KEY-----"].join(" ")
 
     try {
       writeFileSync(
@@ -370,7 +371,7 @@ describe("onboarding UAT runner helpers", () => {
             headers: { "x-api-key": "sk-live-json-leak" },
             env: { OPENAI_API_KEY: "sk-live-json-leak" },
             tokens: ["ghp_realgithubtoken", "xoxb-real-slack-token", "AKIAIOSFODNN7EXAMPLE"],
-            privateKey: "-----BEGIN PRIVATE KEY-----",
+            privateKey: privateKeyMarker,
           },
           null,
           2

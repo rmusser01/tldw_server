@@ -63,4 +63,3 @@ MCP Hub Workspace Sets should own the interpretation:
   membership, and preserving route state.
 - The live UAT matrix row `RW-UAT-021` should remain `Partial` unless a live
   backend plus WebUI run proves the handoff.
-

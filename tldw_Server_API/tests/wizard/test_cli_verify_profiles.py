@@ -450,9 +450,7 @@ def test_profile_checks_check_provider_false_skips_provider_probe(monkeypatch, t
     )
 
 
-def test_profile_checks_report_first_chat_state_without_completing_setup(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_profile_checks_report_first_chat_state_without_completing_setup(monkeypatch, tmp_path: Path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text("AUTH_MODE=single_user\nSINGLE_USER_API_KEY=file.key\n", encoding="utf-8")
 
@@ -496,10 +494,7 @@ def test_profile_checks_report_first_chat_state_without_completing_setup(
     assert result["status"] == "ok"
     assert_action_field(result["actions"], "first_run", "status", "first_chat_not_complete")
     assert_action_field(result["actions"], "first_run", "setup_status", "in_progress")
-    assert (
-        "First chat is not complete yet; open the WebUI to complete first-time setup."
-        in result["notes"]
-    )
+    assert "First chat is not complete yet; open the WebUI to complete first-time setup." in result["notes"]
 
 
 def test_provider_endpoint_failure_is_fatal_and_sanitized_when_checked(monkeypatch, tmp_path: Path) -> None:

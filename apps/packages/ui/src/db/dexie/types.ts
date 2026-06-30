@@ -43,7 +43,7 @@ export type UploadedFile = {
 };
 
 export type SessionFiles = {
-  id?: any 
+  id?: any
   sessionId: string;
   files: UploadedFile[];
   retrievalEnabled: boolean;

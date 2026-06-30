@@ -280,7 +280,7 @@ class BackendAdapter(DatabaseAdapter):
         result = self.execute(query, params)
         return getattr(result, "scalar", None)
 
-    
+
     @contextmanager
     def transaction(self):
         existing = self._active_connection()

@@ -234,4 +234,3 @@ curl -H "Authorization: Bearer <token>" \
 | `index_timed_out_for_foreground` | Use Jobs-backed mode or raise `max_index_seconds` after confirming the workspace size is expected. |
 | Queued jobs never run | Start `tldw_Server_API.app.core.CodeGraph.jobs_worker`, verify `CODEGRAPH_JOBS_QUEUE`, and confirm the worker `CODEGRAPH_JOBS_INDEX_BASE_DIR` matches the server's effective `index_base_dir`. |
 | Read tools return `index_present: false` | Run `codegraph.index` or `codegraph.sync` for the active workspace. `codegraph.status` and read tools do not create storage on their own. |
-
