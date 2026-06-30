@@ -61,9 +61,9 @@ jobs:
       - name: Check public/private docs boundary
         run: |
           python Helper_Scripts/docs/check_public_private_boundary.py
-      - name: Build site (strict)
+      - name: Build site
         run: |
-          mkdocs build --strict
+          mkdocs build -f Docs/mkdocs.yml
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
         with:

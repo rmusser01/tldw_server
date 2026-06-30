@@ -12,6 +12,19 @@ DEST_DIR="$SRC_DIR/Published"
 echo "Refreshing curated docs in: $DEST_DIR"
 mkdir -p "$DEST_DIR"
 
+cat > "$DEST_DIR/index.md" <<'EOF'
+# tldw Server Docs
+
+Welcome to the curated public documentation for tldw_server.
+
+- [Getting Started](Getting_Started/README.md)
+- [User Guides](User_Guides/index.md)
+- [API Documentation](API-related/API_README.md)
+- [Deployment](Deployment/First_Time_Production_Setup.md)
+- [Monitoring](Monitoring/Metrics_Cheatsheet.md)
+- [Release Notes](RELEASE_NOTES.md)
+EOF
+
 preserve_and_copy() {
   local src="$1"
   local dest="$2"
@@ -51,7 +64,11 @@ preserve_and_copy "$SRC_DIR/Deployment" "$DEST_DIR/Deployment"
 preserve_and_copy "$SRC_DIR/Deployment/Monitoring" "$DEST_DIR/Monitoring"
 
 # Evaluations
-preserve_and_copy "$SRC_DIR/Evaluations" "$DEST_DIR/Evaluations"
+if [ -d "$SRC_DIR/Evaluations" ]; then
+  preserve_and_copy "$SRC_DIR/Evaluations" "$DEST_DIR/Evaluations"
+else
+  preserve_and_copy "$SRC_DIR/Evals" "$DEST_DIR/Evaluations"
+fi
 
 # Getting Started (canonical onboarding profiles)
 preserve_and_copy "$SRC_DIR/Getting_Started" "$DEST_DIR/Getting_Started"
