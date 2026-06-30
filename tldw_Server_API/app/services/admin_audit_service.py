@@ -96,3 +96,38 @@ async def _persist_admin_account_audit_event(
         logger.bind(exception_type=type(exc).__name__).warning(
             "Admin audit emission failed"
         )
+
+
+async def emit_impersonation_issuance_audit_event(
+    *,
+    actor_id: int | None,
+    target_user_id: int,
+    expires_in_minutes: int,
+) -> None:
+    try:
+        svc = await get_or_create_audit_service_for_user_id_optional(actor_id)
+        ctx = AuditContext(
+            user_id=str(actor_id) if actor_id is not None else None,
+            endpoint="/api/v1/admin/impersonate/{user_id}/token",
+            method="POST",
+        )
+        await svc.log_event(
+            event_type=AuditEventType.USER_UPDATED,
+            category=AuditEventCategory.AUTHENTICATION,
+            context=ctx,
+            resource_type="user_impersonation",
+            resource_id=str(target_user_id),
+            action="admin.impersonation.token_issued",
+            metadata={
+                "actor_id": actor_id,
+                "target_user_id": target_user_id,
+                "expires_in_minutes": expires_in_minutes,
+                "impersonation": True,
+            },
+        )
+        await svc.flush(raise_on_failure=True)
+    except MandatoryAuditWriteError:
+        raise
+    except Exception as exc:
+        logger.warning("Mandatory impersonation audit emission failed: {}", exc)
+        raise MandatoryAuditWriteError("Mandatory audit persistence unavailable") from exc

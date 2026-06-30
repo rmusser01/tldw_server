@@ -9,23 +9,19 @@ audit traceability.
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-from tldw_Server_API.app.core.Audit.unified_audit_service import (
-    AuditEventCategory,
-    AuditEventType,
-    MandatoryAuditWriteError,
-)
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
-from tldw_Server_API.app.services.admin_audit_service import (
-    emit_admin_account_audit_event as _emit_admin_account_audit_event,
-)
+from tldw_Server_API.app.services.admin_audit_service import emit_impersonation_issuance_audit_event
 
 router = APIRouter(prefix="/impersonate", tags=["admin-impersonation"])
 
@@ -46,6 +42,21 @@ class ImpersonationTokenResponse(BaseModel):
     expires_in_minutes: int = _IMPERSONATION_TTL_MINUTES
     impersonated_user_id: int
     impersonated_by: int | None = None
+
+
+def _first_role_name(role_rows: list[Any]) -> str | None:
+    if not role_rows:
+        return None
+    first = role_rows[0]
+    if isinstance(first, dict):
+        value = first.get("name") or first.get("role") or first.get("role_name")
+        return str(value) if value else None
+    value = (
+        getattr(first, "name", None)
+        or getattr(first, "role", None)
+        or getattr(first, "role_name", None)
+    )
+    return str(value) if value else str(first)
 
 
 # ---------------------------------------------------------------------------
@@ -72,70 +83,67 @@ async def create_impersonation_token(
                 detail="Impersonation requires a non-impersonated user principal",
             )
 
-        users_repo = await AuthnzUsersRepo.from_pool()
-        target_user = await users_repo.get_user_by_id(user_id)
-        if not target_user:
+        repo = await AuthnzUsersRepo.from_pool()
+        row = await repo.get_user_by_id(user_id)
+
+        if not row:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"User {user_id} not found",
             )
 
-        if isinstance(target_user, dict):
-            target_user_id = int(target_user["id"])
-            target_username = str(target_user["username"])
-            target_is_active = bool(target_user.get("is_active", True))
-            target_role = str(target_user.get("role") or "user")
+        if isinstance(row, dict):
+            target_user_id = int(row["id"])
+            target_username = str(row["username"])
+            target_is_active = bool(row.get("is_active", True))
+            target_role = str(row.get("role") or "user")
         else:
-            target_user_id = int(target_user.id)
-            target_username = str(target_user.username)
-            target_is_active = bool(getattr(target_user, "is_active", True))
-            target_role = str(getattr(target_user, "role", None) or "user")
+            target_user_id = int(row.id)
+            target_username = str(row.username)
+            target_is_active = bool(getattr(row, "is_active", True))
+            target_role = str(getattr(row, "role", None) or "user")
 
         if not target_is_active:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"User {user_id} is not active",
             )
+
+        # Determine the target user's role
+        try:
+            role_rows = AuthnzRbacRepo().get_user_roles(target_user_id)
+        except Exception:
+            logger.warning(
+                "Unable to load RBAC roles for impersonation target; falling back to user row role"
+            )
+            role_rows = []
+        target_role = _first_role_name(role_rows) or target_role
+
         # Generate a short-lived access token with impersonation claim
-        jwt_svc = get_jwt_service()
-        token = jwt_svc.create_access_token(
+        token = get_jwt_service().create_impersonation_access_token(
             user_id=target_user_id,
             username=target_username,
             role=target_role,
+            impersonated_by=principal.user_id,
             expires_delta=timedelta(minutes=_IMPERSONATION_TTL_MINUTES),
-            additional_claims={
-                "impersonated_by": actor_id,
-                "impersonation": True,
-            },
         )
 
-        await _emit_admin_account_audit_event(
+        await emit_impersonation_issuance_audit_event(
             actor_id=actor_id,
             target_user_id=target_user_id,
-            event_type=AuditEventType.AUTH_TOKEN_CREATED,
-            category=AuditEventCategory.AUTHORIZATION,
-            resource_type="user_impersonation",
-            resource_id=str(target_user_id),
-            action="admin.impersonation.token.create",
-            metadata={
-                "impersonated_by": actor_id,
-                "impersonated_user_id": target_user_id,
-                "expires_in_minutes": _IMPERSONATION_TTL_MINUTES,
-                "impersonation": True,
-            },
-            raise_on_failure=True,
+            expires_in_minutes=_IMPERSONATION_TTL_MINUTES,
         )
 
         logger.info(
             "Impersonation token created: admin_user_id={} -> target_user_id={}",
-            actor_id,
+            principal.user_id,
             target_user_id,
         )
 
         return ImpersonationTokenResponse(
             token=token,
             impersonated_user_id=target_user_id,
-            impersonated_by=actor_id,
+            impersonated_by=principal.user_id,
         )
 
     except HTTPException:
