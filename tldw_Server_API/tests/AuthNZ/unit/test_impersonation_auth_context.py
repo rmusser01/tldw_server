@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from fastapi import HTTPException
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as user_handling
@@ -22,18 +23,15 @@ def _request() -> SimpleNamespace:
     )
 
 
-@pytest.mark.asyncio
-async def test_impersonation_claims_populate_auth_context(monkeypatch):
-    request = _request()
-
+def _patch_jwt_auth_dependencies(monkeypatch, payload_updates: dict):
     class JwtStub:
         def decode_access_token(self, _token: str):
-            return {
+            payload = {
                 "sub": "42",
                 "username": "target",
-                "impersonation": True,
-                "impersonated_by": 7,
             }
+            payload.update(payload_updates)
+            return payload
 
     class RepoStub:
         async def get_user_by_id(self, user_id: int):
@@ -77,6 +75,18 @@ async def test_impersonation_claims_populate_auth_context(monkeypatch):
     monkeypatch.setattr(user_handling, "_enrich_user_with_rbac", lambda *_, **__: (["user"], [], False))
     monkeypatch.setattr(user_handling, "set_scope", lambda **_: None)
 
+
+@pytest.mark.asyncio
+async def test_impersonation_claims_populate_auth_context(monkeypatch):
+    request = _request()
+    _patch_jwt_auth_dependencies(
+        monkeypatch,
+        {
+            "impersonation": True,
+            "impersonated_by": 7,
+        },
+    )
+
     user = await user_handling.verify_jwt_and_fetch_user(request, token="token")  # nosec B106
 
     assert user.id == 42  # nosec B101
@@ -85,3 +95,41 @@ async def test_impersonation_claims_populate_auth_context(monkeypatch):
     assert request.state.auth.principal.user_id == 42  # nosec B101
     assert request.state.auth.principal.impersonation is True  # nosec B101
     assert request.state.auth.principal.impersonated_by_user_id == 7  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_impersonated_by_digit_string_populates_auth_context(monkeypatch):
+    request = _request()
+    _patch_jwt_auth_dependencies(
+        monkeypatch,
+        {
+            "impersonation": True,
+            "impersonated_by": "7",
+        },
+    )
+
+    await user_handling.verify_jwt_and_fetch_user(request, token="token")  # nosec B106
+
+    assert request.state.impersonation is True  # nosec B101
+    assert request.state.impersonated_by_user_id == 7  # nosec B101
+    assert request.state.auth.principal.impersonated_by_user_id == 7  # nosec B101
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload_updates",
+    [
+        {"impersonation": "false", "impersonated_by": 7},
+        {"impersonation": True, "impersonated_by": True},
+        {"impersonation": True, "impersonated_by": 7.9},
+        {"impersonation": True},
+    ],
+)
+async def test_malformed_impersonation_claims_fail_closed(monkeypatch, payload_updates: dict):
+    request = _request()
+    _patch_jwt_auth_dependencies(monkeypatch, payload_updates)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await user_handling.verify_jwt_and_fetch_user(request, token="token")  # nosec B106
+
+    assert exc_info.value.status_code == 401  # nosec B101

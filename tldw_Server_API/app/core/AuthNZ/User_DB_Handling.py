@@ -218,6 +218,16 @@ def _coerce_int_list(raw: Any) -> list[int]:
     return out
 
 
+def _parse_impersonated_by_claim(raw: Any) -> int:
+    if isinstance(raw, bool):
+        raise ValueError("impersonated_by must not be a boolean")
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and raw.isdecimal():
+        return int(raw)
+    raise ValueError("impersonated_by must be an integer or decimal digit string")
+
+
 def _normalize_active_id(raw: Any, ids: list[int]) -> Optional[int]:
     if raw is None:
         return ids[0] if len(ids) == 1 else None
@@ -555,15 +565,25 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
         token_team_ids = _coerce_int_list(payload.get("team_ids"))
         token_active_org_id = payload.get("active_org_id")
         token_active_team_id = payload.get("active_team_id")
-        token_impersonation = bool(payload.get("impersonation"))
+        if "impersonation" in payload:
+            token_impersonation_raw = payload.get("impersonation")
+            if not isinstance(token_impersonation_raw, bool):
+                logger.warning("Token impersonation claim is invalid")
+                raise credentials_exception
+            token_impersonation = token_impersonation_raw
+        else:
+            token_impersonation = False
         token_impersonated_by = payload.get("impersonated_by")
         impersonated_by_user_id: Optional[int] = None
         if token_impersonated_by is not None:
             try:
-                impersonated_by_user_id = int(token_impersonated_by)
-            except (TypeError, ValueError):
+                impersonated_by_user_id = _parse_impersonated_by_claim(token_impersonated_by)
+            except ValueError:
                 logger.warning("Token impersonated_by claim is invalid")
                 raise credentials_exception
+        if token_impersonation and impersonated_by_user_id is None:
+            logger.warning("Token impersonation claim is missing actor attribution")
+            raise credentials_exception
     except (InvalidTokenError, TokenExpiredError) as e:
         logger.warning(f"Token validation failed: {e}")
         raise credentials_exception from e
