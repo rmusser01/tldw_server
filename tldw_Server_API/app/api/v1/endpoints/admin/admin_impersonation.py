@@ -44,19 +44,28 @@ class ImpersonationTokenResponse(BaseModel):
     impersonated_by: int | None = None
 
 
+def _clean_role_name(value: Any) -> str | None:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return None
+
+
 def _first_role_name(role_rows: list[Any]) -> str | None:
     if not role_rows:
         return None
     first = role_rows[0]
+    if isinstance(first, str):
+        return _clean_role_name(first)
     if isinstance(first, dict):
         value = first.get("name") or first.get("role") or first.get("role_name")
-        return str(value) if value else None
+        return _clean_role_name(value)
     value = (
         getattr(first, "name", None)
         or getattr(first, "role", None)
         or getattr(first, "role_name", None)
     )
-    return str(value) if value else str(first)
+    return _clean_role_name(value)
 
 
 # ---------------------------------------------------------------------------
