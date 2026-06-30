@@ -97,7 +97,13 @@ async def create_impersonation_token(
 
         # Determine the target user's role
         role_rows = AuthnzRbacRepo().get_user_roles(target_user_id)
-        target_role = _first_role_name(role_rows) or str(row.get("role") or "user")
+        if role_rows:
+            target_role = _first_role_name(role_rows)
+            if target_role is None:
+                logger.warning("RBAC role rows for impersonation target did not include a role name")
+                raise ValueError("Invalid RBAC role data for impersonation target")
+        else:
+            target_role = str(row.get("role") or "user")
 
         # Generate a short-lived access token with impersonation claim
         token = get_jwt_service().create_impersonation_access_token(
