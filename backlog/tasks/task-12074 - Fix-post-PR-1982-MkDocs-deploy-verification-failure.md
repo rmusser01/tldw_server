@@ -2,29 +2,38 @@
 id: TASK-12074
 title: Fix post-PR-1982 MkDocs deploy verification failure
 status: Done
-priority: High
+assignee: []
+created_date: ''
+updated_date: '2026-06-30 07:22'
+labels: []
+dependencies: []
 references:
-- https://github.com/rmusser01/tldw_server/actions/runs/28421862122
+  - 'https://github.com/rmusser01/tldw_server/actions/runs/28421862122'
+priority: high
 modified_files:
-- .github/workflows/mkdocs.yml
-- Helper_Scripts/refresh_docs_published.sh
+  - .github/workflows/mkdocs.yml
+  - Helper_Scripts/refresh_docs_published.sh
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-
+Resolve the post-PR #1982 MkDocs Pages deploy verification failure by making the curated Docs/Published output satisfy the workflow's expected public-docs structure while preserving the current published-docs warning baseline.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 The docs refresh script creates Docs/Published/index.md.
+- [x] #2 The docs refresh script publishes Evaluations from Docs/Evaluations or the current Docs/Evals source.
+- [x] #3 The MkDocs workflow builds with Docs/mkdocs.yml and the curated-docs verification block passes.
+- [x] #4 Known strict-mode baseline warnings are documented instead of re-breaking the deploy workflow.
 <!-- AC:END -->
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:BEGIN -->
+Completed as part of PR #2557. The workflow now uses the real Docs/mkdocs.yml config path, and strict mode remains disabled because mkdocs build --strict -f Docs/mkdocs.yml currently aborts on 106 existing docs warnings unrelated to this deploy-verification fix. The evaluations-source fallback is now guarded in TASK-12075 follow-up work so missing source dirs fail fast.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
@@ -34,10 +43,10 @@ Fixed the post-PR-1982 Deploy MkDocs to GitHub Pages verification failure by mak
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

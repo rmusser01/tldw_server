@@ -66,8 +66,11 @@ preserve_and_copy "$SRC_DIR/Deployment/Monitoring" "$DEST_DIR/Monitoring"
 # Evaluations
 if [ -d "$SRC_DIR/Evaluations" ]; then
   preserve_and_copy "$SRC_DIR/Evaluations" "$DEST_DIR/Evaluations"
-else
+elif [ -d "$SRC_DIR/Evals" ]; then
   preserve_and_copy "$SRC_DIR/Evals" "$DEST_DIR/Evaluations"
+else
+  echo "Missing evaluations docs source: $SRC_DIR/Evaluations or $SRC_DIR/Evals" >&2
+  exit 1
 fi
 
 # Getting Started (canonical onboarding profiles)

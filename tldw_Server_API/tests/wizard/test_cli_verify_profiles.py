@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from tldw_Server_API.cli.wizard import cli as wizard_cli
@@ -450,6 +451,7 @@ def test_profile_checks_check_provider_false_skips_provider_probe(monkeypatch, t
     )
 
 
+@pytest.mark.unit
 def test_profile_checks_report_first_chat_state_without_completing_setup(monkeypatch, tmp_path: Path) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text("AUTH_MODE=single_user\nSINGLE_USER_API_KEY=file.key\n", encoding="utf-8")
