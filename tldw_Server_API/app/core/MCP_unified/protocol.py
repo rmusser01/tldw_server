@@ -1958,9 +1958,16 @@ class MCPProtocol:
                 "next_action": "Send Authorization: Bearer <token> or X-API-KEY with the request.",
             }
         if code == ErrorCode.AUTHORIZATION_ERROR:
-            reason_code = "write_tools_disabled" if "write tools are disabled" in lowered else "permission_denied"
+            if "write tools are disabled" in lowered:
+                return {
+                    "reason_code": "write_tools_disabled",
+                    "next_action": (
+                        "Enable write tools (set MCP_DISABLE_WRITE_TOOLS=0) "
+                        "or switch to a read-only operation."
+                    ),
+                }
             return {
-                "reason_code": reason_code,
+                "reason_code": "permission_denied",
                 "next_action": "Use a token or API key with the required MCP permission.",
             }
         if code == ErrorCode.MODULE_ERROR:

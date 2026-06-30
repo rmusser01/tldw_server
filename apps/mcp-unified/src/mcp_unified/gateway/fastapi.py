@@ -1808,11 +1808,15 @@ async def _gateway_readiness_status(
     profile_manager: GatewayProfileManager | None,
     external_registry_manager: GatewayExternalRegistryManager | None,
     admin_auth: GatewayAdminAuthConfig | None,
+    status_path: str,
 ) -> dict[str, Any]:
     """Return best-effort package-local gateway readiness metadata."""
 
     warnings: list[dict[str, str]] = []
     next_actions: list[str] = []
+    mount_path = status_path.rsplit("/status", 1)[0] if status_path.endswith("/status") else status_path
+    if not mount_path:
+        mount_path = "/"
     package_summary = package_metadata_summary()
     package_payload = {
         key: package_summary.get(key)
@@ -1866,7 +1870,9 @@ async def _gateway_readiness_status(
             )
             next_actions.append("Configure a default profile before relying on profile-scoped gateway calls.")
         except Exception:  # noqa: BLE001 - status must remain best-effort.
-            logger.exception("Default profile readiness check failed during gateway status.")
+            logger.opt(exception=True).warning(
+                "Gateway default profile readiness check failed"
+            )
             warnings.append(
                 _status_warning(
                     "default_profile_status_unavailable",
@@ -1918,7 +1924,9 @@ async def _gateway_readiness_status(
             )
             external_servers["unavailable"] = external_servers["total"]
         except Exception:  # noqa: BLE001 - status must remain best-effort.
-            logger.exception("External registry readiness check failed during gateway status.")
+            logger.opt(exception=True).warning(
+                "Gateway external registry readiness check failed"
+            )
             warnings.append(
                 _status_warning(
                     "external_registry_status_unavailable",
@@ -1958,7 +1966,7 @@ async def _gateway_readiness_status(
         "status": "ok",
         "name": _runtime_name(runtime),
         "version": _runtime_version(runtime),
-        "transport": {"base_path": "package-local-mounted", "mount_path": "unknown"},
+        "transport": {"base_path": "package-local-mounted", "mount_path": mount_path},
         "package": package_payload,
         "profile_store": profile_store,
         "default_profile": default_profile,
@@ -2055,7 +2063,7 @@ def create_gateway_router(
         )
 
     @router.get("/status", response_model=GatewayReadinessStatusResponse)
-    async def gateway_status() -> dict[str, Any]:
+    async def gateway_status(request: Request) -> dict[str, Any]:
         """Return best-effort package-local gateway readiness metadata."""
 
         return await _gateway_readiness_status(
@@ -2063,6 +2071,7 @@ def create_gateway_router(
             profile_manager=resolved_profile_manager,
             external_registry_manager=resolved_external_registry_manager,
             admin_auth=resolved_admin_auth,
+            status_path=str(request.url.path),
         )
 
     @router.post(

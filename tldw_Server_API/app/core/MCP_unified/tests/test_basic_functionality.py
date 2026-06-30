@@ -170,6 +170,8 @@ def test_describe_module_surface_reports_disabled_available_high_risk_modules():
     assert surface["disabled_available_count"] == 3
     assert all(m["requires_explicit_opt_in"] is True for m in surface["disabled_available"])
     assert all(m["next_action"] for m in surface["disabled_available"])
+    assert all("your MCP modules config" in m["next_action"] for m in surface["disabled_available"])
+    assert all("Config_Files/mcp_modules.yaml" not in m["next_action"] for m in surface["disabled_available"])
 
 
 def test_describe_module_surface_does_not_advertise_not_loaded_modules_as_opt_ins():

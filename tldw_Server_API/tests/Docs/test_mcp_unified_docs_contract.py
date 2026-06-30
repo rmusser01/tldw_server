@@ -241,7 +241,12 @@ def test_unified_mcp_docs_reference_existing_local_targets() -> None:
     for doc_path in docs_to_check:
         text = _read(doc_path)
         for target in re.findall(r"\]\(([^)#][^)]+)\)", text):
-            if "://" in target or target.startswith("#") or target.startswith("mailto:"):
+            if (
+                "://" in target
+                or target.startswith("#")
+                or target.startswith("mailto:")
+                or target.startswith("/")
+            ):
                 continue
             normalized = target.split("#", 1)[0]
             if not normalized:

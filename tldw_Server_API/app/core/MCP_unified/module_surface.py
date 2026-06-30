@@ -68,7 +68,7 @@ def _disabled_next_action(module_name: str, tier: str) -> str:
     else:
         risk = "this capability"
     return (
-        f"Enable `{module_name}` in Config_Files/mcp_modules.yaml only if this "
+        f"Enable `{module_name}` in your MCP modules config only if this "
         f"deployment should expose {risk}; restart TLDW Server and recheck /api/v1/mcp/status."
     )
 

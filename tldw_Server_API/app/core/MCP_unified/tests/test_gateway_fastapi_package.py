@@ -211,6 +211,7 @@ class _FakeLogger:
     def __init__(self) -> None:
         self.opt_calls: list[dict[str, Any]] = []
         self.error_calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.warning_calls: list[tuple[str, tuple[Any, ...]]] = []
 
     def opt(self, **kwargs: Any) -> _FakeLogger:
         self.opt_calls.append(kwargs)
@@ -218,6 +219,9 @@ class _FakeLogger:
 
     def error(self, message: str, *args: Any) -> None:
         self.error_calls.append((message, args))
+
+    def warning(self, message: str, *args: Any) -> None:
+        self.warning_calls.append((message, args))
 
 
 def _assert_jsonrpc_error(
@@ -517,6 +521,11 @@ class _ProfileManagementErrorManagerDouble(_ProfileManagementManagerDouble):
         return await super().delete_profile(profile_id)
 
 
+class _ProfileManagementRuntimeErrorManagerDouble(_ProfileManagementManagerDouble):
+    async def get_default_profile(self) -> dict[str, Any]:
+        raise RuntimeError("profile backend leaked detail")
+
+
 def _external_server_response_payload(
     server_id: str,
     server_name: str,
@@ -612,6 +621,11 @@ class _ExternalRegistryManagerDouble:
 class _ExternalRegistryBootstrapDouble:
     def __init__(self, manager: _ExternalRegistryManagerDouble) -> None:
         self.external_registry_manager = manager
+
+
+class _ExternalRegistryRuntimeErrorManagerDouble(_ExternalRegistryManagerDouble):
+    async def list_servers(self, enabled: bool | None = None) -> dict[str, Any]:
+        raise RuntimeError("external registry leaked detail")
 
 
 class _ExternalRegistryErrorManagerDouble(_ExternalRegistryManagerDouble):
@@ -2416,7 +2430,47 @@ def test_gateway_status_includes_package_boundary_metadata() -> None:
     assert payload["package"]["package_status"] == "internal-experimental"
     assert payload["package"]["publishing_status"] == "not-published"
     assert payload["package"]["source_distribution"] == "tldw-server"
+    assert payload["transport"]["mount_path"] == "/mcp"
     assert "next_actions" in payload
+
+
+def test_gateway_status_generic_readiness_warnings_do_not_leak_exception_types(
+    monkeypatch,
+) -> None:
+    fake_logger = _FakeLogger()
+    monkeypatch.setattr(gateway_fastapi, "logger", fake_logger)
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        profile_manager=_ProfileManagementRuntimeErrorManagerDouble("runtime-error"),
+        enable_profile_management=True,
+        external_registry_manager=_ExternalRegistryRuntimeErrorManagerDouble("runtime-error"),
+        enable_external_registry_management=True,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    warning_messages = {
+        warning["reason_code"]: warning["message"]
+        for warning in payload["warnings"]
+    }
+    assert warning_messages["default_profile_status_unavailable"] == (
+        "Default profile readiness check failed."
+    )
+    assert warning_messages["external_registry_status_unavailable"] == (
+        "External registry readiness check failed."
+    )
+    serialized_payload = json.dumps(payload)
+    assert "RuntimeError" not in serialized_payload
+    assert "profile backend leaked detail" not in serialized_payload
+    assert "external registry leaked detail" not in serialized_payload
+    assert fake_logger.opt_calls == [{"exception": True}, {"exception": True}]
+    assert fake_logger.warning_calls == [
+        ("Gateway default profile readiness check failed", ()),
+        ("Gateway external registry readiness check failed", ()),
+    ]
 
 
 def test_gateway_status_route_has_pydantic_response_model() -> None:
@@ -2452,6 +2506,7 @@ async def test_gateway_readiness_status_handles_missing_admin_auth() -> None:
         profile_manager=None,
         external_registry_manager=None,
         admin_auth=None,
+        status_path="/mcp/status",
     )
 
     assert payload["admin_auth"] == {

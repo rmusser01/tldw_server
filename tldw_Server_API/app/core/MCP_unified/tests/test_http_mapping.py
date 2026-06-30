@@ -421,6 +421,37 @@ def test_modules_permission_detail_mentions_modules_and_recovery(client: TestCli
     assert "tools" not in detail["hint"].lower()
 
 
+def test_permission_detail_preserves_protocol_recovery_metadata():
+    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as endpoint
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPError, MCPResponse
+
+    response = MCPResponse(
+        error=MCPError(
+            code=-32001,
+            message="Write tools are disabled for this profile",
+            data={
+                "hint": "Enable write tools on the selected MCP profile.",
+                "reason_code": "write_tools_disabled",
+                "next_action": "Switch to a profile that permits write tools before retrying.",
+            },
+        ),
+        id=1,
+    )
+
+    detail = endpoint._mcp_permission_detail(
+        response,
+        hint="Use a token or API key with tools execution permission.",
+        next_action="Use a token or API key with the required MCP permission.",
+    )
+
+    assert detail == {
+        "message": "Write tools are disabled for this profile",
+        "hint": "Enable write tools on the selected MCP profile.",
+        "reason_code": "write_tools_disabled",
+        "next_action": "Switch to a profile that permits write tools before retrying.",
+    }
+
+
 def test_invalid_safe_config_keeps_structured_recovery_detail(client: TestClient):
     response = client.post(
         "/api/v1/mcp/request",
@@ -450,6 +481,23 @@ async def test_jsonrpc_invalid_params_error_data_includes_recovery_metadata():
     assert response.error.code == -32602
     assert response.error.data["reason_code"] == "invalid_params"
     assert response.error.data["next_action"]
+
+
+def test_jsonrpc_write_tools_disabled_recovery_metadata_has_specific_next_action():
+    from tldw_Server_API.app.core.MCP_unified.protocol import ErrorCode, MCPProtocol
+
+    metadata = MCPProtocol._error_recovery_metadata(
+        ErrorCode.AUTHORIZATION_ERROR,
+        "Write tools are disabled for this profile",
+    )
+
+    assert metadata == {
+        "reason_code": "write_tools_disabled",
+        "next_action": (
+            "Enable write tools (set MCP_DISABLE_WRITE_TOOLS=0) "
+            "or switch to a read-only operation."
+        ),
+    }
 
 
 def test_websocket_query_auth_is_marked_legacy_in_endpoint_copy():
