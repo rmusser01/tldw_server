@@ -123,6 +123,7 @@ async def test_impersonated_by_digit_string_populates_auth_context(monkeypatch):
         {"impersonation": True, "impersonated_by": True},
         {"impersonation": True, "impersonated_by": 7.9},
         {"impersonation": True},
+        {"impersonation": False, "impersonated_by": None},
     ],
 )
 async def test_malformed_impersonation_claims_fail_closed(monkeypatch, payload_updates: dict):

@@ -573,11 +573,10 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
             token_impersonation = token_impersonation_raw
         else:
             token_impersonation = False
-        token_impersonated_by = payload.get("impersonated_by")
         impersonated_by_user_id: Optional[int] = None
-        if token_impersonated_by is not None:
+        if "impersonated_by" in payload:
             try:
-                impersonated_by_user_id = _parse_impersonated_by_claim(token_impersonated_by)
+                impersonated_by_user_id = _parse_impersonated_by_claim(payload.get("impersonated_by"))
             except ValueError:
                 logger.warning("Token impersonated_by claim is invalid")
                 raise credentials_exception
