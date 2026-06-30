@@ -30,7 +30,7 @@
 **Files:**
 - Modify: `Docs/Getting_Started/Profile_Local_Single_User.md`
 
-- [ ] **Step 1: Read the current local guide and approved design**
+- [x] **Step 1: Read the current local guide and approved design**
 
 Run:
 
@@ -41,7 +41,7 @@ sed -n '1,220p' Docs/superpowers/specs/2026-06-30-local-single-user-webui-guide-
 
 Expected: the guide still has API-only setup and an optional WebUI link, and the spec says the guide should become self-contained.
 
-- [ ] **Step 2: Add WebUI prerequisites to `Prepare`**
+- [x] **Step 2: Add WebUI prerequisites to `Prepare`**
 
 In `Docs/Getting_Started/Profile_Local_Single_User.md`, update the prerequisites list to:
 
@@ -56,7 +56,7 @@ Prerequisites:
 
 Expected: the guide still lists the original API prerequisites and now names Bun for the WebUI.
 
-- [ ] **Step 3: Insert `Start the WebUI` after API verification**
+- [x] **Step 3: Insert `Start the WebUI` after API verification**
 
 After the existing API manual spot checks block in `Docs/Getting_Started/Profile_Local_Single_User.md`, add:
 
@@ -97,7 +97,7 @@ Open http://localhost:8080.
 
 Expected: the local guide contains the complete WebUI setup path and no longer requires the README add-on section for the happy path.
 
-- [ ] **Step 4: Add WebUI verification**
+- [x] **Step 4: Add WebUI verification**
 
 In the `Verify` section after the API manual spot checks, add a short WebUI spot check:
 
@@ -111,7 +111,7 @@ curl -sS http://127.0.0.1:8080 > /dev/null && echo "webui-ok"
 
 Expected: the guide verifies both services: API at `8000`, WebUI at `8080`.
 
-- [ ] **Step 5: Update `First Value` for API or WebUI entry**
+- [x] **Step 5: Update `First Value` for API or WebUI entry**
 
 Replace the first paragraph under `## First Value` with:
 
@@ -126,7 +126,7 @@ Expected: first-value guidance recognizes the WebUI as a valid local starting po
 **Files:**
 - Modify: `Docs/Getting_Started/Profile_Local_Single_User.md`
 
-- [ ] **Step 1: Add WebUI troubleshooting bullets**
+- [x] **Step 1: Add WebUI troubleshooting bullets**
 
 In the `Troubleshoot` section, add these bullets after the existing port `8000` bullet:
 
@@ -138,7 +138,7 @@ In the `Troubleshoot` section, add these bullets after the existing port `8000` 
 
 Expected: common WebUI local failures have direct fixes.
 
-- [ ] **Step 2: Replace optional add-on WebUI link**
+- [x] **Step 2: Replace optional add-on WebUI link**
 
 Replace the current optional add-ons list with:
 
@@ -151,7 +151,7 @@ Replace the current optional add-ons list with:
 
 Expected: the old "Add the WebUI" link is gone because the guide now contains that path.
 
-- [ ] **Step 3: Check for stale README-only wording**
+- [x] **Step 3: Check for stale README-only wording**
 
 Run:
 
@@ -167,7 +167,7 @@ Expected: no matches.
 - Modify: `Docs/Getting_Started/Profile_Local_Single_User.md`
 - Modify: `backlog/tasks/task-12072 - Update-Local-Single-User-Setup-guide-with-WebUI.md`
 
-- [ ] **Step 1: Review the rendered command order in plain text**
+- [x] **Step 1: Review the rendered command order in plain text**
 
 Run:
 
@@ -177,7 +177,7 @@ sed -n '1,220p' Docs/Getting_Started/Profile_Local_Single_User.md
 
 Expected: the order is Prepare, Start API, Verify API, Start WebUI, First Value, Audio Path, Troubleshoot, Optional Add-ons.
 
-- [ ] **Step 2: Check Markdown whitespace**
+- [x] **Step 2: Check Markdown whitespace**
 
 Run:
 
@@ -187,7 +187,7 @@ git diff --check -- Docs/Getting_Started/Profile_Local_Single_User.md
 
 Expected: no output and exit code `0`.
 
-- [ ] **Step 3: Check referenced files exist**
+- [x] **Step 3: Check referenced files exist**
 
 Run:
 
@@ -199,7 +199,7 @@ test -f README.md
 
 Expected: each command exits `0`.
 
-- [ ] **Step 4: Check README anchor exists**
+- [x] **Step 4: Check README anchor exists**
 
 Run:
 
@@ -209,7 +209,7 @@ rg -n "^### Run the Web UI \\(WIP\\)" README.md
 
 Expected: one match for the README section linked from Optional Add-ons.
 
-- [ ] **Step 5: Run targeted onboarding docs hygiene if available**
+- [x] **Step 5: Run targeted onboarding docs hygiene if available**
 
 Run:
 
@@ -223,7 +223,7 @@ fi
 
 Expected: either the checker passes, or the skip message prints because the checker is absent. If the virtual environment is unavailable, record that verification blocker in `TASK-12072` and continue with the static checks above.
 
-- [ ] **Step 6: Record Bandit skip**
+- [x] **Step 6: Record Bandit skip**
 
 Use Backlog MCP `task_edit` on `TASK-12072` and add implementation notes:
 
@@ -233,7 +233,7 @@ Bandit skipped: documentation-only Markdown changes; no Python code touched.
 
 Expected: Backlog task notes explain why Bandit does not apply.
 
-- [ ] **Step 7: Update Backlog final summary and acceptance criteria**
+- [x] **Step 7: Update Backlog final summary and acceptance criteria**
 
 Use Backlog MCP `task_edit` on `TASK-12072` to record:
 
@@ -244,7 +244,7 @@ Verification: Markdown whitespace check passed; referenced docs exist; README We
 
 Expected: `TASK-12072` contains verification and final summary notes. Mark acceptance criteria and Definition of Done complete only after the guide edit and checks have actually passed.
 
-- [ ] **Step 8: Commit the documentation update**
+- [x] **Step 8: Commit the documentation update**
 
 Run:
 
