@@ -2,7 +2,6 @@ import React from "react"
 import {
   Button,
   Input,
-  Alert,
   Progress,
   Typography,
   Space,
@@ -36,6 +35,7 @@ import {
   OPENAI_TTS_VOICES,
   useTtsProviderData
 } from "@/hooks/useTtsProviderData"
+import { Alert } from "@/components/ui/primitives/Alert"
 import type {
   Model as ElevenLabsModel,
   Voice as ElevenLabsVoice
@@ -533,12 +533,15 @@ const TtsPlaygroundPage: React.FC = () => {
 
       {capabilities?.ffmpegAvailable === false && (
         <Alert
-          type="warning"
-          showIcon
+          variant="warning"
           className="mt-3 mb-0"
-          message={t("playground:tts.ffmpegWarningTitle", "ffmpeg not detected")}
-          description={t("playground:tts.ffmpegWarningBody", "Some audio processing features require ffmpeg. Install it for full functionality.")}
-        />
+          title={t("playground:tts.ffmpegWarningTitle", "ffmpeg not detected")}
+        >
+          {t(
+            "playground:tts.ffmpegWarningBody",
+            "Some audio processing features require ffmpeg. Install it for full functionality."
+          )}
+        </Alert>
       )}
 
       <div className="mt-4 space-y-4">
@@ -617,40 +620,38 @@ const TtsPlaygroundPage: React.FC = () => {
 
             {showElevenLabsHint && (
               <Alert
-                type={hasElevenLabsKey ? "warning" : "info"}
-                showIcon
+                variant={hasElevenLabsKey ? "warning" : "info"}
                 title={elevenLabsHintTitle}
-                description={
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span>
-                      {hasElevenLabsLoadError && isTimeoutLikeError(elevenLabsError)
-                        ? elevenLabsTimeoutBody
-                        : elevenLabsHintBody}
-                    </span>
-                    {hasElevenLabsKey && (
-                      <Button
-                        size="small"
-                        type="link"
-                        onClick={() => {
-                          void refetchElevenLabs()
-                        }}
-                      >
-                        {t("common:retry", "Retry")}
-                      </Button>
-                    )}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>
+                    {hasElevenLabsLoadError && isTimeoutLikeError(elevenLabsError)
+                      ? elevenLabsTimeoutBody
+                      : elevenLabsHintBody}
+                  </span>
+                  {hasElevenLabsKey && (
                     <Button
                       size="small"
                       type="link"
-                      onClick={handleElevenLabsApiKeyFocus}
+                      onClick={() => {
+                        void refetchElevenLabs()
+                      }}
                     >
-                      {t(
-                        "playground:tts.elevenLabsMissingCta",
-                        "Set API key in Settings"
-                      )}
+                      {t("common:retry", "Retry")}
                     </Button>
-                  </div>
-                }
-              />
+                  )}
+                  <Button
+                    size="small"
+                    type="link"
+                    onClick={handleElevenLabsApiKeyFocus}
+                  >
+                    {t(
+                      "playground:tts.elevenLabsMissingCta",
+                      "Set API key in Settings"
+                    )}
+                  </Button>
+                </div>
+              </Alert>
             )}
 
             {ttsSettings?.ttsProvider === "elevenlabs" && elevenLabsData && (

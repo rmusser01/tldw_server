@@ -43,3 +43,9 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+- TASK-45.44.13.6 migrates TTS playground and voice-cloning Alert product states to the design-system Alert primitive, removes five TTS baseline exceptions, and is tracked in PR https://github.com/rmusser01/tldw_server/pull/2552.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

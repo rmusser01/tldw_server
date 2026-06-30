@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import TtsPlaygroundPage from "@/components/Option/TTS/TtsPlaygroundPage"
+import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
 
 const DEFAULT_KITTEN_MODEL = "KittenML/kitten-tts-nano-0.8"
 
@@ -29,6 +30,12 @@ const providerDataState = vi.hoisted(() => ({
   tldwVoiceCatalog: [
     { id: "Bella", name: "Bella", language: "en" }
   ]
+}))
+
+const capabilitiesState = vi.hoisted(() => ({
+  data: {
+    ffmpegAvailable: true
+  }
 }))
 
 vi.mock("@/services/tts", () => ({
@@ -79,9 +86,7 @@ vi.mock("@/hooks/useTtsPlayground", () => ({
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
-    capabilities: {
-      ffmpegAvailable: true
-    }
+    capabilities: capabilitiesState.data
   })
 }))
 
@@ -99,6 +104,9 @@ vi.mock("@/components/Common/PageShell", () => ({
 
 describe("TtsPlaygroundPage defaults", () => {
   beforeEach(() => {
+    capabilitiesState.data = {
+      ffmpegAvailable: true
+    }
     providerDataState.hasAudio = true
     providerDataState.tldwVoiceCatalog = [
       { id: "Bella", name: "Bella", language: "en" }
@@ -191,6 +199,58 @@ describe("TtsPlaygroundPage defaults", () => {
     expect(screen.getByText(/Open Speech Settings/)).toBeInTheDocument()
     expect(screen.getByText(/Browser/)).toBeInTheDocument()
     expect(container.querySelectorAll(".ant-alert")).toHaveLength(0)
+  })
+
+  it("renders the ffmpeg warning with the design-system Alert primitive", async () => {
+    capabilitiesState.data = {
+      ffmpegAvailable: false
+    }
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false
+        }
+      }
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TtsPlaygroundPage />
+      </QueryClientProvider>
+    )
+
+    await screen.findByText("ffmpeg not detected")
+    expectInsideDesignSystemAlert("ffmpeg not detected")
+    expectInsideDesignSystemAlert(
+      "Some audio processing features require ffmpeg. Install it for full functionality."
+    )
+  })
+
+  it("renders ElevenLabs setup guidance with the design-system Alert primitive", async () => {
+    ttsSettingsState.data = {
+      ...ttsSettingsState.data,
+      ttsProvider: "elevenlabs",
+      elevenLabsApiKey: ""
+    }
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false
+        }
+      }
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <TtsPlaygroundPage />
+      </QueryClientProvider>
+    )
+
+    await screen.findByText("ElevenLabs needs an API key")
+    expectInsideDesignSystemAlert("ElevenLabs needs an API key")
+    expectInsideDesignSystemAlert(
+      "Add your ElevenLabs API key in Settings to load voices and models."
+    )
   })
 
   it("keeps Play disabled when tldw server TTS setup is required", async () => {

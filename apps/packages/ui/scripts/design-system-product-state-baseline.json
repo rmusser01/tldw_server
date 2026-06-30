@@ -561,61 +561,6 @@
     "migrationQueue": "shared-product-state"
   },
   {
-    "id": "antd-product-state-import:src/components/Option/TTS/TtsPlaygroundPage.tsx:Alert#antd-alert-ttsplaygroundpage-type-info-line-548-1132c3s",
-    "path": "src/components/Option/TTS/TtsPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/TTS/TtsPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/TTS/TtsPlaygroundPage.tsx:Alert#antd-alert-ttsplaygroundpage-type-info-line-567-1aq483",
-    "path": "src/components/Option/TTS/TtsPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/TTS/TtsPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/TTS/TtsPlaygroundPage.tsx:Alert#antd-alert-ttsplaygroundpage-type-warning-line-524-d703fg",
-    "path": "src/components/Option/TTS/TtsPlaygroundPage.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/TTS/TtsPlaygroundPage.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/TTS/VoiceCloningManager.tsx:Alert#antd-alert-voicecloningmanager-type-warning-provider-dis-zpbhde",
-    "path": "src/components/Option/TTS/VoiceCloningManager.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/TTS/VoiceCloningManager.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
-    "id": "antd-product-state-import:src/components/Option/TTS/VoiceCloningManager.tsx:Alert#antd-alert-voicecloningmanager-type-warning-voice-roles-dyycgq",
-    "path": "src/components/Option/TTS/VoiceCloningManager.tsx",
-    "rule": "antd-product-state-import",
-    "subject": "Alert",
-    "state": "allowed_legacy_exception",
-    "owner": "design-system",
-    "reason": "Existing AntD Alert product-state UI in src/components/Option/TTS/VoiceCloningManager.tsx before the stable duplicate-id guard.",
-    "replacement": "tldw design-system state primitive",
-    "migrationQueue": "shared-product-state"
-  },
-  {
     "id": "antd-product-state-import:src/components/Quiz/tabs/CreateTab.tsx:Alert#antd-alert-createtab-type-info-line-1003-u954tt",
     "path": "src/components/Quiz/tabs/CreateTab.tsx",
     "rule": "antd-product-state-import",
