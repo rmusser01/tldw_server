@@ -47,6 +47,7 @@ import type {
   SkillResponse,
   SkillsListResponse
 } from "@/types/skill"
+import { getFirstVisibleFocusableElement } from "@/utils/focus-return"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 const DEFAULT_PAGE_SIZE = 10
@@ -78,6 +79,11 @@ interface FileImportReview {
   file: File
   preview: SkillImportPreviewResponse
   overwrite: boolean
+}
+
+interface FocusReturnTarget {
+  element: HTMLElement | null
+  selector: string | null
 }
 
 interface DeleteSkillPayload {
@@ -286,10 +292,9 @@ export const SkillsManager: React.FC = () => {
     React.useState<SkillsSuccessAction | null>(null)
   const [importTextForm] = Form.useForm<ImportTextFormValues>()
   const importTextOverwrite = Form.useWatch("overwrite", importTextForm)
-  const drawerReturnFocusRef = React.useRef<HTMLElement | null>(null)
-  const drawerReturnFocusLabelRef = React.useRef<string | null>(null)
-  const previewReturnFocusRef = React.useRef<HTMLElement | null>(null)
-  const previewReturnFocusLabelRef = React.useRef<string | null>(null)
+  const managerRootRef = React.useRef<HTMLDivElement | null>(null)
+  const drawerReturnFocusRef = React.useRef<FocusReturnTarget | null>(null)
+  const previewReturnFocusRef = React.useRef<FocusReturnTarget | null>(null)
 
   const getActiveFocusTarget = React.useCallback((): HTMLElement | null => {
     if (typeof document === "undefined" || typeof HTMLElement === "undefined") {
@@ -301,57 +306,75 @@ export const SkillsManager: React.FC = () => {
       : null
   }, [])
 
-  const getFocusTargetLabel = React.useCallback((element: HTMLElement | null) => {
+  const escapeAttributeSelectorValue = React.useCallback((value: string) => {
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+      return CSS.escape(value)
+    }
+    return value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+  }, [])
+
+  const getFocusTargetSelector = React.useCallback((element: HTMLElement | null) => {
     if (!element) return null
 
-    return element.getAttribute("aria-label") || element.textContent?.trim() || null
-  }, [])
+    const action = element.dataset.skillAction
+    if (!action) return null
 
-  const findButtonByLabel = React.useCallback((label: string | null): HTMLElement | null => {
-    if (!label || typeof document === "undefined") return null
+    const actionSelector =
+      `[data-skill-action="${escapeAttributeSelectorValue(action)}"]`
+    const skillName = element.dataset.skillName
+    return skillName
+      ? `${actionSelector}[data-skill-name="${escapeAttributeSelectorValue(skillName)}"]`
+      : actionSelector
+  }, [escapeAttributeSelectorValue])
 
-    return Array.from(document.querySelectorAll<HTMLElement>("button")).find((button) =>
-      button.getAttribute("aria-label") === label
-      || button.textContent?.trim() === label
-    ) ?? null
-  }, [])
+  const getFocusReturnTarget = React.useCallback((element: HTMLElement | null): FocusReturnTarget => ({
+    element,
+    selector: getFocusTargetSelector(element)
+  }), [getFocusTargetSelector])
 
-  const restoreFocus = React.useCallback((
-    element: HTMLElement | null,
-    fallbackLabel?: string | null
-  ) => {
-    if (typeof window === "undefined") return
+  const restoreFocus = React.useCallback((returnTarget: FocusReturnTarget | null): boolean => {
+    if (typeof document === "undefined" || typeof HTMLElement === "undefined") return false
+    if (!returnTarget) return false
 
-    const focusTarget = () => {
-      const target = element?.isConnected
-        ? element
-        : findButtonByLabel(fallbackLabel ?? null)
-      if (target) {
-        target.focus({ preventScroll: true })
-      }
+    const activeElement = document.activeElement
+    const managerRoot = managerRootRef.current
+    if (
+      activeElement instanceof HTMLElement
+      && activeElement !== document.body
+      && activeElement.isConnected
+      && managerRoot?.contains(activeElement)
+    ) {
+      return true
     }
 
-    window.setTimeout(focusTarget, 0)
-    window.setTimeout(focusTarget, 150)
-  }, [findButtonByLabel])
+    const target = returnTarget.element?.isConnected
+      ? returnTarget.element
+      : returnTarget.selector && managerRoot
+        ? getFirstVisibleFocusableElement(returnTarget.selector, managerRoot)
+        : null
+    if (!target) return false
+
+    target.focus({ preventScroll: true })
+    return document.activeElement === target
+  }, [])
 
   const openSkillPreview = React.useCallback(
     (skillName: string, triggerElement?: HTMLElement | null) => {
       const returnTarget = triggerElement ?? getActiveFocusTarget()
-      previewReturnFocusRef.current = returnTarget
-      previewReturnFocusLabelRef.current = getFocusTargetLabel(returnTarget)
+      previewReturnFocusRef.current = getFocusReturnTarget(returnTarget)
       setPreviewSkill(skillName)
     },
-    [getActiveFocusTarget, getFocusTargetLabel]
+    [getActiveFocusTarget, getFocusReturnTarget]
   )
 
   const closeSkillPreview = React.useCallback(() => {
-    const returnTarget = previewReturnFocusRef.current
-    const returnLabel = previewReturnFocusLabelRef.current
-    previewReturnFocusRef.current = null
-    previewReturnFocusLabelRef.current = null
     setPreviewSkill(null)
-    restoreFocus(returnTarget, returnLabel)
+  }, [])
+
+  const handlePreviewAfterClose = React.useCallback(() => {
+    const returnTarget = previewReturnFocusRef.current
+    previewReturnFocusRef.current = null
+    restoreFocus(returnTarget)
   }, [restoreFocus])
 
   const offset = (page - 1) * pageSize
@@ -793,8 +816,7 @@ export const SkillsManager: React.FC = () => {
 
   const handleNew = (triggerElement?: HTMLElement | null) => {
     const returnTarget = triggerElement ?? getActiveFocusTarget()
-    drawerReturnFocusRef.current = returnTarget
-    drawerReturnFocusLabelRef.current = getFocusTargetLabel(returnTarget)
+    drawerReturnFocusRef.current = getFocusReturnTarget(returnTarget)
     setSuccessAction(null)
     setEditingSkill(null)
     setDrawerOpen(true)
@@ -802,8 +824,7 @@ export const SkillsManager: React.FC = () => {
 
   const handleEdit = async (name: string, triggerElement?: HTMLElement | null) => {
     const returnTarget = triggerElement ?? getActiveFocusTarget()
-    drawerReturnFocusRef.current = returnTarget
-    drawerReturnFocusLabelRef.current = getFocusTargetLabel(returnTarget)
+    drawerReturnFocusRef.current = getFocusReturnTarget(returnTarget)
     try {
       const skill = await tldwClient.getSkill(name)
       setEditingSkill(skill)
@@ -936,14 +957,37 @@ export const SkillsManager: React.FC = () => {
     }
   }
 
-  const handleDrawerClose = () => {
+  const restoreDrawerFocus = React.useCallback((clearWhenDone = true) => {
     const returnTarget = drawerReturnFocusRef.current
-    const returnLabel = drawerReturnFocusLabelRef.current
-    drawerReturnFocusRef.current = null
-    drawerReturnFocusLabelRef.current = null
+    const restored = restoreFocus(returnTarget)
+    if (clearWhenDone || restored) {
+      drawerReturnFocusRef.current = null
+    }
+  }, [restoreFocus])
+
+  const handleDrawerAfterClose = React.useCallback(() => {
+    restoreDrawerFocus()
+  }, [restoreDrawerFocus])
+
+  React.useEffect(() => {
+    if (drawerOpen || !drawerReturnFocusRef.current) return
+
+    if (typeof window !== "undefined" && window.requestAnimationFrame) {
+      const animationFrame = window.requestAnimationFrame(() => {
+        restoreDrawerFocus(false)
+      })
+      return () => window.cancelAnimationFrame(animationFrame)
+    }
+
+    const timeout = globalThis.setTimeout(() => {
+      restoreDrawerFocus(false)
+    }, 0)
+    return () => globalThis.clearTimeout(timeout)
+  }, [drawerOpen, restoreDrawerFocus])
+
+  const handleDrawerClose = () => {
     setDrawerOpen(false)
     setEditingSkill(null)
-    restoreFocus(returnTarget, returnLabel)
   }
 
   const handleDrawerSaved = (savedSkillName?: string) => {
@@ -1150,6 +1194,8 @@ export const SkillsManager: React.FC = () => {
               type="text"
               size="small"
               icon={<Play size={14} />}
+              data-skill-action="test-run"
+              data-skill-name={record.name}
               onClick={(event) => openSkillPreview(record.name, event.currentTarget)}
             />
           </Tooltip>
@@ -1162,6 +1208,8 @@ export const SkillsManager: React.FC = () => {
               type="text"
               size="small"
               icon={<Pen size={14} />}
+              data-skill-action="edit"
+              data-skill-name={record.name}
               onClick={(event) => void handleEdit(record.name, event.currentTarget)}
             />
           </Tooltip>
@@ -1447,7 +1495,7 @@ export const SkillsManager: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={managerRootRef} className="flex flex-col gap-4">
       <section
         aria-labelledby="skills-manager-title"
         className="flex flex-col gap-1"
@@ -1500,6 +1548,7 @@ export const SkillsManager: React.FC = () => {
           <Button
             type="primary"
             icon={<Plus size={14} />}
+            data-skill-action="new"
             onClick={(event) => handleNew(event.currentTarget)}
           >
             {t("option:skills.newSkill", { defaultValue: "New Skill" })}
@@ -1686,13 +1735,13 @@ export const SkillsManager: React.FC = () => {
         />
       )}
 
-      {isLoading && (
-        <div role="status" aria-live="polite" className="sr-only">
-          {t("option:skills.loadingStatus", {
-            defaultValue: "Loading skills"
-          })}
-        </div>
-      )}
+      <div role="status" aria-live="polite" className="sr-only">
+        {isLoading
+          ? t("option:skills.loadingStatus", {
+              defaultValue: "Loading skills"
+            })
+          : ""}
+      </div>
 
       {successAction && (
         <DesignSystemAlert
@@ -1713,6 +1762,8 @@ export const SkillsManager: React.FC = () => {
                 <Button
                   size="small"
                   icon={<Play size={14} />}
+                  data-skill-action="success-test-run"
+                  data-skill-name={skillName}
                   onClick={(event) => openSkillPreview(skillName, event.currentTarget)}
                 >
                   {successAction.testLabel ??
@@ -1721,6 +1772,8 @@ export const SkillsManager: React.FC = () => {
                 <Button
                   size="small"
                   icon={<Pen size={14} />}
+                  data-skill-action="success-edit"
+                  data-skill-name={skillName}
                   onClick={(event) => void handleEdit(skillName, event.currentTarget)}
                 >
                   {successAction.viewLabel ??
@@ -1982,6 +2035,7 @@ export const SkillsManager: React.FC = () => {
         open={drawerOpen}
         skill={editingSkill}
         onClose={handleDrawerClose}
+        onAfterClose={handleDrawerAfterClose}
         onSaved={handleDrawerSaved}
       />
 
@@ -1989,6 +2043,7 @@ export const SkillsManager: React.FC = () => {
         skillName={previewSkill}
         runtime={previewRuntime}
         onClose={closeSkillPreview}
+        onAfterClose={handlePreviewAfterClose}
       />
     </div>
   )

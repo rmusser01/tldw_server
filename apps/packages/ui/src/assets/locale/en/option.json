@@ -211,6 +211,22 @@
     "documentWorkspace": "Document Workspace",
     "modeRepo2txt": "Repo2Txt"
   },
+  "skills": {
+    "testRun": "Test run",
+    "testRunTitle": "Test run",
+    "previewArgs": "Test Arguments",
+    "previewArgsPlaceholder": "Enter test arguments...",
+    "renderOnlyAction": "Render prompt only",
+    "testRunAction": "Run test",
+    "previewRendered": "Rendered Prompt",
+    "previewForkOutput": "Fork Output",
+    "testRunError": "Execution failed",
+    "loadingStatus": "Loading skills",
+    "renderingPromptStatus": "Rendering prompt for {{name}}",
+    "runningTestStatus": "Running test for {{name}}",
+    "renderedPromptReadyStatus": "Rendered prompt ready for {{name}}",
+    "testResultReadyStatus": "Test result ready for {{name}}"
+  },
   "documentWorkspace": {
     "title": "Document Workspace",
     "noDocument": "No document selected",

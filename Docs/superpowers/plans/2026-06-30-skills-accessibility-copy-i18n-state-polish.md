@@ -48,8 +48,8 @@
 **Status**: Complete
 
 ## Verification Results
-- `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx src/components/Option/Skills/__tests__/SkillPreview.test.tsx --reporter=dot`: passed, 51 tests.
-- `TLDW_WEB_URL=http://localhost:18080 TLDW_WEB_CMD='bun run dev -- -p 18080' npx playwright test e2e/workflows/tier-5-specialized/skills.spec.ts --project=tier-5 --reporter=line`: passed, 5 tests.
-- `node -e "JSON.parse(require('fs').readFileSync('apps/packages/ui/src/public/_locales/en/option.json','utf8')); console.log('option locale JSON valid')"`: passed.
-- `git diff --check`: passed.
+- `bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx src/components/Option/Skills/__tests__/SkillPreview.test.tsx src/components/Option/Skills/__tests__/skills-locale-keys.test.ts --reporter=dot`: passed, 54 tests.
+- `TLDW_WEB_URL=http://localhost:18087 TLDW_WEB_CMD='bun run dev -- -p 18087' npx playwright test e2e/workflows/tier-5-specialized/skills.spec.ts --project=tier-5 --reporter=line`: passed, 5 tests.
+- `node -e` JSON parse check for `apps/packages/ui/src/public/_locales/en/option.json` and `apps/packages/ui/src/assets/locale/en/option.json`: passed.
+- `git diff --check origin/dev...HEAD`: passed.
 - Bandit: skipped, no Python files touched.

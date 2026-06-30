@@ -91,7 +91,7 @@ async function mockSkillsBeginnerApi(
     const query = (url.searchParams.get("q") ?? "").trim().toLowerCase()
     const skills = seeded
       && (!query
-        || seededSkillSummary.name.includes(query)
+        || seededSkillSummary.name.toLowerCase().includes(query)
         || seededSkillSummary.description.toLowerCase().includes(query))
       ? [seededSkillSummary]
       : []
@@ -245,7 +245,7 @@ test.describe("Skills beginner journey (mocked)", () => {
     const searchInput = page.getByPlaceholder("Search skills...")
     await expect(searchInput).toBeVisible()
     await searchInput.focus()
-    await page.keyboard.type("summ")
+    await page.keyboard.type("summarize")
     await expect(page.getByText("Summarize source material")).toBeVisible()
 
     const testRunButton = page.getByRole("button", { name: "Test run summarize" })

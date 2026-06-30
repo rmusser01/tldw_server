@@ -9,6 +9,7 @@ interface SkillPreviewProps {
   skillName: string | null
   runtime?: SkillRuntimeMetadata | null
   onClose: () => void
+  onAfterClose?: () => void
 }
 
 type SkillRunMode = "dry-run" | "test-run"
@@ -16,7 +17,8 @@ type SkillRunMode = "dry-run" | "test-run"
 export const SkillPreview: React.FC<SkillPreviewProps> = ({
   skillName,
   runtime,
-  onClose
+  onClose,
+  onAfterClose
 }) => {
   const { t } = useTranslation(["option", "common"])
   const [args, setArgs] = React.useState("")
@@ -117,16 +119,15 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
       })}
       open={Boolean(skillName)}
       onCancel={onClose}
+      afterClose={onAfterClose}
       footer={null}
       width={640}
       destroyOnHidden
     >
       <div className="flex flex-col gap-4">
-        {runStatusMessage && (
-          <div role="status" aria-live="polite" className="sr-only">
-            {runStatusMessage}
-          </div>
-        )}
+        <div role="status" aria-live="polite" className="sr-only">
+          {runStatusMessage ?? ""}
+        </div>
 
         <div>
           <label className="mb-1 block text-sm font-medium">

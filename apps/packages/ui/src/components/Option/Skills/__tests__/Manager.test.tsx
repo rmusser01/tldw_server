@@ -55,16 +55,29 @@ vi.mock("../SkillDrawer", () => ({
   SkillDrawer: (props: {
     open: boolean
     onClose: () => void
+    onAfterClose?: () => void
     onSaved: (skillName?: string) => void
   }) => {
     skillDrawerMock(props)
     return props.open ? (
       <div data-testid="skill-drawer-open">
         Skill drawer open
-        <button type="button" onClick={props.onClose}>
+        <button
+          type="button"
+          onClick={() => {
+            props.onClose()
+            window.setTimeout(() => props.onAfterClose?.(), 0)
+          }}
+        >
           Cancel drawer
         </button>
-        <button type="button" onClick={() => props.onSaved("created-skill")}>
+        <button
+          type="button"
+          onClick={() => {
+            props.onSaved("created-skill")
+            window.setTimeout(() => props.onAfterClose?.(), 0)
+          }}
+        >
           Complete create
         </button>
       </div>
@@ -77,12 +90,19 @@ vi.mock("../SkillPreview", () => ({
     skillName: string | null
     runtime?: unknown
     onClose: () => void
+    onAfterClose?: () => void
   }) => {
     skillPreviewMock(props)
     return props.skillName ? (
       <div data-testid="skill-preview-open">
         Test run: {props.skillName}
-        <button type="button" onClick={props.onClose}>
+        <button
+          type="button"
+          onClick={() => {
+            props.onClose()
+            window.setTimeout(() => props.onAfterClose?.(), 0)
+          }}
+        >
           Close test run
         </button>
       </div>
@@ -266,7 +286,7 @@ describe("SkillsManager imports", () => {
     expect(await screen.findByText("2 skills")).toBeInTheDocument()
   })
 
-  it("announces Skills list loading without relying on the table spinner alone", async () => {
+  it("keeps the Skills list loading live region mounted after loading finishes", async () => {
     let resolveList: (value: {
       skills: never[]
       count: number
@@ -283,8 +303,8 @@ describe("SkillsManager imports", () => {
 
     renderManager()
 
-    const loadingStatus = await screen.findByText("Loading skills")
-    expect(loadingStatus.closest('[role="status"]')).toBeInTheDocument()
+    const loadingStatusRegion = await screen.findByRole("status")
+    expect(loadingStatusRegion).toHaveTextContent("Loading skills")
 
     resolveList({
       skills: [],
@@ -299,6 +319,7 @@ describe("SkillsManager imports", () => {
         name: "Start with a reusable skill"
       })
     ).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("")
   })
 
   it("shows a Skills-specific beginner empty state with first actions", async () => {
@@ -737,6 +758,73 @@ describe("SkillsManager imports", () => {
     await waitFor(() => {
       expect(testRunButton).toHaveFocus()
     })
+  })
+
+  it("does not restore focus to an identically labelled button outside Skills when the trigger is gone", async () => {
+    const outsideButton = document.createElement("button")
+    outsideButton.type = "button"
+    outsideButton.setAttribute("aria-label", "Test run skill-1")
+    outsideButton.textContent = "Outside duplicate"
+    document.body.prepend(outsideButton)
+
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [makeSkill(1)],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+
+    try {
+      renderManager()
+
+      expect(await screen.findByText("1 skill")).toBeInTheDocument()
+      const testRunButton = screen
+        .getAllByRole("button", { name: "Test run skill-1" })
+        .find((button) => button !== outsideButton)
+      expect(testRunButton).toBeDefined()
+      fireEvent.click(testRunButton as HTMLElement)
+      expect(screen.getByTestId("skill-preview-open")).toHaveTextContent("skill-1")
+
+      vi.useFakeTimers()
+      ;(testRunButton as HTMLElement).remove()
+      fireEvent.click(screen.getByRole("button", { name: "Close test run" }))
+      await vi.runAllTimersAsync()
+
+      expect(outsideButton).not.toHaveFocus()
+    } finally {
+      outsideButton.remove()
+      vi.useRealTimers()
+    }
+  })
+
+  it("does not steal focus back when the user moves focus before restore runs", async () => {
+    tldwClientMock.listSkills.mockResolvedValue({
+      skills: [makeSkill(1)],
+      count: 1,
+      total: 1,
+      limit: 10,
+      offset: 0
+    })
+
+    try {
+      renderManager()
+
+      expect(await screen.findByText("1 skill")).toBeInTheDocument()
+      const testRunButton = screen.getByRole("button", { name: "Test run skill-1" })
+      fireEvent.click(testRunButton)
+      expect(screen.getByTestId("skill-preview-open")).toHaveTextContent("skill-1")
+
+      vi.useFakeTimers()
+      fireEvent.click(screen.getByRole("button", { name: "Close test run" }))
+      const newSkillButton = screen.getByRole("button", { name: "New Skill" })
+      newSkillButton.focus()
+      await vi.runAllTimersAsync()
+
+      expect(newSkillButton).toHaveFocus()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("passes the row version when deleting a skill", async () => {

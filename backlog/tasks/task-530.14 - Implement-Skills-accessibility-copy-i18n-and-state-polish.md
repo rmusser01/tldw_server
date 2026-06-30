@@ -15,10 +15,13 @@ documentation:
 - Docs/superpowers/plans/2026-06-30-skills-accessibility-copy-i18n-state-polish.md
 modified_files:
 - Docs/superpowers/plans/2026-06-30-skills-accessibility-copy-i18n-state-polish.md
+- apps/packages/ui/src/assets/locale/en/option.json
 - apps/packages/ui/src/components/Option/Skills/Manager.tsx
+- apps/packages/ui/src/components/Option/Skills/SkillDrawer.tsx
 - apps/packages/ui/src/components/Option/Skills/SkillPreview.tsx
 - apps/packages/ui/src/components/Option/Skills/__tests__/Manager.test.tsx
 - apps/packages/ui/src/components/Option/Skills/__tests__/SkillPreview.test.tsx
+- apps/packages/ui/src/components/Option/Skills/__tests__/skills-locale-keys.test.ts
 - apps/packages/ui/src/public/_locales/en/option.json
 - apps/tldw-frontend/e2e/workflows/tier-5-specialized/skills.spec.ts
 ---
@@ -54,12 +57,12 @@ Docs/superpowers/plans/2026-06-30-skills-accessibility-copy-i18n-state-polish.md
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented scoped Skills accessibility/state polish. Added screen-reader-only live status for Skills list loading and SkillPreview pending/completed execution states. Added focus return for test-run modal and create/edit drawer flows, including fallback lookup when Ant Design table buttons remount. Consolidated touched Skills status/test-run strings into the English option locale. Updated the mocked tier-5 Skills journey to current Test run semantics and added a keyboard/mobile-width path covering search, row test run, argument entry, execution result, Escape close focus return, New Skill open, and cancel focus return.
+Implemented scoped Skills accessibility/state polish and addressed PR review feedback. Added permanently mounted screen-reader live status regions for Skills list loading and SkillPreview render/test-run states. Added scoped focus return for test-run modal and create/edit drawer flows using Skills-local data attributes, after-close hooks, and an idempotent drawer closed-state fallback, avoiding the previous document-wide label search and fixed retry behavior. Added WebUI English locale keys in assets/locale alongside extension _locales copy. Updated mocked tier-5 Skills journey to current Test run semantics and case-insensitive search matching, plus keyboard/mobile-width coverage for search, row test run, argument entry, execution result, Escape close focus return, New Skill open, and cancel focus return.
 
-Verification after final rebase onto latest dev:
-- bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx src/components/Option/Skills/__tests__/SkillPreview.test.tsx --reporter=dot: PASS, 51 tests.
-- TLDW_WEB_URL=http://localhost:18083 TLDW_WEB_CMD='bun run dev -- -p 18083' npx playwright test e2e/workflows/tier-5-specialized/skills.spec.ts --project=tier-5 --reporter=line: PASS, 5 tests.
-- node -e JSON parse check for apps/packages/ui/src/public/_locales/en/option.json: PASS.
+Verification after review fixes:
+- bunx vitest run src/components/Option/Skills/__tests__/Manager.test.tsx src/components/Option/Skills/__tests__/SkillPreview.test.tsx src/components/Option/Skills/__tests__/skills-locale-keys.test.ts --reporter=dot: PASS, 54 tests.
+- TLDW_WEB_URL=http://localhost:18087 TLDW_WEB_CMD='bun run dev -- -p 18087' npx playwright test e2e/workflows/tier-5-specialized/skills.spec.ts --project=tier-5 --reporter=line: PASS, 5 tests.
+- node -e JSON parse check for apps/packages/ui/src/public/_locales/en/option.json and apps/packages/ui/src/assets/locale/en/option.json: PASS.
 - git diff --check origin/dev...HEAD: PASS.
 - Bandit: skipped because no Python files were touched.
 

@@ -31,6 +31,7 @@ interface SkillDrawerProps {
   open: boolean
   skill: SkillResponse | null
   onClose: () => void
+  onAfterClose?: () => void
   onSaved: (skillName?: string) => void
 }
 
@@ -38,6 +39,7 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
   open,
   skill,
   onClose,
+  onAfterClose,
   onSaved
 }) => {
   const { t } = useTranslation(["option", "common"])
@@ -264,6 +266,9 @@ export const SkillDrawer: React.FC<SkillDrawerProps> = ({
       }
       open={open}
       onClose={onClose}
+      afterOpenChange={(isOpen) => {
+        if (!isOpen) onAfterClose?.()
+      }}
       size={640}
       destroyOnClose
       extra={

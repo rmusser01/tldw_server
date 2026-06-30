@@ -96,6 +96,7 @@ describe("SkillPreview test-run semantics", () => {
     renderPreview()
 
     const dialog = screen.getByRole("dialog", { name: "Test run" })
+    expect(within(dialog).getByRole("status")).toHaveTextContent("")
     expect(
       within(dialog).getByText(
         "This renders the skill with your arguments. Fork-mode skills may call the configured model and allowed tools."
