@@ -8,12 +8,20 @@ audit traceability.
 
 from __future__ import annotations
 
+from datetime import timedelta
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
+from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
+from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.services.admin_audit_service import emit_impersonation_issuance_audit_event
 
 router = APIRouter(prefix="/impersonate", tags=["admin-impersonation"])
 
@@ -36,6 +44,21 @@ class ImpersonationTokenResponse(BaseModel):
     impersonated_by: int | None = None
 
 
+def _first_role_name(role_rows: list[Any]) -> str | None:
+    if not role_rows:
+        return None
+    first = role_rows[0]
+    if isinstance(first, dict):
+        value = first.get("name") or first.get("role") or first.get("role_name")
+        return str(value) if value else None
+    value = (
+        getattr(first, "name", None)
+        or getattr(first, "role", None)
+        or getattr(first, "role_name", None)
+    )
+    return str(value) if value else str(first)
+
+
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
@@ -53,17 +76,8 @@ async def create_impersonation_token(
     (enforced by the parent ``/admin`` router dependency).
     """
     try:
-        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-
-        pool = await get_db_pool()
-
-        # Verify the target user exists
-        async with pool.acquire() as conn:
-            cur = await conn.execute(
-                "SELECT id, username, is_active FROM users WHERE id = ?",
-                (user_id,),
-            )
-            row = await cur.fetchone()
+        repo = await AuthnzUsersRepo.from_pool()
+        row = await repo.get_user_by_id(user_id)
 
         if not row:
             raise HTTPException(
@@ -71,9 +85,9 @@ async def create_impersonation_token(
                 detail=f"User {user_id} not found",
             )
 
-        target_user_id = row[0]
-        target_username = row[1]
-        target_is_active = row[2]
+        target_user_id = int(row["id"])
+        target_username = str(row["username"])
+        target_is_active = bool(row.get("is_active", False))
 
         if not target_is_active:
             raise HTTPException(
@@ -82,27 +96,36 @@ async def create_impersonation_token(
             )
 
         # Determine the target user's role
-        async with pool.acquire() as conn:
-            cur = await conn.execute(
-                "SELECT role FROM user_roles WHERE user_id = ? LIMIT 1",
-                (user_id,),
+        try:
+            role_rows = AuthnzRbacRepo().get_user_roles(target_user_id)
+        except Exception:
+            logger.warning(
+                "Unable to load RBAC roles for impersonation target; falling back to user row role"
             )
-            role_row = await cur.fetchone()
-        target_role = role_row[0] if role_row else "user"
+            role_rows = []
+        target_role = _first_role_name(role_rows) or str(row.get("role") or "user")
 
         # Generate a short-lived access token with impersonation claim
-        from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
-
-        jwt_svc = get_jwt_service()
-        token = jwt_svc.create_access_token(
+        token = get_jwt_service().create_impersonation_access_token(
             user_id=target_user_id,
             username=target_username,
             role=target_role,
-            additional_claims={
-                "impersonated_by": principal.user_id,
-                "impersonation": True,
-            },
+            impersonated_by=principal.user_id,
+            expires_delta=timedelta(minutes=_IMPERSONATION_TTL_MINUTES),
         )
+
+        try:
+            await emit_impersonation_issuance_audit_event(
+                actor_id=principal.user_id,
+                target_user_id=target_user_id,
+                expires_in_minutes=_IMPERSONATION_TTL_MINUTES,
+            )
+        except MandatoryAuditWriteError as exc:
+            logger.error("Mandatory audit write failed while creating impersonation token")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Mandatory audit persistence unavailable",
+            ) from exc
 
         logger.info(
             "Impersonation token created: admin_user_id={} -> target_user_id={}",
