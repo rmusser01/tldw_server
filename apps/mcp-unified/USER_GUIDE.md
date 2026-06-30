@@ -138,6 +138,120 @@ mcp-unified-gateway get-default-profile \
   --config ./gateway.json
 ```
 
+### Know Which Tools Are Available
+
+The standalone gateway does not have one static global tool list. The effective
+tool surface depends on the installed backend tools, registered external MCP
+servers, profile policy, credentials, workspace/path grants, approvals, and any
+session-scoped grants. Use discovery in this order:
+
+1. Start with presets to understand the intended role shape:
+
+   ```bash
+   mcp-unified-gateway list-presets
+   mcp-unified-gateway show-preset project-researcher
+   ```
+
+2. Create or duplicate a profile into the configured store.
+
+3. Preview that stored profile's effective tool surface:
+
+   ```bash
+   mcp-unified-gateway preview-profile-tools --profile <profile-id> \
+     --config ./gateway.json
+
+   mcp-unified-gateway preview-profile-tools --profile <profile-id> \
+     --category filesystem --exclude-denied --config ./gateway.json
+   ```
+
+4. For a running gateway, the final model-facing discovery surface is still the
+   MCP `tools/list` response for that authenticated session/profile. Profiles
+   can also expose bridge tools such as `tool_categories.list`, `tool_search`,
+   `tool_describe`, and `profile.tools.list` so clients can discover deferred
+   or recommended tools without expanding the direct executable surface.
+
+### Create A Custom Profile
+
+For most operators, duplicating a bundled preset is the safest starting point.
+When a preset is not close enough, create a profile JSON document and store it
+with `create-profile`.
+
+Minimal read-oriented profile:
+
+```json
+{
+  "id": "docs-researcher",
+  "name": "Docs Researcher",
+  "description": "Read-only documentation and workspace research profile.",
+  "policy_document": {
+    "allowed_tools": [
+      "tool_categories.list",
+      "tool_search",
+      "tool_describe",
+      "profile.tools.list",
+      "fs.list",
+      "fs.read",
+      "fs.stat",
+      "fs.glob",
+      "fs.grep"
+    ],
+    "capabilities": [
+      "filesystem.read"
+    ],
+    "path_scope_mode": "workspace_root",
+    "path_grants": [
+      {
+        "path": "docs",
+        "actions": ["read"]
+      },
+      {
+        "path": "src",
+        "actions": ["read"]
+      }
+    ]
+  },
+  "metadata": {
+    "agent_metadata": {
+      "ui_label": "Docs Researcher"
+    }
+  }
+}
+```
+
+Save the document as `docs-researcher.json`, then create and inspect it:
+
+```bash
+mcp-unified-gateway create-profile --profile-file ./docs-researcher.json \
+  --config ./gateway.json
+
+mcp-unified-gateway show-profile docs-researcher --config ./gateway.json
+```
+
+Validate the profile's tool surface before assigning it:
+
+```bash
+mcp-unified-gateway preview-profile-tools --profile docs-researcher \
+  --config ./gateway.json
+```
+
+Use `explain-policy` to inspect tool-level allow/ask/deny decisions,
+`permission_rules`, and runtime TTL grants for a hypothetical call:
+
+```bash
+echo '{"path":"docs/README.md"}' | mcp-unified-gateway explain-policy \
+  --profile docs-researcher --tool fs.read --args-stdin --config ./gateway.json
+```
+
+`explain-policy` does not execute filesystem tools and should not be treated as
+a full validation of authored `policy_document.path_grants`. Validate path
+grants with safe runtime tool calls against representative allowed and denied
+paths in the intended workspace/session before assigning the profile.
+
+If a tool is missing, first check whether the backend tool is installed or only
+recommended, then check `policy_document.allowed_tools`, path grants, external
+server registration, credential grants, and approval/session state. Use
+`patch-profile` for small policy updates after creation.
+
 ### Profile Tooling Discovery
 
 `list-presets` includes compact tooling discovery metadata for role presets.
@@ -185,6 +299,14 @@ content plus file size, newline style, SHA-256 when available, truncation state,
 and a short-lived read receipt for complete hashed reads when the filesystem
 module has a stable `read_receipt_secret` configured.
 
+For Jupyter notebooks, use `notebook.read` instead of `fs.read` when the caller
+needs notebook structure rather than raw JSON. It returns notebook metadata,
+cell ids, cell types, execution counts, output counts, byte size, SHA-256, and
+an optional read receipt. Source is omitted by default. Callers can pass
+`include_source=true` for bounded source previews, narrow the response with
+`cell_ids`, and tune `max_source_chars` or `max_total_source_chars` within the
+module limits.
+
 For existing-file edits, prefer `fs.patch` over whole-file replacement. It
 accepts unified diff text, derives affected paths before execution for path
 policy checks, validates context in memory, and only writes after preimage
@@ -196,6 +318,15 @@ and it also requires either `expected_sha256` or a valid `read_receipt` from
 `fs.write` `mode="create"` fails if the file already exists. `mode="replace"`
 requires either `expected_sha256` or a valid `read_receipt` from `fs.read`.
 
+For notebook edits, use `notebook.edit_cell` instead of `fs.write`. It performs
+one cell-scoped operation by stable cell id: `mode="replace"` updates the target
+cell source, `mode="insert"` adds a `code`, `markdown`, or `raw` cell before or
+after the target, and `mode="delete"` removes the target cell. Replacing a code
+cell clears stored outputs and execution count so stale execution artifacts are
+not preserved. Like file edits, notebook edits require either
+`expected_sha256` or a valid read receipt from `notebook.read`, and they can use
+`dry_run=true` before writing.
+
 This read-before-mutate flow protects against stale edits: if a file changes
 after the model read it, the expected hash or receipt no longer matches and the
 write is rejected instead of silently overwriting newer content.
@@ -203,11 +334,12 @@ write is rejected instead of silently overwriting newer content.
 For concurrent editing workflows, `fs.lock_acquire` and `fs.lock_release`
 provide advisory leases for workspace-relative file paths. A successful acquire
 returns a `lease_id` that callers can pass to `fs.edit` and `fs.write` as
-`lock_lease_id`, or to `fs.patch` as `lock_lease_id_by_path`. Leases do not
-replace hashes or read receipts; mutation tools still run their normal preimage
-checks. Operators can set `require_lock_for_mutation=true` on the filesystem
-module when they want mutations to fail with `lock_required` unless the caller
-supplies a matching active lease.
+`lock_lease_id`, to `notebook.edit_cell` as `lock_lease_id`, or to `fs.patch` as
+`lock_lease_id_by_path`. Leases do not replace hashes or read receipts;
+mutation tools still run their normal preimage checks. Operators can set
+`require_lock_for_mutation=true` on the filesystem module when they want
+mutations to fail with `lock_required` unless the caller supplies a matching
+active lease.
 
 The packaged lock manager supports `lock_manager_backend` values of `memory`,
 `in_memory`, or `sqlite`. The memory and in-memory backends are process-local
@@ -241,12 +373,19 @@ profile with `write` can use `fs.write` and patch-created files when policy also
 allows creation. Deny grants take precedence over broader allow grants, so a
 private subtree can remain read-only or blocked under a writable parent.
 
+Tool allow lists and path grants are separate checks. A profile must allow
+`notebook.read` or `notebook.edit_cell` as tools, and the target path must also
+have the matching `read` or `edit` path action. The shorthand mental model is
+`NotebookRead(path)` for a read action and `NotebookEdit(path)` for an edit
+action; these are policy concepts, not extra executable tool names.
+
 The file-policy action vocabulary is broader than the tools currently shipped.
 The executable filesystem actions today are:
 
 - `read`: inspect file content, directory listings, search results, and path
-  metadata.
-- `edit`: bounded existing-file edits through `fs.patch` or `fs.edit`.
+  metadata, including notebook structure through `notebook.read`.
+- `edit`: bounded existing-file edits through `fs.patch`, `fs.edit`, or
+  `notebook.edit_cell`.
 - `write`: deliberate whole-file create or replace through `fs.write`.
 - `lock`: acquire or release advisory path locks through `fs.lock_acquire` and
   `fs.lock_release`.
@@ -380,10 +519,10 @@ approval grants.
 Local CLI examples:
 
 ```bash
-mcp-unified-gateway explain-policy --profile researcher --tool fs.patch \
+mcp-unified-gateway explain-policy --profile <profile-id> --tool fs.patch \
   --args-json-file ./patch-args.json --config ./gateway.json
 
-mcp-unified-gateway preview-profile-tools --profile researcher \
+mcp-unified-gateway preview-profile-tools --profile <profile-id> \
   --category filesystem --config ./gateway.json
 ```
 
@@ -393,10 +532,10 @@ Remote CLI example:
 export MCP_UNIFIED_GATEWAY_URL=http://127.0.0.1:8000/mcp
 export MCP_UNIFIED_GATEWAY_ADMIN_KEY=replace-with-admin-key
 
-printf '{"path":"src/app.py"}' | mcp-unified-gateway explain-policy \
-  --remote --profile researcher --tool fs.read --args-stdin
+echo '{"path":"src/app.py"}' | mcp-unified-gateway explain-policy \
+  --remote --profile <profile-id> --tool fs.read --args-stdin
 
-mcp-unified-gateway preview-profile-tools --remote --profile researcher \
+mcp-unified-gateway preview-profile-tools --remote --profile <profile-id> \
   --category filesystem --session-id "$MCP_SESSION_ID" --exclude-denied
 ```
 
@@ -406,9 +545,9 @@ Direct admin API examples:
 curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/policy/explain" \
   -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"profile_id":"researcher","tool_name":"fs.read","arguments":{"path":"src/app.py"}}'
+  -d '{"profile_id":"<profile-id>","tool_name":"fs.read","arguments":{"path":"src/app.py"}}'
 
-curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/profiles/researcher/tool-preview" \
+curl -sS -X POST "$MCP_UNIFIED_GATEWAY_URL/profiles/<profile-id>/tool-preview" \
   -H "X-MCP-Gateway-Admin-Key: $MCP_UNIFIED_GATEWAY_ADMIN_KEY" \
   -H "Content-Type: application/json" \
   -d '{"category":"filesystem","include_denied":true,"session_id":"session-1"}'
