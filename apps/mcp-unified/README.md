@@ -108,6 +108,23 @@ List bundled profile presets:
 mcp-unified-gateway list-presets
 ```
 
+Create or duplicate a profile, then preview the effective tool surface before
+assigning it:
+
+```bash
+mcp-unified-gateway duplicate-preset project-researcher \
+  --profile-id researcher --config ./gateway.json
+
+mcp-unified-gateway create-profile --profile-file ./profile.json \
+  --config ./gateway.json
+
+mcp-unified-gateway preview-profile-tools --profile researcher \
+  --config ./gateway.json
+```
+
+For a minimal custom profile JSON template and the recommended discovery flow,
+see [USER_GUIDE.md](USER_GUIDE.md#3-work-with-profiles).
+
 Run the deterministic in-process smoke scenario:
 
 ```bash

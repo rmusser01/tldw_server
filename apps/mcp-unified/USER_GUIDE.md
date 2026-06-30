@@ -129,6 +129,110 @@ mcp-unified-gateway get-default-profile \
   --config ./gateway.json
 ```
 
+### Know Which Tools Are Available
+
+The standalone gateway does not have one static global tool list. The effective
+tool surface depends on the installed backend tools, registered external MCP
+servers, profile policy, credentials, workspace/path grants, approvals, and any
+session-scoped grants. Use discovery in this order:
+
+1. Start with presets to understand the intended role shape:
+
+   ```bash
+   mcp-unified-gateway list-presets
+   mcp-unified-gateway show-preset project-researcher
+   ```
+
+2. Create or duplicate a profile into the configured store.
+
+3. Preview that stored profile's effective tool surface:
+
+   ```bash
+   mcp-unified-gateway preview-profile-tools --profile researcher \
+     --config ./gateway.json
+
+   mcp-unified-gateway preview-profile-tools --profile researcher \
+     --category filesystem --exclude-denied --config ./gateway.json
+   ```
+
+4. For a running gateway, the final model-facing discovery surface is still the
+   MCP `tools/list` response for that authenticated session/profile. Profiles
+   can also expose bridge tools such as `tool_categories.list`, `tool_search`,
+   `tool_describe`, and `profile.tools.list` so clients can discover deferred
+   or recommended tools without expanding the direct executable surface.
+
+### Create A Custom Profile
+
+For most operators, duplicating a bundled preset is the safest starting point.
+When a preset is not close enough, create a profile JSON document and store it
+with `create-profile`.
+
+Minimal read-oriented profile:
+
+```json
+{
+  "id": "docs-researcher",
+  "name": "Docs Researcher",
+  "description": "Read-only documentation and workspace research profile.",
+  "policy_document": {
+    "allowed_tools": [
+      "tool_categories.list",
+      "tool_search",
+      "tool_describe",
+      "profile.tools.list",
+      "fs.list",
+      "fs.read",
+      "fs.stat",
+      "fs.glob",
+      "fs.grep"
+    ],
+    "capabilities": [
+      "filesystem.read"
+    ],
+    "path_scope_mode": "workspace_root",
+    "path_grants": [
+      {
+        "path": "docs",
+        "actions": ["read"]
+      },
+      {
+        "path": "src",
+        "actions": ["read"]
+      }
+    ]
+  },
+  "metadata": {
+    "agent_metadata": {
+      "ui_label": "Docs Researcher"
+    }
+  }
+}
+```
+
+Save the document as `docs-researcher.json`, then create and inspect it:
+
+```bash
+mcp-unified-gateway create-profile --profile-file ./docs-researcher.json \
+  --config ./gateway.json
+
+mcp-unified-gateway show-profile docs-researcher --config ./gateway.json
+```
+
+Validate the profile before assigning it:
+
+```bash
+mcp-unified-gateway preview-profile-tools --profile docs-researcher \
+  --config ./gateway.json
+
+printf '{"path":"docs/README.md"}' | mcp-unified-gateway explain-policy \
+  --profile docs-researcher --tool fs.read --args-stdin --config ./gateway.json
+```
+
+If a tool is missing, first check whether the backend tool is installed or only
+recommended, then check `policy_document.allowed_tools`, path grants, external
+server registration, credential grants, and approval/session state. Use
+`patch-profile` for small policy updates after creation.
+
 ### Profile Tooling Discovery
 
 `list-presets` includes compact tooling discovery metadata for role presets.
