@@ -112,6 +112,53 @@ class TestCreateImpersonationToken:
         )
 
     @pytest.mark.asyncio
+    async def test_success_accepts_legacy_string_role_rows(self):
+        principal = _admin_principal()
+
+        class UsersRepoStub:
+            @classmethod
+            async def from_pool(cls):
+                return cls()
+
+            async def get_user_by_id(self, user_id: int):
+                assert user_id == 42  # nosec B101
+                return {"id": 42, "username": "targetuser", "is_active": True, "role": "legacy"}
+
+        class RbacRepoStub:
+            def get_user_roles(self, user_id: int):
+                assert user_id == 42  # nosec B101
+                return ["user"]
+
+        mock_jwt_svc = MagicMock()
+        mock_jwt_svc.create_impersonation_access_token = MagicMock(return_value="mock.jwt.token")
+        audit = AsyncMock()
+
+        with (
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation.AuthnzUsersRepo",
+                UsersRepoStub,
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation.AuthnzRbacRepo",
+                return_value=RbacRepoStub(),
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation.get_jwt_service",
+                return_value=mock_jwt_svc,
+            ),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.admin.admin_impersonation.emit_impersonation_issuance_audit_event",
+                audit,
+            ),
+        ):
+            result = await create_impersonation_token(42, principal)
+
+        assert result.token == "mock.jwt.token"  # nosec B101, B105
+        token_kwargs = mock_jwt_svc.create_impersonation_access_token.call_args.kwargs
+        assert token_kwargs["role"] == "user"  # nosec B101
+        audit.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_mandatory_audit_failure_returns_503(self):
         principal = _admin_principal()
 
@@ -202,8 +249,17 @@ class TestCreateImpersonationToken:
         mock_jwt_svc.create_impersonation_access_token.assert_not_called()
         audit.assert_not_awaited()
 
+    @pytest.mark.parametrize(
+        "role_rows",
+        [
+            pytest.param([{}], id="empty-dict"),
+            pytest.param([object()], id="plain-object"),
+            pytest.param([""], id="empty-string"),
+            pytest.param([123], id="integer"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_malformed_rbac_role_rows_do_not_issue_token_or_audit(self):
+    async def test_malformed_rbac_role_rows_do_not_issue_token_or_audit(self, role_rows: list[Any]):
         principal = _admin_principal()
 
         class UsersRepoStub:
@@ -218,7 +274,7 @@ class TestCreateImpersonationToken:
         class RbacRepoStub:
             def get_user_roles(self, user_id: int):
                 assert user_id == 42  # nosec B101
-                return [{}]
+                return role_rows
 
         mock_jwt_svc = MagicMock()
         mock_jwt_svc.create_impersonation_access_token = MagicMock(return_value="mock.jwt.token")
