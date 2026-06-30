@@ -4,7 +4,7 @@ title: Implement standalone MCP docs corpus Stage 1
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-06-30 07:55'
+updated_date: '2026-06-30 14:44'
 labels: []
 dependencies: []
 documentation:
@@ -36,6 +36,9 @@ Docs/superpowers/plans/2026-06-30-standalone-mcp-docs-corpus-stage1-plan.md
 - Added the SQLite/FTS5 docs catalog store with scoped documents, chunks, sections, collections, keywords, aliases, status reporting, package-resource schema loading, and package-friendly import boundaries.
 - Addressed Task 2 review findings before commit: quoted user FTS terms to avoid punctuation-triggered SQLite syntax errors, added migration backfill for legacy NULL owner/profile scope rows, and added regression coverage for punctuation queries, supported filters, and legacy NULL-scope migration.
 - Verification for Task 2: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/docs/test_docs_schema_store.py tldw_Server_API/tests/MCP_unified/docs/test_docs_import_boundaries.py -v` passed 16 tests; Bandit on `mcp_unified/docs/store` and `test_docs_schema_store.py` exited 0 with JSON written to `/tmp/bandit_task_12074_task2.json`.
+
+- Added local Markdown/MDX/text/static HTML importers with trusted-root path enforcement, symlink escape denial through resolved paths, max import file-size checks, and deterministic directory traversal.
+- Verification for Task 3: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/docs/test_docs_importers.py tldw_Server_API/tests/MCP_unified/docs/test_docs_import_boundaries.py -v` passed 9 tests; Bandit on `mcp_unified/docs/importers` and `test_docs_importers.py` exited 0 with JSON written to `/tmp/bandit_task_12074_task3.json`.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
