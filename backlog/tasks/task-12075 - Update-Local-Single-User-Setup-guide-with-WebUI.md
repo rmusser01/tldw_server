@@ -4,17 +4,12 @@ title: Update Local Single-User Setup guide with WebUI
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-06-30 07:17
+updated_date: '2026-06-30 15:12'
 labels:
-- docs
-- getting-started
-- webui
+  - docs
+  - getting-started
+  - webui
 dependencies: []
-modified_files:
-- Docs/Getting_Started/Profile_Local_Single_User.md
-- Docs/superpowers/specs/2026-06-30-local-single-user-webui-guide-design.md
-- Docs/superpowers/plans/2026-06-30-local-single-user-webui-guide-implementation-plan.md
-- backlog/tasks/task-12075 - Update-Local-Single-User-Setup-guide-with-WebUI.md
 ---
 
 ## Description
@@ -55,6 +50,8 @@ Subagent reviews:
 - Task 2 spec review passed; Task 2 quality review passed.
 
 Final review fixes applied: clarified that .env.local must be edited to use the shown local API values, marked execution plan checklist items complete, updated the design spec status to Implemented, aligned plan wording with the final guide, and rebased the task record to TASK-12075 to avoid the existing TASK-12072 on origin/dev.
+
+Review follow-up: corrected the design-spec risk note so it reflects that apps/tldw-frontend/.env.local.example already uses 127.0.0.1; the documented risk is now users mixing localhost and 127.0.0.1 across API/WebUI URLs.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

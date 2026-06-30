@@ -109,10 +109,10 @@ This is a documentation-only change. Verification should include:
 
 ## Risks
 
-- The frontend example `.env.local.example` currently uses `localhost` while the
-  local API guide uses `127.0.0.1`. The guide should explicitly say the value
-  must match the running API host and use `127.0.0.1` for consistency with
-  `make start-local-single`.
+- The frontend example `.env.local.example` already uses `127.0.0.1`, matching
+  the local API guide. The remaining risk is that users may mix `localhost` and
+  `127.0.0.1` across API and WebUI URLs, so the guide should keep host guidance
+  consistent with `make start-local-single`.
 - `NEXT_PUBLIC_X_API_KEY` is browser-visible by design. The guide should keep
   it framed as local single-user convenience and avoid suggesting this setup for
   public internet exposure.
