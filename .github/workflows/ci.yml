@@ -1376,6 +1376,8 @@ jobs:
           - name: product-flashcards
             paths: >-
               tldw_Server_API/tests/Flashcards/test*.py
+          - name: product-explainer
+            paths: >-
               tldw_Server_API/tests/Explainer
           - name: product-notes-persona
             paths: >-
@@ -2768,6 +2770,8 @@ jobs:
           - name: product-flashcards
             paths: >-
               tldw_Server_API/tests/Flashcards/test*.py
+          - name: product-explainer
+            paths: >-
               tldw_Server_API/tests/Explainer
           - name: product-notes-persona
             paths: >-
@@ -4033,6 +4037,8 @@ jobs:
           - name: product-flashcards
             paths: >-
               tldw_Server_API/tests/Flashcards/test*.py
+          - name: product-explainer
+            paths: >-
               tldw_Server_API/tests/Explainer
           - name: product-notes-persona
             paths: >-
@@ -5222,6 +5228,8 @@ jobs:
           - name: product-flashcards
             paths: >-
               tldw_Server_API/tests/Flashcards/test*.py
+          - name: product-explainer
+            paths: >-
               tldw_Server_API/tests/Explainer
           - name: product-notes-persona
             paths: >-
@@ -6412,6 +6420,8 @@ jobs:
           - name: product-flashcards
             paths: >-
               tldw_Server_API/tests/Flashcards/test*.py
+          - name: product-explainer
+            paths: >-
               tldw_Server_API/tests/Explainer
           - name: product-notes-persona
             paths: >-
