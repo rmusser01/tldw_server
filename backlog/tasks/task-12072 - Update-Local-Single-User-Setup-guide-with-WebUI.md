@@ -4,7 +4,7 @@ title: Update Local Single-User Setup guide with WebUI
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-06-30 06:14
+updated_date: 2026-06-30 06:24
 labels:
 - docs
 - getting-started
@@ -54,6 +54,8 @@ Subagent reviews:
 - Task 2 spec review passed; Task 2 quality review passed.
 
 Final review fixes applied: clarified that `.env.local` must be edited to use the shown local API values, marked execution plan checklist items complete, and updated the design spec status to Implemented.
+
+Final review minor cleanup: aligned the implementation plan WebUI `.env.local` wording and env fence with the final guide.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

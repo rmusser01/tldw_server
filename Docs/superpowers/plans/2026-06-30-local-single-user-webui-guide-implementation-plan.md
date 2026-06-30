@@ -70,9 +70,9 @@ cd apps/tldw-frontend
 cp .env.local.example .env.local
 ```
 
-Confirm `.env.local` points the WebUI at the local API:
+Edit `.env.local` so it points the WebUI at the local API:
 
-```bash
+```dotenv
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_API_VERSION=v1
 # Optional in single-user mode:
