@@ -16,6 +16,10 @@
 
 ## Deployment Overview
 
+> **Current state:** MCP Unified is operated as part of TLDW Server at
+> `/api/v1/mcp`. The package-local gateway boundary is internal/experimental;
+> this guide does not describe a separately shipped standalone gateway process.
+
 The MCP Unified module is a critical component of the TLDW server that provides:
 - Secure API access to media processing capabilities
 - WebSocket and HTTP endpoints for client connections
@@ -94,20 +98,19 @@ WantedBy=multi-user.target
 Create `/etc/tldw/config/mcp.env`:
 ```bash
 # CRITICAL SECURITY SETTINGS - MUST CHANGE IN PRODUCTION
+AUTH_MODE=multi_user
+SINGLE_USER_API_KEY=""  # single_user only; leave unset for multi_user
 MCP_JWT_SECRET="$(openssl rand -base64 32)"
 MCP_API_KEY_SALT="$(openssl rand -base64 32)"
 
-# Server Configuration
-MCP_HOST=0.0.0.0
-MCP_PORT=8000
-MCP_WORKERS=4
+# TLDW Server process binding is controlled by gunicorn/uvicorn and systemd.
 MCP_LOG_LEVEL=INFO
 MCP_LOG_FILE=/var/log/tldw/mcp/mcp.log
 
 # Database
 MCP_DATABASE_URL=postgresql+asyncpg://tldw:password@localhost/tldw_mcp
 MCP_DATABASE_POOL_SIZE=20
-MCP_DATABASE_MAX_OVERFLOW=40
+MCP_DATABASE_POOL_TIMEOUT=30
 
 # Redis (for distributed deployments)
 MCP_REDIS_URL=redis://localhost:6379/0
@@ -122,28 +125,28 @@ REDIS_URL=redis://localhost:6379/0
 
 # Security
 MCP_CORS_ORIGINS=["https://app.example.com"]
-MCP_TRUSTED_PROXIES=["127.0.0.1", "10.0.0.0/8"]
-MCP_MAX_REQUEST_SIZE=10485760  # 10MB
-MCP_REQUEST_TIMEOUT=30
+MCP_TRUST_X_FORWARDED=true
+MCP_TRUSTED_PROXY_IPS=["127.0.0.1", "10.0.0.0/8"]
+MCP_TRUSTED_PROXY_DEPTH=1
+MCP_HTTP_MAX_BODY_BYTES=10485760  # 10MB
 
 # Authentication
-MCP_AUTH_MODE=jwt  # jwt, api_key, or both
 MCP_JWT_ALGORITHM=HS256
-MCP_JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
-MCP_JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
-MCP_PASSWORD_MIN_LENGTH=12
-MCP_PASSWORD_REQUIRE_SPECIAL=true
+MCP_JWT_ACCESS_EXPIRE=30
+MCP_JWT_REFRESH_EXPIRE=7
+MCP_WS_AUTH_REQUIRED=true
+MCP_WS_ALLOW_QUERY_AUTH=false
 
 # Monitoring
 MCP_METRICS_ENABLED=true
 MCP_METRICS_PORT=9090
-MCP_HEALTH_CHECK_INTERVAL=30
-MCP_HEALTH_CHECK_TIMEOUT=5
+MCP_HEALTH_PATH=/api/v1/mcp/health
 
 # Module Configuration
-MCP_MODULES_ENABLED=["media", "rag", "chat", "admin"]
+MCP_MODULES_CONFIG=/etc/tldw/config/mcp_modules.yaml
 MCP_MODULE_TIMEOUT=60
 MCP_MODULE_MAX_RETRIES=3
+MCP_ENABLE_MEDIA_MODULE=true
 ```
 
 ### Nginx Configuration
@@ -382,7 +385,8 @@ sysctl -p /etc/sysctl.d/99-tldw.conf
 ```python
 # Configure in environment
 MCP_DATABASE_POOL_SIZE=20
-MCP_DATABASE_MAX_OVERFLOW=40
+MCP_DATABASE_POOL_TIMEOUT=30
+MCP_DATABASE_POOL_RECYCLE=1800
 MCP_REDIS_POOL_SIZE=10
 ```
 
@@ -529,7 +533,7 @@ curl http://localhost:8000/api/v1/mcp/metrics | grep database_pool
 
 # Increase pool size
 MCP_DATABASE_POOL_SIZE=50
-MCP_DATABASE_MAX_OVERFLOW=100
+MCP_DATABASE_POOL_TIMEOUT=45
 
 # Check PostgreSQL connections
 psql -U postgres -c "SELECT count(*) FROM pg_stat_activity WHERE datname='tldw_mcp';"

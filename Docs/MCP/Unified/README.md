@@ -4,6 +4,14 @@
 
 The MCP Unified stack is the production Model Context Protocol surface that ships with TLDW. Use this directory as the starting point for all current development, deployment, and client-integration work.
 
+## Which Path Should I Use?
+
+| Use case | Current path | Status |
+| --- | --- | --- |
+| Connect MCP clients to TLDW Server | `/api/v1/mcp/status`, `/api/v1/mcp/request`, `/api/v1/mcp/ws` | Supported embedded TLDW surface. |
+| Test a package-local mounted gateway | `/mcp/status`, `/mcp/request`, `/mcp/ws` | Package-local or host-mounted examples only; the embedding app supplies the server process. |
+| Run a separate standalone gateway process | None | Standalone gateway is planned but not shipped; there is no supported `serve` command today. |
+
 ## Available Guides
 
 - `Developer_Guide.md` - System architecture, extension patterns, testing strategy

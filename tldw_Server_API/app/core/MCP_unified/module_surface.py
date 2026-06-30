@@ -42,6 +42,8 @@ TIER_LABELS: dict[str, str] = {
     "unknown": "Unclassified module",
 }
 
+EXPLICIT_OPT_IN_TIERS = {"local_files", "local_process", "external_network"}
+
 _DISABLED_STATUSES = {"disabled", "not_loaded", "inactive"}
 
 
@@ -55,6 +57,22 @@ def _is_enabled(payload: Any) -> bool:
     return True
 
 
+def _disabled_next_action(module_name: str, tier: str) -> str:
+    """Return user-facing guidance for enabling a disabled high-risk module."""
+    if tier == "local_files":
+        risk = "local file or workspace access"
+    elif tier == "local_process":
+        risk = "local process or sandbox execution"
+    elif tier == "external_network":
+        risk = "external network or federated MCP access"
+    else:
+        risk = "this capability"
+    return (
+        f"Enable `{module_name}` in Config_Files/mcp_modules.yaml only if this "
+        f"deployment should expose {risk}; restart TLDW Server and recheck /api/v1/mcp/status."
+    )
+
+
 def describe_module_surface(modules: dict[str, Any]) -> dict[str, Any]:
     """Group enabled MCP modules into user-facing capability risk tiers."""
     tiers: dict[str, dict[str, Any]] = {
@@ -62,20 +80,34 @@ def describe_module_surface(modules: dict[str, Any]) -> dict[str, Any]:
         for key, label in TIER_LABELS.items()
     }
     enabled_count = 0
+    disabled_available: list[dict[str, Any]] = []
 
     for module_name, payload in sorted(modules.items()):
-        if not _is_enabled(payload):
-            continue
-
-        enabled_count += 1
         tier, description = MODULE_RISK_TIERS.get(
             module_name,
             ("unknown", "No risk tier is registered yet."),
         )
+        if not _is_enabled(payload):
+            if tier in EXPLICIT_OPT_IN_TIERS:
+                disabled_available.append(
+                    {
+                        "id": module_name,
+                        "tier": tier,
+                        "label": TIER_LABELS.get(tier, TIER_LABELS["unknown"]),
+                        "description": description,
+                        "requires_explicit_opt_in": True,
+                        "next_action": _disabled_next_action(module_name, tier),
+                    }
+                )
+            continue
+
+        enabled_count += 1
         tiers[tier]["modules"].append({"id": module_name, "description": description})
 
     return {
         "enabled_count": enabled_count,
+        "disabled_available_count": len(disabled_available),
+        "disabled_available": disabled_available,
         "tiers": {
             key: value
             for key, value in tiers.items()

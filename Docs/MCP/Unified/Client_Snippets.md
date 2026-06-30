@@ -13,6 +13,10 @@ Primary examples use header or WebSocket subprotocol auth. Query-string tokens a
 ## JSON-RPC over HTTP (Initialize → Tools List → Tools Call)
 
 ```bash
+# Status preflight - confirms the embedded TLDW MCP surface is mounted
+curl -s -H "Authorization: Bearer <token>" \
+  http://127.0.0.1:8000/api/v1/mcp/status
+
 # Initialize (optional) - negotiates an mcp-session-id and can carry a base64 safe config
 cfg=$(printf '{"snippet_length": 200}' | base64)
 curl -i -H "Authorization: Bearer <token>" \

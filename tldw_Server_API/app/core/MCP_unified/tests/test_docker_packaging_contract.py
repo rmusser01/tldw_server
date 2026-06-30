@@ -2,6 +2,7 @@ from pathlib import Path
 
 
 DOCKER_README = Path("tldw_Server_API/app/core/MCP_unified/docker/README.md")
+DOCKERFILE = Path("tldw_Server_API/app/core/MCP_unified/docker/Dockerfile")
 ENTRYPOINT = Path("tldw_Server_API/app/core/MCP_unified/docker/entrypoint.sh")
 CORE_README = Path("tldw_Server_API/app/core/MCP_unified/README.md")
 
@@ -27,6 +28,25 @@ def test_mcp_specific_docker_path_is_marked_experimental() -> None:
         "embedded in tldw server today" in text,
         "MCP-specific Docker README should point users back to the embedded TLDW Server path",
     )
+
+
+def test_mcp_specific_dockerfile_does_not_claim_production_readiness() -> None:
+    _ensure(DOCKERFILE.exists(), "MCP-specific Dockerfile is missing")
+    text = DOCKERFILE.read_text(encoding="utf-8").lower()
+
+    _ensure(
+        "experimental" in text,
+        "MCP-specific Dockerfile should mark this path experimental",
+    )
+    for stale_phrase in (
+        "optimized for production deployment",
+        "production-ready",
+        "production grade",
+    ):
+        _ensure(
+            stale_phrase not in text,
+            f"MCP-specific Dockerfile should not claim {stale_phrase!r}",
+        )
 
 
 def test_primary_mcp_readme_flags_docker_deployment_as_experimental() -> None:

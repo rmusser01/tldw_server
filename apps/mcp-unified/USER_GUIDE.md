@@ -6,6 +6,9 @@ credential grants, configuration snapshots, and remote runtime commands.
 
 The package is currently internal/experimental and distributed with the
 `tldw-server` source tree. It is not a separately published standalone package.
+The package CLI does not launch a supported end-user gateway server; remote
+runtime commands require an already running package-local gateway mounted by a
+host application.
 
 ## Publishing Readiness
 
@@ -51,6 +54,12 @@ Confirm the CLI is available:
 ```bash
 mcp-unified-gateway package-info
 ```
+
+When a host application mounts the package gateway, use `GET /mcp/status` for
+package-local readiness. The response reports static package boundary metadata,
+profile/external registry store persistence, default profile state, admin-auth
+configured state, external server counts, warnings, and next actions. For the
+embedded TLDW Server product, use `/api/v1/mcp/status` instead.
 
 For a quick standalone JSON-RPC smoke check, confirm the smoke client is also
 available and run the deterministic in-process fixture:

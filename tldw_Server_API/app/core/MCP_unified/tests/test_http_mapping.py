@@ -396,3 +396,73 @@ def test_request_guard_requires_client_certificate(monkeypatch):
             headers={"x-ssl-client-verify": "SUCCESS"},
         )
         assert r_valid.status_code == 200
+
+
+def test_tools_execute_unauth_preserves_string_detail_and_adds_recovery_headers(client: TestClient):
+    response = client.post(
+        "/api/v1/mcp/tools/execute",
+        json={"tool_name": "media.search", "arguments": {}},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication required"
+    assert response.headers["x-mcp-reason-code"] == "authentication_required"
+    assert response.headers["x-mcp-next-action"]
+
+
+def test_modules_permission_detail_mentions_modules_and_recovery(client: TestClient):
+    response = client.get("/api/v1/mcp/modules")
+
+    assert response.status_code == 403
+    detail = response.json()["detail"]
+    assert detail["reason_code"] == "permission_denied"
+    assert detail["next_action"]
+    assert "modules" in detail["hint"].lower()
+    assert "tools" not in detail["hint"].lower()
+
+
+def test_invalid_safe_config_keeps_structured_recovery_detail(client: TestClient):
+    response = client.post(
+        "/api/v1/mcp/request",
+        json={"jsonrpc": "2.0", "method": "initialize", "params": {}, "id": 1},
+        params={"config": "not-base64-json"},
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["code"] == "invalid_safe_config"
+    assert detail["reason_code"] == "invalid_params"
+    assert detail["next_action"]
+
+
+@pytest.mark.asyncio
+async def test_jsonrpc_invalid_params_error_data_includes_recovery_metadata():
+    from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol, MCPRequest
+    from tldw_Server_API.app.core.MCP_unified.protocol_types import RequestContext
+
+    protocol = MCPProtocol()
+    response = await protocol.process_request(
+        MCPRequest(method="tools/call", params={}, id=1),
+        RequestContext(request_id="invalid-params-test", client_id="pytest", user_id="1"),
+    )
+
+    assert response.error is not None
+    assert response.error.code == -32602
+    assert response.error.data["reason_code"] == "invalid_params"
+    assert response.error.data["next_action"]
+
+
+def test_websocket_query_auth_is_marked_legacy_in_endpoint_copy():
+    import inspect
+    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as endpoint
+
+    signature = inspect.signature(endpoint.websocket_endpoint)
+    token_description = signature.parameters["token"].default.description.lower()
+    api_key_description = signature.parameters["api_key"].default.description.lower()
+    docstring = inspect.getdoc(endpoint.websocket_endpoint).lower()
+
+    assert "legacy" in token_description
+    assert "disabled by default" in token_description
+    assert "legacy" in api_key_description
+    assert "disabled by default" in api_key_description
+    assert "?token=jwt-token" not in docstring

@@ -19,6 +19,14 @@ MCP Unified is the TLDW server's production Model Context Protocol surface. It s
 
 Main base path: `http://127.0.0.1:8000/api/v1/mcp`
 
+## Which Path Should I Use?
+
+| Use case | Current path | Status |
+| --- | --- | --- |
+| Connect MCP clients to TLDW Server | `/api/v1/mcp/status`, `/api/v1/mcp/request`, `/api/v1/mcp/ws` | Supported embedded TLDW surface. Start TLDW Server with `uvicorn` and use these paths. |
+| Test a package-local mounted gateway | `/mcp/status`, `/mcp/request`, `/mcp/ws` | Package-local or host-mounted examples only. Another app must mount `apps/mcp-unified`; the package CLI does not launch a server. |
+| Run a separate standalone gateway process | None | Standalone gateway is planned but not shipped. Do not look for a `serve` command in this release. |
+
 ## 2. Golden Path Quickstart
 
 ### Prerequisites
@@ -207,6 +215,12 @@ curl -X POST http://127.0.0.1:8000/api/v1/mcp/request \
 - `GET /api/v1/mcp/prompts`
 
 The convenience endpoints map to MCP operations and keep the same RBAC behavior.
+When a failure has a known recovery path, JSON-RPC responses include
+`error.data.reason_code` and `error.data.next_action`. Convenience HTTP
+endpoints preserve their existing response body shape: object-shaped `detail`
+may include `reason_code` and `next_action`, while string-shaped `detail`
+exposes the same metadata in `X-MCP-Reason-Code` and `X-MCP-Next-Action`
+headers.
 
 ### Sessions and safe config
 
@@ -313,6 +327,20 @@ modules:
 ```
 
 Replace `<content-db>.db` with your configured per-user content DB filename.
+
+### Safer local module defaults
+
+Default installs no longer expose local filesystem or local command execution
+tools. They appear in `/api/v1/mcp/status` under
+`surface.disabled_available` with `requires_explicit_opt_in: true` until an
+operator enables them.
+
+To restore a previous local workflow intentionally:
+
+1. Copy the relevant entries from `tldw_Server_API/Config_Files/mcp_modules.local_opt_in.example.yaml`.
+2. Set only the needed modules to `enabled: true` in the selected `mcp_modules.yaml`.
+3. Restart TLDW Server.
+4. Recheck `/api/v1/mcp/status`; the module should move from `surface.disabled_available` to `surface.tiers`.
 
 ### Environment variable registration (quick dev path)
 
@@ -525,6 +553,7 @@ There is no built-in autonomous multi-stage agent loop. The safe pattern is expl
 | Module degraded or unhealthy | `/api/v1/mcp/status` `problem_modules` | Follow `next_action`, check module config/dependencies, then restart or disable the module. |
 | Invalid safe config | HTTP 400 with `detail.code=invalid_safe_config` | Remove `config` or send base64url-encoded JSON object data only. |
 | Empty tool list | `/status` `modules`, `problem_modules`, `config_warnings`, and `/tool_catalogs` | Confirm modules are enabled, the catalog filter resolves, and the caller has discovery/execute permissions. |
+| Local file or command tool missing | `/api/v1/mcp/status` `surface.disabled_available` | Enable the module explicitly in YAML only if this deployment should expose local file/process access, then restart. |
 
 ### `503 Server not initialized` on `/health`
 

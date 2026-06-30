@@ -2385,6 +2385,134 @@ def test_gateway_external_runtime_lifecycle_logs_unexpected_startup_exception(
     ]
 
 
+def test_gateway_status_includes_package_boundary_metadata() -> None:
+    app = create_gateway_app(_FakeGatewayRuntime())
+    status_route = next(
+        route
+        for route in app.routes
+        if getattr(route, "path", None) == "/mcp/status"
+    )
+    assert getattr(status_route, "response_model", None) is gateway_fastapi.GatewayStatusResponse
+
+    with TestClient(app) as client:
+        response = client.get("/mcp/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["name"] == "unit-gateway"
+    assert payload["version"] == "0.0-test"
+    assert payload["package"]["package_status"] == "internal-experimental"
+    assert payload["package"]["publishing_status"] == "not-published"
+    assert payload["package"]["source_distribution"] == "tldw-server"
+    assert "next_actions" in payload
+
+
+def test_gateway_status_tolerates_partial_package_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        gateway_fastapi,
+        "package_metadata_summary",
+        lambda: {"publishing_status": "not-published"},
+    )
+    app = create_gateway_app(_FakeGatewayRuntime())
+    with TestClient(app) as client:
+        response = client.get("/mcp/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["package"]["package_name"] is None
+    assert payload["package"]["publishing_status"] == "not-published"
+
+
+def test_gateway_status_reports_profile_store_admin_auth_and_default_profile() -> None:
+    manager = _ProfileManagementManagerDouble("default")
+    manager.store_metadata = type(
+        "_StoreMetadata",
+        (),
+        {"to_payload": lambda self: {"kind": "memory", "persistent": False}},
+    )()
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        profile_manager=manager,
+        enable_profile_management=True,
+        admin_auth=GatewayAdminAuthConfig(enabled=True, api_key="unit-test-key"),
+    )
+    with TestClient(app) as client:
+        response = client.get("/mcp/status")
+
+    payload = response.json()
+    assert payload["profile_store"]["kind"] in {"memory", "sqlite"}
+    assert payload["default_profile"]["configured"] is True
+    assert payload["admin_auth"]["enabled"] is True
+    assert payload["admin_auth"]["configured"] is True
+    assert "unit-test-key" not in json.dumps(payload)
+
+
+def test_gateway_status_uses_generic_profile_warning_for_unexpected_failures() -> None:
+    class _UnexpectedProfileFailureManager(_ProfileManagementManagerDouble):
+        async def get_default_profile(self) -> dict[str, Any]:
+            raise RuntimeError("profile store exploded")
+
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        profile_manager=_UnexpectedProfileFailureManager("default"),
+        enable_profile_management=True,
+    )
+    with TestClient(app) as client:
+        payload = client.get("/mcp/status").json()
+
+    warning = next(
+        item
+        for item in payload["warnings"]
+        if item["reason_code"] == "default_profile_status_unavailable"
+    )
+    assert warning["message"] == "Default profile readiness check failed."
+    assert "RuntimeError" not in json.dumps(payload)
+
+
+def test_gateway_status_counts_external_servers_best_effort() -> None:
+    manager = _ExternalRegistryManagerDouble("enabled")
+    manager.store_metadata = type(
+        "_StoreMetadata",
+        (),
+        {"to_payload": lambda self: {"kind": "memory", "persistent": False}},
+    )()
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        external_registry_manager=manager,
+        enable_external_registry_management=True,
+    )
+    with TestClient(app) as client:
+        payload = client.get("/mcp/status").json()
+
+    assert payload["external_servers"]["total"] >= 1
+    assert payload["external_servers"]["enabled"] >= 1
+    assert payload["external_registry_store"]["kind"] in {"memory", "sqlite"}
+    assert manager.calls == [("list_servers", (), {"enabled": None})]
+
+
+def test_gateway_status_uses_generic_external_registry_warning_for_unexpected_failures() -> None:
+    class _UnexpectedExternalRegistryFailureManager(_ExternalRegistryManagerDouble):
+        async def list_servers(self, enabled: bool | None = None) -> dict[str, Any]:
+            raise RuntimeError("external registry exploded")
+
+    app = create_gateway_app(
+        _FakeGatewayRuntime(),
+        external_registry_manager=_UnexpectedExternalRegistryFailureManager("enabled"),
+        enable_external_registry_management=True,
+    )
+    with TestClient(app) as client:
+        payload = client.get("/mcp/status").json()
+
+    warning = next(
+        item
+        for item in payload["warnings"]
+        if item["reason_code"] == "external_registry_status_unavailable"
+    )
+    assert warning["message"] == "External registry readiness check failed."
+    assert "RuntimeError" not in json.dumps(payload)
+
+
 def test_gateway_external_runtime_lifecycle_stops_on_shutdown() -> None:
     from mcp_unified.gateway.lifecycle import GatewayExternalRuntimeLifecycleConfig
 
@@ -5249,11 +5377,11 @@ def test_gateway_fastapi_app_handles_basic_jsonrpc_flow() -> None:
     with TestClient(app) as client:
         status = client.get("/mcp/status")
         assert status.status_code == 200
-        assert status.json() == {
-            "status": "ok",
-            "name": "unit-gateway",
-            "version": "0.0-test",
-        }
+        status_payload = status.json()
+        assert status_payload["status"] == "ok"
+        assert status_payload["name"] == "unit-gateway"
+        assert status_payload["version"] == "0.0-test"
+        assert status_payload["package"]["package_status"] == "internal-experimental"
 
         initialized = client.post(
             "/mcp/request",

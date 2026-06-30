@@ -1452,6 +1452,12 @@ Complete API documentation is available at:
 | -32001 | Permission denied | Insufficient permissions |
 | -32002 | Rate limit exceeded | Too many requests |
 
+Known JSON-RPC failures may add recovery metadata under `error.data`, for
+example `reason_code` and `next_action`. HTTP convenience endpoints keep their
+existing public body shape: object `detail` payloads may include those fields,
+while string `detail` payloads expose equivalent `X-MCP-Reason-Code` and
+`X-MCP-Next-Action` headers.
+
 ## Resources
 
 - [JSON-RPC 2.0 Specification](https://www.jsonrpc.org/specification)

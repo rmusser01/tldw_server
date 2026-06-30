@@ -152,6 +152,119 @@ def test_describe_module_surface_groups_enabled_modules_by_risk():
     assert surface["enabled_count"] == 8
 
 
+def test_describe_module_surface_reports_disabled_available_high_risk_modules():
+    """Disabled high-risk modules should remain visible as explicit opt-ins."""
+    from tldw_Server_API.app.core.MCP_unified.module_surface import describe_module_surface
+
+    surface = describe_module_surface({
+        "media": {"enabled": True, "status": "healthy"},
+        "filesystem": {"enabled": False, "status": "disabled"},
+        "run_command": {"enabled": False, "status": "disabled"},
+        "external_federation": {"enabled": False, "status": "disabled"},
+    })
+
+    assert surface["enabled_count"] == 1
+    assert [m["id"] for m in surface["tiers"]["read_only"]["modules"]] == ["media"]
+    disabled_ids = [m["id"] for m in surface["disabled_available"]]
+    assert disabled_ids == ["external_federation", "filesystem", "run_command"]
+    assert surface["disabled_available_count"] == 3
+    assert all(m["requires_explicit_opt_in"] is True for m in surface["disabled_available"])
+    assert all(m["next_action"] for m in surface["disabled_available"])
+
+
+def test_default_mcp_modules_yaml_disables_local_file_and_process_modules():
+    """Checked-in defaults should not expose local files or host commands."""
+    import yaml
+    from pathlib import Path
+
+    data = yaml.safe_load(Path("tldw_Server_API/Config_Files/mcp_modules.yaml").read_text(encoding="utf-8"))
+    modules = {entry["id"]: entry for entry in data["modules"]}
+
+    assert modules["filesystem"]["enabled"] is False
+    assert modules["run_command"]["enabled"] is False
+    assert modules["codegraph"]["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_filesystem_fallback_requires_explicit_opt_in(monkeypatch, tmp_path):
+    """Missing YAML fallback must not auto-enable filesystem access."""
+    missing_config = tmp_path / "missing-mcp-modules.yaml"
+    monkeypatch.setenv("MCP_MODULES_CONFIG", str(missing_config))
+    monkeypatch.setenv("MCP_MODULES", "")
+    monkeypatch.delenv("MCP_ENABLE_FILESYSTEM_MODULE", raising=False)
+
+    registered = []
+    server = MCPServer()
+
+    async def _register_module(module_id, cls, config):
+        registered.append(module_id)
+
+    monkeypatch.setattr(server.module_registry, "register_module", _register_module)
+
+    await server._register_default_modules()
+
+    assert "filesystem" not in registered
+
+
+@pytest.mark.asyncio
+async def test_filesystem_fallback_registers_with_explicit_env_opt_in(monkeypatch, tmp_path):
+    """The legacy fallback path should remain available with explicit env opt-in."""
+    missing_config = tmp_path / "missing-mcp-modules.yaml"
+    monkeypatch.setenv("MCP_MODULES_CONFIG", str(missing_config))
+    monkeypatch.setenv("MCP_MODULES", "")
+    monkeypatch.setenv("MCP_ENABLE_FILESYSTEM_MODULE", "true")
+
+    registered = []
+    server = MCPServer()
+
+    async def _register_module(module_id, cls, config):
+        registered.append(module_id)
+
+    monkeypatch.setattr(server.module_registry, "register_module", _register_module)
+
+    await server._register_default_modules()
+
+    assert "filesystem" in registered
+
+
+@pytest.mark.asyncio
+async def test_explicit_yaml_enabled_high_risk_modules_still_register(monkeypatch, tmp_path):
+    """Safer defaults must not override an operator's explicit YAML opt-in."""
+    import textwrap
+
+    config_path = tmp_path / "mcp_modules.yaml"
+    config_path.write_text(
+        textwrap.dedent(
+            """
+            modules:
+              - id: filesystem
+                class: tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module:FilesystemModule
+                enabled: true
+                name: Filesystem
+                version: "1.0.0"
+                department: system
+                settings: {}
+            """
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MCP_MODULES_CONFIG", str(config_path))
+    monkeypatch.setenv("MCP_MODULES", "")
+    monkeypatch.delenv("MCP_ENABLE_FILESYSTEM_MODULE", raising=False)
+
+    registered = []
+    server = MCPServer()
+
+    async def _register_module(module_id, cls, config):
+        registered.append(module_id)
+
+    monkeypatch.setattr(server.module_registry, "register_module", _register_module)
+
+    await server._register_default_modules()
+
+    assert "filesystem" in registered
+
+
 class TestJWTManager:
     """Test JWT authentication manager"""
 
@@ -460,6 +573,49 @@ class TestMCPServer:
         assert [m["id"] for m in status["surface"]["tiers"]["read_only"]["modules"]] == ["media"]
         assert [m["id"] for m in status["surface"]["tiers"]["local_files"]["modules"]] == ["filesystem"]
         assert [m["id"] for m in status["surface"]["tiers"]["local_process"]["modules"]] == ["run_command"]
+
+    async def test_server_status_includes_disabled_available_from_config(self, monkeypatch):
+        """Server status should include configured high-risk modules skipped as disabled."""
+        server = MCPServer()
+        server.initialized = True
+        server._configured_modules_for_status = {
+            "media": {"enabled": True},
+            "filesystem": {"enabled": False},
+            "run_command": {"enabled": False},
+        }
+
+        async def _check_all_health():
+            return {"media": ModuleHealth(status=HealthStatus.HEALTHY)}
+
+        monkeypatch.setattr(server.module_registry, "check_all_health", _check_all_health)
+
+        status = await server.get_status()
+
+        assert status["surface"]["enabled_count"] == 1
+        assert [m["id"] for m in status["surface"]["disabled_available"]] == ["filesystem", "run_command"]
+        assert all(m["requires_explicit_opt_in"] for m in status["surface"]["disabled_available"])
+
+    async def test_server_status_does_not_enable_configured_but_unloaded_modules(self, monkeypatch):
+        """Configured modules should not appear enabled until their health is registered."""
+        server = MCPServer()
+        server.initialized = True
+        server._configured_modules_for_status = {
+            "media": {"enabled": True, "status": "configured"},
+            "filesystem": {"enabled": True, "status": "configured"},
+            "run_command": {"enabled": False, "status": "disabled"},
+        }
+
+        async def _check_all_health():
+            return {"media": ModuleHealth(status=HealthStatus.HEALTHY)}
+
+        monkeypatch.setattr(server.module_registry, "check_all_health", _check_all_health)
+
+        status = await server.get_status()
+
+        assert status["surface"]["enabled_count"] == 1
+        assert [m["id"] for m in status["surface"]["tiers"]["read_only"]["modules"]] == ["media"]
+        assert "local_files" not in status["surface"]["tiers"]
+        assert [m["id"] for m in status["surface"]["disabled_available"]] == ["run_command"]
 
     async def test_server_status_includes_sanitized_problem_modules(self, monkeypatch):
         """Server status should expose actionable, canned module problem reasons."""

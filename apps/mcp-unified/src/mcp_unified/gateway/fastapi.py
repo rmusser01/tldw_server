@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 
 from mcp_unified.storage.models import CredentialGrant, ExternalServerDefinition
 from mcp_unified.interfaces.storage import AuditStore
+from mcp_unified.package_metadata import package_metadata_summary
 from mcp_unified.profiles import MCPProfile
 
 from .admin_auth import (
@@ -348,6 +349,93 @@ class DeleteCredentialGrantResponse(BaseModel):
     ok: bool
     grant_id: str
     store: StoreMetadataResponse
+
+
+class GatewayStatusStoreResponse(BaseModel):
+    """Best-effort readiness metadata for a gateway backing store."""
+
+    model_config = ConfigDict(extra="allow")
+
+    kind: str
+    persistent: bool | None = None
+
+
+class GatewayStatusPackageResponse(BaseModel):
+    """Package boundary metadata exposed by the gateway status endpoint."""
+
+    model_config = ConfigDict(extra="allow")
+
+    package_name: str | None = None
+    package_import_name: str | None = None
+    package_status: str | None = None
+    publishing_status: str | None = None
+    source_distribution: str | None = None
+    dependency_version_policy: str | None = None
+
+
+class GatewayStatusTransportResponse(BaseModel):
+    """Transport metadata exposed by the gateway status endpoint."""
+
+    model_config = ConfigDict(extra="allow")
+
+    base_path: str
+    mount_path: str
+
+
+class GatewayStatusDefaultProfileResponse(BaseModel):
+    """Default profile readiness metadata."""
+
+    model_config = ConfigDict(extra="allow")
+
+    configured: bool
+    profile_id: str | None = None
+    source: str
+
+
+class GatewayStatusAdminAuthResponse(BaseModel):
+    """Admin-auth readiness metadata without secret values."""
+
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool
+    configured: bool
+    header_name: str | None = None
+
+
+class GatewayStatusExternalServersResponse(BaseModel):
+    """External server readiness counts."""
+
+    model_config = ConfigDict(extra="allow")
+
+    total: int
+    enabled: int
+    unavailable: int
+
+
+class GatewayStatusWarningResponse(BaseModel):
+    """Non-secret readiness warning returned by gateway status."""
+
+    reason_code: str
+    message: str
+
+
+class GatewayStatusResponse(BaseModel):
+    """Response body for package-local gateway readiness status."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    name: str
+    version: str
+    transport: GatewayStatusTransportResponse
+    package: GatewayStatusPackageResponse
+    profile_store: GatewayStatusStoreResponse
+    default_profile: GatewayStatusDefaultProfileResponse
+    admin_auth: GatewayStatusAdminAuthResponse
+    external_registry_store: GatewayStatusStoreResponse
+    external_servers: GatewayStatusExternalServersResponse
+    warnings: list[GatewayStatusWarningResponse]
+    next_actions: list[str]
 
 
 class ExternalRuntimeServerStatusResponse(BaseModel):
@@ -1609,6 +1697,198 @@ def _mount_policy_explain_routes(
             return _policy_explain_error_response(exc)
 
 
+def _read_store_metadata(manager: Any) -> dict[str, Any]:
+    """Return non-secret store metadata from a gateway manager."""
+
+    store_metadata = getattr(manager, "store_metadata", None)
+    to_payload = getattr(store_metadata, "to_payload", None)
+    if callable(to_payload):
+        try:
+            payload = to_payload()
+            if isinstance(payload, dict):
+                return dict(payload)
+        except Exception:  # noqa: BLE001 - status must remain best-effort.
+            logger.debug("Gateway status store metadata lookup failed", exc_info=True)
+    return {"kind": "unknown", "persistent": None}
+
+
+def _store_payload_from_result(result: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+    """Return a store payload from a manager result when present."""
+
+    store = result.get("store") if isinstance(result, dict) else None
+    if isinstance(store, dict):
+        return dict(store)
+    return fallback
+
+
+def _status_warning(reason_code: str, message: str) -> dict[str, str]:
+    """Return a small non-secret readiness warning object."""
+
+    return {"reason_code": reason_code, "message": message}
+
+
+async def _gateway_readiness_status(
+    runtime: GatewayRuntime,
+    *,
+    profile_manager: GatewayProfileManager | None,
+    external_registry_manager: GatewayExternalRegistryManager | None,
+    admin_auth: GatewayAdminAuthConfig,
+) -> dict[str, Any]:
+    """Return best-effort package-local gateway readiness metadata."""
+
+    warnings: list[dict[str, str]] = []
+    next_actions: list[str] = []
+    package_summary = package_metadata_summary()
+    package_payload = {
+        key: package_summary.get(key)
+        for key in (
+            "package_name",
+            "package_import_name",
+            "package_status",
+            "publishing_status",
+            "source_distribution",
+            "dependency_version_policy",
+        )
+    }
+    if package_payload.get("publishing_status") == "not-published":
+        warnings.append(
+            _status_warning(
+                "package_not_published",
+                "Package metadata is internal/experimental and not published.",
+            )
+        )
+        next_actions.append(
+            "Install from apps/mcp-unified in this repository; do not use public PyPI install guidance."
+        )
+
+    profile_store = {"kind": "unknown", "persistent": None}
+    default_profile: dict[str, Any] = {"configured": False, "profile_id": None, "source": "none"}
+    if profile_manager is not None:
+        profile_store = _read_store_metadata(profile_manager)
+        try:
+            default_result = await profile_manager.get_default_profile()
+            profile_store = _store_payload_from_result(default_result, profile_store)
+            default = default_result.get("default") if isinstance(default_result, dict) else None
+            profile = default_result.get("profile") if isinstance(default_result, dict) else None
+            profile_id = None
+            source = "unknown"
+            if isinstance(default, dict):
+                profile_id = default.get("profile_id")
+                source = str(default.get("source") or "unknown")
+            if profile_id is None and isinstance(profile, dict):
+                profile_id = profile.get("id")
+            default_profile = {
+                "configured": bool(profile_id),
+                "profile_id": profile_id,
+                "source": source,
+            }
+        except GatewayProfileManagementError as exc:
+            warnings.append(
+                _status_warning(
+                    exc.reason_code,
+                    "Default profile readiness check failed.",
+                )
+            )
+            next_actions.append("Configure a default profile before relying on profile-scoped gateway calls.")
+        except Exception:  # noqa: BLE001 - status must remain best-effort.
+            logger.exception("Default profile readiness check failed during gateway status.")
+            warnings.append(
+                _status_warning(
+                    "default_profile_status_unavailable",
+                    "Default profile readiness check failed.",
+                )
+            )
+    else:
+        next_actions.append("Mount profile management if this host should expose package-local profile readiness.")
+
+    if profile_store.get("persistent") is False:
+        warnings.append(
+            _status_warning(
+                "profile_store_not_persistent",
+                "Profile management is using a non-persistent store.",
+            )
+        )
+
+    external_registry_store = {"kind": "unknown", "persistent": None}
+    external_servers = {"total": 0, "enabled": 0, "unavailable": 0}
+    if external_registry_manager is not None:
+        external_registry_store = _read_store_metadata(external_registry_manager)
+        try:
+            all_result = await external_registry_manager.list_servers(enabled=None)
+            external_registry_store = _store_payload_from_result(all_result, external_registry_store)
+            all_servers = all_result.get("servers", []) if isinstance(all_result, dict) else []
+            total = len(all_servers) if isinstance(all_servers, list) else 0
+            enabled = 0
+            if isinstance(all_servers, list):
+                enabled = sum(
+                    1
+                    for server in all_servers
+                    if (
+                        server.get("enabled", True)
+                        if isinstance(server, dict)
+                        else getattr(server, "enabled", True)
+                    )
+                )
+            external_servers = {
+                "total": total,
+                "enabled": enabled,
+                "unavailable": 0,
+            }
+        except GatewayExternalRegistryManagementError as exc:
+            warnings.append(
+                _status_warning(
+                    exc.reason_code,
+                    "External server registry readiness check failed.",
+                )
+            )
+            external_servers["unavailable"] = external_servers["total"]
+        except Exception:  # noqa: BLE001 - status must remain best-effort.
+            logger.exception("External registry readiness check failed during gateway status.")
+            warnings.append(
+                _status_warning(
+                    "external_registry_status_unavailable",
+                    "External registry readiness check failed.",
+                )
+            )
+            next_actions.append("Check external registry store configuration before using remote MCP servers.")
+
+    if external_registry_store.get("persistent") is False:
+        warnings.append(
+            _status_warning(
+                "external_registry_store_not_persistent",
+                "External server registry is using a non-persistent store.",
+            )
+        )
+
+    admin_auth_payload = {
+        "enabled": bool(admin_auth.enabled),
+        "configured": bool(admin_auth.api_key is not None or admin_auth.verifier is not None),
+        "header_name": admin_auth.header_name if admin_auth.enabled else None,
+    }
+    if admin_auth.enabled and not admin_auth_payload["configured"]:
+        warnings.append(
+            _status_warning(
+                "admin_auth_not_configured",
+                "Admin auth is enabled but no verifier is configured.",
+            )
+        )
+
+    return {
+        "status": "ok",
+        "name": _runtime_name(runtime),
+        "version": _runtime_version(runtime),
+        "transport": {"base_path": "package-local-mounted", "mount_path": "unknown"},
+        "package": package_payload,
+        "profile_store": profile_store,
+        "default_profile": default_profile,
+        "admin_auth": admin_auth_payload,
+        "external_registry_store": external_registry_store,
+        "external_servers": external_servers,
+        "warnings": warnings,
+        "next_actions": next_actions,
+    }
+
+
 def create_gateway_router(
     runtime: GatewayRuntime,
     *,
@@ -1693,15 +1973,16 @@ def create_gateway_router(
             policy_explain_permission_checker=policy_explain_permission_checker,
         )
 
-    @router.get("/status")
-    async def gateway_status() -> dict[str, str]:
-        """Return lightweight gateway health and runtime identity metadata."""
+    @router.get("/status", response_model=GatewayStatusResponse)
+    async def gateway_status() -> dict[str, Any]:
+        """Return best-effort package-local gateway readiness metadata."""
 
-        return {
-            "status": "ok",
-            "name": _runtime_name(runtime),
-            "version": _runtime_version(runtime),
-        }
+        return await _gateway_readiness_status(
+            runtime,
+            profile_manager=resolved_profile_manager,
+            external_registry_manager=resolved_external_registry_manager,
+            admin_auth=resolved_admin_auth,
+        )
 
     @router.post(
         "/request",

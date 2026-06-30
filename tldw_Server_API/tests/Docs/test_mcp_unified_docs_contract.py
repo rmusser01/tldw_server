@@ -1,6 +1,7 @@
 """Documentation contracts for the Unified MCP user journey."""
 
 from pathlib import Path
+import re
 
 import pytest
 
@@ -125,3 +126,146 @@ def test_unified_mcp_operator_cheatsheet_covers_power_user_workflows() -> None:
         "websocket",
     ):
         _require(phrase in text, f"Operator cheatsheet should mention {phrase}.")
+
+
+def test_unified_mcp_docs_use_supported_embedded_paths_for_smoke_and_snippets() -> None:
+    """Client-facing quickstarts should default to the embedded TLDW MCP path."""
+    docs = "\n\n".join(
+        [
+            _read("Docs/MCP/Unified/Client_Snippets.md"),
+            _read("Docs/MCP/Unified/Smoke_Client.md"),
+            _read("Docs/MCP/Unified/User_Guide.md"),
+        ]
+    )
+
+    _require("/api/v1/mcp/status" in docs, "Docs should show embedded status path.")
+    _require("/api/v1/mcp/request" in docs, "Docs should show embedded request path.")
+    _require(
+        "mcp_unified[gateway]" not in docs,
+        "Docs should not install a non-root package path.",
+    )
+
+
+def test_unified_mcp_docs_label_every_package_local_request_example() -> None:
+    """Package-local request examples must be framed as host-mounted/package-local."""
+    smoke = _read("Docs/MCP/Unified/Smoke_Client.md")
+
+    for line_no, line in enumerate(smoke.splitlines(), start=1):
+        if "http://127.0.0.1:8000/mcp/request" not in line:
+            continue
+        window = "\n".join(smoke.splitlines()[max(0, line_no - 5) : line_no + 4]).lower()
+        _require(
+            "package-local" in window or "host-mounted" in window,
+            f"Unlabeled package-local /mcp/request example near Smoke_Client.md:{line_no}",
+        )
+
+
+def test_unified_mcp_docs_have_path_decision_table() -> None:
+    """Primary docs should distinguish embedded, package-local, and future paths."""
+    docs = "\n\n".join(
+        [
+            _read("Docs/MCP/Unified/README.md"),
+            _read("Docs/MCP/Unified/User_Guide.md"),
+        ]
+    ).lower()
+
+    for snippet in (
+        "which path should i use",
+        "/api/v1/mcp/status",
+        "/api/v1/mcp/request",
+        "/mcp/status",
+        "package-local",
+        "standalone gateway",
+        "planned but not shipped",
+    ):
+        _require(snippet in docs, f"Path decision docs should mention {snippet}.")
+
+
+def test_unified_mcp_docs_do_not_normalize_query_token_auth() -> None:
+    """Normal examples should keep query-string auth framed as legacy only."""
+    docs = "\n\n".join(
+        [
+            _read("Docs/MCP/Unified/User_Guide.md"),
+            _read("Docs/MCP/Unified/Client_Snippets.md"),
+            _read("Docs/MCP/Unified/Smoke_Client.md"),
+        ]
+    ).lower()
+
+    _require(
+        "?token=jwt-token" not in docs,
+        "Docs should not show query token auth as a normal example.",
+    )
+    _require(
+        "disabled by default" in docs and "query auth" in docs,
+        "Docs should frame query auth as legacy/disabled.",
+    )
+
+
+def test_unified_mcp_package_docs_do_not_promise_serve_or_publishing() -> None:
+    """Package docs should not promise an unsupported standalone server product."""
+    docs = "\n\n".join(
+        [
+            _read("apps/mcp-unified/README.md"),
+            _read("apps/mcp-unified/USER_GUIDE.md"),
+            _read("apps/mcp-unified/src/mcp_unified/README.md"),
+        ]
+    ).lower()
+
+    forbidden = [
+        "mcp-unified-gateway serve",
+        "pip install mcp-unified",
+        "published to pypi",
+        "production standalone gateway",
+    ]
+    found = [phrase for phrase in forbidden if phrase in docs]
+    _require(not found, f"Package docs imply unsupported standalone/published flows: {found}")
+    _require("not published" in docs, "Package docs should state the package is not published.")
+    _require(
+        "internal" in docs and "experimental" in docs,
+        "Package docs should state internal/experimental status.",
+    )
+
+
+def test_unified_mcp_docs_reference_existing_local_targets() -> None:
+    """Relative markdown links in the high-traffic MCP docs should stay valid."""
+    docs_to_check = [
+        "Docs/MCP/Unified/README.md",
+        "Docs/MCP/Unified/User_Guide.md",
+        "Docs/MCP/Unified/Smoke_Client.md",
+        "Docs/MCP/Unified/Client_Snippets.md",
+        "apps/mcp-unified/README.md",
+        "apps/mcp-unified/USER_GUIDE.md",
+    ]
+    missing: list[str] = []
+
+    for doc_path in docs_to_check:
+        text = _read(doc_path)
+        for target in re.findall(r"\]\(([^)#][^)]+)\)", text):
+            if "://" in target or target.startswith("#") or target.startswith("mailto:"):
+                continue
+            normalized = target.split("#", 1)[0]
+            if not normalized:
+                continue
+            candidate = Path(doc_path).parent / normalized
+            if not candidate.exists():
+                missing.append(f"{doc_path} -> {target}")
+
+    _require(not missing, "Docs reference missing local targets: " + ", ".join(missing))
+
+
+def test_unified_mcp_admin_env_docs_do_not_include_known_stale_mcp_vars() -> None:
+    """Admin docs should not list stale MCP-only env vars as live config."""
+    guide = _read("Docs/MCP/Unified/System_Admin_Guide.md")
+    stale = {
+        "MCP_HOST",
+        "MCP_PORT",
+        "MCP_AUTH_MODE",
+        "MCP_MODULES_ENABLED",
+        "MCP_DATABASE_MAX_OVERFLOW",
+        "MCP_TRUSTED_PROXIES",
+        "MCP_MAX_REQUEST_SIZE",
+        "MCP_REQUEST_TIMEOUT",
+    }
+    found = {name for name in stale if name in guide}
+
+    _require(not found, f"System admin guide documents stale MCP env vars: {sorted(found)}")
