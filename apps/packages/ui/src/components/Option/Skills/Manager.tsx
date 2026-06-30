@@ -286,6 +286,73 @@ export const SkillsManager: React.FC = () => {
     React.useState<SkillsSuccessAction | null>(null)
   const [importTextForm] = Form.useForm<ImportTextFormValues>()
   const importTextOverwrite = Form.useWatch("overwrite", importTextForm)
+  const drawerReturnFocusRef = React.useRef<HTMLElement | null>(null)
+  const drawerReturnFocusLabelRef = React.useRef<string | null>(null)
+  const previewReturnFocusRef = React.useRef<HTMLElement | null>(null)
+  const previewReturnFocusLabelRef = React.useRef<string | null>(null)
+
+  const getActiveFocusTarget = React.useCallback((): HTMLElement | null => {
+    if (typeof document === "undefined" || typeof HTMLElement === "undefined") {
+      return null
+    }
+
+    return document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+  }, [])
+
+  const getFocusTargetLabel = React.useCallback((element: HTMLElement | null) => {
+    if (!element) return null
+
+    return element.getAttribute("aria-label") || element.textContent?.trim() || null
+  }, [])
+
+  const findButtonByLabel = React.useCallback((label: string | null): HTMLElement | null => {
+    if (!label || typeof document === "undefined") return null
+
+    return Array.from(document.querySelectorAll<HTMLElement>("button")).find((button) =>
+      button.getAttribute("aria-label") === label
+      || button.textContent?.trim() === label
+    ) ?? null
+  }, [])
+
+  const restoreFocus = React.useCallback((
+    element: HTMLElement | null,
+    fallbackLabel?: string | null
+  ) => {
+    if (typeof window === "undefined") return
+
+    const focusTarget = () => {
+      const target = element?.isConnected
+        ? element
+        : findButtonByLabel(fallbackLabel ?? null)
+      if (target) {
+        target.focus({ preventScroll: true })
+      }
+    }
+
+    window.setTimeout(focusTarget, 0)
+    window.setTimeout(focusTarget, 150)
+  }, [findButtonByLabel])
+
+  const openSkillPreview = React.useCallback(
+    (skillName: string, triggerElement?: HTMLElement | null) => {
+      const returnTarget = triggerElement ?? getActiveFocusTarget()
+      previewReturnFocusRef.current = returnTarget
+      previewReturnFocusLabelRef.current = getFocusTargetLabel(returnTarget)
+      setPreviewSkill(skillName)
+    },
+    [getActiveFocusTarget, getFocusTargetLabel]
+  )
+
+  const closeSkillPreview = React.useCallback(() => {
+    const returnTarget = previewReturnFocusRef.current
+    const returnLabel = previewReturnFocusLabelRef.current
+    previewReturnFocusRef.current = null
+    previewReturnFocusLabelRef.current = null
+    setPreviewSkill(null)
+    restoreFocus(returnTarget, returnLabel)
+  }, [restoreFocus])
 
   const offset = (page - 1) * pageSize
   const searchQuery = debouncedSearch.trim()
@@ -724,13 +791,19 @@ export const SkillsManager: React.FC = () => {
     })
   }
 
-  const handleNew = () => {
+  const handleNew = (triggerElement?: HTMLElement | null) => {
+    const returnTarget = triggerElement ?? getActiveFocusTarget()
+    drawerReturnFocusRef.current = returnTarget
+    drawerReturnFocusLabelRef.current = getFocusTargetLabel(returnTarget)
     setSuccessAction(null)
     setEditingSkill(null)
     setDrawerOpen(true)
   }
 
-  const handleEdit = async (name: string) => {
+  const handleEdit = async (name: string, triggerElement?: HTMLElement | null) => {
+    const returnTarget = triggerElement ?? getActiveFocusTarget()
+    drawerReturnFocusRef.current = returnTarget
+    drawerReturnFocusLabelRef.current = getFocusTargetLabel(returnTarget)
     try {
       const skill = await tldwClient.getSkill(name)
       setEditingSkill(skill)
@@ -864,8 +937,13 @@ export const SkillsManager: React.FC = () => {
   }
 
   const handleDrawerClose = () => {
+    const returnTarget = drawerReturnFocusRef.current
+    const returnLabel = drawerReturnFocusLabelRef.current
+    drawerReturnFocusRef.current = null
+    drawerReturnFocusLabelRef.current = null
     setDrawerOpen(false)
     setEditingSkill(null)
+    restoreFocus(returnTarget, returnLabel)
   }
 
   const handleDrawerSaved = (savedSkillName?: string) => {
@@ -1072,7 +1150,7 @@ export const SkillsManager: React.FC = () => {
               type="text"
               size="small"
               icon={<Play size={14} />}
-              onClick={() => setPreviewSkill(record.name)}
+              onClick={(event) => openSkillPreview(record.name, event.currentTarget)}
             />
           </Tooltip>
           <Tooltip title={t("common:edit", { defaultValue: "Edit" })}>
@@ -1084,7 +1162,7 @@ export const SkillsManager: React.FC = () => {
               type="text"
               size="small"
               icon={<Pen size={14} />}
-              onClick={() => handleEdit(record.name)}
+              onClick={(event) => void handleEdit(record.name, event.currentTarget)}
             />
           </Tooltip>
           <Tooltip title={t("option:skills.export", { defaultValue: "Export" })}>
@@ -1191,7 +1269,10 @@ export const SkillsManager: React.FC = () => {
             defaultValue: "Seed built-ins"
           })}
         </Button>
-        <Button icon={<Plus size={14} />} onClick={handleNew}>
+        <Button
+          icon={<Plus size={14} />}
+          onClick={(event) => handleNew(event.currentTarget)}
+        >
           {t("option:skills.emptyCreateFromTemplate", {
             defaultValue: "Create from template"
           })}
@@ -1416,7 +1497,11 @@ export const SkillsManager: React.FC = () => {
               {t("option:skills.seedBuiltins", { defaultValue: "Seed Built-ins" })}
             </Button>
           </Dropdown>
-          <Button type="primary" icon={<Plus size={14} />} onClick={handleNew}>
+          <Button
+            type="primary"
+            icon={<Plus size={14} />}
+            onClick={(event) => handleNew(event.currentTarget)}
+          >
             {t("option:skills.newSkill", { defaultValue: "New Skill" })}
           </Button>
         </div>
@@ -1601,6 +1686,14 @@ export const SkillsManager: React.FC = () => {
         />
       )}
 
+      {isLoading && (
+        <div role="status" aria-live="polite" className="sr-only">
+          {t("option:skills.loadingStatus", {
+            defaultValue: "Loading skills"
+          })}
+        </div>
+      )}
+
       {successAction && (
         <DesignSystemAlert
           data-testid="skills-success-actions"
@@ -1620,7 +1713,7 @@ export const SkillsManager: React.FC = () => {
                 <Button
                   size="small"
                   icon={<Play size={14} />}
-                  onClick={() => setPreviewSkill(skillName)}
+                  onClick={(event) => openSkillPreview(skillName, event.currentTarget)}
                 >
                   {successAction.testLabel ??
                     t("option:skills.testRun", { defaultValue: "Test run" })}
@@ -1628,7 +1721,7 @@ export const SkillsManager: React.FC = () => {
                 <Button
                   size="small"
                   icon={<Pen size={14} />}
-                  onClick={() => void handleEdit(skillName)}
+                  onClick={(event) => void handleEdit(skillName, event.currentTarget)}
                 >
                   {successAction.viewLabel ??
                     t("option:skills.viewSkill", { defaultValue: "View skill" })}
@@ -1895,7 +1988,7 @@ export const SkillsManager: React.FC = () => {
       <SkillPreview
         skillName={previewSkill}
         runtime={previewRuntime}
-        onClose={() => setPreviewSkill(null)}
+        onClose={closeSkillPreview}
       />
     </div>
   )

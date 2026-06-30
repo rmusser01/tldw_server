@@ -49,6 +49,7 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
     if (!skillName || skillRunPendingRef.current || executeMutation.isPending) return
 
     skillRunPendingRef.current = true
+    setResult(null)
     setActiveRunMode(dryRun ? "dry-run" : "test-run")
     executeMutation.mutate({ dryRun })
   }
@@ -86,6 +87,27 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
             defaultValue: "Run test uses inline prompt execution for this skill."
           })
     : ""
+  const runStatusMessage = executeMutation.isPending && skillName
+    ? activeRunMode === "dry-run"
+      ? t("option:skills.renderingPromptStatus", {
+          defaultValue: `Rendering prompt for ${skillName}`,
+          name: skillName
+        })
+      : t("option:skills.runningTestStatus", {
+          defaultValue: `Running test for ${skillName}`,
+          name: skillName
+        })
+    : result && skillName
+      ? result.dry_run
+        ? t("option:skills.renderedPromptReadyStatus", {
+            defaultValue: `Rendered prompt ready for ${skillName}`,
+            name: skillName
+          })
+        : t("option:skills.testResultReadyStatus", {
+            defaultValue: `Test result ready for ${skillName}`,
+            name: skillName
+          })
+      : null
 
   return (
     <Modal
@@ -100,6 +122,12 @@ export const SkillPreview: React.FC<SkillPreviewProps> = ({
       destroyOnHidden
     >
       <div className="flex flex-col gap-4">
+        {runStatusMessage && (
+          <div role="status" aria-live="polite" className="sr-only">
+            {runStatusMessage}
+          </div>
+        )}
+
         <div>
           <label className="mb-1 block text-sm font-medium">
             {t("option:skills.previewArgs", {
