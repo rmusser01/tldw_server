@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.Audio.Realtime.models import (
 from tldw_Server_API.app.core.Audio.Realtime.persistence import (
     NoopRealtimePersistenceAdapter,
     RealtimePersistenceAdapter,
+    RealtimePersistenceConfig,
     persistence_config_from_metadata,
 )
 from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
@@ -407,6 +408,7 @@ class RealtimeSession:
         )
         if not self._generation_is_current(generation_id, response_id):
             return
+        response_persistence_config = persistence_config_from_metadata(self.config.metadata)
         yield ResponseDoneEvent(
             event_id=command.event_id,
             response_id=response_id,
@@ -420,6 +422,7 @@ class RealtimeSession:
                 assistant_text,
                 turn_index=response_turn_index,
                 user_transcript=response_user_transcript,
+                persistence_config=response_persistence_config,
             )
             if error is not None:
                 yield error
@@ -460,8 +463,8 @@ class RealtimeSession:
         *,
         turn_index: int,
         user_transcript: str,
+        persistence_config: RealtimePersistenceConfig,
     ) -> RealtimeErrorEvent | None:
-        persistence_config = persistence_config_from_metadata(self.config.metadata)
         if not persistence_config.enabled or persistence_config.conversation_id is None:
             return None
 
