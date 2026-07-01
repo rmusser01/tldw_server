@@ -743,8 +743,9 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         )
       )
     } finally {
-      if (requestId !== defaultAssistantRequestIdRef.current) return
-      setDefaultAssistantLoading(false)
+      if (requestId === defaultAssistantRequestIdRef.current) {
+        setDefaultAssistantLoading(false)
+      }
     }
   }
 

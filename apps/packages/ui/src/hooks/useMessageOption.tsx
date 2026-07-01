@@ -51,6 +51,24 @@ const normalizePersonaMemoryMode = (
   return value === "read_only" || value === "read_write" ? value : null;
 };
 
+const assistantSelectionsMatch = (
+  left: AssistantSelection | null,
+  right: AssistantSelection | null,
+): boolean => {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.kind === right.kind &&
+    left.id === right.id &&
+    left.name === right.name &&
+    (left.avatar_url ?? null) === (right.avatar_url ?? null) &&
+    (left.system_prompt ?? null) === (right.system_prompt ?? null) &&
+    left.metadata?.selectionMode === right.metadata?.selectionMode &&
+    left.metadata?.source === right.metadata?.source &&
+    left.metadata?.personaMemoryMode === right.metadata?.personaMemoryMode
+  );
+};
+
 export const useMessageOption = (
   opts: UseMessageOptionOptions = {},
 ) => {
@@ -252,7 +270,10 @@ export const useMessageOption = (
     historyId,
     serverChatId,
   });
-  const inheritedAssistantRef = React.useRef<AssistantSelection | null>(null);
+  const [
+    inheritedAssistantSnapshot,
+    setInheritedAssistantSnapshot,
+  ] = React.useState<AssistantSelection | null>(null);
   const canCaptureInheritedAssistant =
     !selectedAssistant &&
     opts.inheritedAssistant?.kind === "persona" &&
@@ -264,14 +285,26 @@ export const useMessageOption = (
     messages.length === 0 &&
     history.length === 0;
 
-  if (selectedAssistant) {
-    inheritedAssistantRef.current = null;
-  } else if (canCaptureInheritedAssistant) {
-    inheritedAssistantRef.current = opts.inheritedAssistant;
-  }
+  const inheritedAssistantCandidate =
+    canCaptureInheritedAssistant && opts.inheritedAssistant?.kind === "persona"
+      ? opts.inheritedAssistant
+      : null;
+
+  React.useEffect(() => {
+    if (selectedAssistant) {
+      setInheritedAssistantSnapshot((current) => (current === null ? current : null));
+      return;
+    }
+    if (!inheritedAssistantCandidate) return;
+    setInheritedAssistantSnapshot((current) =>
+      assistantSelectionsMatch(current, inheritedAssistantCandidate)
+        ? current
+        : inheritedAssistantCandidate,
+    );
+  }, [inheritedAssistantCandidate, selectedAssistant]);
 
   const assistantDraftSelection =
-    selectedAssistant ?? inheritedAssistantRef.current;
+    selectedAssistant ?? inheritedAssistantSnapshot ?? inheritedAssistantCandidate;
   const effectiveAssistantState = React.useMemo(
     () =>
       resolveEffectiveAssistantState({
@@ -304,9 +337,9 @@ export const useMessageOption = (
   );
   const inheritedAssistant =
     !selectedAssistant &&
-    inheritedAssistantRef.current?.kind === "persona" &&
-    inheritedAssistantRef.current.id != null
-      ? inheritedAssistantRef.current
+    (inheritedAssistantSnapshot ?? inheritedAssistantCandidate)?.kind === "persona" &&
+    (inheritedAssistantSnapshot ?? inheritedAssistantCandidate)?.id != null
+      ? inheritedAssistantSnapshot ?? inheritedAssistantCandidate
       : null;
   const effectiveSelectedAssistant = React.useMemo<AssistantSelection | null>(() => {
     if (effectiveAssistantState.mode === "plain") {

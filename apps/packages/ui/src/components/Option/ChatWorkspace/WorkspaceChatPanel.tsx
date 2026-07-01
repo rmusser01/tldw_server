@@ -162,9 +162,15 @@ export const WorkspaceChatPanel = ({
     selectedAssistant?.kind === "persona" &&
     inheritedAssistant?.kind === "persona" &&
     selectedAssistant.id === inheritedAssistant.id
+  const restoredWorkspaceAssistant =
+    !selectedAssistant &&
+    inheritedAssistant?.kind === "persona" &&
+    serverChatAssistantKind === "persona" &&
+    serverChatAssistantId === inheritedAssistant.id
   const usingWorkspaceAssistant =
     Boolean(inheritedAssistant) &&
     (selectedMatchesWorkspaceAssistant ||
+      restoredWorkspaceAssistant ||
       (selectedAssistantSource === "workspace" &&
         !selectedAssistant &&
         messages.length === 0))
@@ -177,7 +183,7 @@ export const WorkspaceChatPanel = ({
         : "none"
   const runtimeSelectedPersonaLabel =
     assistantSource === "workspace"
-      ? selectedAssistant?.name ?? inheritedAssistant?.name ?? null
+      ? inheritedAssistant?.name ?? selectedAssistant?.name ?? null
       : selectedAssistant?.name ??
         (assistantSource === "explicit" && serverChatAssistantKind === "persona"
           ? "Persona"

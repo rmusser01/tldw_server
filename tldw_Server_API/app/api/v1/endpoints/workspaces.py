@@ -187,11 +187,17 @@ def _get_workspace_persona_profile(
     if cache is not None and cache_key in cache:
         return cache[cache_key]
 
-    profile = db.get_persona_profile(
-        assistant_id,
-        user_id=user_id,
-        include_deleted=include_deleted,
-    )
+    try:
+        profile = db.get_persona_profile(
+            assistant_id,
+            user_id=user_id,
+            include_deleted=include_deleted,
+        )
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(
+            exc,
+            default_detail="Failed to resolve workspace assistant default",
+        ) from exc
     if cache is not None:
         cache[cache_key] = profile
     return profile
@@ -282,8 +288,9 @@ def _validate_workspace_assistant_default_reference(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="assistant_defaults.assistant_kind is not supported",
         )
-    profile = db.get_persona_profile(
-        stored.assistant_id,
+    profile = _get_workspace_persona_profile(
+        db=db,
+        assistant_id=stored.assistant_id,
         user_id=user_id,
         include_deleted=False,
     )

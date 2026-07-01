@@ -18,7 +18,11 @@ from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_WRITE_RATE_LIMIT,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    InputError,
+)
 
 
 @pytest.fixture
@@ -215,6 +219,68 @@ def test_list_workspaces_caches_repeated_persona_default_lookups(
         "ws-assistant-b",
     }
     assert profile_lookup_count == 1
+
+
+@pytest.mark.integration
+def test_get_workspace_maps_persona_lookup_database_errors(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+    db.update_workspace(
+        "ws-assistant",
+        {"assistant_defaults_json": _assistant_defaults_payload("persona-1")},
+        expected_version=int(workspace["version"]),
+    )
+
+    def _raise_get_persona_profile(*args: Any, **kwargs: Any) -> Any:
+        raise CharactersRAGDBError("lookup failed")
+
+    monkeypatch.setattr(db, "get_persona_profile", _raise_get_persona_profile)
+    _install_workspace_overrides(workspace_app, db)
+
+    try:
+        with TestClient(workspace_app, raise_server_exceptions=False) as client:
+            response = client.get("/api/v1/workspaces/ws-assistant")
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert response.status_code == 500, response.text
+    assert response.json() == {
+        "detail": "Failed to resolve workspace assistant default"
+    }
+
+
+@pytest.mark.integration
+def test_patch_workspace_maps_persona_lookup_input_errors(
+    workspace_app: FastAPI,
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = db.upsert_workspace("ws-assistant", "Assistant Defaults")
+
+    def _raise_get_persona_profile(*args: Any, **kwargs: Any) -> Any:
+        raise InputError("invalid persona lookup")
+
+    monkeypatch.setattr(db, "get_persona_profile", _raise_get_persona_profile)
+    _install_workspace_overrides(workspace_app, db, write=True)
+
+    try:
+        with TestClient(workspace_app, raise_server_exceptions=False) as client:
+            response = client.patch(
+                "/api/v1/workspaces/ws-assistant",
+                json={
+                    "version": workspace["version"],
+                    "assistant_defaults": _assistant_defaults_payload("persona-1"),
+                },
+            )
+    finally:
+        _clear_workspace_overrides(workspace_app)
+
+    assert response.status_code == 400, response.text
+    assert response.json() == {"detail": "invalid persona lookup"}
+    assert db.get_workspace("ws-assistant")["assistant_defaults_json"] is None
 
 
 @pytest.mark.integration

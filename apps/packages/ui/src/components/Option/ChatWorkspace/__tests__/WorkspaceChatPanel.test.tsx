@@ -640,6 +640,33 @@ describe("WorkspaceChatPanel", () => {
     )
   })
 
+  it("keeps workspace provenance when reopening an inherited persona chat", () => {
+    chatHookState.value.selectedAssistant = null
+    chatHookState.value.selectedAssistantSource = "none"
+    chatHookState.value.serverChatId = "workspace-persona-chat"
+    chatHookState.value.serverChatAssistantKind = "persona"
+    chatHookState.value.serverChatAssistantId = "workspace-persona"
+    const onRuntimeStateChange = vi.fn()
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+        effectiveAssistantDefault={availableWorkspaceDefault}
+        onRuntimeStateChange={onRuntimeStateChange}
+      />
+    )
+
+    expect(onRuntimeStateChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedPersonaLabel: "Workspace Analyst",
+        assistantSource: "workspace"
+      })
+    )
+  })
+
   it("keeps an explicit selected persona ahead of the workspace default", async () => {
     chatHookState.value.selectedAssistant = {
       kind: "persona",
