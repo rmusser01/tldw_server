@@ -482,10 +482,11 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
     assert metadata.LICENSE_EXPRESSION == "GPL-3.0-only"
 
     extras = metadata.OPTIONAL_EXTRAS
-    assert set(extras) == {
+    assert set(extras) == {  # nosec B101
         "core",
         "fastapi",
         "sqlite",
+        "docs-web",
         "federation",
         "gateway",
         "dev",

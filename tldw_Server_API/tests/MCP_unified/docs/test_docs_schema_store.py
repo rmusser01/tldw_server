@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
 
 import pytest
 
+from mcp_unified.docs.errors import DocsError
 from mcp_unified.docs.models import AccessScope
 from mcp_unified.docs.store.sqlite import DocsCatalogStore
+
+pytestmark = pytest.mark.unit
 
 
 def test_store_migrates_and_reports_status(tmp_path: Path) -> None:
@@ -45,6 +49,27 @@ def test_document_without_collection_is_searchable(tmp_path: Path) -> None:
     assert document_id > 0  # nosec B101
     assert len(results) == 1  # nosec B101
     assert results[0]["title"] == "Install Guide"  # nosec B101
+
+
+def test_upsert_document_rejects_malformed_optional_integer_fields(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+
+    with pytest.raises(DocsError, match="integer-compatible"):
+        store.upsert_document(
+            scope=AccessScope(),
+            title="Bad Offsets",
+            document_type="text",
+            canonical_uri="file:///bad.txt",
+            source_path="/bad.txt",
+            source_url=None,
+            text="bad offsets",
+            sections=[{"heading": "Bad", "level": 1, "start_char": "abc"}],
+            chunks=[{"text": "bad offsets", "citation": "bad.txt"}],
+            keywords=(),
+            collection_names=(),
+            metadata={},
+        )
 
 
 @pytest.mark.parametrize("query", ("sqlite:", "C++", "foo/bar", "foo -bar"))
@@ -205,6 +230,38 @@ def test_default_scope_upsert_replaces_document_without_duplicates(tmp_path: Pat
     assert results[0]["title"] == "Updated Title"  # nosec B101
 
 
+def test_concurrent_upserts_for_same_uri_do_not_create_duplicates(tmp_path: Path) -> None:
+    db_path = tmp_path / "docs.db"
+    store = DocsCatalogStore(db_path)
+    store.migrate()
+    scope = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
+
+    def upsert(index: int) -> int:
+        return DocsCatalogStore(db_path).upsert_document(
+            scope=scope,
+            title=f"Concurrent {index}",
+            document_type="text",
+            canonical_uri="file:///concurrent.txt",
+            source_path="/concurrent.txt",
+            source_url=None,
+            text=f"concurrent sqlite material {index}",
+            sections=[],
+            chunks=[{"text": f"concurrent sqlite material {index}", "citation": "concurrent.txt"}],
+            keywords=(),
+            collection_names=(),
+            metadata={},
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        ids = list(executor.map(upsert, range(8)))
+
+    documents = store.list_documents(scope=scope, limit=10)
+
+    assert len(set(ids)) == 1  # nosec B101
+    assert len(documents) == 1  # nosec B101
+    assert documents[0]["canonical_uri"] == "file:///concurrent.txt"  # nosec B101
+
+
 def test_migrate_backfills_legacy_null_default_scope_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "docs.db"
     with closing(DocsCatalogStore(db_path).connect()) as conn:
@@ -303,6 +360,59 @@ def test_list_keywords_includes_keyword_field(tmp_path: Path) -> None:
     keywords = store.list_keywords(scope)
 
     assert keywords == [{"id": 1, "name": "setup", "keyword": "setup", "document_count": 1}]  # nosec B101
+
+
+def test_empty_collection_survives_unrelated_document_upsert(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
+    store.create_collection(scope=scope, name="Empty", description="No docs yet")
+
+    store.upsert_document(
+        scope=scope,
+        title="Uncollected Doc",
+        document_type="text",
+        canonical_uri="file:///uncollected.txt",
+        source_path="/uncollected.txt",
+        source_url=None,
+        text="sqlite material",
+        sections=[],
+        chunks=[{"text": "sqlite material", "citation": "uncollected.txt"}],
+        keywords=(),
+        collection_names=(),
+        metadata={},
+    )
+
+    assert store.list_collections(scope) == [  # nosec B101
+        {"id": 1, "name": "Empty", "description": "No docs yet", "document_count": 0}
+    ]
+
+
+def test_fts_rows_are_removed_when_document_delete_cascades_chunks(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
+    document_id = store.upsert_document(
+        scope=scope,
+        title="Delete Me",
+        document_type="text",
+        canonical_uri="file:///delete.txt",
+        source_path="/delete.txt",
+        source_url=None,
+        text="delete sqlite material",
+        sections=[],
+        chunks=[{"text": "delete sqlite material", "citation": "delete.txt"}],
+        keywords=(),
+        collection_names=(),
+        metadata={},
+    )
+
+    with closing(store.connect()) as conn:
+        conn.execute("DELETE FROM docs_documents WHERE id = ?", (document_id,))
+        conn.commit()
+        row = conn.execute("SELECT COUNT(*) AS count FROM docs_chunks_fts").fetchone()
+
+    assert int(row["count"]) == 0  # nosec B101
 
 
 def test_resolve_name_returns_scoped_document_collection_and_keyword_matches(tmp_path: Path) -> None:

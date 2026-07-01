@@ -65,6 +65,10 @@ FASTAPI_DEPENDENCIES: Final = (
     "starlette",
 )
 SQLITE_DEPENDENCIES: Final = ("sqlalchemy",)
+DOCS_WEB_DEPENDENCIES: Final = (
+    "beautifulsoup4",
+    "trafilatura",
+)
 FEDERATION_DEPENDENCIES: Final = CORE_DEPENDENCIES
 GATEWAY_DEPENDENCIES: Final = (
     *CORE_DEPENDENCIES,
@@ -87,6 +91,7 @@ OPTIONAL_EXTRAS: Final = MappingProxyType(
         "core": CORE_DEPENDENCIES,
         "fastapi": FASTAPI_DEPENDENCIES,
         "sqlite": SQLITE_DEPENDENCIES,
+        "docs-web": DOCS_WEB_DEPENDENCIES,
         "federation": FEDERATION_DEPENDENCIES,
         "gateway": GATEWAY_DEPENDENCIES,
         "dev": DEV_DEPENDENCIES,

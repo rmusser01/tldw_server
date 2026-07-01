@@ -157,7 +157,11 @@ class DocsMCPToolProvider:
             _tool(
                 "get-library-docs",
                 "Context7-compatible docs retrieval backed by docs.context.",
-                {"context7CompatibleLibraryID": {"type": "string"}, "topic": {"type": "string"}},
+                {
+                    "context7CompatibleLibraryID": {"type": "string"},
+                    "topic": {"type": "string"},
+                    "tokens": {"type": "integer"},
+                },
                 ["context7CompatibleLibraryID"],
                 "retrieval",
             ),
@@ -193,10 +197,11 @@ class DocsMCPToolProvider:
             )
             return status
         if tool_name == "docs.search":
+            query = _required_str(args, "query")
             return self.retrieval.search(
                 scope=scope,
                 request=SearchRequest(
-                    query=str(args["query"]),
+                    query=query,
                     filters=_filters_from_args(args),
                     limit=int(args.get("limit", 10)),
                     offset=int(args.get("offset", 0)),
@@ -204,10 +209,11 @@ class DocsMCPToolProvider:
                 ),
             )
         if tool_name == "docs.context":
+            query = _required_str(args, "query")
             return self.context.build(
                 scope=scope,
                 request=ContextRequest(
-                    query=str(args["query"]),
+                    query=query,
                     filters=_filters_from_args(args),
                     max_chunks=int(args.get("max_chunks", 8)),
                     max_documents=int(args.get("max_documents", 4)),
@@ -215,22 +221,28 @@ class DocsMCPToolProvider:
                 ),
             )
         if tool_name == "docs.resolve":
-            return self.aliases.resolve(scope=scope, name=str(args["name"]))
+            return self.aliases.resolve(scope=scope, name=_required_str(args, "name"))
         if tool_name == "resolve-library-id":
-            return self.aliases.resolve_library_id(scope=scope, library_name=str(args["libraryName"]))
+            return self.aliases.resolve_library_id(scope=scope, library_name=_required_str(args, "libraryName"))
         if tool_name == "get-library-docs":
-            collection = str(args["context7CompatibleLibraryID"])
+            collection = _required_str(args, "context7CompatibleLibraryID")
             topic = str(args.get("topic") or collection)
+            token_budget = int(args.get("tokens", 3000))
             result = self.context.build(
                 scope=scope,
-                request=ContextRequest(query=topic, filters=SearchFilters(collection=collection)),
+                request=ContextRequest(
+                    query=topic,
+                    filters=SearchFilters(collection=collection),
+                    max_characters=max(1, token_budget) * 4,
+                ),
             )
             result["canonical_tool"] = "docs.context"
             return result
         if tool_name == "docs.import_path":
+            path = _required_str(args, "path")
             return self.importer.import_path(
                 scope=scope,
-                path=Path(str(args["path"])),
+                path=Path(path),
                 keywords=tuple(str(item) for item in args.get("keywords") or ()),
                 collection_names=tuple(str(item) for item in args.get("collections") or ()),
             )
@@ -251,9 +263,11 @@ class DocsMCPToolProvider:
 
     def _execute_management_or_list(self, *, tool_name: str, args: dict[str, Any], scope: AccessScope) -> Any:
         if tool_name == "docs.get":
-            return self.retrieval.get(scope=scope, target=args["id"], mode=str(args.get("mode") or "snippet"))
+            return self.retrieval.get(
+                scope=scope, target=_required_str(args, "id"), mode=str(args.get("mode") or "snippet")
+            )
         if tool_name == "docs.list":
-            kind = str(args["kind"])
+            kind = _required_str(args, "kind")
             limit = int(args.get("limit", 50))
             offset = int(args.get("offset", 0))
             if kind == "documents":
@@ -268,19 +282,19 @@ class DocsMCPToolProvider:
         if tool_name == "docs.collections.list":
             return self.retrieval.list_collections(scope=scope)
         if tool_name == "docs.collections.create":
-            name = str(args["name"]).strip()
+            name = _required_str(args, "name")
             description = str(args.get("description") or "")
             collection_id = self.store.create_collection(scope=scope, name=name, description=description)
             return {"status": "created", "id": collection_id, "name": name}
         if tool_name == "docs.collections.update":
-            name = str(args["name"]).strip()
+            name = _required_str(args, "name")
             description = str(args.get("description") or "")
             updated = self.store.update_collection(scope=scope, name=name, description=description)
             return {"status": "updated" if updated else "unchanged", "name": name}
         if tool_name == "docs.collections.set_membership":
-            collection = str(args["collection"]).strip()
-            document_id = int(args["document_id"])
-            action = str(args["action"]).strip().lower()
+            collection = _required_str(args, "collection")
+            document_id = _required_int(args, "document_id")
+            action = _required_str(args, "action").lower()
             result = self.store.set_collection_membership(
                 scope=scope,
                 collection=collection,
@@ -291,7 +305,9 @@ class DocsMCPToolProvider:
         if tool_name == "docs.keywords.list":
             return self.retrieval.list_keywords(scope=scope)
         if tool_name == "docs.keywords.apply":
-            document_id = int(args["document_id"])
+            document_id = _required_int(args, "document_id")
+            if "keywords" not in args:
+                raise ValueError("keywords is required")
             keywords = tuple(str(item) for item in args.get("keywords") or ())
             self.store.apply_keywords(scope=scope, document_id=document_id, keywords=keywords)
             return {"status": "updated", "document_id": document_id, "keywords": list(keywords)}
@@ -329,3 +345,16 @@ def _optional_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _required_str(args: dict[str, Any], name: str) -> str:
+    value = _optional_str(args.get(name))
+    if value is None:
+        raise ValueError(f"{name} is required")
+    return value
+
+
+def _required_int(args: dict[str, Any], name: str) -> int:
+    if name not in args:
+        raise ValueError(f"{name} is required")
+    return int(args[name])

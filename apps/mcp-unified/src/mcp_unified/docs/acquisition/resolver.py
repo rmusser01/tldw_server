@@ -24,7 +24,15 @@ class StdlibResolver:
             if ip_text in seen:
                 continue
             seen.add(ip_text)
-            addresses.append(ResolvedAddress(host=host, ip=ip_text, port=port, family=family))
+            addresses.append(
+                ResolvedAddress(
+                    host=host,
+                    ip=ip_text,
+                    port=port,
+                    family=family,
+                    is_private=is_unsafe_egress_ip(ip_text),
+                )
+            )
         return addresses
 
 

@@ -216,14 +216,17 @@ Important fields:
   profile-specific data
 - `title`
 - `description`
-- `document_type` such as `markdown`, `text`, `html`, `pdf`, `docx`, or `other`
+- `document_type` such as `markdown`, `mdx`, `text`, `html`, or `other`
 - `language`
 - `source_id`
 - `canonical_uri`
 - `source_url`
 - `source_path`
-- `content_hash`
-- `raw_content_hash`
+- `content_hash`: hash of the normalized text stored for retrieval and
+  re-indexing checks
+- `raw_content_hash`: optional future acquisition hash of source bytes or raw
+  extracted content before normalization; Stage 1 local imports do not require
+  this field in the standalone SQLite schema
 - `license_hint`
 - `created_at`, `updated_at`, `fetched_at`, `indexed_at`
 - `metadata_json`

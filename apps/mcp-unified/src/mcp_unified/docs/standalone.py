@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, Mapping
 
 from .mcp_module import DocsMCPToolProvider
@@ -10,6 +11,8 @@ from .settings import DocsSettings
 
 
 class StandaloneDocsProfile(str, Enum):
+    """Deployment profiles for standalone docs corpus mounting."""
+
     LOCKED_DOWN = "locked_down"
     LOCAL_FIRST = "local_first"
     ONLINE_CAPABLE = "online_capable"
@@ -17,12 +20,16 @@ class StandaloneDocsProfile(str, Enum):
 
 @dataclass(frozen=True)
 class StandaloneDocsMount:
+    """A mounted docs provider with its resolved settings and public tool surface."""
+
     module_id: str
     name: str
     settings: DocsSettings
     provider: DocsMCPToolProvider
 
     def tool_definitions(self) -> list[dict[str, Any]]:
+        """Return the MCP tool definitions exposed by this mount."""
+
         return self.provider.tool_definitions()
 
     def execute_tool(
@@ -32,7 +39,13 @@ class StandaloneDocsMount:
         *,
         scope: AccessScope | None = None,
     ) -> Any:
+        """Execute a docs tool in the supplied or default access scope."""
+
         return self.provider.execute(tool_name, arguments or {}, scope=scope or self.settings.default_scope)
+
+
+def _default_standalone_db_path() -> Path:
+    return Path.home() / ".local" / "share" / "tldw_mcp" / "docs.db"
 
 
 def standalone_docs_settings_for_profile(
@@ -40,9 +53,11 @@ def standalone_docs_settings_for_profile(
     *,
     overrides: Mapping[str, Any] | None = None,
 ) -> DocsSettings:
+    """Build docs settings from a named standalone deployment profile."""
+
     profile_value = StandaloneDocsProfile(profile)
     values: dict[str, Any] = {
-        "db_path": "Databases/mcp_docs.db",
+        "db_path": _default_standalone_db_path(),
         "enable_web_acquisition": False,
         "web_source_profile": profile_value.value,
         "allow_arbitrary_public_domains": False,
@@ -61,6 +76,8 @@ def create_standalone_docs_mount(
     module_id: str = "docs",
     name: str = "Docs Corpus",
 ) -> StandaloneDocsMount:
+    """Create a runtime-neutral docs MCP mount for the standalone server."""
+
     if isinstance(settings, DocsSettings):
         resolved_settings = settings
     else:

@@ -19,6 +19,8 @@ from mcp_unified.docs.acquisition.models import (
 )
 from mcp_unified.docs.acquisition.policy import SourcePolicy, has_url_credentials, normalize_url
 
+pytestmark = pytest.mark.unit
+
 
 def _settings(**overrides: object) -> dict[str, object]:
     values: dict[str, object] = {
@@ -328,6 +330,6 @@ def test_normalize_url_returns_safe_canonical_parts() -> None:
     assert normalized.scheme == "https"  # nosec B101
     assert normalized.host == "docs.example.com"  # nosec B101
     assert normalized.port is None  # nosec B101
-    assert normalized.canonical_url == "https://docs.example.com/reference/page"  # nosec B101
+    assert normalized.canonical_url == "https://docs.example.com/reference/page?token=secret"  # nosec B101
     assert normalized.redacted_url == "https://docs.example.com/reference/page"  # nosec B101
     assert "token" not in normalized.redacted_url  # nosec B101

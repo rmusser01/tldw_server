@@ -5,9 +5,13 @@ import importlib
 import sys
 from pathlib import Path
 
+import pytest
 
-DOCS_PACKAGE_ROOT = Path("apps/mcp-unified/src/mcp_unified/docs")
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+DOCS_PACKAGE_ROOT = REPO_ROOT / "apps/mcp-unified/src/mcp_unified/docs"
 FORBIDDEN_IMPORT_PREFIX = "tldw_Server_API"
+pytestmark = pytest.mark.unit
 
 
 def _import_names(path: Path) -> set[str]:
@@ -65,6 +69,9 @@ def test_docs_package_does_not_import_optional_web_acquisition_dependencies() ->
 
 
 def test_docs_package_import_does_not_load_rich_extractors() -> None:
+    for name in list(sys.modules):
+        if name == "mcp_unified.docs" or name.startswith("mcp_unified.docs."):
+            sys.modules.pop(name, None)
     for name in ("trafilatura", "bs4"):
         sys.modules.pop(name, None)
 

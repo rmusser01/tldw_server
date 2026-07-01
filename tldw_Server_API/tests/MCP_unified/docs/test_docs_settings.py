@@ -4,7 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from mcp_unified.docs.models import AccessScope
 from mcp_unified.docs.settings import DocsSettings
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("value", ["false", "0", "no", "off", False])
@@ -24,6 +27,12 @@ def test_from_mapping_coerces_true_values_for_web_acquisition(value: str | bool)
 def test_from_mapping_rejects_unknown_web_acquisition_string() -> None:
     with pytest.raises(ValueError, match="enable_web_acquisition"):
         DocsSettings.from_mapping({"enable_web_acquisition": "sometimes"})
+
+
+@pytest.mark.parametrize("value", [1, 0, [], {"enabled": True}])
+def test_from_mapping_rejects_non_boolean_web_acquisition_values(value: object) -> None:
+    with pytest.raises(ValueError, match="enable_web_acquisition"):
+        DocsSettings.from_mapping({"enable_web_acquisition": value})
 
 
 def test_from_mapping_uses_safe_url_acquisition_defaults() -> None:
@@ -70,6 +79,13 @@ def test_from_mapping_parses_url_acquisition_values() -> None:
     assert settings.allowed_content_types == ("text/plain",)  # nosec B101
     assert settings.url_user_agent == "tldw-docs-test/1"  # nosec B101
     assert settings.respect_robots is True  # nosec B101
+    assert settings.allow_arbitrary_public_domains is False  # nosec B101
+
+
+def test_from_mapping_parses_default_scope() -> None:
+    settings = DocsSettings.from_mapping({"default_scope": {"owner_scope": "owner-a", "profile_scope": "profile-a"}})
+
+    assert settings.default_scope == AccessScope(owner_scope="owner-a", profile_scope="profile-a")  # nosec B101
 
 
 @pytest.mark.parametrize("profile", ["", "open", "offline", "LOCAL_FIRST"])
@@ -82,6 +98,12 @@ def test_from_mapping_rejects_unknown_web_source_profile(profile: str) -> None:
 def test_from_mapping_rejects_non_positive_url_limits(field: str) -> None:
     with pytest.raises(ValueError, match=field):
         DocsSettings.from_mapping({field: 0})
+
+
+@pytest.mark.parametrize("value", [1.5, "1.5", [], {"limit": 5}])
+def test_from_mapping_rejects_non_integer_url_limits(value: object) -> None:
+    with pytest.raises(ValueError, match="max_url_redirects"):
+        DocsSettings.from_mapping({"max_url_redirects": value})
 
 
 @pytest.mark.parametrize("value", [0, "nan", "inf", "-inf"])

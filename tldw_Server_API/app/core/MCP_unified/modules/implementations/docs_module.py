@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from loguru import logger
@@ -38,17 +39,37 @@ class DocsModule(BaseModule):
         return self._ensure_provider().tool_definitions()
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
-        args = self.sanitize_input(arguments or {})
+        args = dict(arguments or {})
         try:
             self.validate_tool_arguments(tool_name, args)
         except (OverflowError, TypeError, ValueError) as exc:
             raise ValueError(f"Invalid arguments for {tool_name}: {exc}") from exc
-        return self._ensure_provider().execute(tool_name, args, scope=docs_scope_from_context(context))
+        provider = self._ensure_provider()
+        scope = docs_scope_from_context(context)
+        return await asyncio.to_thread(provider.execute, tool_name, args, scope=scope)
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
-        if tool_name == "docs.import_path" and not str(arguments.get("path") or "").strip():
-            raise ValueError("path is required")
-        if tool_name == "docs.ingest_url" and not str(arguments.get("url") or "").strip():
-            raise ValueError("url is required")
-        if tool_name in {"docs.search", "docs.context"} and not str(arguments.get("query") or "").strip():
-            raise ValueError("query is required")
+        required_strings = {
+            "docs.import_path": ("path",),
+            "docs.ingest_url": ("url",),
+            "docs.search": ("query",),
+            "docs.context": ("query",),
+            "docs.resolve": ("name",),
+            "docs.get": ("id",),
+            "docs.list": ("kind",),
+            "docs.collections.create": ("name",),
+            "docs.collections.update": ("name",),
+            "docs.collections.set_membership": ("collection", "action"),
+            "resolve-library-id": ("libraryName",),
+            "get-library-docs": ("context7CompatibleLibraryID",),
+        }
+        for field_name in required_strings.get(tool_name, ()):
+            if not str(arguments.get(field_name) or "").strip():
+                raise ValueError(f"{field_name} is required")
+        if (
+            tool_name in {"docs.collections.set_membership", "docs.keywords.apply"}
+            and not str(arguments.get("document_id") or "").strip()
+        ):
+            raise ValueError("document_id is required")
+        if tool_name == "docs.keywords.apply" and "keywords" not in arguments:
+            raise ValueError("keywords is required")

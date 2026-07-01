@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from typing import Literal, Protocol
 
 PolicyStatus = Literal["allowed", "approval_required", "denied"]
@@ -24,8 +24,15 @@ class NormalizedURL:
     port: int | None
     path: str
     decoded_path: str
-    canonical_url: str
     redacted_url: str
+    canonical_url: InitVar[str | None] = None
+
+    def __post_init__(self, canonical_url: str | None) -> None:
+        object.__setattr__(self, "_canonical_url", canonical_url or self.redacted_url)
+
+    @property
+    def canonical_url(self) -> str:
+        return self._canonical_url
 
 
 @dataclass(frozen=True)
@@ -86,6 +93,7 @@ class FetchResult:
     status: FetchResultStatus
     reason: str
     final_url: str | None = None
+    canonical_url: str | None = None
     status_code: int | None = None
     headers: Mapping[str, str] = field(default_factory=dict)
     body: bytes = b""

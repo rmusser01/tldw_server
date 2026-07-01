@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tldw_Server_API.app.core.MCP_unified.adapters.docs.config import (
     docs_scope_from_context,
     docs_settings_from_module_config,
 )
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+
+pytestmark = pytest.mark.unit
 
 
 def test_docs_settings_from_module_config_keeps_locked_down_defaults(tmp_path: Path) -> None:

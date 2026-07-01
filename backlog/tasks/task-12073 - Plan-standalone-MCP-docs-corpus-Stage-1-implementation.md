@@ -1,7 +1,7 @@
 ---
 id: TASK-12073
 title: Plan standalone MCP docs corpus Stage 1 implementation
-status: In Progress
+status: Done
 labels:
 - mcp
 - docs
@@ -21,6 +21,9 @@ Write the Stage 1 implementation plan for the standalone MCP document corpus: lo
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
+- [x] #1 Stage 1 implementation plan covers local imports, SQLite/FTS5 storage, scoped retrieval/context, collection/keyword metadata, Context7-compatible aliases, package-boundary tests, and MCP config registration.
+- [x] #2 Plan explicitly defers URL acquisition, web-scraping extras, embeddings, Playwright, crawler sync, and Media/RAG bridging to later stages.
+- [x] #3 Plan path, verification notes, and documentation links are recorded in this Backlog task.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -43,10 +46,10 @@ Stage 1 implementation plan written at `Docs/superpowers/plans/2026-06-30-standa
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

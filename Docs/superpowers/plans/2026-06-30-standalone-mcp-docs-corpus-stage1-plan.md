@@ -553,8 +553,8 @@ CREATE TABLE IF NOT EXISTS docs_schema_migrations (
 
 CREATE TABLE IF NOT EXISTS docs_documents (
   id INTEGER PRIMARY KEY,
-  owner_scope TEXT,
-  profile_scope TEXT,
+  owner_scope TEXT NOT NULL DEFAULT '',
+  profile_scope TEXT NOT NULL DEFAULT '',
   title TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   document_type TEXT NOT NULL,
@@ -563,7 +563,7 @@ CREATE TABLE IF NOT EXISTS docs_documents (
   source_url TEXT,
   source_path TEXT,
   content_hash TEXT NOT NULL,
-  raw_content_hash TEXT NOT NULL,
+  text TEXT NOT NULL,
   metadata_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -575,8 +575,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_docs_documents_scope_uri
 
 CREATE TABLE IF NOT EXISTS docs_collections (
   id INTEGER PRIMARY KEY,
-  owner_scope TEXT,
-  profile_scope TEXT,
+  owner_scope TEXT NOT NULL DEFAULT '',
+  profile_scope TEXT NOT NULL DEFAULT '',
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   collection_type TEXT NOT NULL DEFAULT 'general',
@@ -601,8 +601,8 @@ CREATE TABLE IF NOT EXISTS docs_collection_members (
 
 CREATE TABLE IF NOT EXISTS docs_keywords (
   id INTEGER PRIMARY KEY,
-  owner_scope TEXT,
-  profile_scope TEXT,
+  owner_scope TEXT NOT NULL DEFAULT '',
+  profile_scope TEXT NOT NULL DEFAULT '',
   keyword TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -642,18 +642,16 @@ CREATE TABLE IF NOT EXISTS docs_chunks (
 
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_chunks_fts USING fts5(
   title,
-  chunk_text,
+  body,
   citation,
-  document_id UNINDEXED,
   chunk_id UNINDEXED,
-  content='',
-  tokenize='unicode61'
+  document_id UNINDEXED
 );
 
 CREATE TABLE IF NOT EXISTS docs_aliases (
   id INTEGER PRIMARY KEY,
-  owner_scope TEXT,
-  profile_scope TEXT,
+  owner_scope TEXT NOT NULL DEFAULT '',
+  profile_scope TEXT NOT NULL DEFAULT '',
   alias TEXT NOT NULL,
   target_type TEXT NOT NULL,
   target_id INTEGER NOT NULL,
@@ -746,9 +744,9 @@ class DocsCatalogStore:
             row = conn.execute(
                 """
                 SELECT id FROM docs_documents
-                WHERE owner_scope IS ? AND profile_scope IS ? AND canonical_uri = ?
+                WHERE owner_scope = ? AND profile_scope = ? AND canonical_uri = ?
                 """,
-                (scope.owner_scope, scope.profile_scope, canonical_uri),
+                (scope.owner_scope or "", scope.profile_scope or "", canonical_uri),
             ).fetchone()
             if row:
                 document_id = int(row["id"])
@@ -756,11 +754,11 @@ class DocsCatalogStore:
                     """
                     UPDATE docs_documents
                     SET title = ?, document_type = ?, source_path = ?, source_url = ?,
-                        content_hash = ?, raw_content_hash = ?, metadata_json = ?,
+                        content_hash = ?, text = ?, metadata_json = ?,
                         updated_at = CURRENT_TIMESTAMP, indexed_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
-                    (title, document_type, source_path, source_url, content_hash, content_hash, json.dumps(metadata), document_id),
+                    (title, document_type, source_path, source_url, content_hash, text, json.dumps(metadata), document_id),
                 )
                 conn.execute("DELETE FROM docs_sections WHERE document_id = ?", (document_id,))
                 conn.execute("DELETE FROM docs_chunks WHERE document_id = ?", (document_id,))
@@ -772,19 +770,19 @@ class DocsCatalogStore:
                     """
                     INSERT INTO docs_documents(
                       owner_scope, profile_scope, title, document_type, canonical_uri,
-                      source_url, source_path, content_hash, raw_content_hash, metadata_json, indexed_at
+                      source_url, source_path, content_hash, text, metadata_json, indexed_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     """,
                     (
-                        scope.owner_scope,
-                        scope.profile_scope,
+                        scope.owner_scope or "",
+                        scope.profile_scope or "",
                         title,
                         document_type,
                         canonical_uri,
                         source_url,
                         source_path,
                         content_hash,
-                        content_hash,
+                        text,
                         json.dumps(metadata),
                     ),
                 )
@@ -835,11 +833,11 @@ class DocsCatalogStore:
                 )
                 chunk_id = int(cur.lastrowid)
                 conn.execute(
-                    "INSERT INTO docs_chunks_fts(title, chunk_text, citation, document_id, chunk_id) VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO docs_chunks_fts(title, body, citation, document_id, chunk_id) VALUES (?, ?, ?, ?, ?)",
                     (title, chunk_text, str(chunk.get("citation") or canonical_uri), str(document_id), str(chunk_id)),
                 )
 
-            self._replace_keywords(conn, scope, document_id, keywords)
+            self._insert_keywords(conn, scope, document_id, keywords)
             self._replace_collections(conn, scope, document_id, collection_names)
             return document_id
 ```
@@ -873,7 +871,7 @@ Continue `mcp_unified/docs/store/sqlite.py` with concrete scoped helper methods:
         )
         return int(cur.fetchone()["id"])
 
-    def _replace_keywords(
+    def _insert_keywords(
         self,
         conn: sqlite3.Connection,
         scope: AccessScope,
@@ -2076,7 +2074,7 @@ Add the backing store methods in `mcp_unified/docs/store/sqlite.py`:
 
                 raise DocsError("document_not_found", "Document not found in active scope.", {"document_id": document_id})
             conn.execute("DELETE FROM docs_document_keywords WHERE document_id = ?", (document_id,))
-            self._replace_keywords(conn, scope, document_id, keywords)
+            self._insert_keywords(conn, scope, document_id, keywords)
 ```
 
 - [ ] **Step 3: Update exports**

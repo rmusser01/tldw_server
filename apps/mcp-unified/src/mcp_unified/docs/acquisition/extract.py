@@ -33,15 +33,25 @@ def extract_fetched_document(*, url: str, content_type: str, body: bytes) -> Par
             source_url=url,
             extraction_method="text",
         )
+    if media_type not in _HTML_CONTENT_TYPES:
+        return ParsedDocument(
+            title=_title_from_url(url),
+            document_type="text",
+            text=text.strip(),
+            sections=[],
+            canonical_uri=url,
+            source_url=url,
+            extraction_method="text",
+        )
 
-    static_html = _parse_static_html(url=url, text=text) if media_type in _HTML_CONTENT_TYPES else None
+    static_html = _parse_static_html(url=url, text=text)
     trafilatura_text = _extract_with_trafilatura(text)
     if trafilatura_text:
         return ParsedDocument(
             title=_metadata_title(static_html, url),
             document_type="html",
             text=trafilatura_text,
-            sections=static_html.sections if static_html is not None else [],
+            sections=static_html.sections,
             canonical_uri=url,
             source_url=url,
             extraction_method="trafilatura",
@@ -53,24 +63,13 @@ def extract_fetched_document(*, url: str, content_type: str, body: bytes) -> Par
             title=_metadata_title(static_html, url),
             document_type="html",
             text=soup_text,
-            sections=static_html.sections if static_html is not None else [],
+            sections=static_html.sections,
             canonical_uri=url,
             source_url=url,
             extraction_method="beautifulsoup",
         )
 
-    document_type = "html" if media_type in _HTML_CONTENT_TYPES else "text"
-    if document_type == "text":
-        return ParsedDocument(
-            title=_title_from_url(url),
-            document_type="text",
-            text=text.strip(),
-            sections=[],
-            canonical_uri=url,
-            source_url=url,
-            extraction_method="text",
-        )
-    return static_html or _parse_static_html(url=url, text=text)
+    return static_html
 
 
 def _parse_static_html(*, url: str, text: str) -> ParsedDocument:
@@ -84,8 +83,8 @@ def _parse_static_html(*, url: str, text: str) -> ParsedDocument:
     )
 
 
-def _metadata_title(static_html: ParsedDocument | None, url: str) -> str:
-    return static_html.title if static_html is not None else _title_from_url(url)
+def _metadata_title(static_html: ParsedDocument, url: str) -> str:
+    return static_html.title or _title_from_url(url)
 
 
 def _can_import(name: str) -> bool:
@@ -110,8 +109,8 @@ def _decode_body(body: bytes, content_type: str) -> str:
     charset = "utf-8"
     for part in content_type.split(";")[1:]:
         key, _separator, value = part.strip().partition("=")
-        if key.lower() == "charset" and value:
-            charset = value.strip()
+        if key.strip().lower() == "charset" and value:
+            charset = value.strip().strip("\"'")
             break
     try:
         return body.decode(charset, errors="replace")

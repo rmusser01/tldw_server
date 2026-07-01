@@ -2,7 +2,7 @@
 
 Date: 2026-06-30
 Status: Draft for user review
-Backlog: TASK-12076
+Backlog: TASK-12076.1
 Related:
 - Docs/superpowers/specs/2026-06-30-standalone-mcp-docs-catalog-design.md
 - Docs/superpowers/plans/2026-06-30-standalone-mcp-docs-corpus-stage1-plan.md

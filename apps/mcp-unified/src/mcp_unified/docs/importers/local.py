@@ -30,6 +30,8 @@ class DocsImportService:
     ) -> dict:
         target = self._assert_allowed_path(Path(path))
         files = self._iter_import_files(target)
+        keyword_tuple = tuple(keywords)
+        collection_tuple = tuple(collection_names)
         imported: list[dict] = []
 
         for file_path in files:
@@ -52,8 +54,8 @@ class DocsImportService:
                 text=parsed.text,
                 sections=[asdict(section) for section in parsed.sections],
                 chunks=chunks,
-                keywords=keywords,
-                collection_names=collection_names,
+                keywords=keyword_tuple,
+                collection_names=collection_tuple,
                 metadata={"importer": "local"},
             )
             imported.append({"id": document_id, "title": parsed.title, "chunks": len(chunks)})
@@ -88,6 +90,8 @@ class DocsImportService:
         files: list[Path] = []
         for candidate in sorted(target.rglob("*")):
             if not candidate.is_file():
+                continue
+            if candidate.suffix.lower() not in SUPPORTED_SUFFIXES:
                 continue
             files.append(self._assert_allowed_path(candidate))
         return files

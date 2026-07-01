@@ -9,6 +9,8 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
+from loguru import logger
+
 from ..errors import DocsError
 from ..models import AccessScope
 
@@ -66,6 +68,7 @@ class DocsCatalogStore:
         with closing(self.connect()) as conn:
             conn.executescript(schema)
             self._backfill_scope_sentinels(conn)
+            self._ensure_documents_scope_uri_unique_index(conn)
             self._ensure_collection_description_column(conn)
             conn.commit()
 
@@ -107,81 +110,52 @@ class DocsCatalogStore:
 
         with closing(self.connect()) as conn:
             with conn:
-                row = conn.execute(
+                cursor = conn.execute(
                     """
-                    SELECT id
-                    FROM docs_documents
-                    WHERE owner_scope = ? AND profile_scope = ? AND canonical_uri = ?
+                    INSERT INTO docs_documents (
+                        owner_scope,
+                        profile_scope,
+                        title,
+                        document_type,
+                        canonical_uri,
+                        source_path,
+                        source_url,
+                        content_hash,
+                        text,
+                        metadata_json,
+                        package_name,
+                        package_version
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(owner_scope, profile_scope, canonical_uri)
+                    DO UPDATE SET title = excluded.title,
+                        document_type = excluded.document_type,
+                        source_path = excluded.source_path,
+                        source_url = excluded.source_url,
+                        content_hash = excluded.content_hash,
+                        text = excluded.text,
+                        metadata_json = excluded.metadata_json,
+                        package_name = excluded.package_name,
+                        package_version = excluded.package_version,
+                        updated_at = CURRENT_TIMESTAMP
+                    RETURNING id
                     """,
-                    (owner_scope, profile_scope, canonical_uri),
-                ).fetchone()
-                if row is None:
-                    cursor = conn.execute(
-                        """
-                        INSERT INTO docs_documents (
-                            owner_scope,
-                            profile_scope,
-                            title,
-                            document_type,
-                            canonical_uri,
-                            source_path,
-                            source_url,
-                            content_hash,
-                            text,
-                            metadata_json,
-                            package_name,
-                            package_version
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            owner_scope,
-                            profile_scope,
-                            title,
-                            document_type,
-                            canonical_uri,
-                            source_path,
-                            source_url,
-                            content_hash,
-                            text,
-                            metadata_json,
-                            package_name,
-                            package_version,
-                        ),
-                    )
-                    document_id = int(cursor.lastrowid)
-                else:
-                    document_id = int(row["id"])
-                    conn.execute(
-                        """
-                        UPDATE docs_documents
-                        SET title = ?,
-                            document_type = ?,
-                            source_path = ?,
-                            source_url = ?,
-                            content_hash = ?,
-                            text = ?,
-                            metadata_json = ?,
-                            package_name = ?,
-                            package_version = ?,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ? AND owner_scope = ? AND profile_scope = ?
-                        """,
-                        (
-                            title,
-                            document_type,
-                            source_path,
-                            source_url,
-                            content_hash,
-                            text,
-                            metadata_json,
-                            package_name,
-                            package_version,
-                            document_id,
-                            owner_scope,
-                            profile_scope,
-                        ),
-                    )
+                    (
+                        owner_scope,
+                        profile_scope,
+                        title,
+                        document_type,
+                        canonical_uri,
+                        source_path,
+                        source_url,
+                        content_hash,
+                        text,
+                        metadata_json,
+                        package_name,
+                        package_version,
+                    ),
+                )
+                document_id = int(cursor.fetchone()["id"])
 
                 self._replace_document_rows(conn, document_id, title, sections, chunks)
                 self._replace_document_keywords(conn, owner_scope, profile_scope, document_id, keywords)
@@ -267,6 +241,34 @@ class DocsCatalogStore:
             }
             for row in rows
         ]
+
+    def count_search_chunks(self, scope: AccessScope, query: str, filters: Any = None) -> int:
+        query = query.strip()
+        if not query:
+            return 0
+        match_query = _fts_match_query(query)
+        if not match_query:
+            return 0
+
+        owner_scope, profile_scope = _scope_values(scope)
+        where_sql, params = self._search_filter_sql(filters, owner_scope, profile_scope)
+        sql = "\n".join(
+            (
+                """
+            SELECT COUNT(*) AS count
+            FROM docs_chunks_fts
+            JOIN docs_chunks c ON c.id = docs_chunks_fts.chunk_id
+            JOIN docs_documents d ON d.id = c.document_id
+            WHERE docs_chunks_fts MATCH ?
+              AND d.owner_scope = ?
+              AND d.profile_scope = ?
+                """,
+                where_sql,
+            )
+        )
+        with closing(self.connect()) as conn:
+            row = conn.execute(sql, (match_query, owner_scope, profile_scope, *params)).fetchone()
+        return int(row["count"]) if row is not None else 0
 
     def get_document(self, scope: AccessScope, target: int | str, mode: str = "snippet") -> dict[str, Any]:
         document_id = target if isinstance(target, int) else self._resolve_document_id(scope, target)
@@ -661,10 +663,23 @@ class DocsCatalogStore:
             conn.execute("ALTER TABLE docs_collections ADD COLUMN description TEXT NOT NULL DEFAULT ''")
 
     @staticmethod
+    def _ensure_documents_scope_uri_unique_index(conn: sqlite3.Connection) -> None:
+        columns = ("owner_scope", "profile_scope", "canonical_uri")
+        if _table_has_unique_index(conn, "docs_documents", columns):
+            return
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS docs_documents_scope_uri_unique_idx
+            ON docs_documents (owner_scope, profile_scope, canonical_uri)
+            """
+        )
+
+    @staticmethod
     def _schema_version(conn: sqlite3.Connection) -> int:
         try:
             row = conn.execute("SELECT MAX(version) AS version FROM docs_schema_migrations").fetchone()
-        except sqlite3.Error:
+        except sqlite3.Error as exc:
+            logger.debug("Could not read docs schema version: {}", exc)
             return 0
         return int(row["version"] or 0) if row is not None else 0
 
@@ -672,7 +687,8 @@ class DocsCatalogStore:
     def _fts_available(conn: sqlite3.Connection) -> bool:
         try:
             conn.execute("SELECT rowid FROM docs_chunks_fts LIMIT 0").fetchall()
-        except sqlite3.Error:
+        except sqlite3.Error as exc:
+            logger.debug("Could not verify docs FTS availability: {}", exc)
             return False
         return True
 
@@ -680,7 +696,11 @@ class DocsCatalogStore:
     def _count(conn: sqlite3.Connection, table_name: str) -> int:
         try:
             row = conn.execute(_COUNT_SQL[table_name]).fetchone()
-        except (KeyError, sqlite3.Error):
+        except KeyError:
+            logger.debug("Unknown docs count table requested: {}", table_name)
+            return 0
+        except sqlite3.Error as exc:
+            logger.debug("Could not count docs table {}: {}", table_name, exc)
             return 0
         return int(row["count"]) if row is not None else 0
 
@@ -830,15 +850,6 @@ class DocsCatalogStore:
                 """,
                 (int(row["id"]), document_id),
             )
-        conn.execute(
-            """
-            DELETE FROM docs_collections
-            WHERE owner_scope = ?
-              AND profile_scope = ?
-              AND id NOT IN (SELECT collection_id FROM docs_collection_members)
-            """,
-            (owner_scope, profile_scope),
-        )
 
     @staticmethod
     def _search_filter_sql(filters: Any, owner_scope: str, profile_scope: str) -> tuple[str, list[Any]]:
@@ -990,9 +1001,19 @@ def _optional_text(value: object) -> str | None:
 
 
 def _optional_int(value: object) -> int | None:
-    if value is None or value == "":
+    if value is None:
         return None
-    return int(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except (TypeError, ValueError) as exc:
+        raise DocsError(
+            code="invalid_integer",
+            message="Expected an integer-compatible value.",
+            details={"value": text},
+        ) from exc
 
 
 def _required_name(value: object, field_name: str) -> str:
@@ -1032,6 +1053,24 @@ def _table_has_scope_columns(conn: sqlite3.Connection, table_name: str) -> bool:
         return False
     columns = {row["name"] for row in rows}
     return {"owner_scope", "profile_scope"}.issubset(columns)
+
+
+def _table_has_unique_index(conn: sqlite3.Connection, table_name: str, columns: tuple[str, ...]) -> bool:
+    try:
+        indexes = conn.execute(f"PRAGMA index_list({table_name})").fetchall()
+    except sqlite3.Error:
+        return False
+    for index in indexes:
+        if not bool(index["unique"]):
+            continue
+        index_name = index["name"]
+        try:
+            indexed_columns = conn.execute(f"PRAGMA index_info({index_name})").fetchall()
+        except sqlite3.Error:
+            continue
+        if tuple(row["name"] for row in indexed_columns) == columns:
+            return True
+    return False
 
 
 def _fts_match_query(query: str) -> str:

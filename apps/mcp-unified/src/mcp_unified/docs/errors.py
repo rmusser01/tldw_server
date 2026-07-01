@@ -12,6 +12,9 @@ class DocsError(Exception):
     message: str
     details: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        Exception.__init__(self, self.message)
+
     def __str__(self) -> str:
         return f"{self.code}: {self.message}"
 

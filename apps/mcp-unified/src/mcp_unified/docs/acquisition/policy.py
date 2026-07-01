@@ -109,7 +109,8 @@ def normalize_url(raw_url: str) -> NormalizedURL:
 
     path = parts.path or "/"
     decoded_path = unquote(path)
-    canonical_url = _build_redacted_url(scheme=scheme, host=host, port=port, path=path)
+    canonical_url = _build_canonical_url(scheme=scheme, host=host, port=port, path=path, query=parts.query)
+    redacted_url = _build_redacted_url(scheme=scheme, host=host, port=port, path=path)
     return NormalizedURL(
         scheme=scheme,
         host=host,
@@ -117,7 +118,7 @@ def normalize_url(raw_url: str) -> NormalizedURL:
         path=path,
         decoded_path=decoded_path,
         canonical_url=canonical_url,
-        redacted_url=canonical_url,
+        redacted_url=redacted_url,
     )
 
 
@@ -236,6 +237,12 @@ def _normalize_hostname(hostname: str) -> str:
         return host.encode("idna").decode("ascii").lower()
     except UnicodeError as exc:
         raise URLPolicyError("malformed_url") from exc
+
+
+def _build_canonical_url(*, scheme: str, host: str, port: int | None, path: str, query: str) -> str:
+    display_host = _format_url_host(host)
+    netloc = f"{display_host}:{port}" if port is not None else display_host
+    return urlunsplit((scheme, netloc, path or "/", query, ""))
 
 
 def _build_redacted_url(*, scheme: str, host: str, port: int | None, path: str) -> str:

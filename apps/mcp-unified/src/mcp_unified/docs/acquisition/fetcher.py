@@ -47,13 +47,6 @@ class URLFetcher:
             normalized = decision.normalized_url
             if normalized is None:
                 return FetchResult(status="denied", reason="malformed_url", redirects=tuple(redirects))
-            if self.settings.respect_robots:
-                return FetchResult(
-                    status="denied",
-                    reason="robots_unavailable",
-                    final_url=normalized.redacted_url,
-                    redirects=tuple(redirects),
-                )
             if not bool(getattr(self.transport, "dials_validated_address", False)):
                 return FetchResult(
                     status="denied",
@@ -151,11 +144,23 @@ class URLFetcher:
                 current_url = next_url
                 continue
 
+            if response.status_code < 200 or response.status_code >= 300:
+                return FetchResult(
+                    status="denied",
+                    reason="http_status_error",
+                    final_url=normalized.redacted_url,
+                    canonical_url=normalized.canonical_url,
+                    status_code=response.status_code,
+                    headers=headers,
+                    redirects=tuple(redirects),
+                )
+
             if not _content_type_allowed(headers, self.settings.allowed_content_types):
                 return FetchResult(
                     status="denied",
                     reason="content_type_denied",
                     final_url=normalized.redacted_url,
+                    canonical_url=normalized.canonical_url,
                     status_code=response.status_code,
                     headers=headers,
                     redirects=tuple(redirects),
@@ -171,11 +176,29 @@ class URLFetcher:
                     headers=headers,
                     redirects=tuple(redirects),
                 )
-            decoded_body = _decode_limited(body, headers.get("content-encoding"), self.settings.max_url_body_bytes)
+            body, transfer_reason = _decode_transfer_limited(
+                body,
+                headers.get("transfer-encoding"),
+                self.settings.max_url_body_bytes,
+            )
+            if body is None:
+                return FetchResult(
+                    status="denied",
+                    reason=transfer_reason or "transfer_encoding_unsupported",
+                    final_url=normalized.redacted_url,
+                    status_code=response.status_code,
+                    headers=headers,
+                    redirects=tuple(redirects),
+                )
+            decoded_body, decode_reason = _decode_limited(
+                body,
+                headers.get("content-encoding"),
+                self.settings.max_url_body_bytes,
+            )
             if decoded_body is None:
                 return FetchResult(
                     status="denied",
-                    reason="content_too_large",
+                    reason=decode_reason or "content_too_large",
                     final_url=normalized.redacted_url,
                     status_code=response.status_code,
                     headers=headers,
@@ -185,6 +208,7 @@ class URLFetcher:
                 status="fetched",
                 reason="ok",
                 final_url=normalized.redacted_url,
+                canonical_url=normalized.canonical_url,
                 status_code=response.status_code,
                 headers=headers,
                 body=decoded_body,
@@ -257,9 +281,11 @@ def _normalize_headers(headers: Mapping[str, str]) -> dict[str, str]:
 
 
 def _content_type_allowed(headers: Mapping[str, str], allowed_content_types: tuple[str, ...]) -> bool:
+    if not allowed_content_types:
+        return True
     content_type = headers.get("content-type")
     if not content_type:
-        return True
+        return False
     media_type = content_type.split(";", 1)[0].strip().lower()
     allowed = {item.split(";", 1)[0].strip().lower() for item in allowed_content_types}
     return media_type in allowed
@@ -276,7 +302,47 @@ def _join_limited(chunks: Iterable[bytes], max_bytes: int) -> bytes | None:
     return bytes(body)
 
 
-def _decode_limited(body: bytes, content_encoding: str | None, max_bytes: int) -> bytes | None:
+def _decode_transfer_limited(
+    body: bytes,
+    transfer_encoding: str | None,
+    max_bytes: int,
+) -> tuple[bytes | None, str | None]:
+    encodings = [item.strip().lower() for item in (transfer_encoding or "").split(",") if item.strip()]
+    if not encodings or encodings == ["identity"]:
+        return body, None
+    if encodings == ["chunked"]:
+        return _decode_chunked_limited(body, max_bytes)
+    return None, "transfer_encoding_unsupported"
+
+
+def _decode_chunked_limited(body: bytes, max_bytes: int) -> tuple[bytes | None, str | None]:
+    decoded = bytearray()
+    position = 0
+    while True:
+        line_end = body.find(b"\r\n", position)
+        if line_end < 0:
+            return None, "transfer_encoding_unsupported"
+        size_text = body[position:line_end].split(b";", 1)[0].strip()
+        try:
+            chunk_size = int(size_text, 16)
+        except ValueError:
+            return None, "transfer_encoding_unsupported"
+        position = line_end + 2
+        if chunk_size == 0:
+            return bytes(decoded), None
+        chunk_end = position + chunk_size
+        if chunk_end > len(body):
+            return None, "transfer_encoding_unsupported"
+        if len(decoded) + chunk_size > max_bytes:
+            return None, "content_too_large"
+        decoded.extend(body[position:chunk_end])
+        position = chunk_end
+        if body[position : position + 2] != b"\r\n":
+            return None, "transfer_encoding_unsupported"
+        position += 2
+
+
+def _decode_limited(body: bytes, content_encoding: str | None, max_bytes: int) -> tuple[bytes | None, str | None]:
     encoding = (content_encoding or "identity").split(",", 1)[0].strip().lower()
     try:
         if encoding in {"", "identity"}:
@@ -286,14 +352,14 @@ def _decode_limited(body: bytes, content_encoding: str | None, max_bytes: int) -
         elif encoding == "deflate":
             decoded = _zlib_decode_limited(body, zlib.MAX_WBITS, max_bytes)
         else:
-            return None
+            return None, "content_encoding_unsupported"
     except (OSError, EOFError, zlib.error):
-        return None
+        return None, "content_encoding_unsupported"
     if decoded is None:
-        return None
+        return None, "content_too_large"
     if len(decoded) > max_bytes:
-        return None
-    return decoded
+        return None, "content_too_large"
+    return decoded, None
 
 
 def _zlib_decode_limited(body: bytes, window_bits: int, max_bytes: int) -> bytes | None:
@@ -318,10 +384,25 @@ def _zlib_decode_limited(body: bytes, window_bits: int, max_bytes: int) -> bytes
 
 def _write_request(stream: socket.socket | ssl.SSLSocket, request: URLRequest) -> None:
     target = request.target or request.normalized_url.path or "/"
+    if "\r" in target or "\n" in target:
+        raise ValueError("request target contains a newline")
     header_lines = [f"GET {target} HTTP/1.1"]
-    header_lines.extend(f"{key}: {value}" for key, value in request.headers.items())
+    for key, value in request.headers.items():
+        _validate_header(key, value)
+        header_lines.append(f"{key}: {value}")
     payload = "\r\n".join(header_lines) + "\r\n\r\n"
-    stream.sendall(payload.encode("ascii", errors="ignore"))
+    stream.sendall(payload.encode("iso-8859-1"))
+
+
+def _validate_header(key: str, value: str) -> None:
+    key_text = str(key)
+    value_text = str(value)
+    if not key_text or any(ch in key_text for ch in ":\r\n"):
+        raise ValueError("invalid HTTP header name")
+    if any(ord(ch) < 33 or ord(ch) > 126 for ch in key_text):
+        raise ValueError("invalid HTTP header name")
+    if "\r" in value_text or "\n" in value_text:
+        raise ValueError("invalid HTTP header value")
 
 
 def _read_response(

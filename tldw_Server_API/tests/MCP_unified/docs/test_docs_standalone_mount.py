@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from mcp_unified.docs import AccessScope
 from mcp_unified.docs.standalone import (
     StandaloneDocsProfile,
     create_standalone_docs_mount,
     standalone_docs_settings_for_profile,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_standalone_mount_defaults_to_docs_with_local_sqlite(tmp_path: Path) -> None:
@@ -66,6 +70,13 @@ def test_standalone_profile_defaults_are_downgradeable(tmp_path: Path) -> None:
     assert online.web_source_profile == "online_capable"  # nosec B101
     assert online.enable_web_acquisition is True  # nosec B101
     assert online.allowed_url_prefixes == ("https://example.com/docs/",)  # nosec B101
+
+
+def test_standalone_default_db_path_is_absolute() -> None:
+    settings = standalone_docs_settings_for_profile(StandaloneDocsProfile.LOCKED_DOWN)
+
+    assert settings.db_path.is_absolute()  # nosec B101
+    assert settings.db_path.name == "docs.db"  # nosec B101
 
 
 def test_standalone_mount_online_profile_advertises_url_ingest_when_enabled(tmp_path: Path) -> None:

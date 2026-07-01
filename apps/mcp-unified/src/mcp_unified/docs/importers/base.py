@@ -28,6 +28,13 @@ class ParsedDocument:
 
 
 def chunks_from_text(text: str, *, max_chars: int = 1_200, overlap: int = 120) -> list[str]:
+    if max_chars <= 0:
+        raise ValueError("max_chars must be positive")
+    if overlap < 0:
+        raise ValueError("overlap must be non-negative")
+    if overlap >= max_chars:
+        raise ValueError("overlap must be smaller than max_chars")
+
     normalized = "\n".join(line.rstrip() for line in text.splitlines()).strip()
     if not normalized:
         return []

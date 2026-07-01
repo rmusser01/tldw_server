@@ -45,9 +45,6 @@ CREATE TABLE IF NOT EXISTS docs_collections (
     UNIQUE (owner_scope, profile_scope, name)
 );
 
-CREATE INDEX IF NOT EXISTS docs_collections_scope_idx
-    ON docs_collections (owner_scope, profile_scope, name);
-
 CREATE TABLE IF NOT EXISTS docs_collection_members (
     collection_id INTEGER NOT NULL REFERENCES docs_collections(id) ON DELETE CASCADE,
     document_id INTEGER NOT NULL REFERENCES docs_documents(id) ON DELETE CASCADE,
@@ -66,9 +63,6 @@ CREATE TABLE IF NOT EXISTS docs_keywords (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (owner_scope, profile_scope, name)
 );
-
-CREATE INDEX IF NOT EXISTS docs_keywords_scope_idx
-    ON docs_keywords (owner_scope, profile_scope, name);
 
 CREATE TABLE IF NOT EXISTS docs_document_keywords (
     keyword_id INTEGER NOT NULL REFERENCES docs_keywords(id) ON DELETE CASCADE,
@@ -116,6 +110,12 @@ CREATE VIRTUAL TABLE IF NOT EXISTS docs_chunks_fts USING fts5(
     document_id UNINDEXED
 );
 
+CREATE TRIGGER IF NOT EXISTS docs_chunks_after_delete_fts
+AFTER DELETE ON docs_chunks
+BEGIN
+    DELETE FROM docs_chunks_fts WHERE chunk_id = old.id;
+END;
+
 CREATE TABLE IF NOT EXISTS docs_aliases (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_scope TEXT NOT NULL DEFAULT '',
@@ -125,6 +125,3 @@ CREATE TABLE IF NOT EXISTS docs_aliases (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (owner_scope, profile_scope, name)
 );
-
-CREATE INDEX IF NOT EXISTS docs_aliases_scope_idx
-    ON docs_aliases (owner_scope, profile_scope, name);

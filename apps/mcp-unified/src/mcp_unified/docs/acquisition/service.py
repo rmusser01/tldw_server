@@ -5,6 +5,8 @@ from dataclasses import asdict, replace
 from hashlib import sha256
 from typing import Any
 
+from loguru import logger
+
 from ..errors import DocsError
 from ..importers.base import chunks_from_text
 from ..models import AccessScope
@@ -39,8 +41,9 @@ class DocsAcquisitionService:
         title_override: str | None = None,
     ) -> dict[str, Any]:
         if not self.settings.enable_web_acquisition:
+            logger.info("Docs URL ingestion disabled; skipping requested URL")
             return {
-                "status": "failed",
+                "status": "capability_disabled",
                 "reason_code": "capability_disabled",
                 "final_url": None,
                 "redirects": [],
@@ -48,6 +51,13 @@ class DocsAcquisitionService:
 
         fetched = self.fetcher.fetch(url)
         if fetched.status != "fetched":
+            logger.info(
+                "Docs URL fetch did not produce ingestable content: status={} reason={} final_url={} redirects={}",
+                fetched.status,
+                fetched.reason,
+                fetched.final_url,
+                len(fetched.redirects),
+            )
             return {
                 "status": fetched.status,
                 "reason_code": fetched.reason,
@@ -57,7 +67,8 @@ class DocsAcquisitionService:
             }
 
         content_type = fetched.headers.get("content-type", "text/html")
-        parsed = extract_fetched_document(url=fetched.final_url or url, content_type=content_type, body=fetched.body)
+        document_url = fetched.canonical_url or fetched.final_url or url
+        parsed = extract_fetched_document(url=document_url, content_type=content_type, body=fetched.body)
         if title_override:
             parsed = replace(parsed, title=title_override)
         if not parsed.text.strip():

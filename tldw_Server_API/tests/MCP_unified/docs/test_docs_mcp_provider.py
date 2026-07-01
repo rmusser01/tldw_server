@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from mcp_unified.docs.mcp_module import DocsMCPToolProvider
 from mcp_unified.docs.models import AccessScope
 from mcp_unified.docs.settings import DocsSettings
 from mcp_unified.docs.store.sqlite import DocsCatalogStore
+
+pytestmark = pytest.mark.unit
 
 
 def _provider(
@@ -48,12 +52,13 @@ def test_context7_get_library_docs_routes_to_context(tmp_path: Path) -> None:
 
     result = provider.execute(
         "get-library-docs",
-        {"context7CompatibleLibraryID": "sqlite", "topic": "FTS5"},
+        {"context7CompatibleLibraryID": "sqlite", "topic": "FTS5", "tokens": 1},
         scope=scope,
     )
 
     assert result["canonical_tool"] == "docs.context"  # nosec B101
     assert result["chunks"]  # nosec B101
+    assert result["budget"]["used_characters"] <= 4  # nosec B101
 
 
 def test_general_resolve_does_not_force_library_version_semantics(tmp_path: Path) -> None:
@@ -69,13 +74,15 @@ def test_general_resolve_does_not_force_library_version_semantics(tmp_path: Path
 def test_provider_advertises_stage1_tools_without_ingest_url(tmp_path: Path) -> None:
     provider, _scope, _document_id = _provider(tmp_path)
 
-    names = {tool["name"] for tool in provider.tool_definitions()}
+    tools = {tool["name"]: tool for tool in provider.tool_definitions()}
+    names = set(tools)
 
     assert "docs.search" in names  # nosec B101
     assert "docs.context" in names  # nosec B101
     assert "docs.import_path" in names  # nosec B101
     assert "resolve-library-id" in names  # nosec B101
     assert "get-library-docs" in names  # nosec B101
+    assert "tokens" in tools["get-library-docs"]["inputSchema"]["properties"]  # nosec B101
     assert "docs.ingest_url" not in names  # nosec B101
 
 
@@ -149,6 +156,29 @@ def test_provider_rejects_empty_ingest_url_when_enabled(tmp_path: Path) -> None:
         assert "url is required" in str(exc)  # nosec B101
     else:
         raise AssertionError("Expected empty docs.ingest_url url to be rejected")
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "message"),
+    [
+        ("docs.search", {}, "query is required"),
+        ("docs.get", {}, "id is required"),
+        ("docs.list", {}, "kind is required"),
+        ("docs.resolve", {}, "name is required"),
+        ("resolve-library-id", {}, "libraryName is required"),
+        ("get-library-docs", {}, "context7CompatibleLibraryID is required"),
+    ],
+)
+def test_provider_reports_missing_required_fields(
+    tmp_path: Path,
+    tool_name: str,
+    arguments: dict,
+    message: str,
+) -> None:
+    provider, scope, _document_id = _provider(tmp_path)
+
+    with pytest.raises(ValueError, match=message):
+        provider.execute(tool_name, arguments, scope=scope)
 
 
 def test_provider_marks_write_tools_with_ingestion_or_management_category(tmp_path: Path) -> None:

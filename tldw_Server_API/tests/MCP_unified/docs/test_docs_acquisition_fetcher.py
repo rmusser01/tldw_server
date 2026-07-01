@@ -1,46 +1,25 @@
 from __future__ import annotations
 
 import gzip
+import socket
 from collections.abc import Iterable
 
-from mcp_unified.docs.acquisition.fetcher import URLFetcher
-from mcp_unified.docs.acquisition.models import FetchResponse, ResolvedAddress, URLRequest
+import pytest
+
+from mcp_unified.docs.acquisition.fetcher import URLFetcher, _write_request
+from mcp_unified.docs.acquisition.models import FetchResponse, NormalizedURL, ResolvedAddress, URLRequest
 from mcp_unified.docs.acquisition.policy import SourcePolicy
+from mcp_unified.docs.acquisition.resolver import StdlibResolver
 from mcp_unified.docs.settings import DocsSettings
+from tldw_Server_API.tests.MCP_unified.docs.helpers import FakeResolver, FakeTransport
 
-
-class FakeResolver:
-    def __init__(self, addresses: dict[str, list[str]]) -> None:
-        self.addresses = addresses
-        self.calls: list[tuple[str, int]] = []
-
-    def resolve(self, host: str, port: int) -> Iterable[ResolvedAddress]:
-        self.calls.append((host, port))
-        return [ResolvedAddress(host=host, ip=ip, port=port) for ip in self.addresses[host]]
+pytestmark = pytest.mark.unit
 
 
 class FailingResolver(FakeResolver):
     def resolve(self, host: str, port: int) -> Iterable[ResolvedAddress]:
         self.calls.append((host, port))
         raise OSError("temporary DNS failure")
-
-
-class FakeTransport:
-    dials_validated_address = True
-
-    def __init__(self, responses: list[FetchResponse]) -> None:
-        self.responses = responses
-        self.calls: list[tuple[ResolvedAddress, URLRequest, float]] = []
-
-    def request(
-        self,
-        *,
-        address: ResolvedAddress,
-        request: URLRequest,
-        timeout_seconds: float,
-    ) -> FetchResponse:
-        self.calls.append((address, request, timeout_seconds))
-        return self.responses.pop(0)
 
 
 class ReResolvingTransport(FakeTransport):
@@ -119,6 +98,21 @@ def test_fetcher_preserves_query_in_request_target_without_result_leakage() -> N
 
     assert transport.calls[0][1].target == "/search?q=secret"  # nosec B101
     assert result.final_url == "https://example.com/search"  # nosec B101
+    assert result.canonical_url == "https://example.com/search?q=secret"  # nosec B101
+
+
+def test_fetcher_denies_non_success_http_status_before_ingestion() -> None:
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport(
+        [FetchResponse(status_code=404, headers={"content-type": "text/html"}, body_chunks=[b"<h1>Not found</h1>"])]
+    )
+
+    result = _fetcher(resolver=resolver, transport=transport).fetch("https://example.com/missing")
+
+    assert result.status == "denied"  # nosec B101
+    assert result.reason == "http_status_error"  # nosec B101
+    assert result.status_code == 404  # nosec B101
+    assert result.body == b""  # nosec B101
 
 
 def test_fetcher_denies_private_ip_before_transport() -> None:
@@ -132,6 +126,19 @@ def test_fetcher_denies_private_ip_before_transport() -> None:
     assert result.status == "denied"  # nosec B101
     assert result.reason == "egress_private_address_denied"  # nosec B101
     assert transport.calls == []  # nosec B101
+
+
+def test_stdlib_resolver_populates_private_address_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_getaddrinfo(host: str, port: int, type: int):
+        return [(socket.AF_INET, type, 0, "", ("127.0.0.1", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    addresses = list(StdlibResolver().resolve("localhost", 443))
+
+    assert len(addresses) == 1  # nosec B101
+    assert addresses[0].ip == "127.0.0.1"  # nosec B101
+    assert addresses[0].is_private is True  # nosec B101
 
 
 def test_fetcher_returns_failed_when_resolver_fails() -> None:
@@ -185,19 +192,19 @@ def test_fetcher_returns_approval_required_without_resolver_or_transport() -> No
     assert transport.calls == []  # nosec B101
 
 
-def test_fetcher_respect_robots_fails_closed_before_resolver_or_transport() -> None:
+def test_fetcher_respect_robots_does_not_fail_closed_without_robots_client() -> None:
     settings = _settings(respect_robots=True)
     resolver = FakeResolver({"example.com": ["93.184.216.34"]})
     transport = FakeTransport(
-        [FetchResponse(status_code=200, headers={"content-type": "text/html"}, body_chunks=[b"never"])]
+        [FetchResponse(status_code=200, headers={"content-type": "text/html"}, body_chunks=[b"<h1>Ok</h1>"])]
     )
 
     result = _fetcher(resolver=resolver, transport=transport, settings=settings).fetch("https://example.com/docs")
 
-    assert result.status == "denied"  # nosec B101
-    assert result.reason == "robots_unavailable"  # nosec B101
-    assert resolver.calls == []  # nosec B101
-    assert transport.calls == []  # nosec B101
+    assert result.status == "fetched"  # nosec B101
+    assert result.body == b"<h1>Ok</h1>"  # nosec B101
+    assert resolver.calls == [("example.com", 443)]  # nosec B101
+    assert len(transport.calls) == 1  # nosec B101
 
 
 def test_fetcher_revalidates_redirect_target_and_denies_private_redirect() -> None:
@@ -264,6 +271,35 @@ def test_fetcher_denies_content_type_before_body_is_returned() -> None:
     assert result.body == b""  # nosec B101
 
 
+def test_fetcher_denies_missing_content_type_when_allowlist_is_configured() -> None:
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport([FetchResponse(status_code=200, headers={}, body_chunks=[b"ambiguous"])])
+
+    result = _fetcher(resolver=resolver, transport=transport).fetch("https://example.com/no-content-type")
+
+    assert result.status == "denied"  # nosec B101
+    assert result.reason == "content_type_denied"  # nosec B101
+    assert result.body == b""  # nosec B101
+
+
+def test_fetcher_decodes_chunked_transfer_body() -> None:
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport(
+        [
+            FetchResponse(
+                status_code=200,
+                headers={"content-type": "text/plain", "transfer-encoding": "chunked"},
+                body_chunks=[b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"],
+            )
+        ]
+    )
+
+    result = _fetcher(resolver=resolver, transport=transport).fetch("https://example.com/chunked.txt")
+
+    assert result.status == "fetched"  # nosec B101
+    assert result.body == b"hello world"  # nosec B101
+
+
 def test_fetcher_enforces_transferred_body_size_limit() -> None:
     resolver = FakeResolver({"example.com": ["93.184.216.34"]})
     transport = FakeTransport(
@@ -293,3 +329,43 @@ def test_fetcher_enforces_decoded_body_size_limit_for_gzip() -> None:
 
     assert result.status == "denied"  # nosec B101
     assert result.reason == "content_too_large"  # nosec B101
+
+
+def test_fetcher_reports_unsupported_content_encoding_separately() -> None:
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport(
+        [
+            FetchResponse(
+                status_code=200,
+                headers={"content-type": "text/plain", "content-encoding": "br"},
+                body_chunks=[b"compressed"],
+            )
+        ]
+    )
+
+    result = _fetcher(resolver=resolver, transport=transport).fetch("https://example.com/brotli.txt")
+
+    assert result.status == "denied"  # nosec B101
+    assert result.reason == "content_encoding_unsupported"  # nosec B101
+
+
+def test_write_request_rejects_header_crlf_injection() -> None:
+    class FakeStream:
+        def sendall(self, payload: bytes) -> None:
+            raise AssertionError(f"unexpected payload: {payload!r}")
+
+    request = URLRequest(
+        normalized_url=NormalizedURL(
+            scheme="https",
+            host="example.com",
+            port=None,
+            path="/docs",
+            decoded_path="/docs",
+            canonical_url="https://example.com/docs",
+            redacted_url="https://example.com/docs",
+        ),
+        headers={"host": "example.com", "x-test": "ok\r\nInjected: yes"},
+    )
+
+    with pytest.raises(ValueError, match="header value"):
+        _write_request(FakeStream(), request)  # type: ignore[arg-type]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
@@ -27,7 +27,7 @@ def _coerce_bool(value: object, field_name: str) -> bool:
         if normalized in _FALSE_VALUES:
             return False
         raise ValueError(f"{field_name} must be a recognized boolean string")
-    return bool(value)
+    raise ValueError(f"{field_name} must be a boolean or recognized boolean string")
 
 
 def _coerce_trusted_roots(value: object) -> tuple[Path, ...]:
@@ -41,14 +41,31 @@ def _coerce_trusted_roots(value: object) -> tuple[Path, ...]:
 
 
 def _coerce_positive_int(value: object, field_name: str) -> int:
-    result = int(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a positive integer")
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError(f"{field_name} must be a positive integer")
+        result = int(value)
+    elif isinstance(value, int):
+        result = value
+    elif isinstance(value, str):
+        try:
+            result = int(value.strip())
+        except ValueError as exc:
+            raise ValueError(f"{field_name} must be a positive integer") from exc
+    else:
+        raise ValueError(f"{field_name} must be a positive integer")
     if result <= 0:
         raise ValueError(f"{field_name} must be positive")
     return result
 
 
 def _coerce_positive_float(value: object, field_name: str) -> float:
-    result = float(value)
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be finite and positive") from exc
     if not math.isfinite(result) or result <= 0:
         raise ValueError(f"{field_name} must be finite and positive")
     return result
@@ -69,6 +86,26 @@ def _coerce_string_tuple(value: object) -> tuple[str, ...]:
     else:
         items = tuple(value) if isinstance(value, Iterable) else (value,)
     return tuple(str(item).strip() for item in items if str(item).strip())
+
+
+def _coerce_optional_scope_value(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _coerce_access_scope(value: object) -> AccessScope:
+    if value is None or value == "":
+        return AccessScope()
+    if isinstance(value, AccessScope):
+        return value
+    if isinstance(value, Mapping):
+        return AccessScope(
+            owner_scope=_coerce_optional_scope_value(value.get("owner_scope")),
+            profile_scope=_coerce_optional_scope_value(value.get("profile_scope")),
+        )
+    raise ValueError("default_scope must be a mapping or AccessScope")
 
 
 def _coerce_source_profile(value: object, field_name: str) -> SourceProfile:
@@ -102,6 +139,7 @@ class DocsSettings:
         return cls(
             db_path=Path(values.get("db_path", "Databases/mcp_docs.db")).expanduser(),
             trusted_roots=roots,
+            default_scope=_coerce_access_scope(values.get("default_scope")),
             max_import_file_bytes=_coerce_positive_int(
                 values.get("max_import_file_bytes", 2_000_000),
                 "max_import_file_bytes",
