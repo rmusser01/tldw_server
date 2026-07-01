@@ -8,19 +8,29 @@ from typing import Any
 
 from tldw_Server_API.app.core.Audio.Realtime.constants import (
     OPENAI_REALTIME_CONVERSATION_ITEM_CREATED,
+    OPENAI_REALTIME_CONVERSATION_ITEM_DONE,
     OPENAI_REALTIME_ERROR,
     OPENAI_REALTIME_INPUT_AUDIO_APPEND,
     OPENAI_REALTIME_INPUT_AUDIO_CLEAR,
     OPENAI_REALTIME_INPUT_AUDIO_COMMIT,
     OPENAI_REALTIME_INPUT_AUDIO_COMMITTED,
+    OPENAI_REALTIME_INPUT_AUDIO_SPEECH_STARTED,
+    OPENAI_REALTIME_INPUT_AUDIO_SPEECH_STOPPED,
     OPENAI_REALTIME_RATE_LIMITS_UPDATED,
     OPENAI_REALTIME_RESPONSE_CANCEL,
+    OPENAI_REALTIME_RESPONSE_CONTENT_PART_ADDED,
+    OPENAI_REALTIME_RESPONSE_CONTENT_PART_DONE,
     OPENAI_REALTIME_RESPONSE_CREATE,
     OPENAI_REALTIME_RESPONSE_CREATED,
     OPENAI_REALTIME_RESPONSE_DONE,
     OPENAI_REALTIME_RESPONSE_OUTPUT_AUDIO_DELTA,
+    OPENAI_REALTIME_RESPONSE_OUTPUT_AUDIO_DONE,
     OPENAI_REALTIME_RESPONSE_OUTPUT_AUDIO_TRANSCRIPT_DELTA,
+    OPENAI_REALTIME_RESPONSE_OUTPUT_AUDIO_TRANSCRIPT_DONE,
+    OPENAI_REALTIME_RESPONSE_OUTPUT_ITEM_ADDED,
+    OPENAI_REALTIME_RESPONSE_OUTPUT_ITEM_DONE,
     OPENAI_REALTIME_RESPONSE_OUTPUT_TEXT_DELTA,
+    OPENAI_REALTIME_RESPONSE_OUTPUT_TEXT_DONE,
     OPENAI_REALTIME_SESSION_CREATED,
     OPENAI_REALTIME_SESSION_UPDATE,
     OPENAI_REALTIME_SESSION_UPDATED,
@@ -41,18 +51,28 @@ from tldw_Server_API.app.core.Audio.Realtime.models import (
     ClientCommand,
     CommitAudioCommand,
     ConversationItemAddedEvent,
+    ConversationItemDoneEvent,
     CreateResponseCommand,
     InputAudioCommittedEvent,
+    InputAudioSpeechStartedEvent,
+    InputAudioSpeechStoppedEvent,
     RateLimitsUpdatedEvent,
     RealtimeErrorEvent,
     RealtimeLimits,
     RealtimeServerEvent,
     RealtimeSessionConfig,
     ResponseAudioDeltaEvent,
+    ResponseAudioDoneEvent,
+    ResponseContentPartAddedEvent,
+    ResponseContentPartDoneEvent,
     ResponseCreatedEvent,
     ResponseDoneEvent,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
     ResponseTextDeltaEvent,
+    ResponseTextDoneEvent,
     ResponseTranscriptDeltaEvent,
+    ResponseTranscriptDoneEvent,
     SessionCreatedEvent,
     SessionUpdatedEvent,
     UpdateSessionCommand,
@@ -107,6 +127,20 @@ def to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]:
             "event_id": event.event_id,
             "session": _session_payload(event.session_id, event.model, event.voice),
         }
+    if isinstance(event, InputAudioSpeechStartedEvent):
+        return {
+            "type": OPENAI_REALTIME_INPUT_AUDIO_SPEECH_STARTED,
+            "event_id": event.event_id,
+            "item_id": event.item_id,
+            "audio_start_ms": event.audio_start_ms,
+        }
+    if isinstance(event, InputAudioSpeechStoppedEvent):
+        return {
+            "type": OPENAI_REALTIME_INPUT_AUDIO_SPEECH_STOPPED,
+            "event_id": event.event_id,
+            "item_id": event.item_id,
+            "audio_end_ms": event.audio_end_ms,
+        }
     if isinstance(event, InputAudioCommittedEvent):
         return {
             "type": OPENAI_REALTIME_INPUT_AUDIO_COMMITTED,
@@ -130,11 +164,40 @@ def to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]:
                 ],
             },
         }
+    if isinstance(event, ConversationItemDoneEvent):
+        return {
+            "type": OPENAI_REALTIME_CONVERSATION_ITEM_DONE,
+            "event_id": event.event_id,
+            "item": {
+                "id": event.item_id,
+                "type": "message",
+                "role": event.role,
+                "status": event.status,
+            },
+        }
     if isinstance(event, ResponseCreatedEvent):
         return {
             "type": OPENAI_REALTIME_RESPONSE_CREATED,
             "event_id": event.event_id,
             "response": _response_payload(event.response_id, "in_progress"),
+        }
+    if isinstance(event, ResponseOutputItemAddedEvent):
+        return {
+            "type": OPENAI_REALTIME_RESPONSE_OUTPUT_ITEM_ADDED,
+            "event_id": event.event_id,
+            "response_id": event.response_id,
+            "output_index": event.output_index,
+            "item": _response_output_item_payload(event.item_id, event.role),
+        }
+    if isinstance(event, ResponseContentPartAddedEvent):
+        return {
+            "type": OPENAI_REALTIME_RESPONSE_CONTENT_PART_ADDED,
+            "event_id": event.event_id,
+            "response_id": event.response_id,
+            "item_id": event.item_id,
+            "output_index": event.output_index,
+            "content_index": event.content_index,
+            "part": {"type": event.content_type},
         }
     if isinstance(event, ResponseTextDeltaEvent):
         return {
@@ -145,6 +208,16 @@ def to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]:
             "output_index": event.output_index,
             "content_index": event.content_index,
             "delta": event.delta,
+        }
+    if isinstance(event, ResponseTextDoneEvent):
+        return {
+            "type": OPENAI_REALTIME_RESPONSE_OUTPUT_TEXT_DONE,
+            "event_id": event.event_id,
+            "response_id": event.response_id,
+            "item_id": event.item_id,
+            "output_index": event.output_index,
+            "content_index": event.content_index,
+            "text": event.text,
         }
     if isinstance(event, ResponseAudioDeltaEvent):
         if len(event.audio) > REALTIME_MAX_OUTPUT_CHUNK_BYTES:
@@ -167,6 +240,15 @@ def to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]:
             "content_index": event.content_index,
             "delta": base64.b64encode(event.audio).decode("ascii"),
         }
+    if isinstance(event, ResponseAudioDoneEvent):
+        return {
+            "type": OPENAI_REALTIME_RESPONSE_OUTPUT_AUDIO_DONE,
+            "event_id": event.event_id,
+            "response_id": event.response_id,
+            "item_id": event.item_id,
+            "output_index": event.output_index,
+            "content_index": event.content_index,
+        }
     if isinstance(event, ResponseTranscriptDeltaEvent):
         return {
             "type": OPENAI_REALTIME_RESPONSE_OUTPUT_AUDIO_TRANSCRIPT_DELTA,
@@ -176,6 +258,34 @@ def to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]:
             "output_index": event.output_index,
             "content_index": event.content_index,
             "delta": event.delta,
+        }
+    if isinstance(event, ResponseTranscriptDoneEvent):
+        return {
+            "type": OPENAI_REALTIME_RESPONSE_OUTPUT_AUDIO_TRANSCRIPT_DONE,
+            "event_id": event.event_id,
+            "response_id": event.response_id,
+            "item_id": event.item_id,
+            "output_index": event.output_index,
+            "content_index": event.content_index,
+            "transcript": event.transcript,
+        }
+    if isinstance(event, ResponseContentPartDoneEvent):
+        return {
+            "type": OPENAI_REALTIME_RESPONSE_CONTENT_PART_DONE,
+            "event_id": event.event_id,
+            "response_id": event.response_id,
+            "item_id": event.item_id,
+            "output_index": event.output_index,
+            "content_index": event.content_index,
+            "part": {"type": event.content_type},
+        }
+    if isinstance(event, ResponseOutputItemDoneEvent):
+        return {
+            "type": OPENAI_REALTIME_RESPONSE_OUTPUT_ITEM_DONE,
+            "event_id": event.event_id,
+            "response_id": event.response_id,
+            "output_index": event.output_index,
+            "item": _response_output_item_payload(event.item_id, "assistant", status=event.status),
         }
     if isinstance(event, ResponseDoneEvent):
         return {
@@ -539,3 +649,15 @@ def _response_payload(
         "status_details": status_details,
         "output": output if output is not None else [],
     }
+
+
+def _response_output_item_payload(item_id: str, role: str, *, status: str | None = None) -> dict[str, Any]:
+    item = {
+        "id": item_id,
+        "type": "message",
+        "role": role,
+    }
+    if status is not None:
+        item["status"] = status
+    item["content"] = []
+    return item

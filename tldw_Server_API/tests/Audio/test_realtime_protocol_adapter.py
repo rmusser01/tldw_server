@@ -12,16 +12,26 @@ from tldw_Server_API.app.core.Audio.Realtime.models import (
     ClearAudioCommand,
     CommitAudioCommand,
     ConversationItemAddedEvent,
+    ConversationItemDoneEvent,
     CreateResponseCommand,
     InputAudioCommittedEvent,
+    InputAudioSpeechStartedEvent,
+    InputAudioSpeechStoppedEvent,
     RateLimitsUpdatedEvent,
     RealtimeErrorEvent,
     RealtimeLimits,
     ResponseAudioDeltaEvent,
+    ResponseAudioDoneEvent,
+    ResponseContentPartAddedEvent,
+    ResponseContentPartDoneEvent,
     ResponseCreatedEvent,
     ResponseDoneEvent,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
     ResponseTextDeltaEvent,
+    ResponseTextDoneEvent,
     ResponseTranscriptDeltaEvent,
+    ResponseTranscriptDoneEvent,
     SessionCreatedEvent,
     SessionUpdatedEvent,
     UpdateSessionCommand,
@@ -521,6 +531,32 @@ def test_session_update_rejects_present_fields_with_wrong_json_type(payload, exp
             },
         ),
         (
+            InputAudioSpeechStartedEvent(
+                event_id="evt_server_speech_started",
+                item_id="item_1",
+                audio_start_ms=120,
+            ),
+            {
+                "type": "input_audio_buffer.speech_started",
+                "event_id": "evt_server_speech_started",
+                "item_id": "item_1",
+                "audio_start_ms": 120,
+            },
+        ),
+        (
+            InputAudioSpeechStoppedEvent(
+                event_id="evt_server_speech_stopped",
+                item_id="item_1",
+                audio_end_ms=340,
+            ),
+            {
+                "type": "input_audio_buffer.speech_stopped",
+                "event_id": "evt_server_speech_stopped",
+                "item_id": "item_1",
+                "audio_end_ms": 340,
+            },
+        ),
+        (
             ConversationItemAddedEvent(
                 event_id="evt_server_item",
                 item_id="item_1",
@@ -544,6 +580,24 @@ def test_session_update_rejects_present_fields_with_wrong_json_type(payload, exp
             },
         ),
         (
+            ConversationItemDoneEvent(
+                event_id="evt_server_item_done",
+                item_id="item_1",
+                role="user",
+                status="completed",
+            ),
+            {
+                "type": "conversation.item.done",
+                "event_id": "evt_server_item_done",
+                "item": {
+                    "id": "item_1",
+                    "type": "message",
+                    "role": "user",
+                    "status": "completed",
+                },
+            },
+        ),
+        (
             ResponseCreatedEvent(
                 event_id="evt_server_response_created",
                 response_id="resp_1",
@@ -558,6 +612,46 @@ def test_session_update_rejects_present_fields_with_wrong_json_type(payload, exp
                     "status_details": None,
                     "output": [],
                 },
+            },
+        ),
+        (
+            ResponseOutputItemAddedEvent(
+                event_id="evt_server_output_added",
+                response_id="resp_1",
+                item_id="item_2",
+                output_index=0,
+                role="assistant",
+            ),
+            {
+                "type": "response.output_item.added",
+                "event_id": "evt_server_output_added",
+                "response_id": "resp_1",
+                "output_index": 0,
+                "item": {
+                    "id": "item_2",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                },
+            },
+        ),
+        (
+            ResponseContentPartAddedEvent(
+                event_id="evt_server_part_added",
+                response_id="resp_1",
+                item_id="item_2",
+                output_index=0,
+                content_index=1,
+                content_type="audio_transcript",
+            ),
+            {
+                "type": "response.content_part.added",
+                "event_id": "evt_server_part_added",
+                "response_id": "resp_1",
+                "item_id": "item_2",
+                "output_index": 0,
+                "content_index": 1,
+                "part": {"type": "audio_transcript"},
             },
         ),
         (
@@ -580,6 +674,25 @@ def test_session_update_rejects_present_fields_with_wrong_json_type(payload, exp
             },
         ),
         (
+            ResponseTextDoneEvent(
+                event_id="evt_server_text_done",
+                response_id="resp_1",
+                item_id="item_2",
+                output_index=0,
+                content_index=0,
+                text="hello",
+            ),
+            {
+                "type": "response.output_text.done",
+                "event_id": "evt_server_text_done",
+                "response_id": "resp_1",
+                "item_id": "item_2",
+                "output_index": 0,
+                "content_index": 0,
+                "text": "hello",
+            },
+        ),
+        (
             ResponseAudioDeltaEvent(
                 event_id="evt_server_audio",
                 response_id="resp_1",
@@ -599,6 +712,23 @@ def test_session_update_rejects_present_fields_with_wrong_json_type(payload, exp
             },
         ),
         (
+            ResponseAudioDoneEvent(
+                event_id="evt_server_audio_done",
+                response_id="resp_1",
+                item_id="item_2",
+                output_index=0,
+                content_index=2,
+            ),
+            {
+                "type": "response.output_audio.done",
+                "event_id": "evt_server_audio_done",
+                "response_id": "resp_1",
+                "item_id": "item_2",
+                "output_index": 0,
+                "content_index": 2,
+            },
+        ),
+        (
             ResponseTranscriptDeltaEvent(
                 event_id="evt_server_transcript",
                 response_id="resp_1",
@@ -615,6 +745,66 @@ def test_session_update_rejects_present_fields_with_wrong_json_type(payload, exp
                 "output_index": 0,
                 "content_index": 0,
                 "delta": "hello",
+            },
+        ),
+        (
+            ResponseTranscriptDoneEvent(
+                event_id="evt_server_transcript_done",
+                response_id="resp_1",
+                item_id="item_2",
+                output_index=0,
+                content_index=1,
+                transcript="hello",
+            ),
+            {
+                "type": "response.output_audio_transcript.done",
+                "event_id": "evt_server_transcript_done",
+                "response_id": "resp_1",
+                "item_id": "item_2",
+                "output_index": 0,
+                "content_index": 1,
+                "transcript": "hello",
+            },
+        ),
+        (
+            ResponseContentPartDoneEvent(
+                event_id="evt_server_part_done",
+                response_id="resp_1",
+                item_id="item_2",
+                output_index=0,
+                content_index=1,
+                content_type="audio_transcript",
+            ),
+            {
+                "type": "response.content_part.done",
+                "event_id": "evt_server_part_done",
+                "response_id": "resp_1",
+                "item_id": "item_2",
+                "output_index": 0,
+                "content_index": 1,
+                "part": {"type": "audio_transcript"},
+            },
+        ),
+        (
+            ResponseOutputItemDoneEvent(
+                event_id="evt_server_output_done",
+                response_id="resp_1",
+                item_id="item_2",
+                output_index=0,
+                status="completed",
+            ),
+            {
+                "type": "response.output_item.done",
+                "event_id": "evt_server_output_done",
+                "response_id": "resp_1",
+                "output_index": 0,
+                "item": {
+                    "id": "item_2",
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [],
+                },
             },
         ),
         (

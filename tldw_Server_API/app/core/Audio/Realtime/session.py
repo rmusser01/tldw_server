@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import AsyncIterator
+from typing import Any
 
 from tldw_Server_API.app.core.Audio.Realtime.constants import REALTIME_MAX_BUFFERED_AUDIO_BYTES
 from tldw_Server_API.app.core.Audio.Realtime.models import (
@@ -76,7 +77,7 @@ class RealtimeSession:
         self.input_audio_buffer = b""
         self.buffer_started = False
         self.closed = False
-        self.active_task = None
+        self.active_task: Any | None = None
 
         self._pending_audio_item_id: str | None = None
         self._previous_item_id: str | None = None
@@ -95,6 +96,9 @@ class RealtimeSession:
         events = self._pending_events
         self._pending_events = []
         return events
+
+    def set_active_task(self, task: Any | None) -> None:
+        self.active_task = task
 
     async def handle_command(self, command: ClientCommand) -> AsyncIterator[RealtimeServerEvent]:
         if isinstance(command, UpdateSessionCommand):
@@ -125,7 +129,7 @@ class RealtimeSession:
             yield RealtimeErrorEvent(code=command.code, message=command.message, event_id=command.event_id)
 
     async def apply_update(self, command: UpdateSessionCommand) -> list[RealtimeServerEvent]:
-        self.config = command.config
+        self.config = _merge_config(self.config, command.config)
         return [
             SessionUpdatedEvent(
                 event_id=command.event_id,
@@ -226,6 +230,14 @@ class RealtimeSession:
         return []
 
     async def create_response(self, command: CreateResponseCommand) -> AsyncIterator[RealtimeServerEvent]:
+        if self.active_response_id is not None:
+            yield RealtimeErrorEvent(
+                code="invalid_request",
+                message="response.create is not allowed while another response is active",
+                event_id=command.event_id,
+            )
+            return
+
         self.generation_id += 1
         generation_id = self.generation_id
         response_id = _new_realtime_id("resp")
@@ -406,14 +418,25 @@ class RealtimeSession:
                 yield error
 
     async def cancel_response(self, command: CancelResponseCommand) -> list[RealtimeServerEvent]:
+        response_id = command.response_id or self.active_response_id
+        if command.response_id is not None and command.response_id != self.active_response_id:
+            return [
+                RealtimeErrorEvent(
+                    code="invalid_request",
+                    message="response.cancel response_id does not match the active response",
+                    event_id=command.event_id,
+                )
+            ]
+
+        if response_id is None:
+            return []
+
         self.generation_id += 1
         if self.active_task is not None:
             self.active_task.cancel()
+            self.active_task = None
 
-        response_id = command.response_id or self.active_response_id
         self.active_response_id = None
-        if response_id is None:
-            return []
 
         return [
             ResponseDoneEvent(
@@ -448,6 +471,7 @@ class RealtimeSession:
     def _clear_active_response(self, response_id: str) -> None:
         if self.active_response_id == response_id:
             self.active_response_id = None
+            self.active_task = None
 
     def _generation_is_current(self, generation_id: int, response_id: str) -> bool:
         if generation_id == self.generation_id:
@@ -458,6 +482,31 @@ class RealtimeSession:
 
 def _new_realtime_id(prefix: str) -> str:
     return f"{prefix}_{secrets.token_urlsafe(12)}"
+
+
+def _merge_config(current: RealtimeSessionConfig, incoming: RealtimeSessionConfig) -> RealtimeSessionConfig:
+    return RealtimeSessionConfig(
+        model=incoming.model if incoming.model is not None else current.model,
+        voice=incoming.voice if incoming.voice is not None else current.voice,
+        instructions=incoming.instructions if incoming.instructions is not None else current.instructions,
+        input_format=incoming.input_format,
+        input_sample_rate_hz=incoming.input_sample_rate_hz,
+        output_format=incoming.output_format,
+        output_sample_rate_hz=incoming.output_sample_rate_hz,
+        turn_detection=incoming.turn_detection,
+        metadata=_merge_metadata(current.metadata, incoming.metadata),
+    )
+
+
+def _merge_metadata(current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(current)
+    for key, value in incoming.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = _merge_metadata(existing, value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _language_from_metadata(metadata: dict[str, object]) -> str | None:
