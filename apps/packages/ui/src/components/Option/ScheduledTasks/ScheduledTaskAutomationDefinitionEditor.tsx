@@ -23,7 +23,11 @@ export interface ScheduledTaskAutomationDefinitionEditorValues {
   visibility?: "private" | "shared"
   question?: string
   successCriteria?: string
+  scopeMode?: ScheduledTaskAutomationScopeMode
+  scopeSources?: string
   scopeJson?: string
+  findingPolicyPreset?: ScheduledTaskFindingPolicyPreset
+  generationMode?: ScheduledTaskGenerationMode
   agentRef?: string
   message?: string
   allowedToolClasses?: string
@@ -61,6 +65,16 @@ export type ScheduledTaskAutomationEditorScheduleKind =
   | "weekly"
   | "cron"
 
+export type ScheduledTaskAutomationScopeMode =
+  | "all_searchable_library"
+  | "sources"
+
+export type ScheduledTaskFindingPolicyPreset =
+  | "balanced_findings"
+  | "high_confidence_only"
+
+export type ScheduledTaskGenerationMode = "disabled" | "optional" | "required"
+
 const DEFAULT_SCHEDULE_KIND: ScheduledTaskAutomationEditorScheduleKind = "daily"
 const SUPPORTED_SCHEDULE_KINDS = new Set<string>([
   "one_time",
@@ -68,6 +82,22 @@ const SUPPORTED_SCHEDULE_KINDS = new Set<string>([
   "daily",
   "weekly",
   "cron"
+])
+const DEFAULT_SCOPE_MODE: ScheduledTaskAutomationScopeMode = "all_searchable_library"
+const SUPPORTED_SCOPE_MODES = new Set<string>([
+  "all_searchable_library",
+  "sources"
+])
+const DEFAULT_FINDING_POLICY_PRESET: ScheduledTaskFindingPolicyPreset = "balanced_findings"
+const SUPPORTED_FINDING_POLICY_PRESETS = new Set<string>([
+  "balanced_findings",
+  "high_confidence_only"
+])
+const DEFAULT_GENERATION_MODE: ScheduledTaskGenerationMode = "optional"
+const SUPPORTED_GENERATION_MODES = new Set<string>([
+  "disabled",
+  "optional",
+  "required"
 ])
 
 const toStringList = (value: string): string[] =>
@@ -88,6 +118,23 @@ const normalizeScheduleKind = (
   value: unknown
 ): ScheduledTaskAutomationEditorScheduleKind =>
   isSupportedScheduleKind(value) ? value : DEFAULT_SCHEDULE_KIND
+
+const normalizeScopeMode = (value: unknown): ScheduledTaskAutomationScopeMode =>
+  typeof value === "string" && SUPPORTED_SCOPE_MODES.has(value)
+    ? (value as ScheduledTaskAutomationScopeMode)
+    : DEFAULT_SCOPE_MODE
+
+const normalizeFindingPolicyPreset = (
+  value: unknown
+): ScheduledTaskFindingPolicyPreset =>
+  typeof value === "string" && SUPPORTED_FINDING_POLICY_PRESETS.has(value)
+    ? (value as ScheduledTaskFindingPolicyPreset)
+    : DEFAULT_FINDING_POLICY_PRESET
+
+const normalizeGenerationMode = (value: unknown): ScheduledTaskGenerationMode =>
+  typeof value === "string" && SUPPORTED_GENERATION_MODES.has(value)
+    ? (value as ScheduledTaskGenerationMode)
+    : DEFAULT_GENERATION_MODE
 
 const parseJsonObject = (
   value: string,
@@ -181,6 +228,25 @@ const buildSchedule = (
   }
 }
 
+const buildRecurringQuestionScope = (
+  values: Required<ScheduledTaskAutomationDefinitionEditorValues>
+): Record<string, unknown> => {
+  const parsedScope = parseJsonObject(values.scopeJson, "Scope JSON")
+  if ("error" in parsedScope) {
+    throw new Error(parsedScope.error)
+  }
+
+  const baseScope =
+    values.scopeMode === "sources"
+      ? { mode: "sources", sources: toStringList(values.scopeSources) }
+      : { mode: "all_searchable_library" }
+
+  return {
+    ...baseScope,
+    ...parsedScope.value
+  }
+}
+
 export const buildAutomationDefinitionPreviewPayload = ({
   family,
   mode,
@@ -199,10 +265,7 @@ export const buildAutomationDefinitionPreviewPayload = ({
   const notification_policy = { channels: [] }
 
   if (family === "recurring_question") {
-    const parsedScope = parseJsonObject(values.scopeJson, "Scope JSON")
-    if ("error" in parsedScope) {
-      throw new Error(parsedScope.error)
-    }
+    const scope = buildRecurringQuestionScope(values)
 
     return {
       mode,
@@ -213,10 +276,14 @@ export const buildAutomationDefinitionPreviewPayload = ({
       description: values.description.trim() || null,
       input: {
         question: values.question.trim(),
-        success_criteria: values.successCriteria.trim() || null,
-        scope: parsedScope.value
+        success_criteria: values.successCriteria.trim() || null
       },
-      config: {},
+      config: {
+        scope,
+        finding_policy: { preset: values.findingPolicyPreset },
+        generation_mode: values.generationMode,
+        retention_policy: { mode: "default" }
+      },
       schedule,
       visibility_policy,
       notification_policy,
@@ -270,7 +337,13 @@ export const ScheduledTaskAutomationDefinitionEditor: React.FC<
     visibility: initialValues?.visibility ?? "private",
     question: initialValues?.question ?? "",
     successCriteria: initialValues?.successCriteria ?? "",
+    scopeMode: normalizeScopeMode(initialValues?.scopeMode),
+    scopeSources: initialValues?.scopeSources ?? "",
     scopeJson: initialValues?.scopeJson ?? DEFAULT_SCOPE_JSON,
+    findingPolicyPreset: normalizeFindingPolicyPreset(
+      initialValues?.findingPolicyPreset
+    ),
+    generationMode: normalizeGenerationMode(initialValues?.generationMode),
     agentRef: initialValues?.agentRef ?? DEFAULT_AGENT_REF,
     message: initialValues?.message ?? "",
     allowedToolClasses: initialValues?.allowedToolClasses ?? "",
@@ -281,6 +354,7 @@ export const ScheduledTaskAutomationDefinitionEditor: React.FC<
   const [preview, setPreview] = React.useState<ScheduledTaskPreviewResponse | null>(null)
   const [previewing, setPreviewing] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  const [advancedScopeOpen, setAdvancedScopeOpen] = React.useState(false)
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
   const [saved, setSaved] = React.useState(false)
   const valuesSignatureRef = React.useRef(JSON.stringify(values))
@@ -443,8 +517,8 @@ export const ScheduledTaskAutomationDefinitionEditor: React.FC<
         {family === "recurring_question" ? (
           <>
             <Input.TextArea
-              aria-label="Question"
-              placeholder="Question"
+              aria-label="Question or prompt"
+              placeholder="Question or prompt"
               rows={3}
               value={values.question}
               onChange={(event) => updateValue("question", event.target.value)}
@@ -456,12 +530,66 @@ export const ScheduledTaskAutomationDefinitionEditor: React.FC<
               value={values.successCriteria}
               onChange={(event) => updateValue("successCriteria", event.target.value)}
             />
-            <Input.TextArea
-              aria-label="Scope JSON"
-              value={values.scopeJson}
-              rows={4}
-              onChange={(event) => updateValue("scopeJson", event.target.value)}
-            />
+            <Space wrap style={{ width: "100%" }}>
+              <Select
+                aria-label="Search scope"
+                value={values.scopeMode}
+                onChange={(value) => updateValue("scopeMode", value)}
+                options={[
+                  { value: "all_searchable_library", label: "All searchable library" },
+                  { value: "sources", label: "Selected sources" }
+                ]}
+                style={{ width: 220 }}
+              />
+              {values.scopeMode === "sources" ? (
+                <Input
+                  aria-label="Source IDs"
+                  placeholder="media_db, notes, chats"
+                  value={values.scopeSources}
+                  onChange={(event) => updateValue("scopeSources", event.target.value)}
+                  style={{ minWidth: 240 }}
+                />
+              ) : null}
+              <Select
+                aria-label="Finding behavior"
+                value={values.findingPolicyPreset}
+                onChange={(value) => updateValue("findingPolicyPreset", value)}
+                options={[
+                  { value: "balanced_findings", label: "Balanced findings" },
+                  { value: "high_confidence_only", label: "High confidence only" }
+                ]}
+                style={{ width: 210 }}
+              />
+              <Select
+                aria-label="Answer generation"
+                value={values.generationMode}
+                onChange={(value) => updateValue("generationMode", value)}
+                options={[
+                  { value: "optional", label: "Generate when useful" },
+                  { value: "disabled", label: "Evidence only" },
+                  { value: "required", label: "Require generated answer" }
+                ]}
+                style={{ width: 220 }}
+              />
+            </Space>
+            <div>
+              <Button
+                type="link"
+                aria-expanded={advancedScopeOpen}
+                onClick={() => setAdvancedScopeOpen((current) => !current)}
+                style={{ paddingLeft: 0 }}
+              >
+                Advanced scope JSON
+              </Button>
+              {advancedScopeOpen ? (
+                <Input.TextArea
+                  aria-label="Scope JSON"
+                  value={values.scopeJson}
+                  rows={4}
+                  onChange={(event) => updateValue("scopeJson", event.target.value)}
+                />
+              ) : null}
+            </div>
           </>
         ) : (
           <>
@@ -526,8 +654,14 @@ export const ScheduledTaskAutomationDefinitionEditor: React.FC<
         {errorMessage ? (
           <DesignSystemAlert variant="error" title={errorMessage} />
         ) : null}
-        {(preview?.status === "valid" || saved) ? (
-          <Typography.Text type="secondary">Execution is not available yet</Typography.Text>
+        {saved ? (
+          <Typography.Text type="secondary">
+            Definition saved. Runs are available from task details.
+          </Typography.Text>
+        ) : preview?.status === "valid" ? (
+          <Typography.Text type="secondary">
+            Preview is ready. Save the definition to make it runnable.
+          </Typography.Text>
         ) : null}
 
         <Space wrap>

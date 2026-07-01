@@ -752,6 +752,8 @@ git commit -m "feat: schedule recurring question runs"
 
 ## Stage 6: WebUI And Extension Reference Client
 
+**Status:** Complete. Stage 6 added typed frontend run/result/review/resolution client methods, guided Recurring Question creation controls, normalized results/read-state UI, run history and resolution actions in task details, and Home Automation Inbox normalized result surfacing while preserving Watchlists and notification-derived signals.
+
 **Goal:** Make the WebUI and extension consume the new API-first contracts without replacing Watchlists.
 
 **Success Criteria:**

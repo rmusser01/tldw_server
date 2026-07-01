@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   fetchCompanionHomeSnapshot: vi.fn(),
   fetchPersonalizationProfile: vi.fn(),
   listScheduledTasks: vi.fn(),
+  listScheduledTaskResults: vi.fn(),
   listNotifications: vi.fn(),
   updatePersonalizationOptIn: vi.fn(),
   loadCompanionHomeLayout: vi.fn(),
@@ -66,7 +67,9 @@ vi.mock("@/services/scheduled-tasks-control-plane", async () => {
 
   return {
     ...actual,
-    listScheduledTasks: (...args: unknown[]) => mocks.listScheduledTasks(...args)
+    listScheduledTasks: (...args: unknown[]) => mocks.listScheduledTasks(...args),
+    listScheduledTaskResults: (...args: unknown[]) =>
+      mocks.listScheduledTaskResults(...args)
   }
 })
 
@@ -283,6 +286,13 @@ describe("CompanionHomePage", () => {
       partial: false,
       errors: []
     })
+    mocks.listScheduledTaskResults.mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 50,
+      offset: 0,
+      has_more: false
+    })
     mocks.listNotifications.mockResolvedValue({
       items: [],
       total: 0
@@ -437,6 +447,88 @@ describe("CompanionHomePage", () => {
       "/scheduled-tasks?tab=results&run_id=103"
     )
     expect(screen.getByText("Needs attention")).toBeInTheDocument()
+  })
+
+  it("prefers surfaced normalized scheduled-task results in Automation Inbox", async () => {
+    mocks.listScheduledTaskResults.mockResolvedValueOnce({
+      total: 2,
+      limit: 50,
+      offset: 0,
+      has_more: false,
+      items: [
+        {
+          id: "rq-result-42",
+          definition_id: "definition-7",
+          run_id: "run-42",
+          kind: "finding",
+          title: "Possible answer found",
+          summary: "One relevant source matched the open question.",
+          answer: "The latest policy memo mentions the missing constraint.",
+          answer_mode: "generated_answer",
+          confidence: { label: "medium" },
+          source_refs: [
+            {
+              source_id: "media-9",
+              title: "Policy memo",
+              snippet: "Short redacted evidence excerpt",
+              citation_ref: "memo#p4"
+            }
+          ],
+          dedupe_key: "rq:def-7:policy",
+          visibility_destination: { home: true, results: true },
+          review_state: "unread",
+          created_at: "2030-01-03T09:00:00Z",
+          updated_at: "2030-01-03T09:00:00Z"
+        },
+        {
+          id: "rq-result-dismissed",
+          definition_id: "definition-8",
+          run_id: "run-43",
+          kind: "finding",
+          title: "Dismissed answer",
+          summary: "This should stay out of Home after review.",
+          answer: null,
+          answer_mode: "evidence_only",
+          confidence: { label: "low" },
+          source_refs: [],
+          dedupe_key: "rq:def-8:dismissed",
+          visibility_destination: { home: true, results: true },
+          review_state: "dismissed",
+          created_at: "2030-01-03T08:00:00Z",
+          updated_at: "2030-01-03T08:00:00Z"
+        },
+        {
+          id: "rq-result-results-only",
+          definition_id: "definition-9",
+          run_id: "run-44",
+          kind: "finding",
+          title: "Results only answer",
+          summary: "This result should remain on the Scheduled Tasks results tab.",
+          answer: null,
+          answer_mode: "evidence_only",
+          confidence: { label: "medium" },
+          source_refs: [],
+          dedupe_key: "rq:def-9:results-only",
+          visibility_destination: { home: false, results: true },
+          review_state: "unread",
+          created_at: "2030-01-03T07:00:00Z",
+          updated_at: "2030-01-03T07:00:00Z"
+        }
+      ]
+    })
+
+    renderPage()
+
+    expect(await screen.findByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Possible answer found/i })).toHaveAttribute(
+      "href",
+      "/scheduled-tasks?tab=results&result_id=rq-result-42"
+    )
+    expect(screen.getByText("New result")).toBeInTheDocument()
+    expect(screen.getByText("Scheduled Tasks")).toBeInTheDocument()
+    expect(screen.queryByText("Dismissed answer")).not.toBeInTheDocument()
+    expect(screen.queryByText("Results only answer")).not.toBeInTheDocument()
+    expect(mocks.listScheduledTaskResults).toHaveBeenCalledWith({ limit: 50 })
   })
 
   it("keeps Companion Home usable when scheduled-task loading fails", async () => {

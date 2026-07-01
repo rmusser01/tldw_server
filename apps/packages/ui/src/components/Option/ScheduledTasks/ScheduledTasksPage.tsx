@@ -12,15 +12,21 @@ import {
   createScheduledTaskDefinition,
   createScheduledTaskReminder,
   createScheduledTaskPreview,
+  createScheduledTaskRun,
   deleteScheduledTaskReminder,
   duplicateScheduledTaskDefinition,
   getScheduledTaskCapabilities,
   getScheduledTaskDefinition,
   listScheduledTaskDefinitionAudit,
   listScheduledTaskPreviews,
+  listScheduledTaskResults,
+  listScheduledTaskRuns,
   listScheduledTasks,
+  markScheduledTaskDefinitionSolved,
   pauseScheduledTaskDefinition,
+  reopenScheduledTaskDefinition,
   resumeScheduledTaskDefinition,
+  updateScheduledTaskResultReview,
   updateScheduledTaskDefinition,
   updateScheduledTaskReminder,
   type ScheduledTask,
@@ -50,7 +56,9 @@ import {
 } from "./scheduled-task-route-state"
 import {
   findScheduledTaskResultByRouteState,
+  mapScheduledTaskApiResults,
   projectScheduledTaskResults,
+  resolveScheduledTaskResultsCapabilityMode,
   type ScheduledTaskResultItem
 } from "./scheduled-task-results"
 import {
@@ -113,6 +121,11 @@ const stringifyEditorText = (value: unknown): string => {
   }
 }
 
+const readRecurringScopeMode = (
+  scope: Record<string, unknown>
+): ScheduledTaskAutomationDefinitionEditorValues["scopeMode"] =>
+  scope.mode === "sources" ? "sources" : "all_searchable_library"
+
 const normalizeAutomationScheduleKind = (
   value: unknown
 ): ScheduledTaskAutomationEditorScheduleKind =>
@@ -153,7 +166,18 @@ const buildAutomationEditorInitialValues = (
     visibility,
     question: readStringField(input, "question"),
     successCriteria: readStringField(input, "success_criteria"),
-    scopeJson: stringifyEditorJson(input.scope),
+    scopeMode: readRecurringScopeMode(isRecord(config.scope) ? config.scope : {}),
+    scopeSources: readStringListField(isRecord(config.scope) ? config.scope : {}, "sources"),
+    scopeJson: stringifyEditorJson(config.scope),
+    findingPolicyPreset:
+      isRecord(config.finding_policy) &&
+      config.finding_policy.preset === "high_confidence_only"
+        ? "high_confidence_only"
+        : "balanced_findings",
+    generationMode:
+      config.generation_mode === "disabled" || config.generation_mode === "required"
+        ? config.generation_mode
+        : "optional",
     agentRef: stringifyEditorText(input.agent_ref),
     message: readStringField(input, "message"),
     allowedToolClasses: readStringListField(config, "allowed_tool_classes"),
@@ -180,6 +204,8 @@ export const ScheduledTasksPage: React.FC = () => {
   const [scheduledTasksSupported, setScheduledTasksSupported] = useState<
     boolean | null
   >(null)
+  const [scheduledTasksOpenApiPaths, setScheduledTasksOpenApiPaths] =
+    useState<Record<string, unknown> | null>(null)
   const routeState = React.useMemo(
     () =>
       parseScheduledTaskRouteState(searchParams, {
@@ -226,6 +252,7 @@ export const ScheduledTasksPage: React.FC = () => {
     const serverUrl = connectionConfig?.serverUrl?.trim()
     if (!serverUrl) {
       setScheduledTasksSupported(true)
+      setScheduledTasksOpenApiPaths(null)
       return
     }
 
@@ -243,6 +270,7 @@ export const ScheduledTasksPage: React.FC = () => {
         if (!response.ok) {
           if (!cancelled) {
             setScheduledTasksSupported(true)
+            setScheduledTasksOpenApiPaths(null)
           }
           return
         }
@@ -255,10 +283,12 @@ export const ScheduledTasksPage: React.FC = () => {
 
         if (!cancelled) {
           setScheduledTasksSupported(Boolean(paths && SCHEDULED_TASKS_PATH in paths))
+          setScheduledTasksOpenApiPaths(paths)
         }
       } catch {
         if (!cancelled) {
           setScheduledTasksSupported(true)
+          setScheduledTasksOpenApiPaths(null)
         }
       } finally {
         window.clearTimeout(timeoutId)
@@ -284,18 +314,48 @@ export const ScheduledTasksPage: React.FC = () => {
     queryFn: getScheduledTaskCapabilities,
     enabled: scheduledTasksSupported === true
   })
+  const resultsCapabilityMode = React.useMemo(
+    () => resolveScheduledTaskResultsCapabilityMode(scheduledTasksOpenApiPaths),
+    [scheduledTasksOpenApiPaths]
+  )
+  const normalizedResultsQuery = useQuery({
+    queryKey: ["scheduled-task-results", resultsCapabilityMode],
+    queryFn: () => listScheduledTaskResults({ limit: 100 }),
+    enabled:
+      scheduledTasksSupported === true &&
+      resultsCapabilityMode !== "projected_signals"
+  })
 
   const tasks = tasksQuery.data?.items ?? []
   const projectedResults = React.useMemo(
     () => projectScheduledTaskResults(tasks, { includeCompletedNoResults: true }),
     [tasks]
   )
+  const normalizedResults = React.useMemo(
+    () =>
+      normalizedResultsQuery.data
+        ? mapScheduledTaskApiResults(normalizedResultsQuery.data.items, {
+            capabilityMode: resultsCapabilityMode
+          })
+        : [],
+    [normalizedResultsQuery.data, resultsCapabilityMode]
+  )
+  const displayedResults = React.useMemo(() => {
+    if (normalizedResultsQuery.isSuccess) {
+      return [
+        ...normalizedResults,
+        ...projectedResults.filter((result) => result.owner !== "scheduled_tasks")
+      ]
+    }
+
+    return projectedResults
+  }, [normalizedResults, normalizedResultsQuery.isSuccess, projectedResults])
   const selectedResult = React.useMemo(
     () =>
       routeState.tab === "results"
-        ? findScheduledTaskResultByRouteState(projectedResults, routeState)
+        ? findScheduledTaskResultByRouteState(displayedResults, routeState)
         : null,
-    [projectedResults, routeState]
+    [displayedResults, routeState]
   )
   const selectedTask = React.useMemo(
     () => {
@@ -308,9 +368,9 @@ export const ScheduledTasksPage: React.FC = () => {
   const selectedTaskLatestResult = React.useMemo(
     () =>
       selectedTask
-        ? projectedResults.find((result) => result.taskId === selectedTask.id) ?? null
+        ? displayedResults.find((result) => result.taskId === selectedTask.id) ?? null
         : null,
-    [projectedResults, selectedTask]
+    [displayedResults, selectedTask]
   )
   const selectedAutomationDefinitionId = React.useMemo(() => {
     if (selectedTask?.primitive !== "automation_definition") return null
@@ -341,6 +401,24 @@ export const ScheduledTasksPage: React.FC = () => {
       }),
     enabled: Boolean(selectedAutomationDefinitionId)
   })
+  const selectedAutomationRunsQuery = useQuery({
+    queryKey: ["scheduled-task-definition-runs", selectedAutomationDefinitionId],
+    queryFn: () =>
+      listScheduledTaskRuns(selectedAutomationDefinitionId as string, {
+        limit: 10
+      }),
+    enabled: Boolean(selectedAutomationDefinitionId)
+  })
+  const selectedAutomationResults = React.useMemo(
+    () =>
+      selectedAutomationDefinitionId
+        ? displayedResults.filter(
+            (result) =>
+              result.taskId === `automation_definition:${selectedAutomationDefinitionId}`
+          )
+        : [],
+    [displayedResults, selectedAutomationDefinitionId]
+  )
   const editingAutomationDefinitionId = React.useMemo(
     () =>
       editingAutomationTask
@@ -484,6 +562,18 @@ export const ScheduledTasksPage: React.FC = () => {
 
   const refreshTasks = async () => {
     await tasksQuery.refetch()
+  }
+
+  const refreshExecutionState = async () => {
+    await refreshTasks()
+    if (resultsCapabilityMode !== "projected_signals") {
+      await normalizedResultsQuery.refetch()
+    }
+    if (selectedAutomationDefinitionId) {
+      await selectedAutomationRunsQuery.refetch()
+      await selectedAutomationAuditQuery.refetch()
+      await selectedAutomationDefinitionQuery.refetch()
+    }
   }
 
   const readScheduledTaskControlPlaneError = (
@@ -647,6 +737,74 @@ export const ScheduledTasksPage: React.FC = () => {
     }
   }
 
+  const handleRunAutomationDefinition = async (task: ScheduledTask) => {
+    setAutomationErrorMessage(null)
+    try {
+      const definitionId = getAutomationDefinitionIdForTask(task)
+      await createScheduledTaskRun(definitionId)
+      message.success("Run queued")
+      await refreshExecutionState()
+    } catch (error) {
+      const messageText = readScheduledTaskControlPlaneError(
+        error,
+        "Unable to queue run"
+      )
+      setAutomationErrorMessage(messageText)
+      message.error(messageText)
+    }
+  }
+
+  const handleAutomationResolutionAction = async (
+    task: ScheduledTask,
+    action: "mark_solved" | "reopen"
+  ) => {
+    setAutomationErrorMessage(null)
+    try {
+      const definitionId = getAutomationDefinitionIdForTask(task)
+      if (action === "mark_solved") {
+        await markScheduledTaskDefinitionSolved(definitionId, {
+          resolved_result_id: selectedTaskLatestResult?.resultId ?? undefined
+        })
+        message.success("Definition marked solved")
+      } else {
+        await reopenScheduledTaskDefinition(definitionId, {
+          target_lifecycle: "paused"
+        })
+        message.success("Definition reopened")
+      }
+      await refreshExecutionState()
+    } catch (error) {
+      const messageText = readScheduledTaskControlPlaneError(
+        error,
+        "Unable to update automation resolution"
+      )
+      setAutomationErrorMessage(messageText)
+      message.error(messageText)
+    }
+  }
+
+  const handleReviewResult = async (result: ScheduledTaskResultItem) => {
+    if (!result.resultId) return
+
+    setAutomationErrorMessage(null)
+    try {
+      await updateScheduledTaskResultReview(result.resultId, {
+        review_state: "read"
+      })
+      message.success("Result marked reviewed")
+      if (resultsCapabilityMode !== "projected_signals") {
+        await normalizedResultsQuery.refetch()
+      }
+    } catch (error) {
+      const messageText = readScheduledTaskControlPlaneError(
+        error,
+        "Unable to update result review"
+      )
+      setAutomationErrorMessage(messageText)
+      message.error(messageText)
+    }
+  }
+
   const handleTabChange = (tab: string) => {
     updateRoute({ tab: tab as ScheduledTaskTabId })
   }
@@ -709,8 +867,13 @@ export const ScheduledTasksPage: React.FC = () => {
   const hasResultRouteTarget =
     routeState.tab === "results" &&
     Boolean(routeState.resultId || routeState.runId || routeState.taskId)
+  const hasLoadedResultData =
+    resultsCapabilityMode === "projected_signals" ||
+    normalizedResultsQuery.isFetched ||
+    normalizedResultsQuery.isError
   const missingRouteResult =
     hasLoadedTasks &&
+    hasLoadedResultData &&
     hasResultRouteTarget &&
     selectedResult === null
 
@@ -720,7 +883,7 @@ export const ScheduledTasksPage: React.FC = () => {
         <ScheduledTaskOverview
           tasks={tasks}
           partial={Boolean(tasksQuery.data?.partial)}
-          results={projectedResults}
+          results={displayedResults}
           onOpenResult={openResultSignal}
         />
       ) : null}
@@ -753,9 +916,13 @@ export const ScheduledTasksPage: React.FC = () => {
         <DesignSystemAlert variant="warning" title="Result signal not found." />
       ) : null}
       <ScheduledTaskResultsPanel
-        results={projectedResults}
+        results={displayedResults}
         taskCount={tasks.length}
-        capabilityMode="projected_signals"
+        capabilityMode={
+          normalizedResultsQuery.isSuccess
+            ? resultsCapabilityMode
+            : "projected_signals"
+        }
         onCreateTask={openCreateReminder}
         onOpenResult={openResultSignal}
       />
@@ -783,7 +950,7 @@ export const ScheduledTasksPage: React.FC = () => {
       {hasLoadedTasks && tasks.length > 0 ? (
         <ScheduledTaskTable
           tasks={tasks}
-          results={projectedResults}
+          results={displayedResults}
           onCreateReminder={openCreateReminder}
           onInspectTask={openTaskDetail}
           onOpenTaskResults={openTaskResults}
@@ -942,6 +1109,8 @@ export const ScheduledTasksPage: React.FC = () => {
               task={selectedTask}
               latestResult={selectedTaskLatestResult}
               automationDefinition={selectedAutomationDefinitionQuery.data ?? null}
+              automationRuns={selectedAutomationRunsQuery.data?.items ?? []}
+              automationResults={selectedAutomationResults}
               automationPreviewHistory={selectedAutomationPreviewsQuery.data?.items ?? []}
               automationAuditEvents={selectedAutomationAuditQuery.data?.items ?? []}
               onClose={closeTaskDetail}
@@ -959,6 +1128,15 @@ export const ScheduledTasksPage: React.FC = () => {
               }}
               onDuplicateAutomationDefinition={(task) => {
                 void handleAutomationLifecycleAction(task, "duplicate")
+              }}
+              onRunAutomationDefinition={(task) => {
+                void handleRunAutomationDefinition(task)
+              }}
+              onMarkAutomationDefinitionSolved={(task) => {
+                void handleAutomationResolutionAction(task, "mark_solved")
+              }}
+              onReopenAutomationDefinition={(task) => {
+                void handleAutomationResolutionAction(task, "reopen")
               }}
             />
           ) : null}
@@ -1012,7 +1190,9 @@ export const ScheduledTasksPage: React.FC = () => {
               open
               result={selectedResult}
               onClose={closeResultDetail}
-              onReviewResult={() => undefined}
+              onReviewResult={(result) => {
+                void handleReviewResult(result)
+              }}
               onRetryRun={() => undefined}
             />
           ) : null}

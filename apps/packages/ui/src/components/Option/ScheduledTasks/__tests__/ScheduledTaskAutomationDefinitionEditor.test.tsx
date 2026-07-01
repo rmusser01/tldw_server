@@ -56,6 +56,30 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
     return { promise, resolve }
   }
 
+  it("shows guided recurring question controls and hides raw scope JSON by default", async () => {
+    const user = userEvent.setup()
+
+    render(
+      <ScheduledTaskAutomationDefinitionEditor
+        family="recurring_question"
+        mode="create"
+        onPreview={vi.fn().mockResolvedValue(validPreview())}
+        onCreate={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(screen.getByLabelText("Question or prompt")).toBeInTheDocument()
+    expect(screen.getByLabelText("Search scope")).toBeInTheDocument()
+    expect(screen.getByLabelText("Finding behavior")).toBeInTheDocument()
+    expect(screen.getByLabelText("Answer generation")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Scope JSON")).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "Advanced scope JSON" }))
+
+    expect(screen.getByLabelText("Scope JSON")).toBeInTheDocument()
+  })
+
   it("previews and creates a recurring question definition", async () => {
     const user = userEvent.setup()
     const onPreview = vi.fn().mockResolvedValue(validPreview())
@@ -71,7 +95,7 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
       />
     )
 
-    await user.type(screen.getByLabelText("Question"), "Has the answer appeared?")
+    await user.type(screen.getByLabelText("Question or prompt"), "Has the answer appeared?")
     await user.click(screen.getByRole("button", { name: "Preview" }))
     await screen.findByText("Preview ready")
     await user.click(screen.getByRole("button", { name: "Save definition" }))
@@ -86,6 +110,11 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
         }),
         input: expect.objectContaining({
           question: "Has the answer appeared?"
+        }),
+        config: expect.objectContaining({
+          scope: { mode: "all_searchable_library" },
+          finding_policy: { preset: "balanced_findings" },
+          generation_mode: "optional"
         })
       })
     )
@@ -93,7 +122,7 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
       preview_id: "preview_1",
       initial_lifecycle: "configured"
     })
-    expect(await screen.findByText("Execution is not available yet")).toBeInTheDocument()
+    expect(await screen.findByText("Definition saved. Runs are available from task details.")).toBeInTheDocument()
   })
 
   it("shows agent task preview redaction copy", async () => {
@@ -151,9 +180,9 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
       />
     )
 
-    await user.type(screen.getByLabelText("Question"), "Has the answer appeared?")
+    await user.type(screen.getByLabelText("Question or prompt"), "Has the answer appeared?")
     await user.click(screen.getByRole("button", { name: "Preview" }))
-    fireEvent.change(screen.getByLabelText("Question"), {
+    fireEvent.change(screen.getByLabelText("Question or prompt"), {
       target: { value: "Has the answer changed?" }
     })
     firstPreview.resolve(validPreview({ id: "preview_stale" }))
@@ -182,7 +211,7 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
       />
     )
 
-    await user.type(screen.getByLabelText("Question"), "Has the answer appeared?")
+    await user.type(screen.getByLabelText("Question or prompt"), "Has the answer appeared?")
     await user.click(screen.getByRole("button", { name: "Preview" }))
     await screen.findByText("Preview ready")
     await user.click(screen.getByRole("button", { name: "Save definition" }))
@@ -206,7 +235,8 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
       />
     )
 
-    await user.type(screen.getByLabelText("Question"), "Has the answer appeared?")
+    await user.type(screen.getByLabelText("Question or prompt"), "Has the answer appeared?")
+    await user.click(screen.getByRole("button", { name: "Advanced scope JSON" }))
     fireEvent.change(screen.getByLabelText("Scope JSON"), {
       target: { value: '{"collection_id":' }
     })
@@ -239,7 +269,7 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
       />
     )
 
-    await user.type(screen.getByLabelText("Question"), "Has the answer appeared?")
+    await user.type(screen.getByLabelText("Question or prompt"), "Has the answer appeared?")
     await user.click(screen.getByRole("button", { name: "Preview" }))
 
     expect(await screen.findByText("Preview again before saving")).toBeInTheDocument()
@@ -288,7 +318,7 @@ describe("ScheduledTaskAutomationDefinitionEditor", () => {
       />
     )
 
-    await user.type(screen.getByLabelText("Question"), "Has the answer appeared?")
+    await user.type(screen.getByLabelText("Question or prompt"), "Has the answer appeared?")
     await user.click(screen.getByRole("button", { name: "Preview" }))
     await screen.findByText("Preview ready")
     await user.click(screen.getByRole("button", { name: "Save definition" }))
