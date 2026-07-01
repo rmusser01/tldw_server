@@ -702,7 +702,7 @@ class SandboxService:
             "SANDBOX_ACTIVE_MAX_PER_WORKSPACE_GROUP",
         )
         renew_interval = max(0.5, min(5.0, float(lease_seconds) / 3.0))
-        next_renew = time.monotonic() + renew_interval
+        next_renew = time.monotonic()
         while True:
             admitted = self._orch.try_admit_run_start(
                 run_id,

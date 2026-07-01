@@ -33,6 +33,9 @@ const routeMocks = vi.hoisted(() => ({
       apiKey: "test-api-key"
     } as Record<string, unknown>
   },
+  runtimeApiKey: {
+    current: null as string | null
+  },
   getConfig: vi.fn(),
   listMedia: vi.fn(),
   updateConfig: vi.fn()
@@ -101,6 +104,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     listMedia: routeMocks.listMedia,
     updateConfig: routeMocks.updateConfig
   }
+}))
+
+vi.mock("@/services/tldw/runtime-auth-override", () => ({
+  getRuntimeSingleUserApiKeyOverride: () => routeMocks.runtimeApiKey.current
 }))
 
 vi.mock("@/hooks/useSetupOnboarding", () => ({
@@ -180,6 +187,7 @@ describe("OptionIndex unified setup resolver", () => {
       authMode: "single-user",
       apiKey: "test-api-key"
     }
+    routeMocks.runtimeApiKey.current = null
     routeMocks.getConfig.mockReset()
     routeMocks.getConfig.mockImplementation(
       async () => routeMocks.tldwConfig.current
@@ -250,6 +258,31 @@ describe("OptionIndex unified setup resolver", () => {
       },
       { focusTrigger: true }
     )
+  })
+
+  it("accepts runtime single-user auth for post-onboarding media readiness", async () => {
+    routeMocks.firstRunState.current = createCompletedFirstRunState()
+    routeMocks.tldwConfig.current = {
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user"
+    }
+    routeMocks.runtimeApiKey.current = "runtime-api-key"
+    const { default: OptionIndex } = await import("../option-index")
+
+    render(
+      <MemoryRouter>
+        <OptionIndex />
+      </MemoryRouter>
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: /add your first source/i })
+    ).toBeInTheDocument()
+    await waitFor(() => {
+      expect(routeMocks.listMedia).toHaveBeenCalledWith({
+        results_per_page: 1
+      })
+    })
   })
 
   it("passes the selected first-source kind into quick ingest", async () => {

@@ -6,7 +6,7 @@ import {
   expect,
   assertNoCriticalErrors,
 } from "../utils/fixtures"
-import { TEST_CONFIG, dismissConnectionModals } from "../utils/helpers"
+import { TEST_CONFIG, dismissConnectionModals, seedAuth } from "../utils/helpers"
 
 type ViewportTarget = {
   label: "desktop" | "mobile"
@@ -145,6 +145,24 @@ async function json(route: Route, body: unknown, status = 200): Promise<void> {
 }
 
 async function installCompletedFirstRunApi(page: Page): Promise<void> {
+  await page.route(/\/api\/_tldw-webui\/runtime-config(?:\?.*)?$/, async (route) => {
+    if (route.request().method().toUpperCase() !== "GET") {
+      await route.fallback()
+      return
+    }
+    await json(route, {
+      runtimeAuth: {
+        available: true,
+        authMode: "single-user",
+        apiKey: TEST_CONFIG.apiKey,
+      },
+      networking: {
+        deploymentMode: "quickstart",
+        serverUrl: "",
+      },
+    })
+  })
+
   await page.route(/\/api\/v1\/setup\/first-run\/(?:state|metadata)(?:\?.*)?$/, async (route) => {
     const request = route.request()
     const method = request.method().toUpperCase()
@@ -213,6 +231,22 @@ async function installCompletedFirstRunApi(page: Page): Promise<void> {
       return
     }
     await json(route, { items: [], total: 0, page: 1, results_per_page: 1 })
+  })
+
+  await page.route(/\/api\/v1\/llm\/models\/metadata(?:\?.*)?$/, async (route) => {
+    if (route.request().method().toUpperCase() !== "GET") {
+      await route.fallback()
+      return
+    }
+    await json(route, { providers: [], models: [] })
+  })
+
+  await page.route(/\/api\/v1\/llm\/providers(?:\?.*)?$/, async (route) => {
+    if (route.request().method().toUpperCase() !== "GET") {
+      await route.fallback()
+      return
+    }
+    await json(route, { providers: [] })
   })
 }
 
@@ -301,21 +335,12 @@ test.describe("Onboarding First-Source Journey", () => {
   test.beforeEach(async ({ authedPage }) => {
     ensureEvidenceDirectory()
     await installCompletedFirstRunApi(authedPage)
-    await authedPage.addInitScript((cfg) => {
-      try {
-        localStorage.setItem( // codeql[js/clear-text-storage-of-sensitive-data] synthetic E2E auth seed only
-          "tldwConfig",
-          JSON.stringify({
-            serverUrl: cfg.serverUrl,
-            authMode: "single-user",
-            apiKey: cfg.apiKey,
-          })
-        )
-      } catch {}
+    await seedAuth(authedPage)
+    await authedPage.addInitScript(() => {
       try {
         localStorage.removeItem("tldw:first-source-milestone-dismissed")
       } catch {}
-    }, TEST_CONFIG)
+    })
   })
 
   for (const viewport of VIEWPORTS) {
