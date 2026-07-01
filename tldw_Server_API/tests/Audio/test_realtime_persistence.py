@@ -150,6 +150,47 @@ async def test_persist_metadata_writes_user_transcript_and_assistant_text_after_
 
 
 @pytest.mark.asyncio
+async def test_persistence_uses_turn_snapshot_when_next_audio_commit_starts_before_write():
+    adapter = FakeRealtimePersistenceAdapter()
+    pipeline = FakeRealtimePipeline(transcript="first user")
+    session = RealtimeSession(
+        pipeline=pipeline,
+        persistence_adapter=adapter,
+    )
+    await session.apply_update(
+        UpdateSessionCommand(
+            event_id="evt_update",
+            config=RealtimeSessionConfig(metadata={"tldw": {"persist": True, "conversation_id": "abc"}}),
+        )
+    )
+    await session.append_audio(AppendAudioCommand(event_id="evt_first_audio", audio=b"\x00\x01"))
+    await session.commit_audio(CommitAudioCommand(event_id="evt_first_commit"))
+
+    first_response = session.create_response(CreateResponseCommand(event_id="evt_first_create"))
+    while True:
+        event = await anext(first_response)
+        if isinstance(event, ResponseDoneEvent):
+            break
+
+    pipeline.transcript = "second user"
+    await session.append_audio(AppendAudioCommand(event_id="evt_second_audio", audio=b"\x02\x03"))
+    await session.commit_audio(CommitAudioCommand(event_id="evt_second_commit"))
+
+    with pytest.raises(StopAsyncIteration):
+        await anext(first_response)
+
+    assert adapter.writes == [
+        {
+            "conversation_id": "abc",
+            "session_id": session.session_id,
+            "turn_index": 1,
+            "user_transcript": "first user",
+            "assistant_text": "persisted assistant",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_persistence_failure_emits_internal_error_after_streamed_output_and_done():
     adapter = FakeRealtimePersistenceAdapter(fail=True)
     session = RealtimeSession(

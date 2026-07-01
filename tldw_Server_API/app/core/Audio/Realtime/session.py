@@ -243,6 +243,8 @@ class RealtimeSession:
         response_id = _new_realtime_id("resp")
         self.active_response_id = response_id
         item_id = _new_realtime_id("item")
+        response_turn_index = self.turn_index
+        response_user_transcript = self._last_user_transcript
 
         assistant_text = ""
         assistant_transcript = ""
@@ -269,7 +271,7 @@ class RealtimeSession:
 
         try:
             async for pipeline_event in self.pipeline.stream_turn(
-                self._last_user_transcript,
+                response_user_transcript,
                 config=self.config,
             ):
                 if not self._generation_is_current(generation_id, response_id):
@@ -413,7 +415,12 @@ class RealtimeSession:
         self._clear_active_response(response_id)
 
         if final_status == "completed":
-            error = await self._persist_turn(command.event_id, assistant_text)
+            error = await self._persist_turn(
+                command.event_id,
+                assistant_text,
+                turn_index=response_turn_index,
+                user_transcript=response_user_transcript,
+            )
             if error is not None:
                 yield error
 
@@ -446,7 +453,14 @@ class RealtimeSession:
             )
         ]
 
-    async def _persist_turn(self, event_id: str | None, assistant_text: str) -> RealtimeErrorEvent | None:
+    async def _persist_turn(
+        self,
+        event_id: str | None,
+        assistant_text: str,
+        *,
+        turn_index: int,
+        user_transcript: str,
+    ) -> RealtimeErrorEvent | None:
         persistence_config = persistence_config_from_metadata(self.config.metadata)
         if not persistence_config.enabled or persistence_config.conversation_id is None:
             return None
@@ -455,8 +469,8 @@ class RealtimeSession:
             await self.persistence_adapter.write_turn(
                 conversation_id=persistence_config.conversation_id,
                 session_id=self.session_id,
-                turn_index=self.turn_index,
-                user_transcript=self._last_user_transcript,
+                turn_index=turn_index,
+                user_transcript=user_transcript,
                 assistant_text=assistant_text,
             )
         except Exception:
