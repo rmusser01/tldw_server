@@ -1,7 +1,7 @@
 ---
 id: TASK-12088
 title: Address PR 2567 review follow-ups on dev
-status: In Progress
+status: Done
 labels:
 - code-review
 - pr-2567
@@ -9,6 +9,7 @@ labels:
 priority: High
 references:
 - https://github.com/rmusser01/tldw_server/pull/2567
+- https://github.com/rmusser01/tldw_server/pull/2568
 modified_files:
 - tldw_Server_API/app/core/DB_Management/jobs_sql_fragments.py
 - tldw_Server_API/app/core/Jobs/manager.py
@@ -53,7 +54,7 @@ Create a follow-up PR against dev that addresses all actionable Qodo review issu
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Ready for PR against dev after commit/push. All review items from PR 2567 have been addressed or technically dispositioned, with targeted backend/frontend/package tests passing and Bandit baseline comparison recorded.
+Draft PR opened against dev: https://github.com/rmusser01/tldw_server/pull/2568. Addressed all eight Qodo review threads from PR 2567. Verification passed: git diff --check; targeted Python pytest suite with 101 passing tests; targeted Vitest useConfig suite with 10 passing tests; Bandit touched Python scope reported only the same three low-severity WebSearch_APIs.py baseline findings present on origin/dev (B311, B101, B311), so no new Bandit findings were introduced. PR remains draft pending the required human-authored Change summary before merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
