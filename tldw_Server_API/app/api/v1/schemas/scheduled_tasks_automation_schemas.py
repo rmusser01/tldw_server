@@ -22,6 +22,10 @@ ScheduledTaskDefinitionHealth = Literal[
     "permission_required",
 ]
 ScheduledTaskDefinitionDisabledLockKind = Literal["none", "admin", "security", "system"]
+ScheduledTaskDefinitionResolutionState = Literal["open", "solved"]
+ScheduledTaskRunStatus = Literal["queued", "running", "completed", "failed", "skipped", "cancelled"]
+ScheduledTaskRunOutcome = Literal["finding", "no_match", "partial", "degraded", "none"]
+ScheduledTaskReviewState = Literal["unread", "read", "dismissed"]
 
 
 class ScheduledTaskActionCapability(BaseModel):
@@ -141,6 +145,12 @@ class ScheduledTaskDefinitionResponse(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     archived_at: datetime | None = None
+    resolution_state: ScheduledTaskDefinitionResolutionState = "open"
+    resolved_at: datetime | None = None
+    resolved_by: str | None = None
+    resolved_result_id: str | None = None
+    finding_policy: dict[str, Any] = Field(default_factory=lambda: {"preset": "balanced_findings"})
+    retention_policy: dict[str, Any] = Field(default_factory=lambda: {"mode": "default"})
 
 
 class ScheduledTaskDefinitionListResponse(BaseModel):
@@ -152,6 +162,95 @@ class ScheduledTaskDefinitionListResponse(BaseModel):
     offset: int = Field(default=0, ge=0)
     has_more: bool = False
     next_offset: int | None = Field(default=None, ge=0)
+
+
+class ScheduledTaskRunResponse(BaseModel):
+    """Persisted Scheduled Tasks automation run response."""
+
+    id: str
+    owner_id: str | None = None
+    definition_id: str
+    definition_version: int = Field(..., ge=1)
+    trigger_reason: str
+    status: ScheduledTaskRunStatus
+    outcome: ScheduledTaskRunOutcome = "none"
+    job_id: str | None = None
+    schedule_slot: str | None = None
+    scope_snapshot: dict[str, Any] = Field(default_factory=dict)
+    finding_policy_snapshot: dict[str, Any] = Field(default_factory=dict)
+    rag_request_snapshot: dict[str, Any] = Field(default_factory=dict)
+    run_summary: dict[str, Any] = Field(default_factory=dict)
+    evidence_summary: dict[str, Any] = Field(default_factory=dict)
+    failure_reason: dict[str, Any] | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+
+
+class ScheduledTaskRunListResponse(BaseModel):
+    """Paginated list of Scheduled Tasks automation runs."""
+
+    items: list[ScheduledTaskRunResponse] = Field(default_factory=list)
+    total: int = Field(default=0, ge=0)
+    limit: int = Field(default=50, ge=1)
+    offset: int = Field(default=0, ge=0)
+    has_more: bool = False
+    next_offset: int | None = Field(default=None, ge=0)
+
+
+class ScheduledTaskResultResponse(BaseModel):
+    """Persisted Scheduled Tasks automation result response."""
+
+    id: str
+    owner_id: str | None = None
+    definition_id: str
+    run_id: str
+    kind: Literal["finding", "failure"]
+    title: str
+    summary: str
+    answer: Any | None = None
+    answer_mode: Literal["synthesized", "evidence_only", "none"]
+    confidence: dict[str, Any] = Field(default_factory=dict)
+    source_refs: list[dict[str, Any]] = Field(default_factory=list)
+    dedupe_key: str = Field(..., min_length=1)
+    visibility_destination: dict[str, Any] = Field(default_factory=dict)
+    review_state: ScheduledTaskReviewState = "unread"
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    reviewed_at: datetime | None = None
+    reviewed_by: str | None = None
+    review_note: str | None = None
+
+
+class ScheduledTaskResultListResponse(BaseModel):
+    """Paginated list of Scheduled Tasks automation results."""
+
+    items: list[ScheduledTaskResultResponse] = Field(default_factory=list)
+    total: int = Field(default=0, ge=0)
+    limit: int = Field(default=50, ge=1)
+    offset: int = Field(default=0, ge=0)
+    has_more: bool = False
+    next_offset: int | None = Field(default=None, ge=0)
+
+
+class ScheduledTaskResultReviewRequest(BaseModel):
+    """Request to update a Scheduled Tasks result review state."""
+
+    review_state: ScheduledTaskReviewState
+    review_note: str | None = None
+
+
+class ScheduledTaskMarkSolvedRequest(BaseModel):
+    """Request to mark a Recurring Question definition solved."""
+
+    resolved_result_id: str | None = None
+
+
+class ScheduledTaskReopenRequest(BaseModel):
+    """Request to reopen a solved Recurring Question definition."""
+
+    reason: str | None = None
 
 
 class ScheduledTaskAuditEventResponse(BaseModel):
