@@ -136,3 +136,8 @@ def test_provider_status_reports_web_acquisition_disabled(tmp_path: Path) -> Non
 
     assert status["web_acquisition_enabled"] is False  # nosec B101
     assert status["web_acquisition_available"] is False  # nosec B101
+    assert status["web_source_profile"] == "locked_down"  # nosec B101
+    assert status["web_acquisition_unavailable_reason"] == "web_acquisition_disabled"  # nosec B101
+    assert status["web_policy"]["allow_arbitrary_public_domains"] is False  # nosec B101
+    assert status["web_policy"]["preapproved_domains"] == []  # nosec B101
+    assert status["web_policy"]["allowed_url_prefixes"] == []  # nosec B101

@@ -4,11 +4,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from os import PathLike
 from pathlib import Path
+from typing import Literal, cast
 
 from .models import AccessScope
 
+SourceProfile = Literal["locked_down", "local_first", "online_capable"]
+
 _TRUE_VALUES = {"true", "1", "yes", "on"}
 _FALSE_VALUES = {"false", "0", "no", "off"}
+_SOURCE_PROFILES = ("locked_down", "local_first", "online_capable")
 
 
 def _coerce_bool(value: object, field_name: str) -> bool:
@@ -41,6 +45,29 @@ def _coerce_positive_int(value: object, field_name: str) -> int:
     return result
 
 
+def _coerce_positive_float(value: object, field_name: str) -> float:
+    result = float(value)
+    if result <= 0:
+        raise ValueError(f"{field_name} must be positive")
+    return result
+
+
+def _coerce_string_tuple(value: object) -> tuple[str, ...]:
+    if value is None or value == "":
+        return ()
+    if isinstance(value, str):
+        items = (value,)
+    else:
+        items = tuple(value) if isinstance(value, Iterable) else (value,)
+    return tuple(str(item).strip() for item in items if str(item).strip())
+
+
+def _coerce_source_profile(value: object, field_name: str) -> SourceProfile:
+    if value not in _SOURCE_PROFILES:
+        raise ValueError(f"{field_name} must be one of: {', '.join(_SOURCE_PROFILES)}")
+    return cast(SourceProfile, value)
+
+
 @dataclass(frozen=True)
 class DocsSettings:
     db_path: Path
@@ -48,6 +75,17 @@ class DocsSettings:
     max_import_file_bytes: int = 2_000_000
     default_scope: AccessScope = AccessScope()
     enable_web_acquisition: bool = False
+    web_source_profile: SourceProfile = "locked_down"
+    preapproved_domains: tuple[str, ...] = ()
+    allowed_url_prefixes: tuple[str, ...] = ()
+    denied_domains: tuple[str, ...] = ()
+    max_url_redirects: int = 3
+    max_url_body_bytes: int = 2_000_000
+    url_request_timeout_seconds: float = 10.0
+    allowed_content_types: tuple[str, ...] = ("text/html", "application/xhtml+xml", "text/plain", "text/markdown")
+    url_user_agent: str = "tldw-mcp-docs/0.1"
+    respect_robots: bool = False
+    allow_arbitrary_public_domains: bool = False
 
     @classmethod
     def from_mapping(cls, values: dict) -> "DocsSettings":
@@ -62,5 +100,36 @@ class DocsSettings:
             enable_web_acquisition=_coerce_bool(
                 values.get("enable_web_acquisition", False),
                 "enable_web_acquisition",
+            ),
+            web_source_profile=_coerce_source_profile(
+                values.get("web_source_profile", "locked_down"),
+                "web_source_profile",
+            ),
+            preapproved_domains=_coerce_string_tuple(values.get("preapproved_domains")),
+            allowed_url_prefixes=_coerce_string_tuple(values.get("allowed_url_prefixes")),
+            denied_domains=_coerce_string_tuple(values.get("denied_domains")),
+            max_url_redirects=_coerce_positive_int(
+                values.get("max_url_redirects", 3),
+                "max_url_redirects",
+            ),
+            max_url_body_bytes=_coerce_positive_int(
+                values.get("max_url_body_bytes", 2_000_000),
+                "max_url_body_bytes",
+            ),
+            url_request_timeout_seconds=_coerce_positive_float(
+                values.get("url_request_timeout_seconds", 10.0),
+                "url_request_timeout_seconds",
+            ),
+            allowed_content_types=_coerce_string_tuple(
+                values.get(
+                    "allowed_content_types",
+                    ("text/html", "application/xhtml+xml", "text/plain", "text/markdown"),
+                )
+            ),
+            url_user_agent=str(values.get("url_user_agent", "tldw-mcp-docs/0.1")),
+            respect_robots=_coerce_bool(values.get("respect_robots", False), "respect_robots"),
+            allow_arbitrary_public_domains=_coerce_bool(
+                values.get("allow_arbitrary_public_domains", False),
+                "allow_arbitrary_public_domains",
             ),
         )

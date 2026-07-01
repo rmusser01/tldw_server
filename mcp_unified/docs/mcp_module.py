@@ -30,6 +30,21 @@ def _tool(
     }
 
 
+def _web_policy_status(settings: DocsSettings) -> dict[str, Any]:
+    return {
+        "allow_arbitrary_public_domains": settings.allow_arbitrary_public_domains,
+        "preapproved_domains": list(settings.preapproved_domains),
+        "allowed_url_prefixes": list(settings.allowed_url_prefixes),
+        "denied_domains": list(settings.denied_domains),
+        "max_url_redirects": settings.max_url_redirects,
+        "max_url_body_bytes": settings.max_url_body_bytes,
+        "url_request_timeout_seconds": settings.url_request_timeout_seconds,
+        "allowed_content_types": list(settings.allowed_content_types),
+        "url_user_agent": settings.url_user_agent,
+        "respect_robots": settings.respect_robots,
+    }
+
+
 class DocsMCPToolProvider:
     def __init__(self, *, settings: DocsSettings, store: DocsCatalogStore | None = None) -> None:
         self.settings = settings
@@ -149,6 +164,13 @@ class DocsMCPToolProvider:
             status = self.store.status()
             status["web_acquisition_enabled"] = self.settings.enable_web_acquisition
             status["web_acquisition_available"] = False
+            status["web_source_profile"] = self.settings.web_source_profile
+            status["web_policy"] = _web_policy_status(self.settings)
+            status["web_acquisition_unavailable_reason"] = (
+                "web_acquisition_disabled"
+                if not self.settings.enable_web_acquisition
+                else "web_acquisition_service_unavailable"
+            )
             return status
         if tool_name == "docs.search":
             return self.retrieval.search(
