@@ -12,8 +12,10 @@ references:
 - https://developers.openai.com/api/docs/guides/realtime-conversations#handling-audio-with-websockets
 documentation:
 - Docs/superpowers/specs/2026-07-01-openai-realtime-speech-endpoint-design.md
+- Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
 modified_files:
 - Docs/superpowers/specs/2026-07-01-openai-realtime-speech-endpoint-design.md
+- Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
 - backlog/tasks/task-12088 - Design-OpenAI-compatible-realtime-speech-endpoint.md
 ---
 
@@ -26,6 +28,12 @@ Write the design spec for an adapter-first OpenAI GA Realtime-compatible speech-
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
