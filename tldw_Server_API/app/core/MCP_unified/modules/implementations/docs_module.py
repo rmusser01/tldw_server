@@ -44,6 +44,8 @@ class DocsModule(BaseModule):
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]) -> None:
         if tool_name == "docs.import_path" and not str(arguments.get("path") or "").strip():
             raise ValueError("path is required")
+        if tool_name == "docs.ingest_url" and not str(arguments.get("url") or "").strip():
+            raise ValueError("url is required")
         if tool_name in {"docs.search", "docs.context"} and not str(arguments.get("query") or "").strip():
             raise ValueError("query is required")
 

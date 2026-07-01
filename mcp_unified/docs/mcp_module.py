@@ -4,6 +4,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from .acquisition.extract import available_extractors
+from .acquisition.service import DocsAcquisitionService
 from .importers.local import DocsImportService
 from .models import AccessScope, ContextRequest, SearchFilters, SearchRequest
 from .retrieval.aliases import DocsAliasResolver
@@ -54,9 +56,12 @@ class DocsMCPToolProvider:
         self.context = DocsContextBuilder(self.retrieval)
         self.aliases = DocsAliasResolver(self.store)
         self.importer = DocsImportService(settings=settings, store=self.store)
+        self.acquisition = (
+            DocsAcquisitionService(settings=settings, store=self.store) if settings.enable_web_acquisition else None
+        )
 
     def tool_definitions(self) -> list[dict[str, Any]]:
-        return [
+        tools = [
             _tool(
                 "docs.search",
                 "Search the local docs corpus.",
@@ -157,19 +162,34 @@ class DocsMCPToolProvider:
                 "retrieval",
             ),
         ]
+        if self.acquisition is not None:
+            tools.append(
+                _tool(
+                    "docs.ingest_url",
+                    "Fetch and ingest one approved HTTP or HTTPS page into the local docs corpus.",
+                    {
+                        "url": {"type": "string"},
+                        "keywords": {"type": "array"},
+                        "collections": {"type": "array"},
+                        "title": {"type": "string"},
+                    },
+                    ["url"],
+                    "ingestion",
+                )
+            )
+        return tools
 
     def execute(self, tool_name: str, arguments: dict[str, Any] | None, *, scope: AccessScope) -> Any:
         args = dict(arguments or {})
         if tool_name == "docs.status":
             status = self.store.status()
             status["web_acquisition_enabled"] = self.settings.enable_web_acquisition
-            status["web_acquisition_available"] = False
+            status["web_acquisition_available"] = self.acquisition is not None
+            status["web_extractors"] = available_extractors() if self.acquisition is not None else []
             status["web_source_profile"] = self.settings.web_source_profile
             status["web_policy"] = _web_policy_status(self.settings)
             status["web_acquisition_unavailable_reason"] = (
-                "web_acquisition_disabled"
-                if not self.settings.enable_web_acquisition
-                else "web_acquisition_service_unavailable"
+                None if self.acquisition is not None else "web_acquisition_disabled"
             )
             return status
         if tool_name == "docs.search":
@@ -213,6 +233,19 @@ class DocsMCPToolProvider:
                 path=Path(str(args["path"])),
                 keywords=tuple(str(item) for item in args.get("keywords") or ()),
                 collection_names=tuple(str(item) for item in args.get("collections") or ()),
+            )
+        if tool_name == "docs.ingest_url":
+            if self.acquisition is None:
+                return {"status": "capability_disabled", "reason_code": "web_acquisition_disabled"}
+            url = _optional_str(args.get("url"))
+            if url is None:
+                raise ValueError("url is required")
+            return self.acquisition.ingest_url(
+                scope=scope,
+                url=url,
+                keywords=tuple(str(item) for item in args.get("keywords") or ()),
+                collection_names=tuple(str(item) for item in args.get("collections") or ()),
+                title_override=_optional_str(args.get("title")),
             )
         return self._execute_management_or_list(tool_name=tool_name, args=args, scope=scope)
 

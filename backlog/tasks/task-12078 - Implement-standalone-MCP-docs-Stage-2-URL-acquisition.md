@@ -16,12 +16,12 @@ Implement optional single-page URL acquisition for the standalone MCP docs corpu
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 docs.ingest_url is hidden when disabled and stale direct calls return capability_disabled before policy or network work.
+- [x] #1 docs.ingest_url is hidden when disabled and stale direct calls return capability_disabled before policy or network work.
 - [x] #2 Source policy implements locked_down, local_first, and online_capable decisions with structured domain/wildcard/prefix matching, safe URL normalization, approval_required without fetch, denied-domain precedence, unsupported scheme denial, and credential URL denial.
 - [x] #3 URL fetcher uses injectable resolver/transport, validates unsafe IP ranges, prevents DNS rebinding through validated-address transport binding, handles manual redirects with per-hop policy/DNS/IP checks, enforces redirect limits, content-type limits, transferred and decoded body limits, and robots fail-closed behavior.
 - [x] #4 Extraction uses lazy optional trafilatura/bs4 imports with stdlib HTML/text fallback and preserves source_url/canonical_uri without pretending URLs are local paths.
 - [x] #5 Approved fake URL ingestion writes to SQLite/FTS5, applies keywords and collections, and is retrievable via docs.search and docs.context.
-- [ ] #6 MCP provider and host shim expose docs.ingest_url only when enabled, validate url arguments, categorize it as ingestion, and report disabled/enabled/extractor status in docs.status.
+- [x] #6 MCP provider and host shim expose docs.ingest_url only when enabled, validate url arguments, categorize it as ingestion, and report disabled/enabled/extractor status in docs.status.
 - [ ] #7 Import-boundary tests verify mcp_unified.docs has no top-level tldw_Server_API, requests, httpx, aiohttp, playwright, trafilatura, or bs4 imports; tests do not use live internet.
 - [ ] #8 Focused docs MCP tests and Bandit on touched Python paths pass.
 <!-- AC:END -->
@@ -59,6 +59,12 @@ Task 5 complete locally.
 - Green evidence: focused service tests passed (`5 passed, 6 warnings`); full docs MCP tests passed (`135 passed, 6 warnings`); Black check reported 5 touched files unchanged; `git diff --check` was clean.
 - Bandit evidence: `/tmp/bandit_mcp_docs_service.json` reported `errors: []` and `results: []` for `mcp_unified/docs/acquisition`, `mcp_unified/docs/importers`, and the Task 5 service/extraction tests.
 - Review gates: verified disabled calls return `capability_disabled` before policy/resolver/transport work, approval-required and robots fail-closed paths do not fetch, approved fake URL ingestion writes SQLite/FTS5 content with keywords and collections, docs.search/docs.context retrieve it, unchanged detection works, and rich extraction preserves static title/sections metadata.
+Task 6 complete locally.
+- Red evidence: provider/shim tests first failed because `docs.ingest_url` was unknown, not advertised when enabled, `docs.status` lacked `web_extractors` and enabled availability, and the host shim did not reject blank URL arguments; a review-driven provider validation regression failed until enabled direct calls rejected blank URLs before acquisition.
+- Green evidence: provider/shim tests passed (`16 passed, 6 warnings`); full docs MCP tests passed (`141 passed, 6 warnings`); Black check reported 4 touched files unchanged; `git diff --check` was clean.
+- Bandit evidence: `/tmp/bandit_mcp_docs_provider_url.json` reported `errors: []` and `results: []` for the provider, host shim, and Task 6 tests.
+- Review gates: verified `docs.ingest_url` remains hidden when disabled, stale disabled direct provider calls return `capability_disabled`, enabled provider definitions mark the tool as ingestion/write-capable, enabled direct calls validate non-empty URL and delegate keywords/collections/title to the acquisition service, `docs.status` reports enabled availability plus extractor names, and the host shim rejects blank URL before provider execution.
+AC #1 resolved with Task 6 plus the Task 5 service guard: disabled configurations do not advertise `docs.ingest_url`, stale provider calls return `capability_disabled`/`web_acquisition_disabled`, and service-level disabled calls return before policy, resolver, or transport work.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

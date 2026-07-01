@@ -56,3 +56,22 @@ async def test_docs_module_executes_with_context_scope(tmp_path: Path) -> None:
     result = await module.execute_tool("docs.search", {"query": "SQLite"}, context=ctx)
 
     assert result["results"]  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_docs_module_rejects_empty_ingest_url(tmp_path: Path) -> None:
+    module = DocsModule(
+        ModuleConfig(
+            name="docs",
+            settings={
+                "db_path": str(tmp_path / "docs.db"),
+                "enable_web_acquisition": True,
+                "web_source_profile": "locked_down",
+                "allowed_url_prefixes": ["https://example.com/docs/"],
+            },
+        )
+    )
+    await module.on_initialize()
+
+    with pytest.raises(ValueError, match="url is required"):
+        await module.execute_tool("docs.ingest_url", {"url": "   "}, context=None)

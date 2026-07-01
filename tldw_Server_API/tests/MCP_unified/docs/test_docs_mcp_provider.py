@@ -79,6 +79,78 @@ def test_provider_advertises_stage1_tools_without_ingest_url(tmp_path: Path) -> 
     assert "docs.ingest_url" not in names  # nosec B101
 
 
+def test_provider_stale_ingest_url_call_is_disabled_when_not_advertised(tmp_path: Path) -> None:
+    provider, scope, _document_id = _provider(tmp_path)
+
+    result = provider.execute("docs.ingest_url", {"url": "https://example.com/docs"}, scope=scope)
+
+    assert result["status"] == "capability_disabled"  # nosec B101
+    assert result["reason_code"] == "web_acquisition_disabled"  # nosec B101
+
+
+def test_provider_advertises_ingest_url_when_enabled(tmp_path: Path) -> None:
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "locked_down",
+            "allowed_url_prefixes": ("https://example.com/docs/",),
+        }
+    )
+    provider = DocsMCPToolProvider(settings=settings)
+
+    tools = {tool["name"]: tool for tool in provider.tool_definitions()}
+
+    assert "docs.ingest_url" in tools  # nosec B101
+    assert tools["docs.ingest_url"]["metadata"]["category"] == "ingestion"  # nosec B101
+    assert tools["docs.ingest_url"]["metadata"]["readOnlyHint"] is False  # nosec B101
+
+
+def test_provider_ingest_url_delegates_to_acquisition_service(tmp_path: Path) -> None:
+    class FakeAcquisition:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def ingest_url(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"status": "created", "reason_code": "ok"}
+
+    settings = DocsSettings.from_mapping({"db_path": str(tmp_path / "docs.db"), "enable_web_acquisition": True})
+    provider = DocsMCPToolProvider(settings=settings)
+    acquisition = FakeAcquisition()
+    provider.acquisition = acquisition
+    scope = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
+
+    result = provider.execute(
+        "docs.ingest_url",
+        {"url": "https://example.com/docs", "keywords": ["sqlite"], "collections": ["Reference"], "title": "Guide"},
+        scope=scope,
+    )
+
+    assert result["status"] == "created"  # nosec B101
+    assert acquisition.calls == [  # nosec B101
+        {
+            "scope": scope,
+            "url": "https://example.com/docs",
+            "keywords": ("sqlite",),
+            "collection_names": ("Reference",),
+            "title_override": "Guide",
+        }
+    ]
+
+
+def test_provider_rejects_empty_ingest_url_when_enabled(tmp_path: Path) -> None:
+    settings = DocsSettings.from_mapping({"db_path": str(tmp_path / "docs.db"), "enable_web_acquisition": True})
+    provider = DocsMCPToolProvider(settings=settings)
+
+    try:
+        provider.execute("docs.ingest_url", {"url": "   "}, scope=AccessScope())
+    except ValueError as exc:
+        assert "url is required" in str(exc)  # nosec B101
+    else:
+        raise AssertionError("Expected empty docs.ingest_url url to be rejected")
+
+
 def test_provider_marks_write_tools_with_ingestion_or_management_category(tmp_path: Path) -> None:
     provider, _scope, _document_id = _provider(tmp_path)
     write_names = {
@@ -139,6 +211,7 @@ def test_provider_status_reports_web_acquisition_disabled(tmp_path: Path) -> Non
 
     assert status["web_acquisition_enabled"] is False  # nosec B101
     assert status["web_acquisition_available"] is False  # nosec B101
+    assert status["web_extractors"] == []  # nosec B101
     assert status["web_source_profile"] == "locked_down"  # nosec B101
     assert status["web_acquisition_unavailable_reason"] == "web_acquisition_disabled"  # nosec B101
     assert status["web_policy"]["allow_arbitrary_public_domains"] is False  # nosec B101
@@ -180,3 +253,22 @@ def test_provider_status_reports_custom_web_policy(tmp_path: Path) -> None:
         "url_user_agent": "tldw-docs-test/1",
         "respect_robots": True,
     }
+
+
+def test_provider_status_reports_enabled_static_extractors(tmp_path: Path) -> None:
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "locked_down",
+            "allowed_url_prefixes": ("https://example.com/docs/",),
+        }
+    )
+    provider = DocsMCPToolProvider(settings=settings)
+
+    status = provider.execute("docs.status", {}, scope=AccessScope())
+
+    assert status["web_acquisition_enabled"] is True  # nosec B101
+    assert status["web_acquisition_available"] is True  # nosec B101
+    assert status["web_acquisition_unavailable_reason"] is None  # nosec B101
+    assert "static_html" in status["web_extractors"]  # nosec B101
