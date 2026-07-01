@@ -126,6 +126,20 @@ class InputAudioCommittedEvent:
 
 
 @dataclass(frozen=True)
+class InputAudioSpeechStartedEvent:
+    event_id: str | None
+    item_id: str
+    audio_start_ms: int = 0
+
+
+@dataclass(frozen=True)
+class InputAudioSpeechStoppedEvent:
+    event_id: str | None
+    item_id: str
+    audio_end_ms: int | None = None
+
+
+@dataclass(frozen=True)
 class ConversationItemAddedEvent:
     event_id: str | None
     item_id: str
@@ -134,9 +148,37 @@ class ConversationItemAddedEvent:
 
 
 @dataclass(frozen=True)
+class ConversationItemDoneEvent:
+    event_id: str | None
+    item_id: str
+    role: str
+    status: str = "completed"
+
+
+@dataclass(frozen=True)
 class ResponseCreatedEvent:
     event_id: str | None
     response_id: str
+    generation_id: int = 0
+
+
+@dataclass(frozen=True)
+class ResponseOutputItemAddedEvent:
+    event_id: str | None
+    response_id: str
+    item_id: str
+    output_index: int
+    role: str = "assistant"
+
+
+@dataclass(frozen=True)
+class ResponseContentPartAddedEvent:
+    event_id: str | None
+    response_id: str
+    item_id: str
+    output_index: int
+    content_index: int
+    content_type: str
 
 
 @dataclass(frozen=True)
@@ -170,6 +212,54 @@ class ResponseTranscriptDeltaEvent:
 
 
 @dataclass(frozen=True)
+class ResponseTextDoneEvent:
+    event_id: str | None
+    response_id: str
+    item_id: str
+    output_index: int
+    content_index: int
+    text: str
+
+
+@dataclass(frozen=True)
+class ResponseAudioDoneEvent:
+    event_id: str | None
+    response_id: str
+    item_id: str
+    output_index: int
+    content_index: int
+
+
+@dataclass(frozen=True)
+class ResponseTranscriptDoneEvent:
+    event_id: str | None
+    response_id: str
+    item_id: str
+    output_index: int
+    content_index: int
+    transcript: str
+
+
+@dataclass(frozen=True)
+class ResponseContentPartDoneEvent:
+    event_id: str | None
+    response_id: str
+    item_id: str
+    output_index: int
+    content_index: int
+    content_type: str
+
+
+@dataclass(frozen=True)
+class ResponseOutputItemDoneEvent:
+    event_id: str | None
+    response_id: str
+    item_id: str
+    output_index: int
+    status: str = "completed"
+
+
+@dataclass(frozen=True)
 class ResponseDoneEvent:
     event_id: str | None
     response_id: str
@@ -199,12 +289,22 @@ class RealtimeErrorEvent:
 RealtimeServerEvent = (
     SessionCreatedEvent
     | SessionUpdatedEvent
+    | InputAudioSpeechStartedEvent
+    | InputAudioSpeechStoppedEvent
     | InputAudioCommittedEvent
     | ConversationItemAddedEvent
+    | ConversationItemDoneEvent
     | ResponseCreatedEvent
+    | ResponseOutputItemAddedEvent
+    | ResponseContentPartAddedEvent
     | ResponseTextDeltaEvent
     | ResponseAudioDeltaEvent
     | ResponseTranscriptDeltaEvent
+    | ResponseTextDoneEvent
+    | ResponseAudioDoneEvent
+    | ResponseTranscriptDoneEvent
+    | ResponseContentPartDoneEvent
+    | ResponseOutputItemDoneEvent
     | ResponseDoneEvent
     | RateLimitsUpdatedEvent
     | RealtimeErrorEvent
