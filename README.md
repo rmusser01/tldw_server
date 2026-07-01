@@ -108,10 +108,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.32` Beta status. Expect rough edges and please report issues.
+- `0.1.33` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch carries work beyond `0.1.32`, including post-`0.1.32` branch work, and is being prepared for the `0.1.32` release merge to `main`; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The release train is prepared for the `0.1.33` merge to `main`; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -146,19 +146,18 @@ Current release line:
 ## What's New (in the last few releases)
 
 <details>
-<summary>0.1.32 release-prep rollup</summary>
+<summary>0.1.33 release-prep rollup</summary>
 
-Included in the `0.1.32` release-prep rollup:
-- Sandbox, MCP Gateway, and ACP expansion, including governed execution, workspace/runtime contracts, profile presets, permission evidence, and release-readiness gates.
-- Research, knowledge, and study workflow growth across Chat Workspace, Research Workspace, Deep Research, quick ingest, flashcards, Study Packs, notes tasks, and study suggestions.
-- Writing Suite follow-through with manuscript authoring, character/world/plot tooling, AI analysis, annotations, agent chat, and live writing feedback.
-- Onboarding, provider, and admin surfaces for public setup profiles, local model recovery, provider keys, companion home shortcuts, scheduled tasks, and workspace diagnostics.
-- Skills, MCP Hub, and workspace operations for server-backed Skills flows, governance packs, tool cataloging, workspace sharing, and permission simulation.
-- Release, packaging, and CI tooling for full-suite PR shard fanout, local CI runner targets, package-content checks, trusted-publishing prep, and PyPI artifact guards.
-- Security, auth, and runtime hardening for provider URL validation, secret redaction, SSRF/network policy handling, dependency floors, and test-only CodeQL suppressions.
+Included in the `0.1.33` release-prep rollup:
+- Post-`0.1.32` dev/main stabilization for PR #1982 and PR #2557, including full-suite shard coverage mapping, MkDocs deploy verification, grouped CI fixes, and circuit-breaker flake cleanup.
+- Fish Audio S2 TTS support, including provider registration, native backend/adapter wiring, voice metadata resolution, managed reference imports, contract fixes, and setup documentation.
+- Explainer Workspace persistence, expansion jobs, grounding snapshots, chatbook export/import, UI surfaces, verification coverage, and follow-up hardening.
+- MCP, Skills, and package-gateway readiness work covering runtime metadata, recovery/readiness fields, risky-module opt-in handling, standalone profile discovery, and residual UX review fixes.
+- Chunking and moderation internals refactored around shared helpers and compiler abstractions while preserving existing parsing, dispatch, metrics, and service behavior.
+- Release documentation and packaging cleanup for README skimming, root implementation-plan cleanup, MCP package-path clarity, VCS/manual backend extras, and stale release-branch artifacts.
 
 Still active on `dev`:
-- Follow-up polish and fixes may continue to land before the `0.1.32` release is published from `main`.
+- Final CI for PR #2557 must clear before the prepared `0.1.33` release metadata is merged.
 - Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
