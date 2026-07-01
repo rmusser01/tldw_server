@@ -91,8 +91,6 @@ def stage_reading_import_file(
         target_name,
         error_factory=lambda _exc: ReadingImportJobError("reading_import_path_escape", retryable=False),
     )
-    if target_path is None:
-        raise ReadingImportJobError("reading_import_path_escape", retryable=False)
     target = Path(target_path)
     try:
         target.relative_to(imports_dir_resolved)

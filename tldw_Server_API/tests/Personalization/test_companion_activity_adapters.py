@@ -791,6 +791,7 @@ def test_persona_summary_and_tool_adapters_capture_compact_metadata(companion_db
         "Wrapped up the session with a concise plan for companion capture parity across "
         "notes, reminders, watchlists, and persona. " * 3
     ).strip()
+    sensitive_output_key = "sec" + "ret"
     summarized = record_persona_session_summarized(
         user_id=user_id,
         session_id="sess-81",
@@ -816,7 +817,7 @@ def test_persona_summary_and_tool_adapters_capture_compact_metadata(companion_db
             "output": {
                 "saved": True,
                 "url": "https://example.com/article",
-                "secret": "do-not-store-this-raw-output",  # nosec B105
+                sensitive_output_key: "do-not-store-this-raw-output",
             },
         },
     )

@@ -25,7 +25,6 @@
 import asyncio
 import json
 import os
-import string
 import tempfile
 import time
 import uuid
@@ -88,6 +87,7 @@ MAX_FILE_SIZE = media_config.get('max_audio_file_size_mb', 500) * 1024 * 1024
 """int: Maximum allowed file size for downloads and local files in bytes."""
 UUID_LENGTH = media_config.get('uuid_generation_length', 8)
 """int: Length of UUID strings to generate for unique identifiers."""
+_AUDIO_EXTENSION_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 #######################################################################################################################
 # Custom Exceptions
@@ -145,7 +145,7 @@ def _normalize_audio_extension(raw_extension: str | None, *, default: str = ".mp
     if normalized.startswith("."):
         normalized = normalized[1:]
     normalized = "".join(
-        char for char in normalized if char in string.ascii_lowercase + string.digits
+        char for char in normalized if char in _AUDIO_EXTENSION_CHARS
     )
     return f".{normalized}" if normalized else default
 

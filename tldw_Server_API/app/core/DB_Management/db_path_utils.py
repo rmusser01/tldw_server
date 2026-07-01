@@ -304,8 +304,6 @@ def _build_user_dir(base_path: Path, user_id: Optional[UserId]) -> tuple[Path, b
         safe_user_id,
         error_factory=lambda _exc: ValueError("Computed user directory escapes base path"),
     )
-    if joined_user_dir is None:
-        raise ValueError("Computed user directory escapes base path")
     user_dir = Path(joined_user_dir)
     try:
         user_dir.relative_to(base_path)
@@ -560,8 +558,6 @@ class DatabasePaths:
             safe_user_id,
             error_factory=lambda _exc: ValueError("Computed user directory escapes base path"),
         )
-        if joined_user_dir is None:
-            raise ValueError("Computed user directory escapes base path")
         user_dir = Path(joined_user_dir)
         try:
             user_dir.relative_to(base_path)

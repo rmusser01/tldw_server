@@ -225,8 +225,6 @@ def _resolve_chatbook_temp_file(temp_dir: Path, safe_filename: str, *, prefix: s
         f"{prefix}_{uuid4().hex}_{safe_filename}",
         error_factory=lambda _exc: HTTPException(status_code=400, detail="Invalid file path"),
     )
-    if joined is None:
-        raise HTTPException(status_code=400, detail="Invalid file path")
     return Path(joined)
 
 

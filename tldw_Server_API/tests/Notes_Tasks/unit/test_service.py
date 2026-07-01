@@ -73,6 +73,7 @@ def test_task_text_rejects_parseable_metadata_tokens(text: str) -> None:
     "text",
     [
         "Call @foo(bar) customer",
+        "Keep @foo(@due(2026-06-30)) as plain text",
         "Call @due(not-a-date) customer",
         "Call @priority(urgent) customer",
         "Call @estimate(two-hours) customer",
@@ -84,6 +85,11 @@ def test_task_text_allows_unknown_or_malformed_metadata_like_plain_text(text: st
 
 def test_task_text_metadata_scan_handles_unclosed_tokens_as_plain_text() -> None:
     NotesTaskService._validate_task_text("@due(" + "2" * 1995)
+
+
+def test_task_text_rejects_parseable_metadata_after_expanding_casefold_prefix() -> None:
+    with pytest.raises(InputError, match="metadata tokens"):
+        NotesTaskService._validate_task_text("İ@due(2026-06-30)")
 
 
 def test_parse_checklist_line_accepts_existing_projected_format() -> None:

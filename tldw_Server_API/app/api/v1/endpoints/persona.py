@@ -2448,8 +2448,6 @@ def _resolve_persona_visual_asset_path(*, user_id: str, storage_key: str) -> Pat
         "/".join(parts[1:]),
         error_factory=lambda _exc: HTTPException(status_code=404, detail="Persona visual asset not found"),
     )
-    if target_str is None:
-        raise HTTPException(status_code=404, detail="Persona visual asset not found")
     target = Path(target_str)
     if not target.is_relative_to(base) or not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="Persona visual asset not found")
@@ -2521,8 +2519,6 @@ def _persona_visual_pack_export_staging_root(user_id: str) -> Path:
             str(user_id),
             error_factory=lambda _exc: ValueError("persona visual export staging path escapes configured root"),
         )
-        if joined is None:
-            raise ValueError("persona visual export staging path escapes configured root")
         return Path(joined)
     return DatabasePaths.get_user_temp_outputs_dir(user_id) / "persona_visual_packs"
 
@@ -2535,8 +2531,6 @@ def _persona_visual_pack_import_preview_staging_root(user_id: str) -> Path:
             str(user_id),
             error_factory=lambda _exc: ValueError("persona visual import-preview staging path escapes configured root"),
         )
-        if joined is None:
-            raise ValueError("persona visual import-preview staging path escapes configured root")
         return Path(joined)
     return DatabasePaths.get_user_temp_outputs_dir(user_id) / "persona_visual_pack_import_previews"
 
@@ -5329,8 +5323,6 @@ async def start_persona_visual_pack_import_preview(
             f"{request_id}{archive_suffix}",
             error_factory=lambda _exc: HTTPException(status_code=400, detail="invalid_archive_path"),
         )
-        if archive_path_str is None:
-            raise HTTPException(status_code=400, detail="invalid_archive_path")
         archive_path = Path(archive_path_str)
         uploaded_bytes = await _save_persona_visual_import_preview_archive(archive, archive_path)
         repo = await _run_persona_db_call(_persona_visual_portability_repo, db)

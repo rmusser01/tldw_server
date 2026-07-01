@@ -41,10 +41,15 @@ function sanitizeHistoryItem(item: RequestHistoryItem): RequestHistoryItem {
   };
 }
 
+function parseHistory(raw: string | null): RequestHistoryItem[] {
+  if (!raw) return [];
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
 export function addRequestHistory(item: RequestHistoryItem) {
   try {
-    const raw = localStorage.getItem(KEY);
-    const arr: RequestHistoryItem[] = raw ? JSON.parse(raw) : [];
+    const arr = parseHistory(localStorage.getItem(KEY));
     const next = [sanitizeHistoryItem(item), ...arr.map(sanitizeHistoryItem)].slice(0, MAX);
     localStorage.setItem(KEY, JSON.stringify(next));
   } catch {
@@ -55,9 +60,13 @@ export function addRequestHistory(item: RequestHistoryItem) {
 export function getRequestHistory(): RequestHistoryItem[] {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const arr: RequestHistoryItem[] = JSON.parse(raw);
-    return arr;
+    const arr = parseHistory(raw);
+    const sanitized = arr.map(sanitizeHistoryItem).slice(0, MAX);
+    const sanitizedRaw = JSON.stringify(sanitized);
+    if (raw !== null && raw !== sanitizedRaw) {
+      localStorage.setItem(KEY, sanitizedRaw);
+    }
+    return sanitized;
   } catch {
     return [];
   }

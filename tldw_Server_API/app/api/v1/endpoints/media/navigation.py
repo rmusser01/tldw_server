@@ -102,14 +102,17 @@ _ITALIC_STOPWORDS = {
 def _strip_html_tags_linear(text: str) -> str:
     """Remove simple HTML tags from navigation display text without regex backtracking."""
     output: list[str] = []
+    tag_buffer: list[str] = []
     in_tag = False
     tag_started = False
     for char in text:
         if not in_tag and char == "<":
             in_tag = True
             tag_started = False
+            tag_buffer = ["<"]
             continue
         if in_tag:
+            tag_buffer.append(char)
             if not tag_started and char == "/":
                 tag_started = True
                 continue
@@ -117,17 +120,18 @@ def _strip_html_tags_linear(text: str) -> str:
                 if char.isalpha():
                     tag_started = True
                     continue
-                output.append("<")
-                output.append(char)
+                output.extend(tag_buffer)
+                tag_buffer = []
                 in_tag = False
                 continue
             if char == ">":
                 output.append(" ")
+                tag_buffer = []
                 in_tag = False
             continue
         output.append(char)
     if in_tag:
-        output.append("<")
+        output.extend(tag_buffer)
     return "".join(output)
 
 
@@ -163,7 +167,46 @@ def _contains_markdown_hint(text: str) -> bool:
 
 
 def _strip_asterisk_emphasis(text: str) -> str:
-    return text.replace("**", "").replace("*", "")
+    output: list[str] = []
+    index = 0
+    while index < len(text):
+        if text.startswith("**", index):
+            end = text.find("**", index + 2)
+            if end == -1:
+                output.append("**")
+                index += 2
+                continue
+            if end == index + 2 or text[index + 2].isspace() or text[end - 1].isspace():
+                output.append("**")
+                index += 2
+                continue
+            output.append(text[index + 2 : end])
+            index = end + 2
+            continue
+        if text[index] == "*":
+            if index + 1 >= len(text) or text[index + 1].isspace():
+                output.append("*")
+                index += 1
+                continue
+            end = index + 1
+            while True:
+                end = text.find("*", end)
+                if end == -1:
+                    break
+                if text.startswith("**", end) or text[end - 1].isspace():
+                    end += 1
+                    continue
+                break
+            if end == -1:
+                output.append("*")
+                index += 1
+                continue
+            output.append(text[index + 1 : end])
+            index = end + 1
+            continue
+        output.append(text[index])
+        index += 1
+    return "".join(output)
 
 
 def _strip_underscore_emphasis(text: str) -> str:

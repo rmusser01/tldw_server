@@ -49,11 +49,19 @@ def _safe_sink(user_id: str | None = None, namespace: str | None = None) -> Path
             # In multi-tenant setups, segregate exemplars per user/namespace
             if namespace:
                 safe_namespace = "".join(c for c in str(namespace) if c.isalnum() or c in ('-', '_', '.'))
-                sink_path = safe_join(str(BASE_DIR), f"tenants/{safe_namespace}/rag_payload_exemplars.jsonl") if safe_namespace else None
+                sink_path = (
+                    safe_join(str(BASE_DIR / "tenants"), f"{safe_namespace}/rag_payload_exemplars.jsonl")
+                    if safe_namespace
+                    else None
+                )
                 sink = Path(sink_path) if sink_path else SINK
             elif user_id:
                 safe_user_id = "".join(c for c in str(user_id) if c.isalnum() or c in ('-', '_', '.'))
-                sink_path = safe_join(str(BASE_DIR), f"users/{safe_user_id}/rag_payload_exemplars.jsonl") if safe_user_id else None
+                sink_path = (
+                    safe_join(str(BASE_DIR / "users"), f"{safe_user_id}/rag_payload_exemplars.jsonl")
+                    if safe_user_id
+                    else None
+                )
                 sink = Path(sink_path) if sink_path else SINK
             else:
                 sink = SINK

@@ -896,8 +896,6 @@ def _sqlite_path_from_url(database_url: str, default_path: Path) -> Path | str:
         raw_path or default_path.name,
         error_factory=lambda _exc: SyncStoreError("Sync v2 SQLite URL path escapes default directory"),
     )
-    if resolved is None:
-        raise SyncStoreError("Sync v2 SQLite URL path escapes default directory")
     return Path(resolved)
 
 

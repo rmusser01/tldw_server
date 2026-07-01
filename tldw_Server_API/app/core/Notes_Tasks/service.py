@@ -69,24 +69,28 @@ def _is_estimate_token(value: str) -> bool:
 def _task_text_contains_parseable_metadata_token(text: str) -> bool:
     """Return True when literal task text contains metadata syntax the parser would consume."""
 
-    lower_text = text.casefold()
-    for token_name in ("due", "priority", "estimate"):
-        needle = f"@{token_name}("
-        start = 0
-        while True:
-            token_start = lower_text.find(needle, start)
-            if token_start == -1:
-                break
-            value_start = token_start + len(needle)
-            value_end = text.find(")", value_start)
-            if value_end == -1:
-                start = value_start
-                continue
-            value = text[value_start:value_end]
-            if _is_parseable_task_text_metadata_token(name=token_name, value=value):
-                return True
+    start = 0
+    while True:
+        token_start = text.find("@", start)
+        if token_start == -1:
+            return False
+        name_start = token_start + 1
+        open_paren = text.find("(", name_start)
+        if open_paren == -1:
+            return False
+        value_start = open_paren + 1
+        value_end = text.find(")", value_start)
+        if value_end == -1:
+            start = value_start
+            continue
+        token_name = text[name_start:open_paren].casefold()
+        if token_name not in {"due", "priority", "estimate"}:
             start = value_end + 1
-    return False
+            continue
+        value = text[value_start:value_end]
+        if _is_parseable_task_text_metadata_token(name=token_name, value=value):
+            return True
+        start = value_end + 1
 
 
 def _is_parseable_task_text_metadata_token(*, name: str, value: str) -> bool:

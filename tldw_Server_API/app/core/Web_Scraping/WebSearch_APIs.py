@@ -2542,7 +2542,7 @@ def parse_google_results(raw_results: dict, output_dict: dict) -> None:
     """
     # Lower verbosity: only log raw payload at debug level
     logging.debug(
-        "Raw results received: %s",
+        "Raw results received: {}",
         json.dumps(_redact_websearch_log_value(raw_results), indent=2),
     )
     try:

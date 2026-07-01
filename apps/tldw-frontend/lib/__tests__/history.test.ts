@@ -31,4 +31,31 @@ describe("request history", () => {
       "content-type": "application/json"
     })
   })
+
+  it("migrates existing unredacted request history on read", () => {
+    localStorage.setItem("tldw-request-history", JSON.stringify([
+      {
+        id: "req-1",
+        method: "GET",
+        url: "/api/v1/config",
+        timestamp: "2026-06-30T00:00:00.000Z",
+        requestHeaders: {
+          Authorization: "Bearer old-secret",
+          Cookie: "sid=old-cookie",
+          Accept: "application/json"
+        }
+      }
+    ]))
+
+    const [item] = getRequestHistory()
+
+    expect(item.requestHeaders).toEqual({
+      Authorization: "[REDACTED]",
+      Cookie: "[REDACTED]",
+      Accept: "application/json"
+    })
+    const raw = localStorage.getItem("tldw-request-history") || ""
+    expect(raw).not.toContain("old-secret")
+    expect(raw).not.toContain("old-cookie")
+  })
 })

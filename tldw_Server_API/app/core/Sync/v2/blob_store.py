@@ -164,8 +164,6 @@ class LocalSyncBlobStore:
             storage_key,
             error_factory=lambda _exc: SyncBlobStoreError("storage_key escapes blob store root"),
         )
-        if target is None:
-            raise SyncBlobStoreError("storage_key escapes blob store root")
         return Path(target)
 
 

@@ -122,6 +122,11 @@ def _get_date_folder() -> str:
     return f"{now.year}/{now.month:02d}/{now.day:02d}"
 
 
+def _get_user_outputs_dir(user_id: int) -> Path:
+    """Return the canonical generated-file output root for storage paths."""
+    return DatabasePaths.get_user_outputs_dir(user_id).resolve(strict=False)
+
+
 async def _save_file(
     user_id: int,
     data: bytes,
@@ -134,7 +139,7 @@ async def _save_file(
     Returns:
         Full path to saved file
     """
-    outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
+    outputs_dir = _get_user_outputs_dir(user_id)
     date_folder = _get_date_folder()
 
     # Create category/date directory structure
@@ -143,8 +148,6 @@ async def _save_file(
         f"{category_folder}/{date_folder}",
         error_factory=lambda _exc: AuthNZStorageError("Invalid generated file directory"),
     )
-    if target_dir_str is None:
-        raise AuthNZStorageError("Invalid generated file directory")
     target_dir = Path(target_dir_str)
     # lgtm[py/path-injection] target_dir is resolved by safe_join under the user's outputs dir.
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -154,8 +157,6 @@ async def _save_file(
         filename,
         error_factory=lambda _exc: AuthNZStorageError("Invalid generated file path"),
     )
-    if file_path_str is None:
-        raise AuthNZStorageError("Invalid generated file path")
     file_path = Path(file_path_str)
 
     # lgtm[py/path-injection] file_path is resolved by safe_join under the generated-file target dir.
@@ -259,7 +260,7 @@ async def save_and_register_tts_audio(
     file_path = await _save_file(user_id, audio_bytes, category_folder, filename)
 
     # Compute relative storage path
-    outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
+    outputs_dir = _get_user_outputs_dir(user_id)
     relative_path = str(file_path.relative_to(outputs_dir))
 
     # Build source reference with metadata
@@ -360,7 +361,7 @@ async def save_and_register_image(
 
     file_path = await _save_file(user_id, image_bytes, category_folder, filename)
 
-    outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
+    outputs_dir = _get_user_outputs_dir(user_id)
     relative_path = str(file_path.relative_to(outputs_dir))
 
     source_ref = f"model:{model_name}" if model_name else None
@@ -435,7 +436,7 @@ async def save_and_register_vn_asset_image(
     category_folder = "vn_assets"
 
     file_path = await _save_file(user_id, image_bytes, category_folder, filename)
-    outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
+    outputs_dir = _get_user_outputs_dir(user_id)
     relative_path = str(file_path.relative_to(outputs_dir))
 
     file_tags = list(tags) if tags else []
@@ -525,7 +526,7 @@ async def save_and_register_voice_clone(
 
     file_path = await _save_file(user_id, voice_data, category_folder, filename)
 
-    outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
+    outputs_dir = _get_user_outputs_dir(user_id)
     relative_path = str(file_path.relative_to(outputs_dir))
 
     source_ref = f"provider:{provider}" if provider else None
@@ -612,7 +613,7 @@ async def save_and_register_spreadsheet(
 
     file_path = await _save_file(user_id, spreadsheet_bytes, category_folder, filename)
 
-    outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
+    outputs_dir = _get_user_outputs_dir(user_id)
     relative_path = str(file_path.relative_to(outputs_dir))
 
     mime_type = SPREADSHEET_MIME_TYPES.get(spreadsheet_format.lower(), "application/octet-stream")
@@ -667,7 +668,7 @@ async def save_and_register_file_export(
     filename = _generate_filename("file_export", file_format)
     category_folder = "file_exports"
     file_path = await _save_file(user_id, file_bytes, category_folder, filename)
-    outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
+    outputs_dir = _get_user_outputs_dir(user_id)
     relative_path = str(file_path.relative_to(outputs_dir))
     mime_type = content_type or EXPORT_MIME_TYPES.get(file_format.lower(), "application/octet-stream")
 
@@ -749,7 +750,7 @@ async def save_and_register_mindmap(
 
     file_path = await _save_file(user_id, mindmap_bytes, category_folder, filename)
 
-    outputs_dir = DatabasePaths.get_user_outputs_dir(user_id)
+    outputs_dir = _get_user_outputs_dir(user_id)
     relative_path = str(file_path.relative_to(outputs_dir))
 
     # Determine MIME type

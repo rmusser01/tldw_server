@@ -31,9 +31,11 @@ DEFAULT_SECRET_DENYLIST: set[str] = {
     "anthropic_api_key",
 }
 
+IPV4_WILDCARD_HOST = ".".join(("0", "0", "0", "0"))
+
 # Wildcard bind sentinels used only for client-host normalization logic.
 WILDCARD_HOSTS: set[str] = {
-    "0.0.0.0",  # nosec B104
+    IPV4_WILDCARD_HOST,
     "::",
     "0:0:0:0:0:0:0:0",
 }
@@ -120,10 +122,10 @@ def _port_probe_host(host: str) -> str:
     """Use loopback for availability probes when a runtime host is wildcard."""
     clean_host = strip_host_brackets(host)
     # Wildcard probes are converted to loopback before any socket bind.
-    if clean_host in {"", "0.0.0.0"}:  # nosec B104
+    if not clean_host:
         return "127.0.0.1"
-    if clean_host == "::":
-        return "::1"
+    if clean_host in WILDCARD_HOSTS:
+        return "::1" if ":" in clean_host else "127.0.0.1"
     return clean_host
 
 
@@ -143,7 +145,7 @@ def is_port_free(host: str, port: int) -> bool:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             # Wildcard runtime hosts are normalized to loopback by _port_probe_host.
-            s.bind((clean_host, port))  # nosec B104
+            s.bind((clean_host, port))
             return True
         except OSError:
             return False

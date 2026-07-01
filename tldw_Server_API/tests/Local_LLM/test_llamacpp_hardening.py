@@ -7,6 +7,7 @@ import pytest
 from tldw_Server_API.app.core.Local_LLM.LlamaCpp_Handler import LlamaCppHandler
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
+from tldw_Server_API.app.core.Local_LLM.handler_utils import _port_probe_host
 
 
 class DummyProc:
@@ -209,6 +210,10 @@ async def test_port_autoselect(monkeypatch, tmp_path: Path):
     assert res["status"] == "started"
     # Expect port increased
     assert res["port"] == cfg.default_port + 1
+
+
+def test_port_probe_host_maps_full_ipv6_wildcard_to_loopback() -> None:
+    assert _port_probe_host("0:0:0:0:0:0:0:0") == "::1"
 
 
 @pytest.mark.asyncio

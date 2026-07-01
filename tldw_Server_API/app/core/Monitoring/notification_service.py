@@ -80,7 +80,25 @@ _SENSITIVE_NOTIFICATION_TEXT_MARKERS = (
     "token:",
     "bearer ",
 )
-_SENSITIVE_NOTIFICATION_TEXT_END = set(" \t\r\n&;,\"'<>")
+_SENSITIVE_NOTIFICATION_TEXT_END = set("\r\n&;,\"'<>")
+
+
+def _sensitive_notification_secret_end(value: str, secret_start: int) -> int:
+    """Find the end of one inline secret while keeping surrounding prose intact."""
+    secret_end = secret_start
+    while secret_end < len(value):
+        char = value[secret_end]
+        if char in _SENSITIVE_NOTIFICATION_TEXT_END:
+            break
+        if char in " \t":
+            if value[secret_start:secret_end].casefold() == "bearer":
+                secret_end += 1
+                while secret_end < len(value) and value[secret_end] in " \t":
+                    secret_end += 1
+                continue
+            break
+        secret_end += 1
+    return secret_end
 
 
 def _safe_exception_label(exc: BaseException) -> str:
@@ -112,11 +130,12 @@ def _redact_notification_text(value: str) -> str:
             break
 
         marker_end = next_marker_start + len(next_marker)
-        secret_end = marker_end
-        while secret_end < len(value) and value[secret_end] not in _SENSITIVE_NOTIFICATION_TEXT_END:
-            secret_end += 1
+        secret_start = marker_end
+        while secret_start < len(value) and value[secret_start] in " \t":
+            secret_start += 1
+        secret_end = _sensitive_notification_secret_end(value, secret_start)
 
-        pieces.append(value[cursor:marker_end])
+        pieces.append(value[cursor:secret_start])
         pieces.append(_REDACTED_VALUE)
         cursor = secret_end
 
