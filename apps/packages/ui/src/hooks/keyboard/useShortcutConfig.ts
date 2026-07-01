@@ -181,13 +181,13 @@ export const useShortcutConfig = () => {
  */
 export const formatShortcut = (shortcut: KeyboardShortcut): string => {
   const parts: string[] = []
-  
+
   if (shortcut.ctrlKey) parts.push('Ctrl')
   if (shortcut.altKey) parts.push('Alt')
   if (shortcut.shiftKey) parts.push('Shift')
   if (shortcut.metaKey) parts.push('⌘')
-  
+
   parts.push(shortcut.key)
-  
+
   return parts.join(' + ')
 }

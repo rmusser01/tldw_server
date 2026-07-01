@@ -1,5 +1,6 @@
 import importlib.machinery
 import sys
+import time
 import types
 
 import pytest
@@ -53,6 +54,15 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+
+
+def _get_until_visible(client: TestClient, path: str, timeout: float = 3.0):
+    deadline = time.monotonic() + timeout
+    response = client.get(path)
+    while response.status_code == 404 and time.monotonic() < deadline:
+        time.sleep(0.05)
+        response = client.get(path)
+    return response
 
 
 @pytest.fixture()
@@ -145,7 +155,7 @@ def test_template_create_and_run_flow(client: TestClient):
     assert run_id, run.text
 
     # Fetch status at least once and verify shape
-    st = client.get(f"/api/v1/workflows/runs/{run_id}")
+    st = _get_until_visible(client, f"/api/v1/workflows/runs/{run_id}")
     assert st.status_code == 200, st.text
     sj = st.json()
     assert isinstance(sj, dict) and sj.get("id") == run_id and sj.get("status")

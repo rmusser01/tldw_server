@@ -594,11 +594,13 @@ def test_chat_completion_embeddings_strategy_passes_user_and_character_to_embedd
     assert observed["character_id"] == str(char_id)
 
 
-def test_chat_completion_accepts_persona_id_alias_when_resolvable(
+def test_chat_completion_accepts_persona_id_alias_before_removal_date_when_resolvable(
     test_client,
     auth_headers,
     monkeypatch,
 ):
+    monkeypatch.setattr(chat_endpoint_module, "_persona_alias_today", lambda: date(2026, 6, 30))
+
     char_id = _create_character(test_client, auth_headers, "Persona Chat Character Alias")
     _create_exemplar(
         test_client,
@@ -640,7 +642,10 @@ def test_chat_completion_accepts_persona_id_alias_when_resolvable(
 def test_chat_completion_rejects_unresolvable_persona_id_alias(
     test_client,
     auth_headers,
+    monkeypatch,
 ):
+    monkeypatch.setattr(chat_endpoint_module, "_persona_alias_today", lambda: date(2026, 6, 30))
+
     response = test_client.post(
         "/api/v1/chat/completions",
         json={
@@ -681,11 +686,13 @@ def test_chat_completion_rejects_persona_id_alias_after_removal_date(
     assert "Use character_id explicitly" in detail
 
 
-def test_chat_completion_persona_id_alias_with_embeddings_strategy_uses_character_context(
+def test_chat_completion_persona_id_alias_before_removal_date_with_embeddings_strategy_uses_character_context(
     test_client,
     auth_headers,
     monkeypatch,
 ):
+    monkeypatch.setattr(chat_endpoint_module, "_persona_alias_today", lambda: date(2026, 6, 30))
+
     char_id = _create_character(test_client, auth_headers, "Persona Chat Character Alias Embeddings")
     _create_exemplar(
         test_client,

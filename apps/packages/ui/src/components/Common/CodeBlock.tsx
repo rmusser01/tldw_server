@@ -78,7 +78,7 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
     : t("artifactsView", "View code")
   const downloadLabel = t("downloadCode", "Download code")
   const copyLabel = t("copyToClipboard", "Copy to clipboard")
-  
+
   function computeKey() {
     const content = value ?? ""
     const base =
@@ -172,16 +172,16 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
       let svgMarkup = hasSvgTag
         ? code
         : `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>${code}</svg>`
-      
+
       const hasWidthHeight = /\s(width|height)\s*=/.test(svgMarkup)
-      
+
       if (!hasWidthHeight && hasSvgTag) {
         svgMarkup = svgMarkup.replace(
           /<svg([^>]*?)>/i,
           '<svg$1 width="100%" height="100%" style="max-width: 100%; max-height: 100%;">'
         )
       }
-      
+
       const sanitizedSvg = DOMPurify.sanitize(svgMarkup, {
         USE_PROFILES: { svg: true }
       })
@@ -263,11 +263,11 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
     if (debounceTimeoutRef.current) {
       clearTimeout(debounceTimeoutRef.current)
     }
-    
+
     debounceTimeoutRef.current = setTimeout(() => {
       setPreviewValue(value)
-    }, 300) 
-    
+    }, 300)
+
     return () => {
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current)

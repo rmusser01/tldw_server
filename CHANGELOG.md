@@ -17,6 +17,62 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.33] - 2026-07-01
+
+> Rollup coverage: this entry covers work that landed after the `0.1.32`
+> metadata update (`61d5c8f0da`, 2026-06-28) through PR #2557. It includes the
+> post-`0.1.32` dev/main integration follow-ups, PR #1982 merge stabilization,
+> and PRs #2517, #2528, #2427, #2540, #2541, #2436, #2546, #2547, #2550,
+> #2551, #2549, #2548, #2553, #2326, #2555, and #2552.
+
+### Added
+
+- **Fish Audio S2 And TTS Workflow Support** — Added the commercial Fish Audio
+  S2 backend, registry and adapter wiring, voice metadata resolution, managed
+  reference imports, contract fixes, and setup documentation.
+- **Explainer Workspace And Export Flows** — Added the Explainer Workspace
+  persistence API, expansion jobs, grounding evidence snapshots, chatbook
+  export/import, UI surfaces, verification coverage, and follow-up hardening.
+- **MCP, Skills, And Package Gateway Readiness** — Added Skills runtime
+  metadata, MCP recovery/readiness metadata, explicit opt-in handling for risky
+  MCP modules, package-gateway status expansion, and standalone profile
+  discovery documentation.
+
+### Changed
+
+- **Chunking And Moderation Internals** — Refactored `process_text` through
+  shared preparation, option-resolution, dispatch, finalization, and wrapper
+  helpers, and moved moderation policy assembly behind compiler abstractions
+  while preserving parser and service behavior.
+- **Design-System Release Polish** — Migrated ACP readiness labels, Audio
+  Studio alerts, and TTS alerts onto shared design-system states, and recorded
+  residual MCP UX design/readiness posture for the release train.
+- **Release Documentation And Packaging Posture** — Collapsed additional README
+  sections, removed stale root implementation-plan files, clarified MCP
+  embedded/package paths and Docker path status, and moved VCS extras/manual
+  backend dependencies into explicit manual-install documentation.
+
+### Fixed
+
+- **PR 1982 And PR 2557 CI Stabilization** — Fixed post-merge pre-commit
+  issues, MkDocs deploy verification, full-suite shard coverage mapping,
+  grouped CI failures, package/manual-OCR backend extras alignment,
+  points-transformers backend requirements, and a circuit-breaker lease-expiry
+  flake.
+- **Workflow Review Follow-Ups** — Addressed onboarding docs review feedback,
+  Writing annotations UAT polish, Skills export metadata feedback, MCP residual
+  UX review findings, MCP status/run-command authz coverage, and TTS/Fish S2
+  review follow-ups.
+- **Runtime And Product Hardening** — Hardened watchlist template seeding, chat
+  cockpit real-server layout seeding, explainer grounding/expansion/job answer
+  handling, and chunking/moderation regression paths.
+
+### Removed
+
+- Removed obsolete root implementation-plan files and the stale Flashcards UX
+  fix list from the release branch.
+
+
 ## [0.1.32] - 2026-06-28
 
 > Rollup coverage: this entry covers the 1,175 PR-numbered merge/squash

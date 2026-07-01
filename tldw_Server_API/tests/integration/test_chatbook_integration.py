@@ -559,7 +559,8 @@ class TestErrorScenarios:
             "characters": 0,
             "world_books": 0,
             "dictionaries": 0,
-            "documents": 0
+            "documents": 0,
+            "explainer_sessions": 0
         }
 
 

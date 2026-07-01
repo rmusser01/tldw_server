@@ -73,6 +73,7 @@ def _minimal_v1_1_manifest() -> dict:
             "total_world_books": 0,
             "total_dictionaries": 0,
             "total_documents": 0,
+            "total_explainer_sessions": 0,
             "total_size_bytes": 0,
         },
         "metadata": {

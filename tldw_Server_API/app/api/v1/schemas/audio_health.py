@@ -31,4 +31,3 @@ class SttCapabilitiesResponse(BaseModel):
 
     models: list[SttCapabilityModelResponse]
     timestamp: str
-

@@ -285,9 +285,7 @@ def _first_run_state_check(base_url: str, timeout: float) -> dict[str, Any]:
 
     setup_status = str(body.get("status") or "unknown")
     first_chat = body.get("first_chat")
-    first_chat_completed = (
-        isinstance(first_chat, dict) and first_chat.get("completed") is True
-    )
+    first_chat_completed = isinstance(first_chat, dict) and first_chat.get("completed") is True
     result["setup_status"] = setup_status
     result["first_chat_completed"] = first_chat_completed
     if setup_status == "completed" or first_chat_completed:

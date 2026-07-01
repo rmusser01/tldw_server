@@ -174,9 +174,7 @@ def build_profile_env(
             env_utils.generate_single_user_api_key,
         )
         if profile.docker and profile.includes_webui:
-            values["TLDW_WEBUI_EXPOSE_RUNTIME_AUTH"] = (
-                existing_env.get("TLDW_WEBUI_EXPOSE_RUNTIME_AUTH") or "1"
-            )
+            values["TLDW_WEBUI_EXPOSE_RUNTIME_AUTH"] = existing_env.get("TLDW_WEBUI_EXPOSE_RUNTIME_AUTH") or "1"
         return values
 
     postgres_user = existing_env.get("POSTGRES_USER") or "tldw_user"
