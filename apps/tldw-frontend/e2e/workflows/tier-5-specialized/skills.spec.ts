@@ -58,8 +58,11 @@ const fulfillJson = async (route: Route, payload: unknown, status = 200) => {
   })
 }
 
-async function mockSkillsBeginnerApi(page: Page) {
-  let seeded = false
+async function mockSkillsBeginnerApi(
+  page: Page,
+  options: { seeded?: boolean } = {}
+) {
+  let seeded = Boolean(options.seeded)
 
   await page.route(/\/api\/v1\/health(?:\?.*)?$/, async (route) => {
     await fulfillJson(route, { status: "healthy" })
@@ -84,7 +87,14 @@ async function mockSkillsBeginnerApi(page: Page) {
       await fulfillJson(route, {}, 405)
       return
     }
-    const skills = seeded ? [seededSkillSummary] : []
+    const url = new URL(route.request().url())
+    const query = (url.searchParams.get("q") ?? "").trim().toLowerCase()
+    const skills = seeded
+      && (!query
+        || seededSkillSummary.name.toLowerCase().includes(query)
+        || seededSkillSummary.description.toLowerCase().includes(query))
+      ? [seededSkillSummary]
+      : []
     await fulfillJson(route, {
       skills,
       count: skills.length,
@@ -121,13 +131,16 @@ async function mockSkillsBeginnerApi(page: Page) {
         await fulfillJson(route, {}, 405)
         return
       }
+      const body = route.request().postDataJSON() as { args?: string; dry_run?: boolean }
+      const args = body.args ?? "A long article about Skills UX"
       await fulfillJson(route, {
         skill_name: "summarize",
-        rendered_prompt: "Summarize this source: A long article about Skills UX",
+        rendered_prompt: `Summarize this source: ${args}`,
         allowed_tools: null,
         model_override: null,
         execution_mode: "inline",
         fork_output: null,
+        dry_run: Boolean(body.dry_run),
       })
     }
   )
@@ -196,13 +209,13 @@ test.describe("Skills beginner journey (mocked)", () => {
     await expect(page.getByText("Summarize source material")).toBeVisible()
 
     await successActions.getByRole("button", { name: "Test summarize" }).click()
-    const previewDialog = page.getByRole("dialog", { name: "Preview Skill" })
+    const previewDialog = page.getByRole("dialog", { name: "Test run" })
     await expect(previewDialog).toBeVisible()
     await previewDialog
       .getByPlaceholder("Enter test arguments...")
       .fill("A long article about Skills UX")
-    await previewDialog.getByRole("button", { name: "Preview" }).click()
-    await expect(previewDialog.getByText("Rendered Prompt")).toBeVisible()
+    await previewDialog.getByRole("button", { name: "Render prompt only" }).click()
+    await expect(previewDialog.getByText("Rendered Prompt", { exact: true })).toBeVisible()
     await expect(
       previewDialog.locator("textarea").last()
     ).toHaveValue("Summarize this source: A long article about Skills UX")
@@ -211,6 +224,63 @@ test.describe("Skills beginner journey (mocked)", () => {
     await forceSkillsConnectionState(page)
     await expect(page.getByText("Summarize source material")).toBeVisible()
     await expect(page.getByTestId("skills-empty-state")).toHaveCount(0)
+
+    await assertNoCriticalErrors(diagnostics)
+  })
+
+  test("supports keyboard test-run and create-cancel flow at extension width", async ({
+    page,
+    diagnostics,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await mockSkillsBeginnerApi(page, { seeded: true })
+    await seedAuth(page, {
+      serverUrl: TEST_CONFIG.serverUrl,
+      allowOffline: true,
+    })
+
+    await page.goto("/skills", { waitUntil: "domcontentloaded" })
+    await forceSkillsConnectionState(page)
+
+    const searchInput = page.getByPlaceholder("Search skills...")
+    await expect(searchInput).toBeVisible()
+    await searchInput.focus()
+    await page.keyboard.type("summarize")
+    await expect(page.getByText("Summarize source material")).toBeVisible()
+
+    const testRunButton = page.getByRole("button", { name: "Test run summarize" })
+    await expect(testRunButton).toBeVisible()
+    await testRunButton.focus()
+    await page.keyboard.press("Enter")
+
+    const previewDialog = page.getByRole("dialog", { name: "Test run" })
+    await expect(previewDialog).toBeVisible()
+    const argsInput = previewDialog.getByPlaceholder("Enter test arguments...")
+    await argsInput.focus()
+    await page.keyboard.type("Keyboard-only workflow")
+    await previewDialog.getByRole("button", { name: "Run test" }).focus()
+    await page.keyboard.press("Enter")
+    await expect(previewDialog.getByText("Rendered Prompt", { exact: true })).toBeVisible()
+    await expect(
+      previewDialog.locator("textarea").last()
+    ).toHaveValue("Summarize this source: Keyboard-only workflow")
+    await page.keyboard.press("Escape")
+    await expect(testRunButton).toBeFocused()
+
+    const newSkillButton = page.getByRole("button", { name: "New Skill" })
+    await expect(newSkillButton).toBeVisible()
+    const newSkillBox = await newSkillButton.boundingBox()
+    expect(newSkillBox).not.toBeNull()
+    expect(newSkillBox!.x).toBeGreaterThanOrEqual(0)
+    expect(newSkillBox!.x + newSkillBox!.width).toBeLessThanOrEqual(390)
+
+    await newSkillButton.focus()
+    await page.keyboard.press("Enter")
+    const drawer = page.getByRole("dialog", { name: "New Skill" })
+    await expect(drawer).toBeVisible()
+    await drawer.getByRole("button", { name: "Cancel" }).focus()
+    await page.keyboard.press("Enter")
+    await expect(newSkillButton).toBeFocused()
 
     await assertNoCriticalErrors(diagnostics)
   })

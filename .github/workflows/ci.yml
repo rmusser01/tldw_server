@@ -1242,6 +1242,9 @@ jobs:
               tldw_Server_API/tests/Chatbooks
               tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
+          - name: explainer-core
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: llm-adapters-unit
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/unit
@@ -2631,6 +2634,9 @@ jobs:
               tldw_Server_API/tests/Chatbooks
               tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
+          - name: explainer-core
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: llm-adapters-unit
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/unit
@@ -3893,6 +3899,9 @@ jobs:
               tldw_Server_API/tests/Chatbooks
               tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
+          - name: explainer-core
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: llm-adapters-unit
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/unit
@@ -5079,6 +5088,9 @@ jobs:
               tldw_Server_API/tests/Chatbooks
               tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
+          - name: explainer-core
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: llm-adapters-unit
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/unit
@@ -6266,6 +6278,9 @@ jobs:
               tldw_Server_API/tests/Chatbooks
               tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
+          - name: explainer-core
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: llm-adapters-unit
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/unit

@@ -96,6 +96,7 @@ describe("SkillPreview test-run semantics", () => {
     renderPreview()
 
     const dialog = screen.getByRole("dialog", { name: "Test run" })
+    expect(within(dialog).getByRole("status")).toHaveTextContent("")
     expect(
       within(dialog).getByText(
         "This renders the skill with your arguments. Fork-mode skills may call the configured model and allowed tools."
@@ -246,6 +247,63 @@ describe("SkillPreview test-run semantics", () => {
       fork_output: "Summary output",
       dry_run: false
     })
+  })
+
+  it("announces pending and completed test-run state", async () => {
+    let resolveExecution: (value: {
+      skill_name: string
+      rendered_prompt: string
+      allowed_tools: string[]
+      model_override: null
+      execution_mode: "inline"
+      fork_output: null
+      dry_run: false
+    }) => void = () => {}
+    tldwClientMock.executeSkill.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveExecution = resolve
+        })
+    )
+
+    renderPreview()
+
+    fireEvent.click(screen.getByRole("button", { name: "Run test" }))
+
+    const pendingStatus = await screen.findByText("Running test for summarize")
+    expect(pendingStatus.closest('[role="status"]')).toBeInTheDocument()
+
+    resolveExecution({
+      skill_name: "summarize",
+      rendered_prompt: "Summarize chapter 1",
+      allowed_tools: [],
+      model_override: null,
+      execution_mode: "inline",
+      fork_output: null,
+      dry_run: false
+    })
+
+    const completedStatus = await screen.findByText("Test result ready for summarize")
+    expect(completedStatus.closest('[role="status"]')).toBeInTheDocument()
+  })
+
+  it("announces dry render completion separately from executed test completion", async () => {
+    tldwClientMock.executeSkill.mockResolvedValueOnce({
+      skill_name: "summarize",
+      rendered_prompt: "Summarize chapter 1",
+      allowed_tools: [],
+      model_override: null,
+      execution_mode: "inline",
+      fork_output: null,
+      dry_run: true
+    })
+
+    renderPreview()
+
+    fireEvent.click(screen.getByRole("button", { name: "Render prompt only" }))
+
+    const completedStatus = await screen.findByText("Rendered prompt ready for summarize")
+    expect(completedStatus.closest('[role="status"]')).toBeInTheDocument()
   })
 
   it("renders execution failures as alerts", async () => {
