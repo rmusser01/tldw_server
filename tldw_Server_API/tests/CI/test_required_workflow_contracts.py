@@ -994,11 +994,12 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         }
         assert shard_path_sets["chatbooks-streaming"] == {
             "tldw_Server_API/tests/Chatbooks",
+            "tldw_Server_API/tests/Explainer",
             "tldw_Server_API/tests/Streaming",
         }
         chat_core_files = {
             str(path)
-            for dirname in ("Chat", "Chat_NEW", "Chatbooks", "Streaming")
+            for dirname in ("Chat", "Chat_NEW", "Chatbooks", "Explainer", "Streaming")
             for path in Path("tldw_Server_API/tests", dirname).glob("**/test*.py")
         }
         covered_chat_core_files: dict[str, str] = {}

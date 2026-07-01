@@ -1240,6 +1240,7 @@ jobs:
           - name: chatbooks-streaming
             paths: >-
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
           - name: llm-adapters-unit
             paths: >-
@@ -2628,6 +2629,7 @@ jobs:
           - name: chatbooks-streaming
             paths: >-
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
           - name: llm-adapters-unit
             paths: >-
@@ -3889,6 +3891,7 @@ jobs:
           - name: chatbooks-streaming
             paths: >-
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
           - name: llm-adapters-unit
             paths: >-
@@ -5074,6 +5077,7 @@ jobs:
           - name: chatbooks-streaming
             paths: >-
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
           - name: llm-adapters-unit
             paths: >-
@@ -6260,6 +6264,7 @@ jobs:
           - name: chatbooks-streaming
             paths: >-
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
           - name: llm-adapters-unit
             paths: >-
