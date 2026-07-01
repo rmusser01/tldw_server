@@ -192,9 +192,6 @@ class JWTService:
         Returns:
             Encoded JWT access token
         """
-        if expires_delta is not None and expires_delta.total_seconds() <= 0:
-            raise ValueError("expires_delta must be positive")
-
         issued_at = datetime.now(timezone.utc)
         lifetime = (
             expires_delta
@@ -249,12 +246,16 @@ class JWTService:
         impersonated_by: int,
         expires_delta: timedelta,
     ) -> str:
+        if type(impersonated_by) is not int or impersonated_by <= 0:
+            raise ValueError("impersonated_by must be a positive integer")
+        if expires_delta.total_seconds() <= 0:
+            raise ValueError("expires_delta must be positive")
         return self.create_access_token(
             user_id=user_id,
             username=username,
             role=role,
             additional_claims={
-                "impersonated_by": int(impersonated_by),
+                "impersonated_by": impersonated_by,
                 "impersonation": True,
             },
             expires_delta=expires_delta,

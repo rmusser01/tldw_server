@@ -230,8 +230,8 @@ def _extract_impersonation_claims(payload: dict[str, Any]) -> tuple[bool, Option
         return False, None
 
     actor = payload.get("impersonated_by")
-    if type(actor) is not int:
-        raise ValueError("impersonation actor must be an integer")
+    if type(actor) is not int or actor <= 0:
+        raise ValueError("impersonation actor must be a positive integer")
     return True, actor
 
 # --- User Model ---
