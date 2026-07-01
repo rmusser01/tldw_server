@@ -162,7 +162,9 @@ function writeBrowserConfig(config: AppConfig): void {
   const hasRuntimeApiBearer = !!apiBearer;
 
   window.localStorage.removeItem('apiKey');
+  window.localStorage.removeItem('apiBearer');
   window.localStorage.removeItem('accessToken');
+  window.localStorage.removeItem('refreshToken');
 
   if (!existingConfig && !hasRuntimeApiKey && !hasRuntimeApiBearer) {
     return;

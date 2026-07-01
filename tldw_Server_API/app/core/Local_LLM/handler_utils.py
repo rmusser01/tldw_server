@@ -119,7 +119,12 @@ def env_paths(name: str) -> list[Path] | None:
 
 
 def _port_probe_host(host: str) -> str:
-    """Use loopback for availability probes when a runtime host is wildcard."""
+    """Use loopback as a proxy when availability-probing wildcard runtime hosts.
+
+    This avoids binding test sockets to all interfaces for CodeQL/Bandit, but
+    `is_port_free` and `pick_port` still only prove the loopback proxy port is
+    available. Startup can still fail if the original wildcard bind differs.
+    """
     clean_host = strip_host_brackets(host)
     # Wildcard probes are converted to loopback before any socket bind.
     if not clean_host:

@@ -82,7 +82,7 @@ def _public_import_preview_error(message: str) -> str:
         lowered = line.lower()
         if any(marker in lowered for marker in _TRACEBACK_ERROR_MARKERS):
             continue
-        if line.startswith("File ") or line.startswith('File "'):
+        if line.startswith('File "') and ", line " in line:
             continue
         lines.append(line)
 
@@ -1390,7 +1390,7 @@ class SkillsService:
         """Build a non-mutating import preview for invalid input."""
         return {
             "valid": False,
-            "errors": [_public_import_preview_error(error) for error in errors],
+            "errors": list(errors),
             "name": None,
             "description": None,
             "argument_hint": None,

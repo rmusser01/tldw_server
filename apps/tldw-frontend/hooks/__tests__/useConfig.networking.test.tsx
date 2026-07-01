@@ -152,6 +152,8 @@ describe('useConfig networking', () => {
 
   it('keeps manually entered single-user api keys in runtime memory only', async () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8000';
+    localStorage.setItem('apiBearer', 'legacy-bearer');
+    localStorage.setItem('refreshToken', 'legacy-refresh');
     const { ConfigProvider, useConfig } = await import('@web/hooks/useConfig');
 
     const { result } = renderHook(() => useConfig(), {
@@ -166,7 +168,9 @@ describe('useConfig networking', () => {
       expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('saved-api-key');
     });
     expect(localStorage.getItem('apiKey')).toBeNull();
+    expect(localStorage.getItem('apiBearer')).toBeNull();
     expect(localStorage.getItem('tldwConfig')).not.toContain('saved-api-key');
+    expect(localStorage.getItem('refreshToken')).toBeNull();
   });
 
   it('refreshes live config after settings writes canonical tldw config', async () => {

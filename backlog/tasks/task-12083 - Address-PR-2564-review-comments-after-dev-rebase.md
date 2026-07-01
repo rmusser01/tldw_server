@@ -4,7 +4,7 @@ title: Address PR 2564 review comments after dev rebase
 status: Done
 assignee: []
 created_date: '2026-07-01 02:14'
-updated_date: '2026-07-01 02:15'
+updated_date: '2026-07-01 02:28'
 labels:
   - codeql
   - pr-review
@@ -33,12 +33,16 @@ Rebased PR #2564 onto latest origin/dev, then addressed review threads covering 
 Verification: bun run test:run lib/__tests__/history.test.ts; python -m pytest -q tldw_Server_API/tests/Monitoring/test_notification_service.py; python -m pytest -q tldw_Server_API/tests/Notes_Tasks/unit/test_service.py tldw_Server_API/tests/Media/test_media_navigation.py tldw_Server_API/tests/MCP_unified/test_mcp_hub_path_enforcement_service.py tldw_Server_API/tests/Storage/test_generated_file_helpers.py tldw_Server_API/tests/Local_LLM/test_llamacpp_hardening.py tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars.py; python -m pytest -q tldw_Server_API/tests/Personalization/test_companion_activity_adapters.py::test_persona_summary_and_tool_adapters_capture_compact_metadata; py_compile for touched Python app files; git diff --check.
 
 Bandit: touched app-source run wrote /tmp/bandit_codeql_review.json and reports only 3 pre-existing low findings in WebSearch_APIs.py outside changed lines (B311 at lines 576 and 2803, B101 at line 2144). Touched monitoring/personalization tests run with B101 skipped wrote /tmp/bandit_codeql_review_tests.json and reported 0 findings.
+
+Follow-up after push: refreshed PR review threads showed additional CodeRabbit comments on the pre-fix commit. Reopening this task to address the remaining unresolved PR threads before finalizing.
+
+Second follow-up addressed the remaining CodeRabbit threads: runtime/config credential scrubbing now removes legacy apiBearer and refreshToken, directory creation rejects existing symlinked directories, metric and companion log hashes use deployment-provided env secrets with process-local fallback warnings, RAG exemplar sinks reject dot-only tenant/user ids, skill import preview preserves public File messages while filtering traceback frames, and wildcard port probe docs now spell out loopback proxy semantics. Verification after follow-up: bun run test:run hooks/__tests__/useConfig.networking.test.tsx lib/__tests__/history.test.ts; bun install --frozen-lockfile followed by bun run test:run __tests__/extension/runtime-bootstrap.test.ts; python -m pytest -q tldw_Server_API/tests/DB_Management/test_db_path_utils.py tldw_Server_API/tests/Metrics/test_sensitive_label_hashing.py tldw_Server_API/tests/Personalization/test_companion_activity_adapters.py tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars.py tldw_Server_API/tests/Skills/unit/test_skills_service.py; previous focused backend suite rerun with 110 passed; py_compile passed for touched app files; git diff --check passed; Bandit app-source wrote /tmp/bandit_pr2564_app.json and now reports only the pre-existing WebSearch_APIs.py baseline findings (B311 lines 576/2803, B101 line 2144). Test Bandit wrote /tmp/bandit_pr2564_tests.json; findings are pre-existing fixture strings in test code, not new touched lines.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Addressed PR #2564 review comments after rebasing onto latest dev. Added focused regressions for credential redaction migration, notification colon-whitespace redaction, Unicode casefold metadata validation, navigation title preservation, MCP path normalization fail-closed behavior, generated-file symlink outputs roots, and full-form IPv6 wildcard probes. Removed reviewed dead safe_join branches and obsolete nosec/noqa suppressions without weakening runtime sanitizer coverage.
+Addressed PR #2564 CodeQL/review comments after rebasing onto latest dev. The follow-up fixes close the remaining CodeRabbit threads around frontend credential persistence, symlinked storage directories, configurable HMAC keys for metrics/companion log refs, dot-only RAG exemplar ids, skill import preview sanitization, and wildcard port probe documentation. Focused frontend and backend regressions now cover the changed behavior.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

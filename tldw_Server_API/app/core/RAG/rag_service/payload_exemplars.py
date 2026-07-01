@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 BASE_DIR = Path("Databases/observability")
 SINK = BASE_DIR / "rag_payload_exemplars.jsonl"
+_DOT_ONLY_IDENTIFIERS = {".", ".."}
 
 
 def _sampling_random() -> float:
@@ -51,7 +52,7 @@ def _safe_sink(user_id: str | None = None, namespace: str | None = None) -> Path
                 safe_namespace = "".join(c for c in str(namespace) if c.isalnum() or c in ('-', '_', '.'))
                 sink_path = (
                     safe_join(str(BASE_DIR / "tenants"), f"{safe_namespace}/rag_payload_exemplars.jsonl")
-                    if safe_namespace
+                    if safe_namespace and safe_namespace not in _DOT_ONLY_IDENTIFIERS
                     else None
                 )
                 sink = Path(sink_path) if sink_path else SINK
@@ -59,7 +60,7 @@ def _safe_sink(user_id: str | None = None, namespace: str | None = None) -> Path
                 safe_user_id = "".join(c for c in str(user_id) if c.isalnum() or c in ('-', '_', '.'))
                 sink_path = (
                     safe_join(str(BASE_DIR / "users"), f"{safe_user_id}/rag_payload_exemplars.jsonl")
-                    if safe_user_id
+                    if safe_user_id and safe_user_id not in _DOT_ONLY_IDENTIFIERS
                     else None
                 )
                 sink = Path(sink_path) if sink_path else SINK

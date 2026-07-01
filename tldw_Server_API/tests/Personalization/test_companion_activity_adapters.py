@@ -50,10 +50,12 @@ def _capture_companion_activity_logs() -> tuple[list[str], int]:
     return messages, sink_id
 
 
-def test_companion_log_ref_uses_namespaced_hmac() -> None:
+def test_companion_log_ref_uses_configured_namespaced_hmac(monkeypatch: pytest.MonkeyPatch) -> None:
+    hash_key = "companion-log-ref-test-key"
+    monkeypatch.setenv("COMPANION_ACTIVITY_LOG_REF_KEY", hash_key)
     value = "user@example.com"
     expected = hmac.digest(
-        companion_activity_module._COMPANION_ACTIVITY_LOG_REF_KEY,
+        hash_key.encode("utf-8"),
         value.encode("utf-8"),
         "sha256",
     ).hex()[:12]

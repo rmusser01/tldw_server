@@ -4,7 +4,7 @@ from pathlib import Path
 from tldw_Server_API.app.core.DB_Management import db_path_utils
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.config import settings
-from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
+from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, StorageUnavailableError
 
 
 def _expect_equal(actual, expected, message: str) -> None:
@@ -61,6 +61,19 @@ def test_get_user_base_directory_only_logs_on_first_directory_creation(monkeypat
         [f"Created user directory: {user_dir}"],
         "user directory creation should only log once for an existing path",
     )
+
+
+def test_ensure_dir_rejects_existing_symlinked_directory(tmp_path):
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    linked_dir = tmp_path / "linked"
+    try:
+        linked_dir.symlink_to(real_dir, target_is_directory=True)
+    except OSError:
+        pytest.skip("filesystem does not support directory symlinks")
+
+    with pytest.raises(StorageUnavailableError, match="Failed to create user directory"):
+        db_path_utils._ensure_dir(linked_dir, label="user")
 
 
 def test_get_user_base_directory_single_user_none_resolves_fixed_id(monkeypatch, tmp_path):

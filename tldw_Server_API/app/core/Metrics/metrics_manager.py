@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import os
 import re
+import secrets
 import statistics
 import threading
 import time
@@ -60,7 +61,10 @@ class MetricsRegistry:
     _PROM_METRIC_NAME_RE = re.compile(r"[^a-zA-Z0-9_:]")
     _PROM_LABEL_KEY_RE = re.compile(r"[^a-zA-Z0-9_]")
     _SENSITIVE_LABEL_RENAMES = {"user_id": "user_hash"}
-    _SENSITIVE_LABEL_HASH_KEY = b"tldw-metrics-sensitive-label-v1"
+    _SENSITIVE_LABEL_HASH_ENV = "METRICS_SENSITIVE_LABEL_HASH_KEY"
+    _SENSITIVE_LABEL_HASH_FALLBACK_ENV = "TLDW_LOG_HASH_SECRET"
+    _SENSITIVE_LABEL_HASH_FALLBACK_KEY = secrets.token_bytes(32)
+    _sensitive_label_hash_fallback_warned = False
 
     def __init__(self):
         """Initialize the metrics registry."""
@@ -155,7 +159,32 @@ class MetricsRegistry:
         return normalized
 
     @staticmethod
-    def _hash_sensitive_label_value(value: Any) -> str:
+    def _env_truthy(name: str) -> bool:
+        return str(os.getenv(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    @classmethod
+    def _sensitive_label_hash_key(cls) -> bytes:
+        raw_secret = os.getenv(cls._SENSITIVE_LABEL_HASH_ENV) or os.getenv(
+            cls._SENSITIVE_LABEL_HASH_FALLBACK_ENV
+        )
+        if raw_secret:
+            return raw_secret.encode("utf-8")
+        if cls._env_truthy("METRICS_REQUIRE_SENSITIVE_LABEL_HASH_KEY") or cls._env_truthy(
+            "TLDW_ENFORCE_LOG_HASH_SECRET"
+        ):
+            raise RuntimeError(
+                "METRICS_SENSITIVE_LABEL_HASH_KEY or TLDW_LOG_HASH_SECRET is required for sensitive metric labels"
+            )
+        if not cls._sensitive_label_hash_fallback_warned:
+            logger.warning(
+                "MetricsRegistry using process-local sensitive label hash key; set {} for stable hashes",
+                cls._SENSITIVE_LABEL_HASH_ENV,
+            )
+            cls._sensitive_label_hash_fallback_warned = True
+        return cls._SENSITIVE_LABEL_HASH_FALLBACK_KEY
+
+    @classmethod
+    def _hash_sensitive_label_value(cls, value: Any) -> str:
         """Return a stable non-reversible public label value."""
         if value is None:
             return "unknown"
@@ -163,7 +192,7 @@ class MetricsRegistry:
         if not value_str:
             return "unknown"
         digest = hmac.digest(
-            MetricsRegistry._SENSITIVE_LABEL_HASH_KEY,
+            cls._sensitive_label_hash_key(),
             value_str.encode("utf-8"),
             "sha256",
         ).hex()[:16]

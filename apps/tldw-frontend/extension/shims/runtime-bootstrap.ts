@@ -401,6 +401,10 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
       delete next.apiKey
       changed = true
     }
+    if (next.apiBearer !== undefined) {
+      delete next.apiBearer
+      changed = true
+    }
     if (next.accessToken !== undefined) {
       delete next.accessToken
       changed = true
@@ -523,6 +527,10 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
 
     if (next.apiKey !== undefined) {
       delete next.apiKey
+      changed = true
+    }
+    if (next.apiBearer !== undefined) {
+      delete next.apiBearer
       changed = true
     }
     if (next.accessToken !== undefined) {

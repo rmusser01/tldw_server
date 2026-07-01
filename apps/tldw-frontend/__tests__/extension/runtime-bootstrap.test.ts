@@ -430,7 +430,9 @@ describe("runtime-bootstrap chrome shim", () => {
       "tldwConfig",
       JSON.stringify({
         authMode: "multi-user",
+        apiBearer: "manual-bearer",
         accessToken: "manual-token",
+        refreshToken: "manual-refresh",
         serverUrl: "http://127.0.0.1:8000"
       })
     )
@@ -442,10 +444,14 @@ describe("runtime-bootstrap chrome shim", () => {
     const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
     expect(getApiKey()).toBe("runtime-key")
     expect(nextConfig.authMode).toBe("single-user")
+    expect(nextConfig.apiBearer).toBeUndefined()
     expect(nextConfig.accessToken).toBeUndefined()
+    expect(nextConfig.refreshToken).toBeUndefined()
     expect(nextConfig.apiKey).toBeUndefined()
     expect(nextConfig.serverUrl).toBe(window.location.origin)
+    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-bearer")
     expect(localStorage.getItem("tldwConfig")).not.toContain("manual-token")
+    expect(localStorage.getItem("tldwConfig")).not.toContain("manual-refresh")
     expect(readStoredValue("tldwServerUrl")).toBe(window.location.origin)
     expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
   })
@@ -604,6 +610,15 @@ describe("runtime-bootstrap chrome shim", () => {
   it("falls back to existing env bootstrap when runtime config fetch fails", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     process.env.NEXT_PUBLIC_X_API_KEY = "env-key"
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "multi-user",
+        apiBearer: "stale-env-bearer",
+        accessToken: "stale-env-access",
+        refreshToken: "stale-env-refresh"
+      })
+    )
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
@@ -617,7 +632,13 @@ describe("runtime-bootstrap chrome shim", () => {
     const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
     expect(getApiKey()).toBe("env-key")
     expect(nextConfig.apiKey).toBeUndefined()
+    expect(nextConfig.apiBearer).toBeUndefined()
+    expect(nextConfig.accessToken).toBeUndefined()
+    expect(nextConfig.refreshToken).toBeUndefined()
     expect(localStorage.getItem("tldwConfig")).not.toContain("env-key")
+    expect(localStorage.getItem("tldwConfig")).not.toContain("stale-env-bearer")
+    expect(localStorage.getItem("tldwConfig")).not.toContain("stale-env-access")
+    expect(localStorage.getItem("tldwConfig")).not.toContain("stale-env-refresh")
     expect(readStoredValue("tldwRuntimeAuthMetadata")).toBeNull()
   })
 
