@@ -15,6 +15,12 @@ from .models import (
     SearchResult,
 )
 from .settings import DocsSettings
+from .standalone import (
+    StandaloneDocsMount,
+    StandaloneDocsProfile,
+    create_standalone_docs_mount,
+    standalone_docs_settings_for_profile,
+)
 from .store import DocsCatalogStore
 
 __all__ = [
@@ -32,4 +38,8 @@ __all__ = [
     "SearchFilters",
     "SearchRequest",
     "SearchResult",
+    "StandaloneDocsMount",
+    "StandaloneDocsProfile",
+    "create_standalone_docs_mount",
+    "standalone_docs_settings_for_profile",
 ]
