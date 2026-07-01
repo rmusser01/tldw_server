@@ -49,7 +49,7 @@ class DomainRule:
 
 @dataclass(frozen=True)
 class URLPrefixRule:
-    raw_prefix: str
+    matched_rule: str
     scheme: str
     host: str
     port: int | None
@@ -62,7 +62,7 @@ class URLPrefixRule:
         except URLPolicyError:
             return None
         return cls(
-            raw_prefix=prefix,
+            matched_rule=normalized.redacted_url,
             scheme=normalized.scheme,
             host=normalized.host,
             port=normalized.port,
@@ -187,7 +187,7 @@ class SourcePolicy:
                     safe_argument_hash=argument_hash,
                     redacted_url=normalized.redacted_url,
                     normalized_url=normalized,
-                    matched_rule=rule.raw_prefix,
+                    matched_rule=rule.matched_rule,
                 )
 
         if self.web_source_profile == "locked_down":

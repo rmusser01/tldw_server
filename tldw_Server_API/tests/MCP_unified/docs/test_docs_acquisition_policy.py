@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
+
 import pytest
 
 from mcp_unified.docs.acquisition.models import (
@@ -51,6 +54,23 @@ def test_locked_down_allows_explicit_allowed_url_prefixes() -> None:
     decision = policy.evaluate("https://docs.example.com/reference/page")
 
     assert decision.status == "allowed"  # nosec B101
+
+
+def test_allowed_url_prefix_decision_does_not_expose_prefix_or_runtime_query_details() -> None:
+    policy = SourcePolicy(
+        web_source_profile="locked_down",
+        allowed_url_prefixes=("https://example.com/docs/?token=secret#frag",),
+    )
+
+    decision = policy.evaluate("https://example.com/docs/page?token=runtime")
+    public_details = json.dumps(asdict(decision), sort_keys=True)
+
+    assert decision.status == "allowed"  # nosec B101
+    assert decision.matched_rule == "https://example.com/docs/"  # nosec B101
+    assert "token" not in public_details  # nosec B101
+    assert "secret" not in public_details  # nosec B101
+    assert "runtime" not in public_details  # nosec B101
+    assert "frag" not in public_details  # nosec B101
 
 
 def test_host_case_and_default_port_are_normalized_for_prefix_matching() -> None:
