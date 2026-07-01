@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.Audio.Realtime.models import (
     InputAudioCommittedEvent,
     InputAudioSpeechStartedEvent,
     InputAudioSpeechStoppedEvent,
+    RealtimeErrorEvent,
     RealtimeSessionConfig,
     ResponseAudioDeltaEvent,
     ResponseContentPartAddedEvent,
@@ -107,6 +108,14 @@ class BlockingRealtimePipeline(FakeRealtimePipeline):
         await self.queue.put(None)
 
 
+class FakeTask:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+
 async def _collect(events: AsyncIterator[object]) -> list[object]:
     return [event async for event in events]
 
@@ -151,6 +160,40 @@ async def test_update_session_changes_config_values():
     assert session.config.instructions == "Be concise."
     assert session.config.output_format == "pcm16"
     assert session.config.metadata == {"tenant": "local"}
+
+
+@pytest.mark.asyncio
+async def test_partial_update_session_preserves_existing_config_and_merges_metadata():
+    session = RealtimeSession(pipeline=FakeRealtimePipeline())
+    await session.apply_update(
+        UpdateSessionCommand(
+            event_id="evt_initial_update",
+            config=RealtimeSessionConfig(
+                model="gpt-realtime",
+                instructions="Be concise.",
+                metadata={"tenant": "local", "tldw": {"persist": True, "conversation_id": "abc"}},
+            ),
+        )
+    )
+
+    await session.apply_update(
+        UpdateSessionCommand(
+            event_id="evt_partial_update",
+            config=RealtimeSessionConfig(
+                voice="verse",
+                metadata={"request_id": "req_1"},
+            ),
+        )
+    )
+
+    assert session.config.model == "gpt-realtime"
+    assert session.config.voice == "verse"
+    assert session.config.instructions == "Be concise."
+    assert session.config.metadata == {
+        "tenant": "local",
+        "request_id": "req_1",
+        "tldw": {"persist": True, "conversation_id": "abc"},
+    }
 
 
 @pytest.mark.asyncio
@@ -261,6 +304,63 @@ async def test_cancel_response_increments_generation_id_and_suppresses_late_chun
 
 
 @pytest.mark.asyncio
+async def test_cancel_response_with_mismatched_response_id_preserves_active_response():
+    pipeline = BlockingRealtimePipeline()
+    session = RealtimeSession(pipeline=pipeline)
+    await session.append_audio(AppendAudioCommand(event_id="evt_audio", audio=b"\x00\x01"))
+    await session.commit_audio(CommitAudioCommand(event_id="evt_commit"))
+    stream = session.create_response(CreateResponseCommand(event_id="evt_create"))
+    created = await anext(stream)
+
+    cancel_events = await session.cancel_response(
+        CancelResponseCommand(event_id="evt_cancel_wrong", response_id="resp_wrong")
+    )
+    await pipeline.emit(RealtimePipelineTextDelta("still active"))
+    await pipeline.finish()
+    remaining_events = await _collect(stream)
+
+    assert cancel_events == [
+        RealtimeErrorEvent(
+            code="invalid_request",
+            message="response.cancel response_id does not match the active response",
+            event_id="evt_cancel_wrong",
+        )
+    ]
+    assert session.generation_id == 1
+    assert any(
+        isinstance(event, ResponseTextDeltaEvent) and event.delta == "still active" for event in remaining_events
+    )
+    assert any(isinstance(event, ResponseDoneEvent) and event.status == "completed" for event in remaining_events)
+    assert created.response_id != "resp_wrong"
+
+
+@pytest.mark.asyncio
+async def test_cancel_response_cancels_and_clears_registered_active_task():
+    pipeline = BlockingRealtimePipeline()
+    task = FakeTask()
+    session = RealtimeSession(pipeline=pipeline)
+    await session.append_audio(AppendAudioCommand(event_id="evt_audio", audio=b"\x00\x01"))
+    await session.commit_audio(CommitAudioCommand(event_id="evt_commit"))
+    stream = session.create_response(CreateResponseCommand(event_id="evt_create"))
+    created = await anext(stream)
+    session.set_active_task(task)
+
+    cancel_events = await session.cancel_response(
+        CancelResponseCommand(event_id="evt_cancel", response_id=created.response_id)
+    )
+
+    assert task.cancelled is True
+    assert session.active_task is None
+    assert cancel_events == [
+        ResponseDoneEvent(
+            event_id="evt_cancel",
+            response_id=created.response_id,
+            status="cancelled",
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_cancel_after_response_created_suppresses_stale_scaffolding_output_and_done_events():
     session = RealtimeSession(pipeline=FakeRealtimePipeline())
     await session.append_audio(AppendAudioCommand(event_id="evt_audio", audio=b"\x00\x01"))
@@ -299,3 +399,34 @@ async def test_cancel_after_response_created_suppresses_stale_scaffolding_output
         for event in remaining_events
     )
     assert not any(isinstance(event, ResponseDoneEvent) and event.status == "completed" for event in remaining_events)
+
+
+@pytest.mark.asyncio
+async def test_create_response_while_active_returns_invalid_request_without_superseding_current_response():
+    pipeline = BlockingRealtimePipeline()
+    session = RealtimeSession(pipeline=pipeline)
+    await session.append_audio(AppendAudioCommand(event_id="evt_audio", audio=b"\x00\x01"))
+    await session.commit_audio(CommitAudioCommand(event_id="evt_commit"))
+    stream = session.create_response(CreateResponseCommand(event_id="evt_create"))
+    created = await anext(stream)
+
+    second_stream = session.create_response(CreateResponseCommand(event_id="evt_create_second"))
+    second_event = await anext(second_stream)
+    with pytest.raises(StopAsyncIteration):
+        await anext(second_stream)
+    await pipeline.emit(RealtimePipelineTextDelta("first response continues"))
+    await pipeline.finish()
+    remaining_events = await _collect(stream)
+
+    assert second_event == RealtimeErrorEvent(
+        code="invalid_request",
+        message="response.create is not allowed while another response is active",
+        event_id="evt_create_second",
+    )
+    assert session.generation_id == 1
+    assert any(
+        isinstance(event, ResponseTextDeltaEvent) and event.delta == "first response continues"
+        for event in remaining_events
+    )
+    assert any(isinstance(event, ResponseDoneEvent) and event.status == "completed" for event in remaining_events)
+    assert created.response_id.startswith("resp_")
