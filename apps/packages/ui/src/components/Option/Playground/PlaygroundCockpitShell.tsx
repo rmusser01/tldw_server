@@ -8,6 +8,8 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { COCKPIT_LEFT_RESTORE_WRAPPER_CLASS } from "@/components/Layouts/chat-rail-positioning";
+
 export type PlaygroundCockpitMode = "cockpit" | "focus";
 export type PlaygroundCockpitMobilePanel = "context" | "runtime" | null;
 
@@ -519,7 +521,7 @@ export const PlaygroundCockpitShell = ({
             onClick={() => onLeftRailVisibleChange?.(true)}
             tooltip={restoreContextSidechannelLabel}
             tooltipPlacement="right"
-            wrapperClassName="absolute left-10 top-1/2 z-50 hidden -translate-y-1/2 lg:inline-flex"
+            wrapperClassName={COCKPIT_LEFT_RESTORE_WRAPPER_CLASS}
             className="inline-flex h-32 w-9 flex-col items-center justify-center gap-2 rounded-r-md border-y border-r border-border bg-surface2/95 py-2 text-[11px] font-semibold text-text shadow-md backdrop-blur-sm hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
             <PanelLeftOpen className="h-3.5 w-3.5" aria-hidden="true" />

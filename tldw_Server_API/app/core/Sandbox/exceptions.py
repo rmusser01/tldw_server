@@ -7,4 +7,3 @@ SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS: tuple[type[Exception], ...] = (
     TypeError,
     ValueError,
 )
-

@@ -1240,7 +1240,11 @@ jobs:
           - name: chatbooks-streaming
             paths: >-
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
+          - name: explainer-core
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: llm-adapters-unit
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/unit
@@ -1372,6 +1376,9 @@ jobs:
           - name: product-flashcards
             paths: >-
               tldw_Server_API/tests/Flashcards/test*.py
+          - name: product-explainer
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: product-notes-persona
             paths: >-
               tldw_Server_API/tests/Notes
@@ -2627,7 +2634,11 @@ jobs:
           - name: chatbooks-streaming
             paths: >-
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
+          - name: explainer-core
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: llm-adapters-unit
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/unit
@@ -2759,6 +2770,9 @@ jobs:
           - name: product-flashcards
             paths: >-
               tldw_Server_API/tests/Flashcards/test*.py
+          - name: product-explainer
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: product-notes-persona
             paths: >-
               tldw_Server_API/tests/Notes
@@ -3887,7 +3901,11 @@ jobs:
           - name: chatbooks-streaming
             paths: >-
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
+          - name: explainer-core
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: llm-adapters-unit
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/unit
@@ -4019,6 +4037,9 @@ jobs:
           - name: product-flashcards
             paths: >-
               tldw_Server_API/tests/Flashcards/test*.py
+          - name: product-explainer
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: product-notes-persona
             paths: >-
               tldw_Server_API/tests/Notes
@@ -5071,7 +5092,11 @@ jobs:
           - name: chatbooks-streaming
             paths: >-
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
+          - name: explainer-core
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: llm-adapters-unit
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/unit
@@ -5203,6 +5228,9 @@ jobs:
           - name: product-flashcards
             paths: >-
               tldw_Server_API/tests/Flashcards/test*.py
+          - name: product-explainer
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: product-notes-persona
             paths: >-
               tldw_Server_API/tests/Notes
@@ -6256,7 +6284,11 @@ jobs:
           - name: chatbooks-streaming
             paths: >-
               tldw_Server_API/tests/Chatbooks
+              tldw_Server_API/tests/Explainer
               tldw_Server_API/tests/Streaming
+          - name: explainer-core
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: llm-adapters-unit
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/unit
@@ -6388,6 +6420,9 @@ jobs:
           - name: product-flashcards
             paths: >-
               tldw_Server_API/tests/Flashcards/test*.py
+          - name: product-explainer
+            paths: >-
+              tldw_Server_API/tests/Explainer
           - name: product-notes-persona
             paths: >-
               tldw_Server_API/tests/Notes

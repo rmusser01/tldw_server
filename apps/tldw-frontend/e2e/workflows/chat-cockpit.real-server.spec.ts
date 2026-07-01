@@ -398,7 +398,7 @@ const seedRealServerConfig = async (
         }
       }
       if (configuredPersistedServerChatId) {
-        localStorage.setItem(
+        localStorage.setItem( // lgtm[js/clear-text-storage-of-sensitive-data] synthetic E2E persisted chat fixture
           'tldw-playground-session',
           JSON.stringify({
             state: {

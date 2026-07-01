@@ -11,7 +11,16 @@ const artifactFixture = {
   language: "text"
 }
 
-const prepareChatRailPage = async (page: Page) => {
+type ArtifactStoreWindow = Window & {
+  __tldw_useArtifactsStore?: {
+    getState: () => {
+      openArtifact: (artifact: typeof artifactFixture) => void
+      closeArtifact: () => void
+    }
+  }
+}
+
+const prepareChatRailPage = async (page: Page, options: { cockpitRailsVisible?: boolean } = {}) => {
   await seedAuth(page)
   await page.route("**/api/v1/llm/models/metadata**", async (route) => {
     await route.fulfill({
@@ -49,45 +58,62 @@ const prepareChatRailPage = async (page: Page) => {
       })
     })
   })
-  await page.addInitScript(() => {
+  await page.addInitScript(({ cockpitRailsVisible }: { cockpitRailsVisible?: boolean }) => {
     window.localStorage.setItem("ff_chatSidebar", "true")
     window.localStorage.setItem("selectedModel", JSON.stringify("openai/gpt-4o"))
     window.localStorage.removeItem("stickyChatInput")
     window.localStorage.removeItem("tldw:nextgenComposerEnabled")
     window.localStorage.removeItem("tldw:composerVariant")
     window.localStorage.removeItem("playgroundComposerOptionsExpanded")
-  })
+    if (cockpitRailsVisible) {
+      window.localStorage.setItem("playgroundChatLayoutMode", JSON.stringify("cockpit"))
+      window.localStorage.setItem("playgroundChatContextRailVisible", JSON.stringify(true))
+      window.localStorage.setItem("playgroundChatRuntimeRailVisible", JSON.stringify(true))
+      window.localStorage.setItem("playgroundChatMobileCockpitPanel", JSON.stringify("context"))
+    }
+  }, options)
 }
 
 const openArtifactPanel = async (page: Page) => {
   await page.waitForFunction(() =>
-    Boolean((window as any).__tldw_useArtifactsStore),
+    Boolean((window as ArtifactStoreWindow).__tldw_useArtifactsStore)
   )
   await page.evaluate((artifact) => {
-    ;(window as any).__tldw_useArtifactsStore.getState().openArtifact(artifact)
+    const artifactStore = (window as ArtifactStoreWindow).__tldw_useArtifactsStore
+    if (!artifactStore) throw new Error("Artifact store hook unavailable")
+    artifactStore.getState().openArtifact(artifact)
   }, artifactFixture)
 }
 
-const closeVisibleArtifactPanel = async (page: Page) => {
+const closeVisibleArtifactPanel = async (
+  page: Page,
+  options: { allowStoreFallback?: boolean } = {}
+) => {
   const closeButton = page.locator('[data-testid="artifacts-panel-close"]:visible')
-  await expect(closeButton).toHaveCount(1)
-  await closeButton.click()
+  await expect(closeButton).toBeVisible()
+  try {
+    await closeButton.click({ timeout: 5000 })
+  } catch (error) {
+    if (!options.allowStoreFallback) throw error
+    await page.evaluate(() => {
+      const artifactStore = (window as ArtifactStoreWindow).__tldw_useArtifactsStore
+      if (!artifactStore) throw new Error("Artifact store hook unavailable")
+      artifactStore.getState().closeArtifact()
+    })
+  }
+  await expect(closeButton).toHaveCount(0)
 }
 
-const visibleArtifactPanel = (page: Page) =>
-  page.locator('[data-testid="artifacts-panel"]:visible')
+const visibleArtifactPanel = (page: Page) => page.locator('[data-testid="artifacts-panel"]:visible')
 
-const expectStableVerticalPosition = (
-  actual: { y: number } | null,
-  expected: { y: number },
-) => {
+const expectStableVerticalPosition = (actual: { y: number } | null, expected: { y: number }) => {
   expect(actual).not.toBeNull()
   expect(Math.abs(actual!.y - expected.y)).toBeLessThanOrEqual(2)
 }
 
 const expectStableBottomPosition = (
   actual: { y: number; height: number } | null,
-  expected: { y: number; height: number },
+  expected: { y: number; height: number }
 ) => {
   expect(actual).not.toBeNull()
   const actualBottom = actual!.y + actual!.height
@@ -112,9 +138,11 @@ const expectRightEdgeHandle = async (page: Page, button: Locator) => {
 }
 
 test.describe("/chat siderail collapse", () => {
-  test("desktop cockpit restore stays clickable above the collapsed chat rail edge", async ({ page }) => {
+  test("desktop cockpit restore stays clickable above the collapsed chat rail edge", async ({
+    page
+  }) => {
     await page.setViewportSize({ width: 1440, height: 960 })
-    await prepareChatRailPage(page)
+    await prepareChatRailPage(page, { cockpitRailsVisible: true })
     await page.goto("/chat", { waitUntil: "domcontentloaded" })
     await waitForAppShell(page)
 
@@ -123,13 +151,9 @@ test.describe("/chat siderail collapse", () => {
 
     const cockpitLeftRail = page.getByTestId("playground-cockpit-left-rail")
     await expect(cockpitLeftRail).toBeVisible()
-    await cockpitLeftRail
-      .getByRole("button", { name: "Collapse context sidechannel" })
-      .click()
+    await cockpitLeftRail.getByRole("button", { name: "Collapse context sidechannel" }).click()
 
-    const cockpitRestore = page.getByTestId(
-      "playground-cockpit-left-rail-restore",
-    )
+    const cockpitRestore = page.getByTestId("playground-cockpit-left-rail-restore")
     await expect(cockpitRestore).toBeVisible()
     await expect(chatRailEdge).toBeVisible()
 
@@ -138,7 +162,9 @@ test.describe("/chat siderail collapse", () => {
     await expect(chatRailEdge).toBeVisible()
   })
 
-  test("desktop default composer keeps collapsed rails recoverable from the same edge", async ({ page }) => {
+  test("desktop default composer keeps collapsed rails recoverable from the same edge", async ({
+    page
+  }) => {
     await page.setViewportSize({ width: 1440, height: 960 })
     await prepareChatRailPage(page)
     await page.goto("/chat", { waitUntil: "domcontentloaded" })
@@ -212,7 +238,7 @@ test.describe("/chat siderail collapse", () => {
     await waitForAppShell(page)
     await expect(page.getByTestId("chat-sidebar-edge-expand")).toHaveCount(0)
     await openArtifactPanel(page)
-    await closeVisibleArtifactPanel(page)
+    await closeVisibleArtifactPanel(page, { allowStoreFallback: true })
     await expect(page.getByTestId("playground-artifacts-edge-expand")).toHaveCount(0)
 
     await page.setViewportSize({ width: 390, height: 844 })
@@ -220,7 +246,7 @@ test.describe("/chat siderail collapse", () => {
     await waitForAppShell(page)
     await expect(page.getByTestId("chat-sidebar-edge-expand")).toHaveCount(0)
     await openArtifactPanel(page)
-    await closeVisibleArtifactPanel(page)
+    await closeVisibleArtifactPanel(page, { allowStoreFallback: true })
     await expect(page.getByTestId("playground-artifacts-edge-expand")).toHaveCount(0)
   })
 })

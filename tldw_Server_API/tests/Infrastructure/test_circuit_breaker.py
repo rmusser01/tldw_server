@@ -28,6 +28,9 @@ from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
 _infra_cb_module = importlib.import_module(
     "tldw_Server_API.app.core.Infrastructure.circuit_breaker"
 )
+_cb_registry_db_module = importlib.import_module(
+    "tldw_Server_API.app.core.DB_Management.Circuit_Breaker_Registry_DB"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1156,27 +1159,29 @@ class TestPersistentStore:
         db = CircuitBreakerRegistryDB(tmp_path / "cb_probe_leases_expiry.db")
         name = "lease-expiry"
 
-        lease1 = db.acquire_probe_lease(
-            name,
-            max_calls=1,
-            ttl_seconds=0.05,
-            owner_id="worker-1",
-        )
-        assert lease1 is not None
-        assert db.count_active_probe_leases(name) == 1
+        now = [time.time()]
+        with patch.object(_cb_registry_db_module.time, "time", side_effect=lambda: now[0]):
+            lease1 = db.acquire_probe_lease(
+                name,
+                max_calls=1,
+                ttl_seconds=0.05,
+                owner_id="worker-1",
+            )
+            assert lease1 is not None
+            assert db.count_active_probe_leases(name) == 1
 
-        time.sleep(0.07)
-        lease2 = db.acquire_probe_lease(
-            name,
-            max_calls=1,
-            ttl_seconds=1.0,
-            owner_id="worker-2",
-        )
-        assert lease2 is not None
-        assert lease2.lease_id != lease1.lease_id
-        assert db.count_active_probe_leases(name) == 1
-        assert db.release_probe_lease(name, lease2.lease_id) is True
-        assert db.count_active_probe_leases(name) == 0
+            now[0] += 0.07
+            lease2 = db.acquire_probe_lease(
+                name,
+                max_calls=1,
+                ttl_seconds=1.0,
+                owner_id="worker-2",
+            )
+            assert lease2 is not None
+            assert lease2.lease_id != lease1.lease_id
+            assert db.count_active_probe_leases(name) == 1
+            assert db.release_probe_lease(name, lease2.lease_id) is True
+            assert db.count_active_probe_leases(name) == 0
 
     def test_probe_leases_released_after_success_and_failure_paths(self, tmp_path):
         db_path = tmp_path / "cb_probe_leases_release.db"

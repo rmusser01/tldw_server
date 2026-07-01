@@ -7,15 +7,15 @@ runtime lifecycle commands.
 ## Package Release Status
 
 The `mcp_unified` package boundary is currently internal/experimental and is
-not a separately published standalone package. It is still distributed as part
-of the broader `tldw-server` source tree while the package release gate is
-being hardened.
+published on PyPI as the early standalone MCP Unified package. It is still
+developed in the broader `tldw-server` source tree while the package release
+gate is being hardened.
 
 The current package metadata uses the canonical repository license expression
-`GPL-3.0-only`. Downstream projects should treat the boundary as an in-repo
-integration surface until a publishing workflow is explicitly enabled. The
-package-local descriptor lives at `apps/mcp-unified/pyproject.toml` and is checked
-by the package-boundary tests before publishing is considered.
+`GPL-3.0-only`. Downstream projects should treat the boundary as an experimental
+standalone integration surface. The package-local descriptor lives at
+`apps/mcp-unified/pyproject.toml` and is checked by the package-boundary tests
+before each publishing run.
 
 Inspect the current release-readiness metadata with:
 

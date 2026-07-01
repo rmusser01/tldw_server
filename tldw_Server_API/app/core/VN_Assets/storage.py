@@ -8,6 +8,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import SOURCE_FEATURE_VN_ASSETS
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 VN_ASSET_CONTENT_NOT_FOUND = "vn_asset_content_not_found"
 VN_ASSET_INVALID_IMAGE = "vn_asset_invalid_image"
@@ -41,7 +42,10 @@ def resolve_vn_asset_storage_path(*, user_id: int, storage_path: str) -> Path:
         raise ValueError(VN_ASSET_CONTENT_NOT_FOUND)
 
     base_dir = DatabasePaths.get_user_outputs_dir(user_id).resolve()
-    full_path = (base_dir / relative_path).resolve()
+    full_path_str = safe_join(str(base_dir), storage_path)
+    if full_path_str is None:
+        raise ValueError(VN_ASSET_CONTENT_NOT_FOUND)
+    full_path = Path(full_path_str)
 
     try:
         full_path.relative_to(base_dir)

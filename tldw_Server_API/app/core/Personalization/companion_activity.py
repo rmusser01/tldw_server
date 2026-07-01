@@ -3,7 +3,10 @@ from __future__ import annotations
 """Helpers for recording explicit companion activity from adjacent systems."""
 
 import hashlib
+import hmac
 import json
+import os
+import secrets
 import sqlite3
 import traceback
 from typing import Any
@@ -15,6 +18,34 @@ from tldw_Server_API.app.core.feature_flags import is_personalization_enabled
 from tldw_Server_API.app.core.Personalization.companion_user_ids import (
     resolve_existing_companion_storage_user_id,
 )
+
+_COMPANION_ACTIVITY_LOG_REF_KEY_ENV = "COMPANION_ACTIVITY_LOG_REF_KEY"
+_COMPANION_ACTIVITY_LOG_REF_FALLBACK_ENV = "TLDW_LOG_HASH_SECRET"
+_COMPANION_ACTIVITY_LOG_REF_FALLBACK_KEY = secrets.token_bytes(32)
+_COMPANION_ACTIVITY_LOG_REF_WARNED = False
+
+
+def _env_truthy(name: str) -> bool:
+    return str(os.getenv(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _companion_activity_log_ref_key() -> bytes:
+    """Return the deployment-provided key for companion activity log references."""
+    global _COMPANION_ACTIVITY_LOG_REF_WARNED
+    raw_secret = os.getenv(_COMPANION_ACTIVITY_LOG_REF_KEY_ENV) or os.getenv(
+        _COMPANION_ACTIVITY_LOG_REF_FALLBACK_ENV
+    )
+    if raw_secret:
+        return raw_secret.encode("utf-8")
+    if _env_truthy("COMPANION_ACTIVITY_REQUIRE_LOG_REF_KEY") or _env_truthy("TLDW_ENFORCE_LOG_HASH_SECRET"):
+        raise RuntimeError("COMPANION_ACTIVITY_LOG_REF_KEY or TLDW_LOG_HASH_SECRET is required")
+    if not _COMPANION_ACTIVITY_LOG_REF_WARNED:
+        logger.warning(
+            "Companion activity using process-local log-ref key; set {} for stable references",
+            _COMPANION_ACTIVITY_LOG_REF_KEY_ENV,
+        )
+        _COMPANION_ACTIVITY_LOG_REF_WARNED = True
+    return _COMPANION_ACTIVITY_LOG_REF_FALLBACK_KEY
 
 
 def _open_db_for_user(user_id: str | int) -> tuple[PersonalizationDB, str]:
@@ -67,7 +98,11 @@ def _log_ref(value: Any) -> str:
     normalized = str(value or "").strip()
     if not normalized:
         return "na"
-    return hashlib.sha1(normalized.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+    return hmac.digest(
+        _companion_activity_log_ref_key(),
+        normalized.encode("utf-8"),
+        "sha256",
+    ).hex()[:12]
 
 
 def _traceback_summary(exc: BaseException) -> list[dict[str, Any]]:

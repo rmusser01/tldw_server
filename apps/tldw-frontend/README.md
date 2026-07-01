@@ -42,6 +42,7 @@ Key variables:
 - `NEXT_PUBLIC_API_URL`: Backend URL (default: `http://127.0.0.1:8000`)
 - `NEXT_PUBLIC_API_BASE_URL`: Optional. Absolute base URL for static assets and WebUI links. If set, this takes precedence over deriving the base from `NEXT_PUBLIC_API_URL`. Useful when the API is mounted under `/api/vN` behind a reverse proxy.
 - `NEXT_PUBLIC_API_VERSION`: API version (default: `v1`)
+- `AUTH_MODE`: Server-side runtime auth mode used by `/api/_tldw-webui/runtime-config` (no `NEXT_PUBLIC_` prefix); set to `single_user` for local single-user setups to match the backend.
 - `NEXT_PUBLIC_X_API_KEY`: Optional. Single-user mode API key (sent as `X-API-KEY`).
 - `NEXT_PUBLIC_API_BEARER`: Optional. Bearer token for chat module when server sets `API_BEARER`.
 - `NEXT_PUBLIC_RUNS_CSV_SERVER_THRESHOLD`: Optional. Runs row-count threshold for preferring server-side CSV export (default: `2000`).

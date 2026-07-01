@@ -3,6 +3,7 @@ import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { COCKPIT_LEFT_RESTORE_WRAPPER_CLASS } from "@/components/Layouts/chat-rail-positioning";
 import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
 
 vi.mock("react-i18next", () => ({
@@ -42,7 +43,7 @@ const renderShell = ({
 };
 
 describe("Playground cockpit rail restore tabs", () => {
-  it("mounts the context restore control beside the app rail lane while runtime stays expanded", () => {
+  it("mounts the context restore control flush to the cockpit edge while runtime stays expanded", () => {
     const { onLeftRailVisibleChange } = renderShell({
       leftRailVisible: false,
       rightRailVisible: true,
@@ -60,12 +61,11 @@ describe("Playground cockpit rail restore tabs", () => {
     );
     expect(contextRestore).toHaveTextContent("Context rail");
     expect(contextRestore.parentElement).toHaveClass(
-      "absolute",
-      "left-10",
-      "top-1/2",
-      "-translate-y-1/2",
+      ...COCKPIT_LEFT_RESTORE_WRAPPER_CLASS.split(" "),
     );
-    expect(contextRestore.parentElement).not.toHaveClass("left-0");
+    expect(contextRestore.parentElement).not.toHaveClass("left-10");
+    expect(contextRestore.parentElement).not.toHaveClass("top-1/2");
+    expect(contextRestore.parentElement).not.toHaveClass("-translate-y-1/2");
     expect(contextRestore.parentElement).not.toHaveClass("relative");
     expect(
       screen
@@ -134,9 +134,7 @@ describe("Playground cockpit rail restore tabs", () => {
         .getByTestId("playground-cockpit-main")
         .parentElement?.style.getPropertyValue("--cockpit-grid-columns"),
     ).toBe("minmax(0,1fr)");
-    expect(screen.getByTestId("playground-cockpit-main")).toHaveClass(
-      "w-full",
-    );
+    expect(screen.getByTestId("playground-cockpit-main")).toHaveClass("w-full");
     expect(screen.getByTestId("playground-cockpit-main")).not.toHaveClass(
       "max-w-[72rem]",
     );

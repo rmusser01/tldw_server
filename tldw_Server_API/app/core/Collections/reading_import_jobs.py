@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     normalize_output_storage_filename,
 )
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.testing import is_truthy
 
 READING_IMPORT_DOMAIN = "reading"
@@ -84,7 +85,13 @@ def stage_reading_import_file(
     if not safe_name:
         safe_name = "reading_import"
     token = uuid4().hex
-    target = (imports_dir / f"reading_import_{token}_{safe_name}").resolve()
+    target_name = f"reading_import_{token}_{safe_name}"
+    target_path = safe_join(
+        str(imports_dir_resolved),
+        target_name,
+        error_factory=lambda _exc: ReadingImportJobError("reading_import_path_escape", retryable=False),
+    )
+    target = Path(target_path)
     try:
         target.relative_to(imports_dir_resolved)
     except ValueError:

@@ -1,6 +1,6 @@
 # Workspace Playground Accessibility Contrast Audit (Category 11 Stage 3)
 
-Date: 2026-02-18  
+Date: 2026-02-18
 Scope: `apps/packages/ui/src/components/Option/ResearchWorkspace/`
 
 ## Checklist
@@ -30,4 +30,3 @@ Scope: `apps/packages/ui/src/components/Option/ResearchWorkspace/`
 - `textMuted/surface2` passes AA across all built-in themes (minimum observed: **4.53:1**).
 - Previous studio mobile badge pairing (`text-white` on `bg-success`) fails AA in several themes (minimum observed: **1.63:1**).
 - Workspace mobile badges were updated to use `text-text` on `bg-surface2` to maintain AA across themes.
-

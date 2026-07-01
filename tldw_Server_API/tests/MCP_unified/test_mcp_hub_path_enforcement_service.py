@@ -832,6 +832,37 @@ async def test_empty_path_grants_fail_closed_even_with_legacy_allowlist() -> Non
 
 
 @pytest.mark.asyncio
+async def test_path_normalization_failure_blocks_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.services import mcp_hub_path_enforcement_service as service_module
+    from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
+        McpHubPathEnforcementService,
+    )
+
+    svc = McpHubPathEnforcementService(path_scope_service=_FakePathScopeService(_workspace_scope()))
+
+    def _raise_value_error(_raw_path: str, *, base_path: Path | None) -> Path:
+        _ = base_path
+        raise ValueError("bad path")
+
+    monkeypatch.setattr(service_module, "_normalize_candidate_path", _raise_value_error)
+
+    result = await svc.evaluate_tool_call(
+        effective_policy={
+            "enabled": True,
+            "policy_document": {"path_scope_mode": "workspace_root"},
+        },
+        context=SimpleNamespace(metadata={}),
+        tool_name="fs.read",
+        tool_args={"path": "documents/story.md"},
+        tool_def=_filesystem_tool_def(action="read"),
+    )
+
+    assert result["within_scope"] is False
+    assert result["reason"] == "path_outside_workspace_scope"
+    assert result["normalized_paths"] == []
+
+
+@pytest.mark.asyncio
 async def test_multi_root_path_grants_keep_deduped_paths_and_actions_aligned() -> None:
     from tldw_Server_API.app.services.mcp_hub_path_enforcement_service import (
         McpHubPathEnforcementService,

@@ -93,6 +93,8 @@ _BATCH_ROUND2_DEFAULT_FIELDS = {
 
 _READY_MEDIA_COLLECTION_STATUSES = frozenset({"completed", "skipped_existing"})
 _EMPTY_MEDIA_SCOPE_SENTINEL = -1
+_RAG_STREAM_DIAGNOSTIC_KEYS = frozenset({"error", "errors", "exception", "traceback", "stack"})
+_PUBLIC_RAG_STREAM_DIAGNOSTIC = "RAG processing diagnostic omitted"
 
 
 def _copy_rag_request_with_updates(
@@ -104,6 +106,38 @@ def _copy_rag_request_with_updates(
     if callable(model_copy):
         return model_copy(update=updates)
     return request.copy(update=updates)
+
+
+def _sanitize_rag_stream_value(value: Any, *, diagnostic: bool = False) -> Any:
+    """Remove exception details from diagnostics before streaming to clients."""
+    if diagnostic:
+        if isinstance(value, list):
+            return [_PUBLIC_RAG_STREAM_DIAGNOSTIC for _item in value]
+        if isinstance(value, dict):
+            return {
+                key: _sanitize_rag_stream_value(item, diagnostic=True)
+                for key, item in value.items()
+            }
+        if value is None:
+            return None
+        return _PUBLIC_RAG_STREAM_DIAGNOSTIC
+
+    if isinstance(value, dict):
+        return {
+            key: _sanitize_rag_stream_value(
+                item,
+                diagnostic=str(key).lower() in _RAG_STREAM_DIAGNOSTIC_KEYS,
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_rag_stream_value(item) for item in value]
+    return value
+
+
+def _sanitize_rag_stream_event(event: Any) -> Any:
+    """Sanitize one RAG stream event at the HTTP boundary."""
+    return _sanitize_rag_stream_value(event)
 
 
 def _ready_media_ids_from_collection(collection: Any) -> list[int]:
@@ -2025,7 +2059,7 @@ async def unified_search_stream_endpoint(
             agentic_pipeline=agentic_rag_pipeline,
             extra_context=stream_context,
         ):
-            yield json.dumps(event) + "\n"
+            yield json.dumps(_sanitize_rag_stream_event(event)) + "\n"
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 

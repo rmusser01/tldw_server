@@ -327,16 +327,14 @@ const isPlaceholderApiKey = (value: string): boolean => {
   return PLACEHOLDER_API_KEYS.has(normalized)
 }
 
-const shouldPersistRuntimeKey = async ({
+const shouldRecordRuntimeMetadata = async ({
   existingKey,
-  runtimeKey,
   metadata,
   buildTimeKey,
   existingAuthMode,
   existingAccessToken
 }: {
   existingKey: string | null
-  runtimeKey: string
   metadata: RuntimeAuthMetadata | null
   buildTimeKey: string | null
   existingAuthMode: string | null
@@ -386,9 +384,8 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
         : null
     const buildTimeKey = normalizeApiKey(process.env.NEXT_PUBLIC_X_API_KEY)
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
-    const shouldPersistKey = await shouldPersistRuntimeKey({
+    const shouldRecordMetadata = await shouldRecordRuntimeMetadata({
       existingKey,
-      runtimeKey,
       metadata,
       buildTimeKey,
       existingAuthMode,
@@ -400,20 +397,31 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
     }
     let changed = false
 
+    if (next.apiKey !== undefined) {
+      delete next.apiKey
+      changed = true
+    }
+    if (next.apiBearer !== undefined) {
+      delete next.apiBearer
+      changed = true
+    }
+    if (next.accessToken !== undefined) {
+      delete next.accessToken
+      changed = true
+    }
+    if (next.refreshToken !== undefined) {
+      delete next.refreshToken
+      changed = true
+    }
+
     if (quickstartWebUiServerUrl && next.serverUrl !== quickstartWebUiServerUrl) {
       next.serverUrl = quickstartWebUiServerUrl
       changed = true
     }
 
-    if (shouldPersistKey) {
-      if (next.authMode !== "single-user") {
-        next.authMode = "single-user"
-        changed = true
-      }
-      if (next.apiKey !== runtimeKey) {
-        next.apiKey = runtimeKey
-        changed = true
-      }
+    if (next.authMode !== "single-user") {
+      next.authMode = "single-user"
+      changed = true
     }
 
     if (changed || (next.serverUrl && !existing)) {
@@ -423,7 +431,7 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
       await storage.set("tldwServerUrl", next.serverUrl)
     }
 
-    if (shouldPersistKey) {
+    if (shouldRecordMetadata) {
       const nextMetadata: RuntimeAuthMetadata = {
         source: "webui-runtime",
         version: RUNTIME_AUTH_METADATA_VERSION,
@@ -517,14 +525,29 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
       shouldSyncStoredServerUrl = true
     }
 
-    if (!next.apiKey && !next.accessToken) {
-      if (apiKey) {
+    if (next.apiKey !== undefined) {
+      delete next.apiKey
+      changed = true
+    }
+    if (next.apiBearer !== undefined) {
+      delete next.apiBearer
+      changed = true
+    }
+    if (next.accessToken !== undefined) {
+      delete next.accessToken
+      changed = true
+    }
+    if (next.refreshToken !== undefined) {
+      delete next.refreshToken
+      changed = true
+    }
+
+    if (apiKey || apiBearer) {
+      if (apiKey && next.authMode !== "single-user") {
         next.authMode = "single-user"
-        next.apiKey = apiKey
         changed = true
-      } else if (apiBearer) {
+      } else if (!apiKey && apiBearer && next.authMode !== "multi-user") {
         next.authMode = "multi-user"
-        next.accessToken = apiBearer
         changed = true
       }
     }

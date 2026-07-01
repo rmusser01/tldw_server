@@ -4199,6 +4199,48 @@
   "header_skills": {
     "message": "Skills"
   },
+  "skills_testRun": {
+    "message": "Test run"
+  },
+  "skills_testRunTitle": {
+    "message": "Test run"
+  },
+  "skills_previewArgs": {
+    "message": "Test Arguments"
+  },
+  "skills_previewArgsPlaceholder": {
+    "message": "Enter test arguments..."
+  },
+  "skills_renderOnlyAction": {
+    "message": "Render prompt only"
+  },
+  "skills_testRunAction": {
+    "message": "Run test"
+  },
+  "skills_previewRendered": {
+    "message": "Rendered Prompt"
+  },
+  "skills_previewForkOutput": {
+    "message": "Fork Output"
+  },
+  "skills_testRunError": {
+    "message": "Execution failed"
+  },
+  "skills_loadingStatus": {
+    "message": "Loading skills"
+  },
+  "skills_renderingPromptStatus": {
+    "message": "Rendering prompt for {{name}}"
+  },
+  "skills_runningTestStatus": {
+    "message": "Running test for {{name}}"
+  },
+  "skills_renderedPromptReadyStatus": {
+    "message": "Rendered prompt ready for {{name}}"
+  },
+  "skills_testResultReadyStatus": {
+    "message": "Test result ready for {{name}}"
+  },
   "header_modeRepo2txt": {
     "message": "Repo2Txt"
   },

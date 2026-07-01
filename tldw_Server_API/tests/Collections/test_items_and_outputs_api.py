@@ -601,12 +601,14 @@ async def test_outputs_create_db_insert_failure_log_is_sanitized(monkeypatch):
         def write_text(self, *args: Any, **kwargs: Any) -> None:
             return None
 
+        def unlink(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
     monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
     monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
     monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
-    monkeypatch.setattr(outputs_endpoint.os, "remove", lambda _path: None)
 
     with pytest.raises(HTTPException) as exc_info:
         await outputs_endpoint.create_output(
@@ -652,15 +654,14 @@ async def test_outputs_create_insert_cleanup_failure_log_is_sanitized(monkeypatc
         def write_text(self, *args: Any, **kwargs: Any) -> None:
             return None
 
-    def _raise_cleanup_failure(_path: Any) -> None:
-        raise OSError("cleanup exploded at /private/output.md")
+        def unlink(self, *args: Any, **kwargs: Any) -> None:
+            raise OSError("cleanup exploded at /private/output.md")
 
     logger = _LoggerStub()
     monkeypatch.setattr(outputs_endpoint, "logger", logger)
     monkeypatch.setattr(outputs_endpoint, "render_output_template", lambda *_args: "rendered")
     monkeypatch.setattr(outputs_endpoint, "_outputs_dir_for_user", lambda _user_id: _OutputDir())
     monkeypatch.setattr(outputs_endpoint, "_resolve_output_path_for_user", lambda *_args: _OutputPath())
-    monkeypatch.setattr(outputs_endpoint.os, "remove", _raise_cleanup_failure)
 
     with pytest.raises(HTTPException) as exc_info:
         await outputs_endpoint.create_output(

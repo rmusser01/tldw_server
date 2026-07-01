@@ -475,11 +475,12 @@ async def preview_import_skill(
     Preview a skill import from SKILL.md content without mutating stored skills.
     """
     try:
-        return await service.preview_import_skill(
+        preview = await service.preview_import_skill(
             content=request.content,
             name=request.name,
             supporting_files=request.supporting_files,
         )
+        return SkillImportPreviewResponse.model_validate(preview)
     except SkillsError as e:
         logger.bind(
             action="preview_import_skill",
@@ -542,7 +543,8 @@ async def preview_import_skill_from_file(
         content = await _read_skill_import_preview_upload(file)
 
         if _is_zip_upload(content):
-            return await service.preview_import_from_zip(content)
+            preview = await service.preview_import_from_zip(content)
+            return SkillImportPreviewResponse.model_validate(preview)
 
         try:
             text_content = content.decode("utf-8")
@@ -555,10 +557,11 @@ async def preview_import_skill_from_file(
             if name == "skill":
                 name = None
 
-        return await service.preview_import_skill(
+        preview = await service.preview_import_skill(
             content=text_content,
             name=name,
         )
+        return SkillImportPreviewResponse.model_validate(preview)
     except SkillValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

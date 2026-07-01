@@ -743,7 +743,7 @@ class SandboxService:
 
     def _run_with_claim_lease(self, run_id: str, fn):
         lease_seconds = self._effective_claim_lease_seconds()
-        heartbeat_interval = max(1, min(10, lease_seconds // 3 if lease_seconds > 2 else 1))
+        heartbeat_interval = max(0.1, min(10.0, float(lease_seconds) / 3.0))
         stop = threading.Event()
 
         def _heartbeat() -> None:

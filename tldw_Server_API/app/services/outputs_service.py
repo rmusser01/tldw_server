@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     normalize_output_storage_filename,
 )
 from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 
 _OUTPUT_TEMPLATE_ENV = SandboxedEnvironment(autoescape=True, enable_async=False)
@@ -244,12 +245,18 @@ def _resolve_output_path_for_user(user_id: int, path_value: str | PathlibPath) -
         logger.warning(f"outputs: invalid characters in output filename: {candidate_name!r}")
         raise HTTPException(status_code=400, detail="invalid_path")
 
-    safe_candidate = PathlibPath(candidate_name)
     try:
-        resolved = (base_resolved / safe_candidate).resolve(strict=False)
+        resolved_str = safe_join(
+            str(base_resolved),
+            candidate_name,
+            error_factory=lambda _exc: HTTPException(status_code=400, detail="invalid_path"),
+        )
     except Exception as e:
         logger.warning(f"outputs: invalid output path {path_value}: {e}")
         raise HTTPException(status_code=400, detail="invalid_path") from e
+    if resolved_str is None:
+        raise HTTPException(status_code=400, detail="invalid_path")
+    resolved = PathlibPath(resolved_str)
 
     if not resolved.is_relative_to(base_resolved):
         logger.warning(f"outputs: output path outside base dir: {resolved}")

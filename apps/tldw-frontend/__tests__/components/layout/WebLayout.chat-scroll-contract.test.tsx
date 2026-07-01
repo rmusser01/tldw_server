@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { CHAT_RAIL_EDGE_TRIGGER_CLASS } from '@/components/Layouts/chat-rail-positioning';
 import OptionLayout from '../../../components/layout/WebLayout';
 
 const testModulePath = import.meta.url.startsWith('file:')
@@ -16,7 +17,6 @@ const webLayoutSourcePath = resolve(
   dirname(testModulePath),
   '../../../components/layout/WebLayout.tsx'
 );
-
 const routerState = vi.hoisted(() => ({
   location: {
     pathname: '/chat',
@@ -83,6 +83,10 @@ const storageState = vi.hoisted(() => ({
 const featureFlagState = vi.hoisted(() => ({
   showChatSidebar: false,
 }));
+const mediaQueryState = vi.hoisted(() => ({
+  isDesktop: false,
+  isMobile: false,
+}));
 const chatSidebarMockState = vi.hoisted(() => ({
   props: [] as Array<Record<string, unknown>>,
 }));
@@ -98,6 +102,7 @@ vi.mock('antd', () => ({
 
 vi.mock('lucide-react', () => ({
   EraserIcon: () => null,
+  PanelLeftOpen: () => null,
   XIcon: () => null,
 }));
 
@@ -161,6 +166,7 @@ vi.mock('@/hooks/useMessageOption', () => ({
 }));
 
 vi.mock('@/hooks/keyboard/useKeyboardShortcuts', () => ({
+  isMac: false,
   useChatShortcuts: () => undefined,
   useSidebarShortcuts: () => undefined,
   useQuickChatShortcuts: () => undefined,
@@ -232,14 +238,13 @@ vi.mock('@/hooks/useFeatureFlags', () => ({
 }));
 
 vi.mock('@/hooks/useMediaQuery', async () => {
-  const actual = await vi.importActual<typeof import('@/hooks/useMediaQuery')>(
-    '@/hooks/useMediaQuery'
-  );
+  const actual =
+    await vi.importActual<typeof import('@/hooks/useMediaQuery')>('@/hooks/useMediaQuery');
 
   return {
     ...actual,
-    useDesktop: () => false,
-    useMobile: () => false,
+    useDesktop: () => mediaQueryState.isDesktop,
+    useMobile: () => mediaQueryState.isMobile,
   };
 });
 
@@ -307,9 +312,7 @@ vi.mock('@/components/Common/BackendRecoveryUiContext', () => ({
 vi.mock('@web/components/layout/BackendUnavailableModalGate', () => ({
   BackendUnavailableModalGate: (props: Record<string, unknown>) => {
     backendUnavailableGateState.props.push(props);
-    return props.backendUnavailableDetail ? (
-      <div data-testid="backend-unavailable-modal" />
-    ) : null;
+    return props.backendUnavailableDetail ? <div data-testid="backend-unavailable-modal" /> : null;
   },
 }));
 
@@ -360,6 +363,8 @@ describe('WebLayout /chat scroll contract', () => {
     routerState.location.hash = '';
     storageState.stickyChatInput = true;
     featureFlagState.showChatSidebar = false;
+    mediaQueryState.isDesktop = false;
+    mediaQueryState.isMobile = false;
     chatSidebarMockState.props = [];
     backendUnavailableGateState.props = [];
     connectionState.value.checkOnce = vi.fn(async () => undefined);
@@ -458,6 +463,22 @@ describe('WebLayout /chat scroll contract', () => {
     expect(source).toContain('if (chatSidebarCollapsed) signalChatSidebarOpen()');
     expect(source).toContain("window.addEventListener('tldw:open-chat-sidebar', handler)");
     expect(source).toContain("if (typeof window === 'undefined' || !showChatSidebar) return;");
+  });
+
+  it('anchors the collapsed chat rail in an upper edge band instead of centering it', () => {
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isDesktop = true;
+
+    render(
+      <OptionLayout>
+        <div data-testid="chat-route-content">Chat route</div>
+      </OptionLayout>
+    );
+
+    const edgeButton = screen.getByTestId('chat-sidebar-edge-expand');
+    expect(edgeButton).toHaveAttribute('aria-label', 'Expand chat rail');
+    expect(edgeButton).toHaveClass(...CHAT_RAIL_EDGE_TRIGGER_CLASS.split(' '));
+    expect(edgeButton).not.toHaveClass('top-[calc(50%_-_8rem)]');
   });
 
   it('ignores chat sidebar open events when the shared ChatSidebar feature is disabled', async () => {

@@ -472,13 +472,13 @@ def test_runtime_package_boundary_has_no_tldw_server_imports() -> None:
 
 
 def test_mcp_unified_package_metadata_declares_release_gate() -> None:
-    """Release-gate package metadata should advertise the internal status."""
+    """Release-gate package metadata should advertise the published experimental status."""
 
     metadata = importlib.import_module("mcp_unified.package_metadata")
 
     assert metadata.PACKAGE_NAME == "mcp-unified"
     assert metadata.PACKAGE_STATUS == "internal-experimental"
-    assert metadata.PUBLISHING_STATUS == "not-published"
+    assert metadata.PUBLISHING_STATUS == "published"
     assert metadata.LICENSE_EXPRESSION == "GPL-3.0-only"
 
     extras = metadata.OPTIONAL_EXTRAS
@@ -545,7 +545,7 @@ def test_mcp_unified_package_metadata_declares_release_gate() -> None:
 
 
 def test_mcp_unified_publish_metadata_is_ready_but_internal() -> None:
-    """Standalone package metadata should be publish-ready but still internal."""
+    """Standalone package metadata should be published but still experimental."""
 
     metadata = importlib.import_module("mcp_unified.package_metadata")
     pyproject = _load_standalone_pyproject()
@@ -583,7 +583,7 @@ def test_mcp_unified_publish_metadata_is_ready_but_internal() -> None:
     assert metadata.LICENSE_FILES == ("LICENSE",)  # nosec B101
 
     summary = metadata.package_metadata_summary()
-    assert summary["publishing_status"] == "not-published"  # nosec B101
+    assert summary["publishing_status"] == "published"  # nosec B101
     assert summary["package_status"] == "internal-experimental"  # nosec B101
     assert summary["authors"] == list(metadata.PACKAGE_AUTHORS)  # nosec B101
     assert summary["maintainers"] == list(metadata.PACKAGE_MAINTAINERS)  # nosec B101
@@ -633,7 +633,8 @@ def test_mcp_unified_package_docs_are_local_to_package_boundary() -> None:
     assert "make mcp-unified-rc" in readme  # nosec B101
     assert "make mcp-unified-publish-dry-run" in readme  # nosec B101
     assert "TestPyPI" in readme  # nosec B101
-    assert "not-published" in readme  # nosec B101
+    assert "published on PyPI" in readme  # nosec B101
+    assert "not-published" not in readme  # nosec B101
     assert "mcp-unified-gateway package-info" in readme  # nosec B101
     assert "filesystem advisory lock backends" in readme  # nosec B101
     assert "memory backend" in readme  # nosec B101
@@ -641,10 +642,12 @@ def test_mcp_unified_package_docs_are_local_to_package_boundary() -> None:
     assert "same local database file" in readme  # nosec B101
     assert "# MCP Unified User Guide" in user_guide  # nosec B101
     assert "Publishing Readiness" in user_guide  # nosec B101
+    assert "published on PyPI" in user_guide  # nosec B101
+    assert "python -m pip install \"mcp-unified[gateway]\"" in user_guide  # nosec B101
     assert "make mcp-unified-rc" in user_guide  # nosec B101
     assert "make mcp-unified-publish-dry-run" in user_guide  # nosec B101
     assert "MCP_UNIFIED_ALLOW_PUBLISH=1" in user_guide  # nosec B101
-    assert "maintainer-owned TestPyPI" in user_guide  # nosec B101
+    assert "not-published" not in user_guide  # nosec B101
     assert "profiles" in user_guide  # nosec B101
     assert "external servers" in user_guide  # nosec B101
     assert "credential grants" in user_guide  # nosec B101

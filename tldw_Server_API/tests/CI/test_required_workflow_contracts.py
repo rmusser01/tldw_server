@@ -456,7 +456,7 @@ def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
     )
     linux_script = linux_step["run"]
     assert 'inputs.install-ffmpeg' in linux_script
-    assert "azure.archive.ubuntu.com" in linux_script
+    assert "azure.archive.ubuntu.com" in linux_script  # lgtm[py/incomplete-url-substring-sanitization] workflow literal contract
     assert (
         "grep -rl 'packages.microsoft.com' /etc/apt/sources.list.d | xargs -r sudo rm -f || true"
         in linux_script
@@ -489,7 +489,7 @@ def test_wait_for_postgres_action_bounds_linux_client_install() -> None:
     install_step = _get_step(action["runs"]["steps"], "Install client (Linux)")
     install_script = install_step["run"]
     assert "command -v pg_isready" in install_script
-    assert "azure.archive.ubuntu.com" in install_script
+    assert "azure.archive.ubuntu.com" in install_script  # lgtm[py/incomplete-url-substring-sanitization] workflow literal contract
     assert "Acquire::http::Timeout=20" in install_script
     assert "Acquire::https::Timeout=20" in install_script
     assert "sudo apt-get install -y --no-install-recommends postgresql-client" in install_script
@@ -994,11 +994,12 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         }
         assert shard_path_sets["chatbooks-streaming"] == {
             "tldw_Server_API/tests/Chatbooks",
+            "tldw_Server_API/tests/Explainer",
             "tldw_Server_API/tests/Streaming",
         }
         chat_core_files = {
             str(path)
-            for dirname in ("Chat", "Chat_NEW", "Chatbooks", "Streaming")
+            for dirname in ("Chat", "Chat_NEW", "Chatbooks", "Explainer", "Streaming")
             for path in Path("tldw_Server_API/tests", dirname).glob("**/test*.py")
         }
         covered_chat_core_files: dict[str, str] = {}

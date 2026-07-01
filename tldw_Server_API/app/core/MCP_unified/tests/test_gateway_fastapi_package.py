@@ -2428,10 +2428,14 @@ def test_gateway_status_includes_package_boundary_metadata() -> None:
     assert payload["name"] == "unit-gateway"
     assert payload["version"] == "0.0-test"
     assert payload["package"]["package_status"] == "internal-experimental"
-    assert payload["package"]["publishing_status"] == "not-published"
+    assert payload["package"]["publishing_status"] == "published"
     assert payload["package"]["source_distribution"] == "tldw-server"
     assert payload["transport"]["mount_path"] == "/mcp"
     assert "next_actions" in payload
+    assert not any(
+        warning["reason_code"] == "package_not_published"
+        for warning in payload["warnings"]
+    )
 
 
 def test_gateway_status_generic_readiness_warnings_do_not_leak_exception_types(

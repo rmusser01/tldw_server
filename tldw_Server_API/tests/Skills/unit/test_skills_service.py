@@ -19,7 +19,11 @@ from tldw_Server_API.app.core.Skills.exceptions import (
     SkillStorageError,
     SkillValidationError,
 )
-from tldw_Server_API.app.core.Skills.skills_service import SkillMetadata, SkillsService
+from tldw_Server_API.app.core.Skills.skills_service import (
+    SkillMetadata,
+    SkillsService,
+    _public_import_preview_error,
+)
 
 
 class TestSkillMetadata:
@@ -741,6 +745,23 @@ Preview content.
         assert result["errors"] == ["Invalid skill content: invalid frontmatter"]
         assert not service._get_skill_dir("parsed").exists()
         assert service._get_db().get_skill_registry("parsed", include_deleted=True) is None
+
+    def test_public_import_preview_error_preserves_non_traceback_file_messages(self):
+        assert _public_import_preview_error("File front-matter is missing required field") == (
+            "File front-matter is missing required field"
+        )
+
+    def test_public_import_preview_error_filters_traceback_file_frames(self):
+        message = 'Traceback (most recent call last):\nFile "/tmp/app.py", line 10, in parse\nInvalid field'
+
+        assert _public_import_preview_error(message) == "Invalid field"
+
+    @pytest.mark.asyncio
+    async def test_invalid_import_preview_does_not_resanitize_public_errors(self, service):
+        long_detail = "x" * 300
+        result = service._invalid_import_preview([f"Invalid skill content: {long_detail}"])
+
+        assert result["errors"] == [f"Invalid skill content: {long_detail}"]
 
     @pytest.mark.asyncio
     async def test_export_skill(self, service):
