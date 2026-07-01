@@ -173,6 +173,51 @@ def test_default_mcp_modules_config_declares_docs_module_without_web_acquisition
 
 
 @pytest.mark.asyncio
+async def test_server_registers_docs_module_without_media_or_rag_dependencies(monkeypatch, tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.MCP_unified.modules.registry import reset_module_registry
+    from tldw_Server_API.app.core.MCP_unified.server import MCPServer
+
+    await reset_module_registry()
+    config_path = tmp_path / "mcp_modules.yaml"
+    config_path.write_text(
+        f"""
+modules:
+  - id: docs
+    class: tldw_Server_API.app.core.MCP_unified.modules.implementations.docs_module:DocsModule
+    enabled: true
+    name: Docs Corpus
+    version: "0.1.0"
+    department: knowledge
+    settings:
+      db_path: {str(tmp_path / "docs.db")}
+      trusted_roots:
+        - {str(tmp_path)}
+      enable_web_acquisition: false
+      web_source_profile: locked_down
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MCP_MODULES_CONFIG", str(config_path))
+    monkeypatch.setenv("MCP_MODULES", "")
+    monkeypatch.setenv("MCP_ENABLE_MEDIA_MODULE", "0")
+    monkeypatch.setenv("MCP_ENABLE_FILESYSTEM_MODULE", "0")
+    server = MCPServer()
+
+    try:
+        await server._register_default_modules()
+        docs_module = await server.module_registry.find_module_for_tool("docs.status")
+        ingest_module = await server.module_registry.find_module_for_tool("docs.ingest_url")
+
+        assert docs_module is not None  # nosec B101
+        assert ingest_module is None  # nosec B101
+        status = await docs_module.execute_tool("docs.status", {}, context=None)
+        assert status["web_acquisition_enabled"] is False  # nosec B101
+    finally:
+        await server.module_registry.shutdown_all()
+        await reset_module_registry()
+
+
+@pytest.mark.asyncio
 async def test_server_skips_disabled_codegraph_module_from_config(monkeypatch, tmp_path: Path) -> None:
     from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 
