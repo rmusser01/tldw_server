@@ -303,8 +303,7 @@ def _is_source_host_denied(host: str) -> bool:
     try:
         ipaddress.ip_address(host)
     except ValueError:
-        address = _parse_legacy_ipv4_address(host)
-        return address is not None and _is_unsafe_ip_address(address)
+        return _parse_legacy_ipv4_address(host) is not None
     return True
 
 
@@ -316,17 +315,6 @@ def _parse_legacy_ipv4_address(host: str) -> ipaddress.IPv4Address | None:
     except OSError:
         return None
     return ipaddress.IPv4Address(packed)
-
-
-def _is_unsafe_ip_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return (
-        address.is_loopback
-        or address.is_private
-        or address.is_link_local
-        or address.is_multicast
-        or address.is_unspecified
-        or address.is_reserved
-    )
 
 
 def _has_dot_segment(decoded_path: str) -> bool:

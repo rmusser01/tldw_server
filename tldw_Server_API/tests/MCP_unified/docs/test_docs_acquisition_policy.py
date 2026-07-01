@@ -153,6 +153,8 @@ def test_online_capable_arbitrary_domains_deny_unsafe_ip_literals_and_local_host
     [
         "http://2130706433/",
         "http://0177.0.0.1/",
+        "http://0127.0.0.1/",
+        "http://0127.000.000.001/",
         "http://0x7f.0.0.1/",
         "http://ip6-localhost/",
         "http://ip6-loopback/",
