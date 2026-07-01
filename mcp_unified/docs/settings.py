@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from os import PathLike
@@ -13,6 +14,7 @@ SourceProfile = Literal["locked_down", "local_first", "online_capable"]
 _TRUE_VALUES = {"true", "1", "yes", "on"}
 _FALSE_VALUES = {"false", "0", "no", "off"}
 _SOURCE_PROFILES = ("locked_down", "local_first", "online_capable")
+_DEFAULT_URL_USER_AGENT = "tldw-mcp-docs/0.1"
 
 
 def _coerce_bool(value: object, field_name: str) -> bool:
@@ -47,9 +49,16 @@ def _coerce_positive_int(value: object, field_name: str) -> int:
 
 def _coerce_positive_float(value: object, field_name: str) -> float:
     result = float(value)
-    if result <= 0:
-        raise ValueError(f"{field_name} must be positive")
+    if not math.isfinite(result) or result <= 0:
+        raise ValueError(f"{field_name} must be finite and positive")
     return result
+
+
+def _coerce_non_empty_string(value: object, default: str) -> str:
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text or default
 
 
 def _coerce_string_tuple(value: object) -> tuple[str, ...]:
@@ -83,7 +92,7 @@ class DocsSettings:
     max_url_body_bytes: int = 2_000_000
     url_request_timeout_seconds: float = 10.0
     allowed_content_types: tuple[str, ...] = ("text/html", "application/xhtml+xml", "text/plain", "text/markdown")
-    url_user_agent: str = "tldw-mcp-docs/0.1"
+    url_user_agent: str = _DEFAULT_URL_USER_AGENT
     respect_robots: bool = False
     allow_arbitrary_public_domains: bool = False
 
@@ -126,7 +135,10 @@ class DocsSettings:
                     ("text/html", "application/xhtml+xml", "text/plain", "text/markdown"),
                 )
             ),
-            url_user_agent=str(values.get("url_user_agent", "tldw-mcp-docs/0.1")),
+            url_user_agent=_coerce_non_empty_string(
+                values.get("url_user_agent"),
+                _DEFAULT_URL_USER_AGENT,
+            ),
             respect_robots=_coerce_bool(values.get("respect_robots", False), "respect_robots"),
             allow_arbitrary_public_domains=_coerce_bool(
                 values.get("allow_arbitrary_public_domains", False),

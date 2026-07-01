@@ -8,7 +8,10 @@ from mcp_unified.docs.settings import DocsSettings
 from mcp_unified.docs.store.sqlite import DocsCatalogStore
 
 
-def _provider(tmp_path: Path) -> tuple[DocsMCPToolProvider, AccessScope, int]:
+def _provider(
+    tmp_path: Path,
+    settings: DocsSettings | None = None,
+) -> tuple[DocsMCPToolProvider, AccessScope, int]:
     store = DocsCatalogStore(tmp_path / "docs.db")
     store.migrate()
     scope = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
@@ -26,7 +29,7 @@ def _provider(tmp_path: Path) -> tuple[DocsMCPToolProvider, AccessScope, int]:
         collection_names=("sqlite",),
         metadata={"package": "sqlite", "version": "3"},
     )
-    settings = DocsSettings(db_path=tmp_path / "docs.db", trusted_roots=(tmp_path,))
+    settings = settings or DocsSettings(db_path=tmp_path / "docs.db", trusted_roots=(tmp_path,))
     return DocsMCPToolProvider(settings=settings, store=store), scope, document_id
 
 
@@ -141,3 +144,39 @@ def test_provider_status_reports_web_acquisition_disabled(tmp_path: Path) -> Non
     assert status["web_policy"]["allow_arbitrary_public_domains"] is False  # nosec B101
     assert status["web_policy"]["preapproved_domains"] == []  # nosec B101
     assert status["web_policy"]["allowed_url_prefixes"] == []  # nosec B101
+
+
+def test_provider_status_reports_custom_web_policy(tmp_path: Path) -> None:
+    settings = DocsSettings(
+        db_path=tmp_path / "docs.db",
+        trusted_roots=(tmp_path,),
+        enable_web_acquisition=True,
+        web_source_profile="online_capable",
+        preapproved_domains=("docs.python.org",),
+        allowed_url_prefixes=("https://docs.python.org/3/",),
+        denied_domains=("blocked.example",),
+        max_url_redirects=5,
+        max_url_body_bytes=4096,
+        url_request_timeout_seconds=2.5,
+        allowed_content_types=("text/plain",),
+        url_user_agent="tldw-docs-test/1",
+        respect_robots=True,
+        allow_arbitrary_public_domains=True,
+    )
+    provider, scope, _document_id = _provider(tmp_path, settings=settings)
+
+    status = provider.execute("docs.status", {}, scope=scope)
+
+    assert status["web_source_profile"] == "online_capable"  # nosec B101
+    assert status["web_policy"] == {  # nosec B101
+        "allow_arbitrary_public_domains": True,
+        "preapproved_domains": ["docs.python.org"],
+        "allowed_url_prefixes": ["https://docs.python.org/3/"],
+        "denied_domains": ["blocked.example"],
+        "max_url_redirects": 5,
+        "max_url_body_bytes": 4096,
+        "url_request_timeout_seconds": 2.5,
+        "allowed_content_types": ["text/plain"],
+        "url_user_agent": "tldw-docs-test/1",
+        "respect_robots": True,
+    }

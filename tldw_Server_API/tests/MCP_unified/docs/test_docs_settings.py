@@ -84,9 +84,17 @@ def test_from_mapping_rejects_non_positive_url_limits(field: str) -> None:
         DocsSettings.from_mapping({field: 0})
 
 
-def test_from_mapping_rejects_non_positive_url_timeout() -> None:
+@pytest.mark.parametrize("value", [0, "nan", "inf", "-inf"])
+def test_from_mapping_rejects_non_positive_or_non_finite_url_timeout(value: int | str) -> None:
     with pytest.raises(ValueError, match="url_request_timeout_seconds"):
-        DocsSettings.from_mapping({"url_request_timeout_seconds": 0})
+        DocsSettings.from_mapping({"url_request_timeout_seconds": value})
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_from_mapping_uses_default_url_user_agent_for_blank_values(value: str | None) -> None:
+    settings = DocsSettings.from_mapping({"url_user_agent": value})
+
+    assert settings.url_user_agent == "tldw-mcp-docs/0.1"  # nosec B101
 
 
 def test_from_mapping_accepts_single_trusted_root_path_value(tmp_path: Path) -> None:
