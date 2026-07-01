@@ -148,6 +148,18 @@ Responsibilities:
 
 All audio over `/v1/realtime` and `/api/v1/audio/realtime` should be sent as JSON event frames. Do not stream raw binary frames on the compatibility surface.
 
+### GA Session Shape
+
+Stage 1 targets OpenAI Realtime GA shapes, not beta-era shapes.
+
+Requirements:
+
+- `session.update` handling must expect and validate `session.type` where the client provides it.
+- Output audio configuration must live under `session.audio.output` when clients provide GA audio options.
+- Beta-only event names and beta-only session fields are unsupported unless explicitly mapped and tested.
+- The `OpenAI-Beta: realtime=v1` header must not enable beta behavior on the compatibility route.
+- Docs and fixtures should use GA event names such as `response.output_text.delta`, `response.output_audio.delta`, and `response.output_audio_transcript.delta`.
+
 ### Session Orchestrator
 
 Owns realtime session state and coordinates pipeline adapters.
@@ -200,6 +212,18 @@ When persistence is enabled:
 - Link records to the resolved tldw conversation/session ID.
 - Do not persist raw audio by default.
 - Do not persist unsupported event payloads.
+
+### Audio Format Contract
+
+The first implementation must define exact Stage 1 input and output audio formats before exposing the route. Those formats should be chosen from what the existing STT/TTS services can support reliably through the realtime adapters.
+
+Requirements:
+
+- Supported input formats and sample rates must be listed in the capability response.
+- Supported output formats and sample rates must be listed in the capability response.
+- Unsupported declared formats must be rejected during `session.update` with an OpenAI-shaped `unsupported_session_option` error.
+- Invalid or undecodable audio payloads must be rejected with an OpenAI-shaped `invalid_audio` error.
+- The implementation plan must select concrete defaults rather than leaving format negotiation implicit.
 
 ## Supported Stage 1 Events
 
@@ -268,10 +292,23 @@ Deferred features:
 - SIP
 - Translation sessions
 - Realtime transcription-only sessions
+- `/v1/realtime/client_secrets` ephemeral credential issuance
 - Tool calls and MCP integration
 - Full conversation item CRUD
 - Server-side control APIs
 - Full truncation and context-management parity
+
+## Rate Limit Events
+
+Stage 1 should emit `rate_limits.updated` as a tldw quota compatibility event, not as a claim of exact OpenAI quota parity.
+
+The event should:
+
+- Use the OpenAI server-event `type` value: `rate_limits.updated`.
+- Report tldw-enforced realtime/audio quotas and remaining allowance where available.
+- Avoid inventing OpenAI organization-level quota fields that tldw cannot compute.
+- Be documented in the capability endpoint as tldw quota compatibility semantics.
+- Be covered by golden fixture tests so downstream clients get stable shapes.
 
 ## Capability Endpoint
 
@@ -289,8 +326,10 @@ The response should report:
 - Max frame size.
 - Max buffered audio seconds/bytes.
 - Supported client events.
+- Optional client events available in the running build, including whether `conversation.item.create` is supported.
 - Supported server events.
 - Deferred features.
+- Rate limit event semantics.
 - Whether persistence is supported and how it is enabled.
 - Whether the route is experimental.
 
@@ -313,6 +352,7 @@ Use golden fixtures for:
 - output text deltas
 - output audio deltas
 - output transcript deltas
+- `rate_limits.updated`
 - done events
 - error events
 
@@ -376,6 +416,8 @@ Cover:
 Cover:
 
 - Capability endpoint includes supported routes, formats, VAD modes, limits, events, and deferred features.
+- Capability endpoint reports optional `conversation.item.create` support accurately for the running build.
+- Capability endpoint documents `rate_limits.updated` as tldw quota compatibility semantics.
 - Capability output changes only intentionally when Stage 2 or Stage 3 expands support.
 
 ### Live Provider Smoke Tests
@@ -428,7 +470,6 @@ Live-provider tests should be:
 - Exact module path: likely `tldw_Server_API/app/core/Audio/Realtime/`, but the implementation plan should verify package naming conventions before creating files.
 - Exact fake adapter injection mechanism for tests.
 - Exact close code policy for auth failure, quota rejection, oversized frames, and fatal internal errors.
-- Exact audio format defaults for Stage 1, based on existing STT/TTS service constraints.
 - Whether basic `conversation.item.create` should land in the first implementation slice or be deferred behind explicit `unsupported_event` behavior.
 
 ## Acceptance Criteria For Stage 1
@@ -438,9 +479,12 @@ Live-provider tests should be:
 - `/v1/realtime` does not require or consume an initial auth message.
 - Unsupported events/options return OpenAI-shaped errors.
 - Audio deltas are base64 JSON events, not binary frames.
+- GA session shapes are accepted and beta-only Realtime shapes are not silently enabled.
+- Exact supported input/output audio formats are exposed through capabilities and unsupported formats are rejected explicitly.
 - Internal STT/LLM/TTS services do not depend on OpenAI event names.
 - Ephemeral sessions do not persist by default.
 - Opt-in persistence writes expected user and assistant turns.
 - `generation_id` stale-output suppression is present.
 - Capability endpoint documents supported and deferred features.
+- Capability endpoint documents optional `conversation.item.create` support and tldw `rate_limits.updated` semantics.
 - Default tests do not require live providers.
