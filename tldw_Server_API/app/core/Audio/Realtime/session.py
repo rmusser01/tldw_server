@@ -81,6 +81,7 @@ class RealtimeSession:
         self._pending_audio_item_id: str | None = None
         self._previous_item_id: str | None = None
         self._last_user_transcript = ""
+        self._pending_events: list[RealtimeServerEvent] = [self.created_event()]
 
     def created_event(self, event_id: str | None = None) -> SessionCreatedEvent:
         return SessionCreatedEvent(
@@ -89,6 +90,11 @@ class RealtimeSession:
             model=self.config.model,
             voice=self.config.voice,
         )
+
+    def drain_pending_events(self) -> list[RealtimeServerEvent]:
+        events = self._pending_events
+        self._pending_events = []
+        return events
 
     async def handle_command(self, command: ClientCommand) -> AsyncIterator[RealtimeServerEvent]:
         if isinstance(command, UpdateSessionCommand):
@@ -238,24 +244,30 @@ class RealtimeSession:
             response_id=response_id,
             generation_id=generation_id,
         )
+        if not self._generation_is_current(generation_id, response_id):
+            return
         yield ResponseOutputItemAddedEvent(
             event_id=command.event_id,
             response_id=response_id,
             item_id=item_id,
             output_index=0,
         )
+        if not self._generation_is_current(generation_id, response_id):
+            return
 
         try:
             async for pipeline_event in self.pipeline.stream_turn(
                 self._last_user_transcript,
                 config=self.config,
             ):
-                if generation_id != self.generation_id:
+                if not self._generation_is_current(generation_id, response_id):
                     return
                 if isinstance(pipeline_event, RealtimePipelineTextDelta):
                     if not text_started:
                         text_started = True
                         yield _content_part_added(command.event_id, response_id, item_id, 0, "text")
+                        if not self._generation_is_current(generation_id, response_id):
+                            return
                     assistant_text += pipeline_event.delta
                     yield ResponseTextDeltaEvent(
                         event_id=command.event_id,
@@ -265,10 +277,14 @@ class RealtimeSession:
                         content_index=0,
                         delta=pipeline_event.delta,
                     )
+                    if not self._generation_is_current(generation_id, response_id):
+                        return
                 elif isinstance(pipeline_event, RealtimePipelineTranscriptDelta):
                     if not transcript_started:
                         transcript_started = True
                         yield _content_part_added(command.event_id, response_id, item_id, 1, "audio_transcript")
+                        if not self._generation_is_current(generation_id, response_id):
+                            return
                     assistant_transcript += pipeline_event.delta
                     yield ResponseTranscriptDeltaEvent(
                         event_id=command.event_id,
@@ -278,10 +294,14 @@ class RealtimeSession:
                         content_index=1,
                         delta=pipeline_event.delta,
                     )
+                    if not self._generation_is_current(generation_id, response_id):
+                        return
                 elif isinstance(pipeline_event, RealtimePipelineAudioDelta):
                     if not audio_started:
                         audio_started = True
                         yield _content_part_added(command.event_id, response_id, item_id, 2, "audio")
+                        if not self._generation_is_current(generation_id, response_id):
+                            return
                     yield ResponseAudioDeltaEvent(
                         event_id=command.event_id,
                         response_id=response_id,
@@ -290,8 +310,10 @@ class RealtimeSession:
                         content_index=2,
                         audio=pipeline_event.audio,
                     )
+                    if not self._generation_is_current(generation_id, response_id):
+                        return
                 elif isinstance(pipeline_event, RealtimePipelineTextDone):
-                    if generation_id != self.generation_id:
+                    if not self._generation_is_current(generation_id, response_id):
                         return
                     yield ResponseTextDoneEvent(
                         event_id=command.event_id,
@@ -301,9 +323,13 @@ class RealtimeSession:
                         content_index=0,
                         text=assistant_text,
                     )
+                    if not self._generation_is_current(generation_id, response_id):
+                        return
                     yield _content_part_done(command.event_id, response_id, item_id, 0, "text")
+                    if not self._generation_is_current(generation_id, response_id):
+                        return
                 elif isinstance(pipeline_event, RealtimePipelineTranscriptDone):
-                    if generation_id != self.generation_id:
+                    if not self._generation_is_current(generation_id, response_id):
                         return
                     yield ResponseTranscriptDoneEvent(
                         event_id=command.event_id,
@@ -313,9 +339,13 @@ class RealtimeSession:
                         content_index=1,
                         transcript=assistant_transcript,
                     )
+                    if not self._generation_is_current(generation_id, response_id):
+                        return
                     yield _content_part_done(command.event_id, response_id, item_id, 1, "audio_transcript")
+                    if not self._generation_is_current(generation_id, response_id):
+                        return
                 elif isinstance(pipeline_event, RealtimePipelineAudioDone):
-                    if generation_id != self.generation_id:
+                    if not self._generation_is_current(generation_id, response_id):
                         return
                     yield ResponseAudioDoneEvent(
                         event_id=command.event_id,
@@ -324,11 +354,15 @@ class RealtimeSession:
                         output_index=0,
                         content_index=2,
                     )
+                    if not self._generation_is_current(generation_id, response_id):
+                        return
                     yield _content_part_done(command.event_id, response_id, item_id, 2, "audio")
+                    if not self._generation_is_current(generation_id, response_id):
+                        return
                 elif isinstance(pipeline_event, RealtimePipelineTurnDone):
                     final_status = pipeline_event.status
         except Exception:
-            if generation_id != self.generation_id:
+            if not self._generation_is_current(generation_id, response_id):
                 return
             yield RealtimeErrorEvent(
                 code="internal_error",
@@ -336,6 +370,8 @@ class RealtimeSession:
                 event_id=command.event_id,
                 error_type="server_error",
             )
+            if not self._generation_is_current(generation_id, response_id):
+                return
             yield ResponseDoneEvent(
                 event_id=command.event_id,
                 response_id=response_id,
@@ -345,7 +381,7 @@ class RealtimeSession:
             self._clear_active_response(response_id)
             return
 
-        if generation_id != self.generation_id:
+        if not self._generation_is_current(generation_id, response_id):
             return
 
         yield ResponseOutputItemDoneEvent(
@@ -355,6 +391,8 @@ class RealtimeSession:
             output_index=0,
             status=final_status,
         )
+        if not self._generation_is_current(generation_id, response_id):
+            return
         yield ResponseDoneEvent(
             event_id=command.event_id,
             response_id=response_id,
@@ -410,6 +448,12 @@ class RealtimeSession:
     def _clear_active_response(self, response_id: str) -> None:
         if self.active_response_id == response_id:
             self.active_response_id = None
+
+    def _generation_is_current(self, generation_id: int, response_id: str) -> bool:
+        if generation_id == self.generation_id:
+            return True
+        self._clear_active_response(response_id)
+        return False
 
 
 def _new_realtime_id(prefix: str) -> str:
