@@ -4,7 +4,7 @@ title: Implement OpenAI-compatible realtime speech endpoint
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-01 21:20'
+updated_date: '2026-07-01 21:32'
 labels:
   - audio
   - realtime
@@ -31,10 +31,23 @@ modified_files:
   - tldw_Server_API/app/core/Audio/Realtime/pipeline.py
   - tldw_Server_API/app/core/Audio/Realtime/session.py
   - tldw_Server_API/app/core/Audio/Realtime/persistence.py
+  - tldw_Server_API/app/core/Audio/Realtime/auth.py
+  - tldw_Server_API/app/core/Audio/Realtime/handler.py
+  - tldw_Server_API/app/core/Audio/streaming_service.py
+  - tldw_Server_API/app/api/v1/endpoints/audio/audio_realtime.py
+  - tldw_Server_API/app/api/v1/endpoints/realtime_compat.py
+  - tldw_Server_API/app/api/v1/router_groups/content.py
+  - tldw_Server_API/app/api/v1/router_groups/minimal.py
+  - tldw_Server_API/Config_Files/README.md
+  - tldw_Server_API/Config_Files/privilege_catalog.yaml
+  - tldw_Server_API/Config_Files/resource_governor_policies.yaml
   - tldw_Server_API/tests/Audio/test_realtime_protocol_adapter.py
   - tldw_Server_API/tests/Audio/test_realtime_capabilities.py
   - tldw_Server_API/tests/Audio/test_realtime_session.py
   - tldw_Server_API/tests/Audio/test_realtime_persistence.py
+  - tldw_Server_API/tests/Audio/test_realtime_auth.py
+  - tldw_Server_API/tests/Audio/test_realtime_websocket.py
+  - tldw_Server_API/tests/Resource_Governance/test_realtime_route_policy.py
 ---
 
 ## Description
@@ -59,6 +72,8 @@ Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation
 Stage 1 complete. Implemented protocol constants, dataclass command/event models, OpenAI GA protocol parser/serializer, capabilities metadata, and provider-free tests. Verification: baseline focused tests passed before implementation (21 passed); Stage 1 tests passed after fixes (43 passed, 3 warnings); spec compliance review passed; code-quality review passed with no Critical or Important findings. Bandit production Realtime package reported errors=0 results=0. Minor hardening candidate: reject stray top-level beta audio fields consistently across event types.
 
 Stage 2 complete. Implemented provider-free realtime pipeline event protocol, internal session orchestrator, manual audio turn lifecycle, response generation/cancellation guards, stale-output suppression, metadata merging, and optional persistence boundary. Verification: focused Stage 2 session+persistence tests passed locally (19 passed, 3 warnings); implementer reported expanded focused slice 72 passed; spec compliance review passed at HEAD 25c6a585; code-quality re-review passed with no Critical or Important findings; Bandit on tldw_Server_API/app/core/Audio/Realtime reported errors=0 results=0. The final persistence fix snapshots RealtimePersistenceConfig before yielding response.done so late session.update cannot misattribute a completed turn.
+
+Stage 3 complete. Implemented realtime WebSocket auth adapter and handler, native /api/v1/audio/realtime capabilities + WS route, OpenAI-compatible /v1/realtime WS route, audio-realtime router gating in content/minimal groups, audio.realtime privilege, and Resource Governor by_route/by_path policy entries. Refactored _audio_ws_authenticate with allow_initial_auth_message defaulting true so existing audio WS routes keep first-message auth fallback while realtime routes do not consume session.update. Stage 3 handler uses monkeypatchable module-level pipeline/persistence factories and keeps the production pipeline as a clear Stage 4 placeholder. Verification: required focused Stage 3 pytest command passed (12 passed, 3 warnings); regression auth/route toggle slice passed (16 passed, 3 warnings); Bandit on touched production scope completed with errors=0 and findings=0; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
