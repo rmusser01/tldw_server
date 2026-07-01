@@ -59,6 +59,7 @@ async def test_realtime_openai_compat_auth_does_not_consume_session_update(
 
     assert (auth_ok, user_id) == (False, None)
     assert ws.receive_text_calls == 0
+    assert ws.sent_json == []
     assert ws.closed is True
     assert ws.close_code == 4401
 

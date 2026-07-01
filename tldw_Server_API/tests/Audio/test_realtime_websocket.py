@@ -103,6 +103,10 @@ def _recv_type(ws) -> str:  # noqa: ANN001
     try:
         payload = results.get(timeout=1.0)
     except queue.Empty as exc:
+        try:
+            ws.close()
+        except Exception:  # noqa: BLE001
+            pass
         raise AssertionError("Timed out waiting for realtime WebSocket event") from exc
     if isinstance(payload, BaseException):
         raise payload
@@ -164,6 +168,19 @@ def test_native_realtime_route_uses_openai_event_shape(monkeypatch: pytest.Monke
     assert first["type"] == "session.created"
     assert "session" in first
     assert second == {"type": "rate_limits.updated", "event_id": None, "rate_limits": []}
+
+
+def test_openai_compat_realtime_unauthenticated_closes_without_auth_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = _build_app(monkeypatch)
+
+    with ws_client_without_lifespan(app) as client:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect("/v1/realtime"):
+                pass
+
+    assert exc_info.value.code == 4401
 
 
 def test_native_realtime_capabilities_route(monkeypatch: pytest.MonkeyPatch) -> None:
