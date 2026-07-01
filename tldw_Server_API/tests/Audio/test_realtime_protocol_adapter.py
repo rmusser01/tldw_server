@@ -4,6 +4,7 @@ import pytest
 
 from tldw_Server_API.app.core.Audio.Realtime.constants import (
     REALTIME_MAX_BUFFERED_AUDIO_BYTES,
+    REALTIME_MAX_OUTPUT_CHUNK_BYTES,
 )
 from tldw_Server_API.app.core.Audio.Realtime.models import (
     AppendAudioCommand,
@@ -117,6 +118,28 @@ def test_session_update_rejects_non_mono_audio_contract(session, expected_messag
     )
 
 
+def test_session_update_rejects_nested_server_vad_turn_detection():
+    result = _parse(
+        {
+            "type": "session.update",
+            "event_id": "evt_nested_vad",
+            "session": {
+                "audio": {
+                    "input": {
+                        "turn_detection": {"type": "server_vad"},
+                    }
+                }
+            },
+        }
+    )
+
+    assert result == RealtimeErrorEvent(
+        code="unsupported_session_option",
+        message="only manual turn detection is supported",
+        event_id="evt_nested_vad",
+    )
+
+
 def test_session_update_accepts_missing_type_but_rejects_transcription_type():
     omitted_type = _parse({"type": "session.update", "session": {}})
     transcription = _parse(
@@ -181,6 +204,22 @@ def test_append_audio_rejects_malformed_base64():
     )
 
 
+def test_append_audio_rejects_odd_length_pcm16_payload():
+    result = _parse(
+        {
+            "type": "input_audio_buffer.append",
+            "event_id": "evt_odd_audio",
+            "audio": base64.b64encode(b"\x00").decode("ascii"),
+        }
+    )
+
+    assert result == RealtimeErrorEvent(
+        code="invalid_audio",
+        message="input_audio_buffer.append audio must contain whole pcm16 samples",
+        event_id="evt_odd_audio",
+    )
+
+
 def test_append_audio_rejects_decoded_audio_larger_than_buffer_limit():
     too_large = b"\x00" * (REALTIME_MAX_BUFFERED_AUDIO_BYTES + 1)
 
@@ -229,6 +268,47 @@ def test_append_audio_rejects_decoded_audio_larger_than_buffer_limit():
 )
 def test_supported_non_session_commands_parse_to_internal_commands(payload, expected):
     assert _parse(payload) == expected
+
+
+@pytest.mark.parametrize(
+    ("response", "expected_message"),
+    [
+        (
+            {"modalities": ["image"]},
+            "response.create modalities must be a subset of audio and text",
+        ),
+        (
+            {"output_audio_format": "pcm16"},
+            "output_audio_format is a beta-era field; use response.audio.output.format",
+        ),
+        (
+            {"audio": {"output": {"format": "mulaw"}}},
+            "only pcm16 24000 Hz mono response output audio is supported",
+        ),
+        (
+            {"audio": {"output": {"sample_rate_hz": 16000}}},
+            "only pcm16 24000 Hz mono response output audio is supported",
+        ),
+        (
+            {"audio": {"output": {"channels": 2}}},
+            "only pcm16 24000 Hz mono response output audio is supported",
+        ),
+    ],
+)
+def test_response_create_rejects_unsupported_stage_one_options(response, expected_message):
+    result = _parse(
+        {
+            "type": "response.create",
+            "event_id": "evt_bad_response",
+            "response": response,
+        }
+    )
+
+    assert result == RealtimeErrorEvent(
+        code="unsupported_session_option",
+        message=expected_message,
+        event_id="evt_bad_response",
+    )
 
 
 @pytest.mark.parametrize(
@@ -289,6 +369,77 @@ def test_realtime_error_serializes_to_exact_openai_shape():
             "event_id": "evt_bad_audio",
         },
     }
+
+
+def test_response_audio_delta_oversized_chunk_serializes_to_error_event():
+    event = ResponseAudioDeltaEvent(
+        event_id="evt_large_audio_delta",
+        response_id="resp_1",
+        item_id="item_2",
+        output_index=0,
+        content_index=0,
+        audio=b"\x00" * (REALTIME_MAX_OUTPUT_CHUNK_BYTES + 1),
+    )
+
+    assert to_openai_server_event(event) == {
+        "type": "error",
+        "event_id": None,
+        "error": {
+            "type": "invalid_request_error",
+            "code": "payload_too_large",
+            "message": "response.output_audio.delta exceeds 65536 byte realtime output chunk limit",
+            "event_id": "evt_large_audio_delta",
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_message"),
+    [
+        (
+            {"type": "session.update", "event_id": "evt_bad_type", "session": []},
+            "session.update session must be an object when provided",
+        ),
+        (
+            {
+                "type": "session.update",
+                "event_id": "evt_bad_type",
+                "session": {"audio": []},
+            },
+            "session.audio must be an object when provided",
+        ),
+        (
+            {
+                "type": "session.update",
+                "event_id": "evt_bad_type",
+                "session": {"audio": {"input": []}},
+            },
+            "session.audio.input must be an object when provided",
+        ),
+        (
+            {
+                "type": "session.update",
+                "event_id": "evt_bad_type",
+                "session": {"audio": {"output": []}},
+            },
+            "session.audio.output must be an object when provided",
+        ),
+        (
+            {
+                "type": "session.update",
+                "event_id": "evt_bad_type",
+                "session": {"metadata": []},
+            },
+            "session.metadata must be an object when provided",
+        ),
+    ],
+)
+def test_session_update_rejects_present_fields_with_wrong_json_type(payload, expected_message):
+    assert _parse(payload) == RealtimeErrorEvent(
+        code="invalid_event",
+        message=expected_message,
+        event_id="evt_bad_type",
+    )
 
 
 @pytest.mark.parametrize(
