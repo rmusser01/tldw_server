@@ -20,6 +20,18 @@ from mcp_unified.docs.acquisition.models import (
 from mcp_unified.docs.acquisition.policy import SourcePolicy, has_url_credentials, normalize_url
 
 
+def _settings(**overrides: object) -> dict[str, object]:
+    values: dict[str, object] = {
+        "web_source_profile": "online_capable",
+        "preapproved_domains": (),
+        "allowed_url_prefixes": (),
+        "denied_domains": (),
+        "allow_arbitrary_public_domains": False,
+    }
+    values.update(overrides)
+    return values
+
+
 def test_models_define_acquisition_contract_names() -> None:
     assert PolicyStatus is not None  # nosec B101
     assert FetchResultStatus is not None  # nosec B101
@@ -118,6 +130,27 @@ def test_online_capable_allows_unknown_public_domain_when_flag_is_true() -> None
 @pytest.mark.parametrize(
     "raw_url",
     [
+        "https://127.0.0.1/",
+        "http://[::1]/",
+        "http://169.254.169.254/latest/meta-data",
+        "https://localhost/",
+    ],
+)
+def test_online_capable_arbitrary_domains_deny_unsafe_ip_literals_and_local_hosts(raw_url: str) -> None:
+    policy = SourcePolicy(
+        web_source_profile="online_capable",
+        allow_arbitrary_public_domains=True,
+    )
+
+    decision = policy.evaluate(raw_url)
+
+    assert decision.status == "denied"  # nosec B101
+    assert decision.reason == "source_host_denied"  # nosec B101
+
+
+@pytest.mark.parametrize(
+    "raw_url",
+    [
         "file:///etc/passwd",
         "ftp://example.com/reference",
         "https:///reference",
@@ -197,6 +230,31 @@ def test_url_prefix_matching_uses_decoded_path_segment_boundaries(
     decision = policy.evaluate(raw_url)
 
     assert decision.status == expected_status  # nosec B101
+
+
+def test_url_prefix_matching_does_not_allow_dot_segment_escapes() -> None:
+    policy = SourcePolicy(
+        web_source_profile="locked_down",
+        allowed_url_prefixes=("https://example.com/docs/",),
+    )
+
+    allowed = policy.evaluate("https://example.com/docs/page")
+    parent_escape = policy.evaluate("https://example.com/docs/../private")
+    encoded_parent_escape = policy.evaluate("https://example.com/docs/%2e%2e/private")
+
+    assert allowed.status == "allowed"  # nosec B101
+    assert parent_escape.status == "approval_required"  # nosec B101
+    assert encoded_parent_escape.status == "approval_required"  # nosec B101
+
+
+def test_invalid_domain_rule_config_fails_fast() -> None:
+    with pytest.raises(ValueError, match="denied_domains"):
+        SourcePolicy(**_settings(denied_domains=["http://169.254.169.254"]))
+
+
+def test_invalid_url_prefix_config_fails_fast() -> None:
+    with pytest.raises(ValueError, match="allowed_url_prefixes"):
+        SourcePolicy(**_settings(allowed_url_prefixes=["not a url"]))
 
 
 def test_safe_argument_hash_changes_with_query_and_redacted_url_omits_query_details() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import unquote, urlsplit, urlunsplit
@@ -12,6 +13,7 @@ SourceProfile = Literal["locked_down", "local_first", "online_capable"]
 _SUPPORTED_SCHEMES = {"http", "https"}
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _SOURCE_PROFILES = {"locked_down", "local_first", "online_capable"}
+_LOCAL_HOSTNAMES = {"localhost", "localhost.localdomain"}
 
 
 class URLPolicyError(ValueError):
@@ -28,18 +30,10 @@ class DomainRule:
 
     @classmethod
     def from_pattern(cls, pattern: str) -> "DomainRule | None":
-        text = pattern.strip()
-        if not text:
-            return None
-        wildcard = text.startswith("*.")
-        host_text = text[2:] if wildcard else text
         try:
-            host = _normalize_hostname(host_text)
-        except URLPolicyError:
+            return _parse_domain_rule(pattern, "domain rule")
+        except ValueError:
             return None
-        if not host:
-            return None
-        return cls(raw_pattern=text, host=host, wildcard=wildcard)
 
     def matches(self, host: str) -> bool:
         if self.wildcard:
@@ -58,19 +52,14 @@ class URLPrefixRule:
     @classmethod
     def from_prefix(cls, prefix: str) -> "URLPrefixRule | None":
         try:
-            normalized = normalize_url(prefix)
-        except URLPolicyError:
+            return _parse_prefix_rule(prefix, "URL prefix")
+        except ValueError:
             return None
-        return cls(
-            matched_rule=normalized.redacted_url,
-            scheme=normalized.scheme,
-            host=normalized.host,
-            port=normalized.port,
-            decoded_path=normalized.decoded_path,
-        )
 
     def matches(self, url: NormalizedURL) -> bool:
         if (self.scheme, self.host, self.port) != (url.scheme, url.host, url.port):
+            return False
+        if _has_dot_segment(url.decoded_path):
             return False
         return _path_has_prefix(url.decoded_path, self.decoded_path)
 
@@ -133,21 +122,9 @@ class SourcePolicy:
         if web_source_profile not in _SOURCE_PROFILES:
             raise ValueError("web_source_profile must be one of: locked_down, local_first, online_capable")
         self.web_source_profile = web_source_profile
-        self.preapproved_domains = tuple(
-            rule
-            for rule in (DomainRule.from_pattern(pattern) for pattern in preapproved_domains)
-            if rule is not None
-        )
-        self.allowed_url_prefixes = tuple(
-            rule
-            for rule in (URLPrefixRule.from_prefix(prefix) for prefix in allowed_url_prefixes)
-            if rule is not None
-        )
-        self.denied_domains = tuple(
-            rule
-            for rule in (DomainRule.from_pattern(pattern) for pattern in denied_domains)
-            if rule is not None
-        )
+        self.preapproved_domains = _parse_domain_rules(preapproved_domains, "preapproved_domains")
+        self.allowed_url_prefixes = _parse_prefix_rules(allowed_url_prefixes, "allowed_url_prefixes")
+        self.denied_domains = _parse_domain_rules(denied_domains, "denied_domains")
         self.allow_arbitrary_public_domains = allow_arbitrary_public_domains
 
     def evaluate(self, raw_url: str) -> SourceDecision:
@@ -166,6 +143,15 @@ class SourcePolicy:
                 status="denied",
                 reason=exc.reason,
                 safe_argument_hash=argument_hash,
+            )
+
+        if _is_source_host_denied(normalized.host):
+            return SourceDecision(
+                status="denied",
+                reason="source_host_denied",
+                safe_argument_hash=argument_hash,
+                redacted_url=normalized.redacted_url,
+                normalized_url=normalized,
             )
 
         for rule in self.denied_domains:
@@ -239,8 +225,76 @@ def _normalize_hostname(hostname: str) -> str:
 
 
 def _build_redacted_url(*, scheme: str, host: str, port: int | None, path: str) -> str:
-    netloc = f"{host}:{port}" if port is not None else host
+    display_host = _format_url_host(host)
+    netloc = f"{display_host}:{port}" if port is not None else display_host
     return urlunsplit((scheme, netloc, path or "/", "", ""))
+
+
+def _format_url_host(host: str) -> str:
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    if address.version == 6:
+        return f"[{address.compressed}]"
+    return address.compressed
+
+
+def _parse_domain_rules(patterns: tuple[str, ...], field_name: str) -> tuple[DomainRule, ...]:
+    return tuple(_parse_domain_rule(pattern, field_name) for pattern in patterns)
+
+
+def _parse_domain_rule(pattern: str, field_name: str) -> DomainRule:
+    text = pattern.strip()
+    if not text:
+        raise ValueError(f"{field_name} contains an empty domain rule")
+    if any(separator in text for separator in ("://", "/", "\\", "?", "#", ":")):
+        raise ValueError(f"{field_name} must contain host patterns, not URLs")
+
+    wildcard = text.startswith("*.")
+    host_text = text[2:] if wildcard else text
+    if "*" in host_text:
+        raise ValueError(f"{field_name} wildcard rules must start with '*.'")
+
+    try:
+        host = _normalize_hostname(host_text)
+    except URLPolicyError as exc:
+        raise ValueError(f"{field_name} contains invalid host pattern") from exc
+    return DomainRule(raw_pattern=text, host=host, wildcard=wildcard)
+
+
+def _parse_prefix_rules(prefixes: tuple[str, ...], field_name: str) -> tuple[URLPrefixRule, ...]:
+    return tuple(_parse_prefix_rule(prefix, field_name) for prefix in prefixes)
+
+
+def _parse_prefix_rule(prefix: str, field_name: str) -> URLPrefixRule:
+    try:
+        normalized = normalize_url(prefix)
+    except URLPolicyError as exc:
+        raise ValueError(f"{field_name} contains invalid URL prefix: {exc.reason}") from exc
+    if _has_dot_segment(normalized.decoded_path):
+        raise ValueError(f"{field_name} cannot contain dot path segments")
+    return URLPrefixRule(
+        matched_rule=normalized.redacted_url,
+        scheme=normalized.scheme,
+        host=normalized.host,
+        port=normalized.port,
+        decoded_path=normalized.decoded_path,
+    )
+
+
+def _is_source_host_denied(host: str) -> bool:
+    if host in _LOCAL_HOSTNAMES or host.endswith(".localhost") or host.endswith(".local"):
+        return True
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+def _has_dot_segment(decoded_path: str) -> bool:
+    return any(segment in {".", ".."} for segment in decoded_path.split("/"))
 
 
 def _path_has_prefix(path: str, prefix: str) -> bool:
