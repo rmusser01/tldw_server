@@ -546,6 +546,24 @@ def test_create_run_rejects_nested_private_payload_keys(tmp_path, monkeypatch, f
 
 
 @pytest.mark.parametrize(
+    ("field_name", "private_payload", "sentinel"),
+    [
+        ("rag_request_snapshot", {"query": "What changed?", "debug": {"rawText": "RAW DEBUG CAMEL"}}, b"RAW DEBUG CAMEL"),
+        ("run_summary", {"message": "Queued", "usage": {"openai_api_key": "secret-openai-key"}}, b"secret-openai-key"),
+        ("run_summary", {"message": "Queued", "auth": {"access_token": "secret-access-token"}}, b"secret-access-token"),
+    ],
+)
+def test_create_run_rejects_private_payload_key_variants(tmp_path, monkeypatch, field_name, private_payload, sentinel):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+
+    with pytest.raises(ValueError, match=field_name):
+        _create_run(repo, definition, **{field_name: private_payload})
+
+    assert sentinel not in _database_bytes(repo)  # nosec B101
+
+
+@pytest.mark.parametrize(
     ("field_name", "private_payload"),
     [
         ("evidence_summary", {"top_sources": [{"raw_source_text": "RAW FULL DOCUMENT"}]}),

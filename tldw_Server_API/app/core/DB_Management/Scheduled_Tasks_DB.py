@@ -39,6 +39,8 @@ _PRIVATE_PAYLOAD_KEYS = _RAW_SOURCE_REF_KEYS | {
     "password",
     "token",
 }
+_PRIVATE_PAYLOAD_NORMALIZED_KEYS = {"".join(char for char in key.lower() if char.isalnum()) for key in _PRIVATE_PAYLOAD_KEYS}
+_PRIVATE_PAYLOAD_NORMALIZED_SUFFIXES = ("apikey", "providerkey", "secret", "password", "token")
 
 
 @dataclass(frozen=True)
@@ -1182,12 +1184,17 @@ def _validate_dedupe_key(value: str) -> None:
 def _validate_private_json_payload(context: str, value: Any) -> None:
     if isinstance(value, dict):
         for key, nested_value in value.items():
-            if str(key).lower() in _PRIVATE_PAYLOAD_KEYS:
+            if _is_private_payload_key(str(key)):
                 raise ValueError(f"{context} contains prohibited private payload key: {key}")
             _validate_private_json_payload(context, nested_value)
     elif isinstance(value, list):
         for nested_value in value:
             _validate_private_json_payload(context, nested_value)
+
+
+def _is_private_payload_key(key: str) -> bool:
+    normalized = "".join(char for char in key.lower() if char.isalnum())
+    return normalized in _PRIVATE_PAYLOAD_NORMALIZED_KEYS or normalized.endswith(_PRIVATE_PAYLOAD_NORMALIZED_SUFFIXES)
 
 
 def _definition_column_names(conn: sqlite3.Connection) -> set[str]:
