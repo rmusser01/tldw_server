@@ -4,6 +4,7 @@ import json
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -83,11 +84,12 @@ def _create_definition(
     owner_id: int = OWNER_ID,
     name: str = "Daily research check",
     initial_lifecycle: str = "configured",
+    config_payload: dict[str, Any] | None = None,
 ):
     preview = service.create_preview(
         owner_id=owner_id,
         actor=ACTOR,
-        payload=_payload(name=name),
+        payload=_payload(name=name, config_payload=config_payload),
     )
     return service.create_definition(
         owner_id=owner_id,
@@ -135,6 +137,7 @@ def _create_run_for_definition(
     *,
     definition_id: str,
     definition_version: int = 1,
+    outcome: str = "finding",
 ):
     return repo.create_run(
         owner_id=OWNER_ID,
@@ -142,12 +145,39 @@ def _create_run_for_definition(
         definition_version=definition_version,
         trigger_reason="manual",
         status="completed",
-        outcome="finding",
+        outcome=outcome,
         scope_snapshot={"mode": "sources", "sources": ["media_db"]},
         finding_policy_snapshot={"preset": "balanced_findings"},
         rag_request_snapshot={"query": "What changed?", "scope": {"sources": ["media_db"]}},
         run_summary={"message": "Completed"},
     )
+
+
+def _set_run_and_result_created_at(
+    repo: ScheduledTasksDatabase,
+    *,
+    run_id: str,
+    created_at: str,
+    result_id: str | None = None,
+) -> None:
+    with sqlite3.connect(repo.db_path) as conn:
+        conn.execute(
+            """
+            UPDATE scheduled_task_runs
+            SET created_at = ?, updated_at = ?, started_at = ?, ended_at = ?
+            WHERE id = ?
+            """,
+            [created_at, created_at, created_at, created_at, run_id],
+        )
+        if result_id is not None:
+            conn.execute(
+                """
+                UPDATE scheduled_task_results
+                SET created_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                [created_at, created_at, result_id],
+            )
 
 
 def _install_idempotency_miss_barrier(
@@ -654,6 +684,65 @@ def test_result_review_mutation_is_owner_scoped(tmp_path):
             result_id=result.id,
             review_state="read",
         )
+
+
+def test_prune_definition_history_applies_definition_retention_policy(tmp_path):
+    service, repo = _recurring_question_service(tmp_path)
+    definition = _create_definition(
+        service,
+        config_payload={
+            "retention_policy": {
+                "mode": "custom",
+                "no_match_run_ttl_days": 1,
+                "result_ttl_days": 365,
+            }
+        },
+    )
+    old_no_match = _create_run_for_definition(
+        repo,
+        definition_id=definition.id,
+        definition_version=definition.version,
+        outcome="no_match",
+    )
+    old_finding_run = _create_run_for_definition(
+        repo,
+        definition_id=definition.id,
+        definition_version=definition.version,
+        outcome="finding",
+    )
+    old_result = repo.create_result(
+        owner_id=OWNER_ID,
+        definition_id=definition.id,
+        run_id=old_finding_run.id,
+        kind="finding",
+        title="Possible answer found",
+        summary="Surfaced results use a longer retention window.",
+        answer=None,
+        answer_mode="evidence_only",
+        confidence={"label": "medium"},
+        source_refs=[{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        dedupe_key=f"rq:{definition.id}:{old_finding_run.id}:retention",
+        visibility_destination={"home": True, "results": True},
+    )
+    old_created_at = "2026-01-01T00:00:00+00:00"
+    _set_run_and_result_created_at(repo, run_id=old_no_match.id, created_at=old_created_at)
+    _set_run_and_result_created_at(
+        repo,
+        run_id=old_finding_run.id,
+        result_id=old_result.id,
+        created_at=old_created_at,
+    )
+
+    pruned = service.prune_definition_history(
+        owner_id=OWNER_ID,
+        definition_id=definition.id,
+        now=datetime(2026, 1, 10, tzinfo=timezone.utc),
+    )
+
+    assert pruned == {"runs": 1, "results": 0}  # nosec B101
+    assert repo.get_run(owner_id=OWNER_ID, run_id=old_no_match.id) is None  # nosec B101
+    assert repo.get_run(owner_id=OWNER_ID, run_id=old_finding_run.id) is not None  # nosec B101
+    assert repo.get_result(owner_id=OWNER_ID, result_id=old_result.id) is not None  # nosec B101
 
 
 def test_duplicate_creates_paused_copy_and_two_audit_events(tmp_path):

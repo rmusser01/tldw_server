@@ -114,6 +114,7 @@ describe("ScheduledTaskResultsPanel", () => {
     expectInsideDesignSystemComponent("Needs attention", "Badge")
     expect(screen.getByText("Running monitor")).toBeInTheDocument()
     expect(screen.getByText("Running now")).toBeInTheDocument()
+    expect(screen.getByText("Running now").closest("[aria-live='polite']")).toBeTruthy()
     expectInsideDesignSystemComponent("Running now", "Badge")
     expect(screen.getByText("Paused monitor")).toBeInTheDocument()
     expect(screen.getByText("Paused monitor is paused.")).toBeInTheDocument()

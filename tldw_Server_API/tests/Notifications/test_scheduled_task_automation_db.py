@@ -119,6 +119,30 @@ def _create_run(repo: ScheduledTasksDatabase, definition, *, owner_id: int = 101
     return repo.create_run(**payload)
 
 
+def _set_run_created_at(repo: ScheduledTasksDatabase, *, run_id: str, created_at: str) -> None:
+    with repo._connect() as conn:
+        conn.execute(
+            """
+            UPDATE scheduled_task_runs
+            SET created_at = ?, updated_at = ?, started_at = ?, ended_at = ?
+            WHERE id = ?
+            """,
+            [created_at, created_at, created_at, created_at, run_id],
+        )
+
+
+def _set_result_created_at(repo: ScheduledTasksDatabase, *, result_id: str, created_at: str) -> None:
+    with repo._connect() as conn:
+        conn.execute(
+            """
+            UPDATE scheduled_task_results
+            SET created_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            [created_at, created_at, result_id],
+        )
+
+
 def test_connect_context_manager_closes_connection(tmp_path):
     repo = ScheduledTasksDatabase(tmp_path / "scheduled_tasks.db")
 
@@ -722,6 +746,151 @@ def test_result_review_state_and_definition_resolution_roundtrip(tmp_path, monke
     assert reopened.resolved_by is None  # nosec B101
     assert reopened.resolved_at is None  # nosec B101
     assert reopened.resolved_result_id is None  # nosec B101
+
+
+def test_prune_run_history_removes_old_no_match_runs_before_surfaced_results(
+    tmp_path, monkeypatch
+):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    old_no_match_at = "2026-01-01T00:00:00+00:00"
+    old_finding_at = "2026-01-02T00:00:00+00:00"
+    recent_no_match_at = "2026-03-01T00:00:00+00:00"
+
+    old_no_match = _create_run(
+        repo,
+        definition,
+        status="completed",
+        outcome="no_match",
+        run_summary={"message": "No match"},
+    )
+    old_finding_run = _create_run(
+        repo,
+        definition,
+        status="completed",
+        outcome="finding",
+        run_summary={"message": "Found answer"},
+    )
+    old_result = repo.create_result(
+        owner_id=101,
+        definition_id=definition.id,
+        run_id=old_finding_run.id,
+        kind="finding",
+        title="Stored finding",
+        summary="A surfaced result should outlive no-match runs.",
+        answer=None,
+        answer_mode="evidence_only",
+        confidence={"label": "medium"},
+        source_refs=[{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        dedupe_key="rq:def:retention:result",
+        visibility_destination={"home": True, "results": True},
+    )
+    recent_no_match = _create_run(
+        repo,
+        definition,
+        status="completed",
+        outcome="no_match",
+        run_summary={"message": "Recent no match"},
+    )
+    _set_run_created_at(repo, run_id=old_no_match.id, created_at=old_no_match_at)
+    _set_run_created_at(repo, run_id=old_finding_run.id, created_at=old_finding_at)
+    _set_result_created_at(repo, result_id=old_result.id, created_at=old_finding_at)
+    _set_run_created_at(repo, run_id=recent_no_match.id, created_at=recent_no_match_at)
+    audit = repo.create_audit_event(
+        owner_id=101,
+        definition_id=definition.id,
+        event_type="run.created",
+        actor="101",
+        summary="Audit rows are retained by audit policy.",
+        before=None,
+        after={"run_id": old_no_match.id},
+        idempotency_key=None,
+        request_id=None,
+    )
+
+    pruned = repo.prune_run_history(
+        owner_id=101,
+        definition_id=definition.id,
+        no_match_before="2026-02-01T00:00:00+00:00",
+        result_before="2025-01-01T00:00:00+00:00",
+    )
+
+    assert pruned == {"runs": 1, "results": 0}  # nosec B101
+    assert repo.get_run(owner_id=101, run_id=old_no_match.id) is None  # nosec B101
+    assert repo.get_run(owner_id=101, run_id=old_finding_run.id) is not None  # nosec B101
+    assert repo.get_result(owner_id=101, result_id=old_result.id) is not None  # nosec B101
+    assert repo.get_run(owner_id=101, run_id=recent_no_match.id) is not None  # nosec B101
+    events, total = repo.list_audit_events(owner_id=101, definition_id=definition.id, limit=10, offset=0)
+    assert total == 1  # nosec B101
+    assert events[0].id == audit.id  # nosec B101
+
+
+def test_prune_run_history_preserves_solved_result_unless_dismissed(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    old_result_at = "2026-01-01T00:00:00+00:00"
+    run = _create_run(
+        repo,
+        definition,
+        status="completed",
+        outcome="finding",
+        run_summary={"message": "Found answer"},
+    )
+    result = repo.create_result(
+        owner_id=101,
+        definition_id=definition.id,
+        run_id=run.id,
+        kind="finding",
+        title="Final answer",
+        summary="This result answered the recurring question.",
+        answer=None,
+        answer_mode="evidence_only",
+        confidence={"label": "high"},
+        source_refs=[{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        dedupe_key="rq:def:retention:solved",
+        visibility_destination={"home": True, "results": True},
+    )
+    _set_run_created_at(repo, run_id=run.id, created_at=old_result_at)
+    _set_result_created_at(repo, result_id=result.id, created_at=old_result_at)
+    repo.mark_definition_solved(
+        owner_id=101,
+        definition_id=definition.id,
+        resolved_by="101",
+        resolved_result_id=result.id,
+    )
+
+    preserved = repo.prune_run_history(
+        owner_id=101,
+        definition_id=definition.id,
+        no_match_before="2030-01-01T00:00:00+00:00",
+        result_before="2030-01-01T00:00:00+00:00",
+    )
+
+    assert preserved == {"runs": 0, "results": 0}  # nosec B101
+    assert repo.get_run(owner_id=101, run_id=run.id) is not None  # nosec B101
+    assert repo.get_result(owner_id=101, result_id=result.id) is not None  # nosec B101
+
+    repo.update_result_review_state(
+        owner_id=101,
+        result_id=result.id,
+        review_state="dismissed",
+        reviewed_by="101",
+        review_note="No longer relevant",
+    )
+    pruned = repo.prune_run_history(
+        owner_id=101,
+        definition_id=definition.id,
+        no_match_before="2030-01-01T00:00:00+00:00",
+        result_before="2030-01-01T00:00:00+00:00",
+    )
+    updated_definition = repo.get_definition(owner_id=101, definition_id=definition.id)
+
+    assert pruned == {"runs": 1, "results": 1}  # nosec B101
+    assert repo.get_run(owner_id=101, run_id=run.id) is None  # nosec B101
+    assert repo.get_result(owner_id=101, result_id=result.id) is None  # nosec B101
+    assert updated_definition is not None  # nosec B101
+    assert updated_definition.resolution_state == "solved"  # nosec B101
+    assert updated_definition.resolved_result_id is None  # nosec B101
 
 
 def test_run_and_result_response_schemas_expose_stage_1_contracts():

@@ -177,6 +177,36 @@ class ScheduledTaskRecurringQuestionService(ScheduledTaskAutomationService):
                 repaired.append(row.id)
         return repaired
 
+    def prune_definition_history(
+        self,
+        *,
+        owner_id: int,
+        definition_id: str,
+        now: datetime | None = None,
+    ) -> dict[str, int]:
+        """Apply a definition's stored run/result retention policy."""
+
+        definition = self._get_definition_row(owner_id=owner_id, definition_id=definition_id)
+        now_utc = _ensure_aware_utc(now or datetime.now(timezone.utc))
+        no_match_days = _retention_ttl_days(
+            definition.retention_policy,
+            preferred_key="no_match_run_ttl_days",
+            fallback_key="run_ttl_days",
+            default_days=30,
+        )
+        result_days = _retention_ttl_days(
+            definition.retention_policy,
+            preferred_key="result_ttl_days",
+            fallback_key=None,
+            default_days=max(no_match_days, 180),
+        )
+        return self._repo(owner_id).prune_run_history(
+            owner_id=owner_id,
+            definition_id=definition_id,
+            no_match_before=(now_utc - timedelta(days=no_match_days)).isoformat(),
+            result_before=(now_utc - timedelta(days=result_days)).isoformat(),
+        )
+
     def list_runs(
         self,
         *,
@@ -661,6 +691,23 @@ def _ensure_aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _retention_ttl_days(
+    policy: dict[str, Any],
+    *,
+    preferred_key: str,
+    fallback_key: str | None,
+    default_days: int,
+) -> int:
+    candidate = policy.get(preferred_key)
+    if candidate is None and fallback_key is not None:
+        candidate = policy.get(fallback_key)
+    try:
+        days = int(candidate)
+    except (TypeError, ValueError):
+        return default_days
+    return max(days, 0)
 
 
 def _parse_optional_datetime(value: str | None) -> datetime | None:

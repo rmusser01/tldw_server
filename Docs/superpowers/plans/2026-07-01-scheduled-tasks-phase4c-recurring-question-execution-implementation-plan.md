@@ -851,6 +851,8 @@ git commit -m "feat: add recurring question execution UI"
 
 ## Stage 7: Retention, Privacy, Accessibility, And Final Verification
 
+**Status:** Complete. Stage 7 added retention pruning for old no-match runs and old dismissible results, preserves the final solved finding until dismissal, keeps audit rows under the existing audit policy, verifies existing private/raw payload guards, adds running-state live-region coverage, confirms Watchlists preservation tests still pass, and completed the targeted backend/frontend/Bandit hardening gate. WebUI smoke was skipped because no dev server was part of this final hardening turn; route and component tests covered `/scheduled-tasks`, `/scheduled-tasks/results`, result drawers, Home surfacing, and Watchlists links.
+
 **Goal:** Close product trust and operational hardening before PR.
 
 **Success Criteria:**

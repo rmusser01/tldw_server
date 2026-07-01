@@ -63,6 +63,20 @@ const renderActionLinks = (result: ScheduledTaskResultItem): React.ReactNode => 
   )
 }
 
+const renderStateBadge = (result: ScheduledTaskResultItem): React.ReactNode => {
+  const badge = (
+    <DesignSystemBadge variant={scheduledTaskResultSeverityToBadgeVariant(result.severity)}>
+      {getScheduledTaskResultStatusLabel(result)}
+    </DesignSystemBadge>
+  )
+
+  if (result.signalKind !== "running") {
+    return badge
+  }
+
+  return <span aria-live="polite">{badge}</span>
+}
+
 const renderAnswerSection = (result: ScheduledTaskResultItem): React.ReactNode => {
   if (!result.answer) {
     return null
@@ -133,11 +147,7 @@ export const ScheduledTaskResultDetailDrawer: React.FC<
 
           <Descriptions bordered size="small" column={1}>
             <Descriptions.Item label="State">
-              <DesignSystemBadge
-                variant={scheduledTaskResultSeverityToBadgeVariant(result.severity)}
-              >
-                {getScheduledTaskResultStatusLabel(result)}
-              </DesignSystemBadge>
+              {renderStateBadge(result)}
             </Descriptions.Item>
             <Descriptions.Item label="Owner">{result.ownerLabel}</Descriptions.Item>
             <Descriptions.Item label="Task type">{result.taskTypeLabel}</Descriptions.Item>

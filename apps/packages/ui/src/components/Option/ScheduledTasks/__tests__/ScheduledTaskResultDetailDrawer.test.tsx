@@ -207,4 +207,27 @@ describe("ScheduledTaskResultDetailDrawer", () => {
     expect(screen.getByText("note:7")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Mark reviewed" })).toBeInTheDocument()
   })
+
+  it("announces running status as live text in the detail drawer", () => {
+    const [result] = projectScheduledTaskResults([
+      buildTask({
+        id: "watchlist_job:running",
+        title: "Running monitor",
+        status: "running",
+        source_ref: { job_id: 42, latest_run_id: 101 }
+      })
+    ])
+
+    render(
+      <ScheduledTaskResultDetailDrawer
+        open
+        result={result}
+        onClose={vi.fn()}
+        onReviewResult={vi.fn()}
+        onRetryRun={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText("Running now").closest("[aria-live='polite']")).toBeTruthy()
+  })
 })

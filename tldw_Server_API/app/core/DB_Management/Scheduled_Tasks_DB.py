@@ -911,6 +911,126 @@ class ScheduledTasksTransaction:
             raise KeyError(f"result not found: {result_id}")
         return updated
 
+    def prune_run_history(
+        self,
+        *,
+        owner_id: int,
+        definition_id: str,
+        no_match_before: str,
+        result_before: str | None = None,
+        preserve_solved_result: bool = True,
+    ) -> dict[str, int]:
+        current = self.get_definition(owner_id=owner_id, definition_id=definition_id)
+        if current is None:
+            raise KeyError(f"definition not found: {definition_id}")
+
+        preserved_result_ids: set[str] = set()
+        if preserve_solved_result and current.resolved_result_id:
+            resolved = self.get_result(owner_id=owner_id, result_id=current.resolved_result_id)
+            if (
+                resolved is not None
+                and resolved.definition_id == definition_id
+                and resolved.review_state != "dismissed"
+            ):
+                preserved_result_ids.add(resolved.id)
+
+        result_ids_to_delete: list[str] = []
+        run_ids_to_check_after_result_delete: set[str] = set()
+        if result_before is not None:
+            result_rows = self._conn.execute(
+                """
+                SELECT id, run_id
+                FROM scheduled_task_results
+                WHERE owner_id = ?
+                    AND definition_id = ?
+                    AND created_at < ?
+                """,
+                [owner_id, definition_id, result_before],
+            ).fetchall()
+            for row in result_rows:
+                result_id = str(row["id"])
+                if result_id in preserved_result_ids:
+                    continue
+                result_ids_to_delete.append(result_id)
+                run_ids_to_check_after_result_delete.add(str(row["run_id"]))
+
+        deleted_results = 0
+        for result_id in result_ids_to_delete:
+            deleted_results += self._conn.execute(
+                """
+                DELETE FROM scheduled_task_results
+                WHERE owner_id = ?
+                    AND id = ?
+                """,
+                [owner_id, result_id],
+            ).rowcount
+        if result_ids_to_delete and current.resolved_result_id in result_ids_to_delete:
+            self._conn.execute(
+                """
+                UPDATE scheduled_task_definitions
+                SET resolved_result_id = NULL,
+                    updated_at = ?
+                WHERE owner_id = ?
+                    AND id = ?
+                    AND resolved_result_id = ?
+                """,
+                [_utcnow_iso(), owner_id, definition_id, current.resolved_result_id],
+            )
+
+        no_match_rows = self._conn.execute(
+            """
+            SELECT id
+            FROM scheduled_task_runs AS runs
+            WHERE runs.owner_id = ?
+                AND runs.definition_id = ?
+                AND runs.outcome = 'no_match'
+                AND runs.created_at < ?
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM scheduled_task_results AS results
+                    WHERE results.owner_id = runs.owner_id
+                        AND results.run_id = runs.id
+                )
+            """,
+            [owner_id, definition_id, no_match_before],
+        ).fetchall()
+        run_ids_to_delete: set[str] = {str(row["id"]) for row in no_match_rows}
+
+        if result_before is not None and run_ids_to_check_after_result_delete:
+            for run_id in run_ids_to_check_after_result_delete:
+                row = self._conn.execute(
+                    """
+                    SELECT id
+                    FROM scheduled_task_runs AS runs
+                    WHERE runs.owner_id = ?
+                        AND runs.definition_id = ?
+                        AND runs.id = ?
+                        AND runs.created_at < ?
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM scheduled_task_results AS results
+                            WHERE results.owner_id = runs.owner_id
+                                AND results.run_id = runs.id
+                        )
+                    """,
+                    [owner_id, definition_id, run_id, result_before],
+                ).fetchone()
+                if row is not None:
+                    run_ids_to_delete.add(str(row["id"]))
+
+        deleted_runs = 0
+        for run_id in sorted(run_ids_to_delete):
+            deleted_runs += self._conn.execute(
+                """
+                DELETE FROM scheduled_task_runs
+                WHERE owner_id = ?
+                    AND id = ?
+                """,
+                [owner_id, run_id],
+            ).rowcount
+
+        return {"runs": deleted_runs, "results": deleted_results}
+
     def mark_definition_solved(
         self,
         *,
@@ -2419,6 +2539,12 @@ class ScheduledTasksDatabase:
         """Update owner-scoped scheduled task result review metadata."""
         with self._connect() as conn:
             return ScheduledTasksTransaction(conn).update_result_review_state(**kwargs)
+
+    def prune_run_history(self, **kwargs: Any) -> dict[str, int]:
+        """Prune owner-scoped run/result history according to retention cutoffs."""
+        with self._connect() as conn:
+            begin_immediate_if_needed(conn)
+            return ScheduledTasksTransaction(conn).prune_run_history(**kwargs)
 
     def mark_definition_solved(self, **kwargs: Any) -> DefinitionRow:
         """Mark an owner-scoped recurring question definition solved."""
