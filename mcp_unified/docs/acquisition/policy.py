@@ -339,10 +339,7 @@ def _is_legacy_ipv4_part_candidate(part: str) -> bool:
 
 
 def _has_raw_whitespace_or_control(raw_url: str) -> bool:
-    return any(
-        character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
-        for character in raw_url
-    )
+    return any(character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F for character in raw_url)
 
 
 def _has_dot_segment(decoded_path: str) -> bool:

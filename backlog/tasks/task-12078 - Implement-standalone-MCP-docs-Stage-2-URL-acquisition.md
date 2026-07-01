@@ -1,7 +1,7 @@
 ---
 id: TASK-12078
 title: Implement standalone MCP docs Stage 2 URL acquisition
-status: In Progress
+status: Done
 priority: high
 documentation:
 - Docs/superpowers/specs/2026-06-30-standalone-mcp-docs-url-acquisition-design.md
@@ -23,7 +23,7 @@ Implement optional single-page URL acquisition for the standalone MCP docs corpu
 - [x] #5 Approved fake URL ingestion writes to SQLite/FTS5, applies keywords and collections, and is retrievable via docs.search and docs.context.
 - [x] #6 MCP provider and host shim expose docs.ingest_url only when enabled, validate url arguments, categorize it as ingestion, and report disabled/enabled/extractor status in docs.status.
 - [x] #7 Import-boundary tests verify mcp_unified.docs has no top-level tldw_Server_API, requests, httpx, aiohttp, playwright, trafilatura, or bs4 imports; tests do not use live internet.
-- [ ] #8 Focused docs MCP tests and Bandit on touched Python paths pass.
+- [x] #8 Focused docs MCP tests and Bandit on touched Python paths pass.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -70,20 +70,29 @@ Task 7 complete locally.
 - Green evidence: focused import-boundary/config tests passed (`5 passed, 6 warnings`); full docs MCP tests passed (`143 passed, 6 warnings`); Black check reported 2 touched Python test files unchanged; `git diff --check` was clean.
 - Bandit evidence: `/tmp/bandit_mcp_docs_boundaries.json` reported `errors: []` and `results: []` for the Task 7 Python test files; config YAML was non-code.
 - Review gates: verified the standalone docs package has no AST-level imports of `tldw_Server_API`, `requests`, `httpx`, `aiohttp`, `playwright`, `trafilatura`, or `bs4`; package import does not load `trafilatura` or `bs4`; tests use fake/no-live-internet paths; and repo MCP config keeps web acquisition disabled with explicit locked-down URL defaults.
+Task 8 final verification complete.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/docs -q --tb=short` -> `143 passed, 6 warnings`.
+- Verification: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified -k "docs or write_tools or validator" -q --tb=short` -> `167 passed, 419 deselected, 52 warnings`.
+- Import smoke: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -c "import importlib, sys; optional=['trafilatura','bs4','requests','httpx','aiohttp','playwright']; [sys.modules.pop(name, None) for name in optional]; module=importlib.import_module('mcp_unified.docs'); print(module.DocsSettings.from_mapping({}).enable_web_acquisition); loaded=[name for name in optional if name in sys.modules]; print('loaded_optional=', loaded)"` -> `False` and `loaded_optional= []`.
+- Formatting: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m black --check mcp_unified/docs/acquisition mcp_unified/docs/settings.py mcp_unified/docs/importers/base.py mcp_unified/docs/importers/html.py mcp_unified/docs/importers/local.py mcp_unified/docs/mcp_module.py tldw_Server_API/app/core/MCP_unified/modules/implementations/docs_module.py tldw_Server_API/tests/MCP_unified/docs` -> `24 files would be left unchanged` after Black formatted `mcp_unified/docs/acquisition/policy.py`.
+- Bandit: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r mcp_unified/docs/acquisition mcp_unified/docs/settings.py mcp_unified/docs/importers/base.py mcp_unified/docs/importers/html.py mcp_unified/docs/importers/local.py mcp_unified/docs/mcp_module.py tldw_Server_API/app/core/MCP_unified/modules/implementations/docs_module.py tldw_Server_API/tests/MCP_unified/docs -f json -o /tmp/bandit_mcp_docs_url_acquisition.json` -> `errors: []`, `results: []`.
+- Security invariant review: every item in the Stage 2 checklist is covered by passing docs tests, including hidden disabled tool, stale `capability_disabled`, approval-required no-fetch, locked-down/local-first/online-capable policy behavior, domain/wildcard/prefix handling, credential/scheme/denied-domain precedence, private/reserved IP denial, validated-address transport requirement, redirect revalidation/limits, content-type/body limits, robots fail-closed, lazy optional extractors, URL ingestion into store/search/context with keywords/collections, and disabled repo config.
+- Touched files: `mcp_unified/docs/acquisition/*`, `mcp_unified/docs/settings.py`, `mcp_unified/docs/importers/{base,html,local}.py`, `mcp_unified/docs/mcp_module.py`, `tldw_Server_API/app/core/MCP_unified/modules/implementations/docs_module.py`, `tldw_Server_API/Config_Files/mcp_modules.yaml`, docs MCP tests under `tldw_Server_API/tests/MCP_unified/docs`, and this Backlog task.
+- Known skips/blockers: none. Web acquisition remains disabled by default; optional rich extractors remain lazy and non-required.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Implemented optional standalone MCP docs URL acquisition with source policy, safe resolver-bound fetching, lazy extraction fallback, SQLite/FTS5 ingestion, MCP provider exposure, host shim validation, disabled-by-default config, and import-boundary safeguards. Final verification passed: docs MCP tests `143 passed`, adjacent MCP selection `167 passed, 419 deselected`, import smoke kept optional web dependencies unloaded, Black passed on the touched Python scope, and Bandit reported no findings.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
