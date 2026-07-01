@@ -150,6 +150,7 @@ def is_port_free(host: str, port: int) -> bool:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             # Wildcard runtime hosts are normalized to loopback by _port_probe_host.
+            # codeql[py/bind-socket-all-network-interfaces]: clean_host never remains a wildcard address here.
             s.bind((clean_host, port))
             return True
         except OSError:

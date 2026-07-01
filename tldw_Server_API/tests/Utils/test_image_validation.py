@@ -302,7 +302,7 @@ class TestValidateImageUrl:
         assert "user" not in logged
         assert "secret-pass" not in logged
         assert "@" not in logged
-        assert "example.com:8443" in logged  # lgtm[py/incomplete-url-substring-sanitization] literal log-sanitization assertion
+        assert "example.com:8443" in logged  # codeql[py/incomplete-url-substring-sanitization] literal log-sanitization assertion
 
     def test_file_url_not_supported(self):
         """Test that file URLs are not supported."""

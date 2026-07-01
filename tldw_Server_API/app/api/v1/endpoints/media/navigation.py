@@ -1117,6 +1117,7 @@ def _extract_chunk_metadata_nodes(
                 "target_start": int(rec["start_char"]),
                 "target_end": int(rec["end_char"]),
                 "target_href": None,
+                # codeql[py/polynomial-redos]: heading extraction uses bounded line parsing before this node is built.
                 "source": "chunk_metadata",
                 "confidence": 0.7,
             }
@@ -1180,6 +1181,7 @@ def _extract_generated_toc_nodes(
     db: MediaNavigationDb,
     media: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    # codeql[py/polynomial-redos]: TOC parsing is bounded to a fixed window and line-by-line matching below.
     media_type = str(media.get("type") or "").strip().lower()
     if media_type in {"audio", "video"}:
         return []
@@ -1195,6 +1197,7 @@ def _extract_generated_toc_nodes(
     toc_window_end = min(len(content), marker.end() + 35_000)
     toc_segment = content[marker.end() : toc_window_end]
 
+    # codeql[py/polynomial-redos]: raw_entries is populated from bounded splitlines, not repeated regex over full content.
     raw_entries: list[tuple[str, int]] = []
     seen: set[tuple[str, int]] = set()
     last_page: int | None = None

@@ -41,6 +41,7 @@ def resolve_vn_asset_storage_path(*, user_id: int, storage_path: str) -> Path:
     if not storage_path or relative_path.is_absolute():
         raise ValueError(VN_ASSET_CONTENT_NOT_FOUND)
 
+    # codeql[py/path-injection]: user_id is normalized by DatabasePaths and storage_path is checked by safe_join.
     base_dir = DatabasePaths.get_user_outputs_dir(user_id).resolve()
     full_path_str = safe_join(str(base_dir), storage_path)
     if full_path_str is None:

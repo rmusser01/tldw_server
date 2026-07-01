@@ -1670,7 +1670,7 @@ class SyncDatabase:
                 sqlite_path=str(custom_path),
             )
 
-        # lgtm[py/path-injection] default_path is built under the normalized per-user database root.
+        # codeql[py/path-injection] default_path is built under the normalized per-user database root.
         default_path.parent.mkdir(parents=True, exist_ok=True)
         return DatabaseConfig(
             backend_type=BackendType.SQLITE,

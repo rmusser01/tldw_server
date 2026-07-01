@@ -403,7 +403,7 @@ async def download_url_async(
                     await _write_response_to_path(url, resp, target_path, resolved_max_bytes)
                 except _DOWNLOAD_UTILS_NONCRITICAL_EXCEPTIONS:
                     with contextlib.suppress(_DOWNLOAD_UTILS_NONCRITICAL_EXCEPTIONS):
-                        # lgtm[py/path-injection] target_path is produced by _validate_target_path.
+                        # codeql[py/path-injection] target_path is produced by _validate_target_path.
                         target_path.unlink(missing_ok=True)
                     raise
                 logger.info("Downloaded {} to {}", safe_url, target_path)
@@ -531,7 +531,7 @@ async def download_url_async(
             await _write_response_to_path(url, resp, target_path, resolved_max_bytes)
         except _DOWNLOAD_UTILS_NONCRITICAL_EXCEPTIONS:
             with contextlib.suppress(_DOWNLOAD_UTILS_NONCRITICAL_EXCEPTIONS):
-                # lgtm[py/path-injection] target_path is produced by _validate_target_path.
+                # codeql[py/path-injection] target_path is produced by _validate_target_path.
                 target_path.unlink(missing_ok=True)
             raise
 

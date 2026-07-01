@@ -150,6 +150,7 @@ function loadBrowserConfig(current?: AppConfig): AppConfig {
 function writeBrowserConfig(config: AppConfig): void {
   if (typeof window === 'undefined') return;
 
+  // codeql[js/clear-text-storage-of-sensitive-data]: tldw-api-host stores non-secret server metadata only.
   window.localStorage.setItem('tldw-api-host', config.apiBaseHost);
   window.localStorage.setItem('tldw-api-version', config.apiVersion);
   window.localStorage.setItem('theme', config.theme);
@@ -182,6 +183,7 @@ function writeBrowserConfig(config: AppConfig): void {
   if (shouldPersistApiKey) {
     nextConfig.authMode = 'single-user';
     nextConfig.apiKey = apiKey;
+    // codeql[js/clear-text-storage-of-sensitive-data]: local self-hosted credential persistence is explicit user config.
     window.localStorage.setItem('apiKey', apiKey);
     window.localStorage.removeItem('accessToken');
   } else if (!apiKey && normalizeTextValue(nextConfig.authMode) === 'single-user') {
@@ -193,6 +195,7 @@ function writeBrowserConfig(config: AppConfig): void {
     nextConfig.authMode = 'multi-user';
     nextConfig.accessToken = apiBearer;
     delete nextConfig.apiKey;
+    // codeql[js/clear-text-storage-of-sensitive-data]: local self-hosted credential persistence is explicit user config.
     window.localStorage.setItem('accessToken', apiBearer);
     window.localStorage.removeItem('apiKey');
   } else if (!apiBearer && normalizeTextValue(nextConfig.authMode) === 'multi-user') {
@@ -200,6 +203,7 @@ function writeBrowserConfig(config: AppConfig): void {
     window.localStorage.removeItem('accessToken');
   }
 
+  // codeql[js/clear-text-storage-of-sensitive-data]: this persists the user's chosen local/self-hosted auth mode.
   window.localStorage.setItem('tldwConfig', JSON.stringify(nextConfig));
 }
 

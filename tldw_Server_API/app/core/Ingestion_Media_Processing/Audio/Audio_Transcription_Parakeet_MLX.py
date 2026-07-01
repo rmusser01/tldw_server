@@ -460,7 +460,7 @@ def transcribe_with_parakeet_mlx(
         if isinstance(audio_data, (str, Path)):
             # Already a file path
             audio_path = Path(audio_data)
-            # lgtm[py/path-injection] read-only transcription input path must already exist; no path is written here.
+            # codeql[py/path-injection] read-only transcription input path must already exist; no path is written here.
             if not audio_path.exists():
                 return "[Error: Audio file not found]"
             audio_file_path = str(audio_path)

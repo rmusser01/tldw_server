@@ -149,7 +149,7 @@ async def _save_file(
         error_factory=lambda _exc: AuthNZStorageError("Invalid generated file directory"),
     )
     target_dir = Path(target_dir_str)
-    # lgtm[py/path-injection] target_dir is resolved by safe_join under the user's outputs dir.
+    # codeql[py/path-injection] target_dir is resolved by safe_join under the user's outputs dir.
     target_dir.mkdir(parents=True, exist_ok=True)
 
     file_path_str = safe_join(
@@ -159,7 +159,7 @@ async def _save_file(
     )
     file_path = Path(file_path_str)
 
-    # lgtm[py/path-injection] file_path is resolved by safe_join under the generated-file target dir.
+    # codeql[py/path-injection] file_path is resolved by safe_join under the generated-file target dir.
     async with aiofiles.open(file_path, "wb") as f:
         await f.write(data)
 
