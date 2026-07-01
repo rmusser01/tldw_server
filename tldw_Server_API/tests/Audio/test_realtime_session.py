@@ -13,10 +13,16 @@ from tldw_Server_API.app.core.Audio.Realtime.models import (
     InputAudioSpeechStoppedEvent,
     RealtimeSessionConfig,
     ResponseAudioDeltaEvent,
+    ResponseContentPartAddedEvent,
+    ResponseContentPartDoneEvent,
     ResponseCreatedEvent,
     ResponseDoneEvent,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
     ResponseTextDeltaEvent,
+    ResponseTextDoneEvent,
     ResponseTranscriptDeltaEvent,
+    ResponseTranscriptDoneEvent,
     SessionCreatedEvent,
     SessionUpdatedEvent,
     UpdateSessionCommand,
@@ -109,11 +115,14 @@ async def _collect(events: AsyncIterator[object]) -> list[object]:
 async def test_session_construction_emits_created_event_with_prefixed_session_id():
     session = RealtimeSession(pipeline=FakeRealtimePipeline())
 
-    event = session.created_event()
+    events = session.drain_pending_events()
 
+    assert len(events) == 1
+    event = events[0]
     assert isinstance(event, SessionCreatedEvent)
     assert event.session_id == session.session_id
     assert event.session_id.startswith("sess_")
+    assert session.drain_pending_events() == []
 
 
 @pytest.mark.asyncio
@@ -249,3 +258,44 @@ async def test_cancel_response_increments_generation_id_and_suppresses_late_chun
         )
     ]
     assert not any(isinstance(event, ResponseTextDeltaEvent) for event in remaining_events)
+
+
+@pytest.mark.asyncio
+async def test_cancel_after_response_created_suppresses_stale_scaffolding_output_and_done_events():
+    session = RealtimeSession(pipeline=FakeRealtimePipeline())
+    await session.append_audio(AppendAudioCommand(event_id="evt_audio", audio=b"\x00\x01"))
+    await session.commit_audio(CommitAudioCommand(event_id="evt_commit"))
+    stream = session.create_response(CreateResponseCommand(event_id="evt_create"))
+
+    created = await anext(stream)
+    cancel_events = await session.cancel_response(
+        CancelResponseCommand(event_id="evt_cancel", response_id=created.response_id)
+    )
+    remaining_events = await _collect(stream)
+
+    assert isinstance(created, ResponseCreatedEvent)
+    assert cancel_events == [
+        ResponseDoneEvent(
+            event_id="evt_cancel",
+            response_id=created.response_id,
+            status="cancelled",
+        )
+    ]
+    assert not any(
+        isinstance(
+            event,
+            (
+                ResponseOutputItemAddedEvent,
+                ResponseContentPartAddedEvent,
+                ResponseContentPartDoneEvent,
+                ResponseOutputItemDoneEvent,
+                ResponseTextDeltaEvent,
+                ResponseTextDoneEvent,
+                ResponseTranscriptDeltaEvent,
+                ResponseTranscriptDoneEvent,
+                ResponseAudioDeltaEvent,
+            ),
+        )
+        for event in remaining_events
+    )
+    assert not any(isinstance(event, ResponseDoneEvent) and event.status == "completed" for event in remaining_events)
