@@ -285,6 +285,97 @@ python Helper_Scripts/voice_latency_harness/examples/ws_tts_realtime_client.py -
 ffplay -f s16le -ar 24000 -ac 1 out_ws_tts_realtime.pcm
 ```
 
+OpenAI-Compatible Realtime Speech
+---------------------------------
+
+The realtime speech endpoint exposes a Stage 1 OpenAI-compatible JSON event
+protocol over WebSocket. It bridges committed PCM16 input audio through the
+existing STT -> chat -> TTS pipeline and emits OpenAI-style realtime events.
+
+### Routes
+
+- `WS /api/v1/audio/realtime`: native tldw route using the OpenAI-compatible event shape.
+- `WS /v1/realtime`: OpenAI-compatible route for clients that expect the upstream path.
+- `GET /api/v1/audio/realtime/capabilities`: runtime metadata for supported routes, events, audio formats, limits,
+  close codes, and unsupported features.
+
+Both WebSocket routes are guarded by the `audio-realtime` route toggle and use the `audio.realtime` AuthNZ endpoint id.
+
+### Authentication
+
+Stage 1 realtime speech authenticates during the WebSocket handshake and does not consume an initial protocol frame
+for auth.
+
+- Single-user mode accepts `Authorization: Bearer <SINGLE_USER_API_KEY>` or `X-API-KEY: <SINGLE_USER_API_KEY>`.
+- Multi-user mode accepts `Authorization: Bearer <JWT>` or `X-API-KEY: <virtual API key>`.
+- Legacy `?token=` query-string auth remains disabled by default and is only accepted when
+  `AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH=1`.
+- `/v1/realtime` does not accept first-message auth such as `{"type":"auth","token":"..."}`. Unauthenticated
+  connections close with `4401`.
+
+### Audio Contract
+
+- Input audio: mono PCM16, 16 kHz, little-endian, base64 encoded in `input_audio_buffer.append.audio`.
+- Output audio: mono PCM16, 24 kHz, base64 encoded in the `delta` field of `response.output_audio.delta` events.
+- Maximum JSON frame size: 262144 bytes.
+- Maximum buffered input audio: 30 seconds, 960000 bytes.
+- Maximum output audio delta chunk: 65536 bytes.
+
+### Supported Client Events
+
+- `session.update`
+- `input_audio_buffer.append`
+- `input_audio_buffer.commit`
+- `input_audio_buffer.clear`
+- `response.create`
+- `response.cancel`
+
+Manual turn flow:
+
+1. Connect with auth headers.
+2. Receive `session.created` and `rate_limits.updated`.
+3. Optionally send `session.update`.
+4. Send one or more `input_audio_buffer.append` frames with base64 PCM16 audio.
+5. Send `input_audio_buffer.commit`.
+6. Send `response.create` to run STT, chat generation, and TTS for the committed turn.
+7. Read streamed text, transcript, audio deltas, and `response.done`.
+
+### Supported Server Events
+
+- `session.created`
+- `session.updated`
+- `input_audio_buffer.speech_started`
+- `input_audio_buffer.speech_stopped`
+- `input_audio_buffer.committed`
+- `conversation.item.created`
+- `conversation.item.done`
+- `response.created`
+- `response.output_item.added`
+- `response.content_part.added`
+- `response.output_text.delta`
+- `response.output_text.done`
+- `response.output_audio.delta`
+- `response.output_audio.done`
+- `response.output_audio_transcript.delta`
+- `response.output_audio_transcript.done`
+- `response.content_part.done`
+- `response.output_item.done`
+- `response.done`
+- `rate_limits.updated`
+- `error`
+
+`rate_limits.updated` is emitted for tldw quota compatibility. It is not an OpenAI quota-parity guarantee.
+
+### Unsupported In Stage 1
+
+- `conversation.item.create`
+- Tool calls
+- Server-side VAD turn detection
+- Client-selected `output_audio_format`
+- Binary WebSocket audio frames
+
+Unsupported client events return an `error` event while keeping the WebSocket open when the frame is otherwise valid.
+
 WebSocket Voice Chat v2
 -----------------------
 

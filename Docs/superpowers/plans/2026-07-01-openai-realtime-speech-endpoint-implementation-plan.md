@@ -162,7 +162,7 @@ class UpdateSessionCommand:
 - [ ] Implement `to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]`.
 - [ ] Keep all base64 encoding and decoding in `protocol.py`.
 - [ ] Keep OpenAI field names out of session and pipeline modules except where converting through the adapter.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
@@ -612,7 +612,7 @@ Expected result: pytest reports `20 passed`; Bandit reports `errors=[]` and `res
 
 **Tests:** Focused unit/integration tests and Bandit pass.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -629,29 +629,29 @@ Modify:
 
 ### Task 5.1: Update Docs
 
-- [ ] Add a `OpenAI-Compatible Realtime Speech` section to `Docs/Audio_Streaming_Protocol.md`.
-- [ ] Document both routes:
+- [x] Add a `OpenAI-Compatible Realtime Speech` section to `Docs/Audio_Streaming_Protocol.md`.
+- [x] Document both routes:
   - `WS /api/v1/audio/realtime`
   - `WS /v1/realtime`
   - `GET /api/v1/audio/realtime/capabilities`
-- [ ] Document required auth headers for Stage 1.
-- [ ] Document that `/v1/realtime` does not accept first-message auth.
-- [ ] Document the input/output audio formats, sample rates, and limits.
-- [ ] Document supported client events and server events.
-- [ ] Document `conversation.item.create` as explicitly unsupported in Stage 1.
-- [ ] Document `rate_limits.updated` as tldw quota compatibility semantics.
-- [ ] Update `Docs/Product/Realtime_Voice_Latency_PRD.md` with a note that the new endpoint carries `generation_id` from Stage 1 and that latency/interruption benchmarks remain Stage 2 work.
-- [ ] Update the design spec status from `Draft for user review` to `Accepted for implementation` after implementation begins.
+- [x] Document required auth headers for Stage 1.
+- [x] Document that `/v1/realtime` does not accept first-message auth.
+- [x] Document the input/output audio formats, sample rates, and limits.
+- [x] Document supported client events and server events.
+- [x] Document `conversation.item.create` as explicitly unsupported in Stage 1.
+- [x] Document `rate_limits.updated` as tldw quota compatibility semantics.
+- [x] Update `Docs/Product/Realtime_Voice_Latency_PRD.md` with a note that the new endpoint carries `generation_id` from Stage 1 and that latency/interruption benchmarks remain Stage 2 work.
+- [x] Update the design spec status from `Draft for user review` to `Accepted for implementation` after implementation begins.
 
 ### Task 5.2: Add Live Smoke Test Marker
 
-- [ ] Add `test_realtime_live_smoke.py`.
-- [ ] Mark the module with `pytestmark = [pytest.mark.external_api, pytest.mark.local_llm_service]`.
-- [ ] Skip unless `TLDW_REALTIME_LIVE_SMOKE=1`.
-- [ ] Require explicit provider environment variables for STT, LLM, and TTS.
-- [ ] Send a short generated PCM16 silence-plus-tone fixture through `/v1/realtime`.
-- [ ] Assert a `response.done` event arrives.
-- [ ] Keep this test out of default verification commands.
+- [x] Add `test_realtime_live_smoke.py`.
+- [x] Mark the module with `pytestmark = [pytest.mark.external_api, pytest.mark.local_llm_service]`.
+- [x] Skip unless `TLDW_REALTIME_LIVE_SMOKE=1`.
+- [x] Require explicit provider environment variables for STT, LLM, and TTS.
+- [x] Send a short generated PCM16 silence-plus-tone fixture through `/v1/realtime`.
+- [x] Assert a `response.done` event arrives.
+- [x] Keep this test out of default verification commands.
 
 ### Task 5.3: Run Focused Verification
 
@@ -673,7 +673,7 @@ python -m pytest \
 
 Expected result: all focused tests pass.
 
-- [ ] Run route/config regression tests:
+- [x] Run route/config regression tests:
 
 ```bash
 source .venv/bin/activate
@@ -686,7 +686,7 @@ python -m pytest \
 
 Expected result: all selected route and policy tests pass.
 
-- [ ] Run Bandit on touched implementation paths:
+- [x] Run Bandit on touched implementation paths:
 
 ```bash
 source .venv/bin/activate
@@ -701,10 +701,13 @@ python -m bandit \
 
 Expected result: Bandit exits successfully, and `/tmp/bandit_audio_realtime.json` contains no new high or medium findings in touched code.
 
+Actual result: live smoke marker collection reported `1 skipped`; focused realtime suite reported `96 passed`;
+route/config regression slice reported `11 passed`; Bandit reported `errors=[]` and `results=0`.
+
 ### Task 5.4: Finalize Backlog And Commit
 
-- [ ] Update Backlog task metadata with implementation docs, touched files, verification commands, Bandit result path, known live smoke skip conditions, and final summary.
-- [ ] Run diff checks:
+- [x] Update Backlog task metadata with implementation docs, touched files, verification commands, Bandit result path, known live smoke skip conditions, and final summary.
+- [x] Run diff checks:
 
 ```bash
 git diff --check
@@ -713,8 +716,10 @@ git status --short
 
 Expected result: no whitespace errors. Git status shows only files intentionally changed for the realtime endpoint work plus unrelated pre-existing workspace changes.
 
-- [ ] Stage only files touched for this implementation.
-- [ ] Commit with a message that references the feature and includes the reason for the adapter-first design:
+Actual result: `git diff --check` passed; `git status --short` showed only Stage 5 documentation/task/test files before final Backlog updates.
+
+- [x] Stage only files touched for this implementation.
+- [x] Commit with a message that references the feature and includes the reason for the adapter-first design:
 
 ```bash
 git commit -m "feat: add OpenAI-compatible realtime speech endpoint"
