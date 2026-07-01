@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
-import socket
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import unquote, urlsplit, urlunsplit
@@ -96,6 +95,8 @@ def normalize_url(raw_url: str) -> NormalizedURL:
         raise URLPolicyError("unsupported_url_scheme")
     if not parts.netloc or parts.hostname is None:
         raise URLPolicyError("url_host_required")
+    if _netloc_has_empty_port(parts.netloc):
+        raise URLPolicyError("malformed_url")
 
     host = _normalize_hostname(parts.hostname)
     try:
@@ -222,7 +223,9 @@ def _approval_required(argument_hash: str, normalized: NormalizedURL) -> SourceD
 
 
 def _normalize_hostname(hostname: str) -> str:
-    host = hostname.strip().rstrip(".")
+    if hostname != hostname.strip() or "%" in hostname:
+        raise URLPolicyError("malformed_url")
+    host = hostname.rstrip(".")
     if not host:
         raise URLPolicyError("url_host_required")
     if any(character.isspace() for character in host):
@@ -247,6 +250,14 @@ def _format_url_host(host: str) -> str:
     if address.version == 6:
         return f"[{address.compressed}]"
     return address.compressed
+
+
+def _netloc_has_empty_port(netloc: str) -> bool:
+    authority = netloc.rsplit("@", 1)[-1]
+    if authority.startswith("["):
+        closing_bracket = authority.find("]")
+        return closing_bracket >= 0 and authority[closing_bracket + 1 :] == ":"
+    return authority.endswith(":")
 
 
 def _parse_domain_rules(patterns: tuple[str, ...], field_name: str) -> tuple[DomainRule, ...]:
@@ -310,11 +321,58 @@ def _is_source_host_denied(host: str) -> bool:
 def _parse_legacy_ipv4_address(host: str) -> ipaddress.IPv4Address | None:
     if not host or any(character not in _LEGACY_IPV4_CHARS for character in host):
         return None
-    try:
-        packed = socket.inet_aton(host)
-    except OSError:
+    parts = host.split(".")
+    if len(parts) > 4:
         return None
-    return ipaddress.IPv4Address(packed)
+
+    values = tuple(_parse_legacy_ipv4_part(part) for part in parts)
+    if any(value is None for value in values):
+        return None
+
+    first = values[0]
+    if len(values) == 1:
+        if first > 0xFFFFFFFF:
+            return None
+        address_value = first
+    elif len(values) == 2:
+        second = values[1]
+        if first > 0xFF or second > 0xFFFFFF:
+            return None
+        address_value = (first << 24) | second
+    elif len(values) == 3:
+        second = values[1]
+        third = values[2]
+        if first > 0xFF or second > 0xFF or third > 0xFFFF:
+            return None
+        address_value = (first << 24) | (second << 16) | third
+    else:
+        second = values[1]
+        third = values[2]
+        fourth = values[3]
+        if first > 0xFF or second > 0xFF or third > 0xFF or fourth > 0xFF:
+            return None
+        address_value = (first << 24) | (second << 16) | (third << 8) | fourth
+    return ipaddress.IPv4Address(address_value)
+
+
+def _parse_legacy_ipv4_part(part: str) -> int | None:
+    if not part:
+        return None
+    lower_part = part.lower()
+    if lower_part.startswith("0x"):
+        if len(part) == 2:
+            return None
+        try:
+            return int(part[2:], 16)
+        except ValueError:
+            return None
+    if len(part) > 1 and part.startswith("0"):
+        if any(character not in "01234567" for character in part):
+            return None
+        return int(part, 8)
+    if not part.isdigit():
+        return None
+    return int(part, 10)
 
 
 def _has_dot_segment(decoded_path: str) -> bool:

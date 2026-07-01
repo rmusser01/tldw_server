@@ -177,6 +177,26 @@ def test_online_capable_arbitrary_domains_deny_legacy_local_host_forms(raw_url: 
 @pytest.mark.parametrize(
     "raw_url",
     [
+        "https:// example.com/path",
+        "http://example.com:/path",
+        "http://%31%32%37.0.0.1/",
+    ],
+)
+def test_online_capable_arbitrary_domains_deny_ambiguous_host_syntax(raw_url: str) -> None:
+    policy = SourcePolicy(
+        web_source_profile="online_capable",
+        allow_arbitrary_public_domains=True,
+    )
+
+    decision = policy.evaluate(raw_url)
+
+    assert decision.status == "denied"  # nosec B101
+    assert decision.reason == "malformed_url"  # nosec B101
+
+
+@pytest.mark.parametrize(
+    "raw_url",
+    [
         "file:///etc/passwd",
         "ftp://example.com/reference",
         "https:///reference",
