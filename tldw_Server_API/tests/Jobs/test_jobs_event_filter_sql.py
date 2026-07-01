@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import pytest
 
-from tldw_Server_API.app.core.Jobs.manager import _job_event_filter_fragment
+from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
+    job_event_filter_fragment,
+)
+
+pytestmark = pytest.mark.unit
 
 
 def test_job_event_filter_fragment_rejects_unknown_columns() -> None:
     with pytest.raises(ValueError, match="Unsupported job event filter column"):
-        _job_event_filter_fragment("domain OR 1=1", backend="sqlite")
+        job_event_filter_fragment("domain OR 1=1", backend="sqlite")
 
 
 @pytest.mark.parametrize(
@@ -22,4 +26,4 @@ def test_job_event_filter_fragment_uses_allowlisted_columns(
     column: str,
     expected: str,
 ) -> None:
-    assert _job_event_filter_fragment(column, backend=backend) == expected
+    assert job_event_filter_fragment(column, backend=backend) == expected

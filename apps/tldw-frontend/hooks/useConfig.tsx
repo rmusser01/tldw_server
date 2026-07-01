@@ -156,17 +156,19 @@ function writeBrowserConfig(config: AppConfig): void {
   window.localStorage.removeItem('tldw-theme');
 
   const existingConfig = readStoredTldwConfig();
+  const envApiKey = normalizeApiKeyValue(process.env.NEXT_PUBLIC_X_API_KEY);
+  const envApiBearer = normalizeBearerValue(process.env.NEXT_PUBLIC_API_BEARER);
   const apiKey = normalizeApiKeyValue(config.xApiKey);
   const apiBearer = normalizeBearerValue(config.apiBearer);
-  const hasRuntimeApiKey = !!apiKey;
-  const hasRuntimeApiBearer = !!apiBearer;
+  const shouldPersistApiKey = !!apiKey && apiKey !== envApiKey;
+  const shouldPersistApiBearer = !!apiBearer && apiBearer !== envApiBearer;
 
   window.localStorage.removeItem('apiKey');
   window.localStorage.removeItem('apiBearer');
   window.localStorage.removeItem('accessToken');
   window.localStorage.removeItem('refreshToken');
 
-  if (!existingConfig && !hasRuntimeApiKey && !hasRuntimeApiBearer) {
+  if (!existingConfig && !shouldPersistApiKey && !shouldPersistApiBearer) {
     return;
   }
 
@@ -177,12 +179,25 @@ function writeBrowserConfig(config: AppConfig): void {
   delete nextConfig.accessToken;
   delete nextConfig.refreshToken;
 
-  if (hasRuntimeApiKey) {
+  if (shouldPersistApiKey) {
     nextConfig.authMode = 'single-user';
+    nextConfig.apiKey = apiKey;
+    window.localStorage.setItem('apiKey', apiKey);
+    window.localStorage.removeItem('accessToken');
+  } else if (!apiKey && normalizeTextValue(nextConfig.authMode) === 'single-user') {
+    delete nextConfig.apiKey;
+    window.localStorage.removeItem('apiKey');
   }
 
-  if (hasRuntimeApiBearer) {
+  if (shouldPersistApiBearer) {
     nextConfig.authMode = 'multi-user';
+    nextConfig.accessToken = apiBearer;
+    delete nextConfig.apiKey;
+    window.localStorage.setItem('accessToken', apiBearer);
+    window.localStorage.removeItem('apiKey');
+  } else if (!apiBearer && normalizeTextValue(nextConfig.authMode) === 'multi-user') {
+    delete nextConfig.accessToken;
+    window.localStorage.removeItem('accessToken');
   }
 
   window.localStorage.setItem('tldwConfig', JSON.stringify(nextConfig));

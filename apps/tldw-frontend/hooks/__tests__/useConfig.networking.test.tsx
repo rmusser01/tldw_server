@@ -150,7 +150,7 @@ describe('useConfig networking', () => {
     });
   });
 
-  it('keeps manually entered single-user api keys in runtime memory only', async () => {
+  it('persists manually entered single-user api keys for reloads', async () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8000';
     localStorage.setItem('apiBearer', 'legacy-bearer');
     localStorage.setItem('refreshToken', 'legacy-refresh');
@@ -167,10 +167,31 @@ describe('useConfig networking', () => {
     await waitFor(() => {
       expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('saved-api-key');
     });
-    expect(localStorage.getItem('apiKey')).toBeNull();
+    expect(localStorage.getItem('apiKey')).toBe('saved-api-key');
     expect(localStorage.getItem('apiBearer')).toBeNull();
-    expect(localStorage.getItem('tldwConfig')).not.toContain('saved-api-key');
+    expect(localStorage.getItem('tldwConfig')).toContain('saved-api-key');
     expect(localStorage.getItem('refreshToken')).toBeNull();
+  });
+
+  it('persists manually entered multi-user bearer tokens for reloads', async () => {
+    process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8000';
+    localStorage.setItem('apiKey', 'legacy-api-key');
+    const { ConfigProvider, useConfig } = await import('@web/hooks/useConfig');
+
+    const { result } = renderHook(() => useConfig(), {
+      wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider>,
+    });
+
+    act(() => {
+      result.current.setApiBearer('Bearer saved-bearer-token');
+    });
+
+    await waitFor(() => {
+      expect(authStorageMocks.setRuntimeApiBearer).toHaveBeenLastCalledWith('Bearer saved-bearer-token');
+    });
+    expect(localStorage.getItem('accessToken')).toBe('saved-bearer-token');
+    expect(localStorage.getItem('apiKey')).toBeNull();
+    expect(localStorage.getItem('tldwConfig')).toContain('saved-bearer-token');
   });
 
   it('refreshes live config after settings writes canonical tldw config', async () => {
@@ -198,8 +219,8 @@ describe('useConfig networking', () => {
       expect(result.current.config.apiBaseHost).toBe('http://127.0.0.1:8222');
       expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('event-api-key');
     });
-    expect(localStorage.getItem('apiKey')).toBeNull();
-    expect(localStorage.getItem('tldwConfig')).not.toContain('event-api-key');
+    expect(localStorage.getItem('apiKey')).toBe('event-api-key');
+    expect(localStorage.getItem('tldwConfig')).toContain('event-api-key');
   });
 
   it('keeps environment api keys ahead of stale browser config', async () => {

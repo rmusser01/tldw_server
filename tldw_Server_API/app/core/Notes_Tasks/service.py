@@ -23,6 +23,8 @@ _TASK_STATUSES = {"open", "done"}
 
 
 class _ChecklistLine(NamedTuple):
+    """Parsed projection of one Markdown checklist line."""
+
     indent: str
     bullet: str
     space: str
@@ -57,12 +59,14 @@ def _parse_checklist_line(raw_line: str) -> _ChecklistLine | None:
 
 
 def _is_iso_date_token(value: str) -> bool:
+    """Return True when a token has the YYYY-MM-DD shape before date parsing."""
     if len(value) != 10 or value[4] != "-" or value[7] != "-":
         return False
     return value[:4].isdigit() and value[5:7].isdigit() and value[8:].isdigit()
 
 
 def _is_estimate_token(value: str) -> bool:
+    """Return True when a task estimate token has an integer plus m/h/d suffix."""
     return len(value) >= 2 and value[:-1].isdigit() and value[-1].casefold() in {"m", "h", "d"}
 
 

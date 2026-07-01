@@ -29,6 +29,9 @@ class _FakeLogger:
     def error(self, message, *args, **kwargs):
         self.errors.append(str(message))
 
+    def exception(self, message, *args, **kwargs):
+        self.errors.append(str(message))
+
     def debug(self, *args, **kwargs):
         pass
 
@@ -49,17 +52,19 @@ class _FakeLogger:
         ("test_perform_websearch_yandex", "yandex"),
     ],
 )
-def test_provider_search_helpers_sanitize_stdout(monkeypatch, capsys, helper_name, provider_label):
+def test_provider_search_helpers_sanitize_logs(monkeypatch, capsys, helper_name, provider_label):
     def fail_search(*_args, **_kwargs):
         raise RuntimeError(_LEAKY_ERROR)
 
+    logger = _FakeLogger()
+    monkeypatch.setattr(ws, "logging", logger)
     monkeypatch.setattr(ws, "perform_websearch", fail_search)
 
     getattr(ws, helper_name)()
 
-    output = capsys.readouterr().out
-    assert f"Error performing {provider_label} searches" in output
-    _assert_safe_text(output)
+    assert capsys.readouterr().out == ""
+    assert logger.errors == [f"Error performing {provider_label} searches"]
+    _assert_safe_text(logger.errors[0])
 
 
 @pytest.mark.parametrize(

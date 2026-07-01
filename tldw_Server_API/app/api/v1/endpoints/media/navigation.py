@@ -136,6 +136,7 @@ def _strip_html_tags_linear(text: str) -> str:
 
 
 def _contains_html_tag_linear(text: str) -> bool:
+    """Return True when text contains a simple bounded HTML tag pattern."""
     for index, char in enumerate(text):
         if char != "<":
             continue
@@ -148,6 +149,7 @@ def _contains_html_tag_linear(text: str) -> bool:
 
 
 def _contains_markdown_hint(text: str) -> bool:
+    """Return True when text contains common Markdown structure markers."""
     if "```" in text:
         return True
     for line in text.splitlines():
@@ -167,6 +169,7 @@ def _contains_markdown_hint(text: str) -> bool:
 
 
 def _strip_asterisk_emphasis(text: str) -> str:
+    """Remove simple asterisk emphasis from titles without regex backtracking."""
     output: list[str] = []
     index = 0
     while index < len(text):
@@ -210,6 +213,7 @@ def _strip_asterisk_emphasis(text: str) -> str:
 
 
 def _strip_underscore_emphasis(text: str) -> str:
+    """Remove simple underscore emphasis while preserving word-internal underscores."""
     output: list[str] = []
     index = 0
     while index < len(text):
@@ -243,6 +247,7 @@ def _strip_underscore_emphasis(text: str) -> str:
 
 
 def _tighten_navigation_punctuation(text: str) -> str:
+    """Collapse spacing around punctuation that commonly appears in navigation titles."""
     while "_ " in text:
         text = text.replace("_ ", "_")
     while " _" in text:
@@ -259,6 +264,7 @@ def _tighten_navigation_punctuation(text: str) -> str:
 
 
 def _looks_like_multi_entry_start(token: str, next_token: str | None) -> bool:
+    """Return True when tokens look like the start of a second TOC entry."""
     stripped = token.strip()
     lowered = stripped.lower()
     if stripped.endswith("."):
@@ -277,6 +283,7 @@ def _looks_like_multi_entry_start(token: str, next_token: str | None) -> bool:
 
 
 def _truncate_multi_entry_title(text: str) -> str:
+    """Trim generated TOC titles that accidentally merge multiple entries."""
     tokens = text.split()
     for index, token in enumerate(tokens[1:], start=1):
         if not token.isdigit() or len(token) > 4:
@@ -309,6 +316,7 @@ class MediaNavigationDb(Protocol):
 
 
 def _to_int(value: Any) -> int | None:
+    """Coerce storage values to int, returning None for invalid values."""
     try:
         if value is None:
             return None
@@ -318,6 +326,7 @@ def _to_int(value: Any) -> int | None:
 
 
 def _to_float(value: Any) -> float | None:
+    """Coerce storage values to float, returning None for invalid values."""
     try:
         if value is None:
             return None
