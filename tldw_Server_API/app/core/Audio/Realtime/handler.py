@@ -18,9 +18,6 @@ from tldw_Server_API.app.core.Audio.Realtime.constants import (
 from tldw_Server_API.app.core.Audio.Realtime.models import (
     RealtimeErrorEvent,
     RealtimeLimits,
-    ResponseContentPartAddedEvent,
-    ResponseContentPartDoneEvent,
-    ResponseOutputItemDoneEvent,
 )
 from tldw_Server_API.app.core.Audio.Realtime.protocol import parse_client_event, to_openai_server_event
 from tldw_Server_API.app.core.Audio.Realtime.session import RealtimeSession
@@ -93,12 +90,7 @@ async def handle_realtime_websocket(
                 await _send_event(websocket, command_or_error)
                 continue
 
-            content_part_added_sent = False
             async for event in session.handle_command(command_or_error):
-                if isinstance(event, ResponseContentPartAddedEvent):
-                    if content_part_added_sent:
-                        continue
-                    content_part_added_sent = True
                 await _send_event(websocket, event)
     except WebSocketDisconnect:
         return
@@ -117,6 +109,4 @@ async def _send_session_start(websocket: WebSocket, session: RealtimeSession) ->
 
 
 async def _send_event(websocket: WebSocket, event: Any) -> None:
-    if isinstance(event, (ResponseContentPartDoneEvent, ResponseOutputItemDoneEvent)):
-        return
     await websocket.send_json(to_openai_server_event(event))

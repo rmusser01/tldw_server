@@ -1,6 +1,8 @@
 import base64
 import importlib
 import json
+import queue
+import threading
 
 import pytest
 from fastapi import FastAPI
@@ -89,7 +91,22 @@ def _auth_headers() -> dict[str, str]:
 
 
 def _recv_type(ws) -> str:  # noqa: ANN001
-    return ws.receive_json()["type"]
+    results: queue.Queue[dict | BaseException] = queue.Queue(maxsize=1)
+
+    def _receive() -> None:
+        try:
+            results.put(ws.receive_json())
+        except BaseException as exc:  # noqa: BLE001
+            results.put(exc)
+
+    threading.Thread(target=_receive, daemon=True).start()
+    try:
+        payload = results.get(timeout=1.0)
+    except queue.Empty as exc:
+        raise AssertionError("Timed out waiting for realtime WebSocket event") from exc
+    if isinstance(payload, BaseException):
+        raise payload
+    return payload["type"]
 
 
 def test_openai_compat_realtime_manual_turn_event_order(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,7 +123,7 @@ def test_openai_compat_realtime_manual_turn_event_order(monkeypatch: pytest.Monk
             ws.send_json({"type": "input_audio_buffer.commit"})
             observed.extend(_recv_type(ws) for _ in range(4))
             ws.send_json({"type": "response.create"})
-            observed.extend(_recv_type(ws) for _ in range(10))
+            observed.extend(_recv_type(ws) for _ in range(16))
 
     assert observed == [
         "session.created",
@@ -121,11 +138,17 @@ def test_openai_compat_realtime_manual_turn_event_order(monkeypatch: pytest.Monk
         "response.output_item.added",
         "response.content_part.added",
         "response.output_text.delta",
+        "response.content_part.added",
         "response.output_audio_transcript.delta",
+        "response.content_part.added",
         "response.output_audio.delta",
         "response.output_text.done",
+        "response.content_part.done",
         "response.output_audio_transcript.done",
+        "response.content_part.done",
         "response.output_audio.done",
+        "response.content_part.done",
+        "response.output_item.done",
         "response.done",
     ]
 

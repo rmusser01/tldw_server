@@ -31,6 +31,12 @@ def test_realtime_router_specs_are_gated_by_audio_realtime(monkeypatch: pytest.M
         ("/api/v1/audio", "audio_realtime_websocket"),
         ("/v1", "realtime_compat"),
     }
+    assert {
+        spec.tags for spec in content_specs if spec.name == "realtime_compat"
+    } == {("audio-realtime",)}
+    assert {
+        spec.tags for spec in minimal_specs if spec.name == "realtime_compat"
+    } == {("audio-realtime",)}
 
 
 def test_realtime_policy_yaml_maps_route_key_and_compat_path() -> None:
