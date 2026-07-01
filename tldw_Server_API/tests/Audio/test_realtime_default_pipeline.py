@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -8,7 +9,9 @@ import pytest
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.Audio.Realtime.default_pipeline import (
     DefaultRealtimePipeline,
+    REALTIME_TTS_ROUTE,
     RealtimePipelineError,
+    _call_open_realtime_session,
 )
 from tldw_Server_API.app.core.Audio.Realtime.models import RealtimeSessionConfig
 from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
@@ -44,6 +47,31 @@ class FakeRealtimeTTSSession:
     async def audio_stream(self) -> AsyncIterator[bytes]:
         for chunk in self._chunks:
             yield chunk
+
+
+class BlockingRealtimeTTSSession(FakeRealtimeTTSSession):
+    def __init__(self) -> None:
+        super().__init__(chunks=[])
+        self._finish_event = asyncio.Event()
+
+    async def finish(self) -> None:
+        await super().finish()
+        self._finish_event.set()
+
+    async def audio_stream(self) -> AsyncIterator[bytes]:
+        await self._finish_event.wait()
+        if False:
+            yield b""
+
+
+class CloseableBlockingRealtimeTTSSession(BlockingRealtimeTTSSession):
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed = 0
+
+    async def close(self) -> None:
+        self.closed += 1
+        self._finish_event.set()
 
 
 class FakeRealtimeHandle:
@@ -199,6 +227,74 @@ async def test_stream_turn_normalizes_non_streaming_chat_response() -> None:
     assert [event.delta for event in events if isinstance(event, RealtimePipelineTranscriptDelta)] == ["one response"]
 
 
+async def test_stream_turn_finishes_tts_session_when_llm_stream_fails() -> None:
+    async def _failing_streaming_chat_call(**_kwargs: Any) -> AsyncIterator[str]:
+        async def _iter() -> AsyncIterator[str]:
+            raise RuntimeError("llm stream failed")
+            yield ""
+
+        return _iter()
+
+    tts_session = BlockingRealtimeTTSSession()
+    pipeline = _pipeline(chat_call=_failing_streaming_chat_call, tts_service=FakeTTSService(tts_session))
+
+    with pytest.raises(RealtimePipelineError) as exc_info:
+        _ = [event async for event in pipeline.stream_turn("hello world", config=RealtimeSessionConfig())]
+
+    assert exc_info.value.stage == "llm"
+    assert tts_session.finished == 1
+
+
+async def test_stream_turn_prefers_close_for_cleanup_when_available() -> None:
+    async def _failing_streaming_chat_call(**_kwargs: Any) -> AsyncIterator[str]:
+        async def _iter() -> AsyncIterator[str]:
+            yield "partial"
+            raise RuntimeError("llm stream failed")
+
+        return _iter()
+
+    tts_session = CloseableBlockingRealtimeTTSSession()
+    pipeline = _pipeline(chat_call=_failing_streaming_chat_call, tts_service=FakeTTSService(tts_session))
+
+    with pytest.raises(RealtimePipelineError):
+        _ = [event async for event in pipeline.stream_turn("hello world", config=RealtimeSessionConfig())]
+
+    assert tts_session.closed == 1
+    assert tts_session.finished == 0
+
+
+async def test_call_open_realtime_session_filters_kwargs_for_duck_typed_methods() -> None:
+    request_session = FakeRealtimeTTSSession()
+    config_session = FakeRealtimeTTSSession()
+    request = OpenAISpeechRequest(model="tts-1", input="", voice="verse", response_format="pcm", stream=True)
+
+    async def request_only_open(*, request: OpenAISpeechRequest) -> FakeRealtimeHandle:
+        assert request.voice == "verse"
+        return FakeRealtimeHandle(request_session)
+
+    async def config_only_open(*, config: Any) -> FakeRealtimeHandle:
+        assert config.voice == "verse"
+        return FakeRealtimeHandle(config_session)
+
+    request_handle = await _call_open_realtime_session(
+        request_only_open,
+        request=request,
+        provider_hint="openai",
+        route=REALTIME_TTS_ROUTE,
+        user_id=42,
+    )
+    config_handle = await _call_open_realtime_session(
+        config_only_open,
+        request=request,
+        provider_hint="openai",
+        route=REALTIME_TTS_ROUTE,
+        user_id=42,
+    )
+
+    assert request_handle.session is request_session
+    assert config_handle.session is config_session
+
+
 async def test_stream_turn_buffered_tts_fallback_preserves_pcm_request_options() -> None:
     class BufferedFallbackTTSService:
         def __init__(self) -> None:
@@ -235,6 +331,32 @@ async def test_stream_turn_buffered_tts_fallback_preserves_pcm_request_options()
             target_sample_rate=24000,
         )
     ]
+
+
+async def test_stream_turn_aborts_buffered_fallback_without_synthesizing_partial_text() -> None:
+    class BufferedFallbackTTSService:
+        def __init__(self) -> None:
+            self.requests: list[OpenAISpeechRequest] = []
+
+        async def generate_speech(self, request: OpenAISpeechRequest, **_kwargs: Any) -> AsyncIterator[bytes]:
+            self.requests.append(request)
+            yield b"should-not-synthesize"
+
+    async def _failing_streaming_chat_call(**_kwargs: Any) -> AsyncIterator[str]:
+        async def _iter() -> AsyncIterator[str]:
+            yield "partial"
+            raise RuntimeError("llm stream failed")
+
+        return _iter()
+
+    tts_service = BufferedFallbackTTSService()
+    pipeline = _pipeline(chat_call=_failing_streaming_chat_call, tts_service=tts_service)
+
+    with pytest.raises(RealtimePipelineError):
+        _ = [event async for event in pipeline.stream_turn("hello world", config=RealtimeSessionConfig())]
+    await asyncio.sleep(0)
+
+    assert tts_service.requests == []
 
 
 async def test_transcribe_pcm16_wraps_stt_errors() -> None:

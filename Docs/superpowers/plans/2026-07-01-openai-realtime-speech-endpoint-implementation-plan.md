@@ -582,6 +582,26 @@ python -m pytest tldw_Server_API/tests/Audio/test_realtime_websocket.py -v
 
 Expected result: all WebSocket tests still pass.
 
+### Stage 4 Review Notes
+
+- [x] Spec review passed with no Critical or Important findings.
+- [x] Initial code-quality review found task/session cleanup leaks on abnormal `stream_turn` exits and fragile realtime TTS opener kwargs.
+- [x] Added cleanup regressions for LLM-stream failure, close-preferred cleanup, buffered fallback abort without partial synthesis, and request-only/config-only realtime opener signatures.
+- [x] Fixed abnormal-exit cleanup to close/abort/cancel TTS sessions where available, fall back to finish, and cancel/await the audio drain task.
+- [x] Added `BufferedRealtimeSession.close()` to abort without synthesizing uncommitted text.
+- [x] Filtered `open_realtime_session` kwargs by callable signature unless it accepts `**kwargs`.
+- [x] Code-quality re-review passed with no Critical or Important findings.
+- [x] Verification after fixes:
+
+```bash
+source .venv/bin/activate
+python -m pytest tldw_Server_API/tests/Audio/test_realtime_default_pipeline.py tldw_Server_API/tests/Audio/test_realtime_websocket.py tldw_Server_API/tests/TTS_NEW/unit/test_realtime_session_sanitization.py -q
+python -m bandit -r tldw_Server_API/app/core/Audio/Realtime tldw_Server_API/app/api/v1/endpoints/audio/audio_realtime.py tldw_Server_API/app/api/v1/endpoints/realtime_compat.py tldw_Server_API/app/core/TTS/realtime_session.py -f json -o /tmp/bandit_realtime_stage4_fix4.json
+git diff --check
+```
+
+Expected result: pytest reports `20 passed`; Bandit reports `errors=[]` and `results=0`; diff check is clean.
+
 ---
 
 ## Stage 5: Documentation, Live Smoke Markers, And Final Verification

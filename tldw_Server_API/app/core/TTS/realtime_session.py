@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
@@ -106,6 +107,17 @@ class BufferedRealtimeSession(RealtimeTTSSession):
                 self._buffer = ""
             await self._text_queue.put(None)
         await await_owned_worker(self._worker_task)
+
+    async def close(self) -> None:
+        """Abort the buffered session without synthesizing uncommitted text."""
+
+        self._buffer = ""
+        self._closed = True
+        if not self._worker_task.done():
+            self._worker_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._worker_task
+        await self._audio_queue.put(None)
 
     async def audio_stream(self) -> AsyncGenerator[bytes, None]:
         while True:
