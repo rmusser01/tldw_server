@@ -220,12 +220,16 @@ def _coerce_int_list(raw: Any) -> list[int]:
 
 def _parse_impersonated_by_claim(raw: Any) -> int:
     if isinstance(raw, bool):
-        raise ValueError("impersonated_by must not be a boolean")
+        raise ValueError("impersonated_by must be a positive integer")
     if isinstance(raw, int):
-        return raw
-    if isinstance(raw, str) and raw.isdecimal():
-        return int(raw)
-    raise ValueError("impersonated_by must be an integer or decimal digit string")
+        value = raw
+    elif isinstance(raw, str) and raw.isdecimal():
+        value = int(raw)
+    else:
+        raise ValueError("impersonated_by must be an integer or decimal digit string")
+    if value <= 0:
+        raise ValueError("impersonated_by must be a positive integer")
+    return value
 
 
 def _normalize_active_id(raw: Any, ids: list[int]) -> Optional[int]:
@@ -582,6 +586,9 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
                 raise credentials_exception
         if token_impersonation and impersonated_by_user_id is None:
             logger.warning("Token impersonation claim is missing actor attribution")
+            raise credentials_exception
+        if not token_impersonation and impersonated_by_user_id is not None:
+            logger.warning("Token actor attribution claim is present without impersonation")
             raise credentials_exception
     except (InvalidTokenError, TokenExpiredError) as e:
         logger.warning(f"Token validation failed: {e}")

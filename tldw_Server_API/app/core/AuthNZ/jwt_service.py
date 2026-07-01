@@ -245,12 +245,20 @@ class JWTService:
         impersonated_by: int,
         expires_delta: timedelta,
     ) -> str:
+        if isinstance(impersonated_by, bool):
+            raise ValueError("impersonated_by must be a positive integer")
+        try:
+            actor_id = int(impersonated_by)
+        except (TypeError, ValueError):
+            raise ValueError("impersonated_by must be a positive integer") from None
+        if actor_id <= 0:
+            raise ValueError("impersonated_by must be a positive integer")
         return self.create_access_token(
             user_id=user_id,
             username=username,
             role=role,
             additional_claims={
-                "impersonated_by": int(impersonated_by),
+                "impersonated_by": actor_id,
                 "impersonation": True,
             },
             expires_delta=expires_delta,

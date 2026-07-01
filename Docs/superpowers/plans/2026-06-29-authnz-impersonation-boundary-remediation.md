@@ -732,6 +732,7 @@ Expected: commit succeeds.
 
 - `AUTH-001` has a test that decodes the actual token and checks `exp - iat`.
 - `AUTH-002` has a test that proves impersonation metadata reaches `request.state.auth.principal`.
+- Impersonation actor attribution fails closed when actor IDs are invalid or when `impersonated_by` appears without `impersonation=True`.
 - `AUTH-002` issuance has mandatory durable audit behavior and a 503 failure path.
 - `AUTH-003` removes raw `pool.acquire()` SQL from the endpoint.
 - Normal access token lifetime behavior remains unchanged.
@@ -740,7 +741,7 @@ Expected: commit succeeds.
 
 ## Completion Evidence
 
-- Focused AuthNZ remediation tests: 40 passed, 170 warnings.
+- Focused AuthNZ remediation tests: 49 passed, 207 warnings.
 - Broader AuthNZ/AuthNZ_Unit safety tests: 1306 passed, 175 skipped, 10846 warnings.
 - Bandit on touched production paths: no high or medium findings; 13 low token-type literal false positives recorded in `TASK-12073`.
 - Endpoint search confirmed no remaining `get_db_pool`, `pool.acquire`, raw user/user-role `SELECT`, or generic `create_access_token` usage in `admin_impersonation.py`.

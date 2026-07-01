@@ -407,6 +407,18 @@ def test_create_impersonation_access_token_marks_actor_and_short_ttl(jwt_service
     assert int(payload["exp"]) - int(payload["iat"]) == 15 * 60
 
 
+@pytest.mark.parametrize("impersonated_by", [True, 0, -1, None, "not-a-user-id"])
+def test_create_impersonation_access_token_rejects_invalid_actor(jwt_service, impersonated_by):
+    with pytest.raises(ValueError, match="impersonated_by must be a positive integer"):
+        jwt_service.create_impersonation_access_token(
+            user_id=42,
+            username="target",
+            role="user",
+            impersonated_by=impersonated_by,
+            expires_delta=timedelta(minutes=15),
+        )
+
+
 def test_create_access_token_rejects_non_positive_expiry_override(jwt_service):
     with pytest.raises(ValueError, match="expires_delta must be positive"):
         jwt_service.create_access_token(
