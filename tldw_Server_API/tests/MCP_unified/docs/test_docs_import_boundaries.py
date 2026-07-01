@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import sys
 from pathlib import Path
 
 
@@ -38,7 +39,7 @@ def test_docs_core_does_not_import_tldw_server_modules() -> None:
 
 
 def test_docs_package_does_not_import_optional_web_acquisition_dependencies() -> None:
-    forbidden = {"playwright", "trafilatura", "requests", "aiohttp"}
+    forbidden = {"playwright", "trafilatura", "requests", "aiohttp", "httpx", "bs4"}
     violations: list[tuple[str, str]] = []
     for path in DOCS_PACKAGE_ROOT.rglob("*.py"):
         for name in _import_names(path):
@@ -47,3 +48,13 @@ def test_docs_package_does_not_import_optional_web_acquisition_dependencies() ->
                 violations.append((str(path), name))
 
     assert violations == []  # nosec B101
+
+
+def test_docs_package_import_does_not_load_rich_extractors() -> None:
+    for name in ("trafilatura", "bs4"):
+        sys.modules.pop(name, None)
+
+    importlib.import_module("mcp_unified.docs")
+
+    assert "trafilatura" not in sys.modules  # nosec B101
+    assert "bs4" not in sys.modules  # nosec B101

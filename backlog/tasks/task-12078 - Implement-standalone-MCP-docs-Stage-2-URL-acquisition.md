@@ -22,7 +22,7 @@ Implement optional single-page URL acquisition for the standalone MCP docs corpu
 - [x] #4 Extraction uses lazy optional trafilatura/bs4 imports with stdlib HTML/text fallback and preserves source_url/canonical_uri without pretending URLs are local paths.
 - [x] #5 Approved fake URL ingestion writes to SQLite/FTS5, applies keywords and collections, and is retrievable via docs.search and docs.context.
 - [x] #6 MCP provider and host shim expose docs.ingest_url only when enabled, validate url arguments, categorize it as ingestion, and report disabled/enabled/extractor status in docs.status.
-- [ ] #7 Import-boundary tests verify mcp_unified.docs has no top-level tldw_Server_API, requests, httpx, aiohttp, playwright, trafilatura, or bs4 imports; tests do not use live internet.
+- [x] #7 Import-boundary tests verify mcp_unified.docs has no top-level tldw_Server_API, requests, httpx, aiohttp, playwright, trafilatura, or bs4 imports; tests do not use live internet.
 - [ ] #8 Focused docs MCP tests and Bandit on touched Python paths pass.
 <!-- AC:END -->
 
@@ -65,6 +65,11 @@ Task 6 complete locally.
 - Bandit evidence: `/tmp/bandit_mcp_docs_provider_url.json` reported `errors: []` and `results: []` for the provider, host shim, and Task 6 tests.
 - Review gates: verified `docs.ingest_url` remains hidden when disabled, stale disabled direct provider calls return `capability_disabled`, enabled provider definitions mark the tool as ingestion/write-capable, enabled direct calls validate non-empty URL and delegate keywords/collections/title to the acquisition service, `docs.status` reports enabled availability plus extractor names, and the host shim rejects blank URL before provider execution.
 AC #1 resolved with Task 6 plus the Task 5 service guard: disabled configurations do not advertise `docs.ingest_url`, stale provider calls return `capability_disabled`/`web_acquisition_disabled`, and service-level disabled calls return before policy, resolver, or transport work.
+Task 7 complete locally.
+- Red evidence: focused boundary/config tests failed because the docs MCP config lacked explicit locked-down URL defaults (`web_source_profile` missing).
+- Green evidence: focused import-boundary/config tests passed (`5 passed, 6 warnings`); full docs MCP tests passed (`143 passed, 6 warnings`); Black check reported 2 touched Python test files unchanged; `git diff --check` was clean.
+- Bandit evidence: `/tmp/bandit_mcp_docs_boundaries.json` reported `errors: []` and `results: []` for the Task 7 Python test files; config YAML was non-code.
+- Review gates: verified the standalone docs package has no AST-level imports of `tldw_Server_API`, `requests`, `httpx`, `aiohttp`, `playwright`, `trafilatura`, or `bs4`; package import does not load `trafilatura` or `bs4`; tests use fake/no-live-internet paths; and repo MCP config keeps web acquisition disabled with explicit locked-down URL defaults.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

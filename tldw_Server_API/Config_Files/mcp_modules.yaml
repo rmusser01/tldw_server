@@ -156,6 +156,20 @@ modules:
       trusted_roots:
         - Docs
       enable_web_acquisition: false
+      web_source_profile: locked_down
+      allow_arbitrary_public_domains: false
+      preapproved_domains: []
+      allowed_url_prefixes: []
+      denied_domains: []
+      max_url_redirects: 3
+      max_url_body_bytes: 2000000
+      url_request_timeout_seconds: 10.0
+      allowed_content_types:
+        - text/html
+        - application/xhtml+xml
+        - text/plain
+        - text/markdown
+      respect_robots: false
       max_import_file_bytes: 2000000
 
   - id: run_command
