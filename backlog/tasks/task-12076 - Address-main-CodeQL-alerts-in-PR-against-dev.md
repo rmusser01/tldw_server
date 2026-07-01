@@ -1,10 +1,10 @@
 ---
 id: TASK-12076
 title: Address main CodeQL alerts in PR against dev
-status: Done
+status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-01 01:38'
+updated_date: '2026-07-01 02:01'
 labels:
   - security
   - codeql
@@ -53,12 +53,13 @@ Verification recorded:
 - Python py_compile passed for changed Python files.
 - git diff --check passed.
 - Bandit touched Python scope written to /tmp/bandit_main_codeql.json; raw scan has 0 high/medium findings, remaining low findings are baseline B101 asserts plus existing B311/B404/B603 in touched legacy files. Actionable profile excluding those baseline IDs written to /tmp/bandit_main_codeql_filtered.json with 0 results.
+
+Follow-up requested: rebase PR #2564 on latest dev and address unresolved PR review threads/comments from Gemini, Cubic, Qodo, and CI checks.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 PR opened against dev: https://github.com/rmusser01/tldw_server/pull/2564
 
 Final result: branch codex/main-codeql-alerts-dev addresses the open CodeQL alert classes observed on refs/heads/main against origin/dev, including frontend durable secret storage, backend path containment, stack-trace exposure, SQL identifier validation, sensitive hashing, ReDoS, sensitive logging/storage, and bind-all-interface probes. Verification is recorded in implementation notes; actionable Bandit profile is clean with 0 results.
