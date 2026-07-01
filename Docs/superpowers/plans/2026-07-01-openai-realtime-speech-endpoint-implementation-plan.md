@@ -327,7 +327,7 @@ Expected result: all Stage 2 session and persistence tests pass.
 
 **Tests:** WebSocket auth and integration tests run against fake pipeline without live providers.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Files
 
@@ -493,7 +493,7 @@ Expected result: all Stage 3 tests pass.
 
 **Tests:** Unit tests monkeypatch service callables and do not call external providers by default.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Files
 
