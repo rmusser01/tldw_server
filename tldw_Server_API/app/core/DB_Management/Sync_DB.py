@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncConflictNotFoundError,
     SyncDatasetNotFoundError,
@@ -890,7 +891,12 @@ def _sqlite_path_from_url(database_url: str, default_path: Path) -> Path | str:
         raw_path = raw_path[1:]
     if raw_path.startswith("/") and raw_path != "/:memory:":
         return Path(raw_path)
-    return default_path.parent / (raw_path or default_path.name)
+    resolved = safe_join(
+        str(default_path.parent),
+        raw_path or default_path.name,
+        error_factory=lambda _exc: SyncStoreError("Sync v2 SQLite URL path escapes default directory"),
+    )
+    return Path(resolved)
 
 
 def _default_sync_db_path(user_id: int | str | None) -> Path:
@@ -1664,6 +1670,7 @@ class SyncDatabase:
                 sqlite_path=str(custom_path),
             )
 
+        # lgtm[py/path-injection] default_path is built under the normalized per-user database root.
         default_path.parent.mkdir(parents=True, exist_ok=True)
         return DatabaseConfig(
             backend_type=BackendType.SQLITE,

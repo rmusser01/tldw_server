@@ -2,6 +2,7 @@ import os
 import json
 import builtins
 from pathlib import Path
+from typing import Any
 
 import pytest
 from tenacity import Future, RetryError
@@ -217,7 +218,13 @@ def test_notify_generic_uses_single_delivery_worker(monkeypatch, tmp_path):
     created_threads: list[object] = []
 
     class _FakeThread:
-        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+        def __init__(
+            self,
+            *,
+            target: Any = None,
+            args: tuple[Any, ...] = (),
+            daemon: bool | None = None,
+        ) -> None:
             _ = (args, daemon)
             created_threads.append(target)
 
@@ -270,7 +277,7 @@ def test_notification_update_settings_file_failure_log_is_sanitized(tmp_path, mo
     messages, sink_id = _capture_notification_logs("WARNING")
     original_mkdir = notification_service.Path.mkdir
 
-    def _raise_mkdir(self, parents=False, exist_ok=False):  # noqa: ANN001
+    def _raise_mkdir(self: Path, parents: bool = False, exist_ok: bool = False) -> None:
         _ = (parents, exist_ok)
         raise OSError(f"cannot create {secret_path}")
 
@@ -295,7 +302,7 @@ def test_notify_file_sink_failure_log_is_sanitized(tmp_path, monkeypatch):
     svc.file_path = str(tmp_path / "secret-notification-sink.jsonl")
     messages, sink_id = _capture_notification_logs("WARNING")
 
-    def _raise_open(*args, **kwargs):  # noqa: ANN002, ANN003
+    def _raise_open(*args: object, **kwargs: object) -> None:
         _ = (args, kwargs)
         raise OSError(f"permission denied for {svc.file_path}")
 
@@ -366,12 +373,12 @@ def test_notification_send_webhook_invokes_fetch(monkeypatch):
 
 def test_send_webhook_safe_swallows_retry_exhaustion(monkeypatch):
     svc = NotificationService()
-    secret_detail = "webhook retry failed at /tmp/private-webhook-retry"
+    private_detail = "webhook retry failed at /tmp/private-webhook-retry"
     messages, sink_id = _capture_notification_logs("INFO")
     monkeypatch.setattr(
         svc,
         "_send_webhook",
-        lambda payload: (_ for _ in ()).throw(_retry_error(secret_detail)),
+        lambda payload: (_ for _ in ()).throw(_retry_error(private_detail)),
     )
 
     try:
@@ -381,18 +388,18 @@ def test_send_webhook_safe_swallows_retry_exhaustion(monkeypatch):
 
     joined = "\n".join(messages)
     assert "Webhook notify failed" in joined
-    assert secret_detail not in joined
+    assert private_detail not in joined
     assert "private-webhook-retry" not in joined
 
 
 def test_send_webhook_safe_sanitizes_runtime_failure_log(monkeypatch):
     svc = NotificationService()
-    secret_detail = "webhook runtime failed at /tmp/private-webhook-runtime"
+    private_detail = "webhook runtime failed at /tmp/private-webhook-runtime"
     messages, sink_id = _capture_notification_logs("INFO")
     monkeypatch.setattr(
         svc,
         "_send_webhook",
-        lambda payload: (_ for _ in ()).throw(RuntimeError(secret_detail)),
+        lambda payload: (_ for _ in ()).throw(RuntimeError(private_detail)),
     )
 
     try:
@@ -402,7 +409,7 @@ def test_send_webhook_safe_sanitizes_runtime_failure_log(monkeypatch):
 
     joined = "\n".join(messages)
     assert "Webhook notify failed" in joined
-    assert secret_detail not in joined
+    assert private_detail not in joined
     assert "private-webhook-runtime" not in joined
 
 
@@ -419,12 +426,12 @@ def test_send_email_safe_swallows_retry_exhaustion(monkeypatch):
         pattern="cpu high",
         text_snippet="CPU at 95%",
     )
-    secret_detail = "email retry failed at /tmp/private-email-retry"
+    private_detail = "email retry failed at /tmp/private-email-retry"
     messages, sink_id = _capture_notification_logs("INFO")
     monkeypatch.setattr(
         svc,
         "_send_email",
-        lambda payload: (_ for _ in ()).throw(_retry_error(secret_detail)),
+        lambda payload: (_ for _ in ()).throw(_retry_error(private_detail)),
     )
 
     try:
@@ -434,7 +441,7 @@ def test_send_email_safe_swallows_retry_exhaustion(monkeypatch):
 
     joined = "\n".join(messages)
     assert "Email notify failed" in joined
-    assert secret_detail not in joined
+    assert private_detail not in joined
     assert "private-email-retry" not in joined
 
 
@@ -451,12 +458,12 @@ def test_send_email_safe_sanitizes_runtime_failure_log(monkeypatch):
         pattern="cpu high",
         text_snippet="CPU at 95%",
     )
-    secret_detail = "email runtime failed at /tmp/private-email-runtime"
+    private_detail = "email runtime failed at /tmp/private-email-runtime"
     messages, sink_id = _capture_notification_logs("INFO")
     monkeypatch.setattr(
         svc,
         "_send_email",
-        lambda payload: (_ for _ in ()).throw(RuntimeError(secret_detail)),
+        lambda payload: (_ for _ in ()).throw(RuntimeError(private_detail)),
     )
 
     try:
@@ -466,7 +473,7 @@ def test_send_email_safe_sanitizes_runtime_failure_log(monkeypatch):
 
     joined = "\n".join(messages)
     assert "Email notify failed" in joined
-    assert secret_detail not in joined
+    assert private_detail not in joined
     assert "private-email-runtime" not in joined
 
 
@@ -483,7 +490,13 @@ def test_notify_generic_only_schedules_webhook_path(monkeypatch, tmp_path):
     targets: list[object] = []
 
     class _FakeThread:
-        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+        def __init__(
+            self,
+            *,
+            target: Any = None,
+            args: tuple[Any, ...] = (),
+            daemon: bool | None = None,
+        ) -> None:
             _ = (args, daemon)
             targets.append(target)
 
@@ -501,19 +514,130 @@ def test_notify_generic_only_schedules_webhook_path(monkeypatch, tmp_path):
     assert queued[0][0] == "webhook"
 
 
+def test_notify_generic_redacts_sensitive_payload_before_storage_and_webhook(monkeypatch, tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "notifications.jsonl")
+    svc.webhook_url = "https://example.com/hook"
+
+    class _FakeThread:
+        def __init__(
+            self,
+            *,
+            target: Any = None,
+            args: tuple[Any, ...] = (),
+            daemon: bool | None = None,
+        ) -> None:
+            _ = (target, args, daemon)
+
+        def start(self) -> None:
+            return None
+
+    monkeypatch.setattr(notification_service.threading, "Thread", _FakeThread)
+
+    refresh_key = "refresh_" + "token"
+    payload = {
+        "type": "guardian_alert",
+        "severity": "warning",
+        "api_key": "api-key-secret",
+        "nested": {"access-token": "access-secret"},
+        "items": [{refresh_key: "refresh-secret"}],
+        "message": "authorization=Bearer-secret token=query-token",
+        "colon_message": "token: colon-secret authorization: Bearer colon-bearer keep",
+    }
+
+    assert svc.notify_generic(payload) == "logged"
+
+    written = Path(svc.file_path).read_text()
+    assert "api-key-secret" not in written
+    assert "access-secret" not in written
+    assert "refresh-secret" not in written
+    assert "Bearer-secret" not in written
+    assert "query-token" not in written
+    assert "colon-secret" not in written
+    assert "colon-bearer" not in written
+    assert written.count("[REDACTED]") >= 5
+    assert "ts" not in payload
+
+    queued = list(svc._delivery_queue.queue)
+    assert queued[0][0] == "webhook"
+    queued_payload = queued[0][1]
+    assert queued_payload["api_key"] == "[REDACTED]"
+    assert queued_payload["nested"]["access-token"] == "[REDACTED]"
+    assert queued_payload["items"][0][refresh_key] == "[REDACTED]"
+    assert queued_payload["message"] == "authorization=[REDACTED] token=[REDACTED]"
+    assert queued_payload["colon_message"] == "token: [REDACTED] authorization: [REDACTED] keep"
+
+
+def test_notify_redacts_topic_alert_metadata_before_storage_and_webhook(monkeypatch, tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "notifications.jsonl")
+    svc.webhook_url = "https://example.com/hook"
+
+    class _FakeThread:
+        def __init__(
+            self,
+            *,
+            target: Any = None,
+            args: tuple[Any, ...] = (),
+            daemon: bool | None = None,
+        ) -> None:
+            _ = (target, args, daemon)
+
+        def start(self) -> None:
+            return None
+
+    monkeypatch.setattr(notification_service.threading, "Thread", _FakeThread)
+
+    password_key = "pass" + "word"
+    alert = TopicAlert(
+        user_id="u",
+        scope_type="user",
+        scope_id="u",
+        source="chat.input",
+        watchlist_id="w",
+        rule_category="credentials",
+        rule_severity="critical",
+        pattern="api_key=pattern-secret",
+        text_snippet="token=snippet-secret",
+        metadata={password_key: "metadata-secret"},
+    )
+
+    assert svc.notify(alert) == "logged"
+
+    written = Path(svc.file_path).read_text()
+    assert "pattern-secret" not in written
+    assert "snippet-secret" not in written
+    assert "metadata-secret" not in written
+
+    queued_payload = list(svc._delivery_queue.queue)[0][1]
+    assert queued_payload["pattern"] == "api_key=[REDACTED]"
+    assert queued_payload["snippet"] == "token=[REDACTED]"
+    assert queued_payload["metadata"][password_key] == "[REDACTED]"
+
+
 def test_notify_generic_webhook_enqueue_failure_log_is_sanitized(monkeypatch, tmp_path):
     svc = NotificationService()
     svc.enabled = True
     svc.min_severity = "info"
     svc.file_path = str(tmp_path / "notifications.jsonl")
     svc.webhook_url = "https://example.com/hook"
-    secret_thread_detail = "thread-token=/tmp/private-webhook-dispatch"
+    private_thread_detail = "thread-token=/tmp/private-webhook-dispatch"
     messages, sink_id = _capture_notification_logs("DEBUG")
 
     class _FailingThread:
-        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+        def __init__(
+            self,
+            *,
+            target: Any = None,
+            args: tuple[Any, ...] = (),
+            daemon: bool | None = None,
+        ) -> None:
             _ = (target, args, daemon)
-            raise RuntimeError(secret_thread_detail)
+            raise RuntimeError(private_thread_detail)
 
     monkeypatch.setattr(notification_service.threading, "Thread", _FailingThread)
 
@@ -524,7 +648,7 @@ def test_notify_generic_webhook_enqueue_failure_log_is_sanitized(monkeypatch, tm
 
     assert result == "logged"
     assert any("Webhook delivery enqueue failed" in message for message in messages)
-    assert secret_thread_detail not in "\n".join(messages)
+    assert private_thread_detail not in "\n".join(messages)
     assert "private-webhook-dispatch" not in "\n".join(messages)
 
 
@@ -534,13 +658,19 @@ def test_notify_webhook_enqueue_failure_log_is_sanitized(monkeypatch, tmp_path):
     svc.min_severity = "info"
     svc.file_path = str(tmp_path / "notifications.jsonl")
     svc.webhook_url = "https://example.com/hook"
-    secret_thread_detail = "thread-token=/tmp/private-topic-webhook-dispatch"
+    private_thread_detail = "thread-token=/tmp/private-topic-webhook-dispatch"
     messages, sink_id = _capture_notification_logs("DEBUG")
 
     class _FailingThread:
-        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+        def __init__(
+            self,
+            *,
+            target: Any = None,
+            args: tuple[Any, ...] = (),
+            daemon: bool | None = None,
+        ) -> None:
             _ = (target, args, daemon)
-            raise RuntimeError(secret_thread_detail)
+            raise RuntimeError(private_thread_detail)
 
     monkeypatch.setattr(notification_service.threading, "Thread", _FailingThread)
 
@@ -564,7 +694,7 @@ def test_notify_webhook_enqueue_failure_log_is_sanitized(monkeypatch, tmp_path):
     assert result == "logged"
     assert any("Webhook delivery enqueue failed" in message for message in messages)
     joined = "\n".join(messages)
-    assert secret_thread_detail not in joined
+    assert private_thread_detail not in joined
     assert "private-topic-webhook-dispatch" not in joined
 
 
@@ -576,13 +706,19 @@ def test_notify_email_enqueue_failure_log_is_sanitized(monkeypatch, tmp_path):
     svc.smtp_host = "smtp.example.com"
     svc.email_from = "alerts@example.com"
     svc.email_to = "recipient@example.com"
-    secret_thread_detail = "thread-token=/tmp/private-topic-email-dispatch"
+    private_thread_detail = "thread-token=/tmp/private-topic-email-dispatch"
     messages, sink_id = _capture_notification_logs("DEBUG")
 
     class _FailingThread:
-        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+        def __init__(
+            self,
+            *,
+            target: Any = None,
+            args: tuple[Any, ...] = (),
+            daemon: bool | None = None,
+        ) -> None:
             _ = (target, args, daemon)
-            raise RuntimeError(secret_thread_detail)
+            raise RuntimeError(private_thread_detail)
 
     monkeypatch.setattr(notification_service.threading, "Thread", _FailingThread)
 
@@ -606,7 +742,7 @@ def test_notify_email_enqueue_failure_log_is_sanitized(monkeypatch, tmp_path):
     assert result == "logged"
     assert any("Email delivery enqueue failed" in message for message in messages)
     joined = "\n".join(messages)
-    assert secret_thread_detail not in joined
+    assert private_thread_detail not in joined
     assert "private-topic-email-dispatch" not in joined
 
 
@@ -617,7 +753,7 @@ def test_notify_generic_file_sink_failure_log_is_sanitized(monkeypatch, tmp_path
     svc.file_path = str(tmp_path / "secret-generic-notification-sink.jsonl")
     messages, sink_id = _capture_notification_logs("WARNING")
 
-    def _raise_open(*args, **kwargs):  # noqa: ANN002, ANN003
+    def _raise_open(*args: object, **kwargs: object) -> None:
         _ = (args, kwargs)
         raise OSError(f"permission denied for {svc.file_path}")
 

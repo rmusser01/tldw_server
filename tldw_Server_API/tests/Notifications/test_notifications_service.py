@@ -150,6 +150,35 @@ async def test_notifications_email_rejects_too_many_recipients(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_notifications_email_recipient_validation_rejects_malformed_addresses(monkeypatch):
+    fake_email = _FakeEmailService()
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Notifications.service.get_email_service",
+        lambda: fake_email,
+    )
+
+    svc = NotificationsService(user_id=1, user_email=None)
+    result = await svc.deliver_email(
+        subject="Bad recipients",
+        html_body="<p>Bad</p>",
+        text_body="Bad",
+        recipients=[
+            "valid@example.com",
+            "missing-domain@",
+            "missing-dot@example",
+            "extra@example.com@example.org",
+            "white space@example.org",
+        ],
+    )
+
+    assert result.status == "failed"
+    assert result.details["reason"] == "invalid_recipients"
+    assert result.details["invalid_recipient_count"] == 4
+    assert fake_email.calls == []
+
+
+@pytest.mark.asyncio
 async def test_notifications_email_rejects_oversized_attachments(monkeypatch):
     fake_email = _FakeEmailService()
 

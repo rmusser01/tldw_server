@@ -68,3 +68,56 @@ async def test_save_and_register_image_preflights_quota_before_writing(
     assert service.preflight_called is True
     assert service.register_called is False
     assert not outputs_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_save_and_register_image_uses_resolved_outputs_root_for_storage_path(
+    tmp_path,
+    monkeypatch,
+):
+    real_outputs_dir = tmp_path / "real_outputs"
+    linked_outputs_dir = tmp_path / "linked_outputs"
+    real_outputs_dir.mkdir()
+    try:
+        linked_outputs_dir.symlink_to(real_outputs_dir, target_is_directory=True)
+    except OSError:
+        pytest.skip("filesystem does not support directory symlinks")
+
+    class RecordingStorageService:
+        def __init__(self):
+            self.kwargs = None
+
+        async def check_combined_quota(self, user_id, new_bytes, **kwargs):
+            _ = (user_id, new_bytes, kwargs)
+
+        async def register_generated_file(self, **kwargs):
+            self.kwargs = dict(kwargs)
+            return {"storage_path": kwargs["storage_path"]}
+
+    service = RecordingStorageService()
+
+    monkeypatch.setattr(
+        generated_file_helpers.DatabasePaths,
+        "get_user_outputs_dir",
+        staticmethod(lambda _user_id: linked_outputs_dir),
+    )
+
+    async def fake_get_storage_service():
+        return service
+
+    monkeypatch.setattr(
+        generated_file_helpers,
+        "get_storage_service",
+        fake_get_storage_service,
+    )
+
+    record = await generated_file_helpers.save_and_register_image(
+        user_id=42,
+        image_bytes=b"image-bytes",
+        check_quota=True,
+    )
+
+    assert service.kwargs is not None
+    assert record["storage_path"] == service.kwargs["storage_path"]
+    assert not record["storage_path"].startswith(str(tmp_path))
+    assert (real_outputs_dir / record["storage_path"]).is_file()

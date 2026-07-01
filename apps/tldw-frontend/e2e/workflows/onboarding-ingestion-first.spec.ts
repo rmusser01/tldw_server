@@ -303,7 +303,7 @@ test.describe("Onboarding First-Source Journey", () => {
     await installCompletedFirstRunApi(authedPage)
     await authedPage.addInitScript((cfg) => {
       try {
-        localStorage.setItem(
+        localStorage.setItem( // lgtm[js/clear-text-storage-of-sensitive-data] synthetic E2E auth seed only
           "tldwConfig",
           JSON.stringify({
             serverUrl: cfg.serverUrl,

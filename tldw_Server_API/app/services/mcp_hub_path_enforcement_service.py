@@ -105,7 +105,9 @@ def _is_within(root: Path, candidate: Path) -> bool:
 def _normalize_candidate_path(raw_path: str, *, base_path: Path) -> Path:
     candidate = Path(raw_path).expanduser()
     if not candidate.is_absolute():
-        candidate = base_path / candidate
+        # lgtm[py/path-injection] relative candidates are scope-checked before use.
+        return (base_path / candidate).resolve(strict=False)
+    # lgtm[py/path-injection] absolute candidates are checked against workspace/scope roots before use.
     return candidate.resolve(strict=False)
 
 
@@ -720,7 +722,14 @@ class McpHubPathEnforcementService:
         path_decisions: list[dict[str, Any]] = []
         for raw_path in raw_paths:
             path_index = len(normalized_paths)
-            normalized = _normalize_candidate_path(raw_path, base_path=base_path)
+            try:
+                normalized = _normalize_candidate_path(raw_path, base_path=base_path)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                return self._blocked_result(
+                    scope=scope,
+                    reason="path_outside_workspace_scope",
+                    normalized_paths=normalized_paths,
+                )
             normalized_paths.append(str(normalized))
             if not _is_within(workspace_root, normalized):
                 return self._blocked_result(

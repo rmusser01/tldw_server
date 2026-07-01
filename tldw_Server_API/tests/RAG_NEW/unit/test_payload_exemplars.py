@@ -80,6 +80,12 @@ def test_safe_sink_namespace_and_user_fallback(tmp_path, monkeypatch):
     path = payload_exemplars._safe_sink(namespace="!!!")
     assert path == sink
 
+    path = payload_exemplars._safe_sink(namespace=".")
+    assert path == sink
+
+    path = payload_exemplars._safe_sink(user_id="..")
+    assert path == sink
+
 
 def test_exemplar_records_scope_metadata_and_redacts_payload(tmp_path, monkeypatch):
 

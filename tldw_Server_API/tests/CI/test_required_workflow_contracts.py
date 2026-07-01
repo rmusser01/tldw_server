@@ -456,7 +456,7 @@ def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
     )
     linux_script = linux_step["run"]
     assert 'inputs.install-ffmpeg' in linux_script
-    assert "azure.archive.ubuntu.com" in linux_script
+    assert "azure.archive.ubuntu.com" in linux_script  # lgtm[py/incomplete-url-substring-sanitization] workflow literal contract
     assert (
         "grep -rl 'packages.microsoft.com' /etc/apt/sources.list.d | xargs -r sudo rm -f || true"
         in linux_script
@@ -489,7 +489,7 @@ def test_wait_for_postgres_action_bounds_linux_client_install() -> None:
     install_step = _get_step(action["runs"]["steps"], "Install client (Linux)")
     install_script = install_step["run"]
     assert "command -v pg_isready" in install_script
-    assert "azure.archive.ubuntu.com" in install_script
+    assert "azure.archive.ubuntu.com" in install_script  # lgtm[py/incomplete-url-substring-sanitization] workflow literal contract
     assert "Acquire::http::Timeout=20" in install_script
     assert "Acquire::https::Timeout=20" in install_script
     assert "sudo apt-get install -y --no-install-recommends postgresql-client" in install_script

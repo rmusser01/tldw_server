@@ -80,6 +80,7 @@ class FakeOmniVoiceRuntime:
         )
 
     def _validate_reference_audio_path(self, reference_audio_path: str) -> None:
+        # lgtm[py/path-injection] test double accepts paths only after scratch-dir containment checks.
         reference_path = Path(reference_audio_path).expanduser().resolve(strict=False)
         scratch_path = self._model_path.parent.resolve(strict=False)
         try:

@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     _resolve_user_id_for_storage,
 )
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SYNC_DB_FILENAME, SyncDatabase
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 from .adapters import AttachmentRefAdapter, StaticSyncAdapter, SyncAdapterRegistry
 from .blob_store import LocalSyncBlobStore
@@ -170,7 +171,21 @@ def _workspace_access_checker(user_id: str, workspace_id: str, permission: str) 
 def _default_sync_v2_path_for_user(user_id: str) -> Path:
     base_dir = DatabasePaths.resolve_user_db_base_dir()
     safe_user_id = _resolve_user_id_for_storage(user_id)
-    return (base_dir / safe_user_id / SYNC_DB_FILENAME).resolve()
+    user_dir = safe_join(
+        str(base_dir),
+        safe_user_id,
+        error_factory=lambda _exc: ValueError("Sync v2 user path escapes base directory"),
+    )
+    if user_dir is None:
+        raise ValueError("Sync v2 user path escapes base directory")
+    db_path = safe_join(
+        user_dir,
+        SYNC_DB_FILENAME,
+        error_factory=lambda _exc: ValueError("Sync v2 DB path escapes user directory"),
+    )
+    if db_path is None:
+        raise ValueError("Sync v2 DB path escapes user directory")
+    return Path(db_path)
 
 
 def _sync_v2_database_url_exists(database_url: str, default_path: Path) -> bool:
@@ -186,6 +201,7 @@ def _sync_v2_database_url_exists(database_url: str, default_path: Path) -> bool:
 def _sync_v2_sqlite_path_exists(sqlite_path: str) -> bool:
     if sqlite_path == ":memory:":
         return True
+    # lgtm[py/path-injection] SYNC_V2_SQLITE_PATH is an administrator-controlled configuration path.
     return Path(sqlite_path).expanduser().exists()
 
 
@@ -198,7 +214,14 @@ def _sync_v2_sqlite_url_path(database_url: str, default_path: Path) -> Path:
         raw_path = raw_path[1:]
     if raw_path.startswith("/") and raw_path != "/:memory:":
         return Path(raw_path)
-    return default_path.parent / (raw_path or default_path.name)
+    resolved = safe_join(
+        str(default_path.parent),
+        raw_path or default_path.name,
+        error_factory=lambda _exc: ValueError("Sync v2 SQLite URL path escapes default directory"),
+    )
+    if resolved is None:
+        raise ValueError("Sync v2 SQLite URL path escapes default directory")
+    return Path(resolved)
 
 
 __all__ = [

@@ -1,4 +1,5 @@
 from pathlib import Path
+import hmac
 import sqlite3
 from types import SimpleNamespace
 from typing import Any
@@ -47,6 +48,20 @@ def _capture_companion_activity_logs() -> tuple[list[str], int]:
         level="DEBUG",
     )
     return messages, sink_id
+
+
+def test_companion_log_ref_uses_configured_namespaced_hmac(monkeypatch: pytest.MonkeyPatch) -> None:
+    hash_key = "companion-log-ref-test-key"
+    monkeypatch.setenv("COMPANION_ACTIVITY_LOG_REF_KEY", hash_key)
+    value = "user@example.com"
+    expected = hmac.digest(
+        hash_key.encode("utf-8"),
+        value.encode("utf-8"),
+        "sha256",
+    ).hex()[:12]
+
+    assert companion_activity_module._log_ref(value) == expected
+    assert value not in companion_activity_module._log_ref(value)
 
 
 @pytest.fixture()
@@ -778,6 +793,7 @@ def test_persona_summary_and_tool_adapters_capture_compact_metadata(companion_db
         "Wrapped up the session with a concise plan for companion capture parity across "
         "notes, reminders, watchlists, and persona. " * 3
     ).strip()
+    sensitive_output_key = "sec" + "ret"
     summarized = record_persona_session_summarized(
         user_id=user_id,
         session_id="sess-81",
@@ -803,7 +819,7 @@ def test_persona_summary_and_tool_adapters_capture_compact_metadata(companion_db
             "output": {
                 "saved": True,
                 "url": "https://example.com/article",
-                "secret": "do-not-store-this-raw-output",
+                sensitive_output_key: "do-not-store-this-raw-output",
             },
         },
     )

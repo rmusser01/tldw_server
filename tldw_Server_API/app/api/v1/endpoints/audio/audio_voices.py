@@ -62,6 +62,16 @@ def _fish_s2_import_error(index: int, message: str, code: Optional[str] = None) 
     return payload
 
 
+def _fish_s2_public_item_error(exc: Exception) -> str:
+    """Return a stable public import-item failure without exception internals."""
+    if isinstance(exc, TTSError):
+        if exc.error_code == "VOICE_NOT_FOUND":
+            return "Fish S2 reference voice was not found"
+        if exc.error_code == "INVALID_REFERENCE_AUDIO":
+            return "Fish S2 reference audio is invalid"
+    return "Fish S2 reference import item failed"
+
+
 def _estimated_base64_decoded_size(value: str) -> int:
     encoded = value.strip()
     padding = len(encoded) - len(encoded.rstrip("="))
@@ -596,12 +606,12 @@ async def import_fish_s2_references(
             results.append({"index": item.source_index, **result_payload})
         except TTSError as e:
             logger.warning(f"Fish S2 reference import item {item.source_index} failed: {e}", exc_info=True)
-            errors.append(_fish_s2_import_error(item.source_index, str(e), getattr(e, "error_code", None)))
+            errors.append(_fish_s2_import_error(item.source_index, _fish_s2_public_item_error(e), getattr(e, "error_code", None)))
             continue
         except Exception as e:
             if e.__class__.__name__ == "VoiceProcessingError":
                 logger.warning(f"Fish S2 reference import item {item.source_index} failed: {e}", exc_info=True)
-                errors.append(_fish_s2_import_error(item.source_index, str(e), getattr(e, "error_code", None)))
+                errors.append(_fish_s2_import_error(item.source_index, _fish_s2_public_item_error(e), getattr(e, "error_code", None)))
                 continue
             logger.error(f"Fish S2 reference import error: {e}")
             raise HTTPException(

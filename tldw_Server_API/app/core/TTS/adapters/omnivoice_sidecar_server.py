@@ -61,13 +61,32 @@ def _runtime_error_status_code(exc: OmniVoiceRuntimeError) -> int:
     return status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
+def _public_runtime_error_message(exc: OmniVoiceRuntimeError) -> str:
+    """Return a public-safe OmniVoice runtime error for HTTP clients."""
+    if exc.code == "MODEL_NOT_AVAILABLE":
+        return "OmniVoice requires a configured local model directory"
+    if exc.code in {"MODEL_LOAD_FAILED", "RUNTIME_IMPORT_FAILED"}:
+        return "OmniVoice runtime is not available"
+    if exc.code == "INVALID_REFERENCE_AUDIO":
+        return "Invalid OmniVoice reference audio"
+    if exc.code == "REFERENCE_PATH_NOT_ALLOWED":
+        return "OmniVoice clone reference audio path is outside managed directories"
+    if exc.code == "INVALID_GENERATION_PARAMETER":
+        return "Invalid OmniVoice generation parameter"
+    if exc.code == "RUNTIME_RELOAD_UNSUPPORTED":
+        return "OmniVoice runtime reload is not supported"
+    if exc.code == "RUNTIME_SHUTDOWN_UNSUPPORTED":
+        return "OmniVoice runtime shutdown is not supported"
+    return "OmniVoice runtime error"
+
+
 def _runtime_error_response(exc: OmniVoiceRuntimeError) -> JSONResponse:
     return JSONResponse(
         status_code=_runtime_error_status_code(exc),
         content={
             "error": {
                 "code": exc.code,
-                "message": str(exc),
+                "message": _public_runtime_error_message(exc),
                 "retryable": exc.retryable,
             }
         },

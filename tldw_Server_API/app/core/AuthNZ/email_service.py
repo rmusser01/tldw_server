@@ -687,22 +687,99 @@ class EmailService:
     @staticmethod
     def _redact_mock_email_body(body: str) -> str:
         """Redact token-bearing content before mock transport persists it."""
-        redacted = re.sub(
-            r"([?&]token=)([^&\"'\s<]+)",
-            r"\1[REDACTED]",
-            body,
-        )
-        redacted = re.sub(
-            r"(?im)((?:manual token|copy this token(?: into the extension)?):\s*)(\S+)",
-            r"\1[REDACTED]",
-            redacted,
-        )
-        redacted = re.sub(
-            r"(?is)(<div\s+class=[\"']code-box[\"'][^>]*>)(.*?)(</div>)",
-            r"\1[REDACTED]\3",
-            redacted,
-        )
-        return redacted
+        redacted = EmailService._redact_token_query_values(body)
+        redacted = EmailService._redact_manual_token_lines(redacted)
+        return EmailService._redact_code_box_divs(redacted)
+
+    @staticmethod
+    def _redact_token_query_values(body: str) -> str:
+        output: list[str] = []
+        index = 0
+        while index < len(body):
+            token_start = body.find("token=", index)
+            if token_start == -1:
+                output.append(body[index:])
+                break
+            if token_start == 0 or body[token_start - 1] not in "?&":
+                output.append(body[index : token_start + len("token=")])
+                index = token_start + len("token=")
+                continue
+            value_start = token_start + len("token=")
+            value_end = value_start
+            while (
+                value_end < len(body)
+                and body[value_end] not in "&\"'\t\r\n <"
+            ):
+                value_end += 1
+            output.append(body[index:value_start])
+            output.append("[REDACTED]")
+            index = value_end
+        return "".join(output)
+
+    @staticmethod
+    def _redact_manual_token_lines(body: str) -> str:
+        redacted_lines: list[str] = []
+        redact_next_token_line = False
+        for line in body.splitlines(keepends=True):
+            line_ending = ""
+            content = line
+            if line.endswith("\r\n"):
+                content = line[:-2]
+                line_ending = "\r\n"
+            elif line.endswith("\n") or line.endswith("\r"):
+                content = line[:-1]
+                line_ending = line[-1]
+            prefix, separator, suffix = content.partition(":")
+            normalized_prefix = prefix.strip().lower()
+            if redact_next_token_line:
+                leading = content[: len(content) - len(content.lstrip())]
+                redacted_lines.append(f"{leading}[REDACTED]{line_ending}")
+                redact_next_token_line = False
+                continue
+            if separator and normalized_prefix in {
+                "manual token",
+                "copy this token",
+                "copy this token into the extension",
+                "or copy this token into the extension",
+            }:
+                leading = suffix[: len(suffix) - len(suffix.lstrip())]
+                if suffix.strip():
+                    redacted_lines.append(f"{prefix}:{leading}[REDACTED]{line_ending}")
+                else:
+                    redacted_lines.append(line)
+                    redact_next_token_line = True
+            else:
+                redacted_lines.append(line)
+        return "".join(redacted_lines)
+
+    @staticmethod
+    def _redact_code_box_divs(body: str) -> str:
+        lowered = body.lower()
+        output: list[str] = []
+        index = 0
+        while True:
+            div_start = lowered.find("<div", index)
+            if div_start == -1:
+                output.append(body[index:])
+                break
+            tag_end = body.find(">", div_start)
+            if tag_end == -1:
+                output.append(body[index:])
+                break
+            opening_tag = body[div_start : tag_end + 1]
+            if 'class="code-box"' not in opening_tag.lower() and "class='code-box'" not in opening_tag.lower():
+                output.append(body[index : tag_end + 1])
+                index = tag_end + 1
+                continue
+            closing_start = lowered.find("</div>", tag_end + 1)
+            if closing_start == -1:
+                output.append(body[index:])
+                break
+            output.append(body[index : tag_end + 1])
+            output.append("[REDACTED]")
+            output.append(body[closing_start : closing_start + len("</div>")])
+            index = closing_start + len("</div>")
+        return "".join(output)
 
     async def _send_smtp_email(
         self,

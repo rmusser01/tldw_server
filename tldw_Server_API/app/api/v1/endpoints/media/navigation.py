@@ -52,21 +52,12 @@ NAVIGATION_SOURCE_PRIORITY = (
     "chunk_metadata",
 )
 NAVIGATION_CACHE_VERSION = 1
-_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>")
-_MD_HINT_RE = re.compile(
-    r"(^#{1,6}\s)|(^[-*+]\s)|(^\d+\.\s)|(```)|(\[[^\]]+\]\([^)]+\))",
-    flags=re.MULTILINE,
-)
 _WS_RE = re.compile(r"\s+")
 _MD_HEADING_LINE_RE = re.compile(
     r"(?m)^(?P<prefix>\s{0,3})(?P<marks>#{1,6})\s+(?P<title>[^\n#].*?)\s*$",
 )
 _NOISY_TITLE_REPEAT_SYMBOL_RE = re.compile(r"([^\w\s])\1{3,}")
 _URL_PREFIX_RE = re.compile(r"^(?:https?://|www\.)", flags=re.IGNORECASE)
-_TITLE_MULTI_ENTRY_SPLIT_RE = re.compile(
-    r"\s+\d{1,4}\s+(?=(?:[A-Z]\.|[IVXLCDM]{1,8}\.|[0-9]{1,3}\.|Chapter\s+\d+|Letter\s+\w+)\s+)",
-    flags=re.IGNORECASE,
-)
 _HEADING_STYLE_TITLE_RE = re.compile(
     r"^(?:[IVXLCDM]{1,8}\.|[A-Z]\.|[0-9]{1,3}\.|chapter\s+\d+|letter\s+\w+|introduction\b|conclusions?\b|appendix\b|acknowledg)",
     flags=re.IGNORECASE,
@@ -106,6 +97,195 @@ _ITALIC_STOPWORDS = {
     "to",
     "we",
 }
+
+
+def _strip_html_tags_linear(text: str) -> str:
+    """Remove simple HTML tags from navigation display text without regex backtracking."""
+    output: list[str] = []
+    tag_buffer: list[str] = []
+    in_tag = False
+    tag_started = False
+    for char in text:
+        if not in_tag and char == "<":
+            in_tag = True
+            tag_started = False
+            tag_buffer = ["<"]
+            continue
+        if in_tag:
+            tag_buffer.append(char)
+            if not tag_started and char == "/":
+                tag_started = True
+                continue
+            if not tag_started:
+                if char.isalpha():
+                    tag_started = True
+                    continue
+                output.extend(tag_buffer)
+                tag_buffer = []
+                in_tag = False
+                continue
+            if char == ">":
+                output.append(" ")
+                tag_buffer = []
+                in_tag = False
+            continue
+        output.append(char)
+    if in_tag:
+        output.extend(tag_buffer)
+    return "".join(output)
+
+
+def _contains_html_tag_linear(text: str) -> bool:
+    for index, char in enumerate(text):
+        if char != "<":
+            continue
+        next_index = index + 1
+        if next_index < len(text) and text[next_index] == "/":
+            next_index += 1
+        if next_index < len(text) and text[next_index].isalpha() and ">" in text[next_index + 1 : next_index + 256]:
+            return True
+    return False
+
+
+def _contains_markdown_hint(text: str) -> bool:
+    if "```" in text:
+        return True
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            marks = len(stripped) - len(stripped.lstrip("#"))
+            if 1 <= marks <= 6 and len(stripped) > marks and stripped[marks].isspace():
+                return True
+        if len(stripped) >= 2 and stripped[0] in "-*+" and stripped[1].isspace():
+            return True
+        dot = stripped.find(".")
+        if 0 < dot <= 3 and stripped[:dot].isdigit() and dot + 1 < len(stripped) and stripped[dot + 1].isspace():
+            return True
+    return "[" in text and "](" in text and ")" in text
+
+
+def _strip_asterisk_emphasis(text: str) -> str:
+    output: list[str] = []
+    index = 0
+    while index < len(text):
+        if text.startswith("**", index):
+            end = text.find("**", index + 2)
+            if end == -1:
+                output.append("**")
+                index += 2
+                continue
+            if end == index + 2 or text[index + 2].isspace() or text[end - 1].isspace():
+                output.append("**")
+                index += 2
+                continue
+            output.append(text[index + 2 : end])
+            index = end + 2
+            continue
+        if text[index] == "*":
+            if index + 1 >= len(text) or text[index + 1].isspace():
+                output.append("*")
+                index += 1
+                continue
+            end = index + 1
+            while True:
+                end = text.find("*", end)
+                if end == -1:
+                    break
+                if text.startswith("**", end) or text[end - 1].isspace():
+                    end += 1
+                    continue
+                break
+            if end == -1:
+                output.append("*")
+                index += 1
+                continue
+            output.append(text[index + 1 : end])
+            index = end + 1
+            continue
+        output.append(text[index])
+        index += 1
+    return "".join(output)
+
+
+def _strip_underscore_emphasis(text: str) -> str:
+    output: list[str] = []
+    index = 0
+    while index < len(text):
+        if text[index] != "_" or (index > 0 and text[index - 1].isalnum()):
+            output.append(text[index])
+            index += 1
+            continue
+        end = text.find("_", index + 1)
+        if end == -1 or (end + 1 < len(text) and text[end + 1].isalnum()):
+            output.append(text[index])
+            index += 1
+            continue
+        inner = text[index + 1 : end].strip()
+        if not inner:
+            index = end + 1
+            continue
+        lowered = inner.lower()
+        if lowered.isalpha() and 2 <= len(lowered) <= 3 and lowered not in _ITALIC_STOPWORDS:
+            output.append(f"{lowered[0]}_{lowered[1:]}")
+        else:
+            output.append(inner)
+            next_index = end + 1
+            while next_index < len(text) and text[next_index].isspace():
+                next_index += 1
+            if len(inner) == 1 and next_index < len(text) and text[next_index].isalnum():
+                output.append("_")
+                index = next_index
+                continue
+        index = end + 1
+    return "".join(output)
+
+
+def _tighten_navigation_punctuation(text: str) -> str:
+    while "_ " in text:
+        text = text.replace("_ ", "_")
+    while " _" in text:
+        text = text.replace(" _", " ")
+    while " - " in text:
+        text = text.replace(" - ", "-")
+    while " -" in text:
+        text = text.replace(" -", "-")
+    while "( " in text:
+        text = text.replace("( ", "(")
+    while " )" in text:
+        text = text.replace(" )", ")")
+    return text
+
+
+def _looks_like_multi_entry_start(token: str, next_token: str | None) -> bool:
+    stripped = token.strip()
+    lowered = stripped.lower()
+    if stripped.endswith("."):
+        stem = stripped[:-1]
+        if stem.isdigit() and 1 <= len(stem) <= 3:
+            return True
+        if len(stem) == 1 and stem.isalpha() and stem.isupper():
+            return True
+        if 1 <= len(stem) <= 8 and all(char in "IVXLCDM" for char in stem.upper()):
+            return True
+    if lowered == "chapter" and next_token and next_token.isdigit():
+        return True
+    if lowered == "letter" and next_token and next_token.isalpha():
+        return True
+    return False
+
+
+def _truncate_multi_entry_title(text: str) -> str:
+    tokens = text.split()
+    for index, token in enumerate(tokens[1:], start=1):
+        if not token.isdigit() or len(token) > 4:
+            continue
+        next_token = tokens[index + 1] if index + 1 < len(tokens) else None
+        following = tokens[index + 2] if index + 2 < len(tokens) else None
+        if next_token and _looks_like_multi_entry_start(next_token, following):
+            return " ".join(tokens[:index]).strip() or text
+    return text
 
 
 class MediaNavigationDb(Protocol):
@@ -179,36 +359,18 @@ def _clean_navigation_title(value: Any) -> str:
         return ""
     text = html_lib.unescape(text)
     text = text.replace("\u00a0", " ")
-    text = _HTML_TAG_RE.sub(" ", text)
+    text = _strip_html_tags_linear(text)
     text = text.replace("`", "").replace("~", "")
-    text = re.sub(r"(?<!\w)\*\*(.+?)\*\*(?!\w)", r"\1", text)
-    text = re.sub(r"(?<!\w)\*(.+?)\*(?!\w)", r"\1", text)
-
-    def _strip_italic_wrap(match: re.Match[str]) -> str:
-        inner = str(match.group(1) or "")
-        lowered = inner.lower()
-        if re.fullmatch(r"[a-z]{2,3}", lowered) and lowered not in _ITALIC_STOPWORDS:
-            return f"{lowered[0]}_{lowered[1:]}"
-        return inner
-
-    text = re.sub(r"(?<!\w)_(\S(?:.*?\S)?)_(?!\w)", _strip_italic_wrap, text)
-    text = re.sub(r"(?<=\w)_\s+(?=\w)", "_", text)
-    text = re.sub(r"(?<=\s)_(?=\w)", "", text)
-    text = re.sub(r"(?<=\w)_(?=\s)", "", text)
-    text = re.sub(r"\s+-\s+", "-", text)
-    text = re.sub(r"\s+-", "-", text)
+    text = _strip_asterisk_emphasis(text)
+    text = _strip_underscore_emphasis(text)
+    text = _tighten_navigation_punctuation(text)
     text = _WS_RE.sub(" ", text).strip()
-    text = re.sub(r"\(\s+", "(", text)
-    text = re.sub(r"\s+\)", ")", text)
+    text = _tighten_navigation_punctuation(text)
     if ">" in text:
-        parts = [part.strip() for part in re.split(r"\s*>\s*", text) if part.strip()]
+        parts = [part.strip() for part in text.split(">") if part.strip()]
         if parts:
             text = parts[-1]
-    split_match = _TITLE_MULTI_ENTRY_SPLIT_RE.search(text)
-    if split_match:
-        truncated = text[: split_match.start()].strip()
-        if truncated:
-            text = truncated
+    text = _truncate_multi_entry_title(text)
     cleaned = text.strip("•*|-_~:;,. ")
     return cleaned.strip()
 
@@ -269,12 +431,12 @@ def _is_plausible_generated_toc_title(title: str) -> bool:
     words = [w for w in cleaned.split(" ") if w]
     if (
         len(words) <= 2
-        and all(len(re.sub(r"[^A-Za-z]", "", w)) <= 1 for w in words)
+        and all(sum(1 for char in w if char.isalpha()) <= 1 for w in words)
         and not _TOC_SECONDARY_LEVEL_RE.match(cleaned)
     ):
         return False
 
-    return not re.search(r"[=<>±∑∫]", cleaned)
+    return not any(char in cleaned for char in "=<>±∑∫")
 
 
 def _sanitize_navigation_path_parts(path_parts: list[str]) -> list[str]:
@@ -1362,15 +1524,15 @@ def _derive_content_span(
 def _detect_intrinsic_format(text: str) -> str:
     if not text:
         return "plain"
-    if _HTML_TAG_RE.search(text):
+    if _contains_html_tag_linear(text):
         return "html"
-    if _MD_HINT_RE.search(text):
+    if _contains_markdown_hint(text):
         return "markdown"
     return "plain"
 
 
 def _html_to_plain(html_text: str) -> str:
-    no_tags = _HTML_TAG_RE.sub("", html_text or "")
+    no_tags = _strip_html_tags_linear(html_text or "")
     return html_lib.unescape(no_tags)
 
 

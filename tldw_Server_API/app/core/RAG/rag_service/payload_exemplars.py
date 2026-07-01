@@ -17,8 +17,11 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
+
 BASE_DIR = Path("Databases/observability")
 SINK = BASE_DIR / "rag_payload_exemplars.jsonl"
+_DOT_ONLY_IDENTIFIERS = {".", ".."}
 
 
 def _sampling_random() -> float:
@@ -47,10 +50,20 @@ def _safe_sink(user_id: str | None = None, namespace: str | None = None) -> Path
             # In multi-tenant setups, segregate exemplars per user/namespace
             if namespace:
                 safe_namespace = "".join(c for c in str(namespace) if c.isalnum() or c in ('-', '_', '.'))
-                sink = BASE_DIR / "tenants" / safe_namespace / "rag_payload_exemplars.jsonl" if safe_namespace else SINK
+                sink_path = (
+                    safe_join(str(BASE_DIR / "tenants"), f"{safe_namespace}/rag_payload_exemplars.jsonl")
+                    if safe_namespace and safe_namespace not in _DOT_ONLY_IDENTIFIERS
+                    else None
+                )
+                sink = Path(sink_path) if sink_path else SINK
             elif user_id:
                 safe_user_id = "".join(c for c in str(user_id) if c.isalnum() or c in ('-', '_', '.'))
-                sink = BASE_DIR / "users" / safe_user_id / "rag_payload_exemplars.jsonl" if safe_user_id else SINK
+                sink_path = (
+                    safe_join(str(BASE_DIR / "users"), f"{safe_user_id}/rag_payload_exemplars.jsonl")
+                    if safe_user_id and safe_user_id not in _DOT_ONLY_IDENTIFIERS
+                    else None
+                )
+                sink = Path(sink_path) if sink_path else SINK
             else:
                 sink = SINK
         sink.parent.mkdir(parents=True, exist_ok=True)
@@ -111,6 +124,7 @@ def maybe_record_exemplar(
                 for d in (documents[:5] if documents else [])
             ],
         }
+        # lgtm[py/path-injection] sink is resolved by _safe_sink under BASE_DIR or the fixed default sink.
         with sink.open("a", encoding="utf-8") as f:
             f.write(json.dumps(sample) + "\n")
     except Exception:

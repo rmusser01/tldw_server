@@ -71,6 +71,37 @@ _WEBSEARCH_NONCRITICAL_EXCEPTIONS = (
     RetryExhaustedError,
 )
 
+_WEBSEARCH_SENSITIVE_LOG_KEYS = {
+    "api_key",
+    "apikey",
+    "authorization",
+    "firecrawl_api_key",
+    "google_search_api_key",
+    "key",
+    "serper_search_api_key",
+    "tavily_search_api_key",
+    "token",
+    "x-api-key",
+    "x-subscription-token",
+}
+
+
+def _redact_websearch_log_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: (
+                "[REDACTED]"
+                if str(key).strip().lower() in _WEBSEARCH_SENSITIVE_LOG_KEYS
+                else _redact_websearch_log_value(inner_value)
+            )
+            for key, inner_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_websearch_log_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_websearch_log_value(item) for item in value)
+    return value
+
 
 def _websearch_browser_headers(
     *, accept_lang: str = "en-US,en;q=0.5", referer: str = "https://www.google.com/", restrict_encodings_for_requests: bool = True
@@ -567,7 +598,9 @@ def generate_and_search(question: str, search_params: dict) -> dict:
         )
 
         # Debug: Inspect raw results
-        logging.debug(f"Raw results for query '{q}': {raw_results}")
+        logging.debug(
+            f"Raw results for query '{q}': {_redact_websearch_log_value(raw_results)}"
+        )
 
         # Check for errors or invalid data
         if not isinstance(raw_results, dict):
@@ -1676,13 +1709,13 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
 def test_perform_websearch_google():
     # Google Searches
     try:
-        test_1 = perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10)
-        print(f"Test 1: {test_1}")
+        perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10)
+        print("Test 1 completed")
         # FIXME - Fails. Need to fix arg formatting
-        test_2 = perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10, date_range="y", safesearch="active", site_blacklist=["spam-site.com"])
-        print(f"Test 2: {test_2}")
-        test_3 = perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10)
-        print(f"Test 3: {test_3}")
+        perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10, date_range="y", safesearch="active", site_blacklist=["spam-site.com"])
+        print("Test 2 completed")
+        perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10)
+        print("Test 3 completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         print("Error performing google searches")
     pass
@@ -1696,8 +1729,8 @@ def test_perform_websearch_bing():
 def test_perform_websearch_brave():
     # Brave Searches
     try:
-        test_7 = perform_websearch("brave", "What is the capital of France?", "US", "en", "en", 10)
-        print(f"Test 7: {test_7}")
+        perform_websearch("brave", "What is the capital of France?", "US", "en", "en", 10)
+        print("Test 7 completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         print("Error performing brave searches")
 
@@ -1705,10 +1738,10 @@ def test_perform_websearch_brave():
 def test_perform_websearch_ddg():
     # DuckDuckGo Searches
     try:
-        test_6 = perform_websearch("duckduckgo", "What is the capital of France?", "US", "en", "en", 10)
-        print(f"Test 6: {test_6}")
-        test_7 = perform_websearch("duckduckgo", "What is the capital of France?", "US", "en", "en", 10, date_range="y")
-        print(f"Test 7: {test_7}")
+        perform_websearch("duckduckgo", "What is the capital of France?", "US", "en", "en", 10)
+        print("Test 6 completed")
+        perform_websearch("duckduckgo", "What is the capital of France?", "US", "en", "en", 10, date_range="y")
+        print("Test 7 completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         print("Error performing duckduckgo searches")
 
@@ -1717,8 +1750,8 @@ def test_perform_websearch_ddg():
 def test_perform_websearch_kagi():
     # Kagi Searches
     try:
-        test_8 = perform_websearch("kagi", "What is the capital of France?", "US", "en", "en", 10)
-        print(f"Test 8: {test_8}")
+        perform_websearch("kagi", "What is the capital of France?", "US", "en", "en", 10)
+        print("Test 8 completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         print("Error performing kagi searches")
 
@@ -1726,8 +1759,8 @@ def test_perform_websearch_kagi():
 def test_perform_websearch_serper():
     # Serper Searches
     try:
-        test_9 = perform_websearch("serper", "What is the capital of France?", "US", "en", "en", 10)
-        print(f"Test 9: {test_9}")
+        perform_websearch("serper", "What is the capital of France?", "US", "en", "en", 10)
+        print("Test 9 completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         print("Error performing serper searches")
 
@@ -1735,8 +1768,8 @@ def test_perform_websearch_serper():
 def test_perform_websearch_tavily():
     # Tavily Searches
     try:
-        test_10 = perform_websearch("tavily", "What is the capital of France?", "US", "en", "en", 10)
-        print(f"Test 10: {test_10}")
+        perform_websearch("tavily", "What is the capital of France?", "US", "en", "en", 10)
+        print("Test 10 completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         print("Error performing tavily searches")
 
@@ -1745,8 +1778,8 @@ def test_perform_websearch_tavily():
 def test_perform_websearch_searx():
     # Searx Searches
     try:
-        test_11 = perform_websearch("searx", "What is the capital of France?", "US", "en", "en", 10)
-        print(f"Test 11: {test_11}")
+        perform_websearch("searx", "What is the capital of France?", "US", "en", "en", 10)
+        print("Test 11 completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         print("Error performing searx searches")
 
@@ -1755,8 +1788,8 @@ def test_perform_websearch_searx():
 def test_perform_websearch_yandex():
     #Yandex Searches
     try:
-        test_12 = perform_websearch("yandex", "What is the capital of France?", "US", "en", "en", 10)
-        print(f"Test 12: {test_12}")
+        perform_websearch("yandex", "What is the capital of France?", "US", "en", "en", 10)
+        print("Test 12 completed")
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         print("Error performing yandex searches")
     pass
@@ -2433,7 +2466,9 @@ def search_web_google(
         if sort_results_by:
             params["sort"] = sort_results_by
 
-        logging.info(f"Prepared parameters for Google Search: {params}")
+        logging.info(
+            f"Prepared parameters for Google Search: {_redact_websearch_log_value(params)}"
+        )
 
         _enforce_provider_outbound_policy(search_url, source="websearch_google")
 
@@ -2506,7 +2541,10 @@ def parse_google_results(raw_results: dict, output_dict: dict) -> None:
         output_dict (Dict): Dictionary to store processed results.
     """
     # Lower verbosity: only log raw payload at debug level
-    logging.debug(f"Raw results received: {json.dumps(raw_results, indent=2)}")
+    logging.debug(
+        "Raw results received: {}",
+        json.dumps(_redact_websearch_log_value(raw_results), indent=2),
+    )
     try:
         # Initialize results list if not present
         if "results" not in output_dict:

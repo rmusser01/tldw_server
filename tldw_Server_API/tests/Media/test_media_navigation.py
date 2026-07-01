@@ -685,6 +685,14 @@ def test_clean_navigation_title_preserves_variable_subscripts_from_italic_markup
     assert cleaned == "A. r_d-independent DESI DR2 F_AP(z) data vector and covariance 24"
 
 
+def test_clean_navigation_title_preserves_unclosed_html_like_text():
+    assert navigation_mod._clean_navigation_title("Section <div") == "Section <div"
+
+
+def test_clean_navigation_title_preserves_literal_unpaired_asterisks():
+    assert navigation_mod._clean_navigation_title("A* search and **bold** note") == "A* search and bold note"
+
+
 @pytest.mark.asyncio
 async def test_navigation_guardrails_and_parent_filter(mock_user, mock_db):
     mock_db.get_media_by_id.return_value = {

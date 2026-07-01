@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from datetime import date
-import re
 from dataclasses import dataclass
+from typing import NamedTuple
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError, InputError
@@ -17,22 +17,80 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskConnection
 
 
-_CHECKLIST_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<bullet>[-*+])(?P<space>[ \t]+)\[(?P<marker>[ xX])\](?P<body_part>(?:[ \t]+(?P<body>.*)|[ \t]*))$"
-)
 _METADATA_TOKEN_ORDER = ("due_date", "priority", "estimate")
 _METADATA_TOKEN_NAMES = {"due_date": "due", "priority": "priority", "estimate": "estimate"}
-_TASK_TEXT_METADATA_TOKEN_RE = re.compile(r"@(?P<name>due|priority|estimate)\((?P<value>[^)]*)\)", re.IGNORECASE)
 _TASK_STATUSES = {"open", "done"}
+
+
+class _ChecklistLine(NamedTuple):
+    indent: str
+    bullet: str
+    space: str
+    body_part: str
+
+
+def _parse_checklist_line(raw_line: str) -> _ChecklistLine | None:
+    """Parse a projected checklist line without regex backtracking."""
+    index = 0
+    while index < len(raw_line) and raw_line[index] in " \t":
+        index += 1
+    indent = raw_line[:index]
+    if index >= len(raw_line) or raw_line[index] not in "-*+":
+        return None
+    bullet = raw_line[index]
+    index += 1
+    space_start = index
+    while index < len(raw_line) and raw_line[index] in " \t":
+        index += 1
+    if index == space_start:
+        return None
+    space = raw_line[space_start:index]
+    if index + 3 > len(raw_line) or raw_line[index] != "[" or raw_line[index + 2] != "]":
+        return None
+    marker = raw_line[index + 1]
+    if marker not in " xX":
+        return None
+    body_part = raw_line[index + 3 :]
+    if body_part and body_part[0] not in " \t":
+        return None
+    return _ChecklistLine(indent=indent, bullet=bullet, space=space, body_part=body_part)
+
+
+def _is_iso_date_token(value: str) -> bool:
+    if len(value) != 10 or value[4] != "-" or value[7] != "-":
+        return False
+    return value[:4].isdigit() and value[5:7].isdigit() and value[8:].isdigit()
+
+
+def _is_estimate_token(value: str) -> bool:
+    return len(value) >= 2 and value[:-1].isdigit() and value[-1].casefold() in {"m", "h", "d"}
 
 
 def _task_text_contains_parseable_metadata_token(text: str) -> bool:
     """Return True when literal task text contains metadata syntax the parser would consume."""
 
-    for match in _TASK_TEXT_METADATA_TOKEN_RE.finditer(text):
-        if _is_parseable_task_text_metadata_token(name=match.group("name"), value=match.group("value")):
+    start = 0
+    while True:
+        token_start = text.find("@", start)
+        if token_start == -1:
+            return False
+        name_start = token_start + 1
+        open_paren = text.find("(", name_start)
+        if open_paren == -1:
+            return False
+        value_start = open_paren + 1
+        value_end = text.find(")", value_start)
+        if value_end == -1:
+            start = value_start
+            continue
+        token_name = text[name_start:open_paren].casefold()
+        if token_name not in {"due", "priority", "estimate"}:
+            start = value_end + 1
+            continue
+        value = text[value_start:value_end]
+        if _is_parseable_task_text_metadata_token(name=token_name, value=value):
             return True
-    return False
+        start = value_end + 1
 
 
 def _is_parseable_task_text_metadata_token(*, name: str, value: str) -> bool:
@@ -41,7 +99,7 @@ def _is_parseable_task_text_metadata_token(*, name: str, value: str) -> bool:
     normalized_name = name.casefold()
     normalized_value = value.strip()
     if normalized_name == "due":
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", normalized_value) is None:
+        if not _is_iso_date_token(normalized_value):
             return False
         try:
             date.fromisoformat(normalized_value)
@@ -51,7 +109,7 @@ def _is_parseable_task_text_metadata_token(*, name: str, value: str) -> bool:
     if normalized_name == "priority":
         return normalized_value.casefold() in {"high", "medium", "low"}
     if normalized_name == "estimate":
-        return re.fullmatch(r"\d+[mhd]", normalized_value.casefold()) is not None
+        return _is_estimate_token(normalized_value)
     return False
 
 
@@ -556,7 +614,7 @@ class NotesTaskService:
         if due_date is not None:
             if not isinstance(due_date, str):
                 raise InputError("Task due_date metadata must be a string.")
-            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", due_date) is None:
+            if not _is_iso_date_token(due_date):
                 raise InputError("Task due_date metadata must use YYYY-MM-DD format.")
             try:
                 date.fromisoformat(due_date)
@@ -567,7 +625,7 @@ class NotesTaskService:
             raise InputError("Task priority metadata must be high, medium, or low.")
         estimate = metadata.get("estimate")
         if estimate is not None:
-            if not isinstance(estimate, str) or re.fullmatch(r"\d+[mhd]", estimate) is None:
+            if not isinstance(estimate, str) or not _is_estimate_token(estimate):
                 raise InputError("Task estimate metadata must match '<number><m|h|d>'.")
 
     @staticmethod
@@ -598,8 +656,8 @@ class NotesTaskService:
         metadata: dict[str, Any],
         preserve_existing_body: bool,
     ) -> str:
-        match = _CHECKLIST_RE.match(raw_line)
-        if match is None:
+        parsed_line = _parse_checklist_line(raw_line)
+        if parsed_line is None:
             raise ConflictError("Task projection line is no longer a checklist item.", entity="tasks")
         marker = "x" if checked else " "
         if preserve_existing_body:
@@ -607,17 +665,17 @@ class NotesTaskService:
             body = self._render_body(text=base_text, metadata=metadata)
         else:
             body = self._render_body(text=text, metadata=metadata)
-        return f"{match.group('indent')}{match.group('bullet')}{match.group('space')}[{marker}] {body}"
+        return f"{parsed_line.indent}{parsed_line.bullet}{parsed_line.space}[{marker}] {body}"
 
     @staticmethod
     def _rewrite_marker_only(*, raw_line: str, checked: bool) -> str:
-        match = _CHECKLIST_RE.match(raw_line)
-        if match is None:
+        parsed_line = _parse_checklist_line(raw_line)
+        if parsed_line is None:
             raise ConflictError("Task projection line is no longer a checklist item.", entity="tasks")
         marker = "x" if checked else " "
         return (
-            f"{match.group('indent')}{match.group('bullet')}{match.group('space')}"
-            f"[{marker}]{match.group('body_part')}"
+            f"{parsed_line.indent}{parsed_line.bullet}{parsed_line.space}"
+            f"[{marker}]{parsed_line.body_part}"
         )
 
     @staticmethod

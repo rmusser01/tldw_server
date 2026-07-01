@@ -8,14 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 FINGERPRINT_VERSION = "prompt-v1"
 
-_DATA_URI_RE = re.compile(r'(data:image[^,]*,)[^"\s]+', re.IGNORECASE)
 _KNOWN_PART_TYPES = frozenset(
     {
         "text",
@@ -181,7 +179,25 @@ def _canonical_json(value: Any) -> str:
 
 
 def _sanitize_data_uris(text: str) -> str:
-    return _DATA_URI_RE.sub(r"\1<omitted>", text)
+    lowered = text.lower()
+    output: list[str] = []
+    index = 0
+    while True:
+        start = lowered.find("data:image", index)
+        if start == -1:
+            output.append(text[index:])
+            break
+        comma = text.find(",", start)
+        if comma == -1:
+            output.append(text[index:])
+            break
+        output.append(text[index : comma + 1])
+        output.append("<omitted>")
+        end = comma + 1
+        while end < len(text) and not text[end].isspace() and text[end] not in "\"'":
+            end += 1
+        index = end
+    return "".join(output)
 
 
 def _normalize_message(message: Mapping[str, Any]) -> dict[str, Any]:
