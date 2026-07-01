@@ -85,6 +85,8 @@ def has_url_credentials(raw_url: str) -> bool:
 
 
 def normalize_url(raw_url: str) -> NormalizedURL:
+    if _has_raw_whitespace_or_control(raw_url):
+        raise URLPolicyError("malformed_url")
     try:
         parts = urlsplit(raw_url)
     except ValueError as exc:
@@ -314,65 +316,33 @@ def _is_source_host_denied(host: str) -> bool:
     try:
         ipaddress.ip_address(host)
     except ValueError:
-        return _parse_legacy_ipv4_address(host) is not None
+        return _is_legacy_ipv4_candidate(host)
     return True
 
 
-def _parse_legacy_ipv4_address(host: str) -> ipaddress.IPv4Address | None:
+def _is_legacy_ipv4_candidate(host: str) -> bool:
     if not host or any(character not in _LEGACY_IPV4_CHARS for character in host):
-        return None
+        return False
     parts = host.split(".")
-    if len(parts) > 4:
-        return None
-
-    values = tuple(_parse_legacy_ipv4_part(part) for part in parts)
-    if any(value is None for value in values):
-        return None
-
-    first = values[0]
-    if len(values) == 1:
-        if first > 0xFFFFFFFF:
-            return None
-        address_value = first
-    elif len(values) == 2:
-        second = values[1]
-        if first > 0xFF or second > 0xFFFFFF:
-            return None
-        address_value = (first << 24) | second
-    elif len(values) == 3:
-        second = values[1]
-        third = values[2]
-        if first > 0xFF or second > 0xFF or third > 0xFFFF:
-            return None
-        address_value = (first << 24) | (second << 16) | third
-    else:
-        second = values[1]
-        third = values[2]
-        fourth = values[3]
-        if first > 0xFF or second > 0xFF or third > 0xFF or fourth > 0xFF:
-            return None
-        address_value = (first << 24) | (second << 16) | (third << 8) | fourth
-    return ipaddress.IPv4Address(address_value)
+    if len(parts) > 4 or any(not part for part in parts):
+        return False
+    if len(parts) == 1:
+        return parts[0].isdigit()
+    return all(_is_legacy_ipv4_part_candidate(part) for part in parts)
 
 
-def _parse_legacy_ipv4_part(part: str) -> int | None:
-    if not part:
-        return None
+def _is_legacy_ipv4_part_candidate(part: str) -> bool:
     lower_part = part.lower()
     if lower_part.startswith("0x"):
-        if len(part) == 2:
-            return None
-        try:
-            return int(part[2:], 16)
-        except ValueError:
-            return None
-    if len(part) > 1 and part.startswith("0"):
-        if any(character not in "01234567" for character in part):
-            return None
-        return int(part, 8)
-    if not part.isdigit():
-        return None
-    return int(part, 10)
+        return len(part) > 2 and all(character in "0123456789abcdefABCDEF" for character in part[2:])
+    return part.isdigit()
+
+
+def _has_raw_whitespace_or_control(raw_url: str) -> bool:
+    return any(
+        character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+        for character in raw_url
+    )
 
 
 def _has_dot_segment(decoded_path: str) -> bool:
