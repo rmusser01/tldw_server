@@ -1,0 +1,455 @@
+"""Internal realtime speech session orchestrator."""
+
+from __future__ import annotations
+
+import secrets
+from collections.abc import AsyncIterator
+
+from tldw_Server_API.app.core.Audio.Realtime.constants import REALTIME_MAX_BUFFERED_AUDIO_BYTES
+from tldw_Server_API.app.core.Audio.Realtime.models import (
+    AppendAudioCommand,
+    CancelResponseCommand,
+    ClearAudioCommand,
+    ClientCommand,
+    CommitAudioCommand,
+    ConversationItemAddedEvent,
+    ConversationItemDoneEvent,
+    CreateResponseCommand,
+    InputAudioCommittedEvent,
+    InputAudioSpeechStartedEvent,
+    InputAudioSpeechStoppedEvent,
+    RealtimeErrorEvent,
+    RealtimeServerEvent,
+    RealtimeSessionConfig,
+    ResponseAudioDeltaEvent,
+    ResponseAudioDoneEvent,
+    ResponseContentPartAddedEvent,
+    ResponseContentPartDoneEvent,
+    ResponseCreatedEvent,
+    ResponseDoneEvent,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
+    ResponseTextDeltaEvent,
+    ResponseTextDoneEvent,
+    ResponseTranscriptDeltaEvent,
+    ResponseTranscriptDoneEvent,
+    SessionCreatedEvent,
+    SessionUpdatedEvent,
+    UpdateSessionCommand,
+    UnsupportedCommand,
+)
+from tldw_Server_API.app.core.Audio.Realtime.persistence import (
+    NoopRealtimePersistenceAdapter,
+    RealtimePersistenceAdapter,
+    persistence_config_from_metadata,
+)
+from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
+    RealtimePipeline,
+    RealtimePipelineAudioDelta,
+    RealtimePipelineAudioDone,
+    RealtimePipelineTextDelta,
+    RealtimePipelineTextDone,
+    RealtimePipelineTranscriptDelta,
+    RealtimePipelineTranscriptDone,
+    RealtimePipelineTurnDone,
+)
+
+
+class RealtimeSession:
+    """Owns realtime turn state without importing route or provider layers."""
+
+    def __init__(
+        self,
+        *,
+        pipeline: RealtimePipeline,
+        persistence_adapter: RealtimePersistenceAdapter | None = None,
+        config: RealtimeSessionConfig | None = None,
+        session_id: str | None = None,
+    ) -> None:
+        self.pipeline = pipeline
+        self.persistence_adapter = persistence_adapter or NoopRealtimePersistenceAdapter()
+        self.session_id = session_id or _new_realtime_id("sess")
+        self.turn_index = 0
+        self.active_response_id: str | None = None
+        self.generation_id = 0
+        self.config = config or RealtimeSessionConfig()
+        self.input_audio_buffer = b""
+        self.buffer_started = False
+        self.closed = False
+        self.active_task = None
+
+        self._pending_audio_item_id: str | None = None
+        self._previous_item_id: str | None = None
+        self._last_user_transcript = ""
+
+    def created_event(self, event_id: str | None = None) -> SessionCreatedEvent:
+        return SessionCreatedEvent(
+            event_id=event_id,
+            session_id=self.session_id,
+            model=self.config.model,
+            voice=self.config.voice,
+        )
+
+    async def handle_command(self, command: ClientCommand) -> AsyncIterator[RealtimeServerEvent]:
+        if isinstance(command, UpdateSessionCommand):
+            for event in await self.apply_update(command):
+                yield event
+            return
+        if isinstance(command, AppendAudioCommand):
+            for event in await self.append_audio(command):
+                yield event
+            return
+        if isinstance(command, CommitAudioCommand):
+            for event in await self.commit_audio(command):
+                yield event
+            return
+        if isinstance(command, ClearAudioCommand):
+            for event in await self.clear_audio(command):
+                yield event
+            return
+        if isinstance(command, CreateResponseCommand):
+            async for event in self.create_response(command):
+                yield event
+            return
+        if isinstance(command, CancelResponseCommand):
+            for event in await self.cancel_response(command):
+                yield event
+            return
+        if isinstance(command, UnsupportedCommand):
+            yield RealtimeErrorEvent(code=command.code, message=command.message, event_id=command.event_id)
+
+    async def apply_update(self, command: UpdateSessionCommand) -> list[RealtimeServerEvent]:
+        self.config = command.config
+        return [
+            SessionUpdatedEvent(
+                event_id=command.event_id,
+                session_id=self.session_id,
+                model=self.config.model,
+                voice=self.config.voice,
+            )
+        ]
+
+    async def append_audio(self, command: AppendAudioCommand) -> list[RealtimeServerEvent]:
+        if len(self.input_audio_buffer) + len(command.audio) > REALTIME_MAX_BUFFERED_AUDIO_BYTES:
+            return [
+                RealtimeErrorEvent(
+                    code="payload_too_large",
+                    message=f"input audio buffer exceeds {REALTIME_MAX_BUFFERED_AUDIO_BYTES} bytes",
+                    event_id=command.event_id,
+                )
+            ]
+
+        events: list[RealtimeServerEvent] = []
+        if command.audio and not self.buffer_started:
+            self.buffer_started = True
+            self._pending_audio_item_id = _new_realtime_id("item")
+            events.append(
+                InputAudioSpeechStartedEvent(
+                    event_id=command.event_id,
+                    item_id=self._pending_audio_item_id,
+                )
+            )
+
+        self.input_audio_buffer += command.audio
+        return events
+
+    async def commit_audio(self, command: CommitAudioCommand) -> list[RealtimeServerEvent]:
+        if not self.input_audio_buffer:
+            return [
+                RealtimeErrorEvent(
+                    code="invalid_request",
+                    message="input audio buffer is empty",
+                    event_id=command.event_id,
+                )
+            ]
+
+        audio = self.input_audio_buffer
+        item_id = self._pending_audio_item_id or _new_realtime_id("item")
+        self.input_audio_buffer = b""
+        self.buffer_started = False
+        self._pending_audio_item_id = None
+
+        events: list[RealtimeServerEvent] = [InputAudioSpeechStoppedEvent(event_id=command.event_id, item_id=item_id)]
+        try:
+            transcript = await self.pipeline.transcribe_pcm16(
+                audio,
+                sample_rate_hz=self.config.input_sample_rate_hz,
+                language=_language_from_metadata(self.config.metadata),
+            )
+        except Exception:
+            events.append(
+                RealtimeErrorEvent(
+                    code="internal_error",
+                    message="Realtime transcription failed",
+                    event_id=command.event_id,
+                    error_type="server_error",
+                )
+            )
+            return events
+
+        self.turn_index += 1
+        self._last_user_transcript = transcript
+        previous_item_id = self._previous_item_id
+        self._previous_item_id = item_id
+        events.extend(
+            [
+                InputAudioCommittedEvent(
+                    event_id=command.event_id,
+                    item_id=item_id,
+                    previous_item_id=previous_item_id,
+                ),
+                ConversationItemAddedEvent(
+                    event_id=command.event_id,
+                    item_id=item_id,
+                    role="user",
+                    transcript=transcript,
+                ),
+                ConversationItemDoneEvent(
+                    event_id=command.event_id,
+                    item_id=item_id,
+                    role="user",
+                ),
+            ]
+        )
+        return events
+
+    async def clear_audio(self, command: ClearAudioCommand) -> list[RealtimeServerEvent]:
+        self.input_audio_buffer = b""
+        self.buffer_started = False
+        self._pending_audio_item_id = None
+        return []
+
+    async def create_response(self, command: CreateResponseCommand) -> AsyncIterator[RealtimeServerEvent]:
+        self.generation_id += 1
+        generation_id = self.generation_id
+        response_id = _new_realtime_id("resp")
+        self.active_response_id = response_id
+        item_id = _new_realtime_id("item")
+
+        assistant_text = ""
+        assistant_transcript = ""
+        final_status = "completed"
+        text_started = False
+        transcript_started = False
+        audio_started = False
+
+        yield ResponseCreatedEvent(
+            event_id=command.event_id,
+            response_id=response_id,
+            generation_id=generation_id,
+        )
+        yield ResponseOutputItemAddedEvent(
+            event_id=command.event_id,
+            response_id=response_id,
+            item_id=item_id,
+            output_index=0,
+        )
+
+        try:
+            async for pipeline_event in self.pipeline.stream_turn(
+                self._last_user_transcript,
+                config=self.config,
+            ):
+                if generation_id != self.generation_id:
+                    return
+                if isinstance(pipeline_event, RealtimePipelineTextDelta):
+                    if not text_started:
+                        text_started = True
+                        yield _content_part_added(command.event_id, response_id, item_id, 0, "text")
+                    assistant_text += pipeline_event.delta
+                    yield ResponseTextDeltaEvent(
+                        event_id=command.event_id,
+                        response_id=response_id,
+                        item_id=item_id,
+                        output_index=0,
+                        content_index=0,
+                        delta=pipeline_event.delta,
+                    )
+                elif isinstance(pipeline_event, RealtimePipelineTranscriptDelta):
+                    if not transcript_started:
+                        transcript_started = True
+                        yield _content_part_added(command.event_id, response_id, item_id, 1, "audio_transcript")
+                    assistant_transcript += pipeline_event.delta
+                    yield ResponseTranscriptDeltaEvent(
+                        event_id=command.event_id,
+                        response_id=response_id,
+                        item_id=item_id,
+                        output_index=0,
+                        content_index=1,
+                        delta=pipeline_event.delta,
+                    )
+                elif isinstance(pipeline_event, RealtimePipelineAudioDelta):
+                    if not audio_started:
+                        audio_started = True
+                        yield _content_part_added(command.event_id, response_id, item_id, 2, "audio")
+                    yield ResponseAudioDeltaEvent(
+                        event_id=command.event_id,
+                        response_id=response_id,
+                        item_id=item_id,
+                        output_index=0,
+                        content_index=2,
+                        audio=pipeline_event.audio,
+                    )
+                elif isinstance(pipeline_event, RealtimePipelineTextDone):
+                    if generation_id != self.generation_id:
+                        return
+                    yield ResponseTextDoneEvent(
+                        event_id=command.event_id,
+                        response_id=response_id,
+                        item_id=item_id,
+                        output_index=0,
+                        content_index=0,
+                        text=assistant_text,
+                    )
+                    yield _content_part_done(command.event_id, response_id, item_id, 0, "text")
+                elif isinstance(pipeline_event, RealtimePipelineTranscriptDone):
+                    if generation_id != self.generation_id:
+                        return
+                    yield ResponseTranscriptDoneEvent(
+                        event_id=command.event_id,
+                        response_id=response_id,
+                        item_id=item_id,
+                        output_index=0,
+                        content_index=1,
+                        transcript=assistant_transcript,
+                    )
+                    yield _content_part_done(command.event_id, response_id, item_id, 1, "audio_transcript")
+                elif isinstance(pipeline_event, RealtimePipelineAudioDone):
+                    if generation_id != self.generation_id:
+                        return
+                    yield ResponseAudioDoneEvent(
+                        event_id=command.event_id,
+                        response_id=response_id,
+                        item_id=item_id,
+                        output_index=0,
+                        content_index=2,
+                    )
+                    yield _content_part_done(command.event_id, response_id, item_id, 2, "audio")
+                elif isinstance(pipeline_event, RealtimePipelineTurnDone):
+                    final_status = pipeline_event.status
+        except Exception:
+            if generation_id != self.generation_id:
+                return
+            yield RealtimeErrorEvent(
+                code="internal_error",
+                message="Realtime pipeline failed",
+                event_id=command.event_id,
+                error_type="server_error",
+            )
+            yield ResponseDoneEvent(
+                event_id=command.event_id,
+                response_id=response_id,
+                status="failed",
+                status_details={"error": {"code": "internal_error", "message": "Realtime pipeline failed"}},
+            )
+            self._clear_active_response(response_id)
+            return
+
+        if generation_id != self.generation_id:
+            return
+
+        yield ResponseOutputItemDoneEvent(
+            event_id=command.event_id,
+            response_id=response_id,
+            item_id=item_id,
+            output_index=0,
+            status=final_status,
+        )
+        yield ResponseDoneEvent(
+            event_id=command.event_id,
+            response_id=response_id,
+            status=final_status,
+        )
+        self._clear_active_response(response_id)
+
+        if final_status == "completed":
+            error = await self._persist_turn(command.event_id, assistant_text)
+            if error is not None:
+                yield error
+
+    async def cancel_response(self, command: CancelResponseCommand) -> list[RealtimeServerEvent]:
+        self.generation_id += 1
+        if self.active_task is not None:
+            self.active_task.cancel()
+
+        response_id = command.response_id or self.active_response_id
+        self.active_response_id = None
+        if response_id is None:
+            return []
+
+        return [
+            ResponseDoneEvent(
+                event_id=command.event_id,
+                response_id=response_id,
+                status="cancelled",
+            )
+        ]
+
+    async def _persist_turn(self, event_id: str | None, assistant_text: str) -> RealtimeErrorEvent | None:
+        persistence_config = persistence_config_from_metadata(self.config.metadata)
+        if not persistence_config.enabled or persistence_config.conversation_id is None:
+            return None
+
+        try:
+            await self.persistence_adapter.write_turn(
+                conversation_id=persistence_config.conversation_id,
+                session_id=self.session_id,
+                turn_index=self.turn_index,
+                user_transcript=self._last_user_transcript,
+                assistant_text=assistant_text,
+            )
+        except Exception:
+            return RealtimeErrorEvent(
+                code="internal_error",
+                message="Realtime persistence failed",
+                event_id=event_id,
+                error_type="server_error",
+            )
+        return None
+
+    def _clear_active_response(self, response_id: str) -> None:
+        if self.active_response_id == response_id:
+            self.active_response_id = None
+
+
+def _new_realtime_id(prefix: str) -> str:
+    return f"{prefix}_{secrets.token_urlsafe(12)}"
+
+
+def _language_from_metadata(metadata: dict[str, object]) -> str | None:
+    language = metadata.get("language")
+    return language if isinstance(language, str) else None
+
+
+def _content_part_added(
+    event_id: str | None,
+    response_id: str,
+    item_id: str,
+    content_index: int,
+    content_type: str,
+) -> ResponseContentPartAddedEvent:
+    return ResponseContentPartAddedEvent(
+        event_id=event_id,
+        response_id=response_id,
+        item_id=item_id,
+        output_index=0,
+        content_index=content_index,
+        content_type=content_type,
+    )
+
+
+def _content_part_done(
+    event_id: str | None,
+    response_id: str,
+    item_id: str,
+    content_index: int,
+    content_type: str,
+) -> ResponseContentPartDoneEvent:
+    return ResponseContentPartDoneEvent(
+        event_id=event_id,
+        response_id=response_id,
+        item_id=item_id,
+        output_index=0,
+        content_index=content_index,
+        content_type=content_type,
+    )
