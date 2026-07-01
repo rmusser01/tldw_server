@@ -459,6 +459,8 @@ git commit -m "feat: add recurring question readiness and resolution lifecycle"
 
 ## Stage 3: Run And Result API With Manual Enqueue
 
+**Status:** Complete. Stage 3 added Jobs-backed manual run creation, run/result read APIs, result review mutation, idempotent manual run replay, and normalized API responses.
+
 **Goal:** Add API-first manual `Run now`, run history, result listing/detail, and review mutation before implementing the RAG worker.
 
 **Success Criteria:**
@@ -545,6 +547,13 @@ source .venv/bin/activate && python -m pytest \
   tldw_Server_API/tests/Notifications/test_scheduled_task_automation_api.py \
   -v
 ```
+
+Actual Stage 3 verification:
+
+- Focused Stage 3 pytest: `5 passed, 11 warnings`.
+- Full scheduled task DB/service/API/scope pytest: `132 passed, 14 warnings`.
+- `git diff --check`: passed.
+- Bandit touched production scope: zero findings in `/tmp/bandit_scheduled_tasks_phase4c_stage3.json`.
 
 **Commit:**
 

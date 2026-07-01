@@ -29,6 +29,13 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas impor
     ScheduledTaskPreviewResponse,
     ScheduledTaskPreviewStatus,
     ScheduledTaskReopenRequest,
+    ScheduledTaskResultListResponse,
+    ScheduledTaskResultResponse,
+    ScheduledTaskResultReviewRequest,
+    ScheduledTaskReviewState,
+    ScheduledTaskRunListResponse,
+    ScheduledTaskRunResponse,
+    ScheduledTaskRunStatus,
 )
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas import (
     ScheduledTask,
@@ -41,6 +48,9 @@ from tldw_Server_API.app.services.scheduled_task_automation_service import (
     ScheduledTaskAutomationError,
     ScheduledTaskAutomationService,
 )
+from tldw_Server_API.app.services.scheduled_task_recurring_question_service import (
+    ScheduledTaskRecurringQuestionService,
+)
 from tldw_Server_API.app.services.scheduled_tasks_control_plane_service import ScheduledTasksControlPlaneService
 
 router = APIRouter(prefix="/scheduled-tasks", tags=["scheduled-tasks"])
@@ -52,6 +62,10 @@ def get_scheduled_tasks_control_plane_service() -> ScheduledTasksControlPlaneSer
 
 def get_scheduled_task_automation_service() -> ScheduledTaskAutomationService:
     return ScheduledTaskAutomationService()
+
+
+def get_scheduled_task_recurring_question_service() -> ScheduledTaskRecurringQuestionService:
+    return ScheduledTaskRecurringQuestionService()
 
 
 def _scheduled_task_error(
@@ -153,6 +167,26 @@ _AUTOMATION_ERROR_MAP: dict[str, tuple[int, str, str]] = {
         "scheduled_task_definition_solved",
         "Scheduled task definition is already solved.",
     ),
+    "scheduled_task_definition_family_mismatch": (
+        status.HTTP_409_CONFLICT,
+        "scheduled_task_definition_family_mismatch",
+        "Scheduled task definition family does not support this action.",
+    ),
+    "scheduled_task_run_in_progress": (
+        status.HTTP_409_CONFLICT,
+        "scheduled_task_run_in_progress",
+        "Scheduled task definition already has an active run.",
+    ),
+    "scheduled_task_run_not_found": (
+        status.HTTP_404_NOT_FOUND,
+        "scheduled_task_run_not_found",
+        "Scheduled task run was not found.",
+    ),
+    "scheduled_task_result_not_found": (
+        status.HTTP_404_NOT_FOUND,
+        "scheduled_task_result_not_found",
+        "Scheduled task result was not found.",
+    ),
     "scheduled_task_scope_empty": (
         status.HTTP_422_UNPROCESSABLE_ENTITY,
         "scheduled_task_scope_empty",
@@ -242,6 +276,26 @@ _AUTOMATION_ERROR_MAP: dict[str, tuple[int, str, str]] = {
         status.HTTP_409_CONFLICT,
         "scheduled_task_definition_solved",
         "Scheduled task definition is already solved.",
+    ),
+    "definition_family_mismatch": (
+        status.HTTP_409_CONFLICT,
+        "scheduled_task_definition_family_mismatch",
+        "Scheduled task definition family does not support this action.",
+    ),
+    "run_in_progress": (
+        status.HTTP_409_CONFLICT,
+        "scheduled_task_run_in_progress",
+        "Scheduled task definition already has an active run.",
+    ),
+    "run_not_found": (
+        status.HTTP_404_NOT_FOUND,
+        "scheduled_task_run_not_found",
+        "Scheduled task run was not found.",
+    ),
+    "result_not_found": (
+        status.HTTP_404_NOT_FOUND,
+        "scheduled_task_result_not_found",
+        "Scheduled task result was not found.",
     ),
     "scope_empty": (
         status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -472,6 +526,152 @@ def create_scheduled_task_automation_definition(
             owner_id=int(current_user.id),
             actor=_actor_from_principal(principal, current_user),
             payload=payload,
+            idempotency_key=_idempotency_key(request),
+            request_id=_request_id(request),
+        )
+    except ScheduledTaskAutomationError as exc:
+        _raise_automation_error(request, exc)
+
+
+@router.post(
+    "/definitions/{definition_id}/runs",
+    response_model=ScheduledTaskRunResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rbac_rate_limit("tasks.control"))],
+)
+def create_scheduled_task_recurring_question_run(
+    request: Request,
+    definition_id: str = Path(..., min_length=1),
+    current_user: User = Depends(get_request_user),
+    principal=Depends(RequirePermission(TASKS_CONTROL)),  # noqa: B008
+    service: ScheduledTaskRecurringQuestionService = Depends(get_scheduled_task_recurring_question_service),
+) -> ScheduledTaskRunResponse:
+    try:
+        return service.create_manual_run(
+            owner_id=int(current_user.id),
+            actor=_actor_from_principal(principal, current_user),
+            definition_id=definition_id,
+            idempotency_key=_idempotency_key(request),
+            request_id=_request_id(request),
+        )
+    except ScheduledTaskAutomationError as exc:
+        _raise_automation_error(request, exc)
+
+
+@router.get(
+    "/definitions/{definition_id}/runs",
+    response_model=ScheduledTaskRunListResponse,
+    dependencies=[Depends(rbac_rate_limit("tasks.read"))],
+)
+def list_scheduled_task_recurring_question_definition_runs(
+    request: Request,
+    definition_id: str = Path(..., min_length=1),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    status_filter: ScheduledTaskRunStatus | None = Query(default=None, alias="status"),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(TASKS_READ)),  # noqa: B008
+    service: ScheduledTaskRecurringQuestionService = Depends(get_scheduled_task_recurring_question_service),
+) -> ScheduledTaskRunListResponse:
+    try:
+        return service.list_runs(
+            owner_id=int(current_user.id),
+            definition_id=definition_id,
+            status=status_filter,
+            limit=limit,
+            offset=offset,
+        )
+    except ScheduledTaskAutomationError as exc:
+        _raise_automation_error(request, exc)
+
+
+@router.get(
+    "/runs/{run_id}",
+    response_model=ScheduledTaskRunResponse,
+    dependencies=[Depends(rbac_rate_limit("tasks.read"))],
+)
+def get_scheduled_task_recurring_question_run(
+    request: Request,
+    run_id: str = Path(..., min_length=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(TASKS_READ)),  # noqa: B008
+    service: ScheduledTaskRecurringQuestionService = Depends(get_scheduled_task_recurring_question_service),
+) -> ScheduledTaskRunResponse:
+    try:
+        return service.get_run(owner_id=int(current_user.id), run_id=run_id)
+    except ScheduledTaskAutomationError as exc:
+        _raise_automation_error(request, exc)
+
+
+@router.get(
+    "/results",
+    response_model=ScheduledTaskResultListResponse,
+    dependencies=[Depends(rbac_rate_limit("tasks.read"))],
+)
+def list_scheduled_task_recurring_question_results(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    definition_id: str | None = Query(default=None),
+    run_id: str | None = Query(default=None),
+    review_state: ScheduledTaskReviewState | None = Query(default=None),
+    kind: str | None = Query(default=None),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(TASKS_READ)),  # noqa: B008
+    service: ScheduledTaskRecurringQuestionService = Depends(get_scheduled_task_recurring_question_service),
+) -> ScheduledTaskResultListResponse:
+    try:
+        return service.list_results(
+            owner_id=int(current_user.id),
+            definition_id=definition_id,
+            run_id=run_id,
+            review_state=review_state,
+            kind=kind,
+            limit=limit,
+            offset=offset,
+        )
+    except ScheduledTaskAutomationError as exc:
+        _raise_automation_error(request, exc)
+
+
+@router.get(
+    "/results/{result_id}",
+    response_model=ScheduledTaskResultResponse,
+    dependencies=[Depends(rbac_rate_limit("tasks.read"))],
+)
+def get_scheduled_task_recurring_question_result(
+    request: Request,
+    result_id: str = Path(..., min_length=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(TASKS_READ)),  # noqa: B008
+    service: ScheduledTaskRecurringQuestionService = Depends(get_scheduled_task_recurring_question_service),
+) -> ScheduledTaskResultResponse:
+    try:
+        return service.get_result(owner_id=int(current_user.id), result_id=result_id)
+    except ScheduledTaskAutomationError as exc:
+        _raise_automation_error(request, exc)
+
+
+@router.post(
+    "/results/{result_id}/review",
+    response_model=ScheduledTaskResultResponse,
+    dependencies=[Depends(rbac_rate_limit("tasks.control"))],
+)
+def review_scheduled_task_recurring_question_result(
+    payload: ScheduledTaskResultReviewRequest,
+    request: Request,
+    result_id: str = Path(..., min_length=1),
+    current_user: User = Depends(get_request_user),
+    principal=Depends(RequirePermission(TASKS_CONTROL)),  # noqa: B008
+    service: ScheduledTaskRecurringQuestionService = Depends(get_scheduled_task_recurring_question_service),
+) -> ScheduledTaskResultResponse:
+    try:
+        return service.update_result_review_state(
+            owner_id=int(current_user.id),
+            actor=_actor_from_principal(principal, current_user),
+            result_id=result_id,
+            review_state=payload.review_state,
+            review_note=payload.review_note,
             idempotency_key=_idempotency_key(request),
             request_id=_request_id(request),
         )

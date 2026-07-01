@@ -16,10 +16,21 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPri
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import ScheduledTasksDatabase
 from tldw_Server_API.app.services.scheduled_task_automation_service import (
     ScheduledTaskAutomationError,
-    ScheduledTaskAutomationService,
+)
+from tldw_Server_API.app.services.scheduled_task_recurring_question_service import (
+    ScheduledTaskRecurringQuestionService,
 )
 
 RAW_SENTINEL = "RAW_AGENT_SECRET_DO_NOT_LEAK_ENDPOINT_4B"
+
+
+class _FakeJobManager:
+    def __init__(self) -> None:
+        self.jobs: list[dict[str, Any]] = []
+
+    def create_job(self, **kwargs):
+        self.jobs.append(kwargs)
+        return {"id": len(self.jobs)}
 
 
 def _make_principal(
@@ -70,18 +81,27 @@ def _override_auth(
 def scheduled_tasks_client(client_user_only, tmp_path):
     repo = ScheduledTasksDatabase(tmp_path / "scheduled_task_automation_api.db")
     repo.ensure_schema()
-    service = ScheduledTaskAutomationService(repository=repo)
+    job_manager = _FakeJobManager()
+    service = ScheduledTaskRecurringQuestionService(repository=repo, job_manager=job_manager)
     _override_auth(client_user_only)
     client_user_only.app.dependency_overrides[
         scheduled_tasks_control_plane.get_scheduled_task_automation_service
     ] = lambda: service
+    client_user_only.app.dependency_overrides[
+        scheduled_tasks_control_plane.get_scheduled_task_recurring_question_service
+    ] = lambda: service
     client_user_only.scheduled_task_automation_service = service
+    client_user_only.scheduled_task_job_manager = job_manager
     client_user_only.scheduled_task_automation_repo = repo
     yield client_user_only
     client_user_only.app.dependency_overrides.pop(get_auth_principal, None)
     client_user_only.app.dependency_overrides.pop(get_request_user, None)
     client_user_only.app.dependency_overrides.pop(
         scheduled_tasks_control_plane.get_scheduled_task_automation_service,
+        None,
+    )
+    client_user_only.app.dependency_overrides.pop(
+        scheduled_tasks_control_plane.get_scheduled_task_recurring_question_service,
         None,
     )
 
@@ -316,6 +336,75 @@ def test_mark_solved_and_reopen_routes_update_resolution_state_and_audit(schedul
         "definition.marked_solved",
         "definition.reopened",
     }
+
+
+def test_manual_run_and_result_routes_are_normalized_and_idempotent(scheduled_tasks_client, auth_headers):
+    definition = _create_definition(scheduled_tasks_client, auth_headers)
+    run_headers = {**auth_headers, "Idempotency-Key": "manual-run-key"}
+
+    created_run = scheduled_tasks_client.post(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/runs",
+        headers=run_headers,
+    )
+    replay_run = scheduled_tasks_client.post(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/runs",
+        headers=run_headers,
+    )
+    listed_runs = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/runs",
+        headers=auth_headers,
+    )
+    run_detail = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/runs/{created_run.json()['id']}",
+        headers=auth_headers,
+    )
+    repo = scheduled_tasks_client.scheduled_task_automation_repo
+    result = repo.create_result(
+        owner_id=880,
+        definition_id=definition["id"],
+        run_id=created_run.json()["id"],
+        kind="finding",
+        title="Possible answer found",
+        summary="A matching source was found.",
+        answer=None,
+        answer_mode="evidence_only",
+        confidence={"label": "medium"},
+        source_refs=[{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        dedupe_key=f"rq:{definition['id']}:{created_run.json()['id']}:m1",
+        visibility_destination={"home": True, "results": True},
+    )
+    listed_results = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/results?definition_id={definition['id']}",
+        headers=auth_headers,
+    )
+    result_detail = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/results/{result.id}",
+        headers=auth_headers,
+    )
+    reviewed = scheduled_tasks_client.post(
+        f"/api/v1/scheduled-tasks/results/{result.id}/review",
+        headers=auth_headers,
+        json={"review_state": "read", "review_note": "Reviewed"},
+    )
+
+    assert created_run.status_code == 201, created_run.text  # nosec B101
+    assert created_run.json()["status"] == "queued"  # nosec B101
+    assert created_run.json()["trigger_reason"] == "manual"  # nosec B101
+    assert created_run.json()["job_id"] == "1"  # nosec B101
+    assert replay_run.status_code == 201, replay_run.text  # nosec B101
+    assert replay_run.json() == created_run.json()  # nosec B101
+    assert listed_runs.status_code == 200, listed_runs.text  # nosec B101
+    assert listed_runs.json()["items"][0]["id"] == created_run.json()["id"]  # nosec B101
+    assert run_detail.status_code == 200, run_detail.text  # nosec B101
+    assert run_detail.json()["id"] == created_run.json()["id"]  # nosec B101
+    assert listed_results.status_code == 200, listed_results.text  # nosec B101
+    assert listed_results.json()["items"][0]["id"] == result.id  # nosec B101
+    assert result_detail.status_code == 200, result_detail.text  # nosec B101
+    assert result_detail.json()["id"] == result.id  # nosec B101
+    assert reviewed.status_code == 200, reviewed.text  # nosec B101
+    assert reviewed.json()["review_state"] == "read"  # nosec B101
+    assert reviewed.json()["review_note"] == "Reviewed"  # nosec B101
+    assert scheduled_tasks_client.scheduled_task_job_manager.jobs[0]["payload"]["run_id"] == created_run.json()["id"]  # nosec B101
 
 
 def test_definition_filters_preview_filters_audit_filters_and_pagination(scheduled_tasks_client, auth_headers):
@@ -671,6 +760,10 @@ def test_same_idempotency_key_with_different_payload_conflicts_on_mutating_route
         ("scheduled_task_lifecycle_transition_invalid", "scheduled_task_lifecycle_transition_invalid", 409),
         ("scope_empty", "scheduled_task_scope_empty", 422),
         ("definition_solved", "scheduled_task_definition_solved", 409),
+        ("definition_family_mismatch", "scheduled_task_definition_family_mismatch", 409),
+        ("run_in_progress", "scheduled_task_run_in_progress", 409),
+        ("run_not_found", "scheduled_task_run_not_found", 404),
+        ("result_not_found", "scheduled_task_result_not_found", 404),
         (
             "definition_resolution_transition_invalid",
             "scheduled_task_resolution_transition_invalid",
@@ -741,6 +834,12 @@ def test_sync_automation_handlers_do_not_run_sqlite_work_on_event_loop():
         scheduled_tasks_control_plane.duplicate_scheduled_task_automation_definition,
         scheduled_tasks_control_plane.mark_scheduled_task_automation_definition_solved,
         scheduled_tasks_control_plane.reopen_scheduled_task_automation_definition,
+        scheduled_tasks_control_plane.create_scheduled_task_recurring_question_run,
+        scheduled_tasks_control_plane.list_scheduled_task_recurring_question_definition_runs,
+        scheduled_tasks_control_plane.get_scheduled_task_recurring_question_run,
+        scheduled_tasks_control_plane.list_scheduled_task_recurring_question_results,
+        scheduled_tasks_control_plane.get_scheduled_task_recurring_question_result,
+        scheduled_tasks_control_plane.review_scheduled_task_recurring_question_result,
     ]
 
     assert all(not inspect.iscoroutinefunction(handler) for handler in automation_handlers)  # nosec B101

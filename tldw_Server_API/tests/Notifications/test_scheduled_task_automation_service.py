@@ -20,6 +20,9 @@ from tldw_Server_API.app.services.scheduled_task_automation_service import (
     ScheduledTaskAutomationError,
     ScheduledTaskAutomationService,
 )
+from tldw_Server_API.app.services.scheduled_task_recurring_question_service import (
+    ScheduledTaskRecurringQuestionService,
+)
 
 OWNER_ID = 4101
 OTHER_OWNER_ID = 4102
@@ -31,6 +34,14 @@ def _service(tmp_path: Path) -> tuple[ScheduledTaskAutomationService, ScheduledT
     repo = ScheduledTasksDatabase(tmp_path / "scheduled_tasks_service.db")
     repo.ensure_schema()
     return ScheduledTaskAutomationService(repository=repo), repo
+
+
+def _recurring_question_service(
+    tmp_path: Path,
+) -> tuple[ScheduledTaskRecurringQuestionService, ScheduledTasksDatabase]:
+    repo = ScheduledTasksDatabase(tmp_path / "scheduled_tasks_recurring_question_service.db")
+    repo.ensure_schema()
+    return ScheduledTaskRecurringQuestionService(repository=repo), repo
 
 
 def _payload(
@@ -117,6 +128,26 @@ def _audit_count(repo: ScheduledTasksDatabase, definition_id: str) -> int:
         limit=100,
         offset=0,
     )[1]
+
+
+def _create_run_for_definition(
+    repo: ScheduledTasksDatabase,
+    *,
+    definition_id: str,
+    definition_version: int = 1,
+):
+    return repo.create_run(
+        owner_id=OWNER_ID,
+        definition_id=definition_id,
+        definition_version=definition_version,
+        trigger_reason="manual",
+        status="completed",
+        outcome="finding",
+        scope_snapshot={"mode": "sources", "sources": ["media_db"]},
+        finding_policy_snapshot={"preset": "balanced_findings"},
+        rag_request_snapshot={"query": "What changed?", "scope": {"sources": ["media_db"]}},
+        run_summary={"message": "Completed"},
+    )
 
 
 def _install_idempotency_miss_barrier(
@@ -485,6 +516,141 @@ def test_mark_solved_and_reopen_reject_archived_and_disabled_definitions(tmp_pat
         service.reopen_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=archived.id)
     with pytest.raises(ScheduledTaskAutomationError, match="definition_disabled"):
         service.reopen_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=disabled.id)
+
+
+def test_manual_run_creates_run_and_jobs_payload(tmp_path, monkeypatch):
+    service, repo = _recurring_question_service(tmp_path)
+    definition = _create_definition(service, initial_lifecycle="paused")
+    created_jobs: list[dict[str, Any]] = []
+
+    def _fake_create_jobs_entry(**kwargs):
+        created_jobs.append(kwargs)
+        return {"id": 123}
+
+    monkeypatch.setattr(service, "_create_jobs_entry", _fake_create_jobs_entry)
+
+    run = service.create_manual_run(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        idempotency_key="run-1",
+    )
+    replay = service.create_manual_run(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        idempotency_key="run-1",
+    )
+
+    assert run.status == "queued"  # nosec B101
+    assert run.trigger_reason == "manual"  # nosec B101
+    assert run.job_id == "123"  # nosec B101
+    assert replay.id == run.id  # nosec B101
+    assert len(created_jobs) == 1  # nosec B101
+    assert created_jobs[0]["payload"]["run_id"] == run.id  # nosec B101
+    assert created_jobs[0]["payload"]["definition_id"] == definition.id  # nosec B101
+    assert repo.get_run(owner_id=OWNER_ID, run_id=run.id).job_id == "123"  # nosec B101
+    audit_events = repo.list_audit_events(owner_id=OWNER_ID, definition_id=definition.id, limit=20, offset=0)[0]
+    assert "run.created" in {event.event_type for event in audit_events}  # nosec B101
+
+
+def test_manual_run_defaults_legacy_missing_scope_to_all_searchable_library(tmp_path, monkeypatch):
+    service, repo = _recurring_question_service(tmp_path)
+    definition = _create_definition(service)
+    preview = repo.get_preview(owner_id=OWNER_ID, preview_id=definition.preview_id)
+    legacy_config = dict(preview.normalized_config)
+    legacy_config["config"] = dict(legacy_config["config"])
+    legacy_config["config"].pop("scope", None)
+    with sqlite3.connect(repo.db_path) as conn:
+        conn.execute(
+            "UPDATE scheduled_task_previews SET normalized_config_json = ? WHERE owner_id = ? AND id = ?",
+            [json.dumps(legacy_config, sort_keys=True, separators=(",", ":")), OWNER_ID, definition.preview_id],
+        )
+    monkeypatch.setattr(service, "_create_jobs_entry", lambda **_kwargs: {"id": 123})
+
+    run = service.create_manual_run(owner_id=OWNER_ID, actor=ACTOR, definition_id=definition.id)
+
+    assert run.scope_snapshot["mode"] == "all_searchable_library"  # nosec B101
+    assert run.scope_snapshot["resolved_sources"] == ["media_db", "notes", "chats"]  # nosec B101
+
+
+def test_manual_run_rejects_solved_archived_disabled_and_overlapping_definitions(tmp_path, monkeypatch):
+    service, repo = _recurring_question_service(tmp_path)
+    monkeypatch.setattr(service, "_create_jobs_entry", lambda **_kwargs: {"id": 123})
+    solved = _create_definition(service, name="Solved run target")
+    archived = _create_definition(service, name="Archived run target")
+    disabled = _create_definition(service, name="Disabled run target")
+    overlapping = _create_definition(service, name="Overlapping run target")
+    service.mark_solved(owner_id=OWNER_ID, actor=ACTOR, definition_id=solved.id)
+    service.archive_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=archived.id)
+    repo.update_definition(
+        owner_id=OWNER_ID,
+        definition_id=disabled.id,
+        patch={"lifecycle": "disabled", "disabled_lock_kind": "admin", "disabled_reason": "policy"},
+        expected_version=disabled.version,
+    )
+    repo.create_run(
+        owner_id=OWNER_ID,
+        definition_id=overlapping.id,
+        definition_version=overlapping.version,
+        trigger_reason="manual",
+        status="queued",
+        outcome="none",
+        scope_snapshot={"mode": "sources", "sources": ["media_db"]},
+        finding_policy_snapshot={"preset": "balanced_findings"},
+        rag_request_snapshot={"query": "What changed?"},
+        run_summary={"message": "Already queued"},
+    )
+
+    with pytest.raises(ScheduledTaskAutomationError, match="definition_solved"):
+        service.create_manual_run(owner_id=OWNER_ID, actor=ACTOR, definition_id=solved.id)
+    with pytest.raises(ScheduledTaskAutomationError, match="definition_archived"):
+        service.create_manual_run(owner_id=OWNER_ID, actor=ACTOR, definition_id=archived.id)
+    with pytest.raises(ScheduledTaskAutomationError, match="definition_disabled"):
+        service.create_manual_run(owner_id=OWNER_ID, actor=ACTOR, definition_id=disabled.id)
+    with pytest.raises(ScheduledTaskAutomationError, match="run_in_progress"):
+        service.create_manual_run(owner_id=OWNER_ID, actor=ACTOR, definition_id=overlapping.id)
+
+
+def test_result_review_mutation_is_owner_scoped(tmp_path):
+    service, repo = _recurring_question_service(tmp_path)
+    definition = _create_definition(service)
+    run = _create_run_for_definition(repo, definition_id=definition.id, definition_version=definition.version)
+    result = repo.create_result(
+        owner_id=OWNER_ID,
+        definition_id=definition.id,
+        run_id=run.id,
+        kind="finding",
+        title="Possible answer found",
+        summary="A matching source was found.",
+        answer=None,
+        answer_mode="evidence_only",
+        confidence={"label": "medium"},
+        source_refs=[{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        dedupe_key=f"rq:{definition.id}:{run.id}:m1",
+        visibility_destination={"home": True, "results": True},
+    )
+
+    updated = service.update_result_review_state(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        result_id=result.id,
+        review_state="dismissed",
+        review_note="Not useful",
+    )
+    listed = service.list_results(owner_id=OWNER_ID, definition_id=definition.id, limit=10, offset=0)
+
+    assert updated.review_state == "dismissed"  # nosec B101
+    assert updated.review_note == "Not useful"  # nosec B101
+    assert listed.total == 1  # nosec B101
+    assert listed.items[0].id == result.id  # nosec B101
+    with pytest.raises(ScheduledTaskAutomationError, match="result_not_found"):
+        service.update_result_review_state(
+            owner_id=OTHER_OWNER_ID,
+            actor=ACTOR,
+            result_id=result.id,
+            review_state="read",
+        )
 
 
 def test_duplicate_creates_paused_copy_and_two_audit_events(tmp_path):

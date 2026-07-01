@@ -1544,8 +1544,7 @@ class ScheduledTaskAutomationService:
         actions.update(
             {
                 "create_run_manual": ScheduledTaskActionCapability(
-                    status="planned",
-                    reason="run_api_pending",
+                    status="available",
                     required_permissions=[TASKS_CONTROL],
                 ),
                 "execute_scheduled": ScheduledTaskActionCapability(
@@ -1553,10 +1552,10 @@ class ScheduledTaskAutomationService:
                     reason="scheduler_pending",
                     required_permissions=[TASKS_CONTROL],
                 ),
-                "read_runs": ScheduledTaskActionCapability(status="planned"),
-                "read_results": ScheduledTaskActionCapability(status="planned"),
+                "read_runs": ScheduledTaskActionCapability(status="available"),
+                "read_results": ScheduledTaskActionCapability(status="available"),
                 "mutate_results": ScheduledTaskActionCapability(
-                    status="planned",
+                    status="available",
                     required_permissions=[TASKS_CONTROL],
                 ),
                 "mark_solved": ScheduledTaskActionCapability(
