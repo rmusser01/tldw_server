@@ -4,43 +4,42 @@ title: Implement Scheduled Tasks Phase 4C Recurring Question execution
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-01 04:08'
+updated_date: 2026-07-01 04:08
 labels:
-  - scheduled-tasks
-  - phase-4c
-  - implementation
-  - api-first
+- scheduled-tasks
+- phase-4c
+- implementation
+- api-first
 dependencies: []
 references:
-  - >-
-    Docs/superpowers/specs/2026-06-30-scheduled-tasks-phase4c-recurring-question-execution-design.md
+- Docs/superpowers/specs/2026-06-30-scheduled-tasks-phase4c-recurring-question-execution-design.md
+- https://github.com/rmusser01/tldw_server/pull/2566
 documentation:
-  - >-
-    Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-execution-implementation-plan.md
+- Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-execution-implementation-plan.md
 priority: high
 modified_files:
-  - apps/packages/ui/src/services/scheduled-tasks-control-plane.ts
-  - apps/packages/ui/src/services/__tests__/scheduled-tasks-control-plane.test.ts
-  - apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskAutomationDefinitionEditor.tsx
-  - apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskDetailDrawer.tsx
-  - apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskResultDetailDrawer.tsx
-  - apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskResultsPanel.tsx
-  - apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx
-  - apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-results.ts
-  - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskAutomationDefinitionEditor.test.tsx
-  - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskDetailDrawer.test.tsx
-  - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskResultDetailDrawer.test.tsx
-  - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskResultsPanel.test.tsx
-  - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx
-  - apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-results.test.ts
-  - apps/packages/ui/src/components/Option/CompanionHome/hooks.ts
-  - apps/packages/ui/src/components/Option/CompanionHome/__tests__/AutomationInboxCard.test.tsx
-  - apps/packages/ui/src/components/Option/CompanionHome/__tests__/CompanionHomePage.test.tsx
-  - tldw_Server_API/app/core/DB_Management/Scheduled_Tasks_DB.py
-  - tldw_Server_API/app/services/scheduled_task_recurring_question_service.py
-  - tldw_Server_API/tests/Notifications/test_scheduled_task_automation_db.py
-  - tldw_Server_API/tests/Notifications/test_scheduled_task_automation_service.py
-  - Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-execution-implementation-plan.md
+- apps/packages/ui/src/services/scheduled-tasks-control-plane.ts
+- apps/packages/ui/src/services/__tests__/scheduled-tasks-control-plane.test.ts
+- apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskAutomationDefinitionEditor.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskDetailDrawer.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskResultDetailDrawer.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTaskResultsPanel.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/scheduled-task-results.ts
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskAutomationDefinitionEditor.test.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskDetailDrawer.test.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskResultDetailDrawer.test.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTaskResultsPanel.test.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/ScheduledTasksPage.test.tsx
+- apps/packages/ui/src/components/Option/ScheduledTasks/__tests__/scheduled-task-results.test.ts
+- apps/packages/ui/src/components/Option/CompanionHome/hooks.ts
+- apps/packages/ui/src/components/Option/CompanionHome/__tests__/AutomationInboxCard.test.tsx
+- apps/packages/ui/src/components/Option/CompanionHome/__tests__/CompanionHomePage.test.tsx
+- tldw_Server_API/app/core/DB_Management/Scheduled_Tasks_DB.py
+- tldw_Server_API/app/services/scheduled_task_recurring_question_service.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_automation_db.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_automation_service.py
+- Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-execution-implementation-plan.md
 ---
 
 ## Description
