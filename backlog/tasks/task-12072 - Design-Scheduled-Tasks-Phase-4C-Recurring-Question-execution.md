@@ -46,13 +46,14 @@ Design-first task. Implementation plan will be written only after the Phase 4C d
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Drafted Phase 4C Recurring Question execution design. Incorporated user-approved decisions: capability-driven RAG scopes, Mark solved in first slice, findings_only default surfacing, Run now, evidence-only fallback when generation is unavailable, and durable run records for every execution. Spec review loop found and fixed capability status vocabulary drift and solved/reopen lifecycle ambiguity, then returned Approved with no blocking issues. Verification: placeholder scan found no TODO/TBD/FIXME markers; required Phase 4C terms and referenced files were present; Bandit skipped because this task touched documentation/backlog only and no executable code.
+Drafted Phase 4C Recurring Question execution design. Incorporated user-approved decisions: capability-driven RAG scopes, Mark solved in first slice, findings_only default surfacing, Run now, evidence-only fallback when generation is unavailable, and durable run records for every execution. Spec review loop found and fixed capability status vocabulary drift and solved/reopen lifecycle ambiguity, then returned Approved with no blocking issues. Verification: placeholder scan found no open placeholder markers; required Phase 4C terms and referenced files were present; Bandit skipped because this task touched documentation/backlog only and no executable code.
+
+Additional planning-risk review found and addressed four ambiguity risks before implementation planning: empty-scope dry runs are explicitly out of scope for 4C and must fail as `scope_empty`; `all_searchable_library` now resolves only to capability-reported searchable sources readable by the owner; scheduled/manual run creation now revalidates active owner context and current readable scope; `generation_mode` now uses existing RAG defaults/profiles or preview-validated safe overrides rather than adding a provider/model selection UX.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

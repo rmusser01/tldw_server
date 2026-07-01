@@ -168,14 +168,17 @@ Scheduled due runs are created by APScheduler using the same internal run creati
 
 Run creation requires:
 
-- owner access and `TASKS_CONTROL` for manual runs;
+- active owner context and current readable access to the resolved scope;
+- `TASKS_CONTROL` for manual runs;
 - definition family is `recurring_question`;
 - definition lifecycle is not archived or disabled;
 - `resolution_state` is `open`;
 - RAG search capability is available;
-- scope resolves to at least one searchable source, unless the selected policy explicitly allows empty-scope dry runs;
+- scope resolves to at least one searchable source;
 - quota/cost admission passes;
 - overlap policy allows a new run.
+
+Empty-scope dry runs are out of scope for 4C. Preview and run admission should fail with `scope_empty` when no searchable sources are available in the resolved scope.
 
 ### Results
 
@@ -280,6 +283,8 @@ The API must tolerate unsupported fields by rejecting them with typed validation
 
 GitHub, YouTube, and similar providers are examples of possible source content after ingest, not primary scheduled-task scope types.
 
+`all_searchable_library` means all capability-reported RAG sources that are enabled, searchable, and readable by the current owner at preview and run time. It must not expand to every configured database, connector, deployment-wide source, or admin-only corpus.
+
 ### Finding Policy
 
 Store finding policy per definition and snapshot it per run.
@@ -303,6 +308,8 @@ Advanced fields can include:
 - `no_match_visibility`.
 
 If generation is unavailable and policy is not `required`, the run proceeds in evidence-only mode.
+
+4C does not add new provider or model selection UX. `generation_mode` controls whether answer synthesis is requested, but provider/model/profile resolution should use existing RAG defaults unless the definition stores an approved RAG profile reference or safe request overrides validated during preview. Preview should show the resolved synthesis mode and cost/quota class without exposing secrets.
 
 ### Run
 
