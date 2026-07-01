@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, WebSocket
 
 from tldw_Server_API.app.core.Audio.Realtime.capabilities import build_realtime_capabilities
+from tldw_Server_API.app.core.Audio.Realtime.default_pipeline import build_default_realtime_pipeline
 from tldw_Server_API.app.core.Audio.Realtime.handler import handle_realtime_websocket
 from tldw_Server_API.app.core.Audio.Realtime.persistence import NoopRealtimePersistenceAdapter
 from tldw_Server_API.app.core.Audio.Realtime.pipeline import RealtimePipeline
@@ -15,18 +16,8 @@ router = APIRouter(tags=["Audio Realtime"])
 ws_router = APIRouter(tags=["Audio Realtime"])
 
 
-class _UnavailableRealtimePipeline:
-    async def transcribe_pcm16(self, audio: bytes, *, sample_rate_hz: int, language: str | None) -> str:  # noqa: ARG002
-        raise NotImplementedError("Realtime STT/LLM/TTS pipeline is provided by Stage 4")
-
-    async def stream_turn(self, transcript: str, *, config: Any):  # noqa: ANN401, ARG002
-        if False:
-            yield None
-        raise NotImplementedError("Realtime STT/LLM/TTS pipeline is provided by Stage 4")
-
-
-def _default_realtime_pipeline_factory() -> RealtimePipeline:
-    return _UnavailableRealtimePipeline()
+def _default_realtime_pipeline_factory(principal: Any | None = None, user_id: int | None = None) -> RealtimePipeline:
+    return build_default_realtime_pipeline(principal=principal, user_id=user_id)
 
 
 def _default_realtime_persistence_factory() -> NoopRealtimePersistenceAdapter:

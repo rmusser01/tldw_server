@@ -493,7 +493,7 @@ Expected result: all Stage 3 tests pass.
 
 **Tests:** Unit tests monkeypatch service callables and do not call external providers by default.
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Files
 
@@ -510,19 +510,19 @@ Modify if needed after inspecting signatures during execution:
 
 ### Task 4.1: Write Default Pipeline Tests First
 
-- [ ] Add `test_realtime_default_pipeline.py`.
-- [ ] Monkeypatch the STT callable to return `"hello world"`.
-- [ ] Monkeypatch `perform_chat_api_call_async` to return an async text iterator yielding `"hello "` and `"there"`.
-- [ ] Monkeypatch TTS service `open_realtime_session` to return a fake realtime TTS session yielding two PCM chunks.
-- [ ] Test the adapter sends `OpenAISpeechRequest(response_format="pcm", stream=True, target_sample_rate=24000)`.
-- [ ] Test text is passed into the TTS realtime session incrementally and committed at turn end.
-- [ ] Test `stream_turn` yields text deltas before done and yields audio chunks from the fake TTS session.
-- [ ] Test assistant transcript deltas mirror the spoken text emitted by the adapter.
-- [ ] Test non-streaming chat return values are normalized into one text delta when the provider does not stream.
-- [ ] Test STT exceptions become `RealtimePipelineError(stage="stt")`.
-- [ ] Test LLM exceptions become `RealtimePipelineError(stage="llm")`.
-- [ ] Test TTS exceptions become `RealtimePipelineError(stage="tts")`.
-- [ ] Run the red test:
+- [x] Add `test_realtime_default_pipeline.py`.
+- [x] Monkeypatch the STT callable to return `"hello world"`.
+- [x] Monkeypatch `perform_chat_api_call_async` to return an async text iterator yielding `"hello "` and `"there"`.
+- [x] Monkeypatch TTS service `open_realtime_session` to return a fake realtime TTS session yielding two PCM chunks.
+- [x] Test the adapter sends `OpenAISpeechRequest(response_format="pcm", stream=True, target_sample_rate=24000)`.
+- [x] Test text is passed into the TTS realtime session incrementally and committed at turn end.
+- [x] Test `stream_turn` yields text deltas before done and yields audio chunks from the fake TTS session.
+- [x] Test assistant transcript deltas mirror the spoken text emitted by the adapter.
+- [x] Test non-streaming chat return values are normalized into one text delta when the provider does not stream.
+- [x] Test STT exceptions become `RealtimePipelineError(stage="stt")`.
+- [x] Test LLM exceptions become `RealtimePipelineError(stage="llm")`.
+- [x] Test TTS exceptions become `RealtimePipelineError(stage="tts")`.
+- [x] Run the red test:
 
 ```bash
 source .venv/bin/activate
@@ -533,8 +533,8 @@ Expected red result: pytest imports the test module and fails because `default_p
 
 ### Task 4.2: Implement Default Pipeline Adapter
 
-- [ ] Add `DefaultRealtimePipeline` in `default_pipeline.py`.
-- [ ] Constructor arguments:
+- [x] Add `DefaultRealtimePipeline` in `default_pipeline.py`.
+- [x] Constructor arguments:
   - `stt_transcribe_pcm16: Callable[..., Awaitable[str]]`
   - `chat_call: Callable[..., Awaitable[Any]]`
   - `tts_service_factory: Callable[[], Any]`
@@ -542,24 +542,24 @@ Expected red result: pytest imports the test module and fails because `default_p
   - `default_voice: str`
   - `provider_hint: str | None`
   - `user_id: int | None`
-- [ ] Provide a module-level factory `build_default_realtime_pipeline(principal) -> DefaultRealtimePipeline`.
-- [ ] Reuse existing STT code by extracting or wrapping a lower-level batch transcription helper. The helper must accept raw PCM16 bytes plus sample rate and must not require an HTTP `UploadFile`.
-- [ ] Use `perform_chat_api_call_async` for LLM calls.
-- [ ] Normalize streaming chat chunks and non-streaming chat responses into an async iterator of text deltas.
-- [ ] Implement `stream_turn` as the only public streaming method on the default pipeline.
-- [ ] Within `stream_turn`, push each LLM text delta to the realtime TTS session and yield a typed text event for the same delta.
-- [ ] Within `stream_turn`, yield transcript events for the assistant text that will be spoken.
-- [ ] Within `stream_turn`, concurrently drain TTS audio chunks and yield typed audio events until the TTS session finishes.
-- [ ] Use `TTSServiceV2.open_realtime_session` when available.
-- [ ] Fall back to `generate_speech` through `BufferedRealtimeSession` when a provider lacks native realtime TTS.
-- [ ] Use `OpenAISpeechRequest` with:
+- [x] Provide a module-level factory `build_default_realtime_pipeline(principal) -> DefaultRealtimePipeline`.
+- [x] Reuse existing STT code by extracting or wrapping a lower-level batch transcription helper. The helper must accept raw PCM16 bytes plus sample rate and must not require an HTTP `UploadFile`.
+- [x] Use `perform_chat_api_call_async` for LLM calls.
+- [x] Normalize streaming chat chunks and non-streaming chat responses into an async iterator of text deltas.
+- [x] Implement `stream_turn` as the only public streaming method on the default pipeline.
+- [x] Within `stream_turn`, push each LLM text delta to the realtime TTS session and yield a typed text event for the same delta.
+- [x] Within `stream_turn`, yield transcript events for the assistant text that will be spoken.
+- [x] Within `stream_turn`, concurrently drain TTS audio chunks and yield typed audio events until the TTS session finishes.
+- [x] Use `TTSServiceV2.open_realtime_session` when available.
+- [x] Fall back to `generate_speech` through `BufferedRealtimeSession` when a provider lacks native realtime TTS.
+- [x] Use `OpenAISpeechRequest` with:
   - `response_format="pcm"`
   - `stream=True`
   - `target_sample_rate=24000`
   - `voice=<resolved voice>`
   - `model=<resolved TTS model>`
-- [ ] Do not import heavy STT or TTS model modules at import time; resolve them inside the factory or call path.
-- [ ] Run:
+- [x] Do not import heavy STT or TTS model modules at import time; resolve them inside the factory or call path.
+- [x] Run:
 
 ```bash
 source .venv/bin/activate
@@ -570,10 +570,10 @@ Expected result: all default pipeline tests pass.
 
 ### Task 4.3: Wire Default Factories Into Routers
 
-- [ ] In `audio_realtime.py`, set the production pipeline factory to `build_default_realtime_pipeline`.
-- [ ] In `realtime_compat.py`, set the production pipeline factory to the same factory.
-- [ ] Keep tests able to monkeypatch factories without importing heavy providers.
-- [ ] Run the Stage 3 WebSocket tests again with fake factories:
+- [x] In `audio_realtime.py`, set the production pipeline factory to `build_default_realtime_pipeline`.
+- [x] In `realtime_compat.py`, set the production pipeline factory to the same factory.
+- [x] Keep tests able to monkeypatch factories without importing heavy providers.
+- [x] Run the Stage 3 WebSocket tests again with fake factories:
 
 ```bash
 source .venv/bin/activate
