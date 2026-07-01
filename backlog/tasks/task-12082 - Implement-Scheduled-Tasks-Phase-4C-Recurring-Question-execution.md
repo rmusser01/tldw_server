@@ -26,15 +26,19 @@ modified_files:
 - tldw_Server_API/app/api/v1/schemas/scheduled_tasks_automation_schemas.py
 - tldw_Server_API/app/services/scheduled_task_automation_service.py
 - tldw_Server_API/app/services/scheduled_task_recurring_question_service.py
+- tldw_Server_API/app/services/scheduled_task_recurring_question_scheduler.py
 - tldw_Server_API/app/services/scheduled_task_recurring_question_worker.py
 - tldw_Server_API/app/services/startup_content_jobs_pollers.py
+- tldw_Server_API/app/services/startup_recurring_schedulers.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_automation_db.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_automation_api.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_automation_service.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_jobs_worker.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_rag_adapter.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_scheduler.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_scope.py
 - tldw_Server_API/tests/Services/test_startup_content_jobs_pollers.py
+- tldw_Server_API/tests/Services/test_startup_recurring_schedulers.py
 ---
 
 ## Description
@@ -76,6 +80,8 @@ Stage 2 preview/readiness slice added source-agnostic Recurring Question scope n
 Stage 3 run/result API slice added idempotent manual Recurring Question run creation, Jobs enqueue payload helpers, normalized run/result list/detail routes, result review mutation with audit, API error aliases, and a legacy-missing-scope compatibility fallback to `all_searchable_library`. Verification: focused Stage 3 pytest passed (5 passed, 11 warnings); full scheduled task DB/service/API/scope pytest passed (132 passed, 14 warnings); git diff --check passed; Bandit on touched production files reported zero findings.
 
 Stage 4 RAG worker slice added a dependency-injected Recurring Question RAG adapter, storage-safe RAG snapshots, worker run state transitions, finding/no-match/failure persistence, retryable failure propagation for Jobs retries, and declarative startup worker discovery behind `SCHEDULED_TASKS_RECURRING_QUESTION_WORKER_ENABLED`. Verification: focused Stage 4 pytest passed (41 passed, 3 warnings); broader scheduled task plus startup pytest passed (173 passed, 14 warnings); git diff --check passed; Bandit on touched production files reported zero findings.
+
+Stage 5 scheduler slice added the APScheduler bridge for configured/open Recurring Questions, deterministic scheduled-run idempotency, overlap prevention, invalid-schedule isolation, stale queued/running run repair, orphaned completed Job/run `needs_attention` repair, lifecycle startup specs behind `SCHEDULED_TASKS_RECURRING_QUESTION_SCHEDULER_ENABLED`, and scheduler/worker readiness capability signals. Verification: focused scheduler pytest passed (6 passed, 3 warnings); adjacent automation/API/startup pytest passed (104 passed, 14 warnings); worker/startup dependency pytest passed (43 passed, 3 warnings); git diff --check passed; Bandit on touched production files reported zero findings in `/tmp/bandit_scheduled_tasks_phase4c_stage5.json`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

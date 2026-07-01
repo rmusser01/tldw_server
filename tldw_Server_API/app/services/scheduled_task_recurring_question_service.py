@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from pydantic import BaseModel
@@ -26,6 +27,7 @@ from tldw_Server_API.app.core.Scheduled_Tasks.recurring_question_jobs import (
     SCHEDULED_TASKS_DOMAIN,
     build_manual_run_idempotency_payload,
     build_recurring_question_run_job_payload,
+    build_scheduled_run_idempotency_key,
 )
 from tldw_Server_API.app.core.Scheduled_Tasks.recurring_question_scope import normalize_recurring_question_scope
 from tldw_Server_API.app.services.scheduled_task_automation_service import (
@@ -72,6 +74,108 @@ class ScheduledTaskRecurringQuestionService(ScheduledTaskAutomationService):
             ),
         )
         return ScheduledTaskRunResponse.model_validate(response)
+
+    def create_scheduled_run(
+        self,
+        *,
+        owner_id: int,
+        actor: str,
+        definition_id: str,
+        definition_version: int,
+        schedule_slot: str | datetime,
+        request_id: str | None = None,
+    ) -> ScheduledTaskRunResponse:
+        """Create or replay one scheduled Recurring Question run for a due slot."""
+
+        normalized_slot = _normalize_schedule_slot(schedule_slot)
+        idempotency_key = build_scheduled_run_idempotency_key(
+            definition_id=definition_id,
+            definition_version=definition_version,
+            schedule_slot=normalized_slot,
+        )
+        payload_hash = _canonical_hash(
+            {
+                "action": "create_scheduled_run",
+                "definition_id": definition_id,
+                "definition_version": definition_version,
+                "schedule_slot": normalized_slot,
+                "trigger_reason": "scheduled",
+            }
+        )
+        response = self._with_idempotency(
+            owner_id=owner_id,
+            route="scheduled_task_recurring_question.scheduled_run",
+            key=idempotency_key,
+            payload_hash=payload_hash,
+            operation=lambda tx: self._create_scheduled_run(
+                tx=tx,
+                owner_id=owner_id,
+                actor=actor,
+                definition_id=definition_id,
+                definition_version=definition_version,
+                schedule_slot=normalized_slot,
+                job_idempotency_key=idempotency_key,
+                request_id=request_id,
+            ),
+        )
+        return ScheduledTaskRunResponse.model_validate(response)
+
+    def reconcile_stale_runs(
+        self,
+        *,
+        owner_id: int,
+        actor: str,
+        now: datetime | None = None,
+        stale_after: timedelta = timedelta(hours=2),
+        limit_per_status: int = 200,
+    ) -> list[str]:
+        """Repair stale queued/running runs that no worker can truthfully finish."""
+
+        now_utc = _ensure_aware_utc(now or datetime.now(timezone.utc))
+        repaired: list[str] = []
+        repo = self._repo(owner_id)
+        for status in ("queued", "running"):
+            rows, _total = repo.list_runs(
+                owner_id=owner_id,
+                status=status,
+                limit=limit_per_status,
+                offset=0,
+            )
+            for row in rows:
+                updated_at = _parse_optional_datetime(row.updated_at)
+                if updated_at is None or now_utc - updated_at < stale_after:
+                    continue
+                failure_reason = self._repair_failure_reason(row)
+                repaired_row = repo.update_run(
+                    owner_id=owner_id,
+                    run_id=row.id,
+                    patch={
+                        "status": "failed",
+                        "outcome": "degraded",
+                        "run_summary": {
+                            **row.run_summary,
+                            "message": failure_reason["message"],
+                            "repair_reason": failure_reason["code"],
+                            "needs_attention": failure_reason.get("needs_attention", True),
+                            "previous_status": row.status,
+                        },
+                        "failure_reason": failure_reason,
+                        "ended_at": now_utc.isoformat(),
+                    },
+                )
+                self._create_audit(
+                    owner_id=owner_id,
+                    definition_id=row.definition_id,
+                    event_type="run.repaired",
+                    actor=actor,
+                    summary=f"Repaired stale {row.status} Recurring Question run",
+                    before=self._run_response(row).model_dump(mode="json"),
+                    after=self._run_response(repaired_row).model_dump(mode="json"),
+                    idempotency_key=None,
+                    request_id=None,
+                )
+                repaired.append(row.id)
+        return repaired
 
     def list_runs(
         self,
@@ -250,6 +354,79 @@ class ScheduledTaskRecurringQuestionService(ScheduledTaskAutomationService):
         )
         return response
 
+    def _create_scheduled_run(
+        self,
+        *,
+        tx: ScheduledTasksTransaction,
+        owner_id: int,
+        actor: str,
+        definition_id: str,
+        definition_version: int,
+        schedule_slot: str,
+        job_idempotency_key: str,
+        request_id: str | None,
+    ) -> ScheduledTaskRunResponse:
+        definition = self._get_definition_row(tx=tx, owner_id=owner_id, definition_id=definition_id)
+        if definition.version != definition_version:
+            raise ScheduledTaskAutomationError("definition_version_mismatch")
+        config = self._recurring_question_config(tx=tx, definition=definition)
+        scope_snapshot = dict(config.get("scope") or {})
+        self._validate_scheduled_run_admission(tx=tx, definition=definition, scope_snapshot=scope_snapshot)
+        run = tx.create_run(
+            owner_id=owner_id,
+            definition_id=definition.id,
+            definition_version=definition.version,
+            trigger_reason="scheduled",
+            status="queued",
+            outcome="none",
+            scope_snapshot=scope_snapshot,
+            finding_policy_snapshot=definition.finding_policy,
+            rag_request_snapshot=self._rag_request_snapshot(definition=definition, config=config, scope=scope_snapshot),
+            run_summary={
+                "message": "Queued scheduled Recurring Question run.",
+                "trigger_reason": "scheduled",
+                "schedule_slot": schedule_slot,
+            },
+            schedule_slot=schedule_slot,
+        )
+        job_payload = build_recurring_question_run_job_payload(run=run, owner_user_id=str(owner_id))
+        job = self._create_jobs_entry(
+            run=run,
+            owner_user_id=str(owner_id),
+            payload=job_payload,
+            request_id=request_id,
+            idempotency_key=job_idempotency_key,
+        )
+        job_id = str(job["id"]) if job.get("id") is not None else None
+        if job_id is not None:
+            run = tx.update_run(
+                owner_id=owner_id,
+                run_id=run.id,
+                patch={
+                    "job_id": job_id,
+                    "run_summary": {
+                        "message": "Queued scheduled Recurring Question run.",
+                        "trigger_reason": "scheduled",
+                        "schedule_slot": schedule_slot,
+                        "job_id": job_id,
+                    },
+                },
+            )
+        response = self._run_response(run)
+        self._create_audit(
+            tx=tx,
+            owner_id=owner_id,
+            definition_id=definition.id,
+            event_type="run.created",
+            actor=actor,
+            summary="Created scheduled Recurring Question run",
+            before=None,
+            after=response.model_dump(mode="json"),
+            idempotency_key=job_idempotency_key,
+            request_id=request_id,
+        )
+        return response
+
     def _create_jobs_entry(
         self,
         *,
@@ -258,6 +435,7 @@ class ScheduledTaskRecurringQuestionService(ScheduledTaskAutomationService):
         payload: dict[str, Any],
         request_id: str | None,
         priority: int = 5,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         manager = self._job_manager or JobManager()
         return manager.create_job(
@@ -267,7 +445,7 @@ class ScheduledTaskRecurringQuestionService(ScheduledTaskAutomationService):
             payload=payload,
             owner_user_id=owner_user_id,
             priority=priority,
-            idempotency_key=f"scheduled-task-rq-run:{run.id}",
+            idempotency_key=idempotency_key or f"scheduled-task-rq-run:{run.id}",
             request_id=request_id,
         )
 
@@ -300,6 +478,69 @@ class ScheduledTaskRecurringQuestionService(ScheduledTaskAutomationService):
             )
             if total > 0 or active:
                 raise ScheduledTaskAutomationError("run_in_progress")
+
+    def _validate_scheduled_run_admission(
+        self,
+        *,
+        tx: ScheduledTasksTransaction,
+        definition: DefinitionRow,
+        scope_snapshot: dict[str, Any],
+    ) -> None:
+        if definition.family != "recurring_question":
+            raise ScheduledTaskAutomationError("definition_family_mismatch")
+        if definition.lifecycle == "archived":
+            raise ScheduledTaskAutomationError("definition_archived")
+        if definition.lifecycle == "disabled":
+            raise ScheduledTaskAutomationError("definition_disabled")
+        if definition.lifecycle != "configured":
+            raise ScheduledTaskAutomationError("definition_not_scheduled")
+        if definition.resolution_state == "solved":
+            raise ScheduledTaskAutomationError("definition_solved")
+        if not _scope_has_sources(scope_snapshot):
+            raise ScheduledTaskAutomationError("scope_empty")
+        for status in ("queued", "running"):
+            active, total = tx.list_runs(
+                owner_id=definition.owner_id,
+                definition_id=definition.id,
+                status=status,
+                limit=1,
+                offset=0,
+            )
+            if total > 0 or active:
+                raise ScheduledTaskAutomationError("run_in_progress")
+
+    def _repair_failure_reason(self, row: RunRow) -> dict[str, Any]:
+        job_status: str | None = None
+        if row.job_id:
+            try:
+                job = (self._job_manager or JobManager()).get_job(int(row.job_id))
+            except (TypeError, ValueError):
+                job = None
+            if isinstance(job, dict):
+                job_status = str(job.get("status") or "")
+        if job_status == "completed":
+            return {
+                "code": "job_completed_without_run_finalization",
+                "message": "The backing job completed but the run did not finalize its result state.",
+                "job_id": row.job_id,
+                "job_status": job_status,
+                "needs_attention": True,
+            }
+        if job_status in {"failed", "cancelled"}:
+            return {
+                "code": f"job_{job_status}_without_run_finalization",
+                "message": f"The backing job is {job_status} but the run did not finalize its result state.",
+                "job_id": row.job_id,
+                "job_status": job_status,
+                "needs_attention": True,
+            }
+        return {
+            "code": "scheduler_repair_stale_run",
+            "message": "The run exceeded the stale-run repair window without worker progress.",
+            "job_id": row.job_id,
+            "job_status": job_status,
+            "needs_attention": True,
+        }
 
     def _recurring_question_config(
         self,
@@ -414,3 +655,28 @@ def _scope_has_sources(scope: dict[str, Any]) -> bool:
     else:
         sources = scope.get("sources")
     return isinstance(sources, list) and any(isinstance(source, str) and source.strip() for source in sources)
+
+
+def _ensure_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _parse_optional_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return _ensure_aware_utc(parsed)
+
+
+def _normalize_schedule_slot(value: str | datetime) -> str:
+    if isinstance(value, datetime):
+        return _ensure_aware_utc(value).isoformat()
+    parsed = _parse_optional_datetime(str(value))
+    if parsed is None:
+        raise ScheduledTaskAutomationError("invalid_schedule_slot")
+    return parsed.isoformat()

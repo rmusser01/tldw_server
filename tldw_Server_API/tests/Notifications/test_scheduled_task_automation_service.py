@@ -287,6 +287,9 @@ def test_capabilities_include_4c_actions_without_degraded_action_status(tmp_path
     ]:
         assert action in recurring.actions  # nosec B101
         assert recurring.actions[action].status in {"available", "unavailable", "planned", "disabled"}  # nosec B101
+    assert recurring.actions["execute_scheduled"].status == "available"  # nosec B101
+    assert recurring.related_capabilities["scheduler"]["status"] in {"enabled", "disabled"}  # nosec B101
+    assert recurring.related_capabilities["worker"]["status"] in {"enabled", "disabled"}  # nosec B101
 
 
 def test_recurring_question_preview_normalizes_scope_policy_retention_and_generation(tmp_path):

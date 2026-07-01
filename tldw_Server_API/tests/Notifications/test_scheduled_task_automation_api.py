@@ -185,7 +185,7 @@ def test_scheduled_task_static_child_routes_do_not_resolve_as_task_ids(scheduled
         assert response.text != "scheduled_task_not_found"  # nosec B101
 
 
-def test_capabilities_report_definition_actions_and_execution_state(scheduled_tasks_client, auth_headers):
+def test_capabilities_report_definition_and_execution_actions(scheduled_tasks_client, auth_headers):
     response = scheduled_tasks_client.get("/api/v1/scheduled-tasks/capabilities", headers=auth_headers)
 
     assert response.status_code == 200, response.text  # nosec B101
@@ -222,6 +222,15 @@ def test_capabilities_report_definition_actions_and_execution_state(scheduled_ta
     ):
         assert action in recurring_actions  # nosec B101
         assert recurring_actions[action]["status"] in {"available", "unavailable", "planned", "disabled"}  # nosec B101
+    assert recurring_actions["execute_scheduled"]["status"] == "available"  # nosec B101
+    assert families["recurring_question"]["related_capabilities"]["scheduler"]["status"] in {  # nosec B101
+        "enabled",
+        "disabled",
+    }
+    assert families["recurring_question"]["related_capabilities"]["worker"]["status"] in {  # nosec B101
+        "enabled",
+        "disabled",
+    }
     assert "degraded" not in {action["status"] for action in recurring_actions.values()}  # nosec B101
 
 

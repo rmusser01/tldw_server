@@ -663,6 +663,8 @@ git commit -m "feat: execute recurring question runs through jobs"
 
 ## Stage 5: APScheduler Registration And Reconciliation
 
+**Status:** Complete. Stage 5 added the APScheduler bridge, scheduled-run idempotency, stale-run repair, orphaned Jobs/run reconciliation, lifecycle startup wiring, and scheduler/worker readiness capabilities.
+
 **Goal:** Schedule configured/open Recurring Questions through APScheduler and repair divergent Jobs/run state.
 
 **Success Criteria:**
@@ -676,7 +678,7 @@ git commit -m "feat: execute recurring question runs through jobs"
 
 **Steps:**
 
-- [ ] Add failing scheduler tests:
+- [x] Add failing scheduler tests:
 
 ```python
 def test_scheduler_registers_only_configured_open_definitions(tmp_path, monkeypatch):
@@ -692,8 +694,8 @@ def test_scheduler_registers_only_configured_open_definitions(tmp_path, monkeypa
     assert paused.id not in {item.definition_id for item in loaded}
 ```
 
-- [ ] Add failing reconciliation tests for stale runs and orphaned jobs.
-- [ ] Run expected failures:
+- [x] Add failing reconciliation tests for stale runs and orphaned jobs.
+- [x] Run expected failures:
 
 ```bash
 source .venv/bin/activate && python -m pytest \
@@ -701,22 +703,22 @@ source .venv/bin/activate && python -m pytest \
   -v
 ```
 
-- [ ] Implement `scheduled_task_recurring_question_scheduler.py`:
+- [x] Implement `scheduled_task_recurring_question_scheduler.py`:
   - `RecurringQuestionSchedulerService`
   - `start()`
   - `stop()`
   - `rescan()`
   - `_add_job(definition)`
   - `_enqueue_due_slot(definition_id, definition_version, schedule_slot)`.
-- [ ] Support Phase 4B schedule kinds with explicit 4C behavior:
+- [x] Support Phase 4B schedule kinds with explicit 4C behavior:
   - `cron`
   - `daily`
   - `weekly`
   - `interval`
   - `one_time` remains readable/editable for backward compatibility but is not registered for recurring APScheduler execution in 4C.
-- [ ] Add reconciliation method to `scheduled_task_recurring_question_service.py`.
-- [ ] Wire scheduler startup/shutdown through `startup_recurring_schedulers.py` or the existing recurring scheduler lifecycle group.
-- [ ] Make capability probes report scheduler readiness and worker readiness.
+- [x] Add reconciliation method to `scheduled_task_recurring_question_service.py`.
+- [x] Wire scheduler startup/shutdown through `startup_recurring_schedulers.py` or the existing recurring scheduler lifecycle group.
+- [x] Make capability probes report scheduler readiness and worker readiness.
 
 **Verification:**
 
@@ -726,6 +728,14 @@ source .venv/bin/activate && python -m pytest \
   tldw_Server_API/tests/Services/test_startup_recurring_schedulers.py \
   -v
 ```
+
+Actual Stage 5 verification:
+
+- Focused scheduler pytest: `6 passed, 3 warnings`.
+- Adjacent automation/API/startup pytest: `104 passed, 14 warnings`.
+- Worker/startup dependency pytest: `43 passed, 3 warnings`.
+- `git diff --check` passed.
+- Bandit on touched production files wrote `/tmp/bandit_scheduled_tasks_phase4c_stage5.json` with zero findings.
 
 **Commit:**
 

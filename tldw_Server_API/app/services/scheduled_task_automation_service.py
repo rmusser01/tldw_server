@@ -25,6 +25,8 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas impor
     ScheduledTaskPreviewCreateRequest,
     ScheduledTaskPreviewListResponse,
     ScheduledTaskPreviewResponse,
+    ScheduledTaskResultResponse,
+    ScheduledTaskRunResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import TASKS_CONTROL
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
@@ -40,6 +42,7 @@ from tldw_Server_API.app.core.Scheduled_Tasks.recurring_question_models import (
     RETENTION_POLICY_MODES,
 )
 from tldw_Server_API.app.core.Scheduled_Tasks.recurring_question_scope import normalize_recurring_question_scope
+from tldw_Server_API.app.core.testing import env_flag_enabled
 
 PREVIEW_TTL = timedelta(hours=24)
 IDEMPOTENCY_TTL = timedelta(hours=24)
@@ -270,7 +273,19 @@ class ScheduledTaskAutomationService:
                     family="recurring_question",
                     family_availability="available",
                     actions=recurring_question_actions,
-                    related_capabilities={"rag": {"status": "not_checked"}},
+                    related_capabilities={
+                        "rag": {"status": "not_checked"},
+                        "scheduler": {
+                            "status": "enabled"
+                            if env_flag_enabled("SCHEDULED_TASKS_RECURRING_QUESTION_SCHEDULER_ENABLED")
+                            else "disabled",
+                        },
+                        "worker": {
+                            "status": "enabled"
+                            if env_flag_enabled("SCHEDULED_TASKS_RECURRING_QUESTION_WORKER_ENABLED")
+                            else "disabled",
+                        },
+                    },
                 ),
                 ScheduledTaskAutomationCapability(
                     family="agent_task",
@@ -1392,6 +1407,10 @@ class ScheduledTaskAutomationService:
                 return ScheduledTaskDefinitionResponse.model_validate(snapshot)
             if response_ref.get("type") == "run_now":
                 return ScheduledTaskRunNowResponse.model_validate(snapshot)
+            if response_ref.get("type") == "run":
+                return ScheduledTaskRunResponse.model_validate(snapshot)
+            if response_ref.get("type") == "result":
+                return ScheduledTaskResultResponse.model_validate(snapshot)
         if response_ref.get("type") == "preview":
             return self.get_preview(owner_id=owner_id, preview_id=str(response_ref["id"]))
         if response_ref.get("type") == "definition":
@@ -1416,6 +1435,18 @@ class ScheduledTaskAutomationService:
             return {
                 "type": "run_now",
                 "id": response.definition_id,
+                "snapshot": response.model_dump(mode="json"),
+            }
+        if isinstance(response, ScheduledTaskRunResponse):
+            return {
+                "type": "run",
+                "id": response.id,
+                "snapshot": response.model_dump(mode="json"),
+            }
+        if isinstance(response, ScheduledTaskResultResponse):
+            return {
+                "type": "result",
+                "id": response.id,
                 "snapshot": response.model_dump(mode="json"),
             }
         raise TypeError(f"unsupported idempotency response type: {type(response)!r}")
@@ -1548,8 +1579,7 @@ class ScheduledTaskAutomationService:
                     required_permissions=[TASKS_CONTROL],
                 ),
                 "execute_scheduled": ScheduledTaskActionCapability(
-                    status="planned",
-                    reason="scheduler_pending",
+                    status="available",
                     required_permissions=[TASKS_CONTROL],
                 ),
                 "read_runs": ScheduledTaskActionCapability(status="available"),
