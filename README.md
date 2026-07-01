@@ -111,7 +111,7 @@ Current release line:
 - `0.1.33` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The release train is prepared for the `0.1.33` merge to `main`; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch carries work beyond `0.1.33`, including post-`0.1.33` branch work, and is prepared for the `0.1.33` release merge to `main`; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
