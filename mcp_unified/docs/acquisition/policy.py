@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import socket
 from dataclasses import dataclass
 from typing import Literal
 from urllib.parse import unquote, urlsplit, urlunsplit
@@ -13,7 +14,15 @@ SourceProfile = Literal["locked_down", "local_first", "online_capable"]
 _SUPPORTED_SCHEMES = {"http", "https"}
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 _SOURCE_PROFILES = {"locked_down", "local_first", "online_capable"}
-_LOCAL_HOSTNAMES = {"localhost", "localhost.localdomain"}
+_LOCAL_HOSTNAMES = {
+    "broadcasthost",
+    "ip6-localhost",
+    "ip6-loopback",
+    "localdomain",
+    "localhost",
+    "localhost.localdomain",
+}
+_LEGACY_IPV4_CHARS = frozenset("0123456789abcdefABCDEFxX.")
 
 
 class URLPolicyError(ValueError):
@@ -284,13 +293,40 @@ def _parse_prefix_rule(prefix: str, field_name: str) -> URLPrefixRule:
 
 
 def _is_source_host_denied(host: str) -> bool:
-    if host in _LOCAL_HOSTNAMES or host.endswith(".localhost") or host.endswith(".local"):
+    if (
+        host in _LOCAL_HOSTNAMES
+        or host.endswith(".localhost")
+        or host.endswith(".local")
+        or host.endswith(".localdomain")
+    ):
         return True
     try:
         ipaddress.ip_address(host)
     except ValueError:
-        return False
+        address = _parse_legacy_ipv4_address(host)
+        return address is not None and _is_unsafe_ip_address(address)
     return True
+
+
+def _parse_legacy_ipv4_address(host: str) -> ipaddress.IPv4Address | None:
+    if not host or any(character not in _LEGACY_IPV4_CHARS for character in host):
+        return None
+    try:
+        packed = socket.inet_aton(host)
+    except OSError:
+        return None
+    return ipaddress.IPv4Address(packed)
+
+
+def _is_unsafe_ip_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return (
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_unspecified
+        or address.is_reserved
+    )
 
 
 def _has_dot_segment(decoded_path: str) -> bool:

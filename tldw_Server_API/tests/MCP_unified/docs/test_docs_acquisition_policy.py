@@ -151,6 +151,30 @@ def test_online_capable_arbitrary_domains_deny_unsafe_ip_literals_and_local_host
 @pytest.mark.parametrize(
     "raw_url",
     [
+        "http://2130706433/",
+        "http://0177.0.0.1/",
+        "http://0x7f.0.0.1/",
+        "http://ip6-localhost/",
+        "http://ip6-loopback/",
+        "http://broadcasthost/",
+        "http://localdomain/",
+    ],
+)
+def test_online_capable_arbitrary_domains_deny_legacy_local_host_forms(raw_url: str) -> None:
+    policy = SourcePolicy(
+        web_source_profile="online_capable",
+        allow_arbitrary_public_domains=True,
+    )
+
+    decision = policy.evaluate(raw_url)
+
+    assert decision.status == "denied"  # nosec B101
+    assert decision.reason == "source_host_denied"  # nosec B101
+
+
+@pytest.mark.parametrize(
+    "raw_url",
+    [
         "file:///etc/passwd",
         "ftp://example.com/reference",
         "https:///reference",
