@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 
-DOCS_PACKAGE_ROOT = Path("mcp_unified/docs")
+DOCS_PACKAGE_ROOT = Path("apps/mcp-unified/src/mcp_unified/docs")
 FORBIDDEN_IMPORT_PREFIX = "tldw_Server_API"
 
 

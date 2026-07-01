@@ -17,11 +17,7 @@ class DocsAliasResolver:
 
     def resolve_library_id(self, *, scope: AccessScope, library_name: str) -> dict[str, Any]:
         result = self.resolve(scope=scope, name=library_name)
-        package_like = [
-            match
-            for match in result["matches"]
-            if match.get("target_type") in {"collection", "package"}
-        ]
+        package_like = [match for match in result["matches"] if match.get("target_type") in {"collection", "package"}]
         return {
             "query": library_name,
             "matches": [{**match, "canonical_tool": "docs.resolve"} for match in package_like],

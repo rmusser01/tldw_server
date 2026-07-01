@@ -454,10 +454,7 @@ class DocsCatalogStore:
             }
             for row in collection_rows
         )
-        matches.extend(
-            {"target_type": "keyword", "id": row["name"], "title": row["name"]}
-            for row in keyword_rows
-        )
+        matches.extend({"target_type": "keyword", "id": row["name"], "title": row["name"]} for row in keyword_rows)
         return matches
 
     def create_collection(self, *, scope: AccessScope, name: str, description: str = "") -> int:

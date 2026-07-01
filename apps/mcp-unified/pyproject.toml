@@ -91,6 +91,11 @@ include-package-data = false
 license-files = ["LICENSE"]
 packages = [
   "mcp_unified",
+  "mcp_unified.docs",
+  "mcp_unified.docs.acquisition",
+  "mcp_unified.docs.importers",
+  "mcp_unified.docs.retrieval",
+  "mcp_unified.docs.store",
   "mcp_unified.federation",
   "mcp_unified.filesystem_locks",
   "mcp_unified.gateway",
@@ -108,3 +113,4 @@ packages = [
 
 [tool.setuptools.package-data]
 mcp_unified = ["py.typed", "README.md", "USER_GUIDE.md"]
+"mcp_unified.docs.store" = ["schema.sql"]
