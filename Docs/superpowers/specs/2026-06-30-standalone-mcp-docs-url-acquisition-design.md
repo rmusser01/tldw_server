@@ -88,12 +88,17 @@ Extend `DocsSettings` with web acquisition configuration:
 - `url_user_agent`: configured user-agent for URL acquisition.
 - `respect_robots`: default false for Stage 2 unless a standalone robots
   checker is implemented in the same plan with tests.
+- `allow_arbitrary_public_domains`: default false. Only meaningful for
+  `online_capable`; when false, unknown public domains still return
+  approval-required.
 
 Locked-down config can keep `enable_web_acquisition` false or enable it with
-only explicit `allowed_url_prefixes`. `local_first` returns approval-required
-for unknown domains. `online_capable` allows configured domains/prefixes and
-returns approval-required for unknown domains unless the deployment later adds
-an approval adapter.
+only explicit `allowed_url_prefixes`; domain-only allow rules are ignored in
+this profile so locked-down deployments remain narrow. `local_first` allows
+configured domains/prefixes and returns approval-required for unknown domains.
+`online_capable` allows configured domains/prefixes and may also allow unknown
+public domains only when `allow_arbitrary_public_domains` is explicitly true.
+The repository's default config must keep this flag false.
 
 ### Source Policy
 
@@ -111,6 +116,22 @@ an approval adapter.
 The policy layer must not perform network I/O. That separation lets tests prove
 no fetch occurs when approval is required.
 
+Domain and prefix matching must be exact and structured:
+
+- normalize hostnames with IDNA and lowercase comparison;
+- normalize default ports before comparison;
+- treat `example.com` as matching only `example.com`, not
+  `badexample.com` or arbitrary subdomains;
+- support subdomains only through explicit wildcard rules such as
+  `*.example.com`, where the wildcard does not match the apex unless both are
+  configured;
+- reject raw string prefix matching for host allow/deny checks;
+- parse URL-prefix rules into scheme, host, optional port, and path components;
+- compare path prefixes on decoded path-segment boundaries so
+  `/docs/` does not allow `/docs.evil/`;
+- ignore fragments for policy decisions and include query strings only in the
+  safe argument hash, never in logs.
+
 ### URL Safety And Fetching
 
 `mcp_unified.docs.acquisition.fetcher` owns network execution after policy
@@ -119,18 +140,30 @@ allows a URL:
 - resolve hostnames through an injectable resolver;
 - deny loopback, private, link-local, multicast, unspecified, and reserved IPs;
 - open requests through an injectable transport;
+- bind transport connections to resolver-validated addresses, or otherwise
+  prove the transport cannot perform an unvalidated hostname re-resolution;
 - disable automatic redirects;
 - validate each redirect target before following it;
 - re-run source policy, DNS, and IP checks on redirect targets;
 - enforce redirect count;
 - validate content type before reading the full response when headers are
   available;
-- read bodies with a hard byte limit;
+- request `Accept-Encoding: identity` in the baseline transport;
+- read bodies with a hard byte limit and enforce limits on both transferred and
+  decoded bytes if an optional transport supports compression;
 - return final URL, status code, headers, redirect chain summary, and bytes.
 
 The design avoids relying on `requests`, `httpx`, or `aiohttp` for the
 baseline. If a future optional transport uses those libraries, it must remain
 behind the same interface and must not be imported at package import time.
+Tests must include a DNS-rebinding scenario where the first resolution is
+public and a later transport resolution would be private; the fetcher must deny
+or avoid that re-resolution path.
+
+If `respect_robots` is true and no standalone robots checker is implemented,
+`docs.ingest_url` must fail closed with `robots_unavailable` before fetching
+page content. Robots support is not required for this Stage 2 slice, but the
+setting cannot silently fail open.
 
 ### Extraction
 
@@ -239,6 +272,7 @@ Responses should use stable machine-readable `status` and `reason_code` values:
 - `denied` / `redirect_limit_exceeded`
 - `denied` / `content_type_denied`
 - `denied` / `content_too_large`
+- `denied` / `robots_unavailable`
 - `failed` / `fetch_timeout`
 - `failed` / `fetch_error`
 - `failed` / `extract_empty`
@@ -262,12 +296,15 @@ Unit tests:
 - no-fetch-before-approval using fake resolver/transport call counters;
 - unsupported scheme and credential URL denial;
 - denied-domain precedence over allowed-domain config;
-- URL prefix matching normalization;
+- domain matching normalization, explicit wildcard handling, and URL prefix
+  path-boundary matching;
 - DNS private/loopback/link-local/multicast/reserved denial;
+- DNS-rebinding denial or validated-address transport binding;
 - redirect validation and redirect-to-private denial;
 - redirect count denial;
 - content-type denial;
-- response size denial;
+- compressed and decoded response size denial;
+- `respect_robots` fail-closed behavior when no robots checker exists;
 - extraction fallback order with monkeypatched optional imports;
 - stdlib extraction works without rich libraries.
 
@@ -298,6 +335,7 @@ MCP config. Users enable it explicitly:
 settings:
   enable_web_acquisition: true
   web_source_profile: local_first
+  allow_arbitrary_public_domains: false
   preapproved_domains:
     - docs.python.org
   allowed_url_prefixes:
@@ -316,13 +354,20 @@ capable.
   when disabled.
 - `docs.ingest_url` returns approval-required without fetch for unknown sources
   under approval-requiring profiles.
+- `online_capable` only fetches unknown public domains when
+  `allow_arbitrary_public_domains` is explicitly true.
 - Approved single-page URLs can be ingested, searched, and included in context
   packs.
 - The fetch path validates DNS/IP policy before connect and after redirects.
+- The fetch path binds the network connection to resolver-validated addresses
+  or denies possible DNS-rebinding paths.
 - The fetch path denies private, loopback, link-local, multicast, and reserved
   addresses.
 - Redirects are manual, capped, and policy-checked per hop.
-- Content type and body-size limits are enforced.
+- Content type, transferred body-size, and decoded body-size limits are
+  enforced.
+- `respect_robots: true` fails closed with `robots_unavailable` unless a
+  standalone robots checker is implemented and tested.
 - Optional rich extractors are lazy and never required for package import.
 - `docs.status` distinguishes disabled, enabled stdlib-only, and enabled rich
   extractor availability.

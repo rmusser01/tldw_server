@@ -4,7 +4,7 @@ title: Design standalone MCP docs Stage 2 URL acquisition
 status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-01 00:17'
+updated_date: '2026-07-01 00:32'
 labels: []
 dependencies: []
 documentation:
@@ -31,12 +31,14 @@ Write the Stage 2 design/spec for optional single-page URL acquisition for the s
 
 <!-- SECTION:NOTES:BEGIN -->
 Wrote the Stage 2 single-page URL acquisition design and completed self-review for placeholders, contradictions, scope, and ambiguity. The spec keeps web acquisition optional, excludes crawler/browser/cookies, requires config-driven approval semantics, fake transport/resolver tests, lazy optional extractors, and import-boundary protection for the standalone package.
+
+Post-review follow-up: patch the Stage 2 URL acquisition spec to clarify DNS/transport binding, exact domain/prefix matching, profile semantics, robots behavior, and compressed-body limits before implementation planning.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Stage 2 URL acquisition spec written for user review at Docs/superpowers/specs/2026-06-30-standalone-mcp-docs-url-acquisition-design.md. Scope is optional single-page docs.ingest_url with approval-required flow, redirect-aware SSRF controls, body/content-type limits, lazy rich extraction fallback, no live-internet tests, and no tldw_server runtime imports.
+Stage 2 URL acquisition spec written and post-review patched at Docs/superpowers/specs/2026-06-30-standalone-mcp-docs-url-acquisition-design.md. The final spec covers optional single-page docs.ingest_url, config-only approval flow, exact domain/prefix semantics, DNS/transport binding against rebinding, redirect-aware SSRF controls, transferred/decoded body limits, fail-closed robots behavior, lazy rich extraction fallback, no live-internet tests, and no tldw_server runtime imports.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
