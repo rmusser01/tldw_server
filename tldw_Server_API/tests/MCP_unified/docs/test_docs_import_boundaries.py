@@ -28,6 +28,20 @@ def test_docs_package_imports_without_host_or_web_dependencies() -> None:
     assert hasattr(module, "AccessScope")  # nosec B101
 
 
+def test_standalone_mount_imports_without_host_dependencies() -> None:
+    module = importlib.import_module("mcp_unified.docs.standalone")
+
+    assert hasattr(module, "create_standalone_docs_mount")  # nosec B101
+    assert hasattr(module, "StandaloneDocsProfile")  # nosec B101
+
+
+def test_docs_public_exports_include_standalone_mount() -> None:
+    module = importlib.import_module("mcp_unified.docs")
+
+    assert hasattr(module, "create_standalone_docs_mount")  # nosec B101
+    assert hasattr(module, "StandaloneDocsProfile")  # nosec B101
+
+
 def test_docs_core_does_not_import_tldw_server_modules() -> None:
     violations: list[tuple[str, str]] = []
     for path in DOCS_PACKAGE_ROOT.rglob("*.py"):
