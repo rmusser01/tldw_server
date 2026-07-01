@@ -28,6 +28,8 @@ from tldw_Server_API.app.core.Audio.Realtime.constants import (
     REALTIME_INPUT_AUDIO_FORMAT,
     REALTIME_INPUT_CHANNELS,
     REALTIME_INPUT_SAMPLE_RATE_HZ,
+    REALTIME_INPUT_SAMPLE_WIDTH_BYTES,
+    REALTIME_MAX_OUTPUT_CHUNK_BYTES,
     REALTIME_OUTPUT_AUDIO_FORMAT,
     REALTIME_OUTPUT_CHANNELS,
     REALTIME_OUTPUT_SAMPLE_RATE_HZ,
@@ -145,6 +147,17 @@ def to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]:
             "delta": event.delta,
         }
     if isinstance(event, ResponseAudioDeltaEvent):
+        if len(event.audio) > REALTIME_MAX_OUTPUT_CHUNK_BYTES:
+            return to_openai_server_event(
+                RealtimeErrorEvent(
+                    code="payload_too_large",
+                    message=(
+                        "response.output_audio.delta exceeds "
+                        f"{REALTIME_MAX_OUTPUT_CHUNK_BYTES} byte realtime output chunk limit"
+                    ),
+                    event_id=event.event_id,
+                )
+            )
         return {
             "type": OPENAI_REALTIME_RESPONSE_OUTPUT_AUDIO_DELTA,
             "event_id": event.event_id,
@@ -211,25 +224,49 @@ def _parse_session_update(payload: dict[str, Any], event_id: str | None) -> Upda
             event_id=event_id,
         )
 
-    session = payload.get("session")
-    if not isinstance(session, dict):
-        session = {}
+    session, invalid = _optional_object(
+        payload,
+        "session",
+        "session.update session must be an object when provided",
+        event_id,
+    )
+    if invalid is not None:
+        return invalid
 
     unsupported = _validate_session_options(session, event_id)
     if unsupported is not None:
         return unsupported
 
-    audio = session.get("audio")
-    if not isinstance(audio, dict):
-        audio = {}
+    audio, invalid = _optional_object(
+        session,
+        "audio",
+        "session.audio must be an object when provided",
+        event_id,
+    )
+    if invalid is not None:
+        return invalid
 
-    input_audio = audio.get("input")
-    if not isinstance(input_audio, dict):
-        input_audio = {}
+    input_audio, invalid = _optional_object(
+        audio,
+        "input",
+        "session.audio.input must be an object when provided",
+        event_id,
+    )
+    if invalid is not None:
+        return invalid
 
-    output_audio = audio.get("output")
-    if not isinstance(output_audio, dict):
-        output_audio = {}
+    output_audio, invalid = _optional_object(
+        audio,
+        "output",
+        "session.audio.output must be an object when provided",
+        event_id,
+    )
+    if invalid is not None:
+        return invalid
+
+    nested_turn_detection = _validate_turn_detection(input_audio.get("turn_detection"), event_id)
+    if nested_turn_detection is not None:
+        return nested_turn_detection
 
     input_format = input_audio.get("format", REALTIME_INPUT_AUDIO_FORMAT)
     input_sample_rate_hz = input_audio.get("sample_rate_hz", REALTIME_INPUT_SAMPLE_RATE_HZ)
@@ -259,9 +296,14 @@ def _parse_session_update(payload: dict[str, Any], event_id: str | None) -> Upda
             event_id=event_id,
         )
 
-    metadata = session.get("metadata")
-    if not isinstance(metadata, dict):
-        metadata = {}
+    metadata, invalid = _optional_object(
+        session,
+        "metadata",
+        "session.metadata must be an object when provided",
+        event_id,
+    )
+    if invalid is not None:
+        return invalid
 
     config = RealtimeSessionConfig(
         model=_optional_str(session.get("model")),
@@ -293,13 +335,9 @@ def _validate_session_options(session: dict[str, Any], event_id: str | None) -> 
             event_id=event_id,
         )
 
-    turn_detection = session.get("turn_detection")
-    if turn_detection not in (None, "manual"):
-        return RealtimeErrorEvent(
-            code="unsupported_session_option",
-            message="only manual turn detection is supported",
-            event_id=event_id,
-        )
+    turn_detection = _validate_turn_detection(session.get("turn_detection"), event_id)
+    if turn_detection is not None:
+        return turn_detection
 
     if _contains_tools(session):
         return RealtimeErrorEvent(
@@ -340,6 +378,13 @@ def _parse_append_audio(
             event_id=event_id,
         )
 
+    if len(decoded) % REALTIME_INPUT_SAMPLE_WIDTH_BYTES != 0:
+        return RealtimeErrorEvent(
+            code="invalid_audio",
+            message="input_audio_buffer.append audio must contain whole pcm16 samples",
+            event_id=event_id,
+        )
+
     return AppendAudioCommand(event_id=event_id, audio=decoded)
 
 
@@ -361,7 +406,91 @@ def _parse_response_create(payload: dict[str, Any], event_id: str | None) -> Cre
             event_id=event_id,
         )
 
+    unsupported = _validate_response_create_options(response, event_id)
+    if unsupported is not None:
+        return unsupported
+
     return CreateResponseCommand(event_id=event_id, response=dict(response))
+
+
+def _validate_response_create_options(
+    response: dict[str, Any],
+    event_id: str | None,
+) -> RealtimeErrorEvent | None:
+    modalities = response.get("modalities")
+    if modalities is not None:
+        if not isinstance(modalities, list) or any(item not in {"audio", "text"} for item in modalities):
+            return RealtimeErrorEvent(
+                code="unsupported_session_option",
+                message="response.create modalities must be a subset of audio and text",
+                event_id=event_id,
+            )
+
+    if "output_audio_format" in response:
+        return RealtimeErrorEvent(
+            code="unsupported_session_option",
+            message="output_audio_format is a beta-era field; use response.audio.output.format",
+            event_id=event_id,
+        )
+
+    audio, invalid = _optional_object(
+        response,
+        "audio",
+        "response.audio must be an object when provided",
+        event_id,
+    )
+    if invalid is not None:
+        return invalid
+
+    output_audio, invalid = _optional_object(
+        audio,
+        "output",
+        "response.audio.output must be an object when provided",
+        event_id,
+    )
+    if invalid is not None:
+        return invalid
+
+    output_format = output_audio.get("format", REALTIME_OUTPUT_AUDIO_FORMAT)
+    output_sample_rate_hz = output_audio.get("sample_rate_hz", REALTIME_OUTPUT_SAMPLE_RATE_HZ)
+    output_channels = output_audio.get("channels", REALTIME_OUTPUT_CHANNELS)
+    if (
+        output_format != REALTIME_OUTPUT_AUDIO_FORMAT
+        or output_sample_rate_hz != REALTIME_OUTPUT_SAMPLE_RATE_HZ
+        or output_channels != REALTIME_OUTPUT_CHANNELS
+    ):
+        return RealtimeErrorEvent(
+            code="unsupported_session_option",
+            message="only pcm16 24000 Hz mono response output audio is supported",
+            event_id=event_id,
+        )
+
+    return None
+
+
+def _validate_turn_detection(value: Any, event_id: str | None) -> RealtimeErrorEvent | None:
+    if value in (None, "manual"):
+        return None
+    return RealtimeErrorEvent(
+        code="unsupported_session_option",
+        message="only manual turn detection is supported",
+        event_id=event_id,
+    )
+
+
+def _optional_object(
+    source: dict[str, Any],
+    key: str,
+    message: str,
+    event_id: str | None,
+) -> tuple[dict[str, Any], RealtimeErrorEvent | None]:
+    if key not in source:
+        return {}, None
+
+    value = source[key]
+    if not isinstance(value, dict):
+        return {}, RealtimeErrorEvent(code="invalid_event", message=message, event_id=event_id)
+    return value, None
 
 
 def _contains_tools(value: dict[str, Any]) -> bool:
