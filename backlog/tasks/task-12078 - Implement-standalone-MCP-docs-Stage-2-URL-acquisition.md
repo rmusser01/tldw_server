@@ -19,7 +19,7 @@ Implement optional single-page URL acquisition for the standalone MCP docs corpu
 - [ ] #1 docs.ingest_url is hidden when disabled and stale direct calls return capability_disabled before policy or network work.
 - [x] #2 Source policy implements locked_down, local_first, and online_capable decisions with structured domain/wildcard/prefix matching, safe URL normalization, approval_required without fetch, denied-domain precedence, unsupported scheme denial, and credential URL denial.
 - [x] #3 URL fetcher uses injectable resolver/transport, validates unsafe IP ranges, prevents DNS rebinding through validated-address transport binding, handles manual redirects with per-hop policy/DNS/IP checks, enforces redirect limits, content-type limits, transferred and decoded body limits, and robots fail-closed behavior.
-- [ ] #4 Extraction uses lazy optional trafilatura/bs4 imports with stdlib HTML/text fallback and preserves source_url/canonical_uri without pretending URLs are local paths.
+- [x] #4 Extraction uses lazy optional trafilatura/bs4 imports with stdlib HTML/text fallback and preserves source_url/canonical_uri without pretending URLs are local paths.
 - [ ] #5 Approved fake URL ingestion writes to SQLite/FTS5, applies keywords and collections, and is retrievable via docs.search and docs.context.
 - [ ] #6 MCP provider and host shim expose docs.ingest_url only when enabled, validate url arguments, categorize it as ingestion, and report disabled/enabled/extractor status in docs.status.
 - [ ] #7 Import-boundary tests verify mcp_unified.docs has no top-level tldw_Server_API, requests, httpx, aiohttp, playwright, trafilatura, or bs4 imports; tests do not use live internet.
@@ -48,6 +48,12 @@ Task 3 complete locally after subagent usage limit interrupted worker availabili
 - Green evidence: focused fetcher tests passed (`14 passed, 6 warnings`); full current docs MCP tests passed (`126 passed, 6 warnings`); Black check reported 5 touched files unchanged.
 - Bandit evidence: `/tmp/bandit_mcp_docs_fetcher.json` reported `errors: []` and `results: []` for `mcp_unified/docs/acquisition` plus the new fetcher test file.
 - Review gates: local spec review verified injectable resolver/transport, deny-before-transport private IP handling, validated-address transport gating, no-fetch-before-approval, per-hop redirect policy/DNS/IP checks, redirect limits, content-type limits, transferred/decoded body limits, query redaction in results, and robots fail-closed behavior.
+
+Task 4 complete locally.
+- Red evidence: extraction tests initially failed for missing `mcp_unified.docs.acquisition.extract`; review-driven warning regression failed until static fallback reported rich-extractor fallback state.
+- Green evidence: extraction/importer tests passed (`10 passed, 6 warnings`); full current docs MCP tests passed (`130 passed, 6 warnings`); Black check reported 5 touched files unchanged.
+- Bandit evidence: `/tmp/bandit_mcp_docs_extract.json` reported `errors: []` and `results: []` for `mcp_unified/docs/acquisition`, `mcp_unified/docs/importers`, and the new extraction test file.
+- Review gates: local spec review verified lazy `importlib` optional extractor checks, no top-level trafilatura/bs4 imports, stdlib HTML/text fallback, URL `source_url`/`canonical_uri` preservation, optional `source_path`, and local importer compatibility.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

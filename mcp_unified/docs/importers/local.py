@@ -48,7 +48,7 @@ class DocsImportService:
                 document_type=parsed.document_type,
                 canonical_uri=parsed.canonical_uri,
                 source_path=parsed.source_path,
-                source_url=None,
+                source_url=parsed.source_url,
                 text=parsed.text,
                 sections=[asdict(section) for section in parsed.sections],
                 chunks=chunks,

@@ -58,16 +58,37 @@ class StaticHTMLTextParser(HTMLParser):
             self.parts.append(" ")
 
 
-def parse_html(path: Path, text: str) -> ParsedDocument:
+def parse_html_document(
+    *,
+    text: str,
+    title_hint: str,
+    canonical_uri: str,
+    source_path: str | None = None,
+    source_url: str | None = None,
+    extraction_method: str = "static_html",
+    warnings: tuple[str, ...] = (),
+) -> ParsedDocument:
     parser = StaticHTMLTextParser()
     parser.feed(text)
     body = "\n".join(part.strip() for part in parser.parts if part.strip())
-    title = parser.sections[0].heading if parser.sections else path.stem
+    title = parser.sections[0].heading if parser.sections else title_hint
     return ParsedDocument(
         title=title,
         document_type="html",
         text=body,
         sections=parser.sections,
+        canonical_uri=canonical_uri,
+        source_path=source_path,
+        source_url=source_url,
+        extraction_method=extraction_method,
+        warnings=warnings,
+    )
+
+
+def parse_html(path: Path, text: str) -> ParsedDocument:
+    return parse_html_document(
+        text=text,
+        title_hint=path.stem,
         canonical_uri=file_uri(path),
         source_path=str(path.resolve()),
     )

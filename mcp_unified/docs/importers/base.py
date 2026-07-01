@@ -21,7 +21,10 @@ class ParsedDocument:
     text: str
     sections: list[ParsedSection]
     canonical_uri: str
-    source_path: str
+    source_path: str | None = None
+    source_url: str | None = None
+    extraction_method: str | None = None
+    warnings: tuple[str, ...] = ()
 
 
 def chunks_from_text(text: str, *, max_chars: int = 1_200, overlap: int = 120) -> list[str]:
