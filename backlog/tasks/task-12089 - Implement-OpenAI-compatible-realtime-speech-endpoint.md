@@ -4,7 +4,7 @@ title: Implement OpenAI-compatible realtime speech endpoint
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: 2026-07-01 21:55
+updated_date: 2026-07-01 22:32
 labels:
 - audio
 - realtime
@@ -99,5 +99,5 @@ Stage 3 quality-review fix complete. Realtime auth denial now closes pre-accept 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Stage 4 complete. Added DefaultRealtimePipeline with injected STT/chat/TTS dependencies, lazy production factory construction, PCM16-to-WAV STT adapter wrapper, streaming/non-streaming chat delta normalization, realtime TTS session integration, buffered fallback coverage, typed pipeline events, and stage-specific RealtimePipelineError wrapping. Wired native and OpenAI-compatible realtime routes to the default pipeline factory through a handler helper that preserves no-arg fake factories. Updated BufferedRealtimeSession to propagate target_sample_rate from realtime config extras into OpenAISpeechRequest. Verification: red test first failed with ModuleNotFoundError for default_pipeline.py; focused default pipeline tests passed (7 passed, 3 warnings); Stage 3 realtime WebSocket regression passed (8 passed, 3 warnings); Bandit touched production scope reported results=[]; git diff --check passed.
+Stage 4 complete. Added DefaultRealtimePipeline with injected STT/chat/TTS dependencies, lazy production factory construction, PCM16-to-WAV STT adapter wrapper, streaming/non-streaming chat delta normalization, realtime TTS session integration, buffered fallback coverage, typed pipeline events, and stage-specific RealtimePipelineError wrapping. Wired native and OpenAI-compatible realtime routes to the default pipeline factory through a handler helper that preserves no-arg fake factories. Updated BufferedRealtimeSession to propagate target_sample_rate from realtime config extras into OpenAISpeechRequest. Initial Stage 4 code-quality review found abnormal-exit cleanup leaks and fragile realtime TTS opener kwargs; fixed by adding cleanup regressions, close/abort/cancel cleanup with audio-task cancellation, BufferedRealtimeSession.close() for aborting uncommitted buffered text, and signature-filtered open_realtime_session kwargs. Verification: red test first failed with ModuleNotFoundError for default_pipeline.py; focused default pipeline tests passed (7 passed, 3 warnings); Stage 3 realtime WebSocket regression passed (8 passed, 3 warnings); post-fix focused suite passed (20 passed, 5 warnings); code-quality re-review passed with no Critical or Important findings; Bandit touched production scope reported errors=[] results=0; git diff --check passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->

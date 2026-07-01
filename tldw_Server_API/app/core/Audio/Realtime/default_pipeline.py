@@ -91,39 +91,51 @@ class DefaultRealtimePipeline:
             asyncio.Queue()
         )
         audio_task = asyncio.create_task(_drain_tts_audio(tts_session, audio_events))
+        tts_finished = False
+        stream_completed = False
 
         try:
-            chat_result = await self._chat_call(**self._chat_kwargs(transcript, config))
-            async for delta in _iter_text_deltas(chat_result):
-                if not delta:
-                    continue
-                try:
-                    await tts_session.push_text(delta)
-                except Exception as exc:
-                    raise RealtimePipelineError(stage="tts", message="Realtime TTS text push failed", cause=exc) from exc
-                yield RealtimePipelineTextDelta(delta)
-                yield RealtimePipelineTranscriptDelta(delta)
-        except RealtimePipelineError:
-            raise
-        except Exception as exc:
-            raise RealtimePipelineError(stage="llm", message="Realtime LLM streaming failed", cause=exc) from exc
+            try:
+                chat_result = await self._chat_call(**self._chat_kwargs(transcript, config))
+                async for delta in _iter_text_deltas(chat_result):
+                    if not delta:
+                        continue
+                    try:
+                        await tts_session.push_text(delta)
+                    except Exception as exc:
+                        raise RealtimePipelineError(
+                            stage="tts",
+                            message="Realtime TTS text push failed",
+                            cause=exc,
+                        ) from exc
+                    yield RealtimePipelineTextDelta(delta)
+                    yield RealtimePipelineTranscriptDelta(delta)
+            except RealtimePipelineError:
+                raise
+            except Exception as exc:
+                raise RealtimePipelineError(stage="llm", message="Realtime LLM streaming failed", cause=exc) from exc
 
-        try:
-            await tts_session.commit()
-            await tts_session.finish()
-        except Exception as exc:
-            raise RealtimePipelineError(stage="tts", message="Realtime TTS commit failed", cause=exc) from exc
+            try:
+                await tts_session.commit()
+                await tts_session.finish()
+                tts_finished = True
+            except Exception as exc:
+                raise RealtimePipelineError(stage="tts", message="Realtime TTS commit failed", cause=exc) from exc
 
-        yield RealtimePipelineTextDone()
-        yield RealtimePipelineTranscriptDone()
+            yield RealtimePipelineTextDone()
+            yield RealtimePipelineTranscriptDone()
 
-        async for audio_event in _drain_remaining_audio_events(audio_events, audio_task):
-            yield audio_event
+            async for audio_event in _drain_remaining_audio_events(audio_events, audio_task):
+                yield audio_event
 
-        error = getattr(tts_session, "error", None)
-        if error is not None:
-            raise RealtimePipelineError(stage="tts", message="Realtime TTS audio failed", cause=error) from error
-        yield RealtimePipelineTurnDone()
+            error = getattr(tts_session, "error", None)
+            if error is not None:
+                raise RealtimePipelineError(stage="tts", message="Realtime TTS audio failed", cause=error) from error
+            stream_completed = True
+            yield RealtimePipelineTurnDone()
+        finally:
+            if not stream_completed:
+                await _cleanup_tts_session(tts_session, audio_task, tts_finished=tts_finished)
 
     def _chat_kwargs(self, transcript: str, config: RealtimeSessionConfig) -> dict[str, Any]:
         messages = [{"role": "user", "content": transcript}]
@@ -165,6 +177,46 @@ class DefaultRealtimePipeline:
             route=REALTIME_TTS_ROUTE,
             user_id=self._user_id,
         )
+
+
+async def _cleanup_tts_session(session: Any, audio_task: asyncio.Task[None], *, tts_finished: bool) -> None:
+    try:
+        if not tts_finished:
+            await _close_tts_session_safely(session)
+    finally:
+        if not audio_task.done():
+            audio_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await audio_task
+
+
+async def _close_tts_session_safely(session: Any) -> None:
+    for method_name in ("close", "aclose", "abort", "cancel"):
+        method = getattr(session, method_name, None)
+        if not callable(method):
+            continue
+        cleanup_failed = False
+        try:
+            maybe_result = method()
+            if inspect.isawaitable(maybe_result):
+                await maybe_result
+        except Exception:
+            cleanup_failed = True
+        if not cleanup_failed:
+            return
+    await _finish_tts_session_safely(session)
+
+
+async def _finish_tts_session_safely(session: Any) -> None:
+    finish = getattr(session, "finish", None)
+    if not callable(finish):
+        return
+    try:
+        maybe_result = finish()
+        if inspect.isawaitable(maybe_result):
+            await maybe_result
+    except Exception:
+        return
 
 
 async def default_stt_transcribe_pcm16(audio: bytes, *, sample_rate_hz: int, language: str | None) -> str:
@@ -244,19 +296,35 @@ async def _call_open_realtime_session(
     signature = inspect.signature(open_realtime_session)
     if "request" in signature.parameters:
         maybe_handle = open_realtime_session(
-            request=request,
-            provider_hint=provider_hint,
-            route=route,
-            user_id=user_id,
+            **_filter_callable_kwargs(
+                signature,
+                {
+                    "request": request,
+                    "provider_hint": provider_hint,
+                    "route": route,
+                    "user_id": user_id,
+                },
+            )
         )
     else:
         maybe_handle = open_realtime_session(
-            config=_tts_config_from_request(request, provider_hint),
-            provider_hint=provider_hint,
-            route=route,
-            user_id=user_id,
+            **_filter_callable_kwargs(
+                signature,
+                {
+                    "config": _tts_config_from_request(request, provider_hint),
+                    "provider_hint": provider_hint,
+                    "route": route,
+                    "user_id": user_id,
+                },
+            )
         )
     return await maybe_handle if inspect.isawaitable(maybe_handle) else maybe_handle
+
+
+def _filter_callable_kwargs(signature: inspect.Signature, kwargs: dict[str, Any]) -> dict[str, Any]:
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()):
+        return kwargs
+    return {key: value for key, value in kwargs.items() if key in signature.parameters}
 
 
 def _tts_config_from_request(request: OpenAISpeechRequest, provider_hint: str | None) -> Any:
