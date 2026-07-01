@@ -417,11 +417,6 @@ async def _audio_ws_authenticate(
                 await outer_stream.send_json({"type": "error", "message": message})
             except Exception as exc:  # noqa: BLE001
                 logger.debug(f"Failed to send websocket error payload: {exc}")
-        else:
-            try:
-                await websocket.send_json({"type": "error", "message": message})
-            except Exception as exc:  # noqa: BLE001
-                logger.debug(f"Failed to send websocket error payload directly: {exc}")
         try:
             await websocket.close(code=code)
         except Exception as exc:  # noqa: BLE001

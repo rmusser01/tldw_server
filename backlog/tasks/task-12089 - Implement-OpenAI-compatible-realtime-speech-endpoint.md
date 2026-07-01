@@ -4,7 +4,7 @@ title: Implement OpenAI-compatible realtime speech endpoint
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-01 21:44'
+updated_date: '2026-07-01 21:55'
 labels:
   - audio
   - realtime
@@ -76,6 +76,8 @@ Stage 2 complete. Implemented provider-free realtime pipeline event protocol, in
 Stage 3 complete. Implemented realtime WebSocket auth adapter and handler, native /api/v1/audio/realtime capabilities + WS route, OpenAI-compatible /v1/realtime WS route, audio-realtime router gating in content/minimal groups, audio.realtime privilege, and Resource Governor by_route/by_path policy entries. Refactored _audio_ws_authenticate with allow_initial_auth_message defaulting true so existing audio WS routes keep first-message auth fallback while realtime routes do not consume session.update. Stage 3 handler uses monkeypatchable module-level pipeline/persistence factories and keeps the production pipeline as a clear Stage 4 placeholder. Verification: required focused Stage 3 pytest command passed (12 passed, 3 warnings); regression auth/route toggle slice passed (16 passed, 3 warnings); Bandit on touched production scope completed with errors=0 and findings=0; git diff --check passed.
 
 Stage 3 spec-review fix complete. Removed realtime handler filtering so every internal RealtimeSession event is serialized through to_openai_server_event, including all content_part.added/content_part.done and output_item.done frames. Changed imported /v1 realtime compat router specs in content/minimal groups to tags=("audio-realtime",). Updated Stage 3 tests to assert the full emitted OpenAI event order and compat spec tags. Verification: required Stage 3 pytest command passed (12 passed, 3 warnings); Bandit Stage 3 production scope reported errors=0 results=0; git diff --check passed.
+
+Stage 3 quality-review fix complete. Realtime auth denial now closes pre-accept sockets without direct websocket JSON sends when outer_stream is None, while accepted audio routes with outer_stream retain error JSON behavior. Added dummy and TestClient regressions for close-only 4401 unauthenticated realtime denial and hardened the realtime WebSocket receive timeout helper. Verification: required Stage 3 pytest suite plus tldw_Server_API/tests/Audio/test_audio_streaming_service_core.py passed (20 passed, 3 warnings); Bandit Stage 3 production scope reported errors=0 results=0; git diff --check passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
