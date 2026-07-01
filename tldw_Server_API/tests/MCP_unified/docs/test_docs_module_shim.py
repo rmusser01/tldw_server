@@ -101,3 +101,13 @@ def test_repo_docs_mcp_config_keeps_web_acquisition_disabled() -> None:
         "text/markdown",
     ]
     assert settings["respect_robots"] is False  # nosec B101
+
+
+def test_docs_module_uses_host_adapter_boundary() -> None:
+    import inspect
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations import docs_module
+
+    source = inspect.getsource(docs_module.DocsModule)
+
+    assert "docs_settings_from_module_config" in source  # nosec B101
+    assert "docs_scope_from_context" in source  # nosec B101
