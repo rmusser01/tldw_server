@@ -239,6 +239,67 @@ def test_agent_task_preview_redacts_raw_message_in_responses_and_storage(tmp_pat
     assert RAW_SENTINEL.encode("utf-8") not in _database_bytes(repo)  # nosec B101
 
 
+def test_capabilities_include_4c_actions_without_degraded_action_status(tmp_path):
+    service, _repo = _service(tmp_path)
+
+    caps = service.get_capabilities()
+    recurring = next(item for item in caps.items if item.family == "recurring_question")
+
+    for action in [
+        "create_run_manual",
+        "execute_scheduled",
+        "read_runs",
+        "read_results",
+        "mutate_results",
+        "mark_solved",
+        "reopen",
+    ]:
+        assert action in recurring.actions  # nosec B101
+        assert recurring.actions[action].status in {"available", "unavailable", "planned", "disabled"}  # nosec B101
+
+
+def test_recurring_question_preview_normalizes_scope_policy_retention_and_generation(tmp_path):
+    service, _repo = _service(tmp_path)
+
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(
+            config_payload={
+                "scope": {"mode": "all_searchable_library"},
+                "finding_policy": {"preset": "high_confidence_only", "min_evidence_count": 2},
+                "retention_policy": {"mode": "custom", "run_ttl_days": 14},
+                "generation_mode": "disabled",
+            },
+        ),
+    )
+
+    normalized_config = preview.normalized_config["config"]
+    assert preview.status == "valid"  # nosec B101
+    assert normalized_config["scope"]["mode"] == "all_searchable_library"  # nosec B101
+    assert normalized_config["scope"]["resolved_sources"]  # nosec B101
+    assert normalized_config["finding_policy"] == {  # nosec B101
+        "preset": "high_confidence_only",
+        "min_evidence_count": 2,
+    }
+    assert normalized_config["retention_policy"] == {"mode": "custom", "run_ttl_days": 14}  # nosec B101
+    assert normalized_config["generation_mode"] == "disabled"  # nosec B101
+    assert preview.visibility_policy == {"mode": "findings_only"}  # nosec B101
+
+
+def test_recurring_question_preview_rejects_empty_scope(tmp_path):
+    service, _repo = _service(tmp_path)
+
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=_payload(config_payload={"scope": {"sources": []}}),
+    )
+
+    assert preview.status == "invalid"  # nosec B101
+    assert {error["code"] for error in preview.validation_errors} >= {"scope_empty"}  # nosec B101
+
+
 def test_create_consumes_valid_preview_and_rejects_consumed_reuse_without_idempotency_key(tmp_path):
     service, repo = _service(tmp_path)
     preview = service.create_preview(owner_id=OWNER_ID, actor=ACTOR, payload=_payload())
@@ -371,6 +432,59 @@ def test_definition_response_includes_persisted_resolution_and_policy_fields(tmp
     assert response.resolved_result_id == "result-123"  # nosec B101
     assert response.finding_policy == {"preset": "high_confidence_only", "min_evidence_count": 3}  # nosec B101
     assert response.retention_policy == {"mode": "custom", "run_ttl_days": 14}  # nosec B101
+
+
+def test_mark_solved_and_reopen_preserve_lifecycle_rules(tmp_path):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service, initial_lifecycle="configured")
+
+    solved = service.mark_solved(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        resolved_result_id=None,
+    )
+    reopened = service.reopen_definition(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        definition_id=definition.id,
+        target_lifecycle="paused",
+    )
+    audits = repo.list_audit_events(
+        owner_id=OWNER_ID,
+        definition_id=definition.id,
+        limit=20,
+        offset=0,
+    )[0]
+
+    assert solved.resolution_state == "solved"  # nosec B101
+    assert solved.lifecycle == "configured"  # nosec B101
+    assert solved.resolved_by == ACTOR  # nosec B101
+    assert reopened.resolution_state == "open"  # nosec B101
+    assert reopened.lifecycle == "paused"  # nosec B101
+    assert {event.event_type for event in audits} >= {"definition.marked_solved", "definition.reopened"}  # nosec B101
+
+
+def test_mark_solved_and_reopen_reject_archived_and_disabled_definitions(tmp_path):
+    service, repo = _service(tmp_path)
+    archived = _create_definition(service, name="Archived target")
+    service.archive_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=archived.id)
+    disabled = _create_definition(service, name="Disabled target")
+    repo.update_definition(
+        owner_id=OWNER_ID,
+        definition_id=disabled.id,
+        patch={"lifecycle": "disabled", "updated_by": ACTOR},
+        expected_version=disabled.version,
+    )
+
+    with pytest.raises(ScheduledTaskAutomationError, match="definition_archived"):
+        service.mark_solved(owner_id=OWNER_ID, actor=ACTOR, definition_id=archived.id)
+    with pytest.raises(ScheduledTaskAutomationError, match="definition_disabled"):
+        service.mark_solved(owner_id=OWNER_ID, actor=ACTOR, definition_id=disabled.id)
+    with pytest.raises(ScheduledTaskAutomationError, match="definition_archived"):
+        service.reopen_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=archived.id)
+    with pytest.raises(ScheduledTaskAutomationError, match="definition_disabled"):
+        service.reopen_definition(owner_id=OWNER_ID, actor=ACTOR, definition_id=disabled.id)
 
 
 def test_duplicate_creates_paused_copy_and_two_audit_events(tmp_path):

@@ -21,12 +21,14 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas impor
     ScheduledTaskDefinitionResponse,
     ScheduledTaskDefinitionUpdateRequest,
     ScheduledTaskDuplicateRequest,
+    ScheduledTaskMarkSolvedRequest,
     ScheduledTaskRunNowResponse,
     ScheduledTaskPreviewCreateRequest,
     ScheduledTaskPreviewListResponse,
     ScheduledTaskPreviewMode,
     ScheduledTaskPreviewResponse,
     ScheduledTaskPreviewStatus,
+    ScheduledTaskReopenRequest,
 )
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas import (
     ScheduledTask,
@@ -141,6 +143,21 @@ _AUTOMATION_ERROR_MAP: dict[str, tuple[int, str, str]] = {
         "scheduled_task_lifecycle_transition_invalid",
         "Scheduled task lifecycle transition is invalid.",
     ),
+    "scheduled_task_resolution_transition_invalid": (
+        status.HTTP_409_CONFLICT,
+        "scheduled_task_resolution_transition_invalid",
+        "Scheduled task resolution transition is invalid.",
+    ),
+    "scheduled_task_definition_solved": (
+        status.HTTP_409_CONFLICT,
+        "scheduled_task_definition_solved",
+        "Scheduled task definition is already solved.",
+    ),
+    "scheduled_task_scope_empty": (
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        "scheduled_task_scope_empty",
+        "Scheduled task scope has no readable searchable sources.",
+    ),
     "scheduled_task_idempotency_conflict": (
         status.HTTP_409_CONFLICT,
         "scheduled_task_idempotency_conflict",
@@ -215,6 +232,21 @@ _AUTOMATION_ERROR_MAP: dict[str, tuple[int, str, str]] = {
         status.HTTP_409_CONFLICT,
         "scheduled_task_lifecycle_transition_invalid",
         "Scheduled task definition is paused.",
+    ),
+    "definition_resolution_transition_invalid": (
+        status.HTTP_409_CONFLICT,
+        "scheduled_task_resolution_transition_invalid",
+        "Scheduled task resolution transition is invalid.",
+    ),
+    "definition_solved": (
+        status.HTTP_409_CONFLICT,
+        "scheduled_task_definition_solved",
+        "Scheduled task definition is already solved.",
+    ),
+    "scope_empty": (
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        "scheduled_task_scope_empty",
+        "Scheduled task scope has no readable searchable sources.",
     ),
 }
 
@@ -489,6 +521,59 @@ def list_scheduled_task_automation_definition_audit(
             created_to=normalized_created_to,
             idempotency_key=idempotency_key,
             request_id=request_id,
+        )
+    except ScheduledTaskAutomationError as exc:
+        _raise_automation_error(request, exc)
+
+
+@router.post(
+    "/definitions/{definition_id}/mark-solved",
+    response_model=ScheduledTaskDefinitionResponse,
+    dependencies=[Depends(rbac_rate_limit("tasks.control"))],
+)
+def mark_scheduled_task_automation_definition_solved(
+    payload: ScheduledTaskMarkSolvedRequest,
+    request: Request,
+    definition_id: str = Path(..., min_length=1),
+    current_user: User = Depends(get_request_user),
+    principal=Depends(RequirePermission(TASKS_CONTROL)),  # noqa: B008
+    service: ScheduledTaskAutomationService = Depends(get_scheduled_task_automation_service),
+) -> ScheduledTaskDefinitionResponse:
+    try:
+        return service.mark_solved(
+            owner_id=int(current_user.id),
+            actor=_actor_from_principal(principal, current_user),
+            definition_id=definition_id,
+            resolved_result_id=payload.resolved_result_id,
+            idempotency_key=_idempotency_key(request),
+            request_id=_request_id(request),
+        )
+    except ScheduledTaskAutomationError as exc:
+        _raise_automation_error(request, exc)
+
+
+@router.post(
+    "/definitions/{definition_id}/reopen",
+    response_model=ScheduledTaskDefinitionResponse,
+    dependencies=[Depends(rbac_rate_limit("tasks.control"))],
+)
+def reopen_scheduled_task_automation_definition(
+    payload: ScheduledTaskReopenRequest,
+    request: Request,
+    definition_id: str = Path(..., min_length=1),
+    current_user: User = Depends(get_request_user),
+    principal=Depends(RequirePermission(TASKS_CONTROL)),  # noqa: B008
+    service: ScheduledTaskAutomationService = Depends(get_scheduled_task_automation_service),
+) -> ScheduledTaskDefinitionResponse:
+    try:
+        return service.reopen_definition(
+            owner_id=int(current_user.id),
+            actor=_actor_from_principal(principal, current_user),
+            definition_id=definition_id,
+            target_lifecycle=payload.target_lifecycle,
+            reason=payload.reason,
+            idempotency_key=_idempotency_key(request),
+            request_id=_request_id(request),
         )
     except ScheduledTaskAutomationError as exc:
         _raise_automation_error(request, exc)

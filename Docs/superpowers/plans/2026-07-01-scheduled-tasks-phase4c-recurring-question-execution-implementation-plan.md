@@ -155,6 +155,8 @@ Frontend tests to add or extend:
 
 ## Stage 0: Implementation Backlog Setup
 
+**Status:** Complete. Tracked in `TASK-12082`.
+
 **Goal:** Establish execution tracking before code edits.
 
 **Success Criteria:**
@@ -191,6 +193,8 @@ backlog task <IMPLEMENTATION_TASK_ID> --plain
 ---
 
 ## Stage 1: Scheduled Tasks Storage And API Schemas
+
+**Status:** Complete. Storage/schema work was implemented and verified in the Stage 1 commits.
 
 **Goal:** Add durable definition extensions, runs, results, review state, and response schemas without starting execution.
 
@@ -329,6 +333,8 @@ git commit -m "feat: add scheduled task run and result storage"
 
 ## Stage 2: Preview Validation, Capabilities, And Resolution Lifecycle
 
+**Status:** Complete. Stage 2 added generic Recurring Question scope normalization, capability actions, preview normalization, mark-solved/reopen APIs, transition enforcement, and audit coverage.
+
 **Goal:** Make Recurring Question definitions executable-ready at the control-plane layer without yet enqueueing work.
 
 **Success Criteria:**
@@ -429,6 +435,13 @@ source .venv/bin/activate && python -m pytest \
   tldw_Server_API/tests/Notifications/test_scheduled_task_automation_api.py \
   -v
 ```
+
+Actual Stage 2 verification:
+
+- Focused Stage 2 pytest: `31 passed, 11 warnings`.
+- Full automation service/API/scope pytest: `82 passed, 14 warnings`.
+- `git diff --check`: passed.
+- Bandit touched production scope: zero findings in `/tmp/bandit_scheduled_tasks_phase4c_stage2.json`.
 
 **Commit:**
 

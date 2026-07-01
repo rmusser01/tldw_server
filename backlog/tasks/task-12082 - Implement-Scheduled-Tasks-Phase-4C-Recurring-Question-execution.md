@@ -14,11 +14,18 @@ documentation:
 - Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-execution-implementation-plan.md
 modified_files:
 - backlog/tasks/task-12082 - Implement-Scheduled-Tasks-Phase-4C-Recurring-Question-execution.md
+- Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-execution-implementation-plan.md
 - tldw_Server_API/app/core/DB_Management/Scheduled_Tasks_DB.py
+- tldw_Server_API/app/core/Scheduled_Tasks/__init__.py
+- tldw_Server_API/app/core/Scheduled_Tasks/recurring_question_models.py
+- tldw_Server_API/app/core/Scheduled_Tasks/recurring_question_scope.py
+- tldw_Server_API/app/api/v1/endpoints/scheduled_tasks_control_plane.py
 - tldw_Server_API/app/api/v1/schemas/scheduled_tasks_automation_schemas.py
 - tldw_Server_API/app/services/scheduled_task_automation_service.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_automation_db.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_automation_api.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_automation_service.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_scope.py
 ---
 
 ## Description
@@ -54,6 +61,8 @@ Stage 1 storage/schema slice added durable recurring-question definition resolut
 Stage 1 spec-review fix mapped persisted definition resolution/policy fields into service responses and added recursive private-key validation before run/result JSON persistence. Verification: focused scheduled task DB+service pytest passed (68 passed, 4 warnings); git diff --check passed; Bandit on touched production files reported zero findings.
 
 Stage 1 local code-quality review tightened private payload key detection for common variants such as `rawText`, `openai_api_key`, and `access_token`. Verification after hardening: focused scheduled task DB+service pytest passed (71 passed, 4 warnings); git diff --check passed; Bandit on touched production files reported zero findings.
+
+Stage 2 preview/readiness slice added source-agnostic Recurring Question scope normalization, finding/retention/generation preview normalization, 4C capability actions without action-level degraded status, `mark-solved` and `reopen` service/API routes, transition enforcement for archived/disabled/unsolved definitions, and audit coverage. Verification: focused Stage 2 pytest passed (31 passed, 11 warnings); full scheduled task automation service/API/scope pytest passed (82 passed, 14 warnings); git diff --check passed; Bandit on touched production files reported zero findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -250,6 +250,7 @@ class ScheduledTaskMarkSolvedRequest(BaseModel):
 class ScheduledTaskReopenRequest(BaseModel):
     """Request to reopen a solved Recurring Question definition."""
 
+    target_lifecycle: ScheduledTaskDefinitionCreateLifecycle = "paused"
     reason: str | None = None
 
 

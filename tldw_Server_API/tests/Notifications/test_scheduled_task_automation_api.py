@@ -165,7 +165,7 @@ def test_scheduled_task_static_child_routes_do_not_resolve_as_task_ids(scheduled
         assert response.text != "scheduled_task_not_found"  # nosec B101
 
 
-def test_capabilities_report_definition_actions_but_no_execution(scheduled_tasks_client, auth_headers):
+def test_capabilities_report_definition_actions_and_execution_state(scheduled_tasks_client, auth_headers):
     response = scheduled_tasks_client.get("/api/v1/scheduled-tasks/capabilities", headers=auth_headers)
 
     assert response.status_code == 200, response.text  # nosec B101
@@ -187,6 +187,22 @@ def test_capabilities_report_definition_actions_but_no_execution(scheduled_tasks
             assert "redacted at rest" in actions["execute"]["reason"]  # nosec B101
         assert actions["run_now"]["status"] == "available"  # nosec B101
         assert actions["execute_tools"]["status"] == "planned"  # nosec B101
+
+    recurring_actions = families["recurring_question"]["actions"]
+    for action in (
+        "preview",
+        "create_definition",
+        "create_run_manual",
+        "execute_scheduled",
+        "read_runs",
+        "read_results",
+        "mutate_results",
+        "mark_solved",
+        "reopen",
+    ):
+        assert action in recurring_actions  # nosec B101
+        assert recurring_actions[action]["status"] in {"available", "unavailable", "planned", "disabled"}  # nosec B101
+    assert "degraded" not in {action["status"] for action in recurring_actions.values()}  # nosec B101
 
 
 def test_preview_create_list_and_detail_return_valid_and_invalid_statuses(scheduled_tasks_client, auth_headers):
@@ -270,6 +286,35 @@ def test_create_update_lifecycle_duplicate_and_audit_routes(scheduled_tasks_clie
         "definition.resumed",
         "definition.archived",
         "definition_duplicated",
+    }
+
+
+def test_mark_solved_and_reopen_routes_update_resolution_state_and_audit(scheduled_tasks_client, auth_headers):
+    definition = _create_definition(scheduled_tasks_client, auth_headers)
+
+    solved = scheduled_tasks_client.post(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/mark-solved",
+        headers=auth_headers,
+        json={},
+    )
+    reopened = scheduled_tasks_client.post(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/reopen",
+        headers=auth_headers,
+        json={"target_lifecycle": "paused", "reason": "Keep watching"},
+    )
+    audit = scheduled_tasks_client.get(
+        f"/api/v1/scheduled-tasks/definitions/{definition['id']}/audit",
+        headers=auth_headers,
+    )
+
+    assert solved.status_code == 200, solved.text  # nosec B101
+    assert solved.json()["resolution_state"] == "solved"  # nosec B101
+    assert reopened.status_code == 200, reopened.text  # nosec B101
+    assert reopened.json()["resolution_state"] == "open"  # nosec B101
+    assert reopened.json()["lifecycle"] == "paused"  # nosec B101
+    assert {item["event_type"] for item in audit.json()["items"]} >= {  # nosec B101
+        "definition.marked_solved",
+        "definition.reopened",
     }
 
 
@@ -624,6 +669,13 @@ def test_same_idempotency_key_with_different_payload_conflicts_on_mutating_route
         ("scheduled_task_definition_version_conflict", "scheduled_task_definition_version_conflict", 409),
         ("scheduled_task_definition_archived", "scheduled_task_definition_archived", 409),
         ("scheduled_task_lifecycle_transition_invalid", "scheduled_task_lifecycle_transition_invalid", 409),
+        ("scope_empty", "scheduled_task_scope_empty", 422),
+        ("definition_solved", "scheduled_task_definition_solved", 409),
+        (
+            "definition_resolution_transition_invalid",
+            "scheduled_task_resolution_transition_invalid",
+            409,
+        ),
         ("scheduled_task_idempotency_conflict", "scheduled_task_idempotency_conflict", 409),
         ("preview_invalid", "scheduled_task_schedule_invalid", 422),
     ],
@@ -687,6 +739,8 @@ def test_sync_automation_handlers_do_not_run_sqlite_work_on_event_loop():
         scheduled_tasks_control_plane.resume_scheduled_task_automation_definition,
         scheduled_tasks_control_plane.archive_scheduled_task_automation_definition,
         scheduled_tasks_control_plane.duplicate_scheduled_task_automation_definition,
+        scheduled_tasks_control_plane.mark_scheduled_task_automation_definition_solved,
+        scheduled_tasks_control_plane.reopen_scheduled_task_automation_definition,
     ]
 
     assert all(not inspect.iscoroutinefunction(handler) for handler in automation_handlers)  # nosec B101
