@@ -1,0 +1,62 @@
+---
+id: TASK-12082
+title: Implement Scheduled Tasks Phase 4C Recurring Question execution
+status: In Progress
+labels:
+- scheduled-tasks
+- phase-4c
+- implementation
+- api-first
+priority: high
+references:
+- Docs/superpowers/specs/2026-06-30-scheduled-tasks-phase4c-recurring-question-execution-design.md
+documentation:
+- Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-execution-implementation-plan.md
+modified_files:
+- backlog/tasks/task-12082 - Implement-Scheduled-Tasks-Phase-4C-Recurring-Question-execution.md
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Implement the approved API-first Scheduled Tasks Phase 4C Recurring Question execution plan. Scope includes storage, schemas, preview/admission, manual runs, run/result APIs, Jobs worker, APScheduler bridge, Home surfacing, WebUI/extension reference-client behavior, retention/privacy hardening, tests, Bandit, and review checkpoints. Preserve Watchlists as a separate UX/job and do not introduce source-specific GitHub/YouTube monitor assumptions.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 Recurring Question definitions support preview, create/update, inspect, run now, scheduled execution, mark solved, reopen, review state, retention metadata, and durable run/result history through API-first contracts.
+- [ ] #2 Every execution attempt creates a run record; surfaced findings and attention-worthy failures create normalized result records; routine no-match runs remain discoverable in run history without polluting Home.
+- [ ] #3 Execution uses Jobs for queueing/worker lifecycle and APScheduler only for due schedule claims, with reconciliation for divergent Jobs/run state.
+- [ ] #4 WebUI and extension behave as reference/main enterprise API clients, including Home surfacing and `/scheduled-tasks` monitoring, without defining product boundaries in UI-only logic.
+- [ ] #5 Watchlists functionality and UX remain unchanged as a separate persona/job; GitHub and YouTube are treated only as examples, not privileged source assumptions.
+- [ ] #6 Storage, API, service, worker, scheduler, frontend client, UI, retention/privacy, accessibility, and Watchlists compatibility tests cover the implemented behavior.
+- [ ] #7 Bandit and targeted backend/frontend verification are run before completion, with any skips documented.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-execution-implementation-plan.md
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Implementation started from plan `Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-execution-implementation-plan.md` after rebasing the planning branch onto `origin/dev` at merge `85ab688b34`.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
