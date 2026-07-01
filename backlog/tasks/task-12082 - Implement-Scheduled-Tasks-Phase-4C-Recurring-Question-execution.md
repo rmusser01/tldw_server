@@ -20,15 +20,21 @@ modified_files:
 - tldw_Server_API/app/core/Scheduled_Tasks/__init__.py
 - tldw_Server_API/app/core/Scheduled_Tasks/recurring_question_jobs.py
 - tldw_Server_API/app/core/Scheduled_Tasks/recurring_question_models.py
+- tldw_Server_API/app/core/Scheduled_Tasks/recurring_question_rag_adapter.py
 - tldw_Server_API/app/core/Scheduled_Tasks/recurring_question_scope.py
 - tldw_Server_API/app/api/v1/endpoints/scheduled_tasks_control_plane.py
 - tldw_Server_API/app/api/v1/schemas/scheduled_tasks_automation_schemas.py
 - tldw_Server_API/app/services/scheduled_task_automation_service.py
 - tldw_Server_API/app/services/scheduled_task_recurring_question_service.py
+- tldw_Server_API/app/services/scheduled_task_recurring_question_worker.py
+- tldw_Server_API/app/services/startup_content_jobs_pollers.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_automation_db.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_automation_api.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_automation_service.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_jobs_worker.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_rag_adapter.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_recurring_question_scope.py
+- tldw_Server_API/tests/Services/test_startup_content_jobs_pollers.py
 ---
 
 ## Description
@@ -68,6 +74,8 @@ Stage 1 local code-quality review tightened private payload key detection for co
 Stage 2 preview/readiness slice added source-agnostic Recurring Question scope normalization, finding/retention/generation preview normalization, 4C capability actions without action-level degraded status, `mark-solved` and `reopen` service/API routes, transition enforcement for archived/disabled/unsolved definitions, and audit coverage. Verification: focused Stage 2 pytest passed (31 passed, 11 warnings); full scheduled task automation service/API/scope pytest passed (82 passed, 14 warnings); git diff --check passed; Bandit on touched production files reported zero findings.
 
 Stage 3 run/result API slice added idempotent manual Recurring Question run creation, Jobs enqueue payload helpers, normalized run/result list/detail routes, result review mutation with audit, API error aliases, and a legacy-missing-scope compatibility fallback to `all_searchable_library`. Verification: focused Stage 3 pytest passed (5 passed, 11 warnings); full scheduled task DB/service/API/scope pytest passed (132 passed, 14 warnings); git diff --check passed; Bandit on touched production files reported zero findings.
+
+Stage 4 RAG worker slice added a dependency-injected Recurring Question RAG adapter, storage-safe RAG snapshots, worker run state transitions, finding/no-match/failure persistence, retryable failure propagation for Jobs retries, and declarative startup worker discovery behind `SCHEDULED_TASKS_RECURRING_QUESTION_WORKER_ENABLED`. Verification: focused Stage 4 pytest passed (41 passed, 3 warnings); broader scheduled task plus startup pytest passed (173 passed, 14 warnings); git diff --check passed; Bandit on touched production files reported zero findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

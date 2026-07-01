@@ -223,6 +223,17 @@ def provide_content_jobs_worker_specs(
                 "companion",
             ),
         ),
+        stop_event_worker_spec(
+            name="scheduled_tasks_recurring_question_jobs_task",
+            worker_service=_run_scheduled_tasks_recurring_question_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=route_enabled_predicate(
+                "SCHEDULED_TASKS_RECURRING_QUESTION_WORKER_ENABLED",
+                "scheduled-tasks-recurring-question",
+                default_stable=False,
+            ),
+        ),
     )
 
 
@@ -1148,3 +1159,11 @@ def _run_companion_reflection_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_companion_reflection_jobs_worker(stop_event)
+
+
+def _run_scheduled_tasks_recurring_question_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.scheduled_task_recurring_question_worker import (
+        run_recurring_question_jobs_worker as _run_recurring_question_jobs_worker,
+    )
+
+    return _run_recurring_question_jobs_worker(stop_event)

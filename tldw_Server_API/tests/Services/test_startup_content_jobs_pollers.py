@@ -59,6 +59,7 @@ def _specs_by_name(startup_pollers: Any) -> dict[str, Any]:
         "vn_asset_jobs_task",
         "vn_asset_generation_jobs_task",
         "companion_reflection_jobs_task",
+        "scheduled_tasks_recurring_question_jobs_task",
     ],
 )
 def test_content_jobs_worker_specs_match_legacy_worker_contract(
@@ -94,6 +95,7 @@ def test_content_jobs_worker_specs_use_expected_names() -> None:
         "vn_asset_jobs_task",
         "vn_asset_generation_jobs_task",
         "companion_reflection_jobs_task",
+        "scheduled_tasks_recurring_question_jobs_task",
     ]
 
 
@@ -117,6 +119,10 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("vn_asset_jobs_task", "_run_vn_asset_jobs_worker_service"),
         ("vn_asset_generation_jobs_task", "_run_vn_asset_generation_jobs_worker_service"),
         ("companion_reflection_jobs_task", "_run_companion_reflection_jobs_worker_service"),
+        (
+            "scheduled_tasks_recurring_question_jobs_task",
+            "_run_scheduled_tasks_recurring_question_jobs_worker_service",
+        ),
     ]:
         monkeypatch.setattr(
             startup_pollers,
@@ -144,6 +150,10 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("vn_asset_jobs_task", "vn_asset_jobs_task-stop"),
         ("vn_asset_generation_jobs_task", "vn_asset_generation_jobs_task-stop"),
         ("companion_reflection_jobs_task", "companion_reflection_jobs_task-stop"),
+        (
+            "scheduled_tasks_recurring_question_jobs_task",
+            "scheduled_tasks_recurring_question_jobs_task-stop",
+        ),
     ]
 
 
@@ -178,6 +188,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
         "vn_asset_jobs_task",
         "vn_asset_generation_jobs_task",
         "companion_reflection_jobs_task",
+        "scheduled_tasks_recurring_question_jobs_task",
     ]:
         monkeypatch.setenv(
             {
@@ -194,6 +205,9 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
                 "vn_asset_jobs_task": "VN_ASSET_JOBS_WORKER_ENABLED",
                 "vn_asset_generation_jobs_task": "VN_ASSET_GENERATION_JOBS_WORKER_ENABLED",
                 "companion_reflection_jobs_task": "COMPANION_REFLECTION_JOBS_WORKER_ENABLED",
+                "scheduled_tasks_recurring_question_jobs_task": (
+                    "SCHEDULED_TASKS_RECURRING_QUESTION_WORKER_ENABLED"
+                ),
             }[spec_name],
             "true",
         )
@@ -216,6 +230,7 @@ def test_content_jobs_worker_spec_predicates_use_route_enabled_arguments(
             {"default_stable": True},
         ),
         (("companion",), {}),
+        (("scheduled-tasks-recurring-question",), {"default_stable": False}),
     ]
 
 

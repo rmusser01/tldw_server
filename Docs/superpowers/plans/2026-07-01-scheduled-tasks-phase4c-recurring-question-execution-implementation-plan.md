@@ -571,6 +571,8 @@ git commit -m "feat: add recurring question run and result APIs"
 
 ## Stage 4: RAG Adapter And Jobs Worker
 
+**Status:** Complete. Stage 4 added a dependency-injected RAG adapter, safe request snapshots, worker execution/failure handling, result creation, retryable failure propagation, and startup worker discovery.
+
 **Goal:** Execute a queued Recurring Question run through the unified RAG pipeline and persist complete run summaries/results.
 
 **Success Criteria:**
@@ -637,6 +639,13 @@ source .venv/bin/activate && python -m pytest \
   tldw_Server_API/tests/Services/test_startup_content_jobs_pollers.py \
   -v
 ```
+
+Actual Stage 4 verification:
+
+- Focused Stage 4 pytest: `41 passed, 3 warnings`.
+- Broader scheduled task plus startup pytest: `173 passed, 14 warnings`.
+- `git diff --check`: passed.
+- Bandit touched production scope: zero findings in `/tmp/bandit_scheduled_tasks_phase4c_stage4.json`.
 
 **Commit:**
 
