@@ -230,17 +230,47 @@ const getServerWorkspaceContextStatusCopy = (
   }
 }
 
-const DEFAULT_ASSISTANT_DEGRADED_REASON_LABELS: Record<string, string> = {
-  persona_deleted: "Persona deleted",
-  persona_unavailable: "Persona unavailable",
-  persona_feature_disabled: "Persona feature disabled",
-  permission_denied: "Permission denied",
-  invalid_default: "Invalid default",
-  unsupported_assistant_kind: "Unsupported assistant kind"
+const getDefaultAssistantDegradedReasonCopy = (
+  reason: string | null | undefined
+) => {
+  switch (reason) {
+    case "persona_deleted":
+      return {
+        key: "playground:workspace.defaultAssistantDegraded.personaDeleted",
+        fallback: "Persona deleted"
+      }
+    case "persona_unavailable":
+      return {
+        key: "playground:workspace.defaultAssistantDegraded.personaUnavailable",
+        fallback: "Persona unavailable"
+      }
+    case "persona_feature_disabled":
+      return {
+        key: "playground:workspace.defaultAssistantDegraded.personaFeatureDisabled",
+        fallback: "Persona feature disabled"
+      }
+    case "permission_denied":
+      return {
+        key: "playground:workspace.defaultAssistantDegraded.permissionDenied",
+        fallback: "Permission denied"
+      }
+    case "invalid_default":
+      return {
+        key: "playground:workspace.defaultAssistantDegraded.invalidDefault",
+        fallback: "Invalid default"
+      }
+    case "unsupported_assistant_kind":
+      return {
+        key: "playground:workspace.defaultAssistantDegraded.unsupportedAssistantKind",
+        fallback: "Unsupported assistant kind"
+      }
+    default:
+      return {
+        key: "playground:workspace.defaultAssistantDegraded.unavailable",
+        fallback: "Unavailable"
+      }
+  }
 }
-
-const formatDefaultAssistantDegradedReason = (reason: string | null | undefined) =>
-  reason ? DEFAULT_ASSISTANT_DEGRADED_REASON_LABELS[reason] ?? "Unavailable" : "Unavailable"
 
 const getPersonaProfileLabel = (profile: PersonaProfileSummary) =>
   profile.name?.trim() || profile.id
@@ -778,7 +808,9 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   })
 
   const handleSaveDefaultAssistant = async () => {
-    if (!workspaceId || !defaultAssistantWorkspace) return
+    if (!defaultAssistantWorkspace) return
+    const loadedWorkspaceId = defaultAssistantWorkspace.id?.trim()
+    if (!loadedWorkspaceId) return
     if (!defaultAssistantPersonaId.trim()) {
       setDefaultAssistantError(
         t(
@@ -804,7 +836,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     setDefaultAssistantSaving(true)
     setDefaultAssistantError(null)
     try {
-      const updatedWorkspace = await tldwClient.patchWorkspace(workspaceId, {
+      const updatedWorkspace = await tldwClient.patchWorkspace(loadedWorkspaceId, {
         version: defaultAssistantWorkspace.version,
         assistantDefaults: buildDefaultAssistantPayload(),
         ...(defaultAssistantMemoryMode === "read_write"
@@ -833,12 +865,14 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }
 
   const handleClearDefaultAssistant = async () => {
-    if (!workspaceId || !defaultAssistantWorkspace) return
+    if (!defaultAssistantWorkspace) return
+    const loadedWorkspaceId = defaultAssistantWorkspace.id?.trim()
+    if (!loadedWorkspaceId) return
 
     setDefaultAssistantSaving(true)
     setDefaultAssistantError(null)
     try {
-      const updatedWorkspace = await tldwClient.patchWorkspace(workspaceId, {
+      const updatedWorkspace = await tldwClient.patchWorkspace(loadedWorkspaceId, {
         version: defaultAssistantWorkspace.version,
         assistantDefaults: null
       })
@@ -2121,6 +2155,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             "playground:workspace.defaultAssistantNone",
             "No default assistant"
           )
+  const defaultAssistantDegradedReasonCopy =
+    getDefaultAssistantDegradedReasonCopy(
+      effectiveDefaultAssistant?.degradedReason
+    )
   const defaultAssistantStatusDetail =
     effectiveDefaultAssistant?.status === "available"
       ? t(
@@ -2128,8 +2166,9 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           "New workspace chats can inherit this Persona when no assistant is selected."
         )
       : effectiveDefaultAssistant?.status === "unavailable"
-        ? formatDefaultAssistantDegradedReason(
-            effectiveDefaultAssistant.degradedReason
+        ? t(
+            defaultAssistantDegradedReasonCopy.key,
+            defaultAssistantDegradedReasonCopy.fallback
           )
         : t(
             "playground:workspace.defaultAssistantNoneDetail",

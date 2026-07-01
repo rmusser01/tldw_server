@@ -66,6 +66,7 @@ import {
   DEFAULT_WORKSPACE_BANNER,
   DEFAULT_WORKSPACE_NOTE
 } from "@/types/workspace"
+import { normalizeWorkspaceAssistantDefaults } from "@/types/workspace-assistant-defaults"
 import {
   collectDescendantFolderIds,
   createWorkspaceOrganizationIndex,
@@ -2930,37 +2931,8 @@ export const reviveSavedWorkspace = (workspace: SavedWorkspace): SavedWorkspace 
   lastAccessedAt: reviveDateOrNull(workspace.lastAccessedAt) || new Date()
 })
 
-export const coerceWorkspaceAssistantDefaultsForRehydrate = (
-  candidate: unknown
-): WorkspaceAssistantDefaults | null => {
-  if (!isRecord(candidate)) return null
-  const assistantKind =
-    candidate.assistantKind === "persona" || candidate.assistant_kind === "persona"
-      ? "persona"
-      : null
-  if (!assistantKind) return null
-
-  const assistantId =
-    typeof candidate.assistantId === "string"
-      ? candidate.assistantId.trim()
-      : typeof candidate.assistant_id === "string"
-        ? candidate.assistant_id.trim()
-        : ""
-  if (!assistantId) return null
-
-  return {
-    assistantKind,
-    assistantId,
-    personaMemoryMode:
-      candidate.personaMemoryMode === "read_write" ||
-      candidate.persona_memory_mode === "read_write"
-        ? "read_write"
-        : "read_only",
-    voice: null,
-    style: null,
-    toolPolicyProfileId: null
-  }
-}
+export const coerceWorkspaceAssistantDefaultsForRehydrate =
+  normalizeWorkspaceAssistantDefaults
 
 export const reviveWorkspaceSnapshot = (
   workspaceId: string,

@@ -511,6 +511,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     clearWorkspaceUndoActionsForTests()
     registryStateOverrides.missingDegraded = false
     registryStateOverrides.degradedLabel = "Degraded"
+    mockStoreState.workspaceId = "workspace-alpha"
+    mockStoreState.workspaceName = "Alpha Research"
+    mockStoreState.workspaceTag = "workspace:alpha-research"
     mockStoreState.assistantDefaults = null
     mockStoreState.effectiveAssistantDefault = null
     connectionConfigState.loading = false
@@ -1207,6 +1210,49 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
   })
 
+  it("saves default assistant settings against the workspace loaded into the modal", async () => {
+    const header = (
+      <WorkspaceHeader
+        leftPaneOpen={true}
+        rightPaneOpen={true}
+        onToggleLeftPane={vi.fn()}
+        onToggleRightPane={vi.fn()}
+      />
+    )
+    const { rerender } = render(header)
+
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByText("Default assistant"))
+    const modal = await screen.findByTestId("workspace-default-assistant-modal")
+
+    mockStoreState.workspaceId = "workspace-beta"
+    mockStoreState.workspaceName = "Beta Deep Dive"
+    mockStoreState.workspaceTag = "workspace:beta-deep-dive"
+    rerender(header)
+
+    fireEvent.change(
+      within(modal).getByTestId("workspace-default-assistant-select"),
+      { target: { value: "persona-lit-reviewer" } }
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Save default" }))
+
+    await waitFor(() => {
+      expect(mockPatchWorkspace).toHaveBeenCalledWith(
+        "workspace-alpha",
+        expect.objectContaining({
+          version: 7,
+          assistantDefaults: expect.objectContaining({
+            assistantId: "persona-lit-reviewer"
+          })
+        })
+      )
+    })
+    expect(mockPatchWorkspace).not.toHaveBeenCalledWith(
+      "workspace-beta",
+      expect.anything()
+    )
+  })
+
   it("clears default assistant modal state before failed reloads can reuse stale values", async () => {
     mockGetWorkspace.mockResolvedValueOnce(
       createWorkspaceApiResponse({
@@ -1434,6 +1480,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     const modal = await screen.findByTestId("workspace-default-assistant-modal")
     expect(within(modal).getByText("Default unavailable")).toBeInTheDocument()
     expect(within(modal).getByText("Permission denied")).toBeInTheDocument()
+    expect(translationMock.keys).toContain(
+      "playground:workspace.defaultAssistantDegraded.permissionDenied"
+    )
     expect(within(modal).queryByText("Hidden Persona")).not.toBeInTheDocument()
 
     fireEvent.change(
