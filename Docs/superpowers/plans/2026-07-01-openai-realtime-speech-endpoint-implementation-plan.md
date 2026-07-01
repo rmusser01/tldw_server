@@ -21,7 +21,7 @@ Spec: `Docs/superpowers/specs/2026-07-01-openai-realtime-speech-endpoint-design.
 
 **Tests:** Protocol golden tests and capability unit tests run without importing heavy audio providers.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -206,7 +206,7 @@ Expected result: all capability tests pass.
 
 **Tests:** Orchestrator tests use fake pipeline and fake persistence only.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Files
 
@@ -327,7 +327,7 @@ Expected result: all Stage 2 session and persistence tests pass.
 
 **Tests:** WebSocket auth and integration tests run against fake pipeline without live providers.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Files
 
