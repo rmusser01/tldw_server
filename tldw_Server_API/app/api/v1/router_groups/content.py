@@ -193,7 +193,7 @@ def iter_content_router_specs() -> Iterable[RouterSpec]:
                 import_path="tldw_Server_API.app.api.v1.endpoints.realtime_compat",
                 log_name="realtime_compat",
                 prefix="/v1",
-                tags=("openai-realtime-compat",),
+                tags=("audio-realtime",),
                 route_key="audio-realtime",
             ),
         )
