@@ -1,7 +1,7 @@
 # Standalone MCP Document Corpus And RAG Tools Design
 
 Date: 2026-06-30
-Status: Draft for spec review
+Status: Approved for staged implementation
 Backlog: TASK-12071
 Related: Docs/superpowers/specs/2026-05-26-mcp-unified-standalone-library-gateway-design.md
 

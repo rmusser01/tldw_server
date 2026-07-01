@@ -1,7 +1,7 @@
 ---
 id: TASK-12071
 title: Design standalone MCP document corpus and Context7-compatible RAG tools
-status: In Progress
+status: Done
 labels:
 - mcp
 - docs
@@ -21,11 +21,11 @@ Write a design spec for a standalone-first MCP document corpus that supports doc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Design captures standalone-first package boundary with no tldw_server dependency.
-- [ ] #2 Design uses document/collection/keyword-first model rather than library/version constraints.
-- [ ] #3 Design defines canonical docs.* MCP tools plus Context7-compatible aliases.
-- [ ] #4 Design covers URL/source policy, approval flow, egress protections, testing, rollout, and tldw_server host integration.
-- [ ] #5 Spec is written under Docs/superpowers/specs and committed.
+- [x] #1 Design captures standalone-first package boundary with no tldw_server dependency.
+- [x] #2 Design uses document/collection/keyword-first model rather than library/version constraints.
+- [x] #3 Design defines canonical docs.* MCP tools plus Context7-compatible aliases.
+- [x] #4 Design covers URL/source policy, approval flow, egress protections, testing, rollout, and tldw_server host integration.
+- [x] #5 Spec is written under Docs/superpowers/specs and committed.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -46,21 +46,21 @@ Reviewed the draft before implementation planning and tightened the spec around:
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Closeout update after Stage 1 and Stage 2 implementation: the standalone MCP docs catalog design is approved for staged implementation, and the first two implementation slices are complete (`TASK-12074` Stage 1 and `TASK-12078` Stage 2). Updated the spec status from draft to approved-for-staged-implementation. Verification for this closeout is documentation-only: `git diff --check` will be run before commit; Bandit not applicable except as already recorded in implementation tasks.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Design spec written and revised after review for the standalone-first document corpus/RAG MCP module. The revision separates Stage 1 from full-program acceptance, moves local `docs.import_path` into Stage 1, makes URL/web acquisition optional, requires the baseline standalone install to work without the web-scraping pipeline, treats existing tldw_server scraping code as a reference/copy-adapt source or host-adapter implementation rather than a mandatory runtime dependency, adds store-level scope enforcement, documents the current tldw_server shim path, clarifies source-policy storage, splits collection/keyword tools by read/write behavior, and maps Context7 aliases to canonical docs.* authorization. Verification: unfinished-marker scan returned no matches in the spec/task. Bandit skipped because this task only changes documentation and Backlog.md task metadata.
+Design spec completed and approved for staged implementation. The design captures a standalone-first docs corpus with document/collection/keyword-first SQLite+FTS5 retrieval, canonical docs.* tools plus Context7-compatible aliases, optional URL acquisition with policy/egress protections, and tldw_server host mounting boundaries. Stage 1 and Stage 2 follow-on implementation tasks are complete; Stage 3 server mounting planning remains the next separate slice.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
