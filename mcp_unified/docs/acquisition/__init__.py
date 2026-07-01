@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from .models import (
     FetchResponse,
+    FetchResult,
     FetchResultStatus,
     IngestStatus,
     NormalizedURL,
     PolicyStatus,
+    RedirectHop,
     Resolver,
     ResolvedAddress,
     SourceDecision,
@@ -21,23 +23,28 @@ from .policy import (
     normalize_url,
     safe_argument_hash,
 )
+from .resolver import StdlibResolver, is_unsafe_egress_ip
 
 __all__ = [
     "DomainRule",
     "FetchResponse",
+    "FetchResult",
     "FetchResultStatus",
     "IngestStatus",
     "NormalizedURL",
     "PolicyStatus",
+    "RedirectHop",
     "Resolver",
     "ResolvedAddress",
     "SourceDecision",
     "SourcePolicy",
+    "StdlibResolver",
     "Transport",
     "URLPolicyError",
     "URLPrefixRule",
     "URLRequest",
     "has_url_credentials",
+    "is_unsafe_egress_ip",
     "normalize_url",
     "safe_argument_hash",
 ]
