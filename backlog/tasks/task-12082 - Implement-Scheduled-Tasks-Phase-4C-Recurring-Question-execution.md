@@ -16,7 +16,9 @@ modified_files:
 - backlog/tasks/task-12082 - Implement-Scheduled-Tasks-Phase-4C-Recurring-Question-execution.md
 - tldw_Server_API/app/core/DB_Management/Scheduled_Tasks_DB.py
 - tldw_Server_API/app/api/v1/schemas/scheduled_tasks_automation_schemas.py
+- tldw_Server_API/app/services/scheduled_task_automation_service.py
 - tldw_Server_API/tests/Notifications/test_scheduled_task_automation_db.py
+- tldw_Server_API/tests/Notifications/test_scheduled_task_automation_service.py
 ---
 
 ## Description
@@ -48,6 +50,8 @@ Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-exe
 Implementation started from plan `Docs/superpowers/plans/2026-07-01-scheduled-tasks-phase4c-recurring-question-execution-implementation-plan.md` after rebasing the planning branch onto `origin/dev` at merge `85ab688b34`.
 
 Stage 1 storage/schema slice added durable recurring-question definition resolution defaults, owner-scoped run/result persistence, result review state, owner+dedupe uniqueness, canonical JSON snapshots, and redacted source-ref guards. Verification: focused scheduled task DB pytest passed (31 passed, 3 warnings); Bandit on touched production files reported zero findings.
+
+Stage 1 spec-review fix mapped persisted definition resolution/policy fields into service responses and added recursive private-key validation before run/result JSON persistence. Verification: focused scheduled task DB+service pytest passed (68 passed, 4 warnings); git diff --check passed; Bandit on touched production files reported zero findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -102,6 +102,23 @@ def _create_definition(
     )
 
 
+def _create_run(repo: ScheduledTasksDatabase, definition, *, owner_id: int = 101, **overrides):
+    payload = {
+        "owner_id": owner_id,
+        "definition_id": definition.id,
+        "definition_version": definition.version,
+        "trigger_reason": "manual",
+        "status": "queued",
+        "outcome": "none",
+        "scope_snapshot": {"sources": ["media_db"]},
+        "finding_policy_snapshot": {"preset": "balanced_findings"},
+        "rag_request_snapshot": {"query": "What changed?", "sources": ["media_db"]},
+        "run_summary": {"message": "Queued"},
+    }
+    payload.update(overrides)
+    return repo.create_run(**payload)
+
+
 def test_connect_context_manager_closes_connection(tmp_path):
     repo = ScheduledTasksDatabase(tmp_path / "scheduled_tasks.db")
 
@@ -490,18 +507,7 @@ def test_create_result_rejects_empty_dedupe_key(tmp_path, monkeypatch):
 def test_create_result_rejects_raw_source_ref_text(tmp_path, monkeypatch):
     repo = _repo(tmp_path, monkeypatch)
     definition = _create_definition(repo)
-    run = repo.create_run(
-        owner_id=101,
-        definition_id=definition.id,
-        definition_version=definition.version,
-        trigger_reason="manual",
-        status="completed",
-        outcome="finding",
-        scope_snapshot={"sources": ["media_db"]},
-        finding_policy_snapshot={"preset": "balanced_findings"},
-        rag_request_snapshot={"query": "What changed?"},
-        run_summary={"message": "Complete"},
-    )
+    run = _create_run(repo, definition, status="completed", outcome="finding")
 
     with pytest.raises(ValueError, match="source_refs"):
         repo.create_result(
@@ -520,21 +526,138 @@ def test_create_result_rejects_raw_source_ref_text(tmp_path, monkeypatch):
         )
 
 
+@pytest.mark.parametrize(
+    ("field_name", "private_payload"),
+    [
+        ("rag_request_snapshot", {"query": "What changed?", "debug": {"raw_rag_debug": {"step": "RAW DEBUG"}}}),
+        ("run_summary", {"message": "Queued", "details": [{"provider_key": "secret-provider-key"}]}),
+    ],
+)
+def test_create_run_rejects_nested_private_payload_keys(tmp_path, monkeypatch, field_name, private_payload):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+
+    with pytest.raises(ValueError, match=field_name):
+        _create_run(repo, definition, **{field_name: private_payload})
+
+    persisted_bytes = _database_bytes(repo)
+    assert b"RAW DEBUG" not in persisted_bytes  # nosec B101
+    assert b"secret-provider-key" not in persisted_bytes  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("field_name", "private_payload"),
+    [
+        ("evidence_summary", {"top_sources": [{"raw_source_text": "RAW FULL DOCUMENT"}]}),
+        ("failure_reason", {"code": "worker_failure", "details": {"secret": "do-not-store"}}),
+    ],
+)
+def test_update_run_rejects_nested_private_payload_keys(tmp_path, monkeypatch, field_name, private_payload):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    run = _create_run(repo, definition)
+
+    with pytest.raises(ValueError, match=field_name):
+        repo.update_run(owner_id=101, run_id=run.id, patch={field_name: private_payload})
+
+    persisted_bytes = _database_bytes(repo)
+    assert b"RAW FULL DOCUMENT" not in persisted_bytes  # nosec B101
+    assert b"do-not-store" not in persisted_bytes  # nosec B101
+
+
+@pytest.mark.parametrize(
+    ("field_name", "private_payload"),
+    [
+        ("answer", {"summary": "Answer", "evidence": {"document_text": "RAW ANSWER SOURCE"}}),
+        ("source_refs", [{"source_id": "m1", "metadata": {"raw_document_text": "RAW SOURCE REF"}}]),
+    ],
+)
+def test_create_result_rejects_nested_private_payload_keys(tmp_path, monkeypatch, field_name, private_payload):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    run = _create_run(repo, definition, status="completed", outcome="finding")
+    payload = {
+        "owner_id": 101,
+        "definition_id": definition.id,
+        "run_id": run.id,
+        "kind": "finding",
+        "title": "Private payload",
+        "summary": "Should fail.",
+        "answer": None,
+        "answer_mode": "evidence_only",
+        "confidence": {"label": "medium"},
+        "source_refs": [{"source_id": "m1", "title": "Doc", "snippet": "short redacted"}],
+        "dedupe_key": f"rq:def:private:{field_name}",
+        "visibility_destination": {"home": True, "results": True},
+    }
+    payload[field_name] = private_payload
+
+    with pytest.raises(ValueError, match=field_name):
+        repo.create_result(**payload)
+
+    persisted_bytes = _database_bytes(repo)
+    assert b"RAW ANSWER SOURCE" not in persisted_bytes  # nosec B101
+    assert b"RAW SOURCE REF" not in persisted_bytes  # nosec B101
+
+
+def test_privacy_guard_allows_safe_snippets_source_refs_and_messages(tmp_path, monkeypatch):
+    repo = _repo(tmp_path, monkeypatch)
+    definition = _create_definition(repo)
+    run = _create_run(
+        repo,
+        definition,
+        status="completed",
+        outcome="finding",
+        rag_request_snapshot={
+            "query": "What changed?",
+            "message": "Use public summaries only.",
+            "sources": ["media_db"],
+        },
+        run_summary={"message": "Completed", "answer": "A safe short answer."},
+        evidence_summary={
+            "top_sources": [
+                {
+                    "source_id": "m1",
+                    "title": "Doc",
+                    "snippet": "short redacted",
+                    "score": 0.87,
+                    "citation_ref": "c1",
+                }
+            ]
+        },
+    )
+
+    result = repo.create_result(
+        owner_id=101,
+        definition_id=definition.id,
+        run_id=run.id,
+        kind="finding",
+        title="Safe result",
+        summary="A safe result summary.",
+        answer={"message": "Short synthesized answer."},
+        answer_mode="synthesized",
+        confidence={"label": "medium", "score": 0.87},
+        source_refs=[
+            {
+                "source_id": "m1",
+                "title": "Doc",
+                "snippet": "short redacted",
+                "score": 0.87,
+                "citation_ref": "c1",
+            }
+        ],
+        dedupe_key="rq:def:safe:m1",
+        visibility_destination={"home": True, "results": True},
+    )
+
+    assert result.source_refs[0]["snippet"] == "short redacted"  # nosec B101
+    assert result.answer == {"message": "Short synthesized answer."}  # nosec B101
+
+
 def test_result_review_state_and_definition_resolution_roundtrip(tmp_path, monkeypatch):
     repo = _repo(tmp_path, monkeypatch)
     definition = _create_definition(repo)
-    run = repo.create_run(
-        owner_id=101,
-        definition_id=definition.id,
-        definition_version=definition.version,
-        trigger_reason="manual",
-        status="completed",
-        outcome="finding",
-        scope_snapshot={"sources": ["media_db"]},
-        finding_policy_snapshot={"preset": "balanced_findings"},
-        rag_request_snapshot={"query": "What changed?"},
-        run_summary={"message": "Complete"},
-    )
+    run = _create_run(repo, definition, status="completed", outcome="finding")
     result = repo.create_result(
         owner_id=101,
         definition_id=definition.id,

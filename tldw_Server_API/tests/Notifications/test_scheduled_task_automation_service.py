@@ -343,6 +343,36 @@ def test_update_requires_preview_version_match_and_consumes_preview(tmp_path):
     assert consumed.status == "consumed"  # nosec B101
 
 
+def test_definition_response_includes_persisted_resolution_and_policy_fields(tmp_path):
+    service, repo = _service(tmp_path)
+    definition = _create_definition(service)
+    resolved_at = "2026-07-01T00:00:00+00:00"
+    repo.update_definition(
+        owner_id=OWNER_ID,
+        definition_id=definition.id,
+        patch={
+            "resolution_state": "solved",
+            "resolved_at": resolved_at,
+            "resolved_by": ACTOR,
+            "resolved_result_id": "result-123",
+            "finding_policy": {"preset": "high_confidence_only", "min_evidence_count": 3},
+            "retention_policy": {"mode": "custom", "run_ttl_days": 14},
+            "updated_by": ACTOR,
+        },
+        expected_version=definition.version,
+    )
+
+    response = service.get_definition(owner_id=OWNER_ID, definition_id=definition.id)
+
+    assert response.resolution_state == "solved"  # nosec B101
+    assert response.resolved_at is not None  # nosec B101
+    assert response.resolved_at.isoformat() == resolved_at  # nosec B101
+    assert response.resolved_by == ACTOR  # nosec B101
+    assert response.resolved_result_id == "result-123"  # nosec B101
+    assert response.finding_policy == {"preset": "high_confidence_only", "min_evidence_count": 3}  # nosec B101
+    assert response.retention_policy == {"mode": "custom", "run_ttl_days": 14}  # nosec B101
+
+
 def test_duplicate_creates_paused_copy_and_two_audit_events(tmp_path):
     service, repo = _service(tmp_path)
     definition = _create_definition(service)

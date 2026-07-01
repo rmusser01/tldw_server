@@ -1252,6 +1252,12 @@ class ScheduledTaskAutomationService:
             created_at=row.created_at,
             updated_at=row.updated_at,
             archived_at=row.updated_at if row.lifecycle == "archived" else None,
+            resolution_state=row.resolution_state,
+            resolved_at=row.resolved_at,
+            resolved_by=row.resolved_by,
+            resolved_result_id=row.resolved_result_id,
+            finding_policy=row.finding_policy,
+            retention_policy=row.retention_policy,
         )
 
     @staticmethod

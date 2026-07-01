@@ -28,6 +28,17 @@ _SCHEDULED_TASKS_DB_NAME = "ScheduledTasks.db"
 _DISABLED_LOCK_KINDS = {"none", "admin", "security", "system"}
 _RESULT_REVIEW_STATES = {"unread", "read", "dismissed"}
 _RAW_SOURCE_REF_KEYS = {"raw_text", "full_text", "document_text"}
+_PRIVATE_PAYLOAD_KEYS = _RAW_SOURCE_REF_KEYS | {
+    "raw_source_text",
+    "raw_document_text",
+    "raw_rag_debug",
+    "raw_agent_payload",
+    "provider_key",
+    "api_key",
+    "secret",
+    "password",
+    "token",
+}
 
 
 @dataclass(frozen=True)
@@ -517,6 +528,12 @@ class ScheduledTasksTransaction:
     ) -> RunRow:
         run_id = _new_id()
         created_at = _utcnow_iso()
+        _validate_private_json_payload("scope_snapshot", scope_snapshot)
+        _validate_private_json_payload("finding_policy_snapshot", finding_policy_snapshot)
+        _validate_private_json_payload("rag_request_snapshot", rag_request_snapshot)
+        _validate_private_json_payload("run_summary", run_summary)
+        _validate_private_json_payload("evidence_summary", evidence_summary or {})
+        _validate_private_json_payload("failure_reason", failure_reason)
         with self._connect() as conn:
             begin_immediate_if_needed(conn)
             definition_exists = conn.execute(
@@ -597,6 +614,12 @@ class ScheduledTasksTransaction:
             "started_at": patch.get("started_at", current.started_at),
             "ended_at": patch.get("ended_at", current.ended_at),
         }
+        _validate_private_json_payload("scope_snapshot", next_values["scope_snapshot"])
+        _validate_private_json_payload("finding_policy_snapshot", next_values["finding_policy_snapshot"])
+        _validate_private_json_payload("rag_request_snapshot", next_values["rag_request_snapshot"])
+        _validate_private_json_payload("run_summary", next_values["run_summary"])
+        _validate_private_json_payload("evidence_summary", next_values["evidence_summary"])
+        _validate_private_json_payload("failure_reason", next_values["failure_reason"])
         with self._connect() as conn:
             cursor = conn.execute(
                 """
@@ -718,7 +741,10 @@ class ScheduledTasksTransaction:
     ) -> ResultRow:
         _validate_dedupe_key(dedupe_key)
         _validate_review_state(review_state)
-        _validate_source_refs(source_refs)
+        _validate_private_json_payload("answer", answer)
+        _validate_private_json_payload("confidence", confidence)
+        _validate_private_json_payload("source_refs", source_refs)
+        _validate_private_json_payload("visibility_destination", visibility_destination)
         result_id = _new_id()
         created_at = _utcnow_iso()
         with self._connect() as conn:
@@ -1153,10 +1179,15 @@ def _validate_dedupe_key(value: str) -> None:
         raise ValueError("dedupe_key must be non-empty")
 
 
-def _validate_source_refs(source_refs: list[Any]) -> None:
-    for source_ref in source_refs:
-        if isinstance(source_ref, dict) and _RAW_SOURCE_REF_KEYS.intersection(source_ref):
-            raise ValueError("source_refs must not include raw source text fields")
+def _validate_private_json_payload(context: str, value: Any) -> None:
+    if isinstance(value, dict):
+        for key, nested_value in value.items():
+            if str(key).lower() in _PRIVATE_PAYLOAD_KEYS:
+                raise ValueError(f"{context} contains prohibited private payload key: {key}")
+            _validate_private_json_payload(context, nested_value)
+    elif isinstance(value, list):
+        for nested_value in value:
+            _validate_private_json_payload(context, nested_value)
 
 
 def _definition_column_names(conn: sqlite3.Connection) -> set[str]:
