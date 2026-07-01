@@ -14,6 +14,15 @@ references:
 documentation:
 - Docs/superpowers/specs/2026-07-01-openai-realtime-speech-endpoint-design.md
 - Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
+modified_files:
+- backlog/tasks/task-12089 - Implement-OpenAI-compatible-realtime-speech-endpoint.md
+- tldw_Server_API/app/core/Audio/Realtime/__init__.py
+- tldw_Server_API/app/core/Audio/Realtime/constants.py
+- tldw_Server_API/app/core/Audio/Realtime/models.py
+- tldw_Server_API/app/core/Audio/Realtime/protocol.py
+- tldw_Server_API/app/core/Audio/Realtime/capabilities.py
+- tldw_Server_API/tests/Audio/test_realtime_protocol_adapter.py
+- tldw_Server_API/tests/Audio/test_realtime_capabilities.py
 ---
 
 ## Description
@@ -35,7 +44,7 @@ Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Stage 1 complete. Implemented protocol constants, dataclass command/event models, OpenAI GA protocol parser/serializer, capabilities metadata, and provider-free tests. Verification: baseline focused tests passed before implementation (21 passed); Stage 1 tests passed after fixes (43 passed, 3 warnings); spec compliance review passed; code-quality review passed with no Critical or Important findings. Bandit production Realtime package reported errors=0 results=0. Minor hardening candidate: reject stray top-level beta audio fields consistently across event types.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
