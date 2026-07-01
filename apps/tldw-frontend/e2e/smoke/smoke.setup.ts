@@ -418,7 +418,7 @@ export async function seedAuth(
       localStorage.setItem("tldwServerUrl", cfg.serverUrl)
       localStorage.setItem("authMode", cfg.authMode)
       localStorage.setItem("apiKey", cfg.apiKey) // lgtm[js/clear-text-storage-of-sensitive-data] test-only legacy auth compatibility key
-      localStorage.setItem("accessToken", cfg.accessToken)
+      localStorage.setItem("accessToken", cfg.accessToken) // lgtm[js/clear-text-storage-of-sensitive-data] synthetic E2E auth seed only
       localStorage.setItem("__tldw_first_run_complete", "true")
       localStorage.setItem("assistant_setup_dismissed", "true")
       localStorage.setItem("__tldw_test_bypass", "true")

@@ -14,6 +14,7 @@ from mcp_unified.profiles.path_grants import (
 )
 
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
 from tldw_Server_API.app.services.mcp_hub_multi_root_path_service import (
     McpHubMultiRootPathService,
@@ -105,7 +106,15 @@ def _is_within(root: Path, candidate: Path) -> bool:
 def _normalize_candidate_path(raw_path: str, *, base_path: Path) -> Path:
     candidate = Path(raw_path).expanduser()
     if not candidate.is_absolute():
-        candidate = base_path / candidate
+        joined = safe_join(
+            str(base_path),
+            str(candidate),
+            error_factory=lambda _exc: ValueError("Path escapes base path"),
+        )
+        if joined is None:
+            raise ValueError("Path escapes base path")
+        return Path(joined)
+    # lgtm[py/path-injection] absolute candidates are checked against workspace/scope roots before use.
     return candidate.resolve(strict=False)
 
 

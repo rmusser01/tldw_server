@@ -44,10 +44,99 @@ from tldw_Server_API.app.core.DB_Management.TopicMonitoring_DB import TopicAlert
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime, is_test_mode, is_truthy
 
 _SEVERITY_ORDER = {"info": 0, "warning": 1, "critical": 2}
+_REDACTED_VALUE = "[REDACTED]"
+_SENSITIVE_NOTIFICATION_KEY_PARTS = (
+    "api_key",
+    "apikey",
+    "authorization",
+    "access_token",
+    "refresh_token",
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "credential",
+    "private_key",
+    "webhook_url",
+)
+_SENSITIVE_NOTIFICATION_TEXT_MARKERS = (
+    "api_key=",
+    "apikey=",
+    "x-api-key=",
+    "access_token=",
+    "refresh_token=",
+    "authorization=",
+    "password=",
+    "passwd=",
+    "secret=",
+    "token=",
+    "api_key:",
+    "apikey:",
+    "x-api-key:",
+    "authorization:",
+    "password:",
+    "passwd:",
+    "secret:",
+    "token:",
+    "bearer ",
+)
+_SENSITIVE_NOTIFICATION_TEXT_END = set(" \t\r\n&;,\"'<>")
 
 
 def _safe_exception_label(exc: BaseException) -> str:
     return exc.__class__.__name__
+
+
+def _is_sensitive_notification_key(key: Any) -> bool:
+    normalized = str(key).strip().replace("-", "_").lower()
+    return any(part in normalized for part in _SENSITIVE_NOTIFICATION_KEY_PARTS)
+
+
+def _redact_notification_text(value: str) -> str:
+    lower = value.lower()
+    cursor = 0
+    pieces: list[str] = []
+
+    while cursor < len(value):
+        next_marker_start = -1
+        next_marker = ""
+        for marker in _SENSITIVE_NOTIFICATION_TEXT_MARKERS:
+            marker_start = lower.find(marker, cursor)
+            if marker_start == -1:
+                continue
+            if next_marker_start == -1 or marker_start < next_marker_start:
+                next_marker_start = marker_start
+                next_marker = marker
+        if next_marker_start == -1:
+            pieces.append(value[cursor:])
+            break
+
+        marker_end = next_marker_start + len(next_marker)
+        secret_end = marker_end
+        while secret_end < len(value) and value[secret_end] not in _SENSITIVE_NOTIFICATION_TEXT_END:
+            secret_end += 1
+
+        pieces.append(value[cursor:marker_end])
+        pieces.append(_REDACTED_VALUE)
+        cursor = secret_end
+
+    return "".join(pieces)
+
+
+def _sanitize_notification_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized: dict[Any, Any] = {}
+        for key, item in value.items():
+            if _is_sensitive_notification_key(key):
+                sanitized[key] = _REDACTED_VALUE
+            else:
+                sanitized[key] = _sanitize_notification_payload(item)
+        return sanitized
+    if isinstance(value, (list, tuple, set)):
+        return [_sanitize_notification_payload(item) for item in value]
+    if isinstance(value, str):
+        return _redact_notification_text(value)
+    return value
 
 
 def _find_project_root(start: Path) -> Path | None:
@@ -312,17 +401,18 @@ class NotificationService:
             "metadata": alert.metadata or {},
             "route_tags": {"scope_type": alert.scope_type, "scope_id": alert.scope_id},
         }
+        safe_payload = _sanitize_notification_payload(payload)
         # Always append to JSONL file (local-first scaffold)
         file_written = True
         try:
             with self._lock, open(self.file_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                f.write(json.dumps(safe_payload, ensure_ascii=False) + "\n")
         except (OSError, RuntimeError, TypeError, ValueError) as e:
             file_written = False
             logger.warning("Notification file sink failed ({})", _safe_exception_label(e))
         # Best-effort asynchronous sends through a bounded worker queue.
         if self.webhook_url:
-            self._enqueue_delivery("webhook", payload)
+            self._enqueue_delivery("webhook", safe_payload)
         try:
             # Email optional and only if SMTP configured and recipients provided
             recipients = self._parse_email_recipients(self.email_to)
@@ -420,17 +510,19 @@ class NotificationService:
         severity = payload.get("severity") or payload.get("rule_severity")
         if not self._meets_threshold(severity):
             return "skipped"
-        if "ts" not in payload:
-            payload["ts"] = datetime.now(timezone.utc).isoformat()
+        payload_to_record = dict(payload)
+        if "ts" not in payload_to_record:
+            payload_to_record["ts"] = datetime.now(timezone.utc).isoformat()
+        safe_payload = _sanitize_notification_payload(payload_to_record)
         file_written = True
         try:
             with self._lock, open(self.file_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                f.write(json.dumps(safe_payload, ensure_ascii=False) + "\n")
         except (OSError, RuntimeError, TypeError, ValueError) as e:
             file_written = False
             logger.warning("Notification file sink failed ({})", _safe_exception_label(e))
         if self.webhook_url:
-            self._enqueue_delivery("webhook", payload)
+            self._enqueue_delivery("webhook", safe_payload)
         return "logged" if file_written else "failed"
 
     @staticmethod

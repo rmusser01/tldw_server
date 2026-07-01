@@ -55,6 +55,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
     SOURCE_FEATURE_VOICE_STUDIO,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Utils.Utils import sanitize_filename
 from tldw_Server_API.app.services.storage_quota_service import get_storage_service
 
@@ -137,11 +138,27 @@ async def _save_file(
     date_folder = _get_date_folder()
 
     # Create category/date directory structure
-    target_dir = outputs_dir / category_folder / date_folder
+    target_dir_str = safe_join(
+        str(outputs_dir),
+        f"{category_folder}/{date_folder}",
+        error_factory=lambda _exc: AuthNZStorageError("Invalid generated file directory"),
+    )
+    if target_dir_str is None:
+        raise AuthNZStorageError("Invalid generated file directory")
+    target_dir = Path(target_dir_str)
+    # lgtm[py/path-injection] target_dir is resolved by safe_join under the user's outputs dir.
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    file_path = target_dir / filename
+    file_path_str = safe_join(
+        str(target_dir),
+        filename,
+        error_factory=lambda _exc: AuthNZStorageError("Invalid generated file path"),
+    )
+    if file_path_str is None:
+        raise AuthNZStorageError("Invalid generated file path")
+    file_path = Path(file_path_str)
 
+    # lgtm[py/path-injection] file_path is resolved by safe_join under the generated-file target dir.
     async with aiofiles.open(file_path, "wb") as f:
         await f.write(data)
 

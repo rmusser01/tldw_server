@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -11,7 +10,6 @@ from tldw_Server_API.app.core.Chat.document_generator import DocumentGeneratorSe
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
-_EMAIL_RECIPIENT_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 MAX_EMAIL_RECIPIENTS = 50
 MAX_EMAIL_ATTACHMENTS = 5
 MAX_EMAIL_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -33,6 +31,18 @@ def _mask_email_address(address: str) -> str:
     return f"{prefix}***@{domain}"
 
 
+def _is_basic_email_address(value: str) -> bool:
+    local, separator, domain = value.partition("@")
+    if not separator or not local or not domain:
+        return False
+    if "@" in domain or "." not in domain:
+        return False
+    if any(char.isspace() for char in value):
+        return False
+    labels = domain.split(".")
+    return all(labels) and all(label.strip() == label for label in labels)
+
+
 def _normalize_email_recipients(recipients: list[str] | None) -> tuple[list[str], int]:
     normalized: list[str] = []
     seen: set[str] = set()
@@ -48,7 +58,7 @@ def _normalize_email_recipients(recipients: list[str] | None) -> tuple[list[str]
             len(recipient) > 254
             or "\r" in recipient
             or "\n" in recipient
-            or not _EMAIL_RECIPIENT_PATTERN.fullmatch(recipient.lower())
+            or not _is_basic_email_address(recipient)
         ):
             invalid_count += 1
             continue

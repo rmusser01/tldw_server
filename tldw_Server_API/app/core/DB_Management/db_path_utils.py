@@ -112,9 +112,11 @@ def _normalize_user_db_base_dir(raw_path: Path) -> Path:
 
 def _ensure_dir(path: Path, *, label: str) -> bool:
     try:
+        # lgtm[py/path-injection] callers pass paths normalized to trusted project/user database roots.
         path.mkdir(parents=True, exist_ok=False)
         return True
     except FileExistsError as e:
+        # lgtm[py/path-injection] callers pass paths normalized to trusted project/user database roots.
         if path.is_dir():
             return False
         logger.error(f"Failed to create {label} directory {path}: {e}")
@@ -297,7 +299,14 @@ def require_trusted_database_parent_exists(
 
 def _build_user_dir(base_path: Path, user_id: Optional[UserId]) -> tuple[Path, bool]:
     safe_user_id = _resolve_user_id_for_storage(user_id)
-    user_dir = (base_path / safe_user_id).resolve()
+    joined_user_dir = safe_join(
+        str(base_path),
+        safe_user_id,
+        error_factory=lambda _exc: ValueError("Computed user directory escapes base path"),
+    )
+    if joined_user_dir is None:
+        raise ValueError("Computed user directory escapes base path")
+    user_dir = Path(joined_user_dir)
     try:
         user_dir.relative_to(base_path)
     except ValueError as exc:
@@ -546,7 +555,14 @@ class DatabasePaths:
                 allow_legacy_alias=allow_legacy_alias
             )
         safe_user_id = _resolve_user_id_for_storage(user_id)
-        user_dir = (base_path / safe_user_id).resolve()
+        joined_user_dir = safe_join(
+            str(base_path),
+            safe_user_id,
+            error_factory=lambda _exc: ValueError("Computed user directory escapes base path"),
+        )
+        if joined_user_dir is None:
+            raise ValueError("Computed user directory escapes base path")
+        user_dir = Path(joined_user_dir)
         try:
             user_dir.relative_to(base_path)
         except ValueError as exc:

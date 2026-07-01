@@ -156,41 +156,31 @@ function writeBrowserConfig(config: AppConfig): void {
   window.localStorage.removeItem('tldw-theme');
 
   const existingConfig = readStoredTldwConfig();
-  const envApiKey = normalizeApiKeyValue(process.env.NEXT_PUBLIC_X_API_KEY);
-  const envApiBearer = normalizeBearerValue(process.env.NEXT_PUBLIC_API_BEARER);
   const apiKey = normalizeApiKeyValue(config.xApiKey);
   const apiBearer = normalizeBearerValue(config.apiBearer);
-  const shouldPersistApiKey = !!apiKey && apiKey !== envApiKey;
-  const shouldPersistApiBearer = !!apiBearer && apiBearer !== envApiBearer;
+  const hasRuntimeApiKey = !!apiKey;
+  const hasRuntimeApiBearer = !!apiBearer;
 
-  if (!existingConfig && !shouldPersistApiKey && !shouldPersistApiBearer) {
+  window.localStorage.removeItem('apiKey');
+  window.localStorage.removeItem('accessToken');
+
+  if (!existingConfig && !hasRuntimeApiKey && !hasRuntimeApiBearer) {
     return;
   }
 
   const nextConfig: StoredTldwConfig = { ...(existingConfig || {}) };
   nextConfig.serverUrl = config.apiBaseHost;
+  delete nextConfig.apiKey;
+  delete nextConfig.apiBearer;
+  delete nextConfig.accessToken;
+  delete nextConfig.refreshToken;
 
-  if (shouldPersistApiKey) {
+  if (hasRuntimeApiKey) {
     nextConfig.authMode = 'single-user';
-    nextConfig.apiKey = apiKey;
-    delete nextConfig.accessToken;
-    delete nextConfig.refreshToken;
-    window.localStorage.setItem('apiKey', apiKey);
-    window.localStorage.removeItem('accessToken');
-  } else if (!apiKey && normalizeTextValue(nextConfig.authMode) === 'single-user') {
-    delete nextConfig.apiKey;
-    window.localStorage.removeItem('apiKey');
   }
 
-  if (shouldPersistApiBearer) {
+  if (hasRuntimeApiBearer) {
     nextConfig.authMode = 'multi-user';
-    nextConfig.accessToken = apiBearer;
-    delete nextConfig.apiKey;
-    window.localStorage.setItem('accessToken', apiBearer);
-    window.localStorage.removeItem('apiKey');
-  } else if (!apiBearer && normalizeTextValue(nextConfig.authMode) === 'multi-user') {
-    delete nextConfig.accessToken;
-    window.localStorage.removeItem('accessToken');
   }
 
   window.localStorage.setItem('tldwConfig', JSON.stringify(nextConfig));

@@ -3,6 +3,7 @@ from __future__ import annotations
 """Helpers for recording explicit companion activity from adjacent systems."""
 
 import hashlib
+import hmac
 import json
 import sqlite3
 import traceback
@@ -15,6 +16,8 @@ from tldw_Server_API.app.core.feature_flags import is_personalization_enabled
 from tldw_Server_API.app.core.Personalization.companion_user_ids import (
     resolve_existing_companion_storage_user_id,
 )
+
+_COMPANION_ACTIVITY_LOG_REF_KEY = b"tldw-companion-activity-log-ref-v1"
 
 
 def _open_db_for_user(user_id: str | int) -> tuple[PersonalizationDB, str]:
@@ -67,7 +70,11 @@ def _log_ref(value: Any) -> str:
     normalized = str(value or "").strip()
     if not normalized:
         return "na"
-    return hashlib.sha1(normalized.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+    return hmac.digest(
+        _COMPANION_ACTIVITY_LOG_REF_KEY,
+        normalized.encode("utf-8"),
+        "sha256",
+    ).hex()[:12]
 
 
 def _traceback_summary(exc: BaseException) -> list[dict[str, Any]]:

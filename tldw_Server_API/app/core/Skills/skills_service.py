@@ -66,6 +66,28 @@ MAX_SKILL_MD_BYTES = 500000
 MAX_ZIP_IMPORT_ENTRIES = 100
 SKILL_INTEGRITY_TEXT_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh"}
 SkillFileFingerprint = tuple[tuple[str, int, int, int, int, int], ...]
+_TRACEBACK_ERROR_MARKERS = (
+    "traceback (most recent call last):",
+    "stack trace",
+)
+
+
+def _public_import_preview_error(message: str) -> str:
+    """Return bounded validation text without traceback-shaped internals."""
+    lines: list[str] = []
+    for raw_line in str(message or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        lowered = line.lower()
+        if any(marker in lowered for marker in _TRACEBACK_ERROR_MARKERS):
+            continue
+        if line.startswith("File ") or line.startswith('File "'):
+            continue
+        lines.append(line)
+
+    public_message = " ".join(lines).strip()
+    return public_message[:300] if public_message else "Invalid skill import"
 
 
 def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
@@ -1368,7 +1390,7 @@ class SkillsService:
         """Build a non-mutating import preview for invalid input."""
         return {
             "valid": False,
-            "errors": errors,
+            "errors": [_public_import_preview_error(error) for error in errors],
             "name": None,
             "description": None,
             "argument_hint": None,
@@ -1404,7 +1426,9 @@ class SkillsService:
         try:
             parsed = self._parser.parse_content(content, default_name=name)
         except SkillParseError as e:
-            return self._invalid_import_preview([f"Invalid skill content: {e}"])
+            parse_detail = _public_import_preview_error(e.message) if e.message else ""
+            parse_error = f"Invalid skill content: {parse_detail}" if parse_detail else "Invalid skill content"
+            return self._invalid_import_preview([parse_error])
 
         try:
             if parsed.frontmatter.name:
@@ -1427,7 +1451,7 @@ class SkillsService:
                 allow_deletes=False,
             ) if supporting_files else {}
         except SkillValidationError as e:
-            return self._invalid_import_preview([str(e)])
+            return self._invalid_import_preview([_public_import_preview_error(e.message or "Invalid skill import")])
 
         await self._sync_registry_async()
         db = self._get_db()

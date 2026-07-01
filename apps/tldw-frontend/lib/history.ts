@@ -15,12 +15,37 @@ export interface RequestHistoryItem {
 
 const KEY = 'tldw-request-history';
 const MAX = 200;
+const SENSITIVE_HEADER_NAMES = new Set([
+  'authorization',
+  'cookie',
+  'proxy-authorization',
+  'set-cookie',
+  'x-api-key',
+  'x-auth-token',
+]);
+
+function redactRequestHeaders(headers: RequestHistoryItem['requestHeaders']): RequestHistoryItem['requestHeaders'] {
+  if (!headers) return headers;
+  return Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => [
+      name,
+      SENSITIVE_HEADER_NAMES.has(name.toLowerCase()) ? '[REDACTED]' : value,
+    ]),
+  );
+}
+
+function sanitizeHistoryItem(item: RequestHistoryItem): RequestHistoryItem {
+  return {
+    ...item,
+    requestHeaders: redactRequestHeaders(item.requestHeaders),
+  };
+}
 
 export function addRequestHistory(item: RequestHistoryItem) {
   try {
     const raw = localStorage.getItem(KEY);
     const arr: RequestHistoryItem[] = raw ? JSON.parse(raw) : [];
-    const next = [item, ...arr].slice(0, MAX);
+    const next = [sanitizeHistoryItem(item), ...arr.map(sanitizeHistoryItem)].slice(0, MAX);
     localStorage.setItem(KEY, JSON.stringify(next));
   } catch {
     // ignore
@@ -45,4 +70,3 @@ export function clearRequestHistory() {
     // localStorage may be unavailable
   }
 }
-

@@ -126,6 +126,7 @@ async def _materialize_upload(upload: UploadFile, *, prefix: str, request_id: st
     wrote_payload = False
     try:
         suffix = _resolve_audio_suffix(upload.filename, upload.content_type)
+        # lgtm[py/path-injection] suffix is selected from _ALLOWED_UPLOAD_SUFFIXES.
         with tempfile.NamedTemporaryFile(
             suffix=suffix,
             prefix=prefix,
@@ -203,6 +204,7 @@ def _materialize_audio_bytes(
     tmp_path: Optional[str] = None
     try:
         suffix = _resolve_audio_suffix(filename, "audio/wav")
+        # lgtm[py/path-injection] suffix is selected from _ALLOWED_UPLOAD_SUFFIXES.
         with tempfile.NamedTemporaryFile(
             suffix=suffix,
             prefix=prefix,

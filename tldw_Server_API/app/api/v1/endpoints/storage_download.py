@@ -1,6 +1,8 @@
 """Storage file download route."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
@@ -8,6 +10,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints.storage_helpers import (
     _resolve_storage_base_dir,
 )
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService, get_storage_service
 
 router = APIRouter()
@@ -53,13 +56,12 @@ async def download_file(
         raise HTTPException(status_code=404, detail="File not found")
 
     base_dir = _resolve_storage_base_dir(user.id, file_record)
-    full_path = base_dir / storage_path
-
     try:
-        resolved_path = full_path.resolve()
-        if not resolved_path.is_relative_to(base_dir.resolve()):
+        base_dir_resolved = base_dir.resolve()
+        resolved_path_str = safe_join(str(base_dir_resolved), storage_path)
+        if resolved_path_str is None:
             raise HTTPException(status_code=403, detail="Invalid file path")
-        full_path = resolved_path
+        full_path = Path(resolved_path_str)
     except ValueError:
         raise HTTPException(status_code=403, detail="Invalid file path") from None
 
@@ -71,6 +73,7 @@ async def download_file(
     filename = file_record.get("original_filename") or file_record.get("filename", "download")
     mime_type = file_record.get("mime_type") or "application/octet-stream"
 
+    # lgtm[py/path-injection] full_path is resolved by safe_join under the record's storage base dir.
     return FileResponse(
         path=str(full_path),
         filename=filename,

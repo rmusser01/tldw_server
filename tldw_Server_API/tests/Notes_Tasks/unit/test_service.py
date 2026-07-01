@@ -9,7 +9,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 from tldw_Server_API.app.core.Notes_Tasks.models import TaskActor
-from tldw_Server_API.app.core.Notes_Tasks.service import NotesTaskService
+from tldw_Server_API.app.core.Notes_Tasks.service import NotesTaskService, _parse_checklist_line
 
 
 pytestmark = pytest.mark.unit
@@ -80,6 +80,20 @@ def test_task_text_rejects_parseable_metadata_tokens(text: str) -> None:
 )
 def test_task_text_allows_unknown_or_malformed_metadata_like_plain_text(text: str) -> None:
     NotesTaskService._validate_task_text(text)
+
+
+def test_task_text_metadata_scan_handles_unclosed_tokens_as_plain_text() -> None:
+    NotesTaskService._validate_task_text("@due(" + "2" * 1995)
+
+
+def test_parse_checklist_line_accepts_existing_projected_format() -> None:
+    parsed = _parse_checklist_line("\t-   [x]\tAlpha")
+
+    assert parsed is not None
+    assert parsed.indent == "\t"
+    assert parsed.bullet == "-"
+    assert parsed.space == "   "
+    assert parsed.body_part == "\tAlpha"
 
 
 def test_ensure_note_reconciled_preserves_current_warning_state_without_reprocessing(

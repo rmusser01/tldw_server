@@ -366,7 +366,7 @@ def test_notification_send_webhook_invokes_fetch(monkeypatch):
 
 def test_send_webhook_safe_swallows_retry_exhaustion(monkeypatch):
     svc = NotificationService()
-    secret_detail = "webhook retry failed at /tmp/private-webhook-retry"
+    secret_detail = "webhook retry failed at /tmp/private-webhook-retry"  # nosec B105
     messages, sink_id = _capture_notification_logs("INFO")
     monkeypatch.setattr(
         svc,
@@ -387,7 +387,7 @@ def test_send_webhook_safe_swallows_retry_exhaustion(monkeypatch):
 
 def test_send_webhook_safe_sanitizes_runtime_failure_log(monkeypatch):
     svc = NotificationService()
-    secret_detail = "webhook runtime failed at /tmp/private-webhook-runtime"
+    secret_detail = "webhook runtime failed at /tmp/private-webhook-runtime"  # nosec B105
     messages, sink_id = _capture_notification_logs("INFO")
     monkeypatch.setattr(
         svc,
@@ -419,7 +419,7 @@ def test_send_email_safe_swallows_retry_exhaustion(monkeypatch):
         pattern="cpu high",
         text_snippet="CPU at 95%",
     )
-    secret_detail = "email retry failed at /tmp/private-email-retry"
+    secret_detail = "email retry failed at /tmp/private-email-retry"  # nosec B105
     messages, sink_id = _capture_notification_logs("INFO")
     monkeypatch.setattr(
         svc,
@@ -451,7 +451,7 @@ def test_send_email_safe_sanitizes_runtime_failure_log(monkeypatch):
         pattern="cpu high",
         text_snippet="CPU at 95%",
     )
-    secret_detail = "email runtime failed at /tmp/private-email-runtime"
+    secret_detail = "email runtime failed at /tmp/private-email-runtime"  # nosec B105
     messages, sink_id = _capture_notification_logs("INFO")
     monkeypatch.setattr(
         svc,
@@ -501,13 +501,100 @@ def test_notify_generic_only_schedules_webhook_path(monkeypatch, tmp_path):
     assert queued[0][0] == "webhook"
 
 
+def test_notify_generic_redacts_sensitive_payload_before_storage_and_webhook(monkeypatch, tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "notifications.jsonl")
+    svc.webhook_url = "https://example.com/hook"
+
+    class _FakeThread:
+        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+            _ = (target, args, daemon)
+
+        def start(self) -> None:
+            return None
+
+    monkeypatch.setattr(notification_service.threading, "Thread", _FakeThread)
+
+    payload = {
+        "type": "guardian_alert",
+        "severity": "warning",
+        "api_key": "api-key-secret",
+        "nested": {"access-token": "access-secret"},
+        "items": [{"refresh_token": "refresh-secret"}],  # nosec B105
+        "message": "authorization=Bearer-secret token=query-token",
+    }
+
+    assert svc.notify_generic(payload) == "logged"
+
+    written = Path(svc.file_path).read_text()
+    assert "api-key-secret" not in written
+    assert "access-secret" not in written
+    assert "refresh-secret" not in written
+    assert "Bearer-secret" not in written
+    assert "query-token" not in written
+    assert written.count("[REDACTED]") >= 5
+    assert "ts" not in payload
+
+    queued = list(svc._delivery_queue.queue)
+    assert queued[0][0] == "webhook"
+    queued_payload = queued[0][1]
+    assert queued_payload["api_key"] == "[REDACTED]"
+    assert queued_payload["nested"]["access-token"] == "[REDACTED]"
+    assert queued_payload["items"][0]["refresh_token"] == "[REDACTED]"
+    assert queued_payload["message"] == "authorization=[REDACTED] token=[REDACTED]"
+
+
+def test_notify_redacts_topic_alert_metadata_before_storage_and_webhook(monkeypatch, tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "notifications.jsonl")
+    svc.webhook_url = "https://example.com/hook"
+
+    class _FakeThread:
+        def __init__(self, *, target=None, args=(), daemon=None):  # noqa: ANN001, ANN002
+            _ = (target, args, daemon)
+
+        def start(self) -> None:
+            return None
+
+    monkeypatch.setattr(notification_service.threading, "Thread", _FakeThread)
+
+    alert = TopicAlert(
+        user_id="u",
+        scope_type="user",
+        scope_id="u",
+        source="chat.input",
+        watchlist_id="w",
+        rule_category="credentials",
+        rule_severity="critical",
+        pattern="api_key=pattern-secret",
+        text_snippet="token=snippet-secret",
+        metadata={"password": "metadata-secret"},  # nosec B105
+    )
+
+    assert svc.notify(alert) == "logged"
+
+    written = Path(svc.file_path).read_text()
+    assert "pattern-secret" not in written
+    assert "snippet-secret" not in written
+    assert "metadata-secret" not in written
+
+    queued_payload = list(svc._delivery_queue.queue)[0][1]
+    assert queued_payload["pattern"] == "api_key=[REDACTED]"
+    assert queued_payload["snippet"] == "token=[REDACTED]"
+    assert queued_payload["metadata"]["password"] == "[REDACTED]"
+
+
 def test_notify_generic_webhook_enqueue_failure_log_is_sanitized(monkeypatch, tmp_path):
     svc = NotificationService()
     svc.enabled = True
     svc.min_severity = "info"
     svc.file_path = str(tmp_path / "notifications.jsonl")
     svc.webhook_url = "https://example.com/hook"
-    secret_thread_detail = "thread-token=/tmp/private-webhook-dispatch"
+    secret_thread_detail = "thread-token=/tmp/private-webhook-dispatch"  # nosec B105
     messages, sink_id = _capture_notification_logs("DEBUG")
 
     class _FailingThread:
@@ -534,7 +621,7 @@ def test_notify_webhook_enqueue_failure_log_is_sanitized(monkeypatch, tmp_path):
     svc.min_severity = "info"
     svc.file_path = str(tmp_path / "notifications.jsonl")
     svc.webhook_url = "https://example.com/hook"
-    secret_thread_detail = "thread-token=/tmp/private-topic-webhook-dispatch"
+    secret_thread_detail = "thread-token=/tmp/private-topic-webhook-dispatch"  # nosec B105
     messages, sink_id = _capture_notification_logs("DEBUG")
 
     class _FailingThread:
@@ -576,7 +663,7 @@ def test_notify_email_enqueue_failure_log_is_sanitized(monkeypatch, tmp_path):
     svc.smtp_host = "smtp.example.com"
     svc.email_from = "alerts@example.com"
     svc.email_to = "recipient@example.com"
-    secret_thread_detail = "thread-token=/tmp/private-topic-email-dispatch"
+    secret_thread_detail = "thread-token=/tmp/private-topic-email-dispatch"  # nosec B105
     messages, sink_id = _capture_notification_logs("DEBUG")
 
     class _FailingThread:

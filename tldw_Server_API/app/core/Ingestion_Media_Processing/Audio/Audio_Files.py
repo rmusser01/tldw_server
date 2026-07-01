@@ -58,6 +58,7 @@ from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
 from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Utils.Utils import downloaded_files, get_project_root, logging, sanitize_filename
 
 
@@ -136,6 +137,25 @@ _AUDIO_FILES_NONCRITICAL_EXCEPTIONS = (
     AudioTranscriptionError,
     AudioConversionError,
 )
+
+
+def _normalize_audio_extension(raw_extension: str | None, *, default: str = ".mp3") -> str:
+    """Return a simple dot-prefixed alphanumeric extension for downloaded audio."""
+    normalized = str(raw_extension or "").strip().lower()
+    if normalized.startswith("."):
+        normalized = normalized[1:]
+    normalized = "".join(
+        char for char in normalized if char in string.ascii_lowercase + string.digits
+    )
+    return f".{normalized}" if normalized else default
+
+
+def _resolve_audio_download_path(save_dir: Path, filename: str) -> Path:
+    """Resolve a downloaded audio filename under ``save_dir`` without allowing escapes."""
+    resolved = safe_join(str(save_dir), filename)
+    if resolved is None:
+        raise AudioDownloadError("Unsafe audio download filename")
+    return Path(resolved)
 
 #######################################################################################################################
 # Function Definitions
@@ -547,14 +567,14 @@ def download_audio_file(
             original_filename = original_filename.strip().strip("\"' ")
 
         base_name = sanitize_filename(Path(original_filename).stem)
-        extension = Path(original_filename).suffix or ".mp3" # Default to .mp3 if no extension
+        extension = _normalize_audio_extension(Path(original_filename).suffix)
         base_name = base_name[:50] if base_name else "audio" # Ensure base_name is not empty and not too long
         unique_id = uuid.uuid4().hex[:UUID_LENGTH]
         file_name = f"{base_name}_{unique_id}{extension}"
 
         save_dir = Path(target_temp_dir) # Use the provided temp_dir
         save_dir.mkdir(parents=True, exist_ok=True) # Ensure it exists
-        save_path = save_dir / file_name
+        save_path = _resolve_audio_download_path(save_dir, file_name)
 
         logging.info(f"Downloading {safe_url} to: {save_path}")
 
@@ -573,10 +593,10 @@ def download_audio_file(
                     cd_name = content_disposition_hdr.split('filename=')[1].strip('"\' ')
                     if cd_name:
                         _base = sanitize_filename(Path(cd_name).stem)
-                        _ext = Path(cd_name).suffix or extension
+                        _ext = _normalize_audio_extension(Path(cd_name).suffix, default=extension)
                         _base = _base[:50] if _base else _base
                         _fname = f"{_base}_{unique_id}{_ext}"
-                        nonlocal_save = save_dir / _fname
+                        nonlocal_save = _resolve_audio_download_path(save_dir, _fname)
                         # Close/open new path confident after we finish
                         nonlocal save_path
                         save_path = nonlocal_save
@@ -592,6 +612,7 @@ def download_audio_file(
             except ValueError:
                 pass
             total = 0
+            # lgtm[py/path-injection] save_path is resolved by _resolve_audio_download_path under save_dir.
             with open(save_path, 'wb') as f:
                 for chunk in resp.iter_content(chunk_size=65536):
                     if not chunk:
@@ -601,6 +622,7 @@ def download_audio_file(
                         with contextlib.suppress(_AUDIO_FILES_NONCRITICAL_EXCEPTIONS):
                             f.close()
                         with contextlib.suppress(_AUDIO_FILES_NONCRITICAL_EXCEPTIONS):
+                            # lgtm[py/path-injection] save_path is resolved by _resolve_audio_download_path under save_dir.
                             Path(save_path).unlink(missing_ok=True)
                         raise AudioFileSizeError(
                             f"Downloaded content for {safe_url} exceeded the {MAX_FILE_SIZE / (1024*1024):.0f}MB limit."

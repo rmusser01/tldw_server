@@ -116,6 +116,17 @@ def env_paths(name: str) -> list[Path] | None:
     return [Path(p) for p in parts] if parts else None
 
 
+def _port_probe_host(host: str) -> str:
+    """Use loopback for availability probes when a runtime host is wildcard."""
+    clean_host = strip_host_brackets(host)
+    # Wildcard probes are converted to loopback before any socket bind.
+    if clean_host in {"", "0.0.0.0"}:  # nosec B104
+        return "127.0.0.1"
+    if clean_host == "::":
+        return "::1"
+    return clean_host
+
+
 def is_port_free(host: str, port: int) -> bool:
     """Check if a port is available for binding.
 
@@ -126,12 +137,13 @@ def is_port_free(host: str, port: int) -> bool:
     Returns:
         True if the port is free, False otherwise
     """
-    clean_host = strip_host_brackets(host)
+    clean_host = _port_probe_host(host)
     family = socket.AF_INET6 if ":" in str(clean_host) else socket.AF_INET
     with socket.socket(family, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            s.bind((clean_host, port))
+            # Wildcard runtime hosts are normalized to loopback by _port_probe_host.
+            s.bind((clean_host, port))  # nosec B104
             return True
         except OSError:
             return False

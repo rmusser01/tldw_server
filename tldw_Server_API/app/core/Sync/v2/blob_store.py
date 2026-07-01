@@ -11,6 +11,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
+
 STREAM_CHUNK_SIZE = 64 * 1024
 
 
@@ -157,12 +159,14 @@ class LocalSyncBlobStore:
 
         if not storage_key or Path(storage_key).is_absolute():
             raise SyncBlobStoreError("storage_key must be relative")
-        target = (self.root / storage_key).resolve()
-        try:
-            target.relative_to(self.root)
-        except ValueError as exc:
-            raise SyncBlobStoreError("storage_key escapes blob store root") from exc
-        return target
+        target = safe_join(
+            str(self.root),
+            storage_key,
+            error_factory=lambda _exc: SyncBlobStoreError("storage_key escapes blob store root"),
+        )
+        if target is None:
+            raise SyncBlobStoreError("storage_key escapes blob store root")
+        return Path(target)
 
 
 def _sha256(payload: bytes) -> str:

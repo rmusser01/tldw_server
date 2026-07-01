@@ -150,7 +150,7 @@ describe('useConfig networking', () => {
     });
   });
 
-  it('persists single-user api keys to canonical and legacy browser storage', async () => {
+  it('keeps manually entered single-user api keys in runtime memory only', async () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8000';
     const { ConfigProvider, useConfig } = await import('@web/hooks/useConfig');
 
@@ -163,12 +163,10 @@ describe('useConfig networking', () => {
     });
 
     await waitFor(() => {
-      expect(JSON.parse(localStorage.getItem('tldwConfig') ?? '{}')).toMatchObject({
-        authMode: 'single-user',
-        apiKey: 'saved-api-key',
-      });
+      expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('saved-api-key');
     });
-    expect(localStorage.getItem('apiKey')).toBe('saved-api-key');
+    expect(localStorage.getItem('apiKey')).toBeNull();
+    expect(localStorage.getItem('tldwConfig')).not.toContain('saved-api-key');
   });
 
   it('refreshes live config after settings writes canonical tldw config', async () => {
@@ -194,8 +192,10 @@ describe('useConfig networking', () => {
     await waitFor(() => {
       expect(result.current.config.xApiKey).toBe('event-api-key');
       expect(result.current.config.apiBaseHost).toBe('http://127.0.0.1:8222');
-      expect(localStorage.getItem('apiKey')).toBe('event-api-key');
+      expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('event-api-key');
     });
+    expect(localStorage.getItem('apiKey')).toBeNull();
+    expect(localStorage.getItem('tldwConfig')).not.toContain('event-api-key');
   });
 
   it('keeps environment api keys ahead of stale browser config', async () => {

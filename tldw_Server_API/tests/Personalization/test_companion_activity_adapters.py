@@ -1,4 +1,5 @@
 from pathlib import Path
+import hmac
 import sqlite3
 from types import SimpleNamespace
 from typing import Any
@@ -47,6 +48,18 @@ def _capture_companion_activity_logs() -> tuple[list[str], int]:
         level="DEBUG",
     )
     return messages, sink_id
+
+
+def test_companion_log_ref_uses_namespaced_hmac() -> None:
+    value = "user@example.com"
+    expected = hmac.digest(
+        companion_activity_module._COMPANION_ACTIVITY_LOG_REF_KEY,
+        value.encode("utf-8"),
+        "sha256",
+    ).hex()[:12]
+
+    assert companion_activity_module._log_ref(value) == expected
+    assert value not in companion_activity_module._log_ref(value)
 
 
 @pytest.fixture()
@@ -803,7 +816,7 @@ def test_persona_summary_and_tool_adapters_capture_compact_metadata(companion_db
             "output": {
                 "saved": True,
                 "url": "https://example.com/article",
-                "secret": "do-not-store-this-raw-output",
+                "secret": "do-not-store-this-raw-output",  # nosec B105
             },
         },
     )

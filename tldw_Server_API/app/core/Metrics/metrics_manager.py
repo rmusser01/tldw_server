@@ -6,6 +6,7 @@ supporting both OpenTelemetry and fallback implementations.
 """
 
 import hashlib
+import hmac
 import os
 import re
 import statistics
@@ -59,6 +60,7 @@ class MetricsRegistry:
     _PROM_METRIC_NAME_RE = re.compile(r"[^a-zA-Z0-9_:]")
     _PROM_LABEL_KEY_RE = re.compile(r"[^a-zA-Z0-9_]")
     _SENSITIVE_LABEL_RENAMES = {"user_id": "user_hash"}
+    _SENSITIVE_LABEL_HASH_KEY = b"tldw-metrics-sensitive-label-v1"
 
     def __init__(self):
         """Initialize the metrics registry."""
@@ -160,7 +162,11 @@ class MetricsRegistry:
         value_str = str(value)
         if not value_str:
             return "unknown"
-        digest = hashlib.sha256(value_str.encode("utf-8")).hexdigest()[:16]
+        digest = hmac.digest(
+            MetricsRegistry._SENSITIVE_LABEL_HASH_KEY,
+            value_str.encode("utf-8"),
+            "sha256",
+        ).hex()[:16]
         return f"u_{digest}"
 
     @classmethod
