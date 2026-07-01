@@ -32,7 +32,7 @@ from tldw_Server_API.app.api.v1.schemas.explainer import (
     ExplainerSessionResponse,
     ExplainerSessionSummaryResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ContentType
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
