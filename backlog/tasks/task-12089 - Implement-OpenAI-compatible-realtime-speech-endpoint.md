@@ -4,50 +4,51 @@ title: Implement OpenAI-compatible realtime speech endpoint
 status: In Progress
 assignee: []
 created_date: ''
-updated_date: '2026-07-01 21:55'
+updated_date: 2026-07-01 21:55
 labels:
-  - audio
-  - realtime
-  - implementation
+- audio
+- realtime
+- implementation
 dependencies: []
 references:
-  - TASK-12088
-  - 'https://github.com/huggingface/speech-to-speech'
-  - 'https://developers.openai.com/api/docs/guides/realtime'
-  - >-
-    https://developers.openai.com/api/docs/guides/realtime-conversations#handling-audio-with-websockets
+- TASK-12088
+- https://github.com/huggingface/speech-to-speech
+- https://developers.openai.com/api/docs/guides/realtime
+- https://developers.openai.com/api/docs/guides/realtime-conversations#handling-audio-with-websockets
 documentation:
-  - Docs/superpowers/specs/2026-07-01-openai-realtime-speech-endpoint-design.md
-  - >-
-    Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
+- Docs/superpowers/specs/2026-07-01-openai-realtime-speech-endpoint-design.md
+- Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
 modified_files:
-  - backlog/tasks/task-12089 - Implement-OpenAI-compatible-realtime-speech-endpoint.md
-  - Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
-  - tldw_Server_API/app/core/Audio/Realtime/__init__.py
-  - tldw_Server_API/app/core/Audio/Realtime/constants.py
-  - tldw_Server_API/app/core/Audio/Realtime/models.py
-  - tldw_Server_API/app/core/Audio/Realtime/protocol.py
-  - tldw_Server_API/app/core/Audio/Realtime/capabilities.py
-  - tldw_Server_API/app/core/Audio/Realtime/pipeline.py
-  - tldw_Server_API/app/core/Audio/Realtime/session.py
-  - tldw_Server_API/app/core/Audio/Realtime/persistence.py
-  - tldw_Server_API/app/core/Audio/Realtime/auth.py
-  - tldw_Server_API/app/core/Audio/Realtime/handler.py
-  - tldw_Server_API/app/core/Audio/streaming_service.py
-  - tldw_Server_API/app/api/v1/endpoints/audio/audio_realtime.py
-  - tldw_Server_API/app/api/v1/endpoints/realtime_compat.py
-  - tldw_Server_API/app/api/v1/router_groups/content.py
-  - tldw_Server_API/app/api/v1/router_groups/minimal.py
-  - tldw_Server_API/Config_Files/README.md
-  - tldw_Server_API/Config_Files/privilege_catalog.yaml
-  - tldw_Server_API/Config_Files/resource_governor_policies.yaml
-  - tldw_Server_API/tests/Audio/test_realtime_protocol_adapter.py
-  - tldw_Server_API/tests/Audio/test_realtime_capabilities.py
-  - tldw_Server_API/tests/Audio/test_realtime_session.py
-  - tldw_Server_API/tests/Audio/test_realtime_persistence.py
-  - tldw_Server_API/tests/Audio/test_realtime_auth.py
-  - tldw_Server_API/tests/Audio/test_realtime_websocket.py
-  - tldw_Server_API/tests/Resource_Governance/test_realtime_route_policy.py
+- backlog/tasks/task-12089 - Implement-OpenAI-compatible-realtime-speech-endpoint.md
+- Docs/superpowers/plans/2026-07-01-openai-realtime-speech-endpoint-implementation-plan.md
+- tldw_Server_API/app/core/Audio/Realtime/__init__.py
+- tldw_Server_API/app/core/Audio/Realtime/constants.py
+- tldw_Server_API/app/core/Audio/Realtime/models.py
+- tldw_Server_API/app/core/Audio/Realtime/protocol.py
+- tldw_Server_API/app/core/Audio/Realtime/capabilities.py
+- tldw_Server_API/app/core/Audio/Realtime/pipeline.py
+- tldw_Server_API/app/core/Audio/Realtime/session.py
+- tldw_Server_API/app/core/Audio/Realtime/persistence.py
+- tldw_Server_API/app/core/Audio/Realtime/auth.py
+- tldw_Server_API/app/core/Audio/Realtime/handler.py
+- tldw_Server_API/app/core/Audio/Realtime/default_pipeline.py
+- tldw_Server_API/app/core/Audio/streaming_service.py
+- tldw_Server_API/app/core/TTS/realtime_session.py
+- tldw_Server_API/app/api/v1/endpoints/audio/audio_realtime.py
+- tldw_Server_API/app/api/v1/endpoints/realtime_compat.py
+- tldw_Server_API/app/api/v1/router_groups/content.py
+- tldw_Server_API/app/api/v1/router_groups/minimal.py
+- tldw_Server_API/Config_Files/README.md
+- tldw_Server_API/Config_Files/privilege_catalog.yaml
+- tldw_Server_API/Config_Files/resource_governor_policies.yaml
+- tldw_Server_API/tests/Audio/test_realtime_protocol_adapter.py
+- tldw_Server_API/tests/Audio/test_realtime_capabilities.py
+- tldw_Server_API/tests/Audio/test_realtime_session.py
+- tldw_Server_API/tests/Audio/test_realtime_persistence.py
+- tldw_Server_API/tests/Audio/test_realtime_auth.py
+- tldw_Server_API/tests/Audio/test_realtime_websocket.py
+- tldw_Server_API/tests/Audio/test_realtime_default_pipeline.py
+- tldw_Server_API/tests/Resource_Governance/test_realtime_route_policy.py
 ---
 
 ## Description
@@ -94,3 +95,9 @@ Stage 3 quality-review fix complete. Realtime auth denial now closes pre-accept 
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Stage 4 complete. Added DefaultRealtimePipeline with injected STT/chat/TTS dependencies, lazy production factory construction, PCM16-to-WAV STT adapter wrapper, streaming/non-streaming chat delta normalization, realtime TTS session integration, buffered fallback coverage, typed pipeline events, and stage-specific RealtimePipelineError wrapping. Wired native and OpenAI-compatible realtime routes to the default pipeline factory through a handler helper that preserves no-arg fake factories. Updated BufferedRealtimeSession to propagate target_sample_rate from realtime config extras into OpenAISpeechRequest. Verification: red test first failed with ModuleNotFoundError for default_pipeline.py; focused default pipeline tests passed (7 passed, 3 warnings); Stage 3 realtime WebSocket regression passed (8 passed, 3 warnings); Bandit touched production scope reported results=[]; git diff --check passed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

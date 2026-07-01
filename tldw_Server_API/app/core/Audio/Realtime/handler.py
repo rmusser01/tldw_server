@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from collections.abc import Callable
 from typing import Any
 
@@ -22,7 +23,7 @@ from tldw_Server_API.app.core.Audio.Realtime.models import (
 from tldw_Server_API.app.core.Audio.Realtime.protocol import parse_client_event, to_openai_server_event
 from tldw_Server_API.app.core.Audio.Realtime.session import RealtimeSession
 
-PipelineFactory = Callable[[], Any]
+PipelineFactory = Callable[..., Any]
 PersistenceFactory = Callable[[], Any]
 
 
@@ -34,13 +35,15 @@ async def handle_realtime_websocket(
 ) -> None:
     """Run an authenticated realtime speech WebSocket session."""
 
-    authenticated, _user_id = await authenticate_realtime_websocket(websocket, route_kind)
+    authenticated, user_id = await authenticate_realtime_websocket(websocket, route_kind)
     if not authenticated:
         return
 
     try:
+        websocket_state = getattr(websocket, "state", None)
+        principal = getattr(websocket_state, "auth_principal", None)
         session = RealtimeSession(
-            pipeline=pipeline_factory(),
+            pipeline=_call_pipeline_factory(pipeline_factory, principal=principal, user_id=user_id),
             persistence_adapter=persistence_factory(),
         )
         limits = RealtimeLimits()
@@ -110,3 +113,25 @@ async def _send_session_start(websocket: WebSocket, session: RealtimeSession) ->
 
 async def _send_event(websocket: WebSocket, event: Any) -> None:
     await websocket.send_json(to_openai_server_event(event))
+
+
+def _call_pipeline_factory(
+    pipeline_factory: PipelineFactory,
+    *,
+    principal: Any | None,
+    user_id: int | None,
+) -> Any:
+    signature = inspect.signature(pipeline_factory)
+    if not signature.parameters:
+        return pipeline_factory()
+
+    kwargs: dict[str, Any] = {}
+    accepts_kwargs = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+    if accepts_kwargs or "principal" in signature.parameters:
+        kwargs["principal"] = principal
+    if accepts_kwargs or "user_id" in signature.parameters:
+        kwargs["user_id"] = user_id
+    return pipeline_factory(**kwargs)
