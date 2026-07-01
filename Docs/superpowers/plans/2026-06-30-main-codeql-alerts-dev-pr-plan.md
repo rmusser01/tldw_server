@@ -57,10 +57,10 @@
 **Goal**: Verify the touched scope and publish the PR against `dev`.
 **Success Criteria**: Focused tests pass, touched Python files pass Bandit, frontend checks for touched modules pass or documented skips are recorded, branch is pushed, and PR is opened against `dev`.
 **Tests**: `python -m pytest ...`, `python -m bandit -r <touched_python_paths> -f json -o /tmp/bandit_main_codeql_alerts.json`, and relevant Bun/Vitest commands.
-**Status**: In Progress
+**Status**: Complete
 
 - [x] Run focused pytest targets.
 - [x] Run focused frontend tests or type checks for touched TypeScript modules.
 - [x] Run Bandit on touched Python scope.
 - [x] Update `TASK-12076` with touched files, verification results, and final summary.
-- [ ] Commit, push, and open PR against `dev`.
+- [x] Commit, push, and open PR against `dev`: https://github.com/rmusser01/tldw_server/pull/2564

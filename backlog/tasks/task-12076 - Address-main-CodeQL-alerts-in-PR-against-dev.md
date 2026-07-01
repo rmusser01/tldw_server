@@ -1,10 +1,10 @@
 ---
 id: TASK-12076
 title: Address main CodeQL alerts in PR against dev
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-01 01:36'
+updated_date: '2026-07-01 01:38'
 labels:
   - security
   - codeql
@@ -58,19 +58,18 @@ Verification recorded:
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
+PR opened against dev: https://github.com/rmusser01/tldw_server/pull/2564
 
+Final result: branch codex/main-codeql-alerts-dev addresses the open CodeQL alert classes observed on refs/heads/main against origin/dev, including frontend durable secret storage, backend path containment, stack-trace exposure, SQL identifier validation, sensitive hashing, ReDoS, sensitive logging/storage, and bind-all-interface probes. Verification is recorded in implementation notes; actionable Bandit profile is clean with 0 results.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
