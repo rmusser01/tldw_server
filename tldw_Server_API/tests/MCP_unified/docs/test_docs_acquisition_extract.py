@@ -62,6 +62,7 @@ def test_trafilatura_is_used_when_available(monkeypatch: pytest.MonkeyPatch) -> 
         body=b"<h1>Guide</h1><p>Rich body</p>",
     )
 
+    assert parsed.title == "Guide"  # nosec B101
     assert parsed.extraction_method == "trafilatura"  # nosec B101
     assert parsed.text == "Rich body"  # nosec B101
     assert parsed.source_url == "https://example.com/docs"  # nosec B101

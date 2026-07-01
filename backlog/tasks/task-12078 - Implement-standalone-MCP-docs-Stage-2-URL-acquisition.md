@@ -20,7 +20,7 @@ Implement optional single-page URL acquisition for the standalone MCP docs corpu
 - [x] #2 Source policy implements locked_down, local_first, and online_capable decisions with structured domain/wildcard/prefix matching, safe URL normalization, approval_required without fetch, denied-domain precedence, unsupported scheme denial, and credential URL denial.
 - [x] #3 URL fetcher uses injectable resolver/transport, validates unsafe IP ranges, prevents DNS rebinding through validated-address transport binding, handles manual redirects with per-hop policy/DNS/IP checks, enforces redirect limits, content-type limits, transferred and decoded body limits, and robots fail-closed behavior.
 - [x] #4 Extraction uses lazy optional trafilatura/bs4 imports with stdlib HTML/text fallback and preserves source_url/canonical_uri without pretending URLs are local paths.
-- [ ] #5 Approved fake URL ingestion writes to SQLite/FTS5, applies keywords and collections, and is retrievable via docs.search and docs.context.
+- [x] #5 Approved fake URL ingestion writes to SQLite/FTS5, applies keywords and collections, and is retrievable via docs.search and docs.context.
 - [ ] #6 MCP provider and host shim expose docs.ingest_url only when enabled, validate url arguments, categorize it as ingestion, and report disabled/enabled/extractor status in docs.status.
 - [ ] #7 Import-boundary tests verify mcp_unified.docs has no top-level tldw_Server_API, requests, httpx, aiohttp, playwright, trafilatura, or bs4 imports; tests do not use live internet.
 - [ ] #8 Focused docs MCP tests and Bandit on touched Python paths pass.
@@ -54,6 +54,11 @@ Task 4 complete locally.
 - Green evidence: extraction/importer tests passed (`10 passed, 6 warnings`); full current docs MCP tests passed (`130 passed, 6 warnings`); Black check reported 5 touched files unchanged.
 - Bandit evidence: `/tmp/bandit_mcp_docs_extract.json` reported `errors: []` and `results: []` for `mcp_unified/docs/acquisition`, `mcp_unified/docs/importers`, and the new extraction test file.
 - Review gates: local spec review verified lazy `importlib` optional extractor checks, no top-level trafilatura/bs4 imports, stdlib HTML/text fallback, URL `source_url`/`canonical_uri` preservation, optional `source_path`, and local importer compatibility.
+Task 5 complete locally.
+- Red evidence: service test first failed because disabled web acquisition still fetched and created a document; rich-title regression preserved the URL page heading when trafilatura supplies body text.
+- Green evidence: focused service tests passed (`5 passed, 6 warnings`); full docs MCP tests passed (`135 passed, 6 warnings`); Black check reported 5 touched files unchanged; `git diff --check` was clean.
+- Bandit evidence: `/tmp/bandit_mcp_docs_service.json` reported `errors: []` and `results: []` for `mcp_unified/docs/acquisition`, `mcp_unified/docs/importers`, and the Task 5 service/extraction tests.
+- Review gates: verified disabled calls return `capability_disabled` before policy/resolver/transport work, approval-required and robots fail-closed paths do not fetch, approved fake URL ingestion writes SQLite/FTS5 content with keywords and collections, docs.search/docs.context retrieve it, unchanged detection works, and rich extraction preserves static title/sections metadata.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

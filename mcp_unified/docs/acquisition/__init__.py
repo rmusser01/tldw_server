@@ -24,8 +24,10 @@ from .policy import (
     safe_argument_hash,
 )
 from .resolver import StdlibResolver, is_unsafe_egress_ip
+from .service import DocsAcquisitionService
 
 __all__ = [
+    "DocsAcquisitionService",
     "DomainRule",
     "FetchResponse",
     "FetchResult",

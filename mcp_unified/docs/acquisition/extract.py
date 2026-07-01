@@ -34,13 +34,14 @@ def extract_fetched_document(*, url: str, content_type: str, body: bytes) -> Par
             extraction_method="text",
         )
 
+    static_html = _parse_static_html(url=url, text=text) if media_type in _HTML_CONTENT_TYPES else None
     trafilatura_text = _extract_with_trafilatura(text)
     if trafilatura_text:
         return ParsedDocument(
-            title=_title_from_url(url),
+            title=_metadata_title(static_html, url),
             document_type="html",
             text=trafilatura_text,
-            sections=[],
+            sections=static_html.sections if static_html is not None else [],
             canonical_uri=url,
             source_url=url,
             extraction_method="trafilatura",
@@ -49,10 +50,10 @@ def extract_fetched_document(*, url: str, content_type: str, body: bytes) -> Par
     soup_text = _extract_with_beautifulsoup(text)
     if soup_text:
         return ParsedDocument(
-            title=_title_from_url(url),
+            title=_metadata_title(static_html, url),
             document_type="html",
             text=soup_text,
-            sections=[],
+            sections=static_html.sections if static_html is not None else [],
             canonical_uri=url,
             source_url=url,
             extraction_method="beautifulsoup",
@@ -69,6 +70,10 @@ def extract_fetched_document(*, url: str, content_type: str, body: bytes) -> Par
             source_url=url,
             extraction_method="text",
         )
+    return static_html or _parse_static_html(url=url, text=text)
+
+
+def _parse_static_html(*, url: str, text: str) -> ParsedDocument:
     return parse_html_document(
         text=text,
         title_hint=_title_from_url(url),
@@ -77,6 +82,10 @@ def extract_fetched_document(*, url: str, content_type: str, body: bytes) -> Par
         extraction_method="static_html",
         warnings=_fallback_warnings(),
     )
+
+
+def _metadata_title(static_html: ParsedDocument | None, url: str) -> str:
+    return static_html.title if static_html is not None else _title_from_url(url)
 
 
 def _can_import(name: str) -> bool:
