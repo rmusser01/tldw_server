@@ -29,10 +29,7 @@ class _DynamicToolModule(BaseModule):
         return {"ok": True}
 
     async def get_tools(self) -> list[dict[str, Any]]:
-        return [
-            {"name": name, "description": "", "inputSchema": {"type": "object"}}
-            for name in self.tool_names
-        ]
+        return [{"name": name, "description": "", "inputSchema": {"type": "object"}} for name in self.tool_names]
 
     async def execute_tool(
         self,

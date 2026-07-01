@@ -11,9 +11,7 @@ from mcp_unified.docs.standalone import (
 
 
 def test_standalone_mount_defaults_to_docs_with_local_sqlite(tmp_path: Path) -> None:
-    mount = create_standalone_docs_mount(
-        {"db_path": str(tmp_path / "docs.db"), "trusted_roots": [str(tmp_path)]}
-    )
+    mount = create_standalone_docs_mount({"db_path": str(tmp_path / "docs.db"), "trusted_roots": [str(tmp_path)]})
 
     names = {tool["name"] for tool in mount.tool_definitions()}
     status = mount.execute_tool("docs.status", {}, scope=AccessScope())
@@ -30,9 +28,7 @@ def test_standalone_mount_defaults_to_docs_with_local_sqlite(tmp_path: Path) -> 
 def test_standalone_mount_can_import_search_and_context(tmp_path: Path) -> None:
     guide = tmp_path / "guide.md"
     guide.write_text("# Guide\n\nSQLite FTS5 context for local agents.\n", encoding="utf-8")
-    mount = create_standalone_docs_mount(
-        {"db_path": str(tmp_path / "docs.db"), "trusted_roots": [str(tmp_path)]}
-    )
+    mount = create_standalone_docs_mount({"db_path": str(tmp_path / "docs.db"), "trusted_roots": [str(tmp_path)]})
     scope = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
 
     imported = mount.execute_tool("docs.import_path", {"path": str(guide)}, scope=scope)
