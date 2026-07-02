@@ -689,6 +689,24 @@ class VisualIdentityRepository:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    def mark_draft_assets_deleted(self, *, draft_id: int, owner_user_id: int) -> int:
+        self._ensure_schema_initialized()
+        if self.get_draft(draft_id, owner_user_id=owner_user_id) is None:
+            raise ValueError("visual_identity_draft_not_found")
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE visual_identity_assets
+                SET deleted = 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE draft_id = ?
+                  AND owner_user_id = ?
+                  AND deleted = 0
+                """,
+                (draft_id, owner_user_id),
+            )
+            return int(cursor.rowcount or 0)
+
     def mark_asset_deleted(self, asset_id: int, *, owner_user_id: int) -> dict[str, Any]:
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:

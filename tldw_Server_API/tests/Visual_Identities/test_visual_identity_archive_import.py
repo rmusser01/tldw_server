@@ -117,7 +117,8 @@ def test_duplicate_expression_keys_import_first_by_normalized_path_and_report_du
     [
         ({"nested.zip": b"PK\x03\x04nested"}, "nested_archive"),
         ({"link.png": b""}, "symlink_entry"),
-        ({"a/happy.png": b"first", r"a\happy.png": b"second"}, "duplicate_archive_path"),
+        ({r"sprites\happy.png": b"data"}, "unsafe_archive_path"),
+        ({"a/happy.png": b"first", "a/./happy.png": b"second"}, "duplicate_archive_path"),
     ],
 )
 def test_archive_import_rejects_unsafe_zip_entries(
@@ -144,6 +145,83 @@ def test_archive_import_rejects_unsafe_zip_entries(
     assert result["status"] == "failed"
     assert repo.list_draft_assets(draft["id"], owner_user_id=1) == []
     assert expected_code in _error_codes(json.loads(result["validation_summary_json"]))
+
+
+@pytest.mark.parametrize("member_name", ["C:happy.png", "sprites/C:happy.png"])
+def test_archive_import_rejects_windows_drive_letter_segments(
+    repo: VisualIdentityRepository,
+    tmp_path: Path,
+    member_name: str,
+) -> None:
+    draft = repo.create_draft(owner_user_id=1, title="Drive Letter", source_kind="zip")
+    archive_path = _zip_with_entries(tmp_path / "drive-letter.zip", {member_name: _png_bytes()})
+
+    result = import_visual_identity_expression_zip(
+        repo,
+        owner_user_id=1,
+        draft_id=draft["id"],
+        archive_path=archive_path,
+        storage_root=tmp_path / "store",
+    )
+
+    assert result["status"] == "failed"
+    assert repo.list_draft_assets(draft["id"], owner_user_id=1) == []
+    assert "unsafe_archive_path" in _error_codes(json.loads(result["validation_summary_json"]))
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_code"),
+    [
+        ("encrypted", "encrypted_entry"),
+        ("symlink", "symlink_entry"),
+    ],
+)
+def test_archive_import_rejects_unsafe_directory_entries(
+    repo: VisualIdentityRepository,
+    tmp_path: Path,
+    kind: str,
+    expected_code: str,
+) -> None:
+    draft = repo.create_draft(owner_user_id=1, title="Unsafe Directory", source_kind="zip")
+    archive_path = _write_zip_directory(tmp_path / f"{kind}-directory.zip", "sprites/", kind=kind)
+
+    result = import_visual_identity_expression_zip(
+        repo,
+        owner_user_id=1,
+        draft_id=draft["id"],
+        archive_path=archive_path,
+        storage_root=tmp_path / "store",
+    )
+
+    assert result["status"] == "failed"
+    assert expected_code in _error_codes(json.loads(result["validation_summary_json"]))
+
+
+def test_archive_import_allows_plain_directory_entries_without_errors(
+    repo: VisualIdentityRepository,
+    tmp_path: Path,
+) -> None:
+    draft = repo.create_draft(owner_user_id=1, title="Plain Directory", source_kind="zip")
+    archive_path = tmp_path / "plain-directory.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        directory = zipfile.ZipInfo("sprites/")
+        directory.create_system = 3
+        directory.external_attr = (stat.S_IFDIR | 0o755) << 16
+        archive.writestr(directory, b"")
+        archive.writestr("sprites/happy.png", _png_bytes())
+
+    result = import_visual_identity_expression_zip(
+        repo,
+        owner_user_id=1,
+        draft_id=draft["id"],
+        archive_path=archive_path,
+        storage_root=tmp_path / "store",
+    )
+
+    summary = json.loads(result["validation_summary_json"])
+    assert result["status"] == "ready_for_review"
+    assert summary["directories"] == ["sprites"]
+    assert summary["errors"] == []
 
 
 def test_archive_import_rejects_encrypted_entry(
@@ -253,6 +331,91 @@ def test_archive_import_marks_ready_for_review_and_creates_asset_rows_for_valid_
     assert "unsupported_archive_entry" in _error_codes(summary)
 
 
+def test_archive_import_failed_reimport_clears_previous_visible_assets(
+    repo: VisualIdentityRepository,
+    tmp_path: Path,
+) -> None:
+    draft = repo.create_draft(owner_user_id=1, title="Reimport", source_kind="zip")
+    first_archive = _zip_with_entries(tmp_path / "valid-reimport.zip", {"happy.png": _png_bytes()})
+
+    first_result = import_visual_identity_expression_zip(
+        repo,
+        owner_user_id=1,
+        draft_id=draft["id"],
+        archive_path=first_archive,
+        storage_root=tmp_path / "store",
+    )
+
+    assert first_result["status"] == "ready_for_review"
+    first_assets = repo.list_draft_assets(draft["id"], owner_user_id=1)
+    assert len(first_assets) == 1
+
+    failed_archive = _zip_with_entries(tmp_path / "failed-reimport.zip", {"../sad.png": _png_bytes("blue")})
+    failed_result = import_visual_identity_expression_zip(
+        repo,
+        owner_user_id=1,
+        draft_id=draft["id"],
+        archive_path=failed_archive,
+        storage_root=tmp_path / "store",
+    )
+
+    assert failed_result["status"] == "failed"
+    assert json.loads(failed_result["slot_map_json"]) == {}
+    assert repo.list_draft_assets(draft["id"], owner_user_id=1) == []
+    assert repo.get_asset(first_assets[0]["id"], owner_user_id=1, include_deleted=True)["deleted"] == 1
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "expected_code"),
+    [
+        ("missing", "zip_archive_not_found"),
+        ("oversized", "archive_size_exceeded"),
+    ],
+)
+def test_archive_import_pre_open_failure_clears_previous_visible_assets(
+    repo: VisualIdentityRepository,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+    expected_code: str,
+) -> None:
+    draft = repo.create_draft(owner_user_id=1, title="Pre-open Reimport", source_kind="zip")
+    first_archive = _zip_with_entries(tmp_path / "valid-before-pre-open-failure.zip", {"happy.png": _png_bytes()})
+    first_result = import_visual_identity_expression_zip(
+        repo,
+        owner_user_id=1,
+        draft_id=draft["id"],
+        archive_path=first_archive,
+        storage_root=tmp_path / "store",
+    )
+    assert first_result["status"] == "ready_for_review"
+    first_assets = repo.list_draft_assets(draft["id"], owner_user_id=1)
+    assert len(first_assets) == 1
+
+    if failure_kind == "missing":
+        failed_archive = tmp_path / "does-not-exist.zip"
+    else:
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.Visual_Identities.archive_import.MAX_EXPRESSION_ZIP_BYTES",
+            1,
+        )
+        failed_archive = _zip_with_entries(tmp_path / "oversized.zip", {"sad.png": _png_bytes("blue")})
+
+    failed_result = import_visual_identity_expression_zip(
+        repo,
+        owner_user_id=1,
+        draft_id=draft["id"],
+        archive_path=failed_archive,
+        storage_root=tmp_path / "store",
+    )
+
+    assert failed_result["status"] == "failed"
+    assert json.loads(failed_result["slot_map_json"]) == {}
+    assert expected_code in _error_codes(json.loads(failed_result["validation_summary_json"]))
+    assert repo.list_draft_assets(draft["id"], owner_user_id=1) == []
+    assert repo.get_asset(first_assets[0]["id"], owner_user_id=1, include_deleted=True)["deleted"] == 1
+
+
 def _png_bytes(color: str = "red") -> bytes:
     output = BytesIO()
     Image.new("RGBA", (8, 8), color).save(output, format="PNG")
@@ -272,6 +435,21 @@ def _write_zip_with_symlink(path: Path, name: str) -> Path:
     info.external_attr = (stat.S_IFLNK | 0o777) << 16
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(info, "target.png")
+    return path
+
+
+def _write_zip_directory(path: Path, name: str, *, kind: str) -> Path:
+    info = zipfile.ZipInfo(name if name.endswith("/") else f"{name}/")
+    if kind == "symlink":
+        info.create_system = 3
+        info.external_attr = (stat.S_IFLNK | 0o777) << 16
+    else:
+        info.create_system = 3
+        info.external_attr = (stat.S_IFDIR | 0o755) << 16
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(info, b"")
+    if kind == "encrypted":
+        _mark_first_zip_entry_encrypted(path)
     return path
 
 

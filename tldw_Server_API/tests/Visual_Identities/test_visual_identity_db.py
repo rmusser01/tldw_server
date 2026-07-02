@@ -339,6 +339,33 @@ def test_update_draft_validation_summary_rejects_missing_draft(
         )
 
 
+def test_mark_draft_assets_deleted_is_owner_scoped(chacha_db: CharactersRAGDB) -> None:
+    repo = VisualIdentityRepository.initialized(chacha_db)
+    draft = repo.create_draft(owner_user_id=1, title="Imported Pack", source_kind="zip")
+    asset = repo.create_asset(
+        owner_user_id=1,
+        draft_id=draft["id"],
+        expression_key="neutral",
+        source_filename="neutral.png",
+        storage_relpath="visual_identities/neutral.png",
+        content_type="image/png",
+        bytes=123,
+        sha256="abc123",
+        width=64,
+        height=64,
+    )
+
+    with pytest.raises(ValueError, match="visual_identity_draft_not_found"):
+        repo.mark_draft_assets_deleted(draft_id=draft["id"], owner_user_id=2)
+
+    assert [row["id"] for row in repo.list_draft_assets(draft["id"], owner_user_id=1)] == [
+        asset["id"]
+    ]
+    assert repo.mark_draft_assets_deleted(draft_id=draft["id"], owner_user_id=1) == 1
+    assert repo.list_draft_assets(draft["id"], owner_user_id=1) == []
+    assert repo.get_asset(asset["id"], owner_user_id=1, include_deleted=True)["deleted"] == 1
+
+
 def test_version_creation_and_set_active_version(chacha_db: CharactersRAGDB) -> None:
     repo = VisualIdentityRepository.initialized(chacha_db)
     pack = repo.create_pack(owner_user_id=1, title="Versioned Expressions")

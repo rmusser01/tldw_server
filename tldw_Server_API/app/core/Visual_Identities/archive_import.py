@@ -77,6 +77,7 @@ def import_visual_identity_expression_zip(
     selected: list[_ImportCandidate] = []
 
     try:
+        repo.mark_draft_assets_deleted(draft_id=draft_id, owner_user_id=owner_user_id)
         _validate_archive_size(source, summary)
         with zipfile.ZipFile(source) as archive:
             candidates = _collect_candidates(archive, summary)
@@ -150,12 +151,13 @@ def _collect_candidates(
             continue
         seen_paths.add(duplicate_key)
 
+        _validate_entry_metadata(info, normalized_path, summary)
         if info.is_dir():
-            summary["directories"].append(normalized_path)
+            if not _entry_has_errors(summary, info.filename):
+                summary["directories"].append(normalized_path)
             continue
 
         total_uncompressed += int(info.file_size)
-        _validate_entry_metadata(info, normalized_path, summary)
         expression_key = normalize_expression_filename(PurePosixPath(normalized_path).name)
         if expression_key is None:
             _record_error(summary, code="empty_expression_key", source_filename=info.filename)
@@ -189,6 +191,8 @@ def _validate_entry_metadata(
         _record_error(summary, code="encrypted_entry", source_filename=source_filename)
     if _is_symlink(info):
         _record_error(summary, code="symlink_entry", source_filename=source_filename)
+    if info.is_dir():
+        return
     if extension in _NESTED_ARCHIVE_EXTENSIONS:
         _record_error(summary, code="nested_archive", source_filename=source_filename)
     elif extension not in _SUPPORTED_ARCHIVE_IMAGE_EXTENSIONS:
@@ -340,14 +344,23 @@ def _finish_import(
 def _normalized_archive_path(raw_name: str) -> str | None:
     if not raw_name or "\x00" in raw_name:
         return None
-    normalized = raw_name.replace("\\", "/")
-    path = PurePosixPath(normalized)
+    if "\\" in raw_name:
+        return None
+    member_name = raw_name[:-1] if raw_name.endswith("/") else raw_name
+    if not member_name:
+        return None
+    raw_parts = member_name.split("/")
+    if any(part == "" for part in raw_parts):
+        return None
+    if any(_has_windows_drive_letter(part) for part in raw_parts):
+        return None
+    path = PurePosixPath(member_name)
     if path.is_absolute():
         return None
     parts = [part for part in path.parts if part not in ("", ".")]
     if not parts or any(part == ".." for part in parts):
         return None
-    if len(parts[0]) == 2 and parts[0][1] == ":":
+    if any(_has_windows_drive_letter(part) for part in parts):
         return None
     normalized_path = PurePosixPath(*parts).as_posix()
     if not PurePosixPath(normalized_path).name:
@@ -358,6 +371,10 @@ def _normalized_archive_path(raw_name: str) -> str | None:
 def _is_symlink(info: zipfile.ZipInfo) -> bool:
     mode = (info.external_attr >> 16) & 0xFFFF
     return stat.S_IFMT(mode) == stat.S_IFLNK
+
+
+def _has_windows_drive_letter(part: str) -> bool:
+    return len(part) >= 2 and part[0].isalpha() and part[1] == ":"
 
 
 def _decompression_ratio(info: zipfile.ZipInfo) -> float:
