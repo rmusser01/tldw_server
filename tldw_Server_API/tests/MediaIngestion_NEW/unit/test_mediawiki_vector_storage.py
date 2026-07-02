@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
@@ -13,8 +14,10 @@ def test_process_single_item_stores_vectors(monkeypatch):
 
     class FakeManager:
         last_call: Dict[str, Any] | None = None
+        last_user_id: str | None = None
 
         def __init__(self, user_id: str, user_embedding_config: Dict[str, Any]):
+            FakeManager.last_user_id = user_id
             self.user_id = user_id
             self.user_embedding_config = user_embedding_config
 
@@ -55,20 +58,25 @@ def test_process_single_item_stores_vectors(monkeypatch):
         "namespace": 0,
     }
 
-    result = mediawiki.process_single_item(
-        content="Intro\n== Section ==\nMore text",
-        title="Test Page",
-        wiki_name="enwiki",
-        chunk_options={"max_size": 50},
-        item=item,
-        store_to_db=True,
-        store_to_vector_db=True,
-        api_name_vector_db="openai:text-embedding-3-small",
-        api_key_vector_db="test-key",
-        media_writer=DummyDB(),
-    )
+    kwargs = {
+        "content": "Intro\n== Section ==\nMore text",
+        "title": "Test Page",
+        "wiki_name": "enwiki",
+        "chunk_options": {"max_size": 50},
+        "item": item,
+        "store_to_db": True,
+        "store_to_vector_db": True,
+        "api_name_vector_db": "openai:text-embedding-3-small",
+        "api_key_vector_db": "test-key",
+        "media_writer": DummyDB(),
+    }
+    if "vector_user_id" in inspect.signature(mediawiki.process_single_item).parameters:
+        kwargs["vector_user_id"] = 42
+
+    result = mediawiki.process_single_item(**kwargs)
 
     assert result["media_id"] == 123
+    assert FakeManager.last_user_id == "42"
     assert FakeManager.last_call is not None
     assert FakeManager.last_call["collection_name"].startswith("mediawiki_")
     assert FakeManager.last_call["metadatas"][0]["media_id"] == str(result["media_id"])

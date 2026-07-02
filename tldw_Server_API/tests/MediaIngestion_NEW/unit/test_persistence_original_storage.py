@@ -21,6 +21,8 @@ from tldw_Server_API.app.services import storage_quota_service
 class _FakeStorage:
     def __init__(self) -> None:
         self.calls: List[Dict[str, Any]] = []
+        self.stored_paths: List[str] = []
+        self.deleted_paths: List[str] = []
 
     async def store(
         self,
@@ -47,7 +49,13 @@ class _FakeStorage:
                 "mime_type": mime_type,
             }
         )
-        return f"storage/{media_id}/{filename}"
+        storage_path = f"storage/{media_id}/{filename}"
+        self.stored_paths.append(storage_path)
+        return storage_path
+
+    async def delete(self, *, user_id: str, storage_path: str) -> None:
+        _ = user_id
+        self.deleted_paths.append(storage_path)
 
 
 class _FakeDB:
@@ -236,6 +244,80 @@ async def test_original_storage_uses_processing_source(monkeypatch, fake_db, fak
     stored_payloads = {call["data"] for call in storage.calls}
     assert stored_payloads == {b"file-one", b"file-two"}
     assert len(db.insert_calls) == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_original_storage_deletes_file_when_media_file_registration_fails(
+    monkeypatch,
+    fake_db,
+    fake_storage,
+):
+    storage = fake_storage
+    db = fake_db
+
+    async def fake_save_uploaded_files(_files, temp_dir, **_kwargs):
+        file_path = Path(temp_dir) / "stored.pdf"
+        file_path.write_bytes(b"file-one")
+        return [{"path": file_path, "original_filename": "original.pdf"}], []
+
+    async def fake_process_doc_item_fn(
+        *,
+        item_input_ref: str,
+        processing_source: str,
+        media_type: Any,
+        **_kwargs: Any,
+    ) -> Dict[str, Any]:
+        return {
+            "status": "Success",
+            "input_ref": item_input_ref,
+            "processing_source": str(processing_source),
+            "media_type": media_type,
+            "metadata": {},
+            "content": "content",
+            "analysis": None,
+            "summary": None,
+            "analysis_details": None,
+            "db_id": 1,
+            "db_message": "ok",
+        }
+
+    def failing_insert_media_file(**kwargs: Any) -> None:
+        db.insert_calls.append(kwargs)
+        raise RuntimeError("media file registration failed")
+
+    db.insert_media_file = failing_insert_media_file
+
+    monkeypatch.setattr(input_sourcing, "save_uploaded_files", fake_save_uploaded_files)
+    monkeypatch.setattr(ingestion_persistence, "process_document_like_item", fake_process_doc_item_fn)
+    monkeypatch.setattr(Storage, "get_storage_backend", lambda: storage)
+    monkeypatch.setattr(storage_quota_service, "StorageQuotaService", _FakeQuotaService)
+
+    form_data = SimpleNamespace(
+        media_type="pdf",
+        urls=[],
+        keep_original_file=True,
+        perform_chunking=False,
+        perform_analysis=False,
+        generate_embeddings=False,
+    )
+
+    response = await ingestion_persistence.add_media_orchestrate(
+        background_tasks=BackgroundTasks(),
+        form_data=form_data,
+        files=[object()],
+        db=db,
+        current_user=SimpleNamespace(id=1),
+        usage_log=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
+    )
+
+    body = json.loads(response.body)
+    result = body["results"][0]
+
+    assert storage.stored_paths == ["storage/1/original.pdf"]
+    assert storage.deleted_paths == storage.stored_paths
+    assert response.status_code == 200
+    assert result["original_file_stored"] is False
 
 
 @pytest.mark.unit

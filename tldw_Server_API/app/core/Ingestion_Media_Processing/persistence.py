@@ -3147,6 +3147,7 @@ async def add_media_orchestrate(
                             )
                             continue
 
+                        storage_path: str | None = None
                         try:
                             # Get file info
                             file_size = source_file.stat().st_size
@@ -3233,6 +3234,25 @@ async def add_media_orchestrate(
                             result["original_file_stored"] = True
 
                         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as store_err:
+                            if storage_path:
+                                try:
+                                    delete_original = getattr(storage, "delete", None)
+                                    if callable(delete_original):
+                                        await delete_original(
+                                            user_id=user_id_str,
+                                            storage_path=storage_path,
+                                        )
+                                    else:
+                                        logger.debug(
+                                            "Storage backend has no delete method; cannot clean up original file {}",
+                                            storage_path,
+                                        )
+                                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as cleanup_err:
+                                    logger.warning(
+                                        "Failed to clean up original file {} after MediaFiles registration failure: {}",
+                                        storage_path,
+                                        cleanup_err,
+                                    )
                             logger.error(f"Failed to store original file for media_id={media_id}: {store_err}")
                             # Non-fatal - don't fail the entire ingestion
                             result["original_file_stored"] = False

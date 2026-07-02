@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -92,7 +93,97 @@ def test_process_single_item_uses_media_repository_for_media_db_sessions(monkeyp
     ]
 
 
-def test_import_mediawiki_dump_reuses_single_managed_media_database(
+def test_import_mediawiki_dump_uses_injected_media_writer_without_managed_database(
+    monkeypatch,
+    tmp_path,
+):
+    class _FakeRepo:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def add_media_with_keywords(self, **kwargs):
+            self.calls.append(kwargs)
+            return 71, "wiki-uuid", "stored"
+
+    fake_repo = _FakeRepo()
+    managed_calls: list[dict[str, object]] = []
+    checkpoint_saves: list[int] = []
+    dump_path = tmp_path / "dump.xml"
+    dump_path.write_text("<mediawiki />")
+
+    @contextmanager
+    def _fake_managed_media_database(client_id, *, initialize=True, **kwargs):
+        managed_calls.append(
+            {
+                "client_id": client_id,
+                "initialize": initialize,
+                "kwargs": kwargs,
+            }
+        )
+        raise AssertionError("managed DB should not be opened when writer is injected")
+
+    items = [
+        {
+            "title": "Page One",
+            "content": "Body one",
+            "timestamp": datetime(2024, 1, 2, tzinfo=timezone.utc),
+            "namespace": 0,
+            "page_id": 123,
+            "revision_id": 456,
+        },
+        {
+            "title": "Page Two",
+            "content": "Body two",
+            "timestamp": datetime(2024, 1, 3, tzinfo=timezone.utc),
+            "namespace": 0,
+            "page_id": 124,
+            "revision_id": 457,
+        },
+    ]
+
+    monkeypatch.setattr(Media_Wiki, "sanitize_wiki_name", lambda name: name)
+    monkeypatch.setattr(Media_Wiki, "validate_file_path", lambda *args, **kwargs: dump_path)
+    monkeypatch.setattr(Media_Wiki, "count_pages", lambda *args, **kwargs: len(items))
+    monkeypatch.setattr(Media_Wiki, "parse_mediawiki_dump", lambda *args, **kwargs: iter(items))
+    monkeypatch.setattr(Media_Wiki, "optimized_chunking", lambda content, options: [{"text": content, "metadata": {}}])
+    monkeypatch.setattr(Media_Wiki, "load_checkpoint", lambda path: 0)
+    monkeypatch.setattr(Media_Wiki, "save_checkpoint", lambda path, page_id: checkpoint_saves.append(page_id))
+    monkeypatch.setattr(Media_Wiki, "get_safe_checkpoint_path", lambda wiki_name: tmp_path / f"{wiki_name}.json")
+    monkeypatch.setattr(Media_Wiki, "managed_media_database", _fake_managed_media_database, raising=False)
+    monkeypatch.setattr(
+        Media_Wiki,
+        "create_media_database",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("legacy raw factory should not be used")),
+        raising=False,
+    )
+    monkeypatch.setattr(Media_Wiki, "get_media_repository", lambda db: fake_repo, raising=False)
+
+    kwargs = {
+        "file_path": str(dump_path),
+        "wiki_name": "ExampleWiki",
+        "store_to_db": True,
+        "store_to_vector_db": False,
+        "allowed_dir": tmp_path,
+    }
+    parameters = inspect.signature(Media_Wiki.import_mediawiki_dump).parameters
+    if "media_writer" in parameters:
+        kwargs["media_writer"] = fake_repo
+    if "vector_user_id" in parameters:
+        kwargs["vector_user_id"] = 42
+
+    results = list(
+        Media_Wiki.import_mediawiki_dump(
+            **kwargs,
+        )
+    )
+
+    assert results[-1]["type"] == "summary"
+    assert managed_calls == []
+    assert len(fake_repo.calls) == 2
+    assert checkpoint_saves == [123, 124]
+
+
+def test_import_mediawiki_dump_uses_managed_media_database_fallback(
     monkeypatch,
     tmp_path,
 ):
@@ -190,6 +281,73 @@ def test_import_mediawiki_dump_reuses_single_managed_media_database(
     assert len(fake_repo.calls) == 2
     assert checkpoint_saves == [123, 124]
     assert media_db.closed is True
+
+
+def test_import_mediawiki_dump_scopes_checkpoint_name_by_user(
+    monkeypatch,
+    tmp_path,
+):
+    class _FakeRepo:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def add_media_with_keywords(self, **kwargs):
+            self.calls.append(kwargs)
+            return 71, "wiki-uuid", "stored"
+
+    fake_repo = _FakeRepo()
+    checkpoint_names: list[str] = []
+    dump_path = tmp_path / "dump.xml"
+    dump_path.write_text("<mediawiki />")
+    items = [
+        {
+            "title": "Page One",
+            "content": "Body one",
+            "timestamp": datetime(2024, 1, 2, tzinfo=timezone.utc),
+            "namespace": 0,
+            "page_id": 123,
+            "revision_id": 456,
+        }
+    ]
+
+    def _fake_checkpoint_path(wiki_name):
+        checkpoint_names.append(wiki_name)
+        return tmp_path / f"{wiki_name}.json"
+
+    @contextmanager
+    def _fake_managed_media_database(client_id, *, initialize=True, **kwargs):
+        yield object()
+
+    monkeypatch.setattr(Media_Wiki, "sanitize_wiki_name", lambda name: name)
+    monkeypatch.setattr(Media_Wiki, "validate_file_path", lambda *args, **kwargs: dump_path)
+    monkeypatch.setattr(Media_Wiki, "count_pages", lambda *args, **kwargs: len(items))
+    monkeypatch.setattr(Media_Wiki, "parse_mediawiki_dump", lambda *args, **kwargs: iter(items))
+    monkeypatch.setattr(Media_Wiki, "optimized_chunking", lambda content, options: [{"text": content, "metadata": {}}])
+    monkeypatch.setattr(Media_Wiki, "load_checkpoint", lambda path: 0)
+    monkeypatch.setattr(Media_Wiki, "save_checkpoint", lambda path, page_id: None)
+    monkeypatch.setattr(Media_Wiki, "get_safe_checkpoint_path", _fake_checkpoint_path)
+    monkeypatch.setattr(Media_Wiki, "managed_media_database", _fake_managed_media_database, raising=False)
+    monkeypatch.setattr(Media_Wiki, "get_media_repository", lambda db: fake_repo, raising=False)
+
+    kwargs = {
+        "file_path": str(dump_path),
+        "wiki_name": "ExampleWiki",
+        "store_to_db": True,
+        "store_to_vector_db": False,
+        "allowed_dir": tmp_path,
+    }
+    parameters = inspect.signature(Media_Wiki.import_mediawiki_dump).parameters
+    if "media_writer" in parameters:
+        kwargs["media_writer"] = fake_repo
+    if "checkpoint_scope" in parameters:
+        kwargs["checkpoint_scope"] = "user_42"
+
+    results = list(Media_Wiki.import_mediawiki_dump(**kwargs))
+
+    assert results[-1]["type"] == "summary"
+    assert checkpoint_names
+    assert "ExampleWiki" in checkpoint_names[0]
+    assert "user_42" in checkpoint_names[0]
 
 
 def test_import_mediawiki_dump_sanitizes_unexpected_import_error(monkeypatch, tmp_path):

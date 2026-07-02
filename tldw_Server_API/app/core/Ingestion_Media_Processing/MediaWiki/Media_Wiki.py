@@ -592,6 +592,11 @@ def _mediawiki_collection_name(wiki_name: str) -> str:
     return safe_wiki
 
 
+def _safe_checkpoint_component(value: str) -> str:
+    safe_value = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(value)).strip("_")
+    return safe_value or "scope"
+
+
 def _store_mediawiki_chunks_in_vector_db(
     *,
     chunks: list[dict[str, Any]],
@@ -602,6 +607,7 @@ def _store_mediawiki_chunks_in_vector_db(
     revision_id: Optional[int],
     api_name_vector_db: Optional[str],
     api_key_vector_db: Optional[str],
+    vector_user_id: str | int | None = None,
 ) -> tuple[bool, str]:
     if ChromaDBManager is None or create_embeddings_batch is None:
         return False, "Embeddings dependencies unavailable."
@@ -622,10 +628,14 @@ def _store_mediawiki_chunks_in_vector_db(
         "embedding_config": embedding_config,
     }
 
-    vector_user_id = settings.get("SINGLE_USER_FIXED_ID", 1)
+    resolved_vector_user_id = (
+        settings.get("SINGLE_USER_FIXED_ID", 1)
+        if vector_user_id is None
+        else vector_user_id
+    )
     try:
         manager = ChromaDBManager(
-            user_id=str(vector_user_id),
+            user_id=str(resolved_vector_user_id),
             user_embedding_config=user_embedding_config,
         )
     except MEDIAWIKI_EMBEDDING_EXCEPTIONS as exc:
@@ -702,6 +712,7 @@ def process_single_item(
         api_name_vector_db: Optional[str] = None,
         api_key_vector_db: Optional[str] = None,
         media_writer: Any | None = None,
+        vector_user_id: str | int | None = None,
 ) -> dict[str, Any]:
     try:
         logging.debug(
@@ -800,6 +811,7 @@ def process_single_item(
                 revision_id=item.get("revision_id"),
                 api_name_vector_db=api_name_vector_db,
                 api_key_vector_db=api_key_vector_db,
+                vector_user_id=vector_user_id,
             )
             if success:
                 processed_data["message"] += f" {message}"
@@ -943,6 +955,9 @@ def import_mediawiki_dump(
         api_name_vector_db: Optional[str] = None,
         api_key_vector_db: Optional[str] = None,
         allowed_dir: Optional[Path] = None,
+        vector_user_id: str | int | None = None,
+        media_writer: Any | None = None,
+        checkpoint_scope: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     try:
         # Sanitize wiki_name and validate file_path
@@ -956,10 +971,13 @@ def import_mediawiki_dump(
         cfg = get_mediawiki_import_config()
         final_chunk_options = chunk_options_override if chunk_options_override else cfg.get('chunking', {})
 
-        # Get safe checkpoint path
-        checkpoint_file = get_safe_checkpoint_path(safe_wiki_name)
         last_processed_id = 0
+        checkpoint_file: Path | None = None
         if store_to_db:  # Checkpoints only make sense if we are saving progress to DB
+            checkpoint_key = safe_wiki_name
+            if checkpoint_scope:
+                checkpoint_key = f"{safe_wiki_name}_{_safe_checkpoint_component(checkpoint_scope)}"
+            checkpoint_file = get_safe_checkpoint_path(checkpoint_key)
             last_processed_id = load_checkpoint(str(checkpoint_file))
 
         total_pages = count_pages(
@@ -975,8 +993,8 @@ def import_mediawiki_dump(
                "message": f"Found {total_pages} pages to process for '{wiki_name}'."}
 
         with contextlib.ExitStack() as stack:
-            shared_media_writer = None
-            if store_to_db:
+            shared_media_writer = media_writer
+            if store_to_db and shared_media_writer is None:
                 db_instance = stack.enter_context(
                     managed_media_database(client_id="mediawiki_import")
                 )
@@ -1013,10 +1031,11 @@ def import_mediawiki_dump(
                     api_name_vector_db=api_name_vector_db,
                     api_key_vector_db=api_key_vector_db,
                     media_writer=shared_media_writer,
+                    vector_user_id=vector_user_id,
                 )
 
                 if store_to_db and processed_item_details.get("status") == "Success" and processed_item_details.get(
-                        "media_id") is not None:
+                        "media_id") is not None and checkpoint_file is not None:
                     save_checkpoint(str(checkpoint_file), current_page_id)
 
                 processed_pages_count += 1
@@ -1027,7 +1046,7 @@ def import_mediawiki_dump(
                 # Yield detailed result for each page, including its processing status
                 yield {"type": "item_result", "data": processed_item_details, "progress_percent": current_progress_percent}
 
-        if store_to_db and checkpoint_file.exists():
+        if store_to_db and checkpoint_file is not None and checkpoint_file.exists():
             try:
                 # Validate checkpoint file path before deletion to ensure it's still safe
                 checkpoint_resolved = checkpoint_file.resolve()
