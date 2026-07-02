@@ -157,6 +157,39 @@ describe("resolveEffectiveAssistantState", () => {
     })
   })
 
+  it("lets a different tracked draft selection override stale tracked chat metadata", () => {
+    expect(
+      resolveEffectiveAssistantState({
+        tracked: {
+          assistantKind: "character",
+          characterId: "char-old",
+          displayName: "Old Character",
+          avatarUrl: "https://cdn.example.test/old.png",
+          systemPromptSnapshot: "Old prompt"
+        },
+        settings: null,
+        draftSelection: {
+          kind: "character",
+          id: "char-new",
+          name: "New Character",
+          avatar_url: "https://cdn.example.test/new.png",
+          system_prompt: "New prompt",
+          metadata: {
+            selectionMode: "tracked"
+          }
+        }
+      })
+    ).toEqual({
+      mode: "tracked_character",
+      kind: "character",
+      id: "char-new",
+      displayName: "New Character",
+      avatarUrl: "https://cdn.example.test/new.png",
+      systemPromptSnapshot: "New prompt",
+      source: "tracked"
+    })
+  })
+
   it("falls back to draft metadata when overlay presentation fields are sparse", () => {
     expect(
       resolveEffectiveAssistantState({

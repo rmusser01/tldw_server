@@ -167,7 +167,7 @@ describe("Header character mode sequencing", () => {
       )
       expect(assistantListener).toHaveBeenCalledWith(
         expect.objectContaining({
-          detail: { tab: "character", source: "chat-header" }
+          detail: { tab: "character", applyAs: "tracked", source: "chat-header" }
         })
       )
     } finally {

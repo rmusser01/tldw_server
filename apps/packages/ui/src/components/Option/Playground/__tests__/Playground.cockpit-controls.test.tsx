@@ -949,6 +949,7 @@ describe("Playground cockpit controls", () => {
       ).toEqual(
         expect.objectContaining({
           tab: "character",
+          applyAs: "tracked",
           source: "playground-cockpit",
           returnFocusSelector: "[data-cockpit-assistant-select-trigger]",
         }),
@@ -991,6 +992,7 @@ describe("Playground cockpit controls", () => {
       ).toEqual(
         expect.objectContaining({
           tab: "persona",
+          applyAs: "tracked",
           source: "playground-cockpit",
           returnFocusSelector: "[data-cockpit-assistant-select-trigger]",
         }),
@@ -1025,6 +1027,7 @@ describe("Playground cockpit controls", () => {
       ).toEqual(
         expect.objectContaining({
           tab: "character",
+          applyAs: "tracked",
           returnFocusSelector: "[data-cockpit-assistant-select-trigger]",
         }),
       );

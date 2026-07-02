@@ -87,10 +87,15 @@ export const openActorSettings = () => {
 };
 
 export const openAssistantSelector = (
-  options: { tab?: AssistantSelectTab; returnFocusSelector?: string } = {},
+  options: {
+    tab?: AssistantSelectTab;
+    applyAs?: AssistantSelectOpenDetail["applyAs"];
+    returnFocusSelector?: string;
+  } = {},
 ) => {
   dispatchOpenAssistantSelect({
     tab: options.tab,
+    ...(options.applyAs ? { applyAs: options.applyAs } : {}),
     source: "playground-cockpit",
     returnFocusSelector: options.returnFocusSelector,
   });

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -107,6 +108,19 @@ const tldwServerState = vi.hoisted(() => ({
 
 const characterSessionsPanelState = vi.hoisted(() => ({
   props: [] as Array<Record<string, unknown>>,
+}));
+
+const routerLocationState = vi.hoisted(() => ({
+  value: null as {
+    pathname?: string;
+    search?: string;
+    hash?: string;
+    key?: string;
+  } | null,
+}));
+
+const routerNavigateState = vi.hoisted(() => ({
+  navigate: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -312,16 +326,19 @@ vi.mock("react-router-dom", async () => {
     );
   return {
     ...actual,
-    useNavigate: () => vi.fn(),
-    useLocation: () => ({
-      pathname: window.location.pathname || "/chat",
-      search: window.location.search || "",
-      hash: window.location.hash || "",
-      state: null,
-      key: "test-location",
-    }),
-  };
-});
+    useNavigate: () => routerNavigateState.navigate,
+	    useLocation: () => ({
+	      pathname:
+	        routerLocationState.value?.pathname ??
+	        window.location.pathname ??
+	        "/chat",
+	      search: routerLocationState.value?.search ?? window.location.search ?? "",
+	      hash: routerLocationState.value?.hash ?? window.location.hash ?? "",
+	      state: null,
+	      key: routerLocationState.value?.key ?? "test-location",
+	    }),
+	  };
+	});
 
 describe("Playground cockpit shell", () => {
   beforeEach(() => {
@@ -356,8 +373,10 @@ describe("Playground cockpit shell", () => {
     sessionPersistenceState.value.sessionScopeReady = true;
     sessionPersistenceState.value.clearPersistedSession.mockClear();
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
-    cockpitChatRenderState.starterDeckSignals = [];
-    tldwServerState.fetchChatModels.mockResolvedValue([
+	    cockpitChatRenderState.starterDeckSignals = [];
+	    routerLocationState.value = null;
+    routerNavigateState.navigate.mockClear();
+	    tldwServerState.fetchChatModels.mockResolvedValue([
       {
         model: "openai:gpt-4.1-mini",
         provider: "openai",
@@ -424,6 +443,32 @@ describe("Playground cockpit shell", () => {
       activeCharacterId: "char-1",
       activeCharacterName: "Ariadne",
       activeServerChatId: "server-chat-1",
+    });
+  });
+
+  it("uses a tracked assistant selection as the active character when legacy character state is empty", async () => {
+    storageState.values.set("playgroundChatWorkflowMode", "character");
+    messageOptionState.value.selectedAssistant = {
+      kind: "character",
+      id: "char-route",
+      name: "Route Character",
+      metadata: { selectionMode: "tracked" },
+    };
+    messageOptionState.value.selectedCharacter = null;
+
+    render(<Playground />);
+
+    expect(
+      await screen.findByTestId("playground-active-chat-mode"),
+    ).toHaveTextContent("Route Character");
+    expect(
+      screen.queryByText("Choose a character to start character chat"),
+    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(characterSessionsPanelState.props.at(-1)).toMatchObject({
+        activeCharacterId: "char-route",
+        activeCharacterName: "Route Character",
+      });
     });
   });
 
@@ -546,7 +591,7 @@ describe("Playground cockpit shell", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("honors first-class character route intent in the chat shell", async () => {
+	  it("honors first-class character route intent in the chat shell", async () => {
     window.history.replaceState(
       {},
       "",
@@ -569,6 +614,232 @@ describe("Playground cockpit shell", () => {
         name: "Route Character",
       }),
     );
+	  });
+
+  it("does not replace an explicit character route with a stale selected character before hydration", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?mode=character&characterId=char-route",
+    );
+    messageOptionState.value.selectedCharacter = {
+      id: "previous-character",
+      name: "Previous Character",
+    };
+    messageOptionState.value.selectedAssistant = {
+      kind: "character",
+      id: "previous-character",
+      name: "Previous Character",
+      metadata: { selectionMode: "tracked" },
+    };
+
+    render(<Playground />);
+
+    await waitFor(() => {
+      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route");
+    });
+    expect(routerNavigateState.navigate).not.toHaveBeenCalledWith(
+      {
+        pathname: "/chat",
+        search: "?mode=character&characterId=previous-character",
+        hash: "",
+      },
+      { replace: true },
+    );
+  });
+
+  it("rehydrates the same explicit character route under a fresh location key before syncing stale selection", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?mode=character&characterId=char-route",
+    );
+    messageOptionState.value.setSelectedCharacter = vi.fn((next) => {
+      messageOptionState.value.selectedCharacter = next;
+      messageOptionState.value.selectedAssistant = next
+        ? {
+            kind: "character",
+            id: String(next.id),
+            name: next.name,
+            metadata: { selectionMode: "tracked" },
+          }
+        : null;
+    });
+
+    const { rerender } = render(<Playground />);
+
+    await waitFor(() => {
+      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route");
+    });
+    await waitFor(() => {
+      expect(
+        messageOptionState.value.setSelectedCharacter,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "char-route",
+          name: "Route Character",
+        }),
+      );
+    });
+
+    messageOptionState.value.selectedCharacter = {
+      id: "previous-character",
+      name: "Previous Character",
+    };
+    messageOptionState.value.selectedAssistant = {
+      kind: "character",
+      id: "previous-character",
+      name: "Previous Character",
+      metadata: { selectionMode: "tracked" },
+    };
+    routerLocationState.value = {
+      pathname: "/chat",
+      search: "?mode=character&characterId=char-route",
+      hash: "",
+      key: "fresh-char-route-location",
+    };
+    routerNavigateState.navigate.mockClear();
+
+    rerender(<Playground />);
+
+    await waitFor(() => {
+      expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(2);
+    });
+    expect(routerNavigateState.navigate).not.toHaveBeenCalledWith(
+      {
+        pathname: "/chat",
+        search: "?mode=character&characterId=previous-character",
+        hash: "",
+      },
+      { replace: true },
+    );
+  });
+
+  it("hydrates character route intent from the browser URL when router search is empty", async () => {
+	    window.history.replaceState(
+	      {},
+	      "",
+	      "/chat?mode=character&characterId=char-route",
+	    );
+	    routerLocationState.value = {
+	      pathname: "/chat",
+	      search: "",
+	      hash: "",
+	      key: "next-chat-empty-search",
+	    };
+	    messageOptionState.value.serverChatId = "stale-chat";
+	    messageOptionState.value.historyId = "stale-history";
+	    messageOptionState.value.messages = [
+	      { role: "assistant", isBot: true, message: "Stale message" },
+	    ];
+	    messageOptionState.value.history = [
+	      { role: "assistant", content: "Stale message" },
+	    ];
+	    messageOptionState.value.setSelectedCharacter = vi.fn((next) => {
+	      messageOptionState.value.selectedCharacter = next;
+	      messageOptionState.value.selectedAssistant = next
+	        ? {
+	            kind: "character",
+	            id: String(next.id),
+	            name: next.name,
+	            metadata: { selectionMode: "tracked" },
+	          }
+	        : null;
+	    });
+
+	    const { rerender } = render(<Playground />);
+
+	    await waitFor(() => {
+	      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route");
+	    });
+	    expect(messageOptionState.value.setHistoryId).toHaveBeenCalledWith(null, {
+	      preserveServerChatId: false,
+	    });
+	    expect(messageOptionState.value.setHistory).toHaveBeenCalledWith([]);
+	    expect(messageOptionState.value.setMessages).toHaveBeenCalledWith([]);
+	    expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null);
+
+	    rerender(<Playground />);
+
+	    await waitFor(() => {
+	      expect(screen.getByTestId("playground-active-chat-mode")).toHaveTextContent(
+	        "Route Character",
+	      );
+	    });
+    expect(
+      screen.queryByText("Choose a character to start character chat"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps route character hydration alive while clearing stale chat state", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?mode=character&characterId=char-route",
+    );
+    routerLocationState.value = {
+      pathname: "/chat",
+      search: "",
+      hash: "",
+      key: "next-chat-empty-search",
+    };
+    messageOptionState.value.serverChatId = "stale-chat";
+    messageOptionState.value.historyId = "stale-history";
+    messageOptionState.value.messages = [
+      { role: "assistant", isBot: true, message: "Stale message" },
+    ];
+    messageOptionState.value.history = [
+      { role: "assistant", content: "Stale message" },
+    ];
+    messageOptionState.value.setSelectedCharacter = vi.fn((next) => {
+      messageOptionState.value.selectedCharacter = next;
+      messageOptionState.value.selectedAssistant = next
+        ? {
+            kind: "character",
+            id: String(next.id),
+            name: next.name,
+            metadata: { selectionMode: "tracked" },
+          }
+        : null;
+    });
+
+    let resolveCharacter:
+      | ((character: { id: string; name: string }) => void)
+      | null = null;
+    tldwClientState.getCharacter.mockImplementationOnce(
+      (id: string | number) =>
+        new Promise((resolve) => {
+          resolveCharacter = () =>
+            resolve({ id: String(id), name: "Route Character" });
+        }),
+    );
+
+    const { rerender } = render(<Playground />);
+
+    await waitFor(() => {
+      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route");
+    });
+
+    messageOptionState.value.serverChatId = null;
+    messageOptionState.value.historyId = null;
+    messageOptionState.value.messages = [];
+    messageOptionState.value.history = [];
+    rerender(<Playground />);
+
+    await act(async () => {
+      resolveCharacter?.({ id: "char-route", name: "Route Character" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "char-route",
+          name: "Route Character",
+        }),
+      );
+    });
+    expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(1);
   });
 
   it("does not re-enforce route character intent after a manual character switch", async () => {
@@ -612,6 +883,95 @@ describe("Playground cockpit shell", () => {
     expect(
       messageOptionState.value.setSelectedCharacter,
     ).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(routerNavigateState.navigate).toHaveBeenCalledWith(
+        {
+          pathname: "/chat",
+          search: "?mode=character&characterId=manual-character",
+          hash: "",
+        },
+        { replace: true },
+      );
+    });
+  });
+
+  it("removes a stale route character id when the hydrated character is cleared", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?mode=character&characterId=char-route",
+    );
+    messageOptionState.value.setSelectedCharacter = vi.fn((next) => {
+      messageOptionState.value.selectedCharacter = next;
+      messageOptionState.value.selectedAssistant = next
+        ? {
+            kind: "character",
+            id: String(next.id),
+            name: next.name,
+            metadata: { selectionMode: "tracked" },
+          }
+        : null;
+    });
+
+    const { rerender } = render(<Playground />);
+
+    await waitFor(() => {
+      expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(
+        messageOptionState.value.setSelectedCharacter,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "char-route",
+          name: "Route Character",
+        }),
+      );
+    });
+    rerender(<Playground />);
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("playground-active-chat-mode"),
+      ).toHaveTextContent("Route Character");
+    });
+
+    messageOptionState.value.selectedCharacter = null;
+    messageOptionState.value.selectedAssistant = null;
+    routerNavigateState.navigate.mockClear();
+
+    rerender(<Playground />);
+
+    await waitFor(() => {
+      expect(routerNavigateState.navigate).toHaveBeenCalledWith(
+        {
+          pathname: "/chat",
+          search: "?mode=character",
+          hash: "",
+        },
+        { replace: true },
+      );
+    });
+  });
+
+  it("adds the selected character id to a mode-only character route", async () => {
+    window.history.replaceState({}, "", "/chat?mode=character");
+    messageOptionState.value.selectedCharacter = {
+      id: "manual-character",
+      name: "Manual Character",
+    };
+
+    render(<Playground />);
+
+    await waitFor(() => {
+      expect(routerNavigateState.navigate).toHaveBeenCalledWith(
+        {
+          pathname: "/chat",
+          search: "?mode=character&characterId=manual-character",
+          hash: "",
+        },
+        { replace: true },
+      );
+    });
   });
 
   it("uses a typed fallback when route character hydration returns no character", async () => {
@@ -627,10 +987,13 @@ describe("Playground cockpit shell", () => {
     await waitFor(() => {
       expect(
         messageOptionState.value.setSelectedCharacter,
-      ).toHaveBeenCalledWith({
-        id: "missing-character",
-        name: "Character missing-character",
-      });
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "missing-character",
+          name: "Character missing-character",
+          metadata: expect.objectContaining({ selectionMode: "tracked" }),
+        }),
+      );
     });
   });
 

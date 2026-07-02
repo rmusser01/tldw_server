@@ -121,14 +121,33 @@ export const AssistantSelect: React.FC<Props> = ({
     useSelectedAssistant(null)
   const historyId = useStoreMessageOption((state) => state.historyId)
   const serverChatId = useStoreMessageOption((state) => state.serverChatId)
+  const setHistoryId = useStoreMessageOption((state) => state.setHistoryId)
+  const setHistory = useStoreMessageOption((state) => state.setHistory)
+  const setMessages = useStoreMessageOption((state) => state.setMessages)
+  const setServerChatId = useStoreMessageOption((state) => state.setServerChatId)
   const serverChatAssistantKind = useStoreMessageOption(
     (state) => state.serverChatAssistantKind
+  )
+  const setServerChatAssistantKind = useStoreMessageOption(
+    (state) => state.setServerChatAssistantKind
   )
   const serverChatAssistantId = useStoreMessageOption(
     (state) => state.serverChatAssistantId
   )
+  const setServerChatAssistantId = useStoreMessageOption(
+    (state) => state.setServerChatAssistantId
+  )
   const serverChatCharacterId = useStoreMessageOption(
     (state) => state.serverChatCharacterId
+  )
+  const setServerChatCharacterId = useStoreMessageOption(
+    (state) => state.setServerChatCharacterId
+  )
+  const setServerChatPersonaMemoryMode = useStoreMessageOption(
+    (state) => state.setServerChatPersonaMemoryMode
+  )
+  const setServerChatMetaLoaded = useStoreMessageOption(
+    (state) => state.setServerChatMetaLoaded
   )
   const { settings, updateSettings } = useChatSettingsRecord({
     historyId,
@@ -154,6 +173,10 @@ export const AssistantSelect: React.FC<Props> = ({
   const searchInputRef = React.useRef<InputRef | null>(null)
   const triggerButtonRef = React.useRef<HTMLButtonElement | null>(null)
   const returnFocusSelectorRef = React.useRef<string | null>(null)
+  const eventOpenIntentRef = React.useRef(false)
+  const pendingSelectionModeIntentRef = React.useRef<
+    "tracked" | "overlay" | null
+  >(null)
   const effectiveAssistantState = React.useMemo(
     () =>
       resolveEffectiveAssistantState({
@@ -189,6 +212,47 @@ export const AssistantSelect: React.FC<Props> = ({
     scheduleFocusFirstVisibleElement(selector)
   }, [variant])
 
+  const trackedSelectionMatchesActiveChat = React.useCallback(
+    (entry: AssistantSelection) => {
+      if (entry.kind === "character") {
+        return (
+          serverChatAssistantKind === "character" &&
+          serverChatCharacterId != null &&
+          String(serverChatCharacterId) === entry.id
+        )
+      }
+
+      return (
+        serverChatAssistantKind === "persona" &&
+        serverChatAssistantId != null &&
+        String(serverChatAssistantId) === entry.id
+      )
+    },
+    [serverChatAssistantId, serverChatAssistantKind, serverChatCharacterId]
+  )
+
+  const clearActiveServerChat = React.useCallback(() => {
+    setHistoryId(null, { preserveServerChatId: false })
+    setHistory([])
+    setMessages([])
+    setServerChatCharacterId(null)
+    setServerChatAssistantKind(null)
+    setServerChatAssistantId(null)
+    setServerChatPersonaMemoryMode(null)
+    setServerChatMetaLoaded(false)
+    setServerChatId(null)
+  }, [
+    setHistory,
+    setHistoryId,
+    setMessages,
+    setServerChatAssistantId,
+    setServerChatAssistantKind,
+    setServerChatCharacterId,
+    setServerChatId,
+    setServerChatMetaLoaded,
+    setServerChatPersonaMemoryMode
+  ])
+
   React.useEffect(() => {
     if (selectedAssistant?.kind === "character" || selectedAssistant?.kind === "persona") {
       setActiveTab(selectedAssistant.kind)
@@ -213,8 +277,10 @@ export const AssistantSelect: React.FC<Props> = ({
         detail.returnFocusSelector.trim().length > 0
           ? detail.returnFocusSelector.trim()
           : null
-      selectionModeIntentRef.current =
-        detail?.applyAs ?? selectionModePreference
+      const requestedMode = detail?.applyAs ?? selectionModePreference
+      selectionModeIntentRef.current = requestedMode
+      pendingSelectionModeIntentRef.current = detail?.applyAs ?? null
+      eventOpenIntentRef.current = true
       setSearchText("")
       setOpen(true)
     }
@@ -441,7 +507,8 @@ export const AssistantSelect: React.FC<Props> = ({
 
   const handleSelect = React.useCallback(
     async (entry: AssistantSelection) => {
-      const nextMode = selectionModeIntentRef.current
+      const nextMode =
+        pendingSelectionModeIntentRef.current ?? selectionModeIntentRef.current
       const isTrackedMode =
         effectiveAssistantState.mode === "tracked_character" ||
         effectiveAssistantState.mode === "tracked_persona"
@@ -449,6 +516,7 @@ export const AssistantSelect: React.FC<Props> = ({
         setOpen(false)
         setSearchText("")
         selectionModeIntentRef.current = selectionModePreference
+        pendingSelectionModeIntentRef.current = null
         restoreReturnFocus()
         return
       }
@@ -456,6 +524,7 @@ export const AssistantSelect: React.FC<Props> = ({
       setOpen(false)
       setSearchText("")
       selectionModeIntentRef.current = selectionModePreference
+      pendingSelectionModeIntentRef.current = null
       restoreReturnFocus()
       const nextEntry: AssistantSelection = {
         ...entry,
@@ -463,6 +532,13 @@ export const AssistantSelect: React.FC<Props> = ({
           ...(entry.metadata ?? {}),
           selectionMode: nextMode
         }
+      }
+      if (
+        nextMode === "tracked" &&
+        serverChatId &&
+        !trackedSelectionMatchesActiveChat(nextEntry)
+      ) {
+        clearActiveServerChat()
       }
       await setSelectedAssistant(nextEntry)
       if (nextMode === "overlay") {
@@ -490,9 +566,12 @@ export const AssistantSelect: React.FC<Props> = ({
     },
     [
       effectiveAssistantState.mode,
+      clearActiveServerChat,
       restoreReturnFocus,
       selectionModePreference,
+      serverChatId,
       setSelectedAssistant,
+      trackedSelectionMatchesActiveChat,
       updateSettings
     ]
   )
@@ -500,11 +579,17 @@ export const AssistantSelect: React.FC<Props> = ({
   const handleOpenChange = React.useCallback((nextOpen: boolean) => {
     setOpen(nextOpen)
     if (nextOpen) {
-      selectionModeIntentRef.current = selectionModePreference
+      if (eventOpenIntentRef.current) {
+        eventOpenIntentRef.current = false
+      } else if (pendingSelectionModeIntentRef.current) {
+        selectionModeIntentRef.current = pendingSelectionModeIntentRef.current
+      } else {
+        selectionModeIntentRef.current = selectionModePreference
+      }
     }
     if (!nextOpen) {
       setSearchText("")
-      selectionModeIntentRef.current = selectionModePreference
+      eventOpenIntentRef.current = false
       restoreReturnFocus()
     }
   }, [restoreReturnFocus, selectionModePreference])
@@ -650,6 +735,13 @@ export const AssistantSelect: React.FC<Props> = ({
                       ? "border-primary bg-primary/10 text-text"
                       : "border-border bg-background text-text hover:bg-surface2"
                   }`}
+                  onPointerDown={(event) => {
+                    event.stopPropagation()
+                  }}
+                  onMouseDown={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                  }}
                   onClick={() => {
                     void handleSelect(entry)
                   }}
@@ -790,6 +882,10 @@ export const AssistantSelect: React.FC<Props> = ({
           className={`inline-flex items-center gap-2 ${className}`.trim()}
           aria-label={buttonLabel}
           aria-expanded={open}
+          onClick={() => {
+            pendingSelectionModeIntentRef.current = null
+            selectionModeIntentRef.current = selectionModePreference
+          }}
         >
           <UserCircle2 className={iconClassName} />
           {showLabel ? (

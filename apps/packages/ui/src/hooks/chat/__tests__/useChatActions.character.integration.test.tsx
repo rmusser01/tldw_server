@@ -18,6 +18,16 @@ const {
     version: 1
   })),
   normalChatModeMock: vi.fn()
+  }))
+
+const messageStoreState = vi.hoisted(() => ({
+  value: {
+    selectedModel: "deepseek-chat" as string | null,
+    serverChatId: null as string | null,
+    serverChatCharacterId: null as string | number | null,
+    serverChatAssistantKind: null as "character" | "persona" | null,
+    serverChatSource: null as string | null
+  }
 }))
 
 vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
@@ -115,7 +125,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: {
-    getState: () => ({ selectedModel: "deepseek-chat" as string | null })
+    getState: () => messageStoreState.value
   }
 }))
 
@@ -129,6 +139,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     streamCharacterChatCompletion: streamCharacterChatCompletionMock,
     persistCharacterCompletion: persistCharacterCompletionMock,
     addChatMessage: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
+    getChatSettings: vi.fn(async () => ({ settings: null })),
     initialize: vi.fn(async () => null)
   }
 }))
@@ -244,6 +255,13 @@ describe("useChatActions character integration", () => {
         ]
       }
     })
+    messageStoreState.value = {
+      selectedModel: "deepseek-chat",
+      serverChatId: null,
+      serverChatCharacterId: null,
+      serverChatAssistantKind: null,
+      serverChatSource: null
+    }
   })
 
   it("keeps tracked character routing anchored to current chat metadata when global character state is stale", async () => {
@@ -384,6 +402,63 @@ describe("useChatActions character integration", () => {
         assistant_content: "Tracked reply",
         speaker_character_id: 99,
         speaker_character_name: "Miku"
+      })
+    )
+  })
+
+  it("reuses the latest store character chat when greeting persistence updates before the send closure", async () => {
+    messageStoreState.value = {
+      selectedModel: "deepseek-chat",
+      serverChatId: "ashley-greeting-chat",
+      serverChatCharacterId: 4,
+      serverChatAssistantKind: "character",
+      serverChatSource: "webui-character-chat"
+    }
+    const options = {
+      ...createHookOptions(),
+      serverChatId: null,
+      serverChatTitle: null,
+      serverChatCharacterId: null,
+      serverChatAssistantKind: null,
+      serverChatAssistantId: null,
+      serverChatSource: null,
+      selectedCharacter: {
+        id: 4,
+        name: "Ashley",
+        system_prompt: "Ashley prompt"
+      },
+      selectedAssistant: {
+        kind: "character",
+        id: "4",
+        name: "Ashley",
+        system_prompt: "Ashley prompt",
+        metadata: { selectionMode: "tracked" }
+      }
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Continue Ashley from her greeting",
+        image: ""
+      })
+    })
+
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
+      "ashley-greeting-chat",
+      expect.objectContaining({
+        include_character_context: true,
+        model: "deepseek-chat"
+      }),
+      expect.any(Object)
+    )
+    expect(persistCharacterCompletionMock).toHaveBeenCalledWith(
+      "ashley-greeting-chat",
+      expect.objectContaining({
+        assistant_content: "Tracked reply",
+        speaker_character_id: 4,
+        speaker_character_name: "Ashley"
       })
     )
   })

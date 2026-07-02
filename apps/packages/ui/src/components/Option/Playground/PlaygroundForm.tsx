@@ -275,6 +275,7 @@ type Props = {
   onDraftPresenceChange?: (hasDraft: boolean) => void;
   composerMessageCount?: number;
   composerMessageCountLabel?: string | null;
+  characterWorkflowActive?: boolean;
   characterChatSendBlocker?: PlaygroundSendBlocker | null;
   characterChatModelUsability?: ChatModelUsability | null;
   characterChatModelUsabilityLabel?: string | null;
@@ -473,6 +474,7 @@ export const PlaygroundForm = ({
   onDraftPresenceChange,
   composerMessageCount = 0,
   composerMessageCountLabel = null,
+  characterWorkflowActive = false,
   characterChatSendBlocker = null,
   characterChatModelUsability = null,
   characterChatModelUsabilityLabel = null,
@@ -3184,6 +3186,7 @@ export const PlaygroundForm = ({
     clearChat,
     selectedCharacter,
     selectedAssistantMode,
+    characterWorkflowActive,
     assistantOverlayActive: pendingAssistantState.mode === "overlay",
     serverPersistenceHintSeen,
     setServerPersistenceHintSeen,
@@ -3359,6 +3362,7 @@ export const PlaygroundForm = ({
         }
         dispatchOpenAssistantSelect({
           tab: "character",
+          applyAs: "tracked",
           source: "playground-starter",
         });
         setModeAnnouncement(

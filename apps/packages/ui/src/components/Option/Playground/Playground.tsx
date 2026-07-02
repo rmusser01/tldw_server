@@ -162,6 +162,88 @@ const readSidepanelChatWebUiHandoffFromLocation = () => {
   );
 };
 
+const extractHashSearch = (hash: string | null | undefined): string => {
+  const value = hash?.startsWith("#") ? hash.slice(1) : (hash ?? "");
+  if (!value) return "";
+  if (value.startsWith("?")) return value;
+  const queryIndex = value.indexOf("?");
+  return queryIndex >= 0 ? value.slice(queryIndex) : "";
+};
+
+const getCharacterChatRouteIntentFromLocation = (
+  locationSearch: string,
+  locationHash: string,
+) => {
+  const candidates = [locationSearch, extractHashSearch(locationHash)];
+  if (typeof window !== "undefined") {
+    candidates.push(
+      window.location.search,
+      extractHashSearch(window.location.hash),
+    );
+  }
+
+  for (const candidate of candidates) {
+    const intent = getCharacterChatRouteIntent(candidate);
+    if (intent) return intent;
+  }
+
+  return null;
+};
+
+const updateCharacterChatRouteSearch = (
+  search: string,
+  characterId: string | null,
+): string => {
+  const normalizedSearch = search.startsWith("?") ? search.slice(1) : search;
+  const params = new URLSearchParams(normalizedSearch);
+  params.set("mode", "character");
+  params.delete("chatId");
+  params.delete("chat_id");
+  params.delete("serverChatId");
+  params.delete("server_chat_id");
+
+  if (characterId) {
+    params.set("characterId", characterId);
+  } else {
+    params.delete("characterId");
+    params.delete("character_id");
+  }
+
+  const nextSearch = params.toString();
+  return nextSearch ? `?${nextSearch}` : "";
+};
+
+const updateCharacterChatRouteHash = (
+  hash: string,
+  characterId: string | null,
+): string => {
+  const prefix = hash.startsWith("#") ? "#" : "";
+  const value = prefix ? hash.slice(1) : hash;
+  const queryIndex = value.indexOf("?");
+  const hashPath = queryIndex >= 0 ? value.slice(0, queryIndex) : value;
+  const hashSearch = queryIndex >= 0 ? value.slice(queryIndex) : "";
+  return `${prefix}${hashPath}${updateCharacterChatRouteSearch(
+    hashSearch,
+    characterId,
+  )}`;
+};
+
+const withTrackedCharacterSelectionMode = (character: Character): Character => {
+  const metadata = (character as Character & { metadata?: unknown }).metadata;
+  const normalizedMetadata =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>)
+      : {};
+
+  return {
+    ...character,
+    metadata: {
+      ...normalizedMetadata,
+      selectionMode: "tracked",
+    },
+  } as Character;
+};
+
 type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
 
 const getAssistantMessageRouteLabel = (
@@ -537,6 +619,7 @@ export const Playground = () => {
   const routeCharacterIntentAppliedRef = React.useRef<string | null>(null);
   const routeCharacterIntentInFlightRef = React.useRef<string | null>(null);
   const routeCharacterIntentRequestRef = React.useRef(0);
+  const routeCharacterIntentSignatureRef = React.useRef<string | null>(null);
   const translationRef = React.useRef(t);
   const previousThreadRef = React.useRef<string | null>(null);
   const stableHistoryId = historyId && historyId !== "temp" ? historyId : null;
@@ -547,9 +630,28 @@ export const Playground = () => {
     !serverChatId &&
     !composerHasDraft;
   const routeCharacterIntent = React.useMemo(
-    () => getCharacterChatRouteIntent(location.search),
-    [location.search],
+    () =>
+      getCharacterChatRouteIntentFromLocation(
+        location.search ?? "",
+        location.hash ?? "",
+      ),
+    [location.hash, location.key, location.search],
   );
+  const routeCharacterIntentSignature = React.useMemo(() => {
+    if (!routeCharacterIntent) return null;
+    return [
+      routeCharacterIntent.chatId ?? "",
+      routeCharacterIntent.characterId ?? "",
+      location.key ?? "",
+      location.search ?? "",
+      location.hash ?? "",
+    ].join("|");
+  }, [
+    location.hash,
+    location.key,
+    location.search,
+    routeCharacterIntent,
+  ]);
   const routeCharacterIntentChatId = routeCharacterIntent?.chatId ?? null;
   const routeCharacterIntentId = routeCharacterIntent?.characterId ?? null;
   const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
@@ -583,34 +685,37 @@ export const Playground = () => {
       : selectedAssistant
         ? false
         : Boolean(selectedCharacter?.id) && selectedAssistantMode !== "overlay";
+  const activeCharacterSelection = React.useMemo<Character | null>(() => {
+    if (
+      selectedAssistant?.kind === "character" &&
+      selectedAssistantMode !== "overlay"
+    ) {
+      return {
+        id: selectedAssistant.id,
+        name: selectedAssistant.name,
+        avatar_url: selectedAssistant.avatar_url ?? null,
+        system_prompt: selectedAssistant.system_prompt ?? null,
+        greeting: selectedAssistant.greeting ?? null,
+        slug: selectedAssistant.slug ?? null,
+        extensions: selectedAssistant.extensions ?? null,
+      };
+    }
+    if (!selectedAssistant && selectedCharacter?.id != null) {
+      return selectedCharacter;
+    }
+    return null;
+  }, [selectedAssistant, selectedAssistantMode, selectedCharacter]);
   const characterWorkflowActive =
     routeRequestsCharacterMode ||
     characterModeIntentActive ||
     normalizedChatWorkflowMode === "character" ||
     hasTrackedCharacterSelection;
-  const activeCharacterModeLabel =
-    selectedAssistant?.kind === "character" &&
-    selectedAssistantMode !== "overlay"
-      ? selectedAssistant.name
-      : selectedAssistant
-        ? null
-        : (selectedCharacter?.name ?? null);
+  const activeCharacterModeLabel = activeCharacterSelection?.name ?? null;
   const selectedTrackedCharacterId = React.useMemo(() => {
-    if (
-      selectedAssistant?.kind === "character" &&
-      selectedAssistantMode !== "overlay"
-    ) {
-      return String(selectedAssistant.id);
-    }
-    if (!selectedAssistant && selectedCharacter?.id != null) {
-      return String(selectedCharacter.id);
-    }
-    return null;
-  }, [
-    selectedAssistant,
-    selectedAssistantMode,
-    selectedCharacter?.id,
-  ]);
+    return activeCharacterSelection?.id != null
+      ? String(activeCharacterSelection.id)
+      : null;
+  }, [activeCharacterSelection?.id]);
 
   React.useEffect(() => {
     if (
@@ -632,7 +737,7 @@ export const Playground = () => {
     setServerChatPersonaMemoryMode(null);
     setServerChatMetaLoaded(false);
     setServerChatId(null);
-    void clearPersistedSession().catch(() => undefined);
+    void Promise.resolve(clearPersistedSession()).catch(() => undefined);
   }, [
     clearPersistedSession,
     selectedTrackedCharacterId,
@@ -742,6 +847,17 @@ export const Playground = () => {
   }, [routeRequestsCharacterMode, setChatWorkflowMode]);
 
   React.useEffect(() => {
+    if (routeCharacterIntentSignatureRef.current === routeCharacterIntentSignature) {
+      return;
+    }
+    routeCharacterIntentSignatureRef.current = routeCharacterIntentSignature;
+    routeCharacterIntentAppliedRef.current = null;
+    routeCharacterIntentInFlightRef.current = null;
+    routeCharacterIntentRequestRef.current += 1;
+    setRouteCharacterRecovery(null);
+  }, [routeCharacterIntentSignature]);
+
+  React.useEffect(() => {
     if (!routeCharacterIntentChatId) return;
     if (serverChatId === routeCharacterIntentChatId) return;
     setServerChatId(routeCharacterIntentChatId);
@@ -760,23 +876,16 @@ export const Playground = () => {
       return;
     }
 
-    const hasActiveConversation =
-      Boolean(serverChatId) ||
-      Boolean(stableHistoryId) ||
-      messages.length > 0 ||
-      history.length > 0;
-    if (hasActiveConversation) {
-      setHistoryId(null, { preserveServerChatId: false });
-      setHistory([]);
-      setMessages([]);
-      setServerChatCharacterId(null);
-      setServerChatAssistantKind(null);
-      setServerChatAssistantId(null);
-      setServerChatPersonaMemoryMode(null);
-      setServerChatMetaLoaded(false);
-      setServerChatId(null);
-      void clearPersistedSession().catch(() => undefined);
-    }
+    setHistoryId(null, { preserveServerChatId: false });
+    setHistory([]);
+    setMessages([]);
+    setServerChatCharacterId(null);
+    setServerChatAssistantKind(null);
+    setServerChatAssistantId(null);
+    setServerChatPersonaMemoryMode(null);
+    setServerChatMetaLoaded(false);
+    setServerChatId(null);
+    void Promise.resolve(clearPersistedSession()).catch(() => undefined);
 
     const requestId = routeCharacterIntentRequestRef.current + 1;
     routeCharacterIntentRequestRef.current = requestId;
@@ -801,14 +910,16 @@ export const Playground = () => {
         routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
         if (character) {
           setRouteCharacterRecovery(null);
-          void setSelectedCharacter(character);
+          void setSelectedCharacter(withTrackedCharacterSelectionMode(character));
           return;
         }
         setRouteCharacterRecovery({
           id: routeCharacterIntentId,
           reason: "missing",
         });
-        void setSelectedCharacter(fallbackCharacter);
+        void setSelectedCharacter(
+          withTrackedCharacterSelectionMode(fallbackCharacter),
+        );
       })
       .catch(() => {
         if (routeCharacterIntentRequestRef.current !== requestId) return;
@@ -817,28 +928,20 @@ export const Playground = () => {
           id: routeCharacterIntentId,
           reason: "load-error",
         });
-        void setSelectedCharacter(fallbackCharacter);
+        void setSelectedCharacter(
+          withTrackedCharacterSelectionMode(fallbackCharacter),
+        );
       })
       .finally(() => {
         if (routeCharacterIntentRequestRef.current !== requestId) return;
         routeCharacterIntentInFlightRef.current = null;
       });
-    return () => {
-      if (routeCharacterIntentRequestRef.current === requestId) {
-        routeCharacterIntentRequestRef.current += 1;
-      }
-      if (routeCharacterIntentInFlightRef.current === routeCharacterIntentId) {
-        routeCharacterIntentInFlightRef.current = null;
-      }
-    };
   }, [
     clearPersistedSession,
-    history.length,
-    messages.length,
     routeCharacterIntentChatId,
     routeCharacterIntentId,
+    routeCharacterIntentSignature,
     routeCharacterRetryToken,
-    serverChatId,
     setHistory,
     setHistoryId,
     setMessages,
@@ -849,7 +952,6 @@ export const Playground = () => {
     setServerChatId,
     setServerChatMetaLoaded,
     setServerChatPersonaMemoryMode,
-    stableHistoryId,
   ]);
 
   React.useEffect(() => {
@@ -861,14 +963,85 @@ export const Playground = () => {
   }, [routeCharacterIntentId]);
 
   React.useEffect(() => {
-    if (!routeCharacterRecovery || !selectedCharacter?.id) return;
+    if (!routeCharacterRecovery || !activeCharacterSelection?.id) return;
     if (routeCharacterIntentInFlightRef.current === routeCharacterRecovery.id) {
       return;
     }
-    if (String(selectedCharacter.id) !== routeCharacterRecovery.id) {
+    if (String(activeCharacterSelection.id) !== routeCharacterRecovery.id) {
       setRouteCharacterRecovery(null);
     }
-  }, [routeCharacterRecovery, selectedCharacter?.id]);
+  }, [activeCharacterSelection?.id, routeCharacterRecovery]);
+
+  React.useEffect(() => {
+    if (!routeRequestsCharacterMode) return;
+    if (routeCharacterIntentInFlightRef.current) return;
+
+    const nextCharacterId = selectedTrackedCharacterId;
+    const routeCharacterApplied =
+      routeCharacterIntentId != null &&
+      routeCharacterIntentAppliedRef.current === routeCharacterIntentId;
+
+    if (routeCharacterIntentId != null && !routeCharacterApplied) return;
+    if (!nextCharacterId && !routeCharacterIntentId && !routeCharacterIntentChatId) {
+      return;
+    }
+    if (!nextCharacterId && !routeCharacterApplied) return;
+    if (
+      nextCharacterId &&
+      !routeCharacterIntentChatId &&
+      routeCharacterIntentId === nextCharacterId
+    ) {
+      return;
+    }
+    if (!nextCharacterId && !routeCharacterIntentId) return;
+
+    const currentSearch =
+      location.search ||
+      (typeof window !== "undefined" ? window.location.search : "");
+    const currentHash =
+      location.hash ||
+      (typeof window !== "undefined" ? window.location.hash : "");
+    const searchIntent = getCharacterChatRouteIntent(currentSearch);
+    const hashSearch = extractHashSearch(currentHash);
+    const hashIntent = getCharacterChatRouteIntent(hashSearch);
+    const pathname =
+      location.pathname ||
+      (typeof window !== "undefined" ? window.location.pathname : "/chat") ||
+      "/chat";
+    const nextRoute = searchIntent
+      ? {
+          pathname,
+          search: updateCharacterChatRouteSearch(
+            currentSearch,
+            nextCharacterId,
+          ),
+          hash: currentHash,
+        }
+      : hashIntent
+        ? {
+            pathname,
+            search: currentSearch,
+            hash: updateCharacterChatRouteHash(currentHash, nextCharacterId),
+          }
+        : null;
+
+    if (!nextRoute) return;
+
+    if (nextCharacterId) {
+      routeCharacterIntentAppliedRef.current = nextCharacterId;
+      routeCharacterIntentInFlightRef.current = null;
+    }
+    navigate(nextRoute, { replace: true });
+  }, [
+    location.hash,
+    location.pathname,
+    location.search,
+    navigate,
+    routeCharacterIntentChatId,
+    routeCharacterIntentId,
+    routeRequestsCharacterMode,
+    selectedTrackedCharacterId,
+  ]);
 
   React.useEffect(() => {
     const handleReadinessState = (event: Event) => {
@@ -1472,7 +1645,7 @@ export const Playground = () => {
 
   useCharacterGreeting({
     playgroundReady,
-    selectedCharacter,
+    selectedCharacter: activeCharacterSelection,
     selectedCharacterMode: selectedAssistantMode,
     serverChatId,
     historyId,
@@ -2314,6 +2487,7 @@ export const Playground = () => {
   const openAssistantSelectorFromCockpit = React.useCallback(() => {
     openAssistantSelector({
       tab: cockpitAssistantSelectTab,
+      applyAs: "tracked",
       returnFocusSelector: COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR,
     });
   }, [cockpitAssistantSelectTab]);
@@ -2551,7 +2725,7 @@ export const Playground = () => {
     () =>
       buildCharacterChatReadiness({
         isServerConnected: serverReadinessState !== "blocked",
-        selectedCharacter,
+        selectedCharacter: activeCharacterSelection,
         selectedModel: providerRouteSummary.selectedModel,
         availableModels: readinessChatModels,
         modelsLoading: !Array.isArray(readinessChatModels),
@@ -2564,7 +2738,7 @@ export const Playground = () => {
       isProcessing,
       providerRouteSummary.selectedModel,
       readinessChatModels,
-      selectedCharacter,
+      activeCharacterSelection,
       serverReadinessState,
       streaming,
     ],
@@ -3062,6 +3236,7 @@ export const Playground = () => {
   const openCharacterSelectorFromReadiness = React.useCallback(() => {
     openAssistantSelector({
       tab: "character",
+      applyAs: "tracked",
       returnFocusSelector: COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR,
     });
   }, []);
@@ -3171,13 +3346,9 @@ export const Playground = () => {
       : null,
   ].filter((item): item is string => Boolean(item));
   const cockpitMessageCount = getCockpitMessageCount(messages, history);
-  const activeCharacterSessionId =
-    selectedAssistant?.kind === "character"
-      ? selectedAssistant.id
-      : selectedCharacter?.id;
   const characterSessionsPanel = characterWorkflowActive ? (
     <CharacterChatSessionsPanel
-      activeCharacterId={activeCharacterSessionId ?? null}
+      activeCharacterId={activeCharacterSelection?.id ?? null}
       activeCharacterName={activeCharacterModeLabel}
       activeServerChatId={serverChatId}
     />
@@ -3871,6 +4042,7 @@ export const Playground = () => {
                 onDraftPresenceChange={handleComposerDraftPresenceChange}
                 composerMessageCount={composerMessageCount}
                 composerMessageCountLabel={composerMessageCountLabel}
+                characterWorkflowActive={characterWorkflowActive}
                 characterChatSendBlocker={characterChatSendBlocker}
                 characterChatModelUsability={activeChatModelUsability}
                 characterChatModelUsabilityLabel={

@@ -36,6 +36,7 @@ import { generateBranchFromMessageIds } from "@/db/dexie/branch"
 import { type UploadedFile } from "@/db/dexie/types"
 import { buildAssistantErrorContent } from "@/utils/chat-error-message"
 import { detectCharacterMood } from "@/utils/character-mood"
+import { WEBUI_CHARACTER_CHAT_SOURCE } from "@/utils/character-chat-session"
 import {
   buildMessageVariant,
   getLastUserMessageId,
@@ -1457,14 +1458,45 @@ export const useChatActions = ({
       setMessages(newMessageList)
 
       const activeCharacterId = String(activeCharacter.id)
+      const latestStoreChatState = (() => {
+        try {
+          return useStoreMessageOption.getState()
+        } catch {
+          return null
+        }
+      })()
+      const latestStoreChatId =
+        typeof latestStoreChatState?.serverChatId === "string" &&
+        latestStoreChatState.serverChatId.trim().length > 0
+          ? latestStoreChatState.serverChatId.trim()
+          : null
+      const latestStoreCharacterId =
+        latestStoreChatState?.serverChatCharacterId != null
+          ? latestStoreChatState.serverChatCharacterId
+          : null
+      const latestStoreCharacterMatches =
+        latestStoreChatId != null &&
+        latestStoreCharacterId != null &&
+        String(latestStoreCharacterId) === activeCharacterId
+      const effectiveServerChatId = latestStoreCharacterMatches
+        ? latestStoreChatId
+        : serverChatId
+      const effectiveServerChatCharacterId = latestStoreCharacterMatches
+        ? latestStoreCharacterId
+        : serverChatCharacterId
+      const effectiveServerChatSource = latestStoreCharacterMatches
+        ? latestStoreChatState?.serverChatSource ?? serverChatSource
+        : serverChatSource
       const serverCharacterId =
-        serverChatCharacterId != null ? String(serverChatCharacterId) : null
+        effectiveServerChatCharacterId != null
+          ? String(effectiveServerChatCharacterId)
+          : null
       const overrideChatId =
         typeof serverChatIdOverride === "string" &&
         serverChatIdOverride.trim().length > 0
           ? serverChatIdOverride.trim()
           : null
-      const resolvedServerChatId = overrideChatId || serverChatId
+      const resolvedServerChatId = overrideChatId || effectiveServerChatId
       const shouldResetServerChat =
         Boolean(resolvedServerChatId) &&
         (!serverCharacterId || serverCharacterId !== activeCharacterId)
@@ -1488,7 +1520,7 @@ export const useChatActions = ({
       let chatId = shouldResetServerChat ? null : resolvedServerChatId
       let chatCharacterId: string | number | null = shouldResetServerChat
         ? null
-        : serverChatCharacterId
+        : effectiveServerChatCharacterId
       let createdNewChat = false
       if (!chatId) {
         const created = await tldwClient.createChat({
@@ -1496,7 +1528,7 @@ export const useChatActions = ({
           state: serverChatState || "in-progress",
           topic_label: serverChatTopic || undefined,
           cluster_id: serverChatClusterId || undefined,
-          source: serverChatSource || undefined,
+          source: effectiveServerChatSource || WEBUI_CHARACTER_CHAT_SOURCE,
           external_ref: serverChatExternalRef || undefined
         }) as TldwChatMeta
 
