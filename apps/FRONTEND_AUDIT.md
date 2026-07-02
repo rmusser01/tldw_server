@@ -233,3 +233,45 @@ Solid e2e footprint (140+ Playwright specs in the extension, tiered gates in the
   - Add `version`/`migrate` to persisted stores.
 
 Per-finding backlog tasks were created for the Critical and High items (`backlog/tasks/task-12091`…`task-12103`). Full reviewer notes and the verification log are archived with this audit.
+
+---
+
+# Round 2 (2026-07-02): Character Chat + TTS/STT
+
+Focused follow-up audit of the two areas the maintainer was concerned about: **character chat** and **TTS/STT**. Five parallel reviewers over character-chat core, character card/data handling, TTS playback, mic capture, and real-time voice WebSockets. Findings verified against code identical between local `dev` and `origin/dev`.
+
+## R2 findings summary (ranked)
+
+| # | Sev | One-line | Where |
+|---|-----|----------|-------|
+| R1 | **High** | Character chat delete/edit hits the **wrong Dexie row** — the greeting sits at UI index 0 but is never in Dexie, so array-index deletes/edits are off by one | `useMessage.tsx:2929,2781`; `db/dexie/helpers.ts:406` |
+| R2 | **High (privacy)** | Microphone can **stay live after a `MediaRecorder` error** (no `onerror` handler) or on a double-start; indicator stuck on, capture coordinator locked | `useAudioRecorder.ts:110-130` (+ `useServerDictation.tsx`, `SpeechPlaygroundPage.tsx`) |
+| R3 | **High (security)** | Voice/STT WS **auth token in the URL query string** → server/proxy logs. Backend already supports subprotocol (persona) and `{type:"auth"}` first-message (audio STT); client uses only the URL token | `persona-stream.ts:20,26`; `voice-conversation.ts:361`; `background.ts:3332` |
+| R4 | Medium | Greeting seed is **never persisted to Dexie** (root cause of R1) → same conversation shows a different message count depending on Dexie vs server rehydrate | `chat-helper/index.ts:438-491` |
+| R5 | Medium | A **stalled character stream hangs indefinitely** — the live path has no inactivity watchdog; the copy that *does* (`useCharacterChatMode.ts`) is tested-but-unused. Three diverged copies of `characterChatMode` | `useChatActions.ts`/`useMessage.tsx` vs `useCharacterChatMode.ts` |
+| R6 | Medium | **Steady TTS memory leaks** — MediaSource/blob URL leaks on stream-fallback and on cancel-during-playback | `useStreamingAudioPlayer.tsx:273`, `useTTS.tsx:283-330` |
+| R7 | Medium | **Overlapping TTS playback** in the chat drawer — playing a second clip doesn't stop the first (two voices) | `TtsClipsDrawer.tsx:128-160` |
+| R8 | Medium | Real-time voice: **barge-in doesn't stop TTS** (assistant talks over you), no `bufferedAmount` backpressure, no handshake timeout (UI wedges "connecting"), WS leaks if unmounted mid-connect | `useVoiceChatStream.tsx`, `usePersonaLiveSession.tsx`, `usePersonaLiveControl.tsx` |
+| R9 | Medium | Character cards: **PNG export fetches an attacker-controlled `avatar_url`** (tracking/SSRF beacon), avatar/import have no size caps, two unsynchronized favorite systems | `character-export.ts:269`, `AvatarField.tsx:118`, `Characters/utils.ts:516`, `CharacterSelect.tsx` vs `useCharacterCrud.tsx` |
+| R10 | Low-Med | Swiping to a not-yet-persisted variant keeps the prior `serverMessageId` → later edit/delete hits the wrong server row | `message-variants.ts:75` |
+
+Lower-severity items (empty-completion bubbles, greeting double-render, undo version guess, soft-delete visible window, headerless-WebM long recordings, play/pause races) are in the reviewer notes.
+
+## Cross-cutting themes (Round 2)
+1. **Duplicated/dead-tested code drifts** — `characterChatMode` exists in triplicate, and the *safe* copy (with an inactivity watchdog + recovery) is the unused one; tests pass against code that never runs (same trap as Round 1's dead auth stack / `extension/routes`).
+2. **UI-index vs storage-index mismatch** — R1/R4: messages are addressed by array position; a greeting at index 0 desyncs UI from Dexie. Root fix is to address by stable message id.
+3. **Lifecycle cleanup only covers the happy path** — mic tracks, blob URLs, and WebSockets leak on error/race/unmount paths. `useMicStream.ts` is the correct template the leaky sites should follow.
+4. **WS token in URL** is systemic across every voice/STT path.
+
+## What's solid (verified OK)
+No XSS in character/card rendering; character card image decode validates magic bytes + MIME allow-list; download filenames are traversal-safe; no ReDoS from lorebook regex; **no duplicate assistant persistence** (the server skips persistence while streaming and the client persists once, idempotently); cross-character session switching resets state correctly; TTS streaming chunk ordering is correct; `useMicStream.ts` teardown is complete on every path; no zero-delay reconnect loops.
+
+## R2 remediation status
+Backlog tasks `task-12104`…`task-12110`.
+
+**Fixed in this pass (with tests, 68 passing):**
+- **R1 (task-12104)** — character delete/edit now address the Dexie row by **stable message id**, not array position, so a greeting at UI index 0 no longer corrupts the store. *Deferred (AC#3):* the greeting is still not persisted to Dexie, so a Dexie-sourced rehydrate shows one fewer message than a server-sourced one — cosmetic, not corruption.
+- **R2 (task-12105)** — the three mic-capture sites now match `useMicStream` (synchronous re-entry guard, stream held in a `catch`-reachable ref, `MediaRecorder` `onerror` that stops tracks + releases the capture lock).
+- **R6/R7 (task-12107)** — TTS blob-URL/MediaSource leaks freed on every path (revoke-before-overwrite; `cancel()` settles the in-flight promise + revokes directly); overlapping playback fixed (stop the prior clip first); audiobook cancel aborts the in-flight chapter.
+
+**Ticketed for follow-up:** **R3 (task-12106)** WS token-in-URL — needs a client auth-method switch validated against a live server (backend already supports subprotocol / first-message auth); **R5 (task-12108)** characterChatMode consolidation + inactivity watchdog; **R8 (task-12109)** real-time voice hardening; **R9/R10 (task-12110)** card handling + variant server-id.

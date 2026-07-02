@@ -412,6 +412,55 @@ export const removeMessageByIndex = async (
   }
 }
 
+// Id-addressed variants (TASK-12104). Prefer these over the index-addressed
+// helpers above: the UI message list can contain non-persisted seed rows (e.g.
+// a character greeting at UI index 0) that are absent from Dexie, so an array
+// index does not line up with the Dexie row order. Addressing by the stable
+// message id avoids deleting/overwriting the wrong row. Rows whose id is not in
+// Dexie (like an unsaved greeting) are simply left untouched.
+export const updateMessageById = async (
+  history_id: string,
+  message_id: string,
+  message: string
+) => {
+  try {
+    const db = new PageAssistDatabase()
+    await db.updateMessage(history_id, message_id, message)
+  } catch {
+    // temp chat will break
+  }
+}
+
+export const removeMessageById = async (
+  history_id: string,
+  message_id: string
+) => {
+  try {
+    const db = new PageAssistDatabase()
+    await db.removeMessage(history_id, message_id)
+  } catch {
+    // temp chat will break
+  }
+}
+
+// Delete every persisted message ordered after `message_id` (used by the edit +
+// regenerate flow). Falls back to a no-op when the id is not found in Dexie.
+export const deleteChatAfterMessageId = async (
+  history_id: string,
+  message_id: string
+) => {
+  const db = new PageAssistDatabase()
+  const chatHistory = await db.getChatHistory(history_id)
+  const sortedHistory = chatHistory.sort((a, b) => a.createdAt - b.createdAt)
+  const startIndex = sortedHistory.findIndex((m) => m.id === message_id)
+  if (startIndex < 0) return
+
+  const messagesToDelete = sortedHistory.slice(startIndex + 1)
+  for (const message of messagesToDelete) {
+    await db.removeMessage(history_id, message.id)
+  }
+}
+
 export const deleteChatForEdit = async (history_id: string, index: number) => {
   const db = new PageAssistDatabase()
   const chatHistory = await db.getChatHistory(history_id)

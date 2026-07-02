@@ -269,6 +269,10 @@ export const useStreamingAudioPlayer = () => {
       audioRef.current = nextAudio
     }
 
+    // Revoke any previously-held object URL (e.g. the MediaSource blob URL from
+    // start()) before overwriting the ref with the buffered fallback blob URL,
+    // otherwise the stream->buffer fallback path leaks one URL per failed stream.
+    revokeObjectUrl()
     const blob = new Blob(allChunksRef.current, { type: mime })
     const url = URL.createObjectURL(blob)
     objectUrlRef.current = url
@@ -283,7 +287,7 @@ export const useStreamingAudioPlayer = () => {
       })
     }
     setState((prev) => ({ ...prev, playing: true }))
-  }, [flushPending])
+  }, [flushPending, revokeObjectUrl])
 
   const getBufferedBlob = React.useCallback(() => {
     if (!allChunksRef.current.length) return null

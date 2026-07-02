@@ -338,6 +338,13 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           <button
             type="button"
             onClick={onDictationToggle}
+            // NOTE: A dedicated "start in flight" flag is not available via
+            // props here, so the disabled state cannot reflect the brief
+            // getUserMedia window. Double-click re-entry during a start is
+            // already guarded synchronously at the hook level (useServerDictation
+            // /useMicStream startingRef), which makes a second click a no-op.
+            // Surfacing an in-flight state on the button would require new prop
+            // plumbing from the parent and is intentionally out of scope here.
             disabled={!speechAvailable || voiceChatEnabled}
             data-testid="dictation-button"
             className={`inline-flex items-center justify-center rounded-md text-xs transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50 ${

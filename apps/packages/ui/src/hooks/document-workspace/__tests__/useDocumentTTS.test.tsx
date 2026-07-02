@@ -190,6 +190,70 @@ describe("useDocumentTTS", () => {
     expect(result.current.voice).toBe("Jasper")
   })
 
+  it("revokes the object URL when audio playback errors", async () => {
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:tts-error")
+    const revokeSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {})
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: vi.fn().mockResolvedValue(new Blob(["audio"]))
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    let lastAudio: any = null
+    class MockAudio {
+      paused = true
+      ended = false
+      duration = 0
+      currentTime = 0
+      volume = 1
+      onended: (() => void) | null = null
+      onerror: (() => void) | null = null
+      onplay: (() => void) | null = null
+      onpause: (() => void) | null = null
+      ontimeupdate: (() => void) | null = null
+
+      constructor(public src: string) {
+        lastAudio = this
+      }
+
+      pause() {
+        this.paused = true
+        this.onpause?.()
+      }
+
+      play() {
+        this.paused = false
+        this.onplay?.()
+        return Promise.resolve()
+      }
+    }
+
+    vi.stubGlobal("Audio", MockAudio)
+
+    const { result } = renderHook(() => useDocumentTTS(), {
+      wrapper: buildWrapper()
+    })
+
+    await waitFor(() => {
+      expect(result.current.voicesLoading).toBe(false)
+    })
+
+    await act(async () => {
+      await result.current.speak("Broken audio")
+    })
+
+    expect(revokeSpy).not.toHaveBeenCalledWith("blob:tts-error")
+
+    act(() => {
+      lastAudio?.onerror?.()
+    })
+
+    expect(revokeSpy).toHaveBeenCalledWith("blob:tts-error")
+    expect(result.current.state.error).toBe("Failed to play audio")
+  })
+
   it("does not overwrite a user-selected voice when configured voice resolves later", async () => {
     let resolveVoice: ((value: string) => void) | undefined
     const pendingVoice = new Promise<string>((resolve) => {

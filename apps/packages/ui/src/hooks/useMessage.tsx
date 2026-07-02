@@ -8,10 +8,13 @@ import { getContentFromCurrentTab } from "~/libs/get-html";
 import { ChatHistory } from "@/store/option";
 import {
   deleteChatForEdit,
+  deleteChatAfterMessageId,
   generateID,
   getPromptById,
   removeMessageByIndex,
+  removeMessageById,
   updateMessageByIndex,
+  updateMessageById,
 } from "@/db/dexie/helpers";
 import { useTranslation } from "react-i18next";
 import { usePageAssist } from "@/context";
@@ -2778,7 +2781,13 @@ export const useMessage = () => {
           idx === index ? { ...item, content: message } : item,
         );
         setHistory(updatedHistory);
-        await updateMessageByIndex(historyId, index, message);
+        // TASK-12104: address the Dexie row by stable id (not UI array index),
+        // which is offset by any non-persisted greeting seed at UI index 0.
+        if (currentHumanMessage?.id) {
+          await updateMessageById(historyId, currentHumanMessage.id, message);
+        } else {
+          await updateMessageByIndex(historyId, index, message);
+        }
         if (
           serverChatId &&
           (selectedCharacter?.id || serverChatAssistantKind === "persona") &&
@@ -2805,8 +2814,15 @@ export const useMessage = () => {
       setMessages(previousMessages);
       const previousHistory = newHistory.slice(0, index);
       setHistory(previousHistory);
-      await updateMessageByIndex(historyId, index, message);
-      await deleteChatForEdit(historyId, index);
+      // TASK-12104: id-address the edited row (and delete what follows it) so a
+      // greeting-offset UI index cannot overwrite/keep the wrong Dexie rows.
+      if (currentHumanMessage?.id) {
+        await updateMessageById(historyId, currentHumanMessage.id, message);
+        await deleteChatAfterMessageId(historyId, currentHumanMessage.id);
+      } else {
+        await updateMessageByIndex(historyId, index, message);
+        await deleteChatForEdit(historyId, index);
+      }
       // Server-backed edit and cleanup
       if (
         serverChatId &&
@@ -2870,7 +2886,12 @@ export const useMessage = () => {
         idx === index ? { ...item, content: message } : item,
       );
       setHistory(updatedHistory);
-      await updateMessageByIndex(historyId, index, message);
+      // TASK-12104: address the assistant Dexie row by stable id.
+      if (currentAssistant?.id) {
+        await updateMessageById(historyId, currentAssistant.id, message);
+      } else {
+        await updateMessageByIndex(historyId, index, message);
+      }
       // Server-backed: update assistant server message too
       if (
         serverChatId &&
@@ -2926,7 +2947,14 @@ export const useMessage = () => {
       }
 
       if (historyId) {
-        await removeMessageByIndex(historyId, index);
+        // TASK-12104: remove the Dexie row by stable id so a non-persisted
+        // greeting at UI index 0 does not shift us onto the wrong row. An
+        // unsaved greeting's id is absent from Dexie, so this is a safe no-op.
+        if (target.id) {
+          await removeMessageById(historyId, target.id);
+        } else {
+          await removeMessageByIndex(historyId, index);
+        }
       }
 
       setMessages(messages.filter((_, idx) => idx !== index));
