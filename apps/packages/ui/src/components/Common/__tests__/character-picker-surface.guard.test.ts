@@ -19,7 +19,9 @@ describe("character picker popup surfaces", () => {
     const source = fs.readFileSync(sourcePath, "utf8")
 
     expect(source).not.toContain("overlayClassName")
+    expect(source).not.toContain("popupClassName")
     expect(source).toContain('root: "character-select-dropdown')
+    expect(source).toContain('root: "character-select-sort-dropdown')
     expect(source).toContain('data-testid="character-select-popup"')
     expect(source).toContain("bg-surface")
   })

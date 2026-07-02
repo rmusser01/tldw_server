@@ -245,6 +245,35 @@ def test_custom_openai_catalog_uses_env_endpoint_and_model_without_api_section(
 
 
 @pytest.mark.unit
+def test_external_custom_openai_env_placeholder_key_is_missing_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Known placeholder API keys do not satisfy external custom OpenAI readiness."""
+    monkeypatch.setenv("CUSTOM_OPENAI_API_URL", "https://api.openai.com/v1")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_MODEL", "gpt-4.1-2025-04-14")
+    monkeypatch.setenv("CUSTOM_OPENAI_API_KEY", "CHANGE_ME_TO_SECURE_API_KEY")
+    parser = _config({})
+
+    with _client_for_config(monkeypatch, parser) as client:
+        providers_response = client.get("/api/v1/llm/providers")
+        models_response = client.get("/api/v1/llm/models/metadata")
+
+    assert providers_response.status_code == 200, providers_response.text
+    provider = _provider(providers_response.json(), "custom_openai_api")
+    assert provider["is_configured"] is False
+    assert provider["provider_enabled"] is False
+    assert provider["availability"] == "not-configured"
+    assert provider["readiness_reason_code"] == "missing_credentials"
+    assert "requires credentials" in provider["readiness_message"]
+
+    assert models_response.status_code == 200, models_response.text
+    model = _model(models_response.json(), "custom_openai_api", "gpt-4.1-2025-04-14")
+    assert model["is_configured"] is False
+    assert model["provider_enabled"] is False
+    assert model["availability"] == "not-configured"
+
+
+@pytest.mark.unit
 def test_llm_provider_readiness_marks_unsupported_catalog_alias_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

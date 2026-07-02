@@ -1704,7 +1704,11 @@ export const CharacterSelect: React.FC<Props> = ({
                 size="small"
                 value={sortMode}
                 onChange={(value) => setSortMode(value as CharacterSortMode)}
-                popupClassName="character-select-sort-dropdown bg-surface text-text shadow-lg"
+                classNames={{
+                  popup: {
+                    root: "character-select-sort-dropdown bg-surface text-text shadow-lg"
+                  }
+                }}
                 options={[
                   {
                     value: "favorites",

@@ -390,12 +390,20 @@ export const tldwRequest = async (
       if (kl === "x-api-key" || kl === "authorization") delete h[k]
     }
     if (!hostedMode) {
-      const runtimeApiKey = getRuntimeSingleUserApiKeyOverride()
-      if (runtimeApiKey) {
+      const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+      if (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey)) {
         h["X-API-KEY"] = runtimeApiKey
       } else if (cfg?.authMode === "single-user") {
         const key = (cfg?.apiKey || "").trim()
         if (!key) {
+          if (runtimeApiKey && isPlaceholderApiKey(runtimeApiKey)) {
+            return {
+              ok: false,
+              status: 401,
+              error:
+                "tldw server API key is still set to a placeholder value. Replace it with your real API key in Settings -> tldw server before continuing."
+            }
+          }
           return {
             ok: false,
             status: 401,

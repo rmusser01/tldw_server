@@ -10,6 +10,7 @@ import {
 } from "@/services/tldw/browser-networking"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
+import { isPlaceholderApiKey } from "@/utils/api-key"
 import {
   ConnectionPhase,
   type ConnectionState,
@@ -552,9 +553,11 @@ const getPersistedServerUrl = async (): Promise<string | null> => {
 }
 
 const hasSingleUserApiKey = (config: Partial<TldwConfig> | null | undefined): boolean => {
+  const apiKey = String(config?.apiKey || "").trim()
+  const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
   return Boolean(
-    String(config?.apiKey || "").trim() ||
-      String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+    (apiKey && !isPlaceholderApiKey(apiKey)) ||
+      (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey))
   )
 }
 

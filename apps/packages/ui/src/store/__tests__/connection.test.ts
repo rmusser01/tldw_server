@@ -361,21 +361,24 @@ describe("connection store stability", () => {
     )
   })
 
-  it("treats whitespace runtime single-user auth as missing credentials", async () => {
-    mockedClient.getConfig.mockResolvedValue({
-      serverUrl: "http://127.0.0.1:8000",
-      authMode: "single-user"
-    } as any)
-    mockedRuntimeApiKey.mockReturnValue("   ")
+  it.each(["   ", "CHANGE_ME_TO_SECURE_API_KEY"])(
+    "treats invalid runtime single-user auth %s as missing credentials",
+    async (runtimeKey) => {
+      mockedClient.getConfig.mockResolvedValue({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user"
+      } as any)
+      mockedRuntimeApiKey.mockReturnValue(runtimeKey)
 
-    await useConnectionStore.getState().checkOnce()
+      await useConnectionStore.getState().checkOnce()
 
-    const state = useConnectionStore.getState().state
-    expect(state.phase).toBe(ConnectionPhase.UNCONFIGURED)
-    expect(state.isConnected).toBe(false)
-    expect(state.configStep).toBe("auth")
-    expect(mockedApiSend).not.toHaveBeenCalled()
-  })
+      const state = useConnectionStore.getState().state
+      expect(state.phase).toBe(ConnectionPhase.UNCONFIGURED)
+      expect(state.isConnected).toBe(false)
+      expect(state.configStep).toBe("auth")
+      expect(mockedApiSend).not.toHaveBeenCalled()
+    }
+  )
 
   it("can force a fresh health check after a recent connected state", async () => {
     setConnectionState({

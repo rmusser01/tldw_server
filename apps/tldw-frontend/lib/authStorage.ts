@@ -1,3 +1,5 @@
+import { isPlaceholderApiKey } from "@/utils/api-key";
+
 let runtimeApiKey: string | null = null;
 let runtimeApiBearer: string | null = null;
 let suppressEnvApiKeyForSession = false;
@@ -20,6 +22,7 @@ const normalizeApiKeyValue = (value?: string | null): string | null => {
     console.warn('Runtime API key contains whitespace; ignoring value.');
     return null;
   }
+  if (isPlaceholderApiKey(normalized)) return null;
   return normalized;
 };
 

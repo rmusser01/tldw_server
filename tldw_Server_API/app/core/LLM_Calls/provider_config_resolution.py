@@ -13,6 +13,21 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
 )
 
+_KNOWN_API_KEY_PLACEHOLDERS = {
+    "REPLACE-ME",
+    "REPLACE_ME",
+    "<REPLACE-ME>",
+    "<REPLACE_ME>",
+    "YOUR_API_KEY",
+    "YOUR_API_KEY_HERE",
+    "<YOUR_API_KEY>",
+    "<YOUR_API_KEY_HERE>",
+    "API_KEY",
+    "CHANGE_ME",
+    "CHANGE_ME_TO_SECURE_API_KEY",
+    "CHANGEME",
+}
+
 
 def valid_provider_config_value(value: Optional[str]) -> Optional[str]:
     """Return a non-placeholder config value after trimming, otherwise None."""
@@ -28,7 +43,14 @@ def valid_provider_config_value(value: Optional[str]) -> Optional[str]:
 
 def valid_provider_api_key(value: Optional[str]) -> Optional[str]:
     """Return a usable provider API key after applying placeholder checks."""
-    return valid_provider_config_value(value)
+    trimmed = valid_provider_config_value(value)
+    if not trimmed:
+        return None
+    if trimmed.lower().startswith("change_me"):
+        return None
+    if trimmed.upper() in _KNOWN_API_KEY_PLACEHOLDERS:
+        return None
+    return trimmed
 
 
 def first_env_provider_value(env_keys: tuple[str, ...]) -> Optional[str]:
