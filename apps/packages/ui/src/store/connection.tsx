@@ -8,7 +8,9 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
+import { isPlaceholderApiKey } from "@/utils/api-key"
 import {
   ConnectionPhase,
   type ConnectionState,
@@ -550,13 +552,22 @@ const getPersistedServerUrl = async (): Promise<string | null> => {
   return null
 }
 
+const hasSingleUserApiKey = (config: Partial<TldwConfig> | null | undefined): boolean => {
+  const apiKey = String(config?.apiKey || "").trim()
+  const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+  return Boolean(
+    (apiKey && !isPlaceholderApiKey(apiKey)) ||
+      (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey))
+  )
+}
+
 const hasRequiredAuthForConfig = (config: Partial<TldwConfig> | null | undefined): boolean => {
   const authMode = config?.authMode ?? "single-user"
   if (authMode === "multi-user") {
     return Boolean(String(config?.accessToken || "").trim())
   }
 
-  return Boolean(String(config?.apiKey || "").trim())
+  return hasSingleUserApiKey(config)
 }
 
 const deriveOnboardingConfigStep = (
@@ -746,10 +757,11 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
         }
       }
 
+      const hasSingleUserApiKeyValue = hasSingleUserApiKey(cfg)
       const missingSingleUserApiKey =
         Boolean(serverUrl) &&
         (cfg?.authMode ?? "single-user") === "single-user" &&
-        !String(cfg?.apiKey || "").trim()
+        !hasSingleUserApiKeyValue
 
       // If we have a server URL but no single-user API key, treat as
       // unconfigured/unauthenticated instead of marking the app connected
@@ -807,7 +819,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
       // Health endpoints may require auth; apiSend injects headers based
       // on tldwConfig (API key / access token).
       const noAuthForHealth = !cfg ||
-        (!cfg.apiKey &&
+        (!hasSingleUserApiKeyValue &&
           !cfg.accessToken &&
           cfg.authMode !== "multi-user")
 
@@ -857,8 +869,9 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
               serverUrl: fallbackServerUrl
             } as TldwConfig
           }
+          const fallbackHasSingleUserApiKey = hasSingleUserApiKey(cfg)
           const fallbackNoAuth = !cfg ||
-            (!cfg.apiKey &&
+            (!fallbackHasSingleUserApiKey &&
               !cfg.accessToken &&
               cfg.authMode !== "multi-user")
           const fallbackResp = await apiSend({

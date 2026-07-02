@@ -32,13 +32,13 @@ describe("Layout chat sidebar reset signal", () => {
     )
   })
 
-  it("scopes chat desktop collapsed sidebar to an edge expand affordance", () => {
+  it("does not render a chat-specific collapsed rail edge affordance", () => {
     const source = readFileSync(layoutSourcePath, "utf8")
 
-    expect(source).toContain("useDesktop")
-    expect(source).toContain("useChatEdgeCollapse")
-    expect(source).toContain('data-testid="chat-sidebar-edge-expand"')
-    expect(source).toContain("isChatScreen && isDesktop")
-    expect(source).toContain("!useChatEdgeCollapse || !chatSidebarCollapsed")
+    expect(source).toContain("!isMobile")
+    expect(source).not.toContain("useChatEdgeCollapse")
+    expect(source).not.toContain('data-testid="chat-sidebar-edge-expand"')
+    expect(source).not.toContain("!useChatEdgeCollapse || !chatSidebarCollapsed")
+    expect(source).not.toContain("CHAT_RAIL_EDGE_TRIGGER_CLASS")
   })
 })

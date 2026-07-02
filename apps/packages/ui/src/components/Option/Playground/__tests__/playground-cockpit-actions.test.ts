@@ -106,6 +106,25 @@ describe("playground cockpit actions", () => {
     });
   });
 
+  it("passes explicit assistant selection mode through cockpit selector events", async () => {
+    const event = nextCustomEvent<{
+      tab: "character";
+      applyAs: "tracked";
+      source: string;
+    }>(OPEN_ASSISTANT_SELECT_EVENT);
+
+    openAssistantSelector({ tab: "character", applyAs: "tracked" });
+
+    await expect(event).resolves.toMatchObject({
+      type: OPEN_ASSISTANT_SELECT_EVENT,
+      detail: {
+        tab: "character",
+        applyAs: "tracked",
+        source: "playground-cockpit",
+      },
+    });
+  });
+
   it("opens MCP settings directly instead of only the composer MCP popover", async () => {
     const event = nextCustomEvent<{ returnFocusSelector: string }>(
       OPEN_MCP_SETTINGS_EVENT,

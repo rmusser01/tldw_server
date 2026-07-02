@@ -35,6 +35,7 @@ export const SidePanelBody = ({
   const {
     messages,
     setMessages,
+    setHistory,
     streaming,
     isProcessing,
     regenerateLastMessage,
@@ -256,6 +257,8 @@ export const SidePanelBody = ({
           messages={messages}
           historyId={historyId}
           serverChatId={serverChatId}
+          setMessages={setMessages}
+          setHistory={setHistory}
           className="mb-4"
         />
         <div style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>

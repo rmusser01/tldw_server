@@ -153,6 +153,7 @@ export const PlaygroundChat = ({
   const {
     messages,
     setMessages,
+    setHistory,
     streaming,
     isProcessing,
     regenerateLastMessage,
@@ -1139,6 +1140,8 @@ export const PlaygroundChat = ({
             messages={messages}
             historyId={historyId}
             serverChatId={serverChatId}
+            setMessages={setMessages}
+            setHistory={setHistory}
             className="mb-6 mt-4"
           />
         </React.Suspense>

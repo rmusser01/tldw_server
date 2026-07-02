@@ -122,12 +122,63 @@ const markOpenApiDriftCheck = async (
   }
 }
 
+const getCurrentHttpPageOrigin = (): string | null => {
+  if (typeof window === "undefined") return null
+  try {
+    const protocol = String(window.location?.protocol || "").toLowerCase()
+    if (protocol !== "http:" && protocol !== "https:") return null
+    return String(window.location?.origin || "").trim() || null
+  } catch {
+    return null
+  }
+}
+
+const getDeploymentMode = (): string => {
+  try {
+    const viteEnv = import.meta.env as Record<string, unknown> | undefined
+    const viteMode = String(
+      (viteEnv?.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE as string | undefined) || ""
+    ).trim()
+    if (viteMode) return viteMode
+  } catch {
+    // Fall back to process.env for Next.js/test contexts.
+  }
+
+  try {
+    return String(
+      typeof process !== "undefined"
+        ? process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || ""
+        : ""
+    ).trim()
+  } catch {
+    return ""
+  }
+}
+
+const isQuickstartDeploymentMode = (): boolean => {
+  return getDeploymentMode() === "quickstart"
+}
+
+const isSameOriginWebUiOpenApiBase = (base: string): boolean => {
+  if (!isQuickstartDeploymentMode()) return false
+  const pageOrigin = getCurrentHttpPageOrigin()
+  if (!pageOrigin) return false
+  try {
+    const parsed = new URL(base)
+    const basePath = parsed.pathname.replace(/\/+$/, "")
+    return parsed.origin === pageOrigin && basePath === ""
+  } catch {
+    return false
+  }
+}
+
 const checkOpenApiDrift = async (storage: Storage) => {
   let timeout: ReturnType<typeof setTimeout> | null = null
   try {
     const cfg = await storage.get<any>("tldwConfig")
     const base = String(cfg?.serverUrl || "").replace(/\/$/, "")
     if (!base) return
+    if (isSameOriginWebUiOpenApiBase(base)) return
     if (await shouldSkipOpenApiDriftCheck(storage, base)) return
 
     const controller = new AbortController()

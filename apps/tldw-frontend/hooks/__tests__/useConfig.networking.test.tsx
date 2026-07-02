@@ -265,4 +265,30 @@ describe('useConfig networking', () => {
     expect(readStoredTldwConfig()).not.toHaveProperty('apiKey');
     expect(readStoredTldwConfig()).not.toHaveProperty('accessToken');
   });
+
+  it('persists env auth opt-out when users clear seeded credentials', async () => {
+    process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8000';
+    process.env.NEXT_PUBLIC_X_API_KEY = 'env-api-key';
+
+    const { ConfigProvider, useConfig } = await import('@web/hooks/useConfig');
+
+    const { result } = renderHook(() => useConfig(), {
+      wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider>,
+    });
+
+    await waitFor(() => {
+      expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('env-api-key');
+    });
+
+    act(() => {
+      result.current.setXApiKey('');
+    });
+
+    await waitFor(() => {
+      expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith(undefined);
+    });
+    expect(localStorage.getItem('tldwRuntimeEnvAuthOptOut')).toBe('true');
+    expect(localStorage.getItem('apiKey')).toBeNull();
+    expect(readStoredTldwConfig()).not.toHaveProperty('apiKey');
+  });
 });

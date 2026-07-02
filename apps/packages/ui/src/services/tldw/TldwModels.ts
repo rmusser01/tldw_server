@@ -2,6 +2,7 @@ import { Storage } from "@plasmohq/storage"
 import { tldwClient, TldwModel, type TldwConfig } from "./TldwApiClient"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { isPlaceholderApiKey } from "@/utils/api-key"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import {
   getProviderDisplayName,
   inferProviderFromModel
@@ -166,6 +167,9 @@ export class TldwModelsService {
       return Boolean(String(config.accessToken || "").trim())
     }
 
+    const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+    if (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey)) return true
+
     const key = String(config.apiKey || "").trim()
     if (!key) return false
     if (isPlaceholderApiKey(key)) return false
@@ -177,7 +181,12 @@ export class TldwModelsService {
     const serverUrl = String(config.serverUrl || "").trim().toLowerCase()
     const authMode = String(config.authMode || "single-user")
     const hasAccessToken = Boolean(String(config.accessToken || "").trim())
-    const hasApiKey = Boolean(String(config.apiKey || "").trim())
+    const apiKey = String(config.apiKey || "").trim()
+    const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+    const hasApiKey = Boolean(
+      (apiKey && !isPlaceholderApiKey(apiKey)) ||
+        (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey))
+    )
     const orgId = config.orgId != null ? String(config.orgId) : "none"
     return `${serverUrl}|${authMode}|${hasAccessToken ? "token" : hasApiKey ? "key" : "none"}|${orgId}`
   }

@@ -460,7 +460,7 @@ export const PlaygroundToolsPopover: React.FC<PlaygroundToolsPopoverProps> =
         trigger="click"
         placement="topRight"
         content={content}
-        overlayClassName="playground-more-tools"
+        classNames={{ root: "playground-more-tools" }}
         open={toolsPopoverOpen}
         onOpenChange={onToolsPopoverChange}
       >

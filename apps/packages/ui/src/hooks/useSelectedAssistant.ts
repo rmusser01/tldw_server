@@ -137,9 +137,9 @@ export const useSelectedAssistant = (
 
       latestSelectedAssistantRef.current = normalizedNext
       await setSelectedAssistant(normalizedNext)
-      notifySelectedAssistantSubscribers(normalizedNext)
       await clearAssistantSyncSelection()
       await syncLegacyCharacterSelectionMirror(normalizedNext)
+      notifySelectedAssistantSubscribers(normalizedNext)
     },
     [setSelectedAssistant]
   )

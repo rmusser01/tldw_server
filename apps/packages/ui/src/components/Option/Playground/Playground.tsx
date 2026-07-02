@@ -15,7 +15,6 @@ import {
   type RuntimeSettingSummary,
   type RuntimeToolChoice,
 } from "./PlaygroundRuntimeInspector";
-import { PlaygroundStatusStrip } from "./PlaygroundStatusStrip";
 import type { PlaygroundSendBlocker } from "./PlaygroundSendControl";
 import {
   CharacterChatReadinessPanel,
@@ -39,7 +38,10 @@ import {
   setTemporaryChatFromCockpit,
   toggleWebSearchFromCockpit,
 } from "./playground-cockpit-actions";
-import { getCockpitMessageCount } from "./playground-cockpit-state";
+import {
+  formatCockpitMessageCount,
+  getCockpitMessageCount,
+} from "./playground-cockpit-state";
 import { buildPlaygroundCompositionPreviewSummary } from "./playground-composition-preview";
 import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBoundary";
 import { hasVisibleAssistantResponse } from "@/components/Common/Playground/message-visibility";
@@ -60,7 +62,14 @@ import {
 } from "@/store/model";
 import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
-import { ChevronDown, Keyboard, PanelRightOpen, Search, X } from "lucide-react";
+import {
+  ChevronDown,
+  Keyboard,
+  Maximize2,
+  PanelRightOpen,
+  Search,
+  X,
+} from "lucide-react";
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings";
 import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
 import { useTranslation } from "react-i18next";
@@ -151,6 +160,88 @@ const readSidepanelChatWebUiHandoffFromLocation = () => {
     hashParams.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM) ??
       params.get(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM),
   );
+};
+
+const extractHashSearch = (hash: string | null | undefined): string => {
+  const value = hash?.startsWith("#") ? hash.slice(1) : (hash ?? "");
+  if (!value) return "";
+  if (value.startsWith("?")) return value;
+  const queryIndex = value.indexOf("?");
+  return queryIndex >= 0 ? value.slice(queryIndex) : "";
+};
+
+const getCharacterChatRouteIntentFromLocation = (
+  locationSearch: string,
+  locationHash: string,
+) => {
+  const candidates = [locationSearch, extractHashSearch(locationHash)];
+  if (typeof window !== "undefined") {
+    candidates.push(
+      window.location.search,
+      extractHashSearch(window.location.hash),
+    );
+  }
+
+  for (const candidate of candidates) {
+    const intent = getCharacterChatRouteIntent(candidate);
+    if (intent) return intent;
+  }
+
+  return null;
+};
+
+const updateCharacterChatRouteSearch = (
+  search: string,
+  characterId: string | null,
+): string => {
+  const normalizedSearch = search.startsWith("?") ? search.slice(1) : search;
+  const params = new URLSearchParams(normalizedSearch);
+  params.set("mode", "character");
+  params.delete("chatId");
+  params.delete("chat_id");
+  params.delete("serverChatId");
+  params.delete("server_chat_id");
+
+  if (characterId) {
+    params.set("characterId", characterId);
+  } else {
+    params.delete("characterId");
+    params.delete("character_id");
+  }
+
+  const nextSearch = params.toString();
+  return nextSearch ? `?${nextSearch}` : "";
+};
+
+const updateCharacterChatRouteHash = (
+  hash: string,
+  characterId: string | null,
+): string => {
+  const prefix = hash.startsWith("#") ? "#" : "";
+  const value = prefix ? hash.slice(1) : hash;
+  const queryIndex = value.indexOf("?");
+  const hashPath = queryIndex >= 0 ? value.slice(0, queryIndex) : value;
+  const hashSearch = queryIndex >= 0 ? value.slice(queryIndex) : "";
+  return `${prefix}${hashPath}${updateCharacterChatRouteSearch(
+    hashSearch,
+    characterId,
+  )}`;
+};
+
+const withTrackedCharacterSelectionMode = (character: Character): Character => {
+  const metadata = character.metadata;
+  const normalizedMetadata =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? metadata
+      : {};
+
+  return {
+    ...character,
+    metadata: {
+      ...normalizedMetadata,
+      selectionMode: "tracked",
+    },
+  };
 };
 
 type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
@@ -359,6 +450,8 @@ export const Playground = () => {
     serverChatState,
     serverChatTopic,
     serverChatSource,
+    serverChatCharacterId,
+    serverChatMetaLoaded,
     isLoading,
     selectedModel,
     setHistoryId,
@@ -526,6 +619,7 @@ export const Playground = () => {
   const routeCharacterIntentAppliedRef = React.useRef<string | null>(null);
   const routeCharacterIntentInFlightRef = React.useRef<string | null>(null);
   const routeCharacterIntentRequestRef = React.useRef(0);
+  const routeCharacterIntentSignatureRef = React.useRef<string | null>(null);
   const translationRef = React.useRef(t);
   const previousThreadRef = React.useRef<string | null>(null);
   const stableHistoryId = historyId && historyId !== "temp" ? historyId : null;
@@ -536,9 +630,28 @@ export const Playground = () => {
     !serverChatId &&
     !composerHasDraft;
   const routeCharacterIntent = React.useMemo(
-    () => getCharacterChatRouteIntent(location.search),
-    [location.search],
+    () =>
+      getCharacterChatRouteIntentFromLocation(
+        location.search ?? "",
+        location.hash ?? "",
+      ),
+    [location.hash, location.key, location.search],
   );
+  const routeCharacterIntentSignature = React.useMemo(() => {
+    if (!routeCharacterIntent) return null;
+    return [
+      routeCharacterIntent.chatId ?? "",
+      routeCharacterIntent.characterId ?? "",
+      location.key ?? "",
+      location.search ?? "",
+      location.hash ?? "",
+    ].join("|");
+  }, [
+    location.hash,
+    location.key,
+    location.search,
+    routeCharacterIntent,
+  ]);
   const routeCharacterIntentChatId = routeCharacterIntent?.chatId ?? null;
   const routeCharacterIntentId = routeCharacterIntent?.characterId ?? null;
   const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
@@ -572,18 +685,75 @@ export const Playground = () => {
       : selectedAssistant
         ? false
         : Boolean(selectedCharacter?.id) && selectedAssistantMode !== "overlay";
+  const activeCharacterSelection = React.useMemo<Character | null>(() => {
+    if (
+      selectedAssistant?.kind === "character" &&
+      selectedAssistantMode !== "overlay"
+    ) {
+      return {
+        id: selectedAssistant.id,
+        name: selectedAssistant.name,
+        avatar_url: selectedAssistant.avatar_url ?? null,
+        system_prompt: selectedAssistant.system_prompt ?? null,
+        greeting: selectedAssistant.greeting ?? null,
+        slug: selectedAssistant.slug ?? null,
+        extensions: selectedAssistant.extensions ?? null,
+      };
+    }
+    if (!selectedAssistant && selectedCharacter?.id != null) {
+      return selectedCharacter;
+    }
+    return null;
+  }, [selectedAssistant, selectedAssistantMode, selectedCharacter]);
   const characterWorkflowActive =
     routeRequestsCharacterMode ||
     characterModeIntentActive ||
     normalizedChatWorkflowMode === "character" ||
     hasTrackedCharacterSelection;
-  const activeCharacterModeLabel =
-    selectedAssistant?.kind === "character" &&
-    selectedAssistantMode !== "overlay"
-      ? selectedAssistant.name
-      : selectedAssistant
-        ? null
-        : (selectedCharacter?.name ?? null);
+  const activeCharacterModeLabel = activeCharacterSelection?.name ?? null;
+  const selectedTrackedCharacterId = React.useMemo(() => {
+    return activeCharacterSelection?.id != null
+      ? String(activeCharacterSelection.id)
+      : null;
+  }, [activeCharacterSelection?.id]);
+
+  React.useEffect(() => {
+    if (
+      !serverChatId ||
+      !serverChatMetaLoaded ||
+      serverChatCharacterId == null ||
+      !selectedTrackedCharacterId ||
+      String(serverChatCharacterId) === selectedTrackedCharacterId
+    ) {
+      return;
+    }
+
+    setHistoryId(null, { preserveServerChatId: false });
+    setHistory([]);
+    setMessages([]);
+    setServerChatCharacterId(null);
+    setServerChatAssistantKind(null);
+    setServerChatAssistantId(null);
+    setServerChatPersonaMemoryMode(null);
+    setServerChatMetaLoaded(false);
+    setServerChatId(null);
+    void Promise.resolve(clearPersistedSession()).catch(() => undefined);
+  }, [
+    clearPersistedSession,
+    selectedTrackedCharacterId,
+    serverChatCharacterId,
+    serverChatId,
+    serverChatMetaLoaded,
+    setHistory,
+    setHistoryId,
+    setMessages,
+    setServerChatAssistantId,
+    setServerChatAssistantKind,
+    setServerChatCharacterId,
+    setServerChatId,
+    setServerChatMetaLoaded,
+    setServerChatPersonaMemoryMode,
+  ]);
   const setRouteContext = useChatSurfaceCoordinatorStore(
     (state) => state.setRouteContext,
   );
@@ -610,6 +780,16 @@ export const Playground = () => {
     },
     [setChatLayoutMode],
   );
+  const nextChatLayoutMode: PlaygroundCockpitMode =
+    normalizedChatLayoutMode === "focus" ? "cockpit" : "focus";
+  const chatLayoutToggleLabel =
+    normalizedChatLayoutMode === "focus"
+      ? toText(t("playground:cockpit.showPanels", "Show cockpit panels"))
+      : toText(t("playground:cockpit.enterFocus", "Enter focus chat"));
+  const chatLayoutToggleText =
+    normalizedChatLayoutMode === "focus"
+      ? toText(t("playground:cockpit.cockpit", "Cockpit"))
+      : toText(t("playground:cockpit.focus", "Focus"));
 
   React.useEffect(() => {
     setRouteContext({ routeId: "chat", surface: "webui" });
@@ -667,6 +847,17 @@ export const Playground = () => {
   }, [routeRequestsCharacterMode, setChatWorkflowMode]);
 
   React.useEffect(() => {
+    if (routeCharacterIntentSignatureRef.current === routeCharacterIntentSignature) {
+      return;
+    }
+    routeCharacterIntentSignatureRef.current = routeCharacterIntentSignature;
+    routeCharacterIntentAppliedRef.current = null;
+    routeCharacterIntentInFlightRef.current = null;
+    routeCharacterIntentRequestRef.current += 1;
+    setRouteCharacterRecovery(null);
+  }, [routeCharacterIntentSignature]);
+
+  React.useEffect(() => {
     if (!routeCharacterIntentChatId) return;
     if (serverChatId === routeCharacterIntentChatId) return;
     setServerChatId(routeCharacterIntentChatId);
@@ -678,17 +869,23 @@ export const Playground = () => {
   React.useEffect(() => {
     if (!routeCharacterIntentId) return;
     if (routeCharacterIntentChatId) return;
-    if (shouldRestorePersistedSessionOnInit) return;
-    const hasActiveConversation =
-      Boolean(serverChatId) ||
-      Boolean(stableHistoryId) ||
-      messages.length > 0 ||
-      history.length > 0 ||
-      composerHasDraft;
-    if (hasActiveConversation) return;
     if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId) {
       return;
     }
+    if (routeCharacterIntentInFlightRef.current === routeCharacterIntentId) {
+      return;
+    }
+
+    setHistoryId(null, { preserveServerChatId: false });
+    setHistory([]);
+    setMessages([]);
+    setServerChatCharacterId(null);
+    setServerChatAssistantKind(null);
+    setServerChatAssistantId(null);
+    setServerChatPersonaMemoryMode(null);
+    setServerChatMetaLoaded(false);
+    setServerChatId(null);
+    void Promise.resolve(clearPersistedSession()).catch(() => undefined);
 
     const requestId = routeCharacterIntentRequestRef.current + 1;
     routeCharacterIntentRequestRef.current = requestId;
@@ -713,14 +910,16 @@ export const Playground = () => {
         routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
         if (character) {
           setRouteCharacterRecovery(null);
-          void setSelectedCharacter(character);
+          void setSelectedCharacter(withTrackedCharacterSelectionMode(character));
           return;
         }
         setRouteCharacterRecovery({
           id: routeCharacterIntentId,
           reason: "missing",
         });
-        void setSelectedCharacter(fallbackCharacter);
+        void setSelectedCharacter(
+          withTrackedCharacterSelectionMode(fallbackCharacter),
+        );
       })
       .catch(() => {
         if (routeCharacterIntentRequestRef.current !== requestId) return;
@@ -729,28 +928,30 @@ export const Playground = () => {
           id: routeCharacterIntentId,
           reason: "load-error",
         });
-        void setSelectedCharacter(fallbackCharacter);
+        void setSelectedCharacter(
+          withTrackedCharacterSelectionMode(fallbackCharacter),
+        );
       })
       .finally(() => {
         if (routeCharacterIntentRequestRef.current !== requestId) return;
         routeCharacterIntentInFlightRef.current = null;
       });
-    return () => {
-      if (routeCharacterIntentRequestRef.current === requestId) {
-        routeCharacterIntentRequestRef.current += 1;
-      }
-    };
   }, [
-    composerHasDraft,
-    history.length,
-    messages.length,
+    clearPersistedSession,
     routeCharacterIntentChatId,
     routeCharacterIntentId,
+    routeCharacterIntentSignature,
     routeCharacterRetryToken,
-    serverChatId,
-    shouldRestorePersistedSessionOnInit,
+    setHistory,
+    setHistoryId,
+    setMessages,
     setSelectedCharacter,
-    stableHistoryId,
+    setServerChatAssistantId,
+    setServerChatAssistantKind,
+    setServerChatCharacterId,
+    setServerChatId,
+    setServerChatMetaLoaded,
+    setServerChatPersonaMemoryMode,
   ]);
 
   React.useEffect(() => {
@@ -762,14 +963,85 @@ export const Playground = () => {
   }, [routeCharacterIntentId]);
 
   React.useEffect(() => {
-    if (!routeCharacterRecovery || !selectedCharacter?.id) return;
+    if (!routeCharacterRecovery || !activeCharacterSelection?.id) return;
     if (routeCharacterIntentInFlightRef.current === routeCharacterRecovery.id) {
       return;
     }
-    if (String(selectedCharacter.id) !== routeCharacterRecovery.id) {
+    if (String(activeCharacterSelection.id) !== routeCharacterRecovery.id) {
       setRouteCharacterRecovery(null);
     }
-  }, [routeCharacterRecovery, selectedCharacter?.id]);
+  }, [activeCharacterSelection?.id, routeCharacterRecovery]);
+
+  React.useEffect(() => {
+    if (!routeRequestsCharacterMode) return;
+    if (routeCharacterIntentInFlightRef.current) return;
+
+    const nextCharacterId = selectedTrackedCharacterId;
+    const routeCharacterApplied =
+      routeCharacterIntentId != null &&
+      routeCharacterIntentAppliedRef.current === routeCharacterIntentId;
+
+    if (routeCharacterIntentId != null && !routeCharacterApplied) return;
+    if (!nextCharacterId && !routeCharacterIntentId && !routeCharacterIntentChatId) {
+      return;
+    }
+    if (!nextCharacterId && !routeCharacterApplied) return;
+    if (
+      nextCharacterId &&
+      !routeCharacterIntentChatId &&
+      routeCharacterIntentId === nextCharacterId
+    ) {
+      return;
+    }
+    if (!nextCharacterId && !routeCharacterIntentId) return;
+
+    const currentSearch =
+      location.search ||
+      (typeof window !== "undefined" ? window.location.search : "");
+    const currentHash =
+      location.hash ||
+      (typeof window !== "undefined" ? window.location.hash : "");
+    const searchIntent = getCharacterChatRouteIntent(currentSearch);
+    const hashSearch = extractHashSearch(currentHash);
+    const hashIntent = getCharacterChatRouteIntent(hashSearch);
+    const pathname =
+      location.pathname ||
+      (typeof window !== "undefined" ? window.location.pathname : "/chat") ||
+      "/chat";
+    const nextRoute = searchIntent
+      ? {
+          pathname,
+          search: updateCharacterChatRouteSearch(
+            currentSearch,
+            nextCharacterId,
+          ),
+          hash: currentHash,
+        }
+      : hashIntent
+        ? {
+            pathname,
+            search: currentSearch,
+            hash: updateCharacterChatRouteHash(currentHash, nextCharacterId),
+          }
+        : null;
+
+    if (!nextRoute) return;
+
+    if (nextCharacterId) {
+      routeCharacterIntentAppliedRef.current = nextCharacterId;
+      routeCharacterIntentInFlightRef.current = null;
+    }
+    navigate(nextRoute, { replace: true });
+  }, [
+    location.hash,
+    location.pathname,
+    location.search,
+    navigate,
+    routeCharacterIntentChatId,
+    routeCharacterIntentId,
+    routeRequestsCharacterMode,
+    selectedTrackedCharacterId,
+  ]);
 
   React.useEffect(() => {
     const handleReadinessState = (event: Event) => {
@@ -1290,7 +1562,7 @@ export const Playground = () => {
       }
       return;
     }
-    if (routeCharacterIntentId && !shouldRestorePersistedSessionOnInit) {
+    if (routeCharacterIntentId) {
       return;
     }
 
@@ -1373,7 +1645,7 @@ export const Playground = () => {
 
   useCharacterGreeting({
     playgroundReady,
-    selectedCharacter,
+    selectedCharacter: activeCharacterSelection,
     selectedCharacterMode: selectedAssistantMode,
     serverChatId,
     historyId,
@@ -2215,6 +2487,7 @@ export const Playground = () => {
   const openAssistantSelectorFromCockpit = React.useCallback(() => {
     openAssistantSelector({
       tab: cockpitAssistantSelectTab,
+      applyAs: "tracked",
       returnFocusSelector: COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR,
     });
   }, [cockpitAssistantSelectTab]);
@@ -2452,7 +2725,7 @@ export const Playground = () => {
     () =>
       buildCharacterChatReadiness({
         isServerConnected: serverReadinessState !== "blocked",
-        selectedCharacter,
+        selectedCharacter: activeCharacterSelection,
         selectedModel: providerRouteSummary.selectedModel,
         availableModels: readinessChatModels,
         modelsLoading: !Array.isArray(readinessChatModels),
@@ -2465,7 +2738,7 @@ export const Playground = () => {
       isProcessing,
       providerRouteSummary.selectedModel,
       readinessChatModels,
-      selectedCharacter,
+      activeCharacterSelection,
       serverReadinessState,
       streaming,
     ],
@@ -2963,6 +3236,7 @@ export const Playground = () => {
   const openCharacterSelectorFromReadiness = React.useCallback(() => {
     openAssistantSelector({
       tab: "character",
+      applyAs: "tracked",
       returnFocusSelector: COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR,
     });
   }, []);
@@ -3072,13 +3346,9 @@ export const Playground = () => {
       : null,
   ].filter((item): item is string => Boolean(item));
   const cockpitMessageCount = getCockpitMessageCount(messages, history);
-  const activeCharacterSessionId =
-    selectedAssistant?.kind === "character"
-      ? selectedAssistant.id
-      : selectedCharacter?.id;
   const characterSessionsPanel = characterWorkflowActive ? (
     <CharacterChatSessionsPanel
-      activeCharacterId={activeCharacterSessionId ?? null}
+      activeCharacterId={activeCharacterSelection?.id ?? null}
       activeCharacterName={activeCharacterModeLabel}
       activeServerChatId={serverChatId}
     />
@@ -3181,40 +3451,14 @@ export const Playground = () => {
       setupRecoveryMode={setupRecoveryMode}
     />
   );
-  const cockpitStatusStrip = (
-    <PlaygroundStatusStrip
-      mode={normalizedChatLayoutMode}
-      streaming={streaming}
-      selectedProvider={providerRouteSummary.selectedProvider}
-      selectedModel={providerRouteSummary.selectedModel}
-      messageCount={cockpitMessageCount}
-      sessionLabel={sessionLabel}
-      sessionTitle={sessionSummary.title}
-      sessionStatus={sessionSummary.status}
-      sessionStatusLabel={sessionSummary.statusLabel}
-      sessionDetail={sessionSummary.detail}
-      sessionError={sessionSummary.error}
-      hasContext={hasChatContext}
-      contextSummary={statusContextSummary}
-      temporaryChat={temporaryChat}
-      characterChatActive={characterWorkflowActive}
-      webSearchInProgress={isSearchingInternet}
-      degraded={serverReadinessState === "degraded"}
-      degradedChecks={serverDegradedChecks}
-      errorMessage={null}
-      serverBlocked={serverReadinessState === "blocked"}
-      modelUsabilityStatus={activeChatModelUsability?.status ?? null}
-      modelUsabilityCanSend={activeChatModelUsability?.canSend ?? null}
-      modelUsabilityMessage={activeChatModelUsabilityMessage}
-      modelUnavailable={characterChatModelUnavailable}
-      modelUnavailableMessage={
-        characterChatModelUnavailable ? characterChatReadinessCopy?.title ?? null : null
-      }
-      compositionStatus={compositionStatus}
-      onStopStreaming={() => stopStreamingRequest()}
-      onOpenSearchContext={() => openSearchAndContext({ tab: "context" })}
-      onOpenModelSettings={openModelSettings}
-    />
+  const composerMessageCount = cockpitMessageCount;
+  const composerMessageCountLabel = formatCockpitMessageCount(
+    t("playground:status.messageCount", {
+      defaultValue:
+        composerMessageCount === 1 ? "{{count}} message" : "{{count}} messages",
+      count: composerMessageCount,
+    } as any),
+    composerMessageCount,
   );
 
   return (
@@ -3273,7 +3517,6 @@ export const Playground = () => {
       <div className="relative z-10 flex h-full min-h-0 w-full">
         <PlaygroundCockpitShell
           mode={normalizedChatLayoutMode}
-          onModeChange={handleChatLayoutModeChange}
           leftRailVisible={normalizedCockpitContextRailVisible}
           rightRailVisible={normalizedCockpitRuntimeRailVisible}
           onLeftRailVisibleChange={setCockpitContextRailVisible}
@@ -3282,7 +3525,6 @@ export const Playground = () => {
           onMobilePanelChange={setMobileCockpitPanel}
           leftRail={cockpitLeftRail}
           rightRail={cockpitRightRail}
-          statusStrip={cockpitStatusStrip}
         >
           <div
             data-testid="playground-chat-shell"
@@ -3333,9 +3575,9 @@ export const Playground = () => {
                 </div>
               </div>
             )}
-            <div className="px-4 pt-2">
+            <div className="px-2 pt-1 sm:px-4 sm:pt-2">
               <div
-                className={`mx-auto flex w-full ${chatContentWidthClassName} items-center justify-between text-[11px] text-text-muted`}
+                className={`mx-auto flex w-full ${chatContentWidthClassName} items-center justify-between gap-2 text-[10px] text-text-muted sm:text-[11px]`}
               >
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <span
@@ -3362,11 +3604,25 @@ export const Playground = () => {
                       </span>
                     ) : null}
                   </span>
-                  <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
+                  <span className="hidden items-center rounded-full border border-border bg-surface2 px-2 py-0.5 sm:inline-flex">
                     {t("playground:regions.timeline", "Conversation timeline")}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    data-testid="playground-chat-layout-mode-trigger"
+                    aria-label={chatLayoutToggleLabel}
+                    aria-pressed={normalizedChatLayoutMode === "focus"}
+                    onClick={() => handleChatLayoutModeChange(nextChatLayoutMode)}
+                    title={chatLayoutToggleLabel}
+                    className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center gap-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
+                  >
+                    <Maximize2 className="h-3 w-3" aria-hidden="true" />
+                    <span className="hidden sm:inline">
+                      {chatLayoutToggleText}
+                    </span>
+                  </button>
                   <button
                     ref={shortcutsTriggerRef}
                     type="button"
@@ -3380,10 +3636,12 @@ export const Playground = () => {
                         "Open keyboard shortcuts (Shift+/)",
                       ) as string
                     }
-                    className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-2 py-0.5 text-text hover:bg-surface"
+                    className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center gap-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
                   >
                     <Keyboard className="h-3 w-3" aria-hidden="true" />
-                    {t("playground:shortcuts.title", "Shortcuts")}
+                    <span className="hidden sm:inline">
+                      {t("playground:shortcuts.title", "Shortcuts")}
+                    </span>
                   </button>
                   <button
                     ref={artifactsTriggerRef}
@@ -3402,7 +3660,11 @@ export const Playground = () => {
                       markArtifactsRead();
                     }}
                     title={artifactBadgeLabel as string}
-                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 transition ${
+                    className={`${
+                      !activeArtifact && !artifactsOpen
+                        ? "hidden sm:inline-flex"
+                        : "inline-flex"
+                    } min-h-[26px] items-center gap-1 rounded-full border px-1.5 py-0.5 transition sm:px-2 ${
                       !activeArtifact && !artifactsOpen
                         ? "cursor-not-allowed border-border bg-surface text-text-subtle opacity-70"
                         : "border-border bg-surface2 text-text hover:bg-surface"
@@ -3666,7 +3928,7 @@ export const Playground = () => {
               aria-live="polite"
               aria-relevant="additions"
               aria-label={t("playground:aria.chatTranscript", "Chat messages")}
-              className="custom-scrollbar flex-1 min-h-0 w-full overflow-x-hidden overflow-y-auto px-4"
+              className="custom-scrollbar flex-1 min-h-0 w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4"
             >
               <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
                 <ChatErrorBoundary>
@@ -3708,13 +3970,15 @@ export const Playground = () => {
                   : ""
               }`}
             >
-              <div
-                className={`mx-auto w-full ${chatContentWidthClassName} px-4 pt-2 text-[11px] text-text-muted`}
-              >
-                <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
-                  {t("playground:regions.composer", "Composer")}
-                </span>
-              </div>
+              {!isMobileViewport ? (
+                <div
+                  className={`mx-auto w-full ${chatContentWidthClassName} px-4 pt-2 text-[11px] text-text-muted`}
+                >
+                  <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
+                    {t("playground:regions.composer", "Composer")}
+                  </span>
+                </div>
+              ) : null}
               {!isAutoScrollToBottom && (
                 <div className="pointer-events-none absolute -top-12 left-0 right-0 flex justify-center">
                   <button
@@ -3776,6 +4040,9 @@ export const Playground = () => {
                   handleSelectAttachedResearchContextHistory
                 }
                 onDraftPresenceChange={handleComposerDraftPresenceChange}
+                composerMessageCount={composerMessageCount}
+                composerMessageCountLabel={composerMessageCountLabel}
+                characterWorkflowActive={characterWorkflowActive}
                 characterChatSendBlocker={characterChatSendBlocker}
                 characterChatModelUsability={activeChatModelUsability}
                 characterChatModelUsabilityLabel={

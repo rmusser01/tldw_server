@@ -21,6 +21,8 @@ export type UsePlaygroundContextItemsDeps = {
   webSearch: boolean;
   sessionUsageTotalTokens: number;
   sessionUsageLabel: string;
+  composerMessageCount?: number;
+  composerMessageCountLabel?: string | null;
   selectedSystemPrompt: string | null | undefined;
   selectedQuickPrompt: string | null | undefined;
   systemPrompt: string | null | undefined;
@@ -72,6 +74,8 @@ export function usePlaygroundContextItems(
     webSearch,
     sessionUsageTotalTokens,
     sessionUsageLabel,
+    composerMessageCount = 0,
+    composerMessageCountLabel = null,
     selectedSystemPrompt,
     selectedQuickPrompt,
     systemPrompt,
@@ -416,6 +420,30 @@ export function usePlaygroundContextItems(
         onClick: openSessionInsightsModal,
       });
     }
+    const normalizedComposerMessageCount =
+      typeof composerMessageCount === "number" &&
+      Number.isFinite(composerMessageCount)
+        ? Math.max(0, Math.trunc(composerMessageCount))
+        : 0;
+    if (normalizedComposerMessageCount > 0) {
+      items.push({
+        id: "messageCount",
+        label: toText(t("playground:composer.context.chat", "Chat")),
+        value:
+          composerMessageCountLabel ||
+          toText(
+            t("playground:composer.context.messageCount", {
+              defaultValue:
+                normalizedComposerMessageCount === 1
+                  ? "{{count}} message"
+                  : "{{count}} messages",
+              count: normalizedComposerMessageCount,
+            } as any),
+          ),
+        tone: "neutral",
+        onClick: openSessionInsightsModal,
+      });
+    }
     if (
       !hasRolePlayState &&
       (selectedSystemPrompt ||
@@ -526,6 +554,8 @@ export function usePlaygroundContextItems(
     selectedModel,
     selectedQuickPrompt,
     selectedSystemPrompt,
+    composerMessageCount,
+    composerMessageCountLabel,
     sessionUsageLabel,
     sessionUsageTotalTokens,
     openSessionInsightsModal,

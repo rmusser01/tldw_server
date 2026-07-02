@@ -1,5 +1,8 @@
+import { isPlaceholderApiKey } from "@/utils/api-key";
+
 let runtimeApiKey: string | null = null;
 let runtimeApiBearer: string | null = null;
+let suppressEnvApiKeyForSession = false;
 
 type StoredTldwConfig = {
   authMode?: unknown;
@@ -19,6 +22,7 @@ const normalizeApiKeyValue = (value?: string | null): string | null => {
     console.warn('Runtime API key contains whitespace; ignoring value.');
     return null;
   }
+  if (isPlaceholderApiKey(normalized)) return null;
   return normalized;
 };
 
@@ -44,6 +48,10 @@ export const setRuntimeApiBearer = (value?: string | null): void => {
 
 export const getRuntimeApiKey = (): string | null => runtimeApiKey;
 export const getRuntimeApiBearer = (): string | null => runtimeApiBearer;
+
+export const setEnvApiKeySuppressedForSession = (suppressed: boolean): void => {
+  suppressEnvApiKeyForSession = suppressed;
+};
 
 const readStoredTldwConfig = (): StoredTldwConfig | null => {
   if (typeof window === "undefined") return null;
@@ -72,7 +80,7 @@ const readStoredLocalValue = (key: string): string | null => {
 export const getApiKey = (): string | null => {
   const configuredValue = normalizeApiKeyValue(process.env.NEXT_PUBLIC_X_API_KEY || null);
   if (runtimeApiKey) return runtimeApiKey;
-  if (configuredValue) return configuredValue;
+  if (configuredValue && !suppressEnvApiKeyForSession) return configuredValue;
 
   const storedConfig = readStoredTldwConfig();
   const storedMode = normalizeValue(String(storedConfig?.authMode || ""));
@@ -100,10 +108,14 @@ export const getApiBearer = (): string | null => {
 };
 
 export const hasEnvApiAuth = (): boolean =>
-  normalizeApiKeyValue(process.env.NEXT_PUBLIC_X_API_KEY || null) !== null ||
+  (
+    !suppressEnvApiKeyForSession &&
+    normalizeApiKeyValue(process.env.NEXT_PUBLIC_X_API_KEY || null) !== null
+  ) ||
   normalizeBearerValue(process.env.NEXT_PUBLIC_API_BEARER || null) !== null;
 
 export const clearRuntimeAuth = (): void => {
   runtimeApiKey = null;
   runtimeApiBearer = null;
+  suppressEnvApiKeyForSession = false;
 };

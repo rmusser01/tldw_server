@@ -164,6 +164,7 @@ export const Header: React.FC<Props> = ({
     if (!selectedCharacter?.id) {
       dispatchOpenAssistantSelect({
         tab: "character",
+        applyAs: "tracked",
         source: "chat-header"
       })
       return

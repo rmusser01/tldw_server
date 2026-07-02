@@ -573,6 +573,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       if (item.id === "sessionStatus") {
         return "composer-session-status-chip"
       }
+      if (item.id === "messageCount") {
+        return "composer-message-count-chip"
+      }
       return undefined
     },
     []
@@ -798,6 +801,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         )}
       </div>
     ) : null
+  const persistentContextStrip =
+    !isMobile && !isProMode ? casualContextStrip : contextStrip
 
   const proAdvancedControls =
     isProMode && !isMobile ? (
@@ -1115,11 +1120,15 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
                 </button>
               </p>
             )}
-          {!isMobile && !isProMode ? casualContextStrip : contextStrip}
+          {persistentContextStrip}
           {!isMobile && !isProMode ? casualAdvancedControlsPanel : null}
         </>
       ) : (
-        collapsedMobileToolbarLayout
+        <>
+          {collapsedMobileToolbarLayout}
+          {!isMobile ? persistentContextStrip : null}
+          {!isMobile && !isProMode ? casualAdvancedControlsPanel : null}
+        </>
       )}
     </div>
   )

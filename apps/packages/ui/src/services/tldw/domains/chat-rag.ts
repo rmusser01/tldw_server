@@ -615,7 +615,8 @@ export const chatRagMethods = {
     const query = buildQuery(toChatScopeParams(options?.scope))
     return await bgRequest<ChatSettingsResponse>({
       path: appendPathQuery(`/api/v1/chats/${cid}/settings`, query),
-      method: "GET"
+      method: "GET",
+      expectedStatuses: [404]
     })
   },
 

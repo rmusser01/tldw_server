@@ -6,6 +6,7 @@ import {
   resolveBrowserRequestTransport,
   tldwRequest
 } from "@/services/tldw/request-core"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import {
   BACKEND_UNREACHABLE_EVENT,
   type BackendUnreachableDetail
@@ -71,6 +72,21 @@ const parseHttpOrigin = (value: unknown): string | null => {
   } catch {
     return null
   }
+}
+
+const normalizeExpectedStatuses = (statuses: unknown): Set<number> => {
+  if (!Array.isArray(statuses)) return new Set()
+  return new Set(
+    statuses
+      .map((status) => Number(status))
+      .filter(
+        (status) =>
+          Number.isFinite(status) &&
+          status >= 100 &&
+          status <= 599
+      )
+      .map((status) => Math.trunc(status))
+  )
 }
 
 const toAllowlistEntries = (value: unknown): string[] => {
@@ -416,6 +432,7 @@ export interface BgRequestInit<
   returnResponse?: boolean
   preferDirect?: boolean
   suppressBackendUnavailableEvent?: boolean
+  expectedStatuses?: number[]
 }
 
 // In-flight coalescing for idempotent GET requests: when several callers issue
@@ -438,7 +455,8 @@ export async function bgRequest<
     !init.returnResponse &&
     !init.responseType &&
     !init.preferDirect &&
-    !init.suppressBackendUnavailableEvent
+    !init.suppressBackendUnavailableEvent &&
+    !init.expectedStatuses?.length
   if (!coalescable) {
     return bgRequestImpl<T, P, M>(init)
   }
@@ -498,9 +516,13 @@ async function bgRequestImpl<
     responseType,
     returnResponse,
     preferDirect = false,
-    suppressBackendUnavailableEvent = false
+    suppressBackendUnavailableEvent = false,
+    expectedStatuses
   } = init
   const path = normalizeKnownPathQuirks(rawPath)
+  const expectedStatusSet = normalizeExpectedStatuses(expectedStatuses)
+  const isExpectedStatus = (status: unknown): boolean =>
+    typeof status === "number" && expectedStatusSet.has(Math.trunc(status))
   const isAbsoluteUrl = typeof path === "string" && /^https?:/i.test(path)
   const noAuthExplicit = Object.prototype.hasOwnProperty.call(init, "noAuth")
   let resolvedNoAuth = noAuthExplicit ? noAuth : (noAuth || isAbsoluteUrl)
@@ -650,7 +672,7 @@ async function bgRequestImpl<
         resp?.error,
         `Request failed: ${resp?.status}`
       )
-      if (!isAbortErrorMessage(msg)) {
+      if (!isAbortErrorMessage(msg) && !isExpectedStatus(resp?.status)) {
         console.warn("[tldw:request]", method, path, resp?.status, msg)
         await recordRequestError({
           method: String(method),
@@ -714,7 +736,7 @@ async function bgRequestImpl<
             resp?.error,
             `Request failed: ${resp?.status}`
           )
-          if (!isAbortErrorMessage(msg)) {
+          if (!isAbortErrorMessage(msg) && !isExpectedStatus(resp?.status)) {
             console.warn("[tldw:request]", method, path, resp?.status, msg)
             await recordRequestError({
               method: String(method),
@@ -788,7 +810,7 @@ async function bgRequestImpl<
           resp?.error,
           `Request failed: ${resp?.status}`
         )
-        if (!isAbortErrorMessage(msg)) {
+        if (!isAbortErrorMessage(msg) && !isExpectedStatus(resp?.status)) {
           console.warn("[tldw:request]", method, path, resp?.status, msg)
           await recordRequestError({
             method: String(method),
@@ -850,7 +872,7 @@ async function bgRequestImpl<
       resp?.error,
       `Request failed: ${resp?.status}`
     )
-    if (!isAbortErrorMessage(msg)) {
+    if (!isAbortErrorMessage(msg) && !isExpectedStatus(resp?.status)) {
       console.warn("[tldw:request]", method, path, resp?.status, msg)
       await recordRequestError({
         method: String(method),
@@ -987,7 +1009,8 @@ async function* bgStreamDirect<
   }
 
   if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
-    const key = String(cfg?.apiKey || "").trim()
+    const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+    const key = runtimeApiKey || String(cfg?.apiKey || "").trim()
     if (!key) {
       throw new Error(
         "Add or update your API key in Settings -> tldw server, then try again."

@@ -145,4 +145,45 @@ describe("TldwApiClient connection storage sync", () => {
       apiKey: "test-api-key"
     })
   })
+
+  it("skips same-origin quickstart OpenAPI discovery", async () => {
+    const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    try {
+      const client = new TldwApiClient()
+      await client.updateConfig({
+        serverUrl: window.location.origin,
+        authMode: "single-user",
+        apiKey: "test-api-key"
+      })
+
+      await expect(client.getOpenAPISpec()).resolves.toBeNull()
+
+      expect(mocks.bgRequest).not.toHaveBeenCalled()
+      expect(mocks.tldwRequest).not.toHaveBeenCalled()
+    } finally {
+      if (previousMode === undefined) {
+        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      } else {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = previousMode
+      }
+    }
+  })
+
+  it("marks missing per-chat settings as an expected 404", async () => {
+    const client = new TldwApiClient()
+    mocks.bgRequest.mockResolvedValue({ settings: null })
+
+    await expect(client.getChatSettings("chat-1")).resolves.toEqual({
+      settings: null
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/chats/chat-1/settings?scope_type=global",
+        method: "GET",
+        expectedStatuses: [404]
+      })
+    )
+  })
 })

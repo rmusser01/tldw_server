@@ -48,29 +48,16 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("Playground cockpit accessibility", () => {
-  it("labels cockpit landmarks and exposes the layout toggle state", () => {
-    const onModeChange = vi.fn();
-
+  it("labels cockpit landmarks without adding a top layout rail", () => {
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
-        onModeChange={onModeChange}
         leftRailVisible
         rightRailVisible
         onLeftRailVisibleChange={vi.fn()}
         onRightRailVisibleChange={vi.fn()}
         leftRail={<div>Context tools</div>}
         rightRail={<div>Runtime tools</div>}
-        statusStrip={
-          <PlaygroundStatusStrip
-            mode="cockpit"
-            streaming={false}
-            selectedModel="openai:gpt-4o"
-            messageCount={0}
-            sessionLabel="Local chat"
-            hasContext={false}
-          />
-        }
       >
         <div>Chat transcript</div>
       </PlaygroundCockpitShell>,
@@ -89,26 +76,21 @@ describe("Playground cockpit accessibility", () => {
       screen.getByTestId("playground-cockpit-mobile-rails"),
     ).toHaveTextContent("Runtime");
 
-    const toggle = screen.getByRole("button", {
-      name: "Enter focus chat",
-    });
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(toggle);
-    expect(onModeChange).toHaveBeenCalledWith("focus");
+    expect(
+      screen.queryByRole("button", { name: "Enter focus chat" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the mobile cockpit panel compact while preserving its accessible summary", () => {
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
-        onModeChange={vi.fn()}
         leftRailVisible
         rightRailVisible
         onLeftRailVisibleChange={vi.fn()}
         onRightRailVisibleChange={vi.fn()}
         leftRail={<div>Context tools</div>}
         rightRail={<div>Runtime tools</div>}
-        statusStrip={<div>Ready</div>}
       >
         <div>Chat transcript</div>
       </PlaygroundCockpitShell>,
@@ -137,28 +119,34 @@ describe("Playground cockpit accessibility", () => {
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
-        onModeChange={vi.fn()}
         leftRailVisible={false}
         rightRailVisible
         onLeftRailVisibleChange={onLeftRailVisibleChange}
         onRightRailVisibleChange={onRightRailVisibleChange}
         leftRail={<div>Context tools</div>}
         rightRail={<div>Runtime tools</div>}
-        statusStrip={<div>Ready</div>}
       >
         <div>Chat transcript</div>
       </PlaygroundCockpitShell>,
     );
 
     const contextToggle = screen.getByRole("button", {
-      name: "Show context rail",
+      name: "Restore context sidechannel",
     });
-    const runtimeToggle = screen.getByRole("button", {
-      name: "Hide runtime rail",
+    const runtimeToggle = within(
+      screen.getByRole("complementary", { name: "Chat cockpit runtime" }),
+    ).getByRole("button", {
+      name: "Collapse runtime sidechannel",
     });
 
-    expect(contextToggle).toHaveAttribute("aria-pressed", "false");
-    expect(runtimeToggle).toHaveAttribute("aria-pressed", "true");
+    expect(contextToggle).toHaveAttribute(
+      "aria-controls",
+      "playground-cockpit-left-rail",
+    );
+    expect(runtimeToggle).toHaveAttribute(
+      "aria-controls",
+      "playground-cockpit-right-rail",
+    );
     fireEvent.click(contextToggle);
     fireEvent.click(runtimeToggle);
     expect(onLeftRailVisibleChange).toHaveBeenCalledWith(true);
@@ -172,14 +160,12 @@ describe("Playground cockpit accessibility", () => {
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
-        onModeChange={vi.fn()}
         leftRailVisible
         rightRailVisible={false}
         onLeftRailVisibleChange={onLeftRailVisibleChange}
         onRightRailVisibleChange={onRightRailVisibleChange}
         leftRail={<div>Context tools</div>}
         rightRail={<div>Runtime tools</div>}
-        statusStrip={<div>Ready</div>}
       >
         <div>Chat transcript</div>
       </PlaygroundCockpitShell>,
@@ -207,7 +193,6 @@ describe("Playground cockpit accessibility", () => {
 
   it("activates cockpit rail and mobile tab controls from the keyboard", async () => {
     const user = userEvent.setup();
-    const onModeChange = vi.fn();
     const onLeftRailVisibleChange = vi.fn();
     const onRightRailVisibleChange = vi.fn();
     const onMobilePanelChange = vi.fn();
@@ -215,7 +200,6 @@ describe("Playground cockpit accessibility", () => {
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
-        onModeChange={onModeChange}
         leftRailVisible
         rightRailVisible
         onLeftRailVisibleChange={onLeftRailVisibleChange}
@@ -224,32 +208,24 @@ describe("Playground cockpit accessibility", () => {
         onMobilePanelChange={onMobilePanelChange}
         leftRail={<div>Context tools</div>}
         rightRail={<div>Runtime tools</div>}
-        statusStrip={<div>Ready</div>}
       >
         <div>Chat transcript</div>
       </PlaygroundCockpitShell>,
     );
 
-    const contextToggle = screen.getByRole("button", {
-      name: "Hide context rail",
-    });
+    const contextToggle = within(
+      screen.getByRole("complementary", { name: "Chat cockpit context" }),
+    ).getByRole("button", { name: "Collapse context sidechannel" });
     contextToggle.focus();
     await user.keyboard("{Enter}");
     expect(onLeftRailVisibleChange).toHaveBeenCalledWith(false);
 
-    const runtimeToggle = screen.getByRole("button", {
-      name: "Hide runtime rail",
-    });
+    const runtimeToggle = within(
+      screen.getByRole("complementary", { name: "Chat cockpit runtime" }),
+    ).getByRole("button", { name: "Collapse runtime sidechannel" });
     runtimeToggle.focus();
     await user.keyboard("{Enter}");
     expect(onRightRailVisibleChange).toHaveBeenCalledWith(false);
-
-    const focusToggle = screen.getByRole("button", {
-      name: "Enter focus chat",
-    });
-    focusToggle.focus();
-    await user.keyboard("{Enter}");
-    expect(onModeChange).toHaveBeenCalledWith("focus");
 
     const runtimeTab = screen.getByRole("tab", { name: "Runtime" });
     const contextTab = screen.getByRole("tab", { name: "Context" });
@@ -267,13 +243,12 @@ describe("Playground cockpit accessibility", () => {
     await user.keyboard("{Enter}");
     expect(onMobilePanelChange).toHaveBeenCalledWith("runtime");
 
-    const mobilePanels = screen.getByTestId("playground-cockpit-mobile-rails");
-    const panelFocusToggle = within(mobilePanels).getByRole("button", {
-      name: "Return to focus chat",
-    });
-    panelFocusToggle.focus();
-    await user.keyboard("{Enter}");
-    expect(onModeChange).toHaveBeenCalledWith("focus");
+    expect(
+      within(screen.getByTestId("playground-cockpit-mobile-rails")).queryByRole(
+        "button",
+        { name: "Return to focus chat" },
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it("announces compact runtime state through one status region", () => {
