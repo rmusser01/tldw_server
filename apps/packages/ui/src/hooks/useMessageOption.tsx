@@ -43,6 +43,8 @@ type UseMessageOptionOptions = {
   scope?: ChatScope;
   inheritedAssistant?: AssistantSelection | null;
   inheritedPersonaMemoryMode?: PersonaMemoryMode | null;
+  visualIdentityManualExpressionOverride?: string | null;
+  setVisualIdentityManualExpressionOverride?: (expressionKey: string) => void;
 };
 
 const normalizePersonaMemoryMode = (
@@ -511,6 +513,10 @@ export const useMessageOption = (
     inheritedAssistant,
     inheritedPersonaMemoryMode,
     scope: opts.scope,
+    visualIdentityManualExpressionOverride:
+      opts.visualIdentityManualExpressionOverride,
+    setVisualIdentityManualExpressionOverride:
+      opts.setVisualIdentityManualExpressionOverride,
   });
   const onSubmit = React.useCallback(
     async (...args: Parameters<typeof submitChat>) => {

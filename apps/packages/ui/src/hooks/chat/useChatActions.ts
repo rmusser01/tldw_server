@@ -134,6 +134,7 @@ import {
 import type { ChatModelSettings } from "@/store/model"
 import type { SaveMessageData } from "@/types/chat-modes"
 import type { DynamicUIRequest } from "@/types/dynamic-ui"
+import type { VisualIdentityResolveResponse } from "@/types/visual-identities"
 import {
   buildGreetingOptionsFromEntries,
   collectGreetingEntries,
@@ -146,6 +147,7 @@ import {
   PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY,
   resolveOutputFormattingGuideSuffix
 } from "@/utils/output-formatting-guide"
+import { parseVisualIdentityEmoteCommand } from "@/utils/visual-identity-emote"
 
 type ChatModelSettingsStore = ChatModelSettings & {
   setSystemPrompt?: (prompt: string) => void
@@ -252,6 +254,74 @@ type TldwChatMeta =
   | number
   | null
   | undefined
+
+type VisualIdentityMessageFields = {
+  visualActorKind?: "character" | "persona" | null
+  visualActorId?: number | string | null
+  visualPackId?: number | null
+  visualPackVersionId?: number | null
+  visualExpressionKey?: string | null
+  visualAssetId?: number | null
+  visualAssetUrl?: string | null
+  visualFallbackReason?: string | null
+  visualIsAnimated?: boolean | null
+}
+
+const buildVisualIdentityMessageFields = (
+  resolution: VisualIdentityResolveResponse | null | undefined
+): VisualIdentityMessageFields => {
+  if (!resolution || typeof resolution !== "object") return {}
+  return {
+    visualActorKind:
+      resolution.actor_kind === "character" || resolution.actor_kind === "persona"
+        ? resolution.actor_kind
+        : null,
+    visualActorId:
+      typeof resolution.actor_id === "string" ||
+      typeof resolution.actor_id === "number"
+        ? resolution.actor_id
+        : null,
+    visualPackId:
+      typeof resolution.pack_id === "number" ? resolution.pack_id : null,
+    visualPackVersionId:
+      typeof resolution.pack_version_id === "number"
+        ? resolution.pack_version_id
+        : null,
+    visualExpressionKey:
+      typeof resolution.expression_key === "string"
+        ? resolution.expression_key
+        : null,
+    visualAssetId:
+      typeof resolution.asset_id === "number" ? resolution.asset_id : null,
+    visualAssetUrl:
+      typeof resolution.asset_url === "string" ? resolution.asset_url : null,
+    visualFallbackReason:
+      typeof resolution.fallback_reason === "string"
+        ? resolution.fallback_reason
+        : null,
+    visualIsAnimated: Boolean(resolution.is_animated)
+  }
+}
+
+const buildVisualIdentityMetadataExtra = (
+  fields: VisualIdentityMessageFields
+): Record<string, unknown> => {
+  const metadata: Record<string, unknown> = {}
+  if (fields.visualActorKind) metadata.visual_actor_kind = fields.visualActorKind
+  if (fields.visualActorId != null) metadata.visual_actor_id = fields.visualActorId
+  if (fields.visualPackId != null) metadata.visual_pack_id = fields.visualPackId
+  if (fields.visualPackVersionId != null) {
+    metadata.visual_pack_version_id = fields.visualPackVersionId
+  }
+  if (fields.visualExpressionKey) {
+    metadata.visual_expression_key = fields.visualExpressionKey
+  }
+  if (fields.visualAssetId != null) metadata.visual_asset_id = fields.visualAssetId
+  if (fields.visualFallbackReason) {
+    metadata.visual_fallback_reason = fields.visualFallbackReason
+  }
+  return metadata
+}
 
 const attemptCharacterStreamRecoveryPersist = async ({
   chatId,
@@ -393,6 +463,8 @@ type UseChatActionsOptions = {
   messageSteeringMode: MessageSteeringMode
   messageSteeringForceNarrate: boolean
   clearMessageSteering: () => void
+  visualIdentityManualExpressionOverride?: string | null
+  setVisualIdentityManualExpressionOverride?: (expressionKey: string) => void
 }
 
 export const useChatActions = ({
@@ -475,7 +547,9 @@ export const useChatActions = ({
   inheritedPersonaMemoryMode,
   messageSteeringMode,
   messageSteeringForceNarrate,
-  clearMessageSteering
+  clearMessageSteering,
+  visualIdentityManualExpressionOverride,
+  setVisualIdentityManualExpressionOverride
 }: UseChatActionsOptions) => {
   const [appendFormattingGuidePrompt] = useStorage(
     PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY,
@@ -1951,6 +2025,7 @@ export const useChatActions = ({
         let resolvedMoodTopic: string | undefined
         let metadataExtra: Record<string, unknown> | undefined
         let speakerCharacterName: string | undefined
+        let visualIdentityFields: VisualIdentityMessageFields = {}
         try {
           const directedSpeakerId =
             normalizePositiveCharacterId(directedCharacterId)
@@ -2001,6 +2076,33 @@ export const useChatActions = ({
               ? detectedMood.topic.trim()
               : undefined
 
+          if (
+            speakerCharacterId &&
+            typeof tldwClient.resolveVisualIdentityBinding === "function"
+          ) {
+            try {
+              const resolvedVisualIdentity =
+                await tldwClient.resolveVisualIdentityBinding({
+                  actor_kind: "character",
+                  actor_id: speakerCharacterId,
+                  expression_key:
+                    visualIdentityManualExpressionOverride ||
+                    resolvedMoodLabel ||
+                    "neutral",
+                  manual_override_expression_key:
+                    visualIdentityManualExpressionOverride || null,
+                  mood_expression_key: resolvedMoodLabel || null
+                })
+              visualIdentityFields =
+                buildVisualIdentityMessageFields(resolvedVisualIdentity)
+            } catch (visualIdentityError) {
+              console.debug(
+                "[useChatActions] Failed to resolve visual identity",
+                visualIdentityError
+              )
+            }
+          }
+
           const persistPayload: Record<string, unknown> = {
             assistant_content: finalPersistedContent,
             assistant_message_id: generateMessageId
@@ -2028,7 +2130,8 @@ export const useChatActions = ({
             speaker_character_name: speakerCharacterName ?? null,
             mood_label: resolvedMoodLabel,
             mood_confidence: resolvedMoodConfidence ?? null,
-            mood_topic: resolvedMoodTopic ?? null
+            mood_topic: resolvedMoodTopic ?? null,
+            ...buildVisualIdentityMetadataExtra(visualIdentityFields)
           }
 
           const persisted = (await tldwClient.persistCharacterCompletion(
@@ -2063,7 +2166,8 @@ export const useChatActions = ({
                 speakerCharacterName,
                 moodLabel: resolvedMoodLabel,
                 moodConfidence: resolvedMoodConfidence ?? null,
-                moodTopic: resolvedMoodTopic ?? null
+                moodTopic: resolvedMoodTopic ?? null,
+                ...visualIdentityFields
               })
             }) as Message[])
           )
@@ -2090,7 +2194,8 @@ export const useChatActions = ({
                   speakerCharacterName,
                   moodLabel: resolvedMoodLabel,
                   moodConfidence: resolvedMoodConfidence ?? null,
-                  moodTopic: resolvedMoodTopic ?? null
+                  moodTopic: resolvedMoodTopic ?? null,
+                  ...visualIdentityFields
                 })
               }) as Message[])
             )
@@ -2114,7 +2219,8 @@ export const useChatActions = ({
                     speakerCharacterName,
                     moodLabel: resolvedMoodLabel,
                     moodConfidence: resolvedMoodConfidence ?? null,
-                    moodTopic: resolvedMoodTopic ?? null
+                    moodTopic: resolvedMoodTopic ?? null,
+                    ...visualIdentityFields
                   })
                 }) as Message[])
               )
@@ -2544,6 +2650,14 @@ export const useChatActions = ({
     serverChatIdOverride?: string | null
     researchContext?: ChatResearchContext
   }): Promise<ChatSubmitResult> => {
+    if (!isRegenerate && !isContinue) {
+      const emoteCommand = parseVisualIdentityEmoteCommand(message)
+      if (emoteCommand) {
+        setVisualIdentityManualExpressionOverride?.(emoteCommand.expressionKey)
+        return chatSubmitSkipped("Visual identity expression updated")
+      }
+    }
+
     const effectiveSelectedModel = getEffectiveSelectedModel(
       requestOverrides?.selectedModel
     )

@@ -67,6 +67,16 @@ export interface MessageCharacterProps {
   moodLabel?: string | null
   moodConfidence?: number | null
   moodTopic?: string | null
+  visualActorKind?: "character" | "persona" | null
+  visualActorId?: number | string | null
+  visualPackId?: number | null
+  visualPackVersionId?: number | null
+  visualExpressionKey?: string | null
+  visualAssetId?: number | null
+  visualAssetUrl?: string | null
+  visualFallbackReason?: string | null
+  visualIsAnimated?: boolean | null
+  visualPreviewUrl?: string | null
 }
 
 export interface MessageCompareProps {

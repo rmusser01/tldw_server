@@ -872,30 +872,37 @@ bunx vitest run \
 
 **Files:**
 
-- [ ] Add `apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityImage.tsx`
-- [ ] Add `apps/packages/ui/src/components/Common/VisualIdentity/ExpressionPicker.tsx`
-- [ ] Add `apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityStage.tsx`
-- [ ] Add `apps/packages/ui/src/hooks/useVisualIdentityResolver.ts`
-- [ ] Modify `apps/packages/ui/src/components/Common/Playground/message-types.ts`
-- [ ] Modify `apps/packages/ui/src/components/Common/Playground/useMessageState.ts`
-- [ ] Modify `apps/packages/ui/src/hooks/chat/useChatActions.ts`
-- [ ] Modify `apps/packages/ui/src/components/Common/Playground/Message.tsx`, specifically the `portraitPanel` image rendering and avatar preview rendering that use `portraitImage`.
-- [ ] Add `apps/packages/ui/src/components/Common/VisualIdentity/__tests__/VisualIdentityImage.test.tsx`
-- [ ] Add `apps/packages/ui/src/components/Common/VisualIdentity/__tests__/ExpressionPicker.test.tsx`
-- [ ] Add `apps/packages/ui/src/components/Common/Playground/__tests__/visual-identity-message-state.test.tsx`
+- [x] Add `apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityImage.tsx`
+- [x] Add `apps/packages/ui/src/components/Common/VisualIdentity/ExpressionPicker.tsx`
+- [x] Add `apps/packages/ui/src/components/Common/VisualIdentity/VisualIdentityStage.tsx`
+- [x] Add `apps/packages/ui/src/hooks/useVisualIdentityResolver.ts`
+- [x] Modify `apps/packages/ui/src/components/Common/Playground/message-types.ts`
+- [x] Modify `apps/packages/ui/src/components/Common/Playground/useMessageState.ts`
+- [x] Modify `apps/packages/ui/src/hooks/chat/useChatActions.ts`
+- [x] Modify `apps/packages/ui/src/components/Common/Playground/Message.tsx`, specifically the `portraitPanel` image rendering and avatar preview rendering that use `portraitImage`.
+- [x] Modify `apps/packages/ui/src/components/Option/Playground/PlaygroundChat.tsx`
+- [x] Modify `apps/packages/ui/src/components/Option/Playground/PlaygroundCompareCluster.tsx`
+- [x] Modify `apps/packages/ui/src/hooks/useMessageOption.tsx`
+- [x] Modify `apps/packages/ui/src/hooks/chat/useServerChatLoader.ts`
+- [x] Modify `apps/packages/ui/src/store/option/types.ts`
+- [x] Add `apps/packages/ui/src/components/Common/VisualIdentity/__tests__/VisualIdentityImage.test.tsx`
+- [x] Add `apps/packages/ui/src/components/Common/VisualIdentity/__tests__/ExpressionPicker.test.tsx`
+- [x] Add `apps/packages/ui/src/components/Common/VisualIdentity/__tests__/VisualIdentityStage.test.tsx`
+- [x] Add `apps/packages/ui/src/components/Common/Playground/__tests__/visual-identity-message-state.test.tsx`
+- [x] Add `apps/packages/ui/src/hooks/__tests__/useVisualIdentityResolver.test.tsx`
 
 **Implementation Steps:**
 
-- [ ] Add optional props to `MessageCharacterProps`: `visualActorKind`, `visualActorId`, `visualPackId`, `visualPackVersionId`, `visualExpressionKey`, `visualAssetId`, `visualAssetUrl`, `visualFallbackReason`.
-- [ ] Teach `useMessageState` to prefer `visualAssetUrl` over legacy mood images for bot messages when the speaker matches the selected character.
-- [ ] Keep `resolveCharacterMoodImageUrl` as the fallback after visual identity resolution.
-- [ ] Add `useVisualIdentityResolver` to resolve the active actor's current expression and cache by actor, pack version, expression key, and asset id.
-- [ ] Add `ExpressionPicker` in the chat toolbar or existing character controls area.
-- [ ] On picker click, set session manual override and immediately update the stage/next assistant expression resolution.
-- [ ] In `useChatActions`, parse `/emote` before submit. If it is a valid emote command, update manual override and skip the network send.
-- [ ] Add a basic single-character `VisualIdentityStage` that displays the active character/persona centered with the current resolved expression.
-- [ ] Keep the stage disabled unless character/persona identity display is enabled and a visual identity binding resolves.
-- [ ] Respect `prefers-reduced-motion` in `VisualIdentityImage`; static images render normally, animated GIF/WebP/AVIF originals render as browser images unless reduced motion requires a still preview.
+- [x] Add optional props to `MessageCharacterProps`: `visualActorKind`, `visualActorId`, `visualPackId`, `visualPackVersionId`, `visualExpressionKey`, `visualAssetId`, `visualAssetUrl`, `visualFallbackReason`.
+- [x] Teach `useMessageState` to prefer `visualAssetUrl` over legacy mood images for bot messages when the speaker matches the selected character.
+- [x] Keep `resolveCharacterMoodImageUrl` as the fallback after visual identity resolution.
+- [x] Add `useVisualIdentityResolver` to resolve the active actor's current expression and cache by actor, pack version, expression key, and asset id.
+- [x] Add `ExpressionPicker` in the chat toolbar or existing character controls area.
+- [x] On picker click, set session manual override and immediately update the stage/next assistant expression resolution.
+- [x] In `useChatActions`, parse `/emote` before submit. If it is a valid emote command, update manual override and skip the network send.
+- [x] Add a basic single-character `VisualIdentityStage` that displays the active character/persona centered with the current resolved expression.
+- [x] Keep the stage disabled unless character/persona identity display is enabled and a visual identity binding resolves.
+- [x] Respect `prefers-reduced-motion` in `VisualIdentityImage`; static images render normally, animated GIF/WebP/AVIF originals render as browser images unless reduced motion requires a still preview.
 
 **Tests To Write First:**
 
@@ -935,6 +942,14 @@ bunx vitest run \
   apps/packages/ui/src/components/Common/VisualIdentity/__tests__/ExpressionPicker.test.tsx \
   apps/packages/ui/src/components/Common/Playground/__tests__/visual-identity-message-state.test.tsx
 ```
+
+**Stage 10 Verification Run:**
+
+- [x] `bunx vitest run src/components/Common/VisualIdentity/__tests__/VisualIdentityImage.test.tsx src/components/Common/VisualIdentity/__tests__/ExpressionPicker.test.tsx src/components/Common/VisualIdentity/__tests__/VisualIdentityStage.test.tsx src/components/Common/VisualIdentity/__tests__/VisualIdentityPackPanel.test.tsx src/components/Common/VisualIdentity/__tests__/VisualIdentityDraftReview.test.tsx src/components/Common/VisualIdentity/__tests__/ExpressionSlotGrid.test.tsx src/components/Common/Playground/__tests__/visual-identity-message-state.test.tsx src/hooks/__tests__/useVisualIdentityResolver.test.tsx src/hooks/chat/__tests__/useChatActions.character.integration.test.tsx src/components/Option/Playground/__tests__/PlaygroundChat.server-load-state.test.tsx` passed: 10 files, 28 tests.
+- [x] `bun run test:characters-harness` passed: 3 files, 104 tests. Known Ant Design shadow-root warning remains.
+- [x] `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --project tsconfig.json --pretty false` still reports 85 existing baseline diagnostics outside Stage 10 files; no diagnostics matched `VisualIdentity`, `useVisualIdentityResolver`, `useChatActions`, `useMessageOption`, `PlaygroundChat`, `PlaygroundCompareCluster`, `useServerChatLoader`, `message-types`, `useMessageState`, `Common/Playground/Message`, or `store/option/types`.
+- [x] `git diff --check` passed.
+- [x] Bandit skipped: Stage 10 touched frontend TypeScript/React files only.
 
 ## Stage 11: VN Asset Bridge
 
