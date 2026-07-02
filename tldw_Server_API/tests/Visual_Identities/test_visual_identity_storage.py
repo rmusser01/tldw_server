@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,21 @@ def _storage_module():
     from tldw_Server_API.app.core.Visual_Identities import storage
 
     return storage
+
+
+def _write_png(path: Path, *, size: tuple[int, int] = (16, 16), color: str = "purple") -> None:
+    Image.new("RGBA", size, color).save(path, format="PNG")
+
+
+def _patch_user_outputs_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    outputs_dir: Path,
+) -> None:
+    monkeypatch.setattr(
+        DatabasePaths,
+        "get_user_outputs_dir",
+        staticmethod(lambda _user_id: outputs_dir),
+    )
 
 
 def test_get_user_visual_identities_dir_creates_expected_user_subdir(
@@ -113,6 +129,12 @@ def test_resolve_visual_identity_asset_path_rejects_traversal(tmp_path: Path) ->
             relpath="/tmp/escape.png",
             storage_root=storage_root,
         )
+    with pytest.raises(ValueError, match="invalid_storage_path"):
+        storage.resolve_visual_identity_asset_path(
+            owner_user_id=1,
+            relpath=r"assets\escape.png",
+            storage_root=storage_root,
+        )
 
     resolved = storage.resolve_visual_identity_asset_path(
         owner_user_id=1,
@@ -125,7 +147,7 @@ def test_resolve_visual_identity_asset_path_rejects_traversal(tmp_path: Path) ->
 def test_rejects_declared_mime_header_mismatch(tmp_path: Path) -> None:
     storage = _storage_module()
     image_path = tmp_path / "avatar.png"
-    Image.new("RGBA", (16, 16), "purple").save(image_path)
+    _write_png(image_path)
 
     with pytest.raises(ValueError, match="mime_mismatch"):
         storage.validate_and_store_visual_identity_asset(
@@ -137,16 +159,177 @@ def test_rejects_declared_mime_header_mismatch(tmp_path: Path) -> None:
         )
 
 
-def test_copy_generated_file_record_to_expression_asset_uses_validated_storage(
+def test_rejects_extension_mismatch_after_mime_detection(tmp_path: Path) -> None:
+    storage = _storage_module()
+    image_path = tmp_path / "avatar.jpg"
+    _write_png(image_path)
+
+    with pytest.raises(ValueError, match="extension_mismatch"):
+        storage.validate_and_store_visual_identity_asset(
+            source_path=image_path,
+            owner_user_id=1,
+            expression_key="neutral",
+            storage_root=tmp_path / "store",
+        )
+
+
+def test_rejects_unsupported_extension_after_mime_detection(tmp_path: Path) -> None:
+    storage = _storage_module()
+    image_path = tmp_path / "avatar.txt"
+    _write_png(image_path)
+
+    with pytest.raises(ValueError, match="unsupported_extension"):
+        storage.validate_and_store_visual_identity_asset(
+            source_path=image_path,
+            owner_user_id=1,
+            expression_key="neutral",
+            storage_root=tmp_path / "store",
+        )
+
+
+def test_rechecks_size_after_reading_source_content(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     storage = _storage_module()
-    source_path = tmp_path / "generated.png"
-    Image.new("RGBA", (12, 10), "green").save(source_path)
+    image_path = tmp_path / "avatar.png"
+    _write_png(image_path)
+    original_stat = Path.stat
+
+    def fake_stat(self: Path):
+        if self == image_path:
+            original = original_stat(self)
+            return SimpleNamespace(st_mode=original.st_mode, st_size=1)
+        return original_stat(self)
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Visual_Identities.constraints.MAX_EXPRESSION_ASSET_BYTES",
+        1,
+    )
+
+    with pytest.raises(ValueError, match="file_too_large"):
+        storage.validate_and_store_visual_identity_asset(
+            source_path=image_path,
+            owner_user_id=1,
+            expression_key="neutral",
+            storage_root=tmp_path / "store",
+        )
+
+
+def test_duplicate_hash_target_with_same_bytes_dedupes_successfully(tmp_path: Path) -> None:
+    storage = _storage_module()
+    image_path = tmp_path / "avatar.png"
+    _write_png(image_path, color="green")
+
+    first = storage.validate_and_store_visual_identity_asset(
+        source_path=image_path,
+        owner_user_id=1,
+        expression_key="neutral",
+        storage_root=tmp_path / "store",
+    )
+    second = storage.validate_and_store_visual_identity_asset(
+        source_path=image_path,
+        owner_user_id=1,
+        expression_key="neutral",
+        storage_root=tmp_path / "store",
+    )
+
+    assert second == first
+    assert (tmp_path / "store" / second.relpath).read_bytes() == image_path.read_bytes()
+
+
+def test_duplicate_hash_target_with_corrupt_existing_file_fails(tmp_path: Path) -> None:
+    storage = _storage_module()
+    image_path = tmp_path / "avatar.png"
+    _write_png(image_path, color="green")
+
+    stored = storage.validate_and_store_visual_identity_asset(
+        source_path=image_path,
+        owner_user_id=1,
+        expression_key="neutral",
+        storage_root=tmp_path / "store",
+    )
+    stored_path = tmp_path / "store" / stored.relpath
+    stored_path.write_bytes(b"corrupt")
+
+    with pytest.raises(ValueError, match="stored_asset_hash_mismatch"):
+        storage.validate_and_store_visual_identity_asset(
+            source_path=image_path,
+            owner_user_id=1,
+            expression_key="neutral",
+            storage_root=tmp_path / "store",
+        )
+
+
+def test_rejects_animated_frame_count_over_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _storage_module()
+    gif_path = tmp_path / "too-many.gif"
+    frames = [Image.new("RGBA", (2, 2), color) for color in ("red", "blue")]
+    frames[0].save(
+        gif_path,
+        save_all=True,
+        append_images=frames[1:],
+        duration=100,
+        loop=0,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Visual_Identities.constraints.MAX_EXPRESSION_FRAME_COUNT",
+        1,
+    )
+
+    with pytest.raises(ValueError, match="image_frame_count_exceeds_limit"):
+        storage.validate_and_store_visual_identity_asset(
+            source_path=gif_path,
+            owner_user_id=1,
+            expression_key="surprised",
+            storage_root=tmp_path / "store",
+        )
+
+
+def test_preview_failure_does_not_reject_valid_original(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _storage_module()
+    image_path = tmp_path / "avatar.png"
+    _write_png(image_path)
+
+    def fail_save(self: Image.Image, fp, format=None, **params) -> None:
+        raise OSError("preview unavailable")
+
+    monkeypatch.setattr(Image.Image, "save", fail_save)
+
+    stored = storage.validate_and_store_visual_identity_asset(
+        source_path=image_path,
+        owner_user_id=1,
+        expression_key="neutral",
+        storage_root=tmp_path / "store",
+    )
+
+    assert stored.preview_relpath is None
+    assert (tmp_path / "store" / stored.relpath).is_file()
+
+
+def test_copy_generated_file_record_to_expression_asset_uses_validated_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _storage_module()
+    outputs_dir = tmp_path / "outputs"
+    outputs_dir.mkdir()
+    _patch_user_outputs_dir(monkeypatch, outputs_dir)
+    source_path = outputs_dir / "generated.png"
+    _write_png(source_path, size=(12, 10), color="green")
     generated_file = {
         "id": 99,
         "user_id": 1,
         "file_category": "image",
+        "source_feature": "vn_assets",
+        "storage_path": "generated.png",
         "mime_type": "image/png",
         "is_deleted": False,
     }
@@ -156,7 +339,6 @@ def test_copy_generated_file_record_to_expression_asset_uses_validated_storage(
         pack_id=5,
         expression_key="happy",
         generated_file_record=generated_file,
-        source_path=source_path,
         source_feature="vn_assets",
         storage_root=tmp_path / "store",
     )
@@ -165,3 +347,75 @@ def test_copy_generated_file_record_to_expression_asset_uses_validated_storage(
     assert stored.width == 12
     assert stored.height == 10
     assert (tmp_path / "store" / stored.relpath).is_file()
+
+
+def test_copy_generated_file_record_rejects_public_source_path_override(
+    tmp_path: Path,
+) -> None:
+    storage = _storage_module()
+    source_path = tmp_path / "outside.png"
+    _write_png(source_path)
+    generated_file = {
+        "id": 99,
+        "user_id": 1,
+        "file_category": "image",
+        "source_feature": "vn_assets",
+        "storage_path": "missing.png",
+        "mime_type": "image/png",
+        "is_deleted": False,
+    }
+
+    with pytest.raises(TypeError, match="source_path"):
+        storage.copy_generated_file_record_to_expression_asset(
+            owner_user_id=1,
+            pack_id=5,
+            expression_key="happy",
+            generated_file_record=generated_file,
+            source_path=source_path,
+            source_feature="vn_assets",
+            storage_root=tmp_path / "store",
+        )
+
+
+@pytest.mark.parametrize(
+    ("record_updates", "source_feature", "expected_error"),
+    [
+        ({"user_id": 2}, "vn_assets", "generated_file_not_found"),
+        ({"is_deleted": True}, "vn_assets", "generated_file_not_found"),
+        ({"file_category": "tts_audio"}, "vn_assets", "generated_file_not_image"),
+        ({}, "vn_assets", "generated_file_not_found"),
+        ({"source_feature": "image_gen"}, "vn_assets", "generated_file_not_found"),
+    ],
+)
+def test_copy_generated_file_record_rejects_invalid_record_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    record_updates: dict[str, object],
+    source_feature: str,
+    expected_error: str,
+) -> None:
+    storage = _storage_module()
+    outputs_dir = tmp_path / "outputs"
+    outputs_dir.mkdir()
+    _patch_user_outputs_dir(monkeypatch, outputs_dir)
+    source_path = outputs_dir / "generated.png"
+    _write_png(source_path)
+    generated_file = {
+        "id": 99,
+        "user_id": 1,
+        "file_category": "image",
+        "storage_path": "generated.png",
+        "mime_type": "image/png",
+        "is_deleted": False,
+    }
+    generated_file.update(record_updates)
+
+    with pytest.raises(ValueError, match=expected_error):
+        storage.copy_generated_file_record_to_expression_asset(
+            owner_user_id=1,
+            pack_id=5,
+            expression_key="happy",
+            generated_file_record=generated_file,
+            source_feature=source_feature,
+            storage_root=tmp_path / "store",
+        )

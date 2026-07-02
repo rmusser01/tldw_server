@@ -30,25 +30,32 @@ Implement Stage 3 from the Visual Identity Expression Packs plan: visual identit
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Stage 3 storage slice implemented with TDD.
+Stage 3 storage slice implemented with TDD, then review-fix pass completed.
 
-Changed:
+Original Stage 3 changed:
 - Added `DatabasePaths.get_user_visual_identities_dir(user_id)` for `Databases/user_databases/{user_id}/visual_identities`.
 - Added `Visual_Identities.storage` with content-hash original storage, MIME/header/Pillow validation, dimension/frame limits, animated metadata, first-frame previews, safe relpath resolution, and lower-level generated-file record copy helper.
 - Added focused Visual Identity storage tests.
 
+Review-fix changed:
+- Removed public `source_path` override from generated-file copy helper so records must resolve through contained `storage_path` under the user outputs directory.
+- Made generated-file `source_feature` validation strict when a caller supplies an expected feature.
+- Rechecked source byte size after reading content.
+- Replaced silent existing-target dedupe with same-directory temp writes plus existing-target regular-file, size, and SHA-256 verification; corrupt targets now raise `stored_asset_hash_mismatch`.
+- Added regression coverage for generated record negative metadata, public path override rejection, duplicate dedupe/corruption, extension mismatch/unsupported extension, backslash traversal, frame-count limit, preview failure tolerance, and post-read size recheck.
+
 Red evidence:
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Visual_Identities/test_visual_identity_storage.py` failed with 7 failures for the expected missing `DatabasePaths.get_user_visual_identities_dir` helper and missing `Visual_Identities.storage` module.
+- First review-fix red run after regression tests: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Visual_Identities/test_visual_identity_storage.py` failed with intended production behavior failures for post-read size recheck, corrupt existing hash target, public `source_path` override, and missing generated-file `source_feature` strictness. Test fixture setup issues were corrected and rerun before implementation.
 
 Green evidence:
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Visual_Identities/test_visual_identity_storage.py` passed: 7 passed, 3 warnings.
-- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Visual_Identities/test_expression_slots.py tldw_Server_API/tests/Visual_Identities/test_visual_identity_capabilities.py tldw_Server_API/tests/Visual_Identities/test_visual_identity_db.py tldw_Server_API/tests/Visual_Identities/test_visual_identity_storage.py` passed: 34 passed, 3 warnings.
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Visual_Identities/test_visual_identity_storage.py` passed: 20 passed, 3 warnings.
+- `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Visual_Identities/test_expression_slots.py tldw_Server_API/tests/Visual_Identities/test_visual_identity_capabilities.py tldw_Server_API/tests/Visual_Identities/test_visual_identity_db.py tldw_Server_API/tests/Visual_Identities/test_visual_identity_storage.py` passed: 47 passed, 3 warnings.
 
 Bandit:
 - `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Visual_Identities tldw_Server_API/app/core/DB_Management/db_path_utils.py -f json -o /tmp/bandit_visual_identity_stage3.json` exited 0; report totals show 0 findings.
 
 Concern:
-- Implemented lower-level `copy_generated_file_record_to_expression_asset(...)` for Stage 11 reuse instead of wiring an AuthnzGeneratedFilesRepo-backed service/API helper in Stage 3, because generated-file lookup is async and belongs at the later service/API layer.
+- The helper remains lower-level (`copy_generated_file_record_to_expression_asset`) for Stage 11 service/API reuse; AuthnzGeneratedFilesRepo lookup wiring remains intentionally out of Stage 3 scope.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

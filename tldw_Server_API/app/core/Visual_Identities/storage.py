@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import re
+import stat
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +30,7 @@ VISUAL_IDENTITY_UNSUPPORTED_EXTENSION = "unsupported_extension"
 VISUAL_IDENTITY_EXTENSION_MISMATCH = "extension_mismatch"
 VISUAL_IDENTITY_GENERATED_FILE_NOT_FOUND = "generated_file_not_found"
 VISUAL_IDENTITY_GENERATED_FILE_NOT_IMAGE = "generated_file_not_image"
+VISUAL_IDENTITY_STORED_ASSET_HASH_MISMATCH = "stored_asset_hash_mismatch"
 
 _IMAGE_VALIDATION_ERRORS = (OSError, ValueError, UnidentifiedImageError)
 _SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -86,6 +90,12 @@ def validate_and_store_visual_identity_asset(
         raise ValueError(VISUAL_IDENTITY_FILE_TOO_LARGE)
 
     content = source.read_bytes()
+    byte_count = len(content)
+    if byte_count <= 0:
+        raise ValueError(VISUAL_IDENTITY_INVALID_IMAGE)
+    if byte_count > constraints.MAX_EXPRESSION_ASSET_BYTES:
+        raise ValueError(VISUAL_IDENTITY_FILE_TOO_LARGE)
+
     sha256 = hashlib.sha256(content).hexdigest()
     sniffed_mime = _sniff_mime_type(content)
     _ensure_supported_mime_type(sniffed_mime)
@@ -106,7 +116,7 @@ def validate_and_store_visual_identity_asset(
         storage_root=root,
     )
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    _write_once(target_path, content)
+    _write_once(target_path, content, expected_sha256=sha256)
 
     preview_relpath = _create_first_frame_preview(
         content,
@@ -161,7 +171,6 @@ def copy_generated_file_record_to_expression_asset(
     pack_id: int | str,
     expression_key: str,
     generated_file_record: Mapping[str, Any],
-    source_path: str | Path | None = None,
     source_feature: str | None = None,
     storage_root: str | Path | None = None,
 ) -> VisualIdentityStoredAsset:
@@ -175,11 +184,7 @@ def copy_generated_file_record_to_expression_asset(
         owner_user_id=owner_user_id,
         source_feature=source_feature,
     )
-    resolved_source_path = (
-        Path(source_path)
-        if source_path is not None
-        else _resolve_generated_file_record_path(owner_user_id, generated_file_record)
-    )
+    resolved_source_path = _resolve_generated_file_record_path(owner_user_id, generated_file_record)
     declared_content_type = str(generated_file_record.get("mime_type") or "").strip() or None
     return validate_and_store_visual_identity_asset(
         source_path=resolved_source_path,
@@ -362,12 +367,88 @@ def _validated_storage_extension(source_path: Path, detected_mime_type: str) -> 
     raise ValueError(VISUAL_IDENTITY_UNSUPPORTED_EXTENSION)
 
 
-def _write_once(target_path: Path, content: bytes) -> None:
+def _write_once(target_path: Path, content: bytes, *, expected_sha256: str) -> None:
+    expected_size = len(content)
     try:
-        with target_path.open("xb") as file_obj:
-            file_obj.write(content)
-    except FileExistsError:
+        _verify_existing_hash_target(
+            target_path,
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+        )
         return
+    except FileNotFoundError:
+        pass
+
+    temp_path = _write_same_dir_temp_file(target_path, content)
+    try:
+        try:
+            os.link(temp_path, target_path)
+        except FileExistsError:
+            _verify_existing_hash_target(
+                target_path,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+            )
+        except OSError:
+            if target_path.exists():
+                _verify_existing_hash_target(
+                    target_path,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                )
+            else:
+                temp_path.replace(target_path)
+                _verify_existing_hash_target(
+                    target_path,
+                    expected_size=expected_size,
+                    expected_sha256=expected_sha256,
+                )
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _write_same_dir_temp_file(target_path: Path, content: bytes) -> Path:
+    fd, raw_temp_path = tempfile.mkstemp(
+        prefix=f".{target_path.name}.",
+        suffix=".tmp",
+        dir=target_path.parent,
+    )
+    temp_path = Path(raw_temp_path)
+    try:
+        with os.fdopen(fd, "wb") as file_obj:
+            file_obj.write(content)
+            file_obj.flush()
+            os.fsync(file_obj.fileno())
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+    return temp_path
+
+
+def _verify_existing_hash_target(
+    target_path: Path,
+    *,
+    expected_size: int,
+    expected_sha256: str,
+) -> None:
+    try:
+        target_stat = target_path.lstat()
+    except FileNotFoundError:
+        raise
+    if not stat.S_ISREG(target_stat.st_mode):
+        raise ValueError(VISUAL_IDENTITY_STORED_ASSET_HASH_MISMATCH)
+    if target_stat.st_size != expected_size:
+        raise ValueError(VISUAL_IDENTITY_STORED_ASSET_HASH_MISMATCH)
+    if _sha256_file(target_path) != expected_sha256:
+        raise ValueError(VISUAL_IDENTITY_STORED_ASSET_HASH_MISMATCH)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file_obj:
+        for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _create_first_frame_preview(
@@ -419,9 +500,11 @@ def _validate_generated_file_record(
     if file_category and file_category != "image":
         raise ValueError(VISUAL_IDENTITY_GENERATED_FILE_NOT_IMAGE)
 
-    record_source_feature = str(generated_file_record.get("source_feature") or "").strip()
-    if source_feature and record_source_feature and record_source_feature != source_feature:
-        raise ValueError(VISUAL_IDENTITY_GENERATED_FILE_NOT_FOUND)
+    expected_source_feature = str(source_feature or "").strip().lower()
+    if expected_source_feature:
+        record_source_feature = str(generated_file_record.get("source_feature") or "").strip().lower()
+        if record_source_feature != expected_source_feature:
+            raise ValueError(VISUAL_IDENTITY_GENERATED_FILE_NOT_FOUND)
 
 
 def _resolve_generated_file_record_path(
