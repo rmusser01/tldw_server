@@ -1,10 +1,10 @@
 ---
 id: TASK-12091
 title: Design standalone MCP docs Stage 4A bounded source sync
-status: In Progress
+status: Done
 assignee: []
 created_date: ''
-updated_date: '2026-07-02 03:44'
+updated_date: '2026-07-02 03:47'
 labels:
   - mcp
   - docs
@@ -25,12 +25,12 @@ Write the Stage 4A design/spec for bounded source refresh in the standalone MCP 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Stage 4A design spec defines docs.sync_source semantics, inputs, outputs, status values, and reason codes.
-- [ ] #2 Spec keeps baseline standalone installs dependency-light and preserves the no tldw_Server_API import boundary for mcp_unified.docs.
-- [ ] #3 Spec defines bounded local trusted-root refresh and URL/source refresh behavior using existing Stage 1/2 services.
-- [ ] #4 Spec explicitly excludes broad crawling, Playwright/browser extraction, embeddings/reranking, Jobs/Scheduler implementation, and Media/RAG host bridges from Stage 4A.
-- [ ] #5 Spec covers stale/missing document handling, idempotency/dedupe, audit/provenance updates, and security tests.
-- [ ] #6 Spec self-review and whitespace verification are recorded before final summary.
+- [x] #1 Stage 4A design spec defines docs.sync_source semantics, inputs, outputs, status values, and reason codes.
+- [x] #2 Spec keeps baseline standalone installs dependency-light and preserves the no tldw_Server_API import boundary for mcp_unified.docs.
+- [x] #3 Spec defines bounded local trusted-root refresh and URL/source refresh behavior using existing Stage 1/2 services.
+- [x] #4 Spec explicitly excludes broad crawling, Playwright/browser extraction, embeddings/reranking, Jobs/Scheduler implementation, and Media/RAG host bridges from Stage 4A.
+- [x] #5 Spec covers stale/missing document handling, idempotency/dedupe, audit/provenance updates, and security tests.
+- [x] #6 Spec self-review and whitespace verification are recorded before final summary.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -47,15 +47,15 @@ Write the Stage 4A design/spec for bounded source refresh in the standalone MCP 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Pending user approval before finalizing this design task.
+Stage 4A bounded source sync design is complete and approved to move into implementation planning. The spec defines docs.sync_source semantics, source registry/run records, local and URL source refresh behavior, redaction and query persistence rules, metadata preservation via sync-aware merge, conservative stale/tombstone semantics, optional sitemap registration/sync boundaries, host integration constraints, and test strategy. Verification was docs-focused: git diff --check passed, targeted stale-wording scans passed, positive contract-term scans passed, and backlog task rendering passed. Bandit was skipped because this task changed only documentation and Backlog metadata.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
