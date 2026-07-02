@@ -302,6 +302,43 @@ def test_draft_creation_status_slot_map_and_assets(chacha_db: CharactersRAGDB) -
     ]
 
 
+def test_update_draft_validation_summary_is_owner_scoped(chacha_db: CharactersRAGDB) -> None:
+    repo = VisualIdentityRepository.initialized(chacha_db)
+    draft = repo.create_draft(owner_user_id=1, title="Import Draft", source_kind="zip")
+
+    updated = repo.update_draft_validation_summary(
+        draft_id=draft["id"],
+        owner_user_id=1,
+        validation_summary={"errors": [{"code": "unsafe_archive_path"}]},
+    )
+
+    assert json.loads(updated["validation_summary_json"]) == {
+        "errors": [{"code": "unsafe_archive_path"}]
+    }
+    with pytest.raises(ValueError, match="visual_identity_draft_not_found"):
+        repo.update_draft_validation_summary(
+            draft_id=draft["id"],
+            owner_user_id=2,
+            validation_summary={"errors": []},
+        )
+    assert json.loads(repo.get_draft(draft["id"], owner_user_id=1)["validation_summary_json"]) == {
+        "errors": [{"code": "unsafe_archive_path"}]
+    }
+
+
+def test_update_draft_validation_summary_rejects_missing_draft(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VisualIdentityRepository.initialized(chacha_db)
+
+    with pytest.raises(ValueError, match="visual_identity_draft_not_found"):
+        repo.update_draft_validation_summary(
+            draft_id=9999,
+            owner_user_id=1,
+            validation_summary={"errors": []},
+        )
+
+
 def test_version_creation_and_set_active_version(chacha_db: CharactersRAGDB) -> None:
     repo = VisualIdentityRepository.initialized(chacha_db)
     pack = repo.create_pack(owner_user_id=1, title="Versioned Expressions")

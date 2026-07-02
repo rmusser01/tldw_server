@@ -398,6 +398,30 @@ class VisualIdentityRepository:
             raise ValueError("visual_identity_draft_not_found")
         return draft
 
+    def update_draft_validation_summary(
+        self,
+        *,
+        draft_id: int,
+        owner_user_id: int,
+        validation_summary: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE visual_identity_pack_drafts
+                SET validation_summary_json = ?,
+                    updated_at = CURRENT_TIMESTAMP,
+                    version = version + 1
+                WHERE id = ? AND owner_user_id = ?
+                """,
+                (_json_dump(dict(validation_summary)), draft_id, owner_user_id),
+            )
+        draft = self.get_draft(draft_id, owner_user_id=owner_user_id)
+        if draft is None:
+            raise ValueError("visual_identity_draft_not_found")
+        return draft
+
     def set_draft_status(
         self,
         *,
