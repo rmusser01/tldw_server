@@ -29,6 +29,7 @@ import {
   Modal
 } from "antd"
 import { READY_STATE_LABEL, getDesignSystemState } from "@/design-system"
+import { safeExternalUrl } from "@/utils/safe-external-url"
 import {
   isWorkspaceSourcePartiallyQueryable,
   isWorkspaceSourceSelectable
@@ -2398,6 +2399,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                       }
                     )
                   : null
+            const previewSafeUrl = safeExternalUrl(previewSource.url)
 
             return (
           <div className="space-y-4">
@@ -2406,14 +2408,14 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               <p className="text-xs capitalize text-text-muted">
                 {previewSource.type} / {previewStatusLabel}
               </p>
-              {previewSource.url && (
+              {previewSafeUrl && (
                 <a
-                  href={previewSource.url}
+                  href={previewSafeUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="mt-1 inline-block break-all text-xs text-primary hover:underline"
                 >
-                  {previewSource.url}
+                  {previewSafeUrl}
                 </a>
               )}
             </div>

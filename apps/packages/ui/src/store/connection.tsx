@@ -599,16 +599,24 @@ const deriveOnboardingConfigStep = (
   return currentState.configStep === "none" ? "health" : currentState.configStep
 }
 
+// Synchronous in-flight guard for checkOnce. It is set BEFORE the first await
+// so concurrent callers can't slip past the overlap check while persisted flags
+// are being read (the store `isChecking` flag was previously only set after
+// several awaits, leaving a race window). Released at every exit path below.
+let checkInFlight = false
+
 export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, get) => ({
   state: initialState,
 
   async checkOnce(options = {}) {
     const prev = get().state
 
-    // Avoid overlapping checks
-    if (prev.isChecking) {
+    // Avoid overlapping checks. Claim the in-flight guard synchronously (no
+    // await between reading and setting it) so a second caller can't proceed.
+    if (prev.isChecking || checkInFlight) {
       return
     }
+    checkInFlight = true
 
     // Load all persisted flags upfront
     const persistedFirstRun = await getFirstRunCompleteFlag()
@@ -629,18 +637,23 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           }
         : prev
 
-    // Apply persisted first-run flag if not already set
+    // Apply persisted first-run flag if not already set. Merge onto the LATEST
+    // state (not the captured snapshot) so a concurrent update isn't reverted.
     if (currentState !== prev) {
-      set({
-        state: currentState
-      })
+      set((s) => ({
+        state: {
+          ...s.state,
+          ...(needsFirstRunSync ? { hasCompletedFirstRun: true } : {}),
+          ...(needsPersonaSync ? { userPersona: persistedUserPersona } : {})
+        }
+      }))
     }
 
     // Test-only hook: force a missing/unconfigured state without network calls.
     if (forceUnconfigured) {
-      set({
+      set((s) => ({
         state: {
-          ...currentState,
+          ...s.state,
           errorKind: "none",
           phase: ConnectionPhase.UNCONFIGURED,
           serverUrl: persistedServerUrl,
@@ -655,7 +668,8 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           knowledgeLastCheckedAt: null,
           knowledgeError: null
         }
-      })
+      }))
+      checkInFlight = false
       return
     }
 
@@ -669,9 +683,9 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
         currentState.serverUrl ??
         "offline://local"
 
-      set({
+      set((s) => ({
         state: {
-          ...currentState,
+          ...s.state,
           phase: ConnectionPhase.CONNECTED,
           serverUrl,
           isConnected: true,
@@ -686,7 +700,8 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           knowledgeLastCheckedAt: Date.now(),
           knowledgeError: null
         }
-      })
+      }))
+      checkInFlight = false
       return
     }
 
@@ -701,14 +716,15 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
       currentState.lastCheckedAt != null &&
       now - currentState.lastCheckedAt < CONNECTED_THROTTLE_MS
     ) {
+      checkInFlight = false
       return
     }
 
     const isBackgroundRefresh =
       currentState.isConnected && currentState.phase === ConnectionPhase.CONNECTED
-    set({
+    set((s) => ({
       state: {
-        ...currentState,
+        ...s.state,
         phase: isBackgroundRefresh
           ? ConnectionPhase.CONNECTED
           : ConnectionPhase.SEARCHING,
@@ -719,7 +735,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
         lastError: isBackgroundRefresh ? currentState.lastError : null,
         checksSinceConfigChange: nextChecksSinceConfigChange
       }
-    })
+    }))
 
     try {
       let cfg = await tldwClient.getConfig()
@@ -769,9 +785,9 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
       // Users must explicitly configure their own credentials in
       // Settings/Onboarding before authenticated pages can function.
       if (missingSingleUserApiKey) {
-        set({
+        set((s) => ({
           state: {
-            ...currentState,
+            ...s.state,
             phase: ConnectionPhase.UNCONFIGURED,
             serverUrl,
             isConnected: false,
@@ -787,14 +803,15 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
             knowledgeLastCheckedAt: null,
             knowledgeError: null
           }
-        })
+        }))
+        checkInFlight = false
         return
       }
 
       if (!serverUrl) {
-        set({
+        set((s) => ({
           state: {
-            ...currentState,
+            ...s.state,
             phase: ConnectionPhase.UNCONFIGURED,
             serverUrl: null,
             isConnected: false,
@@ -809,7 +826,8 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
             knowledgeLastCheckedAt: null,
             knowledgeError: null
           }
-        })
+        }))
+        checkInFlight = false
         return
       }
 
@@ -959,9 +977,9 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
         nextConsecutiveFailures < CONNECTED_FAILURE_THRESHOLD
 
       if (holdConnectedOnTransientFailure) {
-        set({
+        set((s) => ({
           state: {
-            ...currentState,
+            ...s.state,
             phase: ConnectionPhase.CONNECTED,
             isConnected: true,
             isChecking: false,
@@ -972,13 +990,14 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
             errorKind: "partial",
             consecutiveFailures: nextConsecutiveFailures
           }
-        })
+        }))
+        checkInFlight = false
         return
       }
 
-      set({
+      set((s) => ({
         state: {
-          ...currentState,
+          ...s.state,
           phase: ok ? ConnectionPhase.CONNECTED : ConnectionPhase.ERROR,
           serverUrl,
           isConnected: ok,
@@ -999,7 +1018,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           errorKind,
           checksSinceConfigChange: nextChecksSinceConfigChange
         }
-      })
+      }))
     } catch (error) {
       const fallbackError =
         maybeAnnotateCorsMismatchError({
@@ -1007,9 +1026,9 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           status: 0,
           serverUrl: currentState.serverUrl
         }) ?? "unknown-error"
-      set({
+      set((s) => ({
         state: {
-          ...currentState,
+          ...s.state,
           phase: ConnectionPhase.ERROR,
           isConnected: false,
           isChecking: false,
@@ -1024,8 +1043,11 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           errorKind: "unreachable",
           checksSinceConfigChange: nextChecksSinceConfigChange
         }
-      })
+      }))
     }
+    // Release the in-flight guard for both the normal-completion and caught-error
+    // paths (they converge here after the try/catch above).
+    checkInFlight = false
   },
 
   async setServerUrl(url: string) {

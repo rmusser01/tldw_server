@@ -29,6 +29,7 @@ import {
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useCollectionsStore } from "@/store/collections"
+import { safeExternalUrl } from "@/utils/safe-external-url"
 import { useTldwApiClient } from "@/hooks/useTldwApiClient"
 import type { Highlight, HighlightColor, ReadingNoteLink, ReadingStatus } from "@/types/collections"
 import { TagSelector } from "../common/TagSelector"
@@ -1027,7 +1028,7 @@ export const ReadingItemDetail: React.FC<ReadingItemDetailProps> = ({
                   <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-text-muted">
                     {currentItem.domain && (
                       <a
-                        href={currentItem.url}
+                        href={safeExternalUrl(currentItem.url) ?? undefined}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-1 hover:text-primary"

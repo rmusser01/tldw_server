@@ -30,9 +30,7 @@ tldw-frontend/
 │   └── shims/             # Browser API compatibility shims
 │       ├── wxt-browser.ts     # localStorage-based browser.* shim
 │       └── react-router-dom.tsx  # Next.js router shim for react-router-dom
-├── hooks/                 # Web-only hooks
-│   ├── useAuth.ts         # JWT authentication state
-│   └── useConfig.ts       # Server configuration
+├── hooks/                 # Web-only hooks (auth/config are shared — see @/services/tldw/TldwAuth)
 ├── lib/                   # Web-only utilities
 │   ├── api.ts             # Fetch wrapper with auth
 │   └── auth.ts            # Token management
@@ -62,9 +60,9 @@ tldw-frontend/
 import { MyComponent } from "@/components/MyComponent"
 import { useMyHook } from "@/hooks/use-my-hook"
 import { myService } from "@/services/my-service"
+import { tldwAuth } from "@/services/tldw/TldwAuth"  // shared auth (live path)
 
 // Web-only (from tldw-frontend/)
-import { useAuth } from "@web/hooks/useAuth"
 import { api } from "@web/lib/api"
 
 // Browser APIs (automatically shimmed)
@@ -112,23 +110,16 @@ import { Link, useNavigate } from "react-router-dom"
 
 ### 3. Authentication
 
-Web UI uses JWT authentication (vs extension's API key storage):
+Auth state lives in the shared stack (`@/services/tldw/TldwAuth` + the `@/store/connection`
+store), not a web-only hook. Pages stay thin wrappers; auth is resolved inside the shared route
+component:
 
 ```typescript
 // pages/protected-page.tsx
 import dynamic from "next/dynamic"
-import { useAuth } from "@web/hooks/useAuth"
 
-const ProtectedContent = dynamic(() => import("@/routes/protected-route"), { ssr: false })
-
-export default function ProtectedPage() {
-  const { user, isLoading } = useAuth()
-
-  if (isLoading) return <Loading />
-  if (!user) return <RedirectToLogin />
-
-  return <ProtectedContent />
-}
+// Auth is resolved inside the shared route via tldwAuth / the connection store.
+export default dynamic(() => import("@/routes/protected-route"), { ssr: false })
 ```
 
 ### 4. Platform Detection in Shared Code
@@ -218,7 +209,7 @@ export default dynamic(() => import("@/routes/my-route"), { ssr: false })
 **Wrong:**
 ```typescript
 // packages/ui/src/components/MyComponent.tsx
-import { useAuth } from "@web/hooks/useAuth"  // Breaks extension!
+import { api } from "@web/lib/api"  // Breaks extension!
 ```
 
 **Right:** Keep web-only imports in `tldw-frontend/pages/` wrappers only.

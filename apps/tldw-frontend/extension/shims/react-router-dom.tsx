@@ -197,9 +197,13 @@ export const useSearchParams = (): [
       const nextParams =
         next instanceof URLSearchParams ? next : new URLSearchParams(next)
       const queryString = nextParams.toString()
+      // Use the *actual* current path, not router.pathname (which is the
+      // `[bracket]` dynamic-route pattern) so setSearchParams works on routes
+      // like /sources/[id].
+      const currentPath = router.asPath.split("?")[0].split("#")[0]
       const nextPath = queryString
-        ? `${router.pathname}?${queryString}`
-        : router.pathname
+        ? `${currentPath}?${queryString}`
+        : currentPath
       runNavigationTransition(() => {
         const navigation = options?.replace
           ? router.replace(nextPath)

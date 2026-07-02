@@ -55,6 +55,7 @@ import type {
   SourceType
 } from "@/types/watchlists"
 import { formatRelativeTime } from "@/utils/dateFormatters"
+import { safeExternalUrl } from "@/utils/safe-external-url"
 import { SourceFormModal } from "./SourceFormModal"
 import { GroupsTree } from "./GroupsTree"
 import { SourcesBulkImport } from "./SourcesBulkImport"
@@ -1239,14 +1240,16 @@ export const SourcesTab: React.FC = () => {
       dataIndex: "name",
       key: "name",
       width: 260,
-      render: (name: string, record) => (
+      render: (name: string, record) => {
+        const safeUrl = safeExternalUrl(record.url)
+        return (
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
             <span className="font-medium">{name}</span>
-            {record.url && (
+            {safeUrl && (
               <Tooltip title={record.url}>
                 <a
-                  href={record.url}
+                  href={safeUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-text-subtle hover:text-text-muted"
@@ -1278,7 +1281,8 @@ export const SourcesTab: React.FC = () => {
             </div>
           )}
         </div>
-      )
+        )
+      }
     },
     {
       title: t("watchlists:sources.columns.type", "Type"),
@@ -1494,6 +1498,7 @@ export const SourcesTab: React.FC = () => {
         const targetIds = resolveCheckNowTargetIds(source.id)
         const checkNowLoading = targetIds.some((id) => checkingSourceIds.includes(id))
         const isSelected = selectedRowKeys.some((key) => String(key) === String(source.id))
+        const sourceSafeUrl = safeExternalUrl(source.url)
 
         return (
           <article
@@ -1512,14 +1517,14 @@ export const SourcesTab: React.FC = () => {
                 />
                 <span className="min-w-0 space-y-1">
                   <span className="block truncate font-medium text-text">{source.name}</span>
-                  {source.url ? (
+                  {sourceSafeUrl ? (
                     <a
-                      href={source.url}
+                      href={sourceSafeUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="block truncate text-xs text-text-muted hover:text-primary"
                     >
-                      {source.url}
+                      {sourceSafeUrl}
                     </a>
                   ) : null}
                 </span>

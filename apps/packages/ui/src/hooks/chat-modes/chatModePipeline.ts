@@ -64,6 +64,11 @@ export type ChatModeParamsBase = {
   setIsProcessing: (value: boolean) => void
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
+  // Returns true (and releases ownership) only if this turn still owns the
+  // shared abort controller identified by `signal`. Used so a finishing turn
+  // does not clobber a newer in-flight turn's streaming flag / controller.
+  // When omitted, callers get the previous unconditional reset behavior.
+  releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
   historyId: string | null
   setHistoryId: (id: string) => void
   actorSettings?: ActorSettings
@@ -221,6 +226,20 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     isRegenerate && regenerateFromMessage
       ? normalizeMessageVariants(regenerateFromMessage)
       : []
+  // The variant that was active before this regenerate began. Used to restore
+  // prior state if the regenerate is cancelled before any token arrives.
+  const priorActiveVariantIndex =
+    isRegenerate && regenerateFromMessage && regenerateVariants.length > 0
+      ? Math.min(
+          Math.max(
+            0,
+            typeof regenerateFromMessage.activeVariantIndex === "number"
+              ? regenerateFromMessage.activeVariantIndex
+              : regenerateVariants.length - 1
+          ),
+          regenerateVariants.length - 1
+        )
+      : 0
 
   const context: ChatModeContext<TParams> = {
     ...params,
@@ -374,6 +393,49 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
   const abortCancelStreamingUpdate = () => cancelStreamingUpdate()
   signal.addEventListener("abort", abortCancelStreamingUpdate)
+
+  // Regenerate appends a new (initially empty) variant. If the regenerate is
+  // cancelled before any token arrives, drop that empty variant and restore the
+  // previously-active variant instead of leaving an empty interrupted variant.
+  // Returns true when it handled the discard (so callers can finalize as
+  // skipped), false when there was nothing to restore.
+  const discardEmptyRegenerateVariant = (): boolean => {
+    if (!isRegenerate) return false
+    if (regenerateVariants.length === 0) {
+      // No prior variant to restore to: drop the empty assistant message.
+      setMessagesWithTransition((prev) =>
+        prev.filter((msg) => msg.id !== generateMessageId)
+      )
+      return true
+    }
+    const restoreIndex = Math.min(
+      Math.max(0, priorActiveVariantIndex),
+      regenerateVariants.length - 1
+    )
+    const restoredVariant = regenerateVariants[restoreIndex]
+    setMessagesWithTransition((prev) =>
+      prev.map((msg) => {
+        if (msg.id !== generateMessageId) return msg
+        const variants = Array.isArray(msg.variants)
+          ? (msg.variants as MessageVariant[])
+          : []
+        // Only trim when the appended empty stub is still the trailing variant.
+        const trimmed =
+          variants.length > regenerateVariants.length
+            ? variants.slice(0, regenerateVariants.length)
+            : variants
+        const base: Message = {
+          ...msg,
+          variants: trimmed,
+          activeVariantIndex: restoreIndex
+        }
+        return restoredVariant
+          ? applyVariantToMessage(base, restoredVariant, restoreIndex)
+          : base
+      })
+    )
+    return true
+  }
 
   if (mode.setupMessages) {
     const setup = mode.setupMessages(context)
@@ -629,6 +691,38 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       count++
     }
 
+    // User abort: never fall through to the success path (which would save the
+    // partial as a complete answer). Route through the interrupted path, or
+    // discard entirely if nothing was streamed before the abort.
+    if (signal.aborted) {
+      cancelStreamingUpdate()
+      signal.removeEventListener("abort", abortCancelStreamingUpdate)
+      const abortedBeforeAnyContent =
+        count === 0 &&
+        fullText.trim().length === 0 &&
+        !isImageGenerationTurn
+      if (abortedBeforeAnyContent) {
+        if (isRegenerate) {
+          // Regenerate cancelled before any token arrived: discard the empty
+          // new variant and restore the previously-active variant instead of
+          // persisting an empty interrupted variant.
+          if (discardEmptyRegenerateVariant()) {
+            return chatSubmitSkipped("Request cancelled")
+          }
+        } else {
+          // Nothing arrived before the user aborted: drop the empty assistant
+          // stub instead of persisting an empty/error bubble.
+          setMessagesWithTransition((prev) =>
+            prev.filter((msg) => msg.id !== generateMessageId)
+          )
+          return chatSubmitSkipped("Request cancelled")
+        }
+      }
+      const abortError = new Error("Request cancelled")
+      abortError.name = "AbortError"
+      throw abortError
+    }
+
     if (
       !signal.aborted &&
       count === 0 &&
@@ -645,6 +739,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
     const toolCalls = extractToolCalls(generationInfo)
     if (
+      !signal.aborted &&
       fullText.trim().length === 0 &&
       (!Array.isArray(toolCalls) || toolCalls.length === 0) &&
       !isImageGenerationTurn
@@ -691,6 +786,46 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       )
     )
 
+    // Stream transport interrupted mid-answer (extension port dropped after the
+    // first byte): the assistant message is already marked interrupted above.
+    // Persist the partial via the interrupted/error path — never
+    // saveMessageOnSuccess, which would finalize a truncated answer as COMPLETE
+    // and mirror it to the server. This mirrors character chat's handling of the
+    // same `stream_transport_interrupted` sentinel.
+    if (streamTransportInterrupted) {
+      const interruptionReason =
+        streamTransportInterruptionReason ||
+        "Stream transport interrupted; partial response saved."
+      await saveMessageOnError({
+        e: new Error(interruptionReason),
+        botMessage: fullText,
+        history,
+        historyId,
+        image,
+        selectedModel,
+        setHistory: setHistorySafely,
+        setHistoryId,
+        userMessage: message,
+        isRegenerating: isRegenerate,
+        userMessageType,
+        assistantMessageType,
+        clusterId,
+        modelId: resolvedModelId,
+        userModelId,
+        userMessageId: resolvedUserMessageId,
+        assistantMessageId: resolvedAssistantMessageId,
+        userParentMessageId: userParentMessageId ?? null,
+        assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+        documents,
+        isContinue: mode.isContinue,
+        prompt_content: promptContent,
+        prompt_id: promptId,
+        userMetadataExtra: !isRegenerate ? params.userMetadataExtra : undefined,
+        assistantMetadataExtra
+      })
+      return chatSubmitSkipped(interruptionReason)
+    }
+
     setHistorySafely(
       mode.updateHistory
         ? mode.updateHistory(context, fullText)
@@ -736,6 +871,23 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
     const isAbort = signal.aborted || isAbortLikeError(e)
+    if (isAbort && !isImageGenerationTurn && fullText.trim().length === 0) {
+      // Aborted before any content arrived (the pull was still in flight).
+      if (isRegenerate) {
+        // Regenerate: discard the empty new variant and restore the
+        // previously-active variant instead of persisting an empty interrupted
+        // variant.
+        if (discardEmptyRegenerateVariant()) {
+          return chatSubmitSkipped("Request cancelled")
+        }
+      } else {
+        // Drop the empty assistant stub instead of persisting an empty bubble.
+        setMessagesWithTransition((prev) =>
+          prev.filter((msg) => msg.id !== generateMessageId)
+        )
+        return chatSubmitSkipped("Request cancelled")
+      }
+    }
     const assistantContent = isAbort
       ? fullText
       : buildAssistantErrorContent(fullText, e)
@@ -807,8 +959,16 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     return chatSubmitFailed(interruptionReason)
   } finally {
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
-    setIsProcessing(false)
-    setStreaming(false)
-    setAbortController(null)
+    // Only reset the shared streaming flag / controller if this turn still owns
+    // it. A newer in-flight turn may have replaced the controller; clobbering it
+    // would re-enable the send button and orphan the newer turn's Stop button.
+    const stillOwnsTurn = params.releaseAbortControllerIfOwned
+      ? params.releaseAbortControllerIfOwned(signal)
+      : true
+    if (stillOwnsTurn) {
+      setIsProcessing(false)
+      setStreaming(false)
+      setAbortController(null)
+    }
   }
 }

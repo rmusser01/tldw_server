@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from 'antd'
 import { getAllProcessed, deleteProcessed, clearProcessed } from '@/db/dexie/processed'
 import type { ProcessedMedia } from '@/db/dexie/types'
+import { safeExternalUrl } from '@/utils/safe-external-url'
 
 export default function OptionProcessed() {
   const [items, setItems] = useState<ProcessedMedia[]>([])
@@ -45,7 +46,9 @@ export default function OptionProcessed() {
         <div className="text-sm text-text-subtle">No processed items stored locally.</div>
       ) : (
         <ul className="divide-y divide-border">
-          {items.map((it) => (
+          {items.map((it) => {
+            const safeUrl = safeExternalUrl(it.url)
+            return (
             <li key={it.id} className="py-3">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
@@ -59,7 +62,8 @@ export default function OptionProcessed() {
                   <Button
                     size="small"
                     type="link"
-                    href={it.url}
+                    href={safeUrl ?? undefined}
+                    disabled={!safeUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
@@ -75,7 +79,8 @@ export default function OptionProcessed() {
                 </div>
               </div>
             </li>
-          ))}
+            )
+          })}
         </ul>
       )}
     </div>

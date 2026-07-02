@@ -64,6 +64,61 @@ const defaultSerde: Required<SerdeOptions> = {
   }
 }
 
+// Module-level (shared) watch registry keyed by the *scoped* storage key so
+// that every Storage instance — and every React `useStorage` hook — that
+// watches the same key is notified when any instance writes it. Previously
+// watchers lived per-instance, so two components on the same key desynced and
+// changes only applied after a full page reload (H10).
+const globalWatchers = new Map<string, Set<WatchCallback>>()
+
+const subscribeGlobal = (storageKey: string, cb: WatchCallback): (() => void) => {
+  let set = globalWatchers.get(storageKey)
+  if (!set) {
+    set = new Set()
+    globalWatchers.set(storageKey, set)
+  }
+  set.add(cb)
+  return () => {
+    const current = globalWatchers.get(storageKey)
+    if (!current) return
+    current.delete(cb)
+    if (current.size === 0) globalWatchers.delete(storageKey)
+  }
+}
+
+const notifyGlobal = (storageKey: string, change: StorageChange) => {
+  const set = globalWatchers.get(storageKey)
+  if (!set) return
+  set.forEach((cb) => {
+    try {
+      cb(change)
+    } catch {
+      // ignore watcher errors
+    }
+  })
+}
+
+// Cross-tab propagation: the browser `storage` event fires in *other* tabs
+// (never the tab that made the change), so combined with notifyGlobal above we
+// cover both same-tab-cross-instance and cross-tab updates.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.storageArea && event.storageArea !== window.localStorage) return
+    if (event.key == null) return
+    if (!globalWatchers.has(event.key)) return
+    notifyGlobal(event.key, {
+      oldValue:
+        event.oldValue == null
+          ? undefined
+          : defaultSerde.deserializer(event.oldValue),
+      newValue:
+        event.newValue == null
+          ? undefined
+          : defaultSerde.deserializer(event.newValue)
+    })
+  })
+}
+
 export class Storage {
   private backend: StorageBackend
   private serde: Required<SerdeOptions>
@@ -142,21 +197,26 @@ export class Storage {
 
   watch(map: Record<string, WatchCallback>): () => void {
     const entries = Object.entries(map)
-    entries.forEach(([key, cb]) => {
+    const unsubscribers = entries.map(([key, cb]) => {
+      // Track per-instance for `unwatch()` compatibility ...
       if (!this.watchers.has(key)) {
         this.watchers.set(key, new Set())
       }
       this.watchers.get(key)!.add(cb)
+      // ... and register on the shared, cross-instance registry.
+      return subscribeGlobal(this.storageKey(key), cb)
     })
 
     return () => {
-      entries.forEach(([key, cb]) => {
+      entries.forEach(([key, cb], index) => {
         const set = this.watchers.get(key)
-        if (!set) return
-        set.delete(cb)
-        if (set.size === 0) {
-          this.watchers.delete(key)
+        if (set) {
+          set.delete(cb)
+          if (set.size === 0) {
+            this.watchers.delete(key)
+          }
         }
+        unsubscribers[index]()
       })
     }
   }
@@ -164,23 +224,23 @@ export class Storage {
   unwatch(map: Record<string, WatchCallback>): void {
     Object.entries(map).forEach(([key, cb]) => {
       const set = this.watchers.get(key)
-      if (!set) return
-      set.delete(cb)
-      if (set.size === 0) {
-        this.watchers.delete(key)
+      if (set) {
+        set.delete(cb)
+        if (set.size === 0) {
+          this.watchers.delete(key)
+        }
+      }
+      const globalSet = globalWatchers.get(this.storageKey(key))
+      if (globalSet) {
+        globalSet.delete(cb)
+        if (globalSet.size === 0) {
+          globalWatchers.delete(this.storageKey(key))
+        }
       }
     })
   }
 
   private emitWatch(key: string, change: StorageChange) {
-    const callbacks = this.watchers.get(key)
-    if (!callbacks) return
-    callbacks.forEach((cb) => {
-      try {
-        cb(change)
-      } catch {
-        // ignore watcher errors
-      }
-    })
+    notifyGlobal(this.storageKey(key), change)
   }
 }

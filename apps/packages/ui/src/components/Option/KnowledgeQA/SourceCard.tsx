@@ -19,6 +19,7 @@ import {
   MoreHorizontal,
 } from "lucide-react"
 import { cn } from "@/libs/utils"
+import { openExternalUrl } from "@/utils/safe-external-url"
 import type { RagResult } from "./types"
 import {
   detectSourceContentFacet,
@@ -276,7 +277,7 @@ export function SourceCard({
 
   const handleOpenExternal = useCallback(() => {
     if (url) {
-      window.open(url, "_blank", "noopener,noreferrer")
+      openExternalUrl(url, "_blank", "noopener,noreferrer")
     }
   }, [url])
 

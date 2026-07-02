@@ -846,4 +846,90 @@ describe("connection store stability", () => {
     expect(state.isConnected).toBe(false)
     expect(state.configStep).toBe("url")
   })
+
+  it("does not revert a concurrent config edit when a slow health check finishes (H7)", async () => {
+    setConnectionState({
+      phase: ConnectionPhase.SEARCHING,
+      isConnected: false,
+      isChecking: false,
+      configStep: "url",
+      hasCompletedFirstRun: false,
+      userPersona: null,
+      knowledgeStatus: "ready",
+      knowledgeLastCheckedAt: Date.now(),
+      lastCheckedAt: Date.now() - 60_000,
+      consecutiveFailures: 0,
+      errorKind: "none"
+    })
+
+    // Gate the health check so it stays in-flight while other actions run.
+    let releaseHealth: (value: {
+      ok: boolean
+      status: number
+      data?: unknown
+    }) => void = () => {}
+    const healthGate = new Promise<{
+      ok: boolean
+      status: number
+      data?: unknown
+    }>((resolve) => {
+      releaseHealth = resolve
+    })
+    mockedApiSend.mockReturnValue(healthGate as never)
+
+    // Start the (slow) health check but do not await it yet.
+    const checkPromise = useConnectionStore.getState().checkOnce({ force: true })
+
+    // While it is in-flight, concurrent onboarding actions mutate the store.
+    await useConnectionStore
+      .getState()
+      .setConfigPartial({ serverUrl: "http://concurrent.test:9999" })
+    await useConnectionStore.getState().markFirstRunComplete()
+
+    // Let the slow health check complete. Its terminal write must merge onto the
+    // LATEST state, not the snapshot captured before the concurrent edits.
+    releaseHealth({ ok: true, status: 200, data: { status: "alive" } })
+    await checkPromise
+
+    const final = useConnectionStore.getState().state
+    expect(final.configStep).toBe("auth")
+    expect(final.hasCompletedFirstRun).toBe(true)
+    expect(final.phase).toBe(ConnectionPhase.CONNECTED)
+    expect(final.isConnected).toBe(true)
+  })
+
+  it("ignores a concurrent checkOnce while one is already in flight (H7 guard)", async () => {
+    setConnectionState({
+      phase: ConnectionPhase.SEARCHING,
+      isConnected: false,
+      isChecking: false,
+      knowledgeStatus: "ready",
+      knowledgeLastCheckedAt: Date.now(),
+      lastCheckedAt: Date.now() - 60_000
+    })
+
+    let releaseHealth: (value: {
+      ok: boolean
+      status: number
+      data?: unknown
+    }) => void = () => {}
+    const healthGate = new Promise<{
+      ok: boolean
+      status: number
+      data?: unknown
+    }>((resolve) => {
+      releaseHealth = resolve
+    })
+    mockedApiSend.mockReturnValue(healthGate as never)
+
+    // The in-flight guard is claimed synchronously (before the first await), so
+    // the second call must bail before issuing its own health request.
+    const first = useConnectionStore.getState().checkOnce({ force: true })
+    const second = useConnectionStore.getState().checkOnce({ force: true })
+
+    releaseHealth({ ok: true, status: 200, data: { status: "alive" } })
+    await Promise.all([first, second])
+
+    expect(mockedApiSend).toHaveBeenCalledTimes(1)
+  })
 })

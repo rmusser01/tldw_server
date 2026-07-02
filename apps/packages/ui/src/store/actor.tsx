@@ -70,6 +70,10 @@ export const useActorEditorPrefs = createWithEqualityFn<ActorEditorPrefsState>()
     }),
     {
       name: "tldw-actor-editor-prefs",
+      // Baseline version so future shape changes can migrate instead of discarding
+      // persisted state (see apps/FRONTEND_AUDIT.md §6 / TASK-12102).
+      version: 1,
+      migrate: (persisted) => persisted as any,
       storage: createJSONStorage(() => localStorage)
     }
   )

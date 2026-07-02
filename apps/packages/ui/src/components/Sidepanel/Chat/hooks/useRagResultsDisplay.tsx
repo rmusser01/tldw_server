@@ -6,6 +6,7 @@ import {
   type RagPinnedResult
 } from "@/utils/rag-format"
 import { withFullMediaTextIfAvailable } from "@/components/Knowledge/hooks"
+import { openExternalUrl } from "@/utils/safe-external-url"
 import type { RagSettings } from "@/services/rag/unified-rag"
 import type { MenuProps } from "antd"
 
@@ -190,7 +191,7 @@ export function useRagResultsDisplay(deps: UseRagResultsDisplayDeps) {
   const handleOpen = (item: RagResult) => {
     const url = getResultUrl(item)
     if (!url) return
-    window.open(String(url), "_blank")
+    openExternalUrl(String(url), "_blank")
   }
 
   const handlePin = (item: RagResult) => {

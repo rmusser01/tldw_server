@@ -5,6 +5,7 @@
 import React, { useEffect } from "react"
 import { ExternalLink, X } from "lucide-react"
 import { cn } from "@/libs/utils"
+import { openExternalUrl } from "@/utils/safe-external-url"
 import type { RagResult } from "./types"
 import {
   getEvidenceOrigin,
@@ -96,7 +97,7 @@ export function SourceViewerModal({
             {url && (
               <button
                 type="button"
-                onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+                onClick={() => openExternalUrl(url, "_blank", "noopener,noreferrer")}
                 className="inline-flex items-center gap-1 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-subtle hover:bg-hover hover:text-text transition-colors"
               >
                 <ExternalLink className="w-3.5 h-3.5" />

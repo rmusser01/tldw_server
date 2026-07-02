@@ -4,6 +4,7 @@ import type { ColumnsType } from "antd/es/table"
 import { useTranslation } from "react-i18next"
 import { Alert } from "@/components/ui"
 import { getWatchlistOutputEvidence } from "@/services/watchlists"
+import { safeExternalUrl } from "@/utils/safe-external-url"
 import type {
   WatchlistOutputEvidenceResponse,
   WatchlistReportEvidenceItem,
@@ -137,11 +138,14 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
       {
         title: t("watchlists:reports.evidence.columns.link", "Link"),
         key: "link",
-        render: (_, item) => item.url ? (
-          <a href={item.url} target="_blank" rel="noreferrer">
+        render: (_, item) => {
+          const safeUrl = safeExternalUrl(item.url)
+          return safeUrl ? (
+          <a href={safeUrl} target="_blank" rel="noreferrer">
             {t("watchlists:reports.evidence.openSource", "Open source")}
           </a>
         ) : "-"
+        }
       }
     ],
     [t]
@@ -178,7 +182,9 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
 
   const renderConstrainedIncludedEvidence = (items: WatchlistReportEvidenceItem[]) => (
     <div className="space-y-3" data-testid="report-evidence-included-constrained-list">
-      {items.map((item) => (
+      {items.map((item) => {
+        const safeUrl = safeExternalUrl(item.url)
+        return (
         <article
           key={item.id}
           className="rounded-lg border border-border bg-surface p-3"
@@ -220,15 +226,16 @@ export const ReportEvidencePanel: React.FC<ReportEvidencePanelProps> = ({
             </div>
           </div>
 
-          {item.url ? (
+          {safeUrl ? (
             <div className="mt-3">
-              <a href={item.url} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">
+              <a href={safeUrl} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">
                 {t("watchlists:reports.evidence.openSource", "Open source")}
               </a>
             </div>
           ) : null}
         </article>
-      ))}
+        )
+      })}
     </div>
   )
 

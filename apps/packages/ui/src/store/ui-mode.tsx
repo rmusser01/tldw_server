@@ -25,6 +25,10 @@ export const useUiModeStore = createWithEqualityFn<UiModeState>()(
     }),
     {
       name: "tldw-ui-mode",
+      // Baseline version so a future shape change can migrate instead of silently
+      // discarding persisted state (see apps/FRONTEND_AUDIT.md §6 / TASK-12102).
+      version: 1,
+      migrate: (persisted) => persisted as any,
       storage: createJSONStorage(() =>
         typeof window !== "undefined" ? localStorage : createMemoryStorage()
       )
