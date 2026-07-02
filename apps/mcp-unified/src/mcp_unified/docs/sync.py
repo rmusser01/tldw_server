@@ -290,11 +290,153 @@ class DocsSourceSyncService:
         source: dict[str, Any],
         request: SyncSourceRequest,
     ) -> dict[str, Any]:
-        return _response(
-            status="skipped",
-            reason_code="source_sync_unsupported_type",
+        if not self.settings.enable_web_acquisition:
+            return _response(
+                status="denied",
+                reason_code="web_acquisition_disabled",
+                source=source,
+                request=request,
+            )
+
+        source_url = str(source.get("source_url") or "").strip()
+        if not source_url:
+            return self._failed(
+                source=source,
+                request=request,
+                reason_code="source_url_missing",
+                warning="URL source does not include a source URL.",
+            )
+
+        decision = self.acquisition.policy.evaluate(source_url)
+        if decision.status != "allowed":
+            reason_code = "approval_required" if decision.status == "approval_required" else "source_policy_denied"
+            return _response(
+                status="denied",
+                reason_code=reason_code,
+                source=source,
+                request=request,
+            )
+
+        limit = self._document_limit(request)
+        if limit < 1:
+            return _sync_response(
+                status="denied",
+                reason_code="source_sync_limit_exceeded",
+                source=source,
+                request=request,
+                counts=dict(_ZERO_COUNTS),
+                items=[],
+                warnings=[f"sync_item_count=1 exceeds max_documents={limit}"],
+            )
+
+        fetched_document = self.acquisition._fetch_parsed_url(url=source_url)
+        if fetched_document["status"] != "fetched":
+            reason_code = str(fetched_document.get("reason_code") or "fetch_failed")
+            if fetched_document["status"] == "approval_required":
+                return _response(
+                    status="denied",
+                    reason_code="approval_required",
+                    source=source,
+                    request=request,
+                )
+            if fetched_document["status"] == "denied":
+                return _response(
+                    status="denied",
+                    reason_code=reason_code,
+                    source=source,
+                    request=request,
+                )
+            return self._failed(source=source, request=request, reason_code=reason_code, warning=reason_code)
+
+        mode = str(request.mode).strip().lower()
+        source_id = int(source["id"])
+        parsed = fetched_document["parsed"]
+        fetched = fetched_document["fetch"]
+        chunks, content_hash = self._parsed_url_sync_item(parsed)
+        links = self.store.source_document_links(scope=scope, source_id=source_id)
+        link = _url_page_link(links=links, source_url=source_url, parsed_uri=parsed.canonical_uri)
+        item_status = self._local_item_status(
+            scope=scope,
+            parsed=parsed,
+            link=link,
+            content_hash=content_hash,
+            force=request.force,
+        )
+        counts = dict(_ZERO_COUNTS)
+        counts[item_status] = 1
+        default_keywords = _metadata_string_tuple(source.get("metadata"), "default_keywords")
+        default_collections = _metadata_string_tuple(source.get("metadata"), "default_collections")
+        document_id = int(link["document_id"]) if link is not None else None
+
+        if mode == "apply":
+            if item_status in {"created", "updated"}:
+                document_id = self.store.upsert_document_for_sync(
+                    scope=scope,
+                    title=parsed.title,
+                    document_type=parsed.document_type,
+                    canonical_uri=parsed.canonical_uri,
+                    source_path=parsed.source_path,
+                    source_url=parsed.source_url,
+                    text=parsed.text,
+                    sections=[asdict(section) for section in parsed.sections],
+                    chunks=chunks,
+                    source_default_keywords=default_keywords,
+                    source_default_collections=default_collections,
+                    metadata=_url_sync_metadata(parsed=parsed, fetched=fetched),
+                )
+                self.store.link_source_document(
+                    scope=scope,
+                    source_id=source_id,
+                    document_id=document_id,
+                    source_item_uri=parsed.canonical_uri,
+                    status="active",
+                    last_hash=content_hash,
+                    metadata={"importer": "url"},
+                )
+            elif link is not None and link.get("last_hash") != content_hash:
+                self.store.link_source_document(
+                    scope=scope,
+                    source_id=source_id,
+                    document_id=int(link["document_id"]),
+                    source_item_uri=str(link["source_item_uri"]),
+                    status="active",
+                    last_hash=content_hash,
+                    metadata=link.get("metadata") or {"importer": "url"},
+                )
+
+            self.store.record_sync_run(
+                scope=scope,
+                source_id=source_id,
+                mode=mode,
+                status="completed",
+                requested_limits={
+                    "max_documents": request.max_documents,
+                    "max_pages": request.max_pages,
+                    "effective_max_documents": self._document_limit(request),
+                },
+                counts=counts,
+                warnings=list(parsed.warnings),
+                error_code=None,
+                metadata={"source_type": source["source_type"]},
+            )
+            source = self.store.get_source(scope=scope, source_id=source_id) or source
+
+        return _sync_response(
+            status="completed",
+            reason_code="ok",
             source=source,
             request=request,
+            counts=counts,
+            items=[
+                {
+                    "source_item_uri": redacted_url_for_display(parsed.canonical_uri),
+                    "status": item_status,
+                    "document_id": document_id,
+                    "canonical_uri": redacted_url_for_display(parsed.canonical_uri),
+                    "title": parsed.title,
+                }
+            ],
+            warnings=list(parsed.warnings),
         )
 
     def _denied(self, *, source: dict[str, Any], request: SyncSourceRequest, reason_code: str) -> dict[str, Any]:
@@ -350,6 +492,17 @@ class DocsSourceSyncService:
         ]
         content_hash = sha256(parsed.text.encode("utf-8")).hexdigest()
         return parsed, chunks, content_hash
+
+    def _parsed_url_sync_item(self, parsed: ParsedDocument) -> tuple[list[dict[str, str]], str]:
+        chunks = [
+            {
+                "text": chunk,
+                "citation": f"{parsed.source_url or parsed.canonical_uri}#{idx + 1}",
+            }
+            for idx, chunk in enumerate(chunks_from_text(parsed.text))
+        ]
+        content_hash = sha256(parsed.text.encode("utf-8")).hexdigest()
+        return chunks, content_hash
 
     def _local_item_status(
         self,
@@ -503,9 +656,37 @@ def _existing_content_hash(store: DocsCatalogStore, scope: AccessScope, canonica
     return str(value) if value else None
 
 
+def _url_page_link(
+    *,
+    links: list[dict[str, Any]],
+    source_url: str,
+    parsed_uri: str,
+) -> dict[str, Any] | None:
+    for link in links:
+        if str(link.get("source_item_uri") or "") == parsed_uri:
+            return link
+    for link in links:
+        if str(link.get("source_item_uri") or "") == source_url:
+            return link
+    active_links = [link for link in links if link.get("status") == "active"]
+    if len(active_links) == 1:
+        return active_links[0]
+    return None
+
+
 def _local_sync_metadata(parsed: ParsedDocument) -> dict[str, Any]:
     return {
         "importer": "local",
         "extraction_method": parsed.extraction_method,
+        "warnings": list(parsed.warnings),
+    }
+
+
+def _url_sync_metadata(*, parsed: ParsedDocument, fetched: Any) -> dict[str, Any]:
+    return {
+        "importer": "url",
+        "extraction_method": parsed.extraction_method,
+        "fetch_status_code": fetched.status_code,
+        "redirect_count": len(fetched.redirects),
         "warnings": list(parsed.warnings),
     }

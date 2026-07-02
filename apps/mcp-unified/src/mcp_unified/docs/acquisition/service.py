@@ -50,36 +50,20 @@ class DocsAcquisitionService:
                 "redirects": [],
             }
 
-        fetched = self.fetcher.fetch(url)
-        if fetched.status != "fetched":
+        fetched_document = self._fetch_parsed_url(url=url, title_override=title_override)
+        if fetched_document["status"] != "fetched":
             logger.info(
                 "Docs URL fetch did not produce ingestable content: status={} reason={} final_url={} redirects={}",
-                fetched.status,
-                fetched.reason,
-                fetched.final_url,
-                len(fetched.redirects),
+                fetched_document["status"],
+                fetched_document["reason_code"],
+                fetched_document.get("final_url"),
+                len(fetched_document.get("redirects", [])),
             )
-            return {
-                "status": fetched.status,
-                "reason_code": fetched.reason,
-                "final_url": fetched.final_url,
-                "redirects": [asdict(item) for item in fetched.redirects],
-                "safe_argument_hash": fetched.safe_argument_hash,
-            }
+            return fetched_document
 
-        content_type = fetched.headers.get("content-type", "text/html")
-        document_url = fetched.canonical_url or fetched.final_url or url
-        parsed = extract_fetched_document(url=document_url, content_type=content_type, body=fetched.body)
-        if title_override:
-            parsed = replace(parsed, title=title_override)
-        if not parsed.text.strip():
-            return {
-                "status": "failed",
-                "reason_code": "extract_empty",
-                "final_url": fetched.final_url,
-                "redirects": [asdict(item) for item in fetched.redirects],
-            }
-
+        fetched = fetched_document["fetch"]
+        parsed = fetched_document["parsed"]
+        content_type = fetched_document["content_type"]
         previous_hash = _existing_content_hash(self.store, scope, parsed.canonical_uri)
         new_hash = sha256(parsed.text.encode("utf-8")).hexdigest()
         keyword_tuple = tuple(keywords)
@@ -161,6 +145,42 @@ class DocsAcquisitionService:
             },
             "source": source,
             "warnings": warnings,
+        }
+
+    def _fetch_parsed_url(
+        self,
+        *,
+        url: str,
+        title_override: str | None = None,
+    ) -> dict[str, Any]:
+        fetched = self.fetcher.fetch(url)
+        if fetched.status != "fetched":
+            return {
+                "status": fetched.status,
+                "reason_code": fetched.reason,
+                "final_url": fetched.final_url,
+                "redirects": [asdict(item) for item in fetched.redirects],
+                "safe_argument_hash": fetched.safe_argument_hash,
+            }
+
+        content_type = fetched.headers.get("content-type", "text/html")
+        document_url = fetched.canonical_url or fetched.final_url or url
+        parsed = extract_fetched_document(url=document_url, content_type=content_type, body=fetched.body)
+        if title_override:
+            parsed = replace(parsed, title=title_override)
+        if not parsed.text.strip():
+            return {
+                "status": "failed",
+                "reason_code": "extract_empty",
+                "final_url": fetched.final_url,
+                "redirects": [asdict(item) for item in fetched.redirects],
+            }
+        return {
+            "status": "fetched",
+            "reason_code": "ok",
+            "fetch": fetched,
+            "parsed": parsed,
+            "content_type": content_type,
         }
 
 

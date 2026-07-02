@@ -4,10 +4,14 @@ from pathlib import Path
 
 import pytest
 
+from mcp_unified.docs.acquisition.models import FetchResponse
+from mcp_unified.docs.acquisition.service import DocsAcquisitionService
 from mcp_unified.docs.mcp_module import DocsMCPToolProvider
-from mcp_unified.docs.models import AccessScope
+from mcp_unified.docs.models import AccessScope, SyncSourceRequest
 from mcp_unified.docs.settings import DocsSettings
+from mcp_unified.docs.sync import DocsSourceSyncService
 from mcp_unified.docs.store.sqlite import DocsCatalogStore
+from tldw_Server_API.tests.MCP_unified.docs.helpers import FakeResolver, FakeTransport
 
 pytestmark = pytest.mark.unit
 
@@ -20,6 +24,188 @@ ZERO_SYNC_COUNTS = {
     "failed": 0,
     "skipped": 0,
 }
+
+
+def test_url_page_sync_apply_refreshes_existing_source_with_fake_transport(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+        }
+    )
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport(
+        [
+            FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"old sqlite body"]),
+            FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"new sqlite body"]),
+        ]
+    )
+    acquisition = DocsAcquisitionService(settings=settings, store=store, resolver=resolver, transport=transport)
+    scope = AccessScope()
+    ingested = acquisition.ingest_url(scope=scope, url="https://example.com/page")
+    service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=transport)
+
+    result = service.sync_source(scope=scope, request=SyncSourceRequest(source_id=ingested["source"]["id"], mode="apply"))
+    search = store.search_chunks(scope=scope, query="new", limit=10)
+
+    assert result["counts"]["updated"] == 1  # nosec B101
+    assert search[0]["title"]  # nosec B101
+
+
+def test_url_page_sync_does_not_fetch_when_policy_requires_approval(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope()
+    source_id = store.upsert_source(
+        scope=scope,
+        source_type="url_page",
+        canonical_uri="https://example.com/page",
+        display_name="page",
+        source_path=None,
+        source_url="https://example.com/page",
+        redacted_source_url="https://example.com/page",
+        policy_profile="local_first",
+        sync_enabled=True,
+        metadata={},
+    )
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "local_first",
+        }
+    )
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport([FetchResponse(status_code=200, body_chunks=[b"never"])])
+    service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=transport)
+
+    result = service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="apply"))
+
+    assert result["status"] == "denied"  # nosec B101
+    assert result["reason_code"] == "approval_required"  # nosec B101
+    assert resolver.calls == []  # nosec B101
+    assert transport.calls == []  # nosec B101
+
+
+def test_url_page_sync_dry_run_does_not_mutate_content_links_or_runs(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+        }
+    )
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport(
+        [
+            FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"old sqlite body"]),
+            FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"new sqlite body"]),
+        ]
+    )
+    acquisition = DocsAcquisitionService(settings=settings, store=store, resolver=resolver, transport=transport)
+    scope = AccessScope()
+    ingested = acquisition.ingest_url(scope=scope, url="https://example.com/page")
+    source_id = ingested["source"]["id"]
+    source_before = store.get_source(scope=scope, source_id=source_id)
+    links_before = store.source_document_links(scope=scope, source_id=source_id)
+    service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=transport)
+
+    result = service.sync_source(
+        scope=scope,
+        request=SyncSourceRequest(source_id=source_id, mode="dry_run"),
+    )
+    search_new = store.search_chunks(scope=scope, query="new", limit=10)
+    search_old = store.search_chunks(scope=scope, query="old", limit=10)
+    status = store.status()
+
+    assert result["counts"]["updated"] == 1  # nosec B101
+    assert search_new == []  # nosec B101
+    assert search_old  # nosec B101
+    assert store.get_source(scope=scope, source_id=source_id) == source_before  # nosec B101
+    assert store.source_document_links(scope=scope, source_id=source_id) == links_before  # nosec B101
+    assert status["counts"]["sync_runs"] == 0  # nosec B101
+
+
+def test_url_page_sync_redacts_query_bearing_source_summary(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+            "persist_url_query_strings": True,
+        }
+    )
+    resolver = FakeResolver({"example.com": ["93.184.216.34"]})
+    transport = FakeTransport(
+        [
+            FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"old sqlite body"]),
+            FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"new sqlite body"]),
+        ]
+    )
+    acquisition = DocsAcquisitionService(settings=settings, store=store, resolver=resolver, transport=transport)
+    scope = AccessScope()
+    ingested = acquisition.ingest_url(scope=scope, url="https://example.com/page?token=secret")
+    service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=transport)
+
+    result = service.sync_source(
+        scope=scope,
+        request=SyncSourceRequest(source_id=ingested["source"]["id"], mode="apply"),
+    )
+
+    assert "token=secret" not in repr(result["source"])  # nosec B101
+    assert result["source"]["canonical_uri"] == "https://example.com/page"  # nosec B101
+    assert result["source"]["display_uri"] == "https://example.com/page"  # nosec B101
+    assert result["source"]["redacted_source_url"] == "https://example.com/page"  # nosec B101
+
+
+def test_url_page_sync_private_address_denial_preserves_old_content_without_run(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+        }
+    )
+    scope = AccessScope()
+    ingest_transport = FakeTransport(
+        [FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"old sqlite body"])]
+    )
+    acquisition = DocsAcquisitionService(
+        settings=settings,
+        store=store,
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=ingest_transport,
+    )
+    ingested = acquisition.ingest_url(scope=scope, url="https://example.com/page")
+    source_id = ingested["source"]["id"]
+    sync_resolver = FakeResolver({"example.com": ["127.0.0.1"]})
+    sync_transport = FakeTransport([FetchResponse(status_code=200, body_chunks=[b"new sqlite body"])])
+    service = DocsSourceSyncService(settings=settings, store=store, resolver=sync_resolver, transport=sync_transport)
+
+    result = service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="apply"))
+    search_old = store.search_chunks(scope=scope, query="old", limit=10)
+    search_new = store.search_chunks(scope=scope, query="new", limit=10)
+    status = store.status()
+
+    assert result["status"] == "denied"  # nosec B101
+    assert result["reason_code"] == "egress_private_address_denied"  # nosec B101
+    assert search_old  # nosec B101
+    assert search_new == []  # nosec B101
+    assert sync_transport.calls == []  # nosec B101
+    assert status["counts"]["sync_runs"] == 0  # nosec B101
 
 
 def test_provider_advertises_sync_source_when_enabled(tmp_path: Path) -> None:
