@@ -26,6 +26,7 @@ _COUNT_SQL = {
     "docs_chunks": "SELECT COUNT(*) AS count FROM docs_chunks",
     "docs_collections": "SELECT COUNT(*) AS count FROM docs_collections",
     "docs_keywords": "SELECT COUNT(*) AS count FROM docs_keywords",
+    "docs_sync_runs": "SELECT COUNT(*) AS count FROM docs_sync_runs",
 }
 _SCOPE_TABLE_INFO_SQL = {
     "docs_documents": "PRAGMA table_info(docs_documents)",
@@ -106,6 +107,7 @@ class DocsCatalogStore:
                     "chunks": self._count(conn, "docs_chunks"),
                     "collections": self._count(conn, "docs_collections"),
                     "keywords": self._count(conn, "docs_keywords"),
+                    "sync_runs": self._count(conn, "docs_sync_runs"),
                 },
             }
 
@@ -349,6 +351,19 @@ class DocsCatalogStore:
                         metadata_json,
                     ),
                 )
+                if normalized_status == "active":
+                    conn.execute(
+                        """
+                        UPDATE docs_documents
+                        SET lifecycle_status = 'active',
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                          AND owner_scope = ?
+                          AND profile_scope = ?
+                          AND lifecycle_status != 'active'
+                        """,
+                        (document_id, owner_scope, profile_scope),
+                    )
 
     def source_document_links(self, *, scope: AccessScope, source_id: int) -> list[dict[str, Any]]:
         owner_scope, profile_scope = _scope_values(scope)
@@ -367,6 +382,73 @@ class DocsCatalogStore:
                 (source_id, owner_scope, profile_scope),
             ).fetchall()
         return [_source_document_link_from_row(row) for row in rows]
+
+    def tombstone_source_item(
+        self,
+        *,
+        scope: AccessScope,
+        source_id: int,
+        source_item_uri: str,
+    ) -> bool:
+        owner_scope, profile_scope = _scope_values(scope)
+        normalized_item_uri = _required_name(source_item_uri, "source item URI")
+        with closing(self.connect()) as conn:
+            with conn:
+                self._assert_source_in_scope(conn, owner_scope, profile_scope, source_id)
+                row = conn.execute(
+                    """
+                    SELECT sd.document_id, d.preserve_on_source_tombstone
+                    FROM docs_source_documents sd
+                    JOIN docs_documents d ON d.id = sd.document_id
+                    WHERE sd.source_id = ?
+                      AND sd.source_item_uri = ?
+                      AND d.owner_scope = ?
+                      AND d.profile_scope = ?
+                    """,
+                    (source_id, normalized_item_uri, owner_scope, profile_scope),
+                ).fetchone()
+                if row is None:
+                    return False
+
+                document_id = int(row["document_id"])
+                conn.execute(
+                    """
+                    UPDATE docs_source_documents
+                    SET status = 'tombstoned',
+                        last_seen_at = CURRENT_TIMESTAMP,
+                        last_error_code = NULL
+                    WHERE source_id = ?
+                      AND source_item_uri = ?
+                    """,
+                    (source_id, normalized_item_uri),
+                )
+                active_link_row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM docs_source_documents sd
+                    JOIN docs_sources s ON s.id = sd.source_id
+                    WHERE sd.document_id = ?
+                      AND s.owner_scope = ?
+                      AND s.profile_scope = ?
+                      AND sd.status != 'tombstoned'
+                    """,
+                    (document_id, owner_scope, profile_scope),
+                ).fetchone()
+                has_non_tombstoned_links = int(active_link_row["count"] or 0) > 0
+                should_preserve = bool(row["preserve_on_source_tombstone"])
+                if not has_non_tombstoned_links and not should_preserve:
+                    conn.execute(
+                        """
+                        UPDATE docs_documents
+                        SET lifecycle_status = 'tombstoned',
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                          AND owner_scope = ?
+                          AND profile_scope = ?
+                        """,
+                        (document_id, owner_scope, profile_scope),
+                    )
+                return True
 
     def record_sync_run(
         self,
@@ -567,6 +649,7 @@ class DocsCatalogStore:
             WHERE docs_chunks_fts MATCH ?
               AND d.owner_scope = ?
               AND d.profile_scope = ?
+              AND d.lifecycle_status = 'active'
                 """,
                 where_sql,
                 """
@@ -619,6 +702,7 @@ class DocsCatalogStore:
             WHERE docs_chunks_fts MATCH ?
               AND d.owner_scope = ?
               AND d.profile_scope = ?
+              AND d.lifecycle_status = 'active'
                 """,
                 where_sql,
             )
@@ -681,6 +765,7 @@ class DocsCatalogStore:
                 SELECT *
                 FROM docs_documents
                 WHERE owner_scope = ? AND profile_scope = ?
+                  AND lifecycle_status = 'active'
                 ORDER BY title COLLATE NOCASE ASC, id ASC
                 LIMIT ? OFFSET ?
                 """,

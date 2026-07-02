@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+from dataclasses import asdict
+from hashlib import sha256
+from pathlib import Path
 from typing import Any
 
+from .acquisition.service import DocsAcquisitionService
+from .errors import DocsError
+from .importers.base import ParsedDocument, chunks_from_text
+from .importers.local import DocsImportService
 from .models import AccessScope, SyncSourceRequest
 from .settings import DocsSettings
-from .source_utils import redacted_url_for_display
+from .source_utils import file_uri_for_path, redacted_url_for_display
 from .store.sqlite import DocsCatalogStore
 
 _SYNC_MODES = {"dry_run", "apply"}
@@ -32,8 +40,13 @@ class DocsSourceSyncService:
     ) -> None:
         self.settings = settings
         self.store = store
-        self.resolver = resolver
-        self.transport = transport
+        self.importer = DocsImportService(settings=settings, store=store)
+        self.acquisition = DocsAcquisitionService(
+            settings=settings,
+            store=store,
+            resolver=resolver,
+            transport=transport,
+        )
 
     def sync_source(self, *, scope: AccessScope, request: SyncSourceRequest) -> dict[str, Any]:
         if not self.settings.enable_source_sync:
@@ -61,6 +74,219 @@ class DocsSourceSyncService:
                 request=request,
             )
 
+        if source["source_type"] == "local_file":
+            return self._sync_local_file(scope=scope, source=source, request=request)
+        if source["source_type"] == "local_directory":
+            return self._sync_local_directory(scope=scope, source=source, request=request)
+        if source["source_type"] == "url_page":
+            return self._sync_url_page(scope=scope, source=source, request=request)
+        return self._denied(source=source, request=request, reason_code="source_sync_unsupported_type")
+
+    def _get_source(self, *, scope: AccessScope, request: SyncSourceRequest) -> dict[str, Any] | None:
+        if request.source_id is not None:
+            return self.store.get_source(scope=scope, source_id=int(request.source_id))
+        return self.store.get_source(scope=scope, canonical_uri=str(request.source_uri or "").strip())
+
+    def _sync_local_file(
+        self,
+        *,
+        scope: AccessScope,
+        source: dict[str, Any],
+        request: SyncSourceRequest,
+    ) -> dict[str, Any]:
+        try:
+            target = self._source_path(source)
+            resolved = self.importer._assert_allowed_path(target)
+        except DocsError as exc:
+            return self._failed(source=source, request=request, reason_code=exc.code, warning=exc.message)
+
+        files = [resolved] if resolved.is_file() else []
+        return self._sync_local_paths(scope=scope, source=source, request=request, files=files)
+
+    def _sync_local_directory(
+        self,
+        *,
+        scope: AccessScope,
+        source: dict[str, Any],
+        request: SyncSourceRequest,
+    ) -> dict[str, Any]:
+        try:
+            target = self._source_path(source)
+            resolved = self.importer._assert_allowed_path(target)
+            files = self.importer._iter_import_files(resolved) if resolved.is_dir() else []
+        except DocsError as exc:
+            return self._failed(source=source, request=request, reason_code=exc.code, warning=exc.message)
+
+        limit = self._document_limit(request)
+        if len(files) > limit:
+            return _sync_response(
+                status="denied",
+                reason_code="source_sync_limit_exceeded",
+                source=source,
+                request=request,
+                counts=dict(_ZERO_COUNTS),
+                items=[],
+                warnings=[f"candidate_count={len(files)} exceeds max_documents={limit}"],
+            )
+        return self._sync_local_paths(scope=scope, source=source, request=request, files=files)
+
+    def _sync_local_paths(
+        self,
+        *,
+        scope: AccessScope,
+        source: dict[str, Any],
+        request: SyncSourceRequest,
+        files: list[Path],
+    ) -> dict[str, Any]:
+        mode = str(request.mode).strip().lower()
+        stale_policy = str(request.stale_policy).strip().lower()
+        counts = dict(_ZERO_COUNTS)
+        items: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        source_id = int(source["id"])
+        links = self.store.source_document_links(scope=scope, source_id=source_id)
+        links_by_uri = {str(link["source_item_uri"]): link for link in links}
+        current_uris: set[str] = set()
+        default_keywords = _metadata_string_tuple(source.get("metadata"), "default_keywords")
+        default_collections = _metadata_string_tuple(source.get("metadata"), "default_collections")
+
+        for file_path in files:
+            item_uri = file_uri_for_path(file_path)
+            current_uris.add(item_uri)
+            try:
+                parsed, chunks, content_hash = self._parsed_local_sync_item(file_path)
+            except DocsError as exc:
+                counts["failed"] += 1
+                warnings.append(exc.code)
+                items.append(
+                    {
+                        "source_item_uri": item_uri,
+                        "status": "failed",
+                        "reason_code": exc.code,
+                    }
+                )
+                continue
+
+            link = links_by_uri.get(item_uri)
+            item_status = self._local_item_status(
+                scope=scope,
+                parsed=parsed,
+                link=link,
+                content_hash=content_hash,
+                force=request.force,
+            )
+            counts[item_status] += 1
+            document_id = int(link["document_id"]) if link is not None else None
+
+            if mode == "apply":
+                if item_status in {"created", "updated"}:
+                    document_id = self.store.upsert_document_for_sync(
+                        scope=scope,
+                        title=parsed.title,
+                        document_type=parsed.document_type,
+                        canonical_uri=parsed.canonical_uri,
+                        source_path=parsed.source_path,
+                        source_url=parsed.source_url,
+                        text=parsed.text,
+                        sections=[asdict(section) for section in parsed.sections],
+                        chunks=chunks,
+                        source_default_keywords=default_keywords,
+                        source_default_collections=default_collections,
+                        metadata=_local_sync_metadata(parsed),
+                    )
+                    self.store.link_source_document(
+                        scope=scope,
+                        source_id=source_id,
+                        document_id=document_id,
+                        source_item_uri=item_uri,
+                        status="active",
+                        last_hash=content_hash,
+                        metadata={"importer": "local"},
+                    )
+                elif link is not None and link.get("last_hash") != content_hash:
+                    self.store.link_source_document(
+                        scope=scope,
+                        source_id=source_id,
+                        document_id=int(link["document_id"]),
+                        source_item_uri=item_uri,
+                        status="active",
+                        last_hash=content_hash,
+                        metadata=link.get("metadata") or {"importer": "local"},
+                    )
+
+            items.append(
+                {
+                    "source_item_uri": item_uri,
+                    "status": item_status,
+                    "document_id": document_id,
+                    "canonical_uri": parsed.canonical_uri,
+                    "title": parsed.title,
+                }
+            )
+
+        for link in links:
+            item_uri = str(link["source_item_uri"])
+            if item_uri in current_uris or link.get("status") == "tombstoned":
+                continue
+            if stale_policy == "tombstone":
+                counts["tombstoned"] += 1
+                item_status = "tombstoned"
+                if mode == "apply":
+                    self.store.tombstone_source_item(
+                        scope=scope,
+                        source_id=source_id,
+                        source_item_uri=item_uri,
+                    )
+            else:
+                counts["missing"] += 1
+                item_status = "missing"
+            items.append(
+                {
+                    "source_item_uri": item_uri,
+                    "status": item_status,
+                    "document_id": int(link["document_id"]),
+                    "canonical_uri": link.get("canonical_uri"),
+                    "title": link.get("title"),
+                }
+            )
+
+        run_status = "partial" if counts["failed"] else "completed"
+        reason_code = "partial_failure" if counts["failed"] else "ok"
+        if mode == "apply":
+            self.store.record_sync_run(
+                scope=scope,
+                source_id=source_id,
+                mode=mode,
+                status=run_status,
+                requested_limits={
+                    "max_documents": request.max_documents,
+                    "max_pages": request.max_pages,
+                    "effective_max_documents": self._document_limit(request),
+                },
+                counts=counts,
+                warnings=warnings,
+                error_code=None if reason_code == "ok" else reason_code,
+                metadata={"source_type": source["source_type"]},
+            )
+            source = self.store.get_source(scope=scope, source_id=source_id) or source
+
+        return _sync_response(
+            status=run_status,
+            reason_code=reason_code,
+            source=source,
+            request=request,
+            counts=counts,
+            items=items,
+            warnings=warnings,
+        )
+
+    def _sync_url_page(
+        self,
+        *,
+        scope: AccessScope,
+        source: dict[str, Any],
+        request: SyncSourceRequest,
+    ) -> dict[str, Any]:
         return _response(
             status="skipped",
             reason_code="source_sync_unsupported_type",
@@ -68,10 +294,77 @@ class DocsSourceSyncService:
             request=request,
         )
 
-    def _get_source(self, *, scope: AccessScope, request: SyncSourceRequest) -> dict[str, Any] | None:
-        if request.source_id is not None:
-            return self.store.get_source(scope=scope, source_id=int(request.source_id))
-        return self.store.get_source(scope=scope, canonical_uri=str(request.source_uri or "").strip())
+    def _denied(self, *, source: dict[str, Any], request: SyncSourceRequest, reason_code: str) -> dict[str, Any]:
+        return _response(status="skipped", reason_code=reason_code, source=source, request=request)
+
+    def _failed(
+        self,
+        *,
+        source: dict[str, Any],
+        request: SyncSourceRequest,
+        reason_code: str,
+        warning: str,
+    ) -> dict[str, Any]:
+        counts = dict(_ZERO_COUNTS)
+        counts["failed"] = 1
+        return _sync_response(
+            status="failed",
+            reason_code=reason_code,
+            source=source,
+            request=request,
+            counts=counts,
+            items=[],
+            warnings=[warning],
+        )
+
+    def _source_path(self, source: dict[str, Any]) -> Path:
+        source_path = source.get("source_path")
+        if source_path:
+            return Path(str(source_path))
+        canonical_uri = str(source.get("canonical_uri") or "")
+        if canonical_uri.startswith("file://"):
+            return Path(canonical_uri.removeprefix("file://"))
+        raise DocsError(
+            code="source_path_missing",
+            message="Local source does not include a source path.",
+            details={"source_id": source.get("id")},
+        )
+
+    def _document_limit(self, request: SyncSourceRequest) -> int:
+        limits = [self.settings.max_sync_documents, self.settings.max_sync_run_items]
+        if request.max_documents is not None:
+            limits.append(int(request.max_documents))
+        return min(limits)
+
+    def _parsed_local_sync_item(self, file_path: Path) -> tuple[ParsedDocument, list[dict[str, str]], str]:
+        parsed = self.importer._parse_file(file_path)
+        chunks = [
+            {
+                "text": chunk,
+                "citation": f"{file_path.name}:{idx + 1}",
+            }
+            for idx, chunk in enumerate(chunks_from_text(parsed.text))
+        ]
+        content_hash = sha256(parsed.text.encode("utf-8")).hexdigest()
+        return parsed, chunks, content_hash
+
+    def _local_item_status(
+        self,
+        *,
+        scope: AccessScope,
+        parsed: ParsedDocument,
+        link: dict[str, Any] | None,
+        content_hash: str,
+        force: bool,
+    ) -> str:
+        if link is None:
+            return "created"
+        if force:
+            return "updated"
+        previous_hash = link.get("last_hash") or _existing_content_hash(self.store, scope, parsed.canonical_uri)
+        if previous_hash == content_hash and link.get("status") == "active":
+            return "unchanged"
+        return "updated"
 
 
 def _validate_request(request: SyncSourceRequest) -> dict[str, Any] | None:
@@ -120,7 +413,31 @@ def _response(
         "stale_policy": str(request.stale_policy).strip().lower(),
         "force": request.force,
         "counts": dict(_ZERO_COUNTS),
+        "items": [],
         "warnings": [],
+    }
+
+
+def _sync_response(
+    *,
+    status: str,
+    reason_code: str,
+    source: dict[str, Any],
+    request: SyncSourceRequest,
+    counts: dict[str, int],
+    items: list[dict[str, Any]],
+    warnings: list[str],
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "reason_code": reason_code,
+        "source": _source_summary(source),
+        "mode": str(request.mode).strip().lower(),
+        "stale_policy": str(request.stale_policy).strip().lower(),
+        "force": request.force,
+        "counts": {key: int(counts.get(key, 0)) for key in _ZERO_COUNTS},
+        "items": items,
+        "warnings": warnings,
     }
 
 
@@ -157,3 +474,35 @@ def _redacted_source_uri(source: dict[str, Any]) -> str:
         return redacted_uri.strip()
     raw_uri = source.get("canonical_uri") or source.get("source_url") or ""
     return redacted_url_for_display(str(raw_uri))
+
+
+def _metadata_string_tuple(metadata: object, key: str) -> tuple[str, ...]:
+    if not isinstance(metadata, dict):
+        return ()
+    value = metadata.get(key) or ()
+    if isinstance(value, str):
+        values: Iterable[object] = (value,)
+    elif isinstance(value, Iterable):
+        values = value
+    else:
+        values = (value,)
+    return tuple(str(item).strip() for item in values if str(item).strip())
+
+
+def _existing_content_hash(store: DocsCatalogStore, scope: AccessScope, canonical_uri: str) -> str | None:
+    try:
+        document = store.get_document(scope, canonical_uri, mode="snippet")
+    except DocsError as exc:
+        if exc.code == "document_not_found":
+            return None
+        raise
+    value = document.get("content_hash")
+    return str(value) if value else None
+
+
+def _local_sync_metadata(parsed: ParsedDocument) -> dict[str, Any]:
+    return {
+        "importer": "local",
+        "extraction_method": parsed.extraction_method,
+        "warnings": list(parsed.warnings),
+    }
