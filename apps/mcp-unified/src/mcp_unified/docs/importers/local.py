@@ -33,6 +33,23 @@ class DocsImportService:
         files = self._iter_import_files(target)
         keyword_tuple = tuple(keywords)
         collection_tuple = tuple(collection_names)
+        parsed_imports: list[tuple[Path, ParsedDocument, list[dict[str, str]]]] = []
+
+        for file_path in files:
+            parsed = self._parse_file(file_path)
+            chunk_texts = chunks_from_text(parsed.text)
+            chunks = [
+                {
+                    "text": chunk,
+                    "citation": f"{file_path.name}:{idx + 1}",
+                }
+                for idx, chunk in enumerate(chunk_texts)
+            ]
+            parsed_imports.append((file_path, parsed, chunks))
+
+        if not parsed_imports:
+            return {"status": "unchanged", "documents": [], "source": None}
+
         source_type = "local_file" if target.is_file() else "local_directory"
         source_id = self.store.upsert_source(
             scope=scope,
@@ -48,16 +65,7 @@ class DocsImportService:
         )
         imported: list[dict] = []
 
-        for file_path in files:
-            parsed = self._parse_file(file_path)
-            chunk_texts = chunks_from_text(parsed.text)
-            chunks = [
-                {
-                    "text": chunk,
-                    "citation": f"{file_path.name}:{idx + 1}",
-                }
-                for idx, chunk in enumerate(chunk_texts)
-            ]
+        for file_path, parsed, chunks in parsed_imports:
             document_id = self.store.upsert_document(
                 scope=scope,
                 title=parsed.title,
