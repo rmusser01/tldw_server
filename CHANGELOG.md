@@ -17,6 +17,43 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.34] - 2026-07-02
+
+> Rollup coverage: this entry covers current `dev` work that landed after the
+> `0.1.33` release-prep metadata through PR #2568, including the post-PR #2567
+> review follow-ups and current-main CodeQL alert cleanup.
+
+### Added
+
+- **PR 2568 Follow-Up Coverage** — Added Backlog records and focused
+  regression coverage for Jobs event-filter SQL helpers, public metrics-label
+  hashing, frontend auth persistence, and the `mcp-unified` PEP 561
+  `py.typed` marker/package-data contract.
+
+### Changed
+
+- **Jobs, WebSearch, And Auth Persistence Cleanup** — Moved Jobs event-filter
+  SQL construction behind DB management helpers, replaced WebSearch diagnostic
+  `print()` calls with structured Loguru logging, clarified Google parser debug
+  formatting, and restored browser persistence for manually entered API keys
+  and bearer tokens while preserving environment-provided auth precedence.
+- **CodeQL Suppression Hygiene** — Updated validated path/auth/download/sync
+  suppressions from legacy LGTM comments to scoped CodeQL annotations with
+  local rationale on the reviewed paths.
+
+### Fixed
+
+- **PR 2567/2568 Review Follow-Ups** — Addressed review findings for DB-layer
+  ownership, missing helper/class docstrings, pytest unit markers, metrics tests
+  using public label normalization, WebSearch logging ambiguity, frontend auth
+  reload behavior, and the `mcp-unified` typed-marker package-data mismatch.
+
+### Removed
+
+- Removed stray WebSearch parser diagnostic `print()` calls from the current
+  release line.
+
+
 ## [0.1.33] - 2026-07-01
 
 > Rollup coverage: this entry covers work that landed after the `0.1.32`
