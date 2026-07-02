@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, WebSocket
@@ -32,7 +33,7 @@ DEFAULT_REALTIME_PERSISTENCE_FACTORY = _default_realtime_persistence_factory
 async def get_realtime_capabilities() -> dict[str, Any]:
     """Return native and OpenAI-compatible realtime capability metadata."""
 
-    return build_realtime_capabilities().__dict__
+    return asdict(build_realtime_capabilities())
 
 
 @ws_router.websocket("/realtime")

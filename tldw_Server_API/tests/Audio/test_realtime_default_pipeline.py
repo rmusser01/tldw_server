@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Audio.Realtime.default_pipeline import (
     RealtimePipelineError,
     _call_open_realtime_session,
 )
+from tldw_Server_API.app.core.Audio.Realtime.constants import REALTIME_MAX_OUTPUT_CHUNK_BYTES
 from tldw_Server_API.app.core.Audio.Realtime.models import RealtimeSessionConfig
 from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineAudioDelta,
@@ -113,6 +114,7 @@ async def _fake_stt(_audio: bytes, *, sample_rate_hz: int, language: str | None)
 
 
 async def _fake_streaming_chat_call(**kwargs: Any) -> AsyncIterator[str]:
+    assert kwargs["api_endpoint"] == "openai-chat"
     assert kwargs["stream"] is True
     assert kwargs["message"] == "hello world"
     assert kwargs["api_model"] == "gpt-realtime"
@@ -138,7 +140,8 @@ def _pipeline(
         tts_service_factory=lambda: service,
         default_model="gpt-realtime",
         default_voice="alloy",
-        provider_hint="openai",
+        chat_provider_hint="openai-chat",
+        tts_provider_hint="openai-tts",
         user_id=42,
     )
 
@@ -202,11 +205,33 @@ async def test_stream_turn_streams_text_transcript_and_audio_to_tts() -> None:
     ]
     assert tts_service.open_kwargs == [
         {
-            "provider_hint": "openai",
+            "provider_hint": "openai-tts",
             "route": "audio.stream.tts.realtime",
             "user_id": 42,
         }
     ]
+
+
+async def test_stream_turn_splits_large_tts_audio_chunks() -> None:
+    large_chunk = b"a" * (REALTIME_MAX_OUTPUT_CHUNK_BYTES + 3)
+    tts_session = FakeRealtimeTTSSession(chunks=[large_chunk])
+    pipeline = _pipeline(tts_service=FakeTTSService(tts_session))
+
+    events = [
+        event
+        async for event in pipeline.stream_turn(
+            "hello world",
+            config=RealtimeSessionConfig(
+                model="gpt-realtime",
+                instructions="speak plainly",
+                metadata={"tts_model": "tts-1"},
+            ),
+        )
+    ]
+
+    audio_chunks = [event.audio for event in events if isinstance(event, RealtimePipelineAudioDelta)]
+    assert [len(chunk) for chunk in audio_chunks] == [REALTIME_MAX_OUTPUT_CHUNK_BYTES, 3]
+    assert b"".join(audio_chunks) == large_chunk
 
 
 async def test_stream_turn_normalizes_non_streaming_chat_response() -> None:

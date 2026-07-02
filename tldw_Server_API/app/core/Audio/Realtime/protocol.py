@@ -327,6 +327,12 @@ def to_openai_server_event(event: RealtimeServerEvent) -> dict[str, Any]:
 
 
 def _parse_session_update(payload: dict[str, Any], event_id: str | None) -> UpdateSessionCommand | RealtimeErrorEvent:
+    if "input_audio_format" in payload:
+        return RealtimeErrorEvent(
+            code="unsupported_session_option",
+            message="input_audio_format is a beta-era field; use session.audio.input.format",
+            event_id=event_id,
+        )
     if "output_audio_format" in payload:
         return RealtimeErrorEvent(
             code="unsupported_session_option",
@@ -415,6 +421,18 @@ def _parse_session_update(payload: dict[str, Any], event_id: str | None) -> Upda
     if invalid is not None:
         return invalid
 
+    invalid_scalar = _validate_optional_str_fields(
+        session,
+        {
+            "model": "session.model must be a string when provided",
+            "voice": "session.voice must be a string when provided",
+            "instructions": "session.instructions must be a string when provided",
+        },
+        event_id,
+    )
+    if invalid_scalar is not None:
+        return invalid_scalar
+
     config = RealtimeSessionConfig(
         model=_optional_str(session.get("model")),
         voice=_optional_str(session.get("voice")),
@@ -438,10 +456,24 @@ def _validate_session_options(session: dict[str, Any], event_id: str | None) -> 
             event_id=event_id,
         )
 
+    if "input_audio_format" in session:
+        return RealtimeErrorEvent(
+            code="unsupported_session_option",
+            message="input_audio_format is a beta-era field; use session.audio.input.format",
+            event_id=event_id,
+        )
+
     if "output_audio_format" in session:
         return RealtimeErrorEvent(
             code="unsupported_session_option",
             message="output_audio_format is a beta-era field; use session.audio.output.format",
+            event_id=event_id,
+        )
+
+    if "modalities" in session:
+        return RealtimeErrorEvent(
+            code="unsupported_session_option",
+            message="session.modalities overrides are not supported in Stage 1",
             event_id=event_id,
         )
 
@@ -527,15 +559,12 @@ def _validate_response_create_options(
     response: dict[str, Any],
     event_id: str | None,
 ) -> RealtimeErrorEvent | None:
-    modalities = response.get("modalities")
-    if modalities is not None:
-        if not isinstance(modalities, list) or any(item not in {"audio", "text"} for item in modalities):
-            return RealtimeErrorEvent(
-                code="unsupported_session_option",
-                message="response.create modalities must be a subset of audio and text",
-                event_id=event_id,
-            )
-
+    if "input_audio_format" in response:
+        return RealtimeErrorEvent(
+            code="unsupported_session_option",
+            message="input_audio_format is a beta-era field; use session.audio.input.format",
+            event_id=event_id,
+        )
     if "output_audio_format" in response:
         return RealtimeErrorEvent(
             code="unsupported_session_option",
@@ -543,37 +572,14 @@ def _validate_response_create_options(
             event_id=event_id,
         )
 
-    audio, invalid = _optional_object(
-        response,
-        "audio",
-        "response.audio must be an object when provided",
-        event_id,
-    )
-    if invalid is not None:
-        return invalid
-
-    output_audio, invalid = _optional_object(
-        audio,
-        "output",
-        "response.audio.output must be an object when provided",
-        event_id,
-    )
-    if invalid is not None:
-        return invalid
-
-    output_format = output_audio.get("format", REALTIME_OUTPUT_AUDIO_FORMAT)
-    output_sample_rate_hz = output_audio.get("sample_rate_hz", REALTIME_OUTPUT_SAMPLE_RATE_HZ)
-    output_channels = output_audio.get("channels", REALTIME_OUTPUT_CHANNELS)
-    if (
-        output_format != REALTIME_OUTPUT_AUDIO_FORMAT
-        or output_sample_rate_hz != REALTIME_OUTPUT_SAMPLE_RATE_HZ
-        or output_channels != REALTIME_OUTPUT_CHANNELS
-    ):
-        return RealtimeErrorEvent(
-            code="unsupported_session_option",
-            message="only pcm16 24000 Hz mono response output audio is supported",
-            event_id=event_id,
-        )
+    unsupported_overrides = ("modalities", "model", "voice", "instructions", "audio")
+    for field in unsupported_overrides:
+        if field in response:
+            return RealtimeErrorEvent(
+                code="unsupported_session_option",
+                message=f"response.create {field} overrides are not supported in Stage 1; use session.update",
+                event_id=event_id,
+            )
 
     return None
 
@@ -611,6 +617,17 @@ def _contains_tools(value: dict[str, Any]) -> bool:
 
 def _optional_str(value: Any) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _validate_optional_str_fields(
+    source: dict[str, Any],
+    messages: dict[str, str],
+    event_id: str | None,
+) -> RealtimeErrorEvent | None:
+    for key, message in messages.items():
+        if key in source and not isinstance(source[key], str):
+            return RealtimeErrorEvent(code="invalid_event", message=message, event_id=event_id)
+    return None
 
 
 def _session_payload(session_id: str, model: str | None, voice: str | None) -> dict[str, Any]:

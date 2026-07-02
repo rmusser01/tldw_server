@@ -1,4 +1,5 @@
 import base64
+import asyncio
 import importlib
 import json
 import queue
@@ -45,6 +46,22 @@ class FakePersistence:
     pass
 
 
+class BlockingPipeline(FakePipeline):
+    def __init__(self) -> None:
+        self.stream_started = threading.Event()
+        self.cancelled = threading.Event()
+
+    async def stream_turn(self, transcript: str, *, config):  # noqa: ANN001, ARG002
+        self.stream_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+        if False:
+            yield RealtimePipelineTurnDone()
+
+
 @pytest.fixture(autouse=True)
 def _realtime_test_env(monkeypatch: pytest.MonkeyPatch):
     from tldw_Server_API.app.core.AuthNZ import ip_allowlist, settings as auth_settings
@@ -73,12 +90,13 @@ def _realtime_test_env(monkeypatch: pytest.MonkeyPatch):
     config_mod._route_toggle_policy.cache_clear()
 
 
-def _build_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+def _build_app(monkeypatch: pytest.MonkeyPatch, pipeline: FakePipeline | None = None) -> FastAPI:
     audio_realtime = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.audio.audio_realtime")
     realtime_compat = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.realtime_compat")
-    monkeypatch.setattr(audio_realtime, "DEFAULT_REALTIME_PIPELINE_FACTORY", lambda: FakePipeline())
+    resolved_pipeline = pipeline or FakePipeline()
+    monkeypatch.setattr(audio_realtime, "DEFAULT_REALTIME_PIPELINE_FACTORY", lambda: resolved_pipeline)
     monkeypatch.setattr(audio_realtime, "DEFAULT_REALTIME_PERSISTENCE_FACTORY", lambda: FakePersistence())
-    monkeypatch.setattr(realtime_compat, "DEFAULT_REALTIME_PIPELINE_FACTORY", lambda: FakePipeline())
+    monkeypatch.setattr(realtime_compat, "DEFAULT_REALTIME_PIPELINE_FACTORY", lambda: resolved_pipeline)
     monkeypatch.setattr(realtime_compat, "DEFAULT_REALTIME_PERSISTENCE_FACTORY", lambda: FakePersistence())
 
     app = FastAPI()
@@ -90,7 +108,7 @@ def _auth_headers() -> dict[str, str]:
     return {"Authorization": "Bearer single-user-secret"}
 
 
-def _recv_type(ws) -> str:  # noqa: ANN001
+def _recv_json(ws, *, timeout_s: float = 1.0) -> dict:  # noqa: ANN001
     results: queue.Queue[dict | BaseException] = queue.Queue(maxsize=1)
 
     def _receive() -> None:
@@ -101,7 +119,7 @@ def _recv_type(ws) -> str:  # noqa: ANN001
 
     threading.Thread(target=_receive, daemon=True).start()
     try:
-        payload = results.get(timeout=1.0)
+        payload = results.get(timeout=timeout_s)
     except queue.Empty as exc:
         try:
             ws.close()
@@ -110,7 +128,11 @@ def _recv_type(ws) -> str:  # noqa: ANN001
         raise AssertionError("Timed out waiting for realtime WebSocket event") from exc
     if isinstance(payload, BaseException):
         raise payload
-    return payload["type"]
+    return payload
+
+
+def _recv_type(ws) -> str:  # noqa: ANN001
+    return _recv_json(ws)["type"]
 
 
 def test_openai_compat_realtime_manual_turn_event_order(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -168,6 +190,34 @@ def test_native_realtime_route_uses_openai_event_shape(monkeypatch: pytest.Monke
     assert first["type"] == "session.created"
     assert "session" in first
     assert second == {"type": "rate_limits.updated", "event_id": None, "rate_limits": []}
+
+
+def test_response_cancel_reaches_active_websocket_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    pipeline = BlockingPipeline()
+    app = _build_app(monkeypatch, pipeline=pipeline)
+    audio = base64.b64encode(b"\x00\x01").decode("ascii")
+
+    with ws_client_without_lifespan(app) as client:
+        with client.websocket_connect("/v1/realtime", headers=_auth_headers()) as ws:
+            ws.receive_json()
+            ws.receive_json()
+            ws.send_json({"type": "input_audio_buffer.append", "audio": audio})
+            _recv_type(ws)
+            ws.send_json({"type": "input_audio_buffer.commit"})
+            observed = [_recv_type(ws) for _ in range(4)]
+            assert observed[-1] == "conversation.item.done"
+
+            ws.send_json({"type": "response.create"})
+            assert _recv_type(ws) == "response.created"
+            assert _recv_type(ws) == "response.output_item.added"
+            assert pipeline.stream_started.wait(timeout=1.0)
+
+            ws.send_json({"type": "response.cancel"})
+            done = _recv_json(ws, timeout_s=2.0)
+
+    assert done["type"] == "response.done"
+    assert done["response"]["status"] == "cancelled"
+    assert pipeline.cancelled.wait(timeout=1.0)
 
 
 def test_openai_compat_realtime_unauthenticated_closes_without_auth_frame(

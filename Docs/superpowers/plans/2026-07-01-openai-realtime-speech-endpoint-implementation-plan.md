@@ -731,6 +731,16 @@ Expected result: commit succeeds without bypassing hooks.
 
 ## Implementation Notes
 
+- Pre-PR review follow-up: rebased the branch onto current `origin/dev` to remove unrelated PR noise. Fixed review blockers by making WebSocket `response.cancel` reachable during active generation, rejecting unimplemented response/session overrides explicitly, adding capability metadata for persistence/deferred features, serializing capabilities with `asdict`, splitting chat/TTS provider hints, splitting oversized output audio chunks before protocol serialization, and correcting the opt-in live smoke session shape.
+- Review follow-up verification:
+  - `python -m pytest tldw_Server_API/tests/Audio/test_realtime_websocket.py -q` -> `9 passed`
+  - `python -m pytest tldw_Server_API/tests/Audio/test_realtime_default_pipeline.py -q` -> `12 passed`
+  - `python -m pytest tldw_Server_API/tests/Audio/test_realtime_protocol_adapter.py tldw_Server_API/tests/Audio/test_realtime_capabilities.py tldw_Server_API/tests/Audio/test_realtime_live_smoke.py -q` -> `65 passed, 1 skipped`
+  - focused realtime suite from Task 5.3 -> `110 passed`
+  - route/config regression slice -> `11 passed`
+  - Bandit `/tmp/bandit_audio_realtime_reviewfix_final.json` -> `errors=[]`, `results=0`
+  - `git diff --check` -> passed
+
 - Use a separate `audio_realtime` router spec instead of adding the realtime route to aggregate `audio.py`. This preserves independent `audio-realtime` route gating.
 - Keep all OpenAI compatibility field names in `protocol.py`, `handler.py`, and endpoint docs. Session, pipeline, and persistence modules should use internal names.
 - Keep default tests deterministic and provider-free. Live provider validation belongs only in the opt-in smoke module.

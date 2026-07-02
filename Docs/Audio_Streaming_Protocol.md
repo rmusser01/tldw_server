@@ -340,6 +340,10 @@ Manual turn flow:
 6. Send `response.create` to run STT, chat generation, and TTS for the committed turn.
 7. Read streamed text, transcript, audio deltas, and `response.done`.
 
+`response.create` accepts the default/empty response object in Stage 1. Response-scoped overrides such as
+`modalities`, `model`, `voice`, `instructions`, and `audio` are rejected; apply supported session configuration with
+`session.update` before creating a response.
+
 ### Supported Server Events
 
 - `session.created`
@@ -371,10 +375,31 @@ Manual turn flow:
 - `conversation.item.create`
 - Tool calls
 - Server-side VAD turn detection
+- Client-selected `input_audio_format`
 - Client-selected `output_audio_format`
+- Response-scoped overrides (`modalities`, `model`, `voice`, `instructions`, `audio`)
 - Binary WebSocket audio frames
 
 Unsupported client events return an `error` event while keeping the WebSocket open when the frame is otherwise valid.
+
+### Persistence And Capabilities
+
+Sessions are ephemeral by default. Optional turn persistence is enabled through session metadata:
+`metadata.tldw.persist=true` plus `metadata.tldw.conversation_id=<integer>`. Stage 1 does not persist raw audio.
+
+Use `GET /api/v1/audio/realtime/capabilities` to discover persistence metadata, optional/deferred events, audio
+limits, close codes, and route support.
+
+### Provider Hints
+
+The default realtime pipeline uses the existing configured STT, chat, and TTS provider stacks. Optional env overrides:
+
+- `REALTIME_CHAT_MODEL`: default chat model.
+- `REALTIME_TTS_MODEL`: default TTS model.
+- `REALTIME_TTS_VOICE`: default TTS voice.
+- `REALTIME_CHAT_PROVIDER_HINT`: provider hint for chat generation.
+- `REALTIME_TTS_PROVIDER_HINT`: provider hint for realtime/buffered TTS.
+- `REALTIME_PROVIDER_HINT`: compatibility fallback used when a chat- or TTS-specific hint is not set.
 
 WebSocket Voice Chat v2
 -----------------------
