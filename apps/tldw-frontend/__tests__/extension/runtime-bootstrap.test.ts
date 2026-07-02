@@ -265,6 +265,29 @@ describe("runtime-bootstrap chrome shim", () => {
     })
   })
 
+  it("shares the env single-user API key with tldw request auth in advanced mode", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "http://127.0.0.1:8000"
+    process.env.NEXT_PUBLIC_X_API_KEY = "advanced-api-key"
+
+    await importAndAwaitBootstrap()
+
+    const { getRuntimeSingleUserApiKeyOverride } = await import(
+      "@/services/tldw/runtime-auth-override"
+    )
+
+    expect(getRuntimeSingleUserApiKeyOverride()).toBe("advanced-api-key")
+    await vi.waitFor(() => {
+      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
+      expect(nextConfig).toMatchObject({
+        authMode: "single-user",
+        serverUrl: "http://127.0.0.1:8000"
+      })
+      expect(nextConfig.apiKey).toBeUndefined()
+      expect(localStorage.getItem("tldwConfig")).not.toContain("advanced-api-key")
+    })
+  })
+
   it("repairs a stale env LAN host to the current browser host during bootstrap", async () => {
     process.env.NEXT_PUBLIC_API_URL = "http://192.168.5.184:8000"
 

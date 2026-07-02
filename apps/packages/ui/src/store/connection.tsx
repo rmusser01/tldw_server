@@ -8,6 +8,7 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
 import {
   ConnectionPhase,
@@ -746,10 +747,14 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
         }
       }
 
+      const runtimeSingleUserApiKey = getRuntimeSingleUserApiKeyOverride()
+      const hasSingleUserApiKey = Boolean(
+        String(cfg?.apiKey || "").trim() || runtimeSingleUserApiKey
+      )
       const missingSingleUserApiKey =
         Boolean(serverUrl) &&
         (cfg?.authMode ?? "single-user") === "single-user" &&
-        !String(cfg?.apiKey || "").trim()
+        !hasSingleUserApiKey
 
       // If we have a server URL but no single-user API key, treat as
       // unconfigured/unauthenticated instead of marking the app connected
@@ -807,7 +812,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
       // Health endpoints may require auth; apiSend injects headers based
       // on tldwConfig (API key / access token).
       const noAuthForHealth = !cfg ||
-        (!cfg.apiKey &&
+        (!hasSingleUserApiKey &&
           !cfg.accessToken &&
           cfg.authMode !== "multi-user")
 
@@ -857,8 +862,11 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
               serverUrl: fallbackServerUrl
             } as TldwConfig
           }
+          const fallbackHasSingleUserApiKey = Boolean(
+            String(cfg?.apiKey || "").trim() || getRuntimeSingleUserApiKeyOverride()
+          )
           const fallbackNoAuth = !cfg ||
-            (!cfg.apiKey &&
+            (!fallbackHasSingleUserApiKey &&
               !cfg.accessToken &&
               cfg.authMode !== "multi-user")
           const fallbackResp = await apiSend({

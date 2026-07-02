@@ -85,6 +85,26 @@ describe("normalizeAssistantSelection", () => {
       })
     )
   })
+
+  it("uses embedded character card image data as the character avatar", () => {
+    const embeddedPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+
+    expect(
+      characterToAssistantSelection({
+        id: 39,
+        name: "Miku",
+        image_base64: embeddedPng
+      })
+    ).toEqual(
+      expect.objectContaining({
+        kind: "character",
+        id: "39",
+        name: "Miku",
+        avatar_url: `data:image/png;base64,${embeddedPng}`
+      })
+    )
+  })
 })
 
 describe("preserveAssistantSelectionMode", () => {

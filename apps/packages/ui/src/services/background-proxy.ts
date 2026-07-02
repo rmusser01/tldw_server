@@ -6,6 +6,7 @@ import {
   resolveBrowserRequestTransport,
   tldwRequest
 } from "@/services/tldw/request-core"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import {
   BACKEND_UNREACHABLE_EVENT,
   type BackendUnreachableDetail
@@ -987,7 +988,8 @@ async function* bgStreamDirect<
   }
 
   if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
-    const key = String(cfg?.apiKey || "").trim()
+    const runtimeApiKey = getRuntimeSingleUserApiKeyOverride()
+    const key = runtimeApiKey || String(cfg?.apiKey || "").trim()
     if (!key) {
       throw new Error(
         "Add or update your API key in Settings -> tldw server, then try again."

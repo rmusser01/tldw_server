@@ -23,12 +23,18 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("@/services/tldw/runtime-auth-override", () => ({
+  getRuntimeSingleUserApiKeyOverride: vi.fn(() => null)
+}))
+
 import { apiSend } from "@/services/api-send"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { CONNECTION_TIMEOUT_MS, useConnectionStore } from "../connection"
 
 const mockedApiSend = vi.mocked(apiSend)
 const mockedClient = vi.mocked(tldwClient, true)
+const mockedRuntimeApiKey = vi.mocked(getRuntimeSingleUserApiKeyOverride)
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
 
 const setConnectionState = (overrides: Record<string, unknown>) => {
@@ -205,6 +211,7 @@ describe("connection store stability", () => {
     } as any)
     mockedClient.initialize.mockResolvedValue(undefined)
     mockedClient.ragHealth.mockResolvedValue({ status: "healthy" } as any)
+    mockedRuntimeApiKey.mockReturnValue(null)
   })
 
   afterEach(() => {
@@ -324,6 +331,32 @@ describe("connection store stability", () => {
         path: "/api/v1/health/live",
         method: "GET",
         timeoutMs: CONNECTION_TIMEOUT_MS
+      })
+    )
+  })
+
+  it("treats runtime single-user auth as configured without persisting an api key", async () => {
+    mockedClient.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user"
+    } as any)
+    mockedRuntimeApiKey.mockReturnValue("runtime-key")
+    mockedApiSend.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { status: "alive" }
+    })
+
+    await useConnectionStore.getState().checkOnce()
+
+    const state = useConnectionStore.getState().state
+    expect(state.phase).toBe(ConnectionPhase.CONNECTED)
+    expect(state.isConnected).toBe(true)
+    expect(mockedApiSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/health/live",
+        method: "GET",
+        noAuth: false
       })
     )
   })

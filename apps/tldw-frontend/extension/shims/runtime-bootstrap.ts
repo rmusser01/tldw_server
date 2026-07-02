@@ -18,7 +18,10 @@ import {
   resolveWebUiQuickstartServerUrl,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
-import { setRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import {
+  getRuntimeSingleUserApiKeyOverride,
+  setRuntimeSingleUserApiKeyOverride
+} from "@/services/tldw/runtime-auth-override"
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null
@@ -474,6 +477,11 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
     repairedEnvDefaultServerUrl
   const apiKey = (process.env.NEXT_PUBLIC_X_API_KEY || "").trim() || null
   const apiBearer = (process.env.NEXT_PUBLIC_API_BEARER || "").trim() || null
+
+  if (apiKey && !getRuntimeSingleUserApiKeyOverride()) {
+    setRuntimeApiKey(apiKey)
+    setRuntimeSingleUserApiKeyOverride(apiKey)
+  }
 
   if (initialServerUrl && explicitWebHost !== initialServerUrl) {
     try {

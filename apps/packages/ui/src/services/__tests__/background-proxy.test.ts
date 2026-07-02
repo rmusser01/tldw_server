@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   connect: vi.fn(),
   tldwRequest: vi.fn(),
+  getRuntimeSingleUserApiKeyOverride: vi.fn(),
   storageGet: vi.fn(async (_key?: string) => null),
   storageSet: vi.fn(async () => undefined)
 }))
@@ -40,6 +41,11 @@ vi.mock("@/utils/safe-storage", () => ({
   })
 }))
 
+vi.mock("@/services/tldw/runtime-auth-override", () => ({
+  getRuntimeSingleUserApiKeyOverride: (...args: unknown[]) =>
+    (mocks.getRuntimeSingleUserApiKeyOverride as (...args: unknown[]) => unknown)(...args)
+}))
+
 const importProxy = async () => import("@/services/background-proxy")
 
 describe("background proxy fallback safety", () => {
@@ -49,8 +55,10 @@ describe("background proxy fallback safety", () => {
     mocks.sendMessage.mockReset()
     mocks.connect.mockReset()
     mocks.tldwRequest.mockReset()
+    mocks.getRuntimeSingleUserApiKeyOverride.mockReset()
     mocks.storageGet.mockReset()
     mocks.storageSet.mockReset()
+    mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
     mocks.storageGet.mockResolvedValue(null)
     mocks.storageSet.mockResolvedValue(undefined)
   })
@@ -1236,6 +1244,52 @@ describe("background proxy fallback safety", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     expect(requestHeaders.get("X-API-KEY")).toBe("test-key-not-placeholder")
     expect(chunks.some((chunk) => chunk.includes('"event":"run_started"'))).toBe(true)
+  })
+
+  it("uses the runtime single-user key for WebUI direct stream fallback", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: false })
+    mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue("runtime-stream-key")
+    mocks.storageGet.mockImplementation(async (key: string) => {
+      if (key === "tldwConfig") {
+        return {
+          serverUrl: "https://api.example.com",
+          authMode: "single-user"
+        }
+      }
+      return null
+    })
+    const fetchSpy = vi.fn(async () =>
+      new Response(
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+        {
+          status: 200,
+          headers: { "content-type": "text/event-stream" }
+        }
+      )
+    )
+    vi.stubGlobal("fetch", fetchSpy as any)
+
+    const { bgStream } = await importProxy()
+    const chunks: string[] = []
+
+    try {
+      for await (const chunk of bgStream({
+        path: "/api/v1/chat/completions",
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: { stream: true, messages: [] }
+      })) {
+        chunks.push(chunk)
+      }
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    const fetchCalls = fetchSpy.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit?]>
+    const requestHeaders = new Headers(fetchCalls[0]?.[1]?.headers)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(requestHeaders.get("X-API-KEY")).toBe("runtime-stream-key")
+    expect(chunks.some((chunk) => chunk.includes('"content":"ok"'))).toBe(true)
   })
 
   it("uses hosted WebUI stream transport without browser auth headers", async () => {
