@@ -117,17 +117,6 @@ class DocsSourceSyncService:
         except DocsError as exc:
             return self._failed(source=source, request=request, reason_code=exc.code, warning=exc.message)
 
-        limit = self._document_limit(request)
-        if len(files) > limit:
-            return _sync_response(
-                status="denied",
-                reason_code="source_sync_limit_exceeded",
-                source=source,
-                request=request,
-                counts=dict(_ZERO_COUNTS),
-                items=[],
-                warnings=[f"candidate_count={len(files)} exceeds max_documents={limit}"],
-            )
         return self._sync_local_paths(scope=scope, source=source, request=request, files=files)
 
     def _sync_local_paths(
@@ -146,13 +135,29 @@ class DocsSourceSyncService:
         source_id = int(source["id"])
         links = self.store.source_document_links(scope=scope, source_id=source_id)
         links_by_uri = {str(link["source_item_uri"]): link for link in links}
-        current_uris: set[str] = set()
+        current_uris = {file_uri_for_path(file_path) for file_path in files}
+        stale_links = [
+            link
+            for link in links
+            if str(link["source_item_uri"]) not in current_uris and link.get("status") != "tombstoned"
+        ]
+        limit = self._document_limit(request)
+        sync_item_count = len(files) + len(stale_links)
+        if sync_item_count > limit:
+            return _sync_response(
+                status="denied",
+                reason_code="source_sync_limit_exceeded",
+                source=source,
+                request=request,
+                counts=dict(_ZERO_COUNTS),
+                items=[],
+                warnings=[f"sync_item_count={sync_item_count} exceeds max_documents={limit}"],
+            )
         default_keywords = _metadata_string_tuple(source.get("metadata"), "default_keywords")
         default_collections = _metadata_string_tuple(source.get("metadata"), "default_collections")
 
         for file_path in files:
             item_uri = file_uri_for_path(file_path)
-            current_uris.add(item_uri)
             try:
                 parsed, chunks, content_hash = self._parsed_local_sync_item(file_path)
             except DocsError as exc:
@@ -224,10 +229,8 @@ class DocsSourceSyncService:
                 }
             )
 
-        for link in links:
+        for link in stale_links:
             item_uri = str(link["source_item_uri"])
-            if item_uri in current_uris or link.get("status") == "tombstoned":
-                continue
             if stale_policy == "tombstone":
                 counts["tombstoned"] += 1
                 item_status = "tombstoned"

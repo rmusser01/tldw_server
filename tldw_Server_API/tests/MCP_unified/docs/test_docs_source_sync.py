@@ -401,6 +401,31 @@ def test_local_directory_sync_tombstone_hides_document_from_default_search(tmp_p
     assert search["results"] == []  # nosec B101
 
 
+def test_local_directory_sync_counts_stale_items_toward_limit_before_tombstoning(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "a.md").write_text("# A\n\nSQLite A.\n", encoding="utf-8")
+    (root / "b.md").write_text("# B\n\nSQLite B.\n", encoding="utf-8")
+    provider = DocsMCPToolProvider(settings=DocsSettings(db_path=tmp_path / "docs.db", trusted_roots=(root,)))
+    scope = AccessScope()
+    imported = provider.execute("docs.import_path", {"path": str(root)}, scope=scope)
+    source_id = imported["source"]["id"]
+    for file_path in root.iterdir():
+        file_path.unlink()
+
+    result = provider.execute(
+        "docs.sync_source",
+        {"source_id": source_id, "mode": "apply", "stale_policy": "tombstone", "max_documents": 1},
+        scope=scope,
+    )
+    search = provider.execute("docs.search", {"query": "SQLite"}, scope=scope)
+
+    assert result["status"] == "denied"  # nosec B101
+    assert result["reason_code"] == "source_sync_limit_exceeded"  # nosec B101
+    assert result["counts"]["tombstoned"] == 0  # nosec B101
+    assert sorted(match["title"] for match in search["results"]) == ["A", "B"]  # nosec B101
+
+
 def test_local_directory_sync_limit_exceeded_before_parsing_candidates(tmp_path: Path) -> None:
     root = tmp_path / "workspace"
     root.mkdir()
@@ -427,6 +452,32 @@ def test_local_directory_sync_limit_exceeded_before_parsing_candidates(tmp_path:
     assert result["reason_code"] == "source_sync_limit_exceeded"  # nosec B101
     assert search["results"] == []  # nosec B101
     assert status["counts"]["sync_runs"] == 0  # nosec B101
+
+
+def test_local_directory_sync_skips_symlink_escaping_source_directory(tmp_path: Path) -> None:
+    trusted_root = tmp_path
+    root = trusted_root / "workspace"
+    root.mkdir()
+    (root / "public.md").write_text("# Public\n\nSQLite public.\n", encoding="utf-8")
+    secret = trusted_root / "secret.md"
+    secret.write_text("# Secret\n\nClassified sibling content.\n", encoding="utf-8")
+    provider = DocsMCPToolProvider(
+        settings=DocsSettings(db_path=tmp_path / "docs.db", trusted_roots=(trusted_root,))
+    )
+    scope = AccessScope()
+    imported = provider.execute("docs.import_path", {"path": str(root)}, scope=scope)
+    source_id = imported["source"]["id"]
+    link = root / "secret.md"
+    try:
+        link.symlink_to(secret)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable in this environment: {exc}")
+
+    result = provider.execute("docs.sync_source", {"source_id": source_id, "mode": "apply"}, scope=scope)
+    search = provider.execute("docs.search", {"query": "Classified"}, scope=scope)
+
+    assert result["counts"]["created"] == 0  # nosec B101
+    assert search["results"] == []  # nosec B101
 
 
 def test_local_file_sync_apply_unchanged_does_not_rewrite_without_force(tmp_path: Path) -> None:

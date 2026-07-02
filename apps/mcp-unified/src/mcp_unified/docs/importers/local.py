@@ -126,13 +126,17 @@ class DocsImportService:
                 details={"path": str(target)},
             )
 
+        source_root = target.expanduser().resolve()
         files: list[Path] = []
         for candidate in sorted(target.rglob("*")):
             if not candidate.is_file():
                 continue
             if candidate.suffix.lower() not in SUPPORTED_SUFFIXES:
                 continue
-            files.append(self._assert_allowed_path(candidate))
+            resolved_candidate = self._assert_allowed_path(candidate)
+            if not _path_is_relative_to(resolved_candidate, source_root):
+                continue
+            files.append(resolved_candidate)
         return files
 
     def _parse_file(self, path: Path) -> ParsedDocument:
@@ -180,3 +184,11 @@ class DocsImportService:
                     "max_import_file_bytes": self.settings.max_import_file_bytes,
                 },
             )
+
+
+def _path_is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
