@@ -779,6 +779,7 @@ class DocsCatalogStore:
                 SELECT *
                 FROM docs_documents
                 WHERE id = ? AND owner_scope = ? AND profile_scope = ?
+                  AND lifecycle_status = 'active'
                 """,
                 (document_id, owner_scope, profile_scope),
             ).fetchone()
@@ -835,9 +836,13 @@ class DocsCatalogStore:
         with closing(self.connect()) as conn:
             rows = conn.execute(
                 """
-                SELECT col.id, col.name, col.description, COUNT(cm.document_id) AS document_count
+                SELECT col.id, col.name, col.description, COUNT(d.id) AS document_count
                 FROM docs_collections col
                 LEFT JOIN docs_collection_members cm ON cm.collection_id = col.id
+                LEFT JOIN docs_documents d ON d.id = cm.document_id
+                    AND d.owner_scope = col.owner_scope
+                    AND d.profile_scope = col.profile_scope
+                    AND d.lifecycle_status = 'active'
                 WHERE col.owner_scope = ? AND col.profile_scope = ?
                 GROUP BY col.id, col.name, col.description
                 ORDER BY col.name COLLATE NOCASE ASC
@@ -859,9 +864,13 @@ class DocsCatalogStore:
         with closing(self.connect()) as conn:
             rows = conn.execute(
                 """
-                SELECT kw.id, kw.name, COUNT(dk.document_id) AS document_count
+                SELECT kw.id, kw.name, COUNT(d.id) AS document_count
                 FROM docs_keywords kw
                 LEFT JOIN docs_document_keywords dk ON dk.keyword_id = kw.id
+                LEFT JOIN docs_documents d ON d.id = dk.document_id
+                    AND d.owner_scope = kw.owner_scope
+                    AND d.profile_scope = kw.profile_scope
+                    AND d.lifecycle_status = 'active'
                 WHERE kw.owner_scope = ? AND kw.profile_scope = ?
                 GROUP BY kw.id, kw.name
                 ORDER BY kw.name COLLATE NOCASE ASC
@@ -892,6 +901,7 @@ class DocsCatalogStore:
                 FROM docs_documents
                 WHERE owner_scope = ?
                   AND profile_scope = ?
+                  AND lifecycle_status = 'active'
                   AND (title = ? OR title LIKE ? ESCAPE '\\')
                 ORDER BY
                     CASE WHEN title = ? THEN 0 ELSE 1 END,
@@ -902,9 +912,13 @@ class DocsCatalogStore:
             ).fetchall()
             collection_rows = conn.execute(
                 """
-                SELECT col.name, col.description, COUNT(cm.document_id) AS document_count
+                SELECT col.name, col.description, COUNT(d.id) AS document_count
                 FROM docs_collections col
                 LEFT JOIN docs_collection_members cm ON cm.collection_id = col.id
+                LEFT JOIN docs_documents d ON d.id = cm.document_id
+                    AND d.owner_scope = col.owner_scope
+                    AND d.profile_scope = col.profile_scope
+                    AND d.lifecycle_status = 'active'
                 WHERE col.owner_scope = ?
                   AND col.profile_scope = ?
                   AND (col.name = ? OR col.name LIKE ? ESCAPE '\\')
@@ -1067,6 +1081,7 @@ class DocsCatalogStore:
                     SELECT id
                     FROM docs_documents
                     WHERE id = ? AND owner_scope = ? AND profile_scope = ?
+                      AND lifecycle_status = 'active'
                     """,
                     (int(normalized), owner_scope, profile_scope),
                 ).fetchone()
@@ -1075,9 +1090,13 @@ class DocsCatalogStore:
 
             row = conn.execute(
                 """
-                SELECT document_id
-                FROM docs_aliases
-                WHERE owner_scope = ? AND profile_scope = ? AND name = ?
+                SELECT a.document_id
+                FROM docs_aliases a
+                JOIN docs_documents d ON d.id = a.document_id
+                    AND d.owner_scope = a.owner_scope
+                    AND d.profile_scope = a.profile_scope
+                    AND d.lifecycle_status = 'active'
+                WHERE a.owner_scope = ? AND a.profile_scope = ? AND a.name = ?
                 """,
                 (owner_scope, profile_scope, normalized),
             ).fetchone()
@@ -1090,6 +1109,7 @@ class DocsCatalogStore:
                 FROM docs_documents
                 WHERE owner_scope = ?
                   AND profile_scope = ?
+                  AND lifecycle_status = 'active'
                   AND (
                       canonical_uri = ?
                       OR source_path = ?

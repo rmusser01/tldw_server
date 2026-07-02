@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 
 from mcp_unified.docs.acquisition.models import FetchResponse
 from mcp_unified.docs.acquisition.service import DocsAcquisitionService
+from mcp_unified.docs.errors import DocsError
 from mcp_unified.docs.mcp_module import DocsMCPToolProvider
 from mcp_unified.docs.models import AccessScope, SyncSourceRequest
 from mcp_unified.docs.settings import DocsSettings
@@ -24,6 +26,13 @@ ZERO_SYNC_COUNTS = {
     "failed": 0,
     "skipped": 0,
 }
+
+
+def _document_count(items: list[dict], name: str) -> int:
+    for item in items:
+        if item.get("name") == name or item.get("keyword") == name:
+            return int(item["document_count"])
+    raise AssertionError(f"{name!r} not found")
 
 
 def test_url_page_sync_apply_refreshes_existing_source_with_fake_transport(tmp_path: Path) -> None:
@@ -682,6 +691,54 @@ def test_local_directory_sync_tombstone_hides_document_from_default_search(tmp_p
 
     assert result["counts"]["tombstoned"] == 1  # nosec B101
     assert search["results"] == []  # nosec B101
+
+
+def test_local_directory_sync_tombstone_hides_document_from_lookup_and_facets(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    guide = root / "guide.md"
+    guide.write_text("# Tombstone Guide\n\nTombstone visibility content.\n", encoding="utf-8")
+    provider = DocsMCPToolProvider(settings=DocsSettings(db_path=tmp_path / "docs.db", trusted_roots=(root,)))
+    scope = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
+    imported = provider.execute(
+        "docs.import_path",
+        {"path": str(root), "keywords": ["obsolete"], "collections": ["Archive"]},
+        scope=scope,
+    )
+    document_id = imported["documents"][0]["id"]
+    source_id = imported["source"]["id"]
+    with closing(provider.store.connect()) as conn:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO docs_aliases (owner_scope, profile_scope, name, document_id)
+                VALUES (?, ?, ?, ?)
+                """,
+                (scope.owner_scope, scope.profile_scope, "old-guide", document_id),
+            )
+    guide.unlink()
+
+    result = provider.execute(
+        "docs.sync_source",
+        {"source_id": source_id, "mode": "apply", "stale_policy": "tombstone"},
+        scope=scope,
+    )
+    search = provider.execute("docs.search", {"query": "visibility"}, scope=scope)
+    resolved = provider.execute("docs.resolve", {"name": "Tombstone Guide"}, scope=scope)
+    collections = provider.execute("docs.list", {"kind": "collections"}, scope=scope)
+    keywords = provider.execute("docs.list", {"kind": "keywords"}, scope=scope)
+
+    assert result["counts"]["tombstoned"] == 1  # nosec B101
+    assert search["results"] == []  # nosec B101
+    with pytest.raises(DocsError) as direct_get:
+        provider.execute("docs.get", {"id": str(document_id)}, scope=scope)
+    with pytest.raises(DocsError) as alias_get:
+        provider.execute("docs.get", {"id": "old-guide"}, scope=scope)
+    assert direct_get.value.code == "document_not_found"  # nosec B101
+    assert alias_get.value.code == "document_not_found"  # nosec B101
+    assert resolved["matches"] == []  # nosec B101
+    assert _document_count(collections["collections"], "Archive") == 0  # nosec B101
+    assert _document_count(keywords["keywords"], "obsolete") == 0  # nosec B101
 
 
 def test_local_directory_sync_counts_stale_items_toward_limit_before_tombstoning(tmp_path: Path) -> None:
