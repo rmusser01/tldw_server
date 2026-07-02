@@ -870,7 +870,9 @@ export const AssistantSelect: React.FC<Props> = ({
       onOpenChange={handleOpenChange}
       menu={{ items: [] }}
       popupRender={() => content}
-      overlayClassName="assistant-select-dropdown bg-surface text-text shadow-lg"
+      classNames={{
+        root: "assistant-select-dropdown bg-surface text-text shadow-lg"
+      }}
       placement="topLeft"
       trigger={["click"]}
     >

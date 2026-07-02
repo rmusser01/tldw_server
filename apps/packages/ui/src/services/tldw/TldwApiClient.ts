@@ -406,6 +406,19 @@ const getQuickstartWebUiServerUrl = (
   }
 }
 
+const isQuickstartWebUiSameOriginServerUrl = (serverUrl: string): boolean => {
+  const quickstartUrl = getQuickstartWebUiServerUrl()
+  if (!quickstartUrl) return false
+  try {
+    const server = new URL(serverUrl)
+    const quickstart = new URL(quickstartUrl)
+    const serverPath = server.pathname.replace(/\/+$/, "")
+    return server.origin === quickstart.origin && serverPath === ""
+  } catch {
+    return false
+  }
+}
+
 export type PresentationStudioSlide = {
   order: number
   layout: string
@@ -2042,8 +2055,10 @@ export class TldwApiClientBase {
     try {
       if (!this.baseUrl) await this.initialize()
       if (!this.baseUrl) return null
+      const baseUrl = this.baseUrl.replace(/\/$/, '')
+      if (isQuickstartWebUiSameOriginServerUrl(baseUrl)) return null
       return await this.requestWithCurrentConfig<any>({
-        path: `${this.baseUrl.replace(/\/$/, '')}/openapi.json` as any,
+        path: `${baseUrl}/openapi.json` as any,
         method: 'GET' as any
       }, false)
     } catch {
@@ -5021,7 +5036,8 @@ export class TldwApiClientBase {
     const cid = String(chat_id)
     return await bgRequest<ChatSettingsResponse>({
       path: `/api/v1/chats/${cid}/settings`,
-      method: "GET"
+      method: "GET",
+      expectedStatuses: [404]
     })
   }
 

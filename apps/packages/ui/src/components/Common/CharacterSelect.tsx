@@ -1675,7 +1675,9 @@ export const CharacterSelect: React.FC<Props> = ({
             setSearchQuery("")
           }
         }}
-        overlayClassName="character-select-dropdown bg-surface text-text shadow-lg"
+        classNames={{
+          root: "character-select-dropdown bg-surface text-text shadow-lg"
+        }}
         popupRender={(menu) => (
           <div
             data-testid="character-select-popup"

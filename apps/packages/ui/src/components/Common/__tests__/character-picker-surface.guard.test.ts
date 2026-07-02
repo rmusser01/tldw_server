@@ -7,7 +7,8 @@ describe("character picker popup surfaces", () => {
     const sourcePath = path.resolve(__dirname, "../AssistantSelect.tsx")
     const source = fs.readFileSync(sourcePath, "utf8")
 
-    expect(source).toContain('overlayClassName="assistant-select-dropdown')
+    expect(source).not.toContain("overlayClassName")
+    expect(source).toContain('root: "assistant-select-dropdown')
     expect(source).toContain('data-testid="assistant-select-panel"')
     expect(source).toContain("bg-surface")
     expect(source).not.toContain("bg-background shadow-lg")
@@ -17,8 +18,31 @@ describe("character picker popup surfaces", () => {
     const sourcePath = path.resolve(__dirname, "../CharacterSelect.tsx")
     const source = fs.readFileSync(sourcePath, "utf8")
 
-    expect(source).toContain('overlayClassName="character-select-dropdown')
+    expect(source).not.toContain("overlayClassName")
+    expect(source).toContain('root: "character-select-dropdown')
     expect(source).toContain('data-testid="character-select-popup"')
     expect(source).toContain("bg-surface")
+  })
+
+  it("uses current AntD popup APIs for character chat controls", () => {
+    const greetingSource = fs.readFileSync(
+      path.resolve(__dirname, "../ChatGreetingPicker.tsx"),
+      "utf8"
+    )
+    const attachmentSource = fs.readFileSync(
+      path.resolve(__dirname, "../../Option/Playground/PlaygroundSendControl.tsx"),
+      "utf8"
+    )
+    const toolsSource = fs.readFileSync(
+      path.resolve(__dirname, "../../Option/Playground/PlaygroundToolsPopover.tsx"),
+      "utf8"
+    )
+
+    expect(greetingSource).not.toContain("dropdownRender")
+    expect(greetingSource).toContain("popupRender")
+    expect(attachmentSource).not.toContain("overlayClassName")
+    expect(attachmentSource).toContain('root: "playground-attachment-menu"')
+    expect(toolsSource).not.toContain("overlayClassName")
+    expect(toolsSource).toContain('root: "playground-more-tools"')
   })
 })

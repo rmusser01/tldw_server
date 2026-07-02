@@ -75,6 +75,30 @@ describe("background proxy fallback safety", () => {
     expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
+  it("does not warn for expected response statuses", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    mocks.sendMessage.mockResolvedValue({
+      ok: false,
+      status: 404,
+      error: "Chat settings not found"
+    })
+
+    try {
+      const { bgRequest } = await importProxy()
+
+      await expect(
+        bgRequest({
+          path: "/api/v1/chats/chat-1/settings",
+          method: "GET",
+          expectedStatuses: [404]
+        })
+      ).rejects.toMatchObject({ status: 404 })
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
   it("keeps auth enabled for same-origin absolute URLs in background requests", async () => {
     mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
     mocks.storageGet.mockImplementation(async (key: string) => {

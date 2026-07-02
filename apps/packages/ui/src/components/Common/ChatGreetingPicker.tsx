@@ -348,7 +348,7 @@ export const ChatGreetingPicker: React.FC<Props> = ({
             title: option.text,
             option
           }))}
-          dropdownRender={(menu) => <div className="p-1">{menu}</div>}
+          popupRender={(menu) => <div className="p-1">{menu}</div>}
           optionRender={(option) => {
             const data = (option.data as any)?.option || option.data
             const sourceLabel = data?.sourceLabel

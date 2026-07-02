@@ -138,7 +138,7 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
           trigger="click"
           placement="topRight"
           content={menuContent}
-          overlayClassName="playground-attachment-menu"
+          classNames={{ root: "playground-attachment-menu" }}
           open={attachmentMenuOpen}
           onOpenChange={onAttachmentMenuChange}
         >
