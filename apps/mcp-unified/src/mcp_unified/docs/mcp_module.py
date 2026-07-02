@@ -13,7 +13,7 @@ from .retrieval.context import DocsContextBuilder
 from .retrieval.search import DocsRetrievalService
 from .settings import DocsSettings
 from .store.sqlite import DocsCatalogStore
-from .sync import DocsSourceSyncService
+from .sync import DocsSourceSyncService, source_summary_for_tool_response
 
 WRITE_CATEGORIES = {"ingestion", "management"}
 
@@ -295,7 +295,10 @@ class DocsMCPToolProvider:
         if tool_name == "docs.sync_source":
             if not self.settings.enable_source_sync:
                 return {"status": "denied", "reason_code": "source_sync_disabled"}
-            return self.source_sync.sync_source(scope=scope, request=_sync_source_request_from_args(args))
+            request, error = _sync_source_request_from_args(args, self.settings)
+            if error is not None:
+                return error
+            return self.source_sync.sync_source(scope=scope, request=request)
         return self._execute_management_or_list(tool_name=tool_name, args=args, scope=scope)
 
     def _execute_management_or_list(self, *, tool_name: str, args: dict[str, Any], scope: AccessScope) -> Any:
@@ -314,7 +317,11 @@ class DocsMCPToolProvider:
             if kind == "keywords":
                 return self.retrieval.list_keywords(scope=scope)
             if kind == "sources":
-                return {"sources": self.store.list_sources(scope=scope, limit=limit, offset=offset), "warnings": []}
+                sources = [
+                    source_summary_for_tool_response(source)
+                    for source in self.store.list_sources(scope=scope, limit=limit, offset=offset)
+                ]
+                return {"sources": sources, "warnings": []}
             raise ValueError(f"Unsupported docs.list kind: {kind}")
         if tool_name == "docs.collections.list":
             return self.retrieval.list_collections(scope=scope)
@@ -377,16 +384,106 @@ def _filters_from_args(args: dict[str, Any]) -> SearchFilters:
     )
 
 
-def _sync_source_request_from_args(args: dict[str, Any]) -> SyncSourceRequest:
-    return SyncSourceRequest(
-        source_id=_optional_int(args.get("source_id")),
-        source_uri=_optional_str(args.get("source_uri")),
-        mode=str(args.get("mode") or "dry_run"),
-        max_documents=_optional_int(args.get("max_documents")),
-        max_pages=_optional_int(args.get("max_pages")),
-        stale_policy=str(args.get("stale_policy") or "report"),
-        force=bool(args.get("force", False)),
+def _sync_source_request_from_args(
+    args: dict[str, Any],
+    settings: DocsSettings,
+) -> tuple[SyncSourceRequest, dict[str, str] | None]:
+    source_id, error = _optional_positive_int(args.get("source_id"), "source_id")
+    if error is not None:
+        return SyncSourceRequest(), error
+    max_documents, error = _optional_positive_int(args.get("max_documents"), "max_documents")
+    if error is not None:
+        return SyncSourceRequest(), error
+    max_pages, error = _optional_positive_int(args.get("max_pages"), "max_pages")
+    if error is not None:
+        return SyncSourceRequest(), error
+    mode, error = _optional_choice(args.get("mode"), "mode", default="dry_run", allowed={"dry_run", "apply"})
+    if error is not None:
+        return SyncSourceRequest(), error
+    stale_policy, error = _optional_choice(
+        args.get("stale_policy"),
+        "stale_policy",
+        default=settings.default_stale_policy,
+        allowed={"report", "tombstone"},
     )
+    if error is not None:
+        return SyncSourceRequest(), error
+    force, error = _optional_bool(args.get("force"), "force", default=False)
+    if error is not None:
+        return SyncSourceRequest(), error
+
+    return SyncSourceRequest(
+        source_id=source_id,
+        source_uri=_optional_str(args.get("source_uri")),
+        mode=mode,
+        max_documents=max_documents,
+        max_pages=max_pages,
+        stale_policy=stale_policy,
+        force=force,
+    ), None
+
+
+def _invalid_sync_request(field: str) -> dict[str, str]:
+    return {
+        "status": "denied",
+        "reason_code": "source_sync_request_invalid",
+        "field": field,
+    }
+
+
+def _optional_choice(
+    value: Any,
+    field: str,
+    *,
+    default: str,
+    allowed: set[str],
+) -> tuple[str, dict[str, str] | None]:
+    text = _optional_str(value)
+    if text is None:
+        return default, None
+    normalized = text.lower()
+    if normalized not in allowed:
+        return default, _invalid_sync_request(field)
+    return normalized, None
+
+
+def _optional_bool(value: Any, field: str, *, default: bool) -> tuple[bool, dict[str, str] | None]:
+    if value is None:
+        return default, None
+    if isinstance(value, bool):
+        return value, None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if not normalized:
+            return default, None
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True, None
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False, None
+    return default, _invalid_sync_request(field)
+
+
+def _optional_positive_int(value: Any, field: str) -> tuple[int | None, dict[str, str] | None]:
+    if value is None:
+        return None, None
+    if isinstance(value, bool):
+        return None, _invalid_sync_request(field)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None, None
+        try:
+            parsed = int(text, 10)
+        except ValueError:
+            return None, _invalid_sync_request(field)
+    elif isinstance(value, int):
+        parsed = value
+    else:
+        return None, _invalid_sync_request(field)
+
+    if parsed <= 0:
+        return None, _invalid_sync_request(field)
+    return parsed, None
 
 
 def _optional_str(value: Any) -> str | None:
@@ -407,11 +504,3 @@ def _required_int(args: dict[str, Any], name: str) -> int:
     if name not in args:
         raise ValueError(f"{name} is required")
     return int(args[name])
-
-
-def _optional_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, str) and not value.strip():
-        return None
-    return int(value)
