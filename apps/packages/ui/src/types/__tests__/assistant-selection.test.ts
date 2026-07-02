@@ -122,6 +122,21 @@ describe("normalizeAssistantSelection", () => {
     )
   })
 
+  it("falls back to an explicit avatar_url when embedded character image data is invalid", () => {
+    expect(
+      characterToAssistantSelection({
+        id: 40,
+        name: "Miku",
+        avatar_url: "https://cdn.example.test/miku.png",
+        image_base64: "not-base64"
+      })
+    ).toEqual(
+      expect.objectContaining({
+        avatar_url: "https://cdn.example.test/miku.png"
+      })
+    )
+  })
+
   it.each(["", "   ", "not-base64", "data:image/svg+xml;base64,PHN2Zy8+"])(
     "does not produce a broken avatar for malformed embedded image data %s",
     (imageBase64) => {

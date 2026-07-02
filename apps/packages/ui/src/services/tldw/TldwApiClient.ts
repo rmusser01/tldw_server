@@ -232,6 +232,7 @@ const toOptionalNumber = (value: unknown): number | null => {
 export interface TldwConfig {
   serverUrl: string
   apiKey?: string
+  apiBearer?: string
   accessToken?: string
   refreshToken?: string
   orgId?: number

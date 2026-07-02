@@ -96,10 +96,13 @@ const resolveAvatarUrl = (
     return avatarUrl
   }
 
-  const embeddedImageUrl =
+  const embeddedImageBase64 =
     typeof candidate.image_base64 === "string"
-      ? createImageDataUrl(candidate.image_base64.trim())
-      : null
+      ? candidate.image_base64.trim()
+      : ""
+  const embeddedImageUrl = embeddedImageBase64
+    ? createImageDataUrl(embeddedImageBase64)
+    : null
   return embeddedImageUrl ?? avatarUrl
 }
 
