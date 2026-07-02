@@ -434,6 +434,18 @@ describe('WebLayout /chat scroll contract', () => {
     expect(html).toContain('data-chat-scroll-owner="transcript"');
   });
 
+  it('removes hidden-header padding from viewport-constrained chat routes', () => {
+    const html = renderToStaticMarkup(
+      <OptionLayout hideHeader hideSidebar>
+        <div data-testid="chat-route-content">Chat route</div>
+      </OptionLayout>
+    );
+
+    expect(html).toContain('data-chat-scroll-owner="transcript"');
+    expect(html).toContain('items-stretch justify-start overflow-hidden px-0 py-0');
+    expect(html).not.toContain('px-4 py-10');
+  });
+
   it('passes openResetKey when the shared ChatSidebar feature is enabled', () => {
     featureFlagState.showChatSidebar = true;
 

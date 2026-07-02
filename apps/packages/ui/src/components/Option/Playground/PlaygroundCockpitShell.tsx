@@ -22,7 +22,6 @@ export type PlaygroundCockpitShellProps = {
   onMobilePanelChange?: (panel: PlaygroundCockpitMobilePanel) => void;
   leftRail: React.ReactNode;
   rightRail: React.ReactNode;
-  statusStrip: React.ReactNode;
   children: React.ReactNode;
 };
 
@@ -124,7 +123,6 @@ export const PlaygroundCockpitShell = ({
   onMobilePanelChange,
   leftRail,
   rightRail,
-  statusStrip,
   children,
 }: PlaygroundCockpitShellProps) => {
   const { t } = useTranslation("playground");
@@ -217,7 +215,7 @@ export const PlaygroundCockpitShell = ({
               )
             : t(
                 "cockpit.cockpitRailsHiddenSummary",
-                "Cockpit rails hidden. Status remains visible.",
+                "Cockpit rails hidden. Chat and composer remain active.",
               );
   const bodyClassName = focusMode
     ? "flex min-h-0 w-full min-w-0 flex-1 justify-center overflow-hidden"
@@ -447,7 +445,6 @@ export const PlaygroundCockpitShell = ({
         ) : null}
       </div>
 
-      <div data-testid="playground-cockpit-status-strip">{statusStrip}</div>
     </div>
   );
 };

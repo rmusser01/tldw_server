@@ -273,6 +273,8 @@ type Props = {
   forceWideMode?: boolean;
   onComposerLayoutChange?: (metrics: ComposerDockLayoutMetrics) => void;
   onDraftPresenceChange?: (hasDraft: boolean) => void;
+  composerMessageCount?: number;
+  composerMessageCountLabel?: string | null;
   characterChatSendBlocker?: PlaygroundSendBlocker | null;
   characterChatModelUsability?: ChatModelUsability | null;
   characterChatModelUsabilityLabel?: string | null;
@@ -469,6 +471,8 @@ export const PlaygroundForm = ({
   forceWideMode = false,
   onComposerLayoutChange,
   onDraftPresenceChange,
+  composerMessageCount = 0,
+  composerMessageCountLabel = null,
   characterChatSendBlocker = null,
   characterChatModelUsability = null,
   characterChatModelUsabilityLabel = null,
@@ -4177,6 +4181,8 @@ export const PlaygroundForm = ({
     webSearch,
     sessionUsageTotalTokens: sessionUsageSummary.totalTokens,
     sessionUsageLabel,
+    composerMessageCount,
+    composerMessageCountLabel,
     selectedSystemPrompt,
     selectedQuickPrompt,
     systemPrompt,
@@ -4292,6 +4298,7 @@ export const PlaygroundForm = ({
     actionBarVisibilityClass,
     handlers: actionBarHandlers,
   } = useActionBarVisibility({ externalPinSources });
+  const keepComposerToolbarVisible = !isMobileViewport;
   const [composerOptionsExpanded, setComposerOptionsExpanded] = useStorage(
     "playgroundComposerOptionsExpanded",
     true,
@@ -4868,7 +4875,7 @@ export const PlaygroundForm = ({
       id="playground-form-root"
       onRender={onComposerRenderProfile}
     >
-      <div className="flex w-full flex-col items-center px-2 pb-3 sm:px-4 sm:pb-6">
+      <div className="flex w-full flex-col items-center px-2 pb-0 sm:px-4 sm:pb-0">
         <div
           data-checkwidemode={effectiveWideMode}
           data-ui-mode={uiMode}
@@ -5786,8 +5793,16 @@ export const PlaygroundForm = ({
                         const composerToolbarNode = (
                           <div
                             id="composer-options-panel"
-                            aria-hidden={!actionBarVisible}
-                            className={`w-full transition-all duration-200 overflow-hidden ${actionBarVisibilityClass}`}
+                            aria-hidden={
+                              keepComposerToolbarVisible
+                                ? false
+                                : !actionBarVisible
+                            }
+                            className={`w-full transition-all duration-200 overflow-hidden ${
+                              keepComposerToolbarVisible
+                                ? "max-h-[480px] opacity-100 visible"
+                                : actionBarVisibilityClass
+                            }`}
                           >
                             {wrapComposerProfile(
                               "composer-toolbar",

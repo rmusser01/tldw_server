@@ -324,6 +324,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => false,
+  useDesktop: () => true,
 }));
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
@@ -370,6 +371,8 @@ vi.mock("react-router-dom", async () => {
 describe("Playground cockpit controls", () => {
   beforeEach(() => {
     storageState.values.clear();
+    storageState.values.set("playgroundChatContextRailVisible", true);
+    storageState.values.set("playgroundChatRuntimeRailVisible", true);
     modelSettingsState.value.systemPrompt = "";
     modelSettingsState.value.setSystemPrompt = vi.fn();
     modelSettingsState.value.temperature = 0.7;
@@ -513,16 +516,9 @@ describe("Playground cockpit controls", () => {
         within(contextRail).getByText("1 knowledge item"),
       ).toBeInTheDocument();
       expect(within(contextRail).getByText("2 media scopes")).toBeInTheDocument();
-      const statusStrip = screen.getByRole("status", { name: "Chat status" });
-      expect(statusStrip).toHaveTextContent("Web search on");
-      expect(statusStrip).toHaveTextContent("1 file");
-      expect(statusStrip).toHaveTextContent("1 knowledge item");
-      expect(statusStrip).toHaveTextContent("+1 more");
       expect(
-        within(statusStrip).getByRole("button", {
-          name: /open search & context/i,
-        }),
-      ).toBeInTheDocument();
+        screen.queryByRole("status", { name: "Chat status" }),
+      ).not.toBeInTheDocument();
       expect(within(contextRail).getByText("Temporary chat")).toBeInTheDocument();
       expect(within(contextRail).getByText("History linked")).toBeInTheDocument();
       expect(
@@ -707,7 +703,7 @@ describe("Playground cockpit controls", () => {
     }
   }, 15000);
 
-  it("surfaces active web search progress in the cockpit status strip", async () => {
+  it("surfaces active web search state in the cockpit context rail", async () => {
     messageOptionState.value.streaming = false;
     messageOptionState.value.isSearchingInternet = true;
     messageOptionState.value.selectedAssistant = null;
@@ -715,12 +711,13 @@ describe("Playground cockpit controls", () => {
 
     render(<Playground />);
 
-    const statusStrip = await screen.findByRole("status", {
-      name: "Chat status",
-    });
-    expect(statusStrip).toHaveTextContent("Searching web");
-    expect(statusStrip).toHaveTextContent("Web search on");
-    expect(statusStrip).not.toHaveTextContent("Ready");
+    const contextRail = within(
+      await screen.findByTestId("playground-cockpit-left-rail"),
+    ).getByTestId("playground-context-rail");
+    expect(within(contextRail).getByText("Web search on")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("logs selected prompt lookup failures while keeping the prompt unavailable state visible", async () => {
@@ -1232,7 +1229,7 @@ describe("Playground cockpit controls", () => {
     );
   });
 
-  it("reflects degraded server readiness in the cockpit runtime and status strip", async () => {
+  it("reflects degraded server readiness in the cockpit runtime rail", async () => {
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
@@ -1255,9 +1252,9 @@ describe("Playground cockpit controls", () => {
     expect(
       within(runtimeInspector).getByText("Degraded: chacha_notes"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Chat status" })).toHaveTextContent(
-      "chacha_notes",
-    );
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps streaming primary when degraded readiness is warning-only", async () => {
@@ -1281,10 +1278,9 @@ describe("Playground cockpit controls", () => {
     ).getByTestId("playground-runtime-inspector");
     expect(within(runtimeInspector).getByText("Streaming")).toBeInTheDocument();
 
-    const status = screen.getByRole("status", { name: "Chat status" });
-    expect(status).toHaveTextContent("Streaming");
-    expect(status).toHaveTextContent("embeddings");
-    expect(status).toHaveTextContent("Chat remains available.");
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("surfaces blocked server readiness as chat-critical unavailable state", async () => {
@@ -1313,12 +1309,9 @@ describe("Playground cockpit controls", () => {
       ),
     ).toBeInTheDocument();
 
-    const status = screen.getByRole("status", { name: "Chat status" });
-    expect(status).toHaveTextContent("Server unavailable");
-    expect(status).toHaveTextContent(
-      "Reconnect to the server or review server settings before sending.",
-    );
-    expect(status).not.toHaveTextContent("Chat remains available.");
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps provider setup blocking consistent across empty-state and cockpit rails", async () => {
@@ -1373,10 +1366,9 @@ describe("Playground cockpit controls", () => {
     });
     expect(runtimeInspector).toHaveTextContent("Provider setup needed");
 
-    const status = screen.getByRole("status", { name: "Chat status" });
-    expect(status).toHaveTextContent("Model setup needed");
-    expect(status).toHaveTextContent("Provider setup needed");
-    expect(status).not.toHaveTextContent("Ready");
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the cockpit visibly degraded when readiness details are empty", async () => {
@@ -1399,8 +1391,8 @@ describe("Playground cockpit controls", () => {
       screen.getByTestId("playground-cockpit-right-rail"),
     ).getByTestId("playground-runtime-inspector");
     expect(within(runtimeInspector).getByText("Degraded")).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Chat status" })).toHaveTextContent(
-      "Degraded",
-    );
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 });

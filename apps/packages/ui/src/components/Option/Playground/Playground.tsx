@@ -15,7 +15,6 @@ import {
   type RuntimeSettingSummary,
   type RuntimeToolChoice,
 } from "./PlaygroundRuntimeInspector";
-import { PlaygroundStatusStrip } from "./PlaygroundStatusStrip";
 import type { PlaygroundSendBlocker } from "./PlaygroundSendControl";
 import {
   CharacterChatReadinessPanel,
@@ -39,7 +38,10 @@ import {
   setTemporaryChatFromCockpit,
   toggleWebSearchFromCockpit,
 } from "./playground-cockpit-actions";
-import { getCockpitMessageCount } from "./playground-cockpit-state";
+import {
+  formatCockpitMessageCount,
+  getCockpitMessageCount,
+} from "./playground-cockpit-state";
 import { buildPlaygroundCompositionPreviewSummary } from "./playground-composition-preview";
 import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBoundary";
 import { hasVisibleAssistantResponse } from "@/components/Common/Playground/message-visibility";
@@ -3198,40 +3200,14 @@ export const Playground = () => {
       setupRecoveryMode={setupRecoveryMode}
     />
   );
-  const cockpitStatusStrip = (
-    <PlaygroundStatusStrip
-      mode={normalizedChatLayoutMode}
-      streaming={streaming}
-      selectedProvider={providerRouteSummary.selectedProvider}
-      selectedModel={providerRouteSummary.selectedModel}
-      messageCount={cockpitMessageCount}
-      sessionLabel={sessionLabel}
-      sessionTitle={sessionSummary.title}
-      sessionStatus={sessionSummary.status}
-      sessionStatusLabel={sessionSummary.statusLabel}
-      sessionDetail={sessionSummary.detail}
-      sessionError={sessionSummary.error}
-      hasContext={hasChatContext}
-      contextSummary={statusContextSummary}
-      temporaryChat={temporaryChat}
-      characterChatActive={characterWorkflowActive}
-      webSearchInProgress={isSearchingInternet}
-      degraded={serverReadinessState === "degraded"}
-      degradedChecks={serverDegradedChecks}
-      errorMessage={null}
-      serverBlocked={serverReadinessState === "blocked"}
-      modelUsabilityStatus={activeChatModelUsability?.status ?? null}
-      modelUsabilityCanSend={activeChatModelUsability?.canSend ?? null}
-      modelUsabilityMessage={activeChatModelUsabilityMessage}
-      modelUnavailable={characterChatModelUnavailable}
-      modelUnavailableMessage={
-        characterChatModelUnavailable ? characterChatReadinessCopy?.title ?? null : null
-      }
-      compositionStatus={compositionStatus}
-      onStopStreaming={() => stopStreamingRequest()}
-      onOpenSearchContext={() => openSearchAndContext({ tab: "context" })}
-      onOpenModelSettings={openModelSettings}
-    />
+  const composerMessageCount = cockpitMessageCount;
+  const composerMessageCountLabel = formatCockpitMessageCount(
+    t("playground:status.messageCount", {
+      defaultValue:
+        composerMessageCount === 1 ? "{{count}} message" : "{{count}} messages",
+      count: composerMessageCount,
+    } as any),
+    composerMessageCount,
   );
 
   return (
@@ -3298,7 +3274,6 @@ export const Playground = () => {
           onMobilePanelChange={setMobileCockpitPanel}
           leftRail={cockpitLeftRail}
           rightRail={cockpitRightRail}
-          statusStrip={cockpitStatusStrip}
         >
           <div
             data-testid="playground-chat-shell"
@@ -3814,6 +3789,8 @@ export const Playground = () => {
                   handleSelectAttachedResearchContextHistory
                 }
                 onDraftPresenceChange={handleComposerDraftPresenceChange}
+                composerMessageCount={composerMessageCount}
+                composerMessageCountLabel={composerMessageCountLabel}
                 characterChatSendBlocker={characterChatSendBlocker}
                 characterChatModelUsability={activeChatModelUsability}
                 characterChatModelUsabilityLabel={

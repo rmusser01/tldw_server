@@ -32,7 +32,6 @@ const renderShell = ({
       onRightRailVisibleChange={onRightRailVisibleChange}
       leftRail={<div>Context tools</div>}
       rightRail={<div>Runtime tools</div>}
-      statusStrip={<div>Ready</div>}
     >
       <div>Chat transcript</div>
     </PlaygroundCockpitShell>,

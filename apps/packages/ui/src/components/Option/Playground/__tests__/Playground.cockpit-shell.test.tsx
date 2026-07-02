@@ -352,7 +352,7 @@ describe("Playground cockpit shell", () => {
     characterSessionsPanelState.props = [];
   });
 
-  it("renders the cockpit rails, main chat surface, and status strip by default", async () => {
+  it("renders the cockpit rails and main chat surface without a bottom status strip by default", async () => {
     render(<Playground />);
 
     expect(
@@ -365,8 +365,8 @@ describe("Playground cockpit shell", () => {
       screen.getByTestId("playground-cockpit-right-rail"),
     ).toBeInTheDocument();
     expect(
-      screen.getByTestId("playground-cockpit-status-strip"),
-    ).toBeInTheDocument();
+      screen.queryByTestId("playground-cockpit-status-strip"),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByTestId("playground-cockpit-mode-summary"),
     ).toHaveTextContent("Context and runtime rails visible.");
@@ -431,10 +431,9 @@ describe("Playground cockpit shell", () => {
     expect(runtimeRail).toHaveTextContent("No chat models configured");
     expect(runtimeRail).not.toHaveTextContent("Ready");
 
-    const statusStrip = screen.getByRole("status", { name: "Chat status" });
-    expect(statusStrip).toHaveTextContent("Model unavailable");
-    expect(statusStrip).toHaveTextContent("No chat models configured");
-    expect(statusStrip).not.toHaveTextContent("Ready");
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("honors first-class character route intent in the chat shell", async () => {
@@ -730,9 +729,9 @@ describe("Playground cockpit shell", () => {
         await screen.findByTestId("character-chat-readiness-panel"),
       ).getByText("Choose an available chat model before chatting as Ariadne"),
     ).toBeInTheDocument();
-    const chatStatus = screen.getByRole("status", { name: "Chat status" });
-    expect(chatStatus).toHaveTextContent("Model unavailable");
-    expect(chatStatus).not.toHaveTextContent("Ready");
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps empty character chat model selection in the missing-model status", async () => {
@@ -750,9 +749,9 @@ describe("Playground cockpit shell", () => {
         await screen.findByTestId("character-chat-readiness-panel"),
       ).getByText("Choose a chat model before chatting as Ariadne"),
     ).toBeInTheDocument();
-    const chatStatus = screen.getByRole("status", { name: "Chat status" });
-    expect(chatStatus).toHaveTextContent("No model selected");
-    expect(chatStatus).not.toHaveTextContent("Model unavailable");
+    expect(
+      screen.queryByRole("status", { name: "Chat status" }),
+    ).not.toBeInTheDocument();
   });
 
   it("does not treat catalog-only backend models as ready for character chat", async () => {
@@ -1202,7 +1201,7 @@ describe("Playground cockpit shell", () => {
     });
     expect(
       screen.getByTestId("playground-cockpit-mode-summary"),
-    ).toHaveTextContent("Cockpit rails hidden. Status remains visible.");
+    ).toHaveTextContent("Cockpit rails hidden. Chat and composer remain active.");
     expect(storageState.values.get("playgroundChatRuntimeRailVisible")).toBe(
       false,
     );
@@ -1320,8 +1319,8 @@ describe("Playground cockpit shell", () => {
       false,
     );
     expect(
-      screen.getByTestId("playground-cockpit-status-strip"),
-    ).toBeInTheDocument();
+      screen.queryByTestId("playground-cockpit-status-strip"),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByTestId("playground-collapsed-composition-summary"),
     ).toBeNull();

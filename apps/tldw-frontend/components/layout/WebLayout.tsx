@@ -172,6 +172,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const isViewportConstrainedRoute =
     stickyChatLayoutActive ||
     (VIEWPORT_CONSTRAINED_PATHS as readonly string[]).includes(location.pathname);
+  const hideHeaderViewportShell = hideHeader && isViewportConstrainedRoute;
   const chatScreenBackgroundStyle =
     isChatScreen && chatBackgroundImage
       ? {
@@ -452,7 +453,19 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           data-demo-mode={demoEnabled ? 'on' : 'off'}
         >
           {hideHeader ? (
-            <div className="relative flex min-h-screen flex-1 flex-col items-center justify-center px-4 py-10 sm:px-8 overflow-auto">
+            <div
+              data-chat-scroll-owner={
+                hideHeaderViewportShell && stickyChatLayoutActive
+                  ? 'transcript'
+                  : undefined
+              }
+              className={classNames(
+                'relative flex min-h-screen flex-1 flex-col',
+                hideHeaderViewportShell
+                  ? 'min-w-0 items-stretch justify-start overflow-hidden px-0 py-0'
+                  : 'items-center justify-center overflow-auto px-4 py-10 sm:px-8'
+              )}
+            >
               {children}
               {shortcutLoading && renderShortcutOverlay()}
             </div>

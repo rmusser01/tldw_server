@@ -58,16 +58,6 @@ describe("Playground cockpit accessibility", () => {
         onRightRailVisibleChange={vi.fn()}
         leftRail={<div>Context tools</div>}
         rightRail={<div>Runtime tools</div>}
-        statusStrip={
-          <PlaygroundStatusStrip
-            mode="cockpit"
-            streaming={false}
-            selectedModel="openai:gpt-4o"
-            messageCount={0}
-            sessionLabel="Local chat"
-            hasContext={false}
-          />
-        }
       >
         <div>Chat transcript</div>
       </PlaygroundCockpitShell>,
@@ -101,7 +91,6 @@ describe("Playground cockpit accessibility", () => {
         onRightRailVisibleChange={vi.fn()}
         leftRail={<div>Context tools</div>}
         rightRail={<div>Runtime tools</div>}
-        statusStrip={<div>Ready</div>}
       >
         <div>Chat transcript</div>
       </PlaygroundCockpitShell>,
@@ -136,7 +125,6 @@ describe("Playground cockpit accessibility", () => {
         onRightRailVisibleChange={onRightRailVisibleChange}
         leftRail={<div>Context tools</div>}
         rightRail={<div>Runtime tools</div>}
-        statusStrip={<div>Ready</div>}
       >
         <div>Chat transcript</div>
       </PlaygroundCockpitShell>,
@@ -178,7 +166,6 @@ describe("Playground cockpit accessibility", () => {
         onRightRailVisibleChange={onRightRailVisibleChange}
         leftRail={<div>Context tools</div>}
         rightRail={<div>Runtime tools</div>}
-        statusStrip={<div>Ready</div>}
       >
         <div>Chat transcript</div>
       </PlaygroundCockpitShell>,
@@ -221,7 +208,6 @@ describe("Playground cockpit accessibility", () => {
         onMobilePanelChange={onMobilePanelChange}
         leftRail={<div>Context tools</div>}
         rightRail={<div>Runtime tools</div>}
-        statusStrip={<div>Ready</div>}
       >
         <div>Chat transcript</div>
       </PlaygroundCockpitShell>,
