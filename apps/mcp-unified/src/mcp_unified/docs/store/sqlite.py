@@ -239,9 +239,12 @@ class DocsCatalogStore:
         owner_scope, profile_scope = _scope_values(scope)
         if source_id is not None:
             sql = """
-                SELECT s.*, COUNT(DISTINCT sd.document_id) AS document_count
+                SELECT s.*, COUNT(DISTINCT d.id) AS document_count
                 FROM docs_sources s
                 LEFT JOIN docs_source_documents sd ON sd.source_id = s.id
+                LEFT JOIN docs_documents d ON d.id = sd.document_id
+                    AND d.owner_scope = ?
+                    AND d.profile_scope = ?
                 WHERE s.owner_scope = ?
                   AND s.profile_scope = ?
                   AND s.id = ?
@@ -250,9 +253,12 @@ class DocsCatalogStore:
             selector_param: object = source_id
         else:
             sql = """
-                SELECT s.*, COUNT(DISTINCT sd.document_id) AS document_count
+                SELECT s.*, COUNT(DISTINCT d.id) AS document_count
                 FROM docs_sources s
                 LEFT JOIN docs_source_documents sd ON sd.source_id = s.id
+                LEFT JOIN docs_documents d ON d.id = sd.document_id
+                    AND d.owner_scope = ?
+                    AND d.profile_scope = ?
                 WHERE s.owner_scope = ?
                   AND s.profile_scope = ?
                   AND s.canonical_uri = ?
@@ -261,7 +267,10 @@ class DocsCatalogStore:
             selector_param = canonical_uri
 
         with closing(self.connect()) as conn:
-            row = conn.execute(sql, (owner_scope, profile_scope, selector_param)).fetchone()
+            row = conn.execute(
+                sql,
+                (owner_scope, profile_scope, owner_scope, profile_scope, selector_param),
+            ).fetchone()
         return _source_from_row(row) if row is not None else None
 
     def list_sources(self, *, scope: AccessScope, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
@@ -269,15 +278,20 @@ class DocsCatalogStore:
         with closing(self.connect()) as conn:
             rows = conn.execute(
                 """
-                SELECT s.*, COUNT(DISTINCT sd.document_id) AS document_count
+                SELECT s.*, COUNT(DISTINCT d.id) AS document_count
                 FROM docs_sources s
                 LEFT JOIN docs_source_documents sd ON sd.source_id = s.id
+                LEFT JOIN docs_documents d ON d.id = sd.document_id
+                    AND d.owner_scope = ?
+                    AND d.profile_scope = ?
                 WHERE s.owner_scope = ? AND s.profile_scope = ?
                 GROUP BY s.id
                 ORDER BY s.display_name COLLATE NOCASE ASC, s.id ASC
                 LIMIT ? OFFSET ?
                 """,
                 (
+                    owner_scope,
+                    profile_scope,
                     owner_scope,
                     profile_scope,
                     _bounded_non_negative(limit, default=50),
@@ -1122,6 +1136,9 @@ class DocsCatalogStore:
                 UNIQUE (owner_scope, profile_scope, canonical_uri)
             );
 
+            CREATE INDEX IF NOT EXISTS docs_sources_scope_display_idx
+                ON docs_sources (owner_scope, profile_scope, display_name);
+
             CREATE TABLE IF NOT EXISTS docs_source_documents (
                 source_id INTEGER NOT NULL REFERENCES docs_sources(id) ON DELETE CASCADE,
                 document_id INTEGER NOT NULL REFERENCES docs_documents(id) ON DELETE CASCADE,
@@ -1133,6 +1150,9 @@ class DocsCatalogStore:
                 metadata_json TEXT NOT NULL DEFAULT '{}',
                 PRIMARY KEY (source_id, source_item_uri)
             );
+
+            CREATE INDEX IF NOT EXISTS docs_source_documents_document_idx
+                ON docs_source_documents (document_id);
 
             CREATE TABLE IF NOT EXISTS docs_sync_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1149,6 +1169,9 @@ class DocsCatalogStore:
                 error_code TEXT,
                 metadata_json TEXT NOT NULL DEFAULT '{}'
             );
+
+            CREATE INDEX IF NOT EXISTS docs_sync_runs_source_started_idx
+                ON docs_sync_runs (source_id, started_at DESC);
             """
         )
 

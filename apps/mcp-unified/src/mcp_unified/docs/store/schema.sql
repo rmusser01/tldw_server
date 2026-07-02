@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS docs_sources (
     UNIQUE (owner_scope, profile_scope, canonical_uri)
 );
 
+CREATE INDEX IF NOT EXISTS docs_sources_scope_display_idx
+    ON docs_sources (owner_scope, profile_scope, display_name);
+
 CREATE TABLE IF NOT EXISTS docs_source_documents (
     source_id INTEGER NOT NULL REFERENCES docs_sources(id) ON DELETE CASCADE,
     document_id INTEGER NOT NULL REFERENCES docs_documents(id) ON DELETE CASCADE,
@@ -70,6 +73,9 @@ CREATE TABLE IF NOT EXISTS docs_source_documents (
     metadata_json TEXT NOT NULL DEFAULT '{}',
     PRIMARY KEY (source_id, source_item_uri)
 );
+
+CREATE INDEX IF NOT EXISTS docs_source_documents_document_idx
+    ON docs_source_documents (document_id);
 
 CREATE TABLE IF NOT EXISTS docs_sync_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,6 +92,9 @@ CREATE TABLE IF NOT EXISTS docs_sync_runs (
     error_code TEXT,
     metadata_json TEXT NOT NULL DEFAULT '{}'
 );
+
+CREATE INDEX IF NOT EXISTS docs_sync_runs_source_started_idx
+    ON docs_sync_runs (source_id, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS docs_collections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

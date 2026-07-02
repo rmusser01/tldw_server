@@ -63,6 +63,54 @@ def test_store_upserts_and_lists_sources_by_scope(tmp_path: Path) -> None:
     assert store.list_sources(scope=scope_b) == []  # nosec B101
 
 
+def test_source_document_count_ignores_out_of_scope_links(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope_a = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
+    scope_b = AccessScope(owner_scope="owner-b", profile_scope="profile-a")
+
+    source_id = store.upsert_source(
+        scope=scope_a,
+        source_type="local_file",
+        canonical_uri="file:///docs/a.md",
+        display_name="a.md",
+        source_path="/docs/a.md",
+        source_url=None,
+        redacted_source_url=None,
+        policy_profile="locked_down",
+        sync_enabled=True,
+        metadata={},
+    )
+    out_of_scope_document_id = store.upsert_document(
+        scope=scope_b,
+        title="Other Owner",
+        document_type="text",
+        canonical_uri="file:///other-owner.txt",
+        source_path="/other-owner.txt",
+        source_url=None,
+        text="other owner sqlite body",
+        sections=[],
+        chunks=[{"text": "other owner sqlite body", "citation": "other-owner.txt"}],
+        keywords=(),
+        collection_names=(),
+        metadata={},
+    )
+
+    with closing(store.connect()) as conn:
+        conn.execute(
+            """
+            INSERT INTO docs_source_documents (source_id, document_id, source_item_uri)
+            VALUES (?, ?, ?)
+            """,
+            (source_id, out_of_scope_document_id, "file:///other-owner.txt"),
+        )
+        conn.commit()
+
+    assert store.get_source(scope=scope_a, source_id=source_id)["document_count"] == 0  # nosec B101
+    assert store.get_source(scope=scope_a, canonical_uri="file:///docs/a.md")["document_count"] == 0  # nosec B101
+    assert store.list_sources(scope=scope_a)[0]["document_count"] == 0  # nosec B101
+
+
 def test_upsert_document_for_sync_merges_existing_organization(tmp_path: Path) -> None:
     store = DocsCatalogStore(tmp_path / "docs.db")
     store.migrate()
