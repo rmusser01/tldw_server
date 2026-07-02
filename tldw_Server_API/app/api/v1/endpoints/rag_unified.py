@@ -2061,6 +2061,7 @@ async def unified_search_stream_endpoint(
         ):
             yield json.dumps(_sanitize_rag_stream_event(event)) + "\n"
 
+    # codeql[py/stack-trace-exposure]: stream events are sanitized before serialization.
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 

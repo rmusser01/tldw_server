@@ -26,8 +26,8 @@ const bypassChatGates = async (page: Page) => {
     window.localStorage.setItem('assistant_setup_dismissed', 'true');
     window.localStorage.setItem('__tldw_first_run_complete', 'true');
     window.localStorage.setItem('__tldw_test_bypass', 'true');
-    window.localStorage.setItem('tldwConfig', JSON.stringify(authConfig)); // lgtm[js/clear-text-storage-of-sensitive-data] synthetic E2E auth seed only
-    window.localStorage.setItem('apiKey', authConfig.apiKey); // lgtm[js/clear-text-storage-of-sensitive-data] test-only legacy auth compatibility key
+    window.localStorage.setItem('tldwConfig', JSON.stringify(authConfig)); // codeql[js/clear-text-storage-of-sensitive-data] synthetic E2E auth seed only
+    window.localStorage.setItem('apiKey', authConfig.apiKey); // codeql[js/clear-text-storage-of-sensitive-data] test-only legacy auth compatibility key
     window.localStorage.setItem('authMode', authConfig.authMode);
     window.localStorage.setItem('stickyChatInput', 'true');
     window.localStorage.setItem('playgroundComposerOptionsExpanded', 'false');

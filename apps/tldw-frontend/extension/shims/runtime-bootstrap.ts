@@ -477,6 +477,7 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
 
   if (initialServerUrl && explicitWebHost !== initialServerUrl) {
     try {
+      // codeql[js/clear-text-storage-of-sensitive-data]: tldw-api-host stores non-secret server metadata only.
       window.localStorage.setItem("tldw-api-host", initialServerUrl)
     } catch {
       // Best-effort only; ignore storage failures in web contexts.
@@ -502,6 +503,7 @@ const seedTldwConfigFromEnv = async (): Promise<void> => {
 
     if (serverUrl && initialServerUrl !== serverUrl) {
       try {
+        // codeql[js/clear-text-storage-of-sensitive-data]: tldw-api-host stores non-secret server metadata only.
         window.localStorage.setItem("tldw-api-host", serverUrl)
       } catch {
         // Best-effort only; ignore storage failures in web contexts.

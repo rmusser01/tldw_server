@@ -8,6 +8,10 @@ const authStorageMocks = vi.hoisted(() => ({
 
 vi.mock('@web/lib/authStorage', () => authStorageMocks);
 
+function readStoredTldwConfig(): Record<string, unknown> {
+  return JSON.parse(localStorage.getItem('tldwConfig') ?? '{}') as Record<string, unknown>;
+}
+
 describe('useConfig networking', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -150,7 +154,7 @@ describe('useConfig networking', () => {
     });
   });
 
-  it('keeps manually entered single-user api keys in runtime memory only', async () => {
+  it('persists manually entered single-user api keys for reloads', async () => {
     process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8000';
     localStorage.setItem('apiBearer', 'legacy-bearer');
     localStorage.setItem('refreshToken', 'legacy-refresh');
@@ -167,10 +171,39 @@ describe('useConfig networking', () => {
     await waitFor(() => {
       expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('saved-api-key');
     });
-    expect(localStorage.getItem('apiKey')).toBeNull();
+    expect(localStorage.getItem('apiKey')).toBe('saved-api-key');
     expect(localStorage.getItem('apiBearer')).toBeNull();
-    expect(localStorage.getItem('tldwConfig')).not.toContain('saved-api-key');
+    expect(readStoredTldwConfig()).toMatchObject({
+      authMode: 'single-user',
+      apiKey: 'saved-api-key',
+    });
+    expect(readStoredTldwConfig()).not.toHaveProperty('accessToken');
     expect(localStorage.getItem('refreshToken')).toBeNull();
+  });
+
+  it('persists manually entered multi-user bearer tokens for reloads', async () => {
+    process.env.NEXT_PUBLIC_API_URL = 'http://127.0.0.1:8000';
+    localStorage.setItem('apiKey', 'legacy-api-key');
+    const { ConfigProvider, useConfig } = await import('@web/hooks/useConfig');
+
+    const { result } = renderHook(() => useConfig(), {
+      wrapper: ({ children }) => <ConfigProvider>{children}</ConfigProvider>,
+    });
+
+    act(() => {
+      result.current.setApiBearer('Bearer saved-bearer-token');
+    });
+
+    await waitFor(() => {
+      expect(authStorageMocks.setRuntimeApiBearer).toHaveBeenLastCalledWith('Bearer saved-bearer-token');
+    });
+    expect(localStorage.getItem('accessToken')).toBe('saved-bearer-token');
+    expect(localStorage.getItem('apiKey')).toBeNull();
+    expect(readStoredTldwConfig()).toMatchObject({
+      authMode: 'multi-user',
+      accessToken: 'saved-bearer-token',
+    });
+    expect(readStoredTldwConfig()).not.toHaveProperty('apiKey');
   });
 
   it('refreshes live config after settings writes canonical tldw config', async () => {
@@ -198,8 +231,12 @@ describe('useConfig networking', () => {
       expect(result.current.config.apiBaseHost).toBe('http://127.0.0.1:8222');
       expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('event-api-key');
     });
-    expect(localStorage.getItem('apiKey')).toBeNull();
-    expect(localStorage.getItem('tldwConfig')).not.toContain('event-api-key');
+    expect(localStorage.getItem('apiKey')).toBe('event-api-key');
+    expect(readStoredTldwConfig()).toMatchObject({
+      authMode: 'single-user',
+      apiKey: 'event-api-key',
+    });
+    expect(readStoredTldwConfig()).not.toHaveProperty('accessToken');
   });
 
   it('keeps environment api keys ahead of stale browser config', async () => {
@@ -224,5 +261,8 @@ describe('useConfig networking', () => {
     await waitFor(() => {
       expect(authStorageMocks.setRuntimeApiKey).toHaveBeenLastCalledWith('env-api-key');
     });
+    expect(localStorage.getItem('apiKey')).toBeNull();
+    expect(readStoredTldwConfig()).not.toHaveProperty('apiKey');
+    expect(readStoredTldwConfig()).not.toHaveProperty('accessToken');
   });
 });

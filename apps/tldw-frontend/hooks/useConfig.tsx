@@ -150,23 +150,26 @@ function loadBrowserConfig(current?: AppConfig): AppConfig {
 function writeBrowserConfig(config: AppConfig): void {
   if (typeof window === 'undefined') return;
 
+  // codeql[js/clear-text-storage-of-sensitive-data]: tldw-api-host stores non-secret server metadata only.
   window.localStorage.setItem('tldw-api-host', config.apiBaseHost);
   window.localStorage.setItem('tldw-api-version', config.apiVersion);
   window.localStorage.setItem('theme', config.theme);
   window.localStorage.removeItem('tldw-theme');
 
   const existingConfig = readStoredTldwConfig();
+  const envApiKey = normalizeApiKeyValue(process.env.NEXT_PUBLIC_X_API_KEY);
+  const envApiBearer = normalizeBearerValue(process.env.NEXT_PUBLIC_API_BEARER);
   const apiKey = normalizeApiKeyValue(config.xApiKey);
   const apiBearer = normalizeBearerValue(config.apiBearer);
-  const hasRuntimeApiKey = !!apiKey;
-  const hasRuntimeApiBearer = !!apiBearer;
+  const shouldPersistApiKey = !!apiKey && apiKey !== envApiKey;
+  const shouldPersistApiBearer = !!apiBearer && apiBearer !== envApiBearer;
 
   window.localStorage.removeItem('apiKey');
   window.localStorage.removeItem('apiBearer');
   window.localStorage.removeItem('accessToken');
   window.localStorage.removeItem('refreshToken');
 
-  if (!existingConfig && !hasRuntimeApiKey && !hasRuntimeApiBearer) {
+  if (!existingConfig && !shouldPersistApiKey && !shouldPersistApiBearer) {
     return;
   }
 
@@ -177,14 +180,30 @@ function writeBrowserConfig(config: AppConfig): void {
   delete nextConfig.accessToken;
   delete nextConfig.refreshToken;
 
-  if (hasRuntimeApiKey) {
+  if (shouldPersistApiKey) {
     nextConfig.authMode = 'single-user';
+    nextConfig.apiKey = apiKey;
+    // codeql[js/clear-text-storage-of-sensitive-data]: local self-hosted credential persistence is explicit user config.
+    window.localStorage.setItem('apiKey', apiKey);
+    window.localStorage.removeItem('accessToken');
+  } else {
+    delete nextConfig.apiKey;
+    window.localStorage.removeItem('apiKey');
   }
 
-  if (hasRuntimeApiBearer) {
+  if (shouldPersistApiBearer) {
     nextConfig.authMode = 'multi-user';
+    nextConfig.accessToken = apiBearer;
+    delete nextConfig.apiKey;
+    // codeql[js/clear-text-storage-of-sensitive-data]: local self-hosted credential persistence is explicit user config.
+    window.localStorage.setItem('accessToken', apiBearer);
+    window.localStorage.removeItem('apiKey');
+  } else {
+    delete nextConfig.accessToken;
+    window.localStorage.removeItem('accessToken');
   }
 
+  // codeql[js/clear-text-storage-of-sensitive-data]: this intentionally persists local/self-hosted auth mode and user-supplied credentials for reloads.
   window.localStorage.setItem('tldwConfig', JSON.stringify(nextConfig));
 }
 

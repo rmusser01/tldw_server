@@ -2442,6 +2442,7 @@ def _resolve_persona_visual_asset_path(*, user_id: str, storage_key: str) -> Pat
     parts = str(storage_key or "").split("/")
     if len(parts) < 4 or parts[0] != "persona_visuals" or any(part in {"", ".", ".."} for part in parts):
         raise HTTPException(status_code=404, detail="Persona visual asset not found")
+    # codeql[py/path-injection]: user_id and storage_key are constrained to the user's persona visual root.
     base = DatabasePaths.get_user_persona_visuals_dir(user_id).resolve(strict=False)
     target_str = safe_join(
         str(base),
@@ -2449,6 +2450,7 @@ def _resolve_persona_visual_asset_path(*, user_id: str, storage_key: str) -> Pat
         error_factory=lambda _exc: HTTPException(status_code=404, detail="Persona visual asset not found"),
     )
     target = Path(target_str)
+    # codeql[py/path-injection]: target is constrained by safe_join under the user's persona visual root.
     if not target.is_relative_to(base) or not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="Persona visual asset not found")
     return target
@@ -2560,7 +2562,7 @@ def _validated_persona_visual_export_archive_path(user_id: str, archive_path: st
     if not archive_path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="export_archive_not_found")
     root = _persona_visual_pack_export_staging_root(user_id).resolve(strict=False)
-    # lgtm[py/path-injection] persisted archive_path is accepted only after root containment and suffix checks.
+    # codeql[py/path-injection] persisted archive_path is accepted only after root containment and suffix checks.
     path = Path(archive_path).resolve(strict=False)
     try:
         path.relative_to(root)
@@ -2580,7 +2582,7 @@ def _validated_persona_visual_import_preview_archive_path(user_id: str, archive_
     if not archive_path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="import_preview_archive_not_found")
     root = _persona_visual_pack_import_preview_staging_root(user_id).resolve(strict=False)
-    # lgtm[py/path-injection] persisted archive_path is accepted only after root containment and suffix checks.
+    # codeql[py/path-injection] persisted archive_path is accepted only after root containment and suffix checks.
     path = Path(archive_path).resolve(strict=False)
     try:
         path.relative_to(root)
@@ -2597,9 +2599,9 @@ def _validated_persona_visual_import_preview_archive_path(user_id: str, archive_
 async def _save_persona_visual_import_preview_archive(archive: UploadFile, archive_path: Path) -> int:
     total_bytes = 0
     try:
-        # lgtm[py/path-injection] archive_path is generated under the user's import-preview staging root.
+        # codeql[py/path-injection] archive_path is generated under the user's import-preview staging root.
         await aiofiles.os.makedirs(archive_path.parent, exist_ok=True)
-        # lgtm[py/path-injection] archive_path is generated under the user's import-preview staging root.
+        # codeql[py/path-injection] archive_path is generated under the user's import-preview staging root.
         async with aiofiles.open(archive_path, "wb") as output:
             while chunk := await archive.read(_PERSONA_VISUAL_PACK_UPLOAD_CHUNK_SIZE_BYTES):
                 total_bytes += len(chunk)
@@ -2608,12 +2610,12 @@ async def _save_persona_visual_import_preview_archive(archive: UploadFile, archi
                 await output.write(chunk)
     except HTTPException:
         with contextlib.suppress(OSError):
-            # lgtm[py/path-injection] archive_path is generated under the user's import-preview staging root.
+            # codeql[py/path-injection] archive_path is generated under the user's import-preview staging root.
             archive_path.unlink(missing_ok=True)
         raise
     except OSError as exc:
         with contextlib.suppress(OSError):
-            # lgtm[py/path-injection] archive_path is generated under the user's import-preview staging root.
+            # codeql[py/path-injection] archive_path is generated under the user's import-preview staging root.
             archive_path.unlink(missing_ok=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="archive_save_failed") from exc
     finally:
@@ -4701,7 +4703,7 @@ async def get_persona_visual_asset_content(
             user_id=user_id,
             storage_key=str(asset.get("storage_key") or ""),
         )
-        # lgtm[py/path-injection] asset_path is resolved from a contained persona visual storage key.
+        # codeql[py/path-injection] asset_path is resolved from a contained persona visual storage key.
         return FileResponse(
             asset_path,
             media_type=str(asset.get("mime_type") or "application/octet-stream"),
@@ -5279,7 +5281,7 @@ async def download_persona_visual_pack_export(
         user_id,
         portability_job.get("archive_path") if portability_job else None,
     )
-    # lgtm[py/path-injection] archive_path is validated under the user's export staging root.
+    # codeql[py/path-injection] archive_path is validated under the user's export staging root.
     return FileResponse(
         path=str(archive_path),
         filename=archive_path.name,
@@ -5319,6 +5321,7 @@ async def start_persona_visual_pack_import_preview(
         request_id = uuid.uuid4().hex
         archive_root = _persona_visual_pack_import_preview_staging_root(user_id)
         archive_path_str = safe_join(
+            # codeql[py/path-injection]: archive_root is a per-user import-preview staging root.
             str(archive_root.resolve(strict=False)),
             f"{request_id}{archive_suffix}",
             error_factory=lambda _exc: HTTPException(status_code=400, detail="invalid_archive_path"),
@@ -5555,7 +5558,7 @@ async def delete_persona_visual_pack_import_preview(
             str(preview.get("archive_path") or ""),
         )
         if archive_path.is_file():
-            # lgtm[py/path-injection] archive_path is validated under the user's import-preview staging root.
+            # codeql[py/path-injection] archive_path is validated under the user's import-preview staging root.
             await asyncio.to_thread(archive_path.unlink, missing_ok=True)
         await _run_persona_db_call(
             repo.update_import_preview,

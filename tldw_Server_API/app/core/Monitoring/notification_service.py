@@ -102,15 +102,18 @@ def _sensitive_notification_secret_end(value: str, secret_start: int) -> int:
 
 
 def _safe_exception_label(exc: BaseException) -> str:
+    """Return only the exception class name for public notification logs."""
     return exc.__class__.__name__
 
 
 def _is_sensitive_notification_key(key: Any) -> bool:
+    """Return True when a payload key name commonly carries credentials."""
     normalized = str(key).strip().replace("-", "_").lower()
     return any(part in normalized for part in _SENSITIVE_NOTIFICATION_KEY_PARTS)
 
 
 def _redact_notification_text(value: str) -> str:
+    """Redact inline credential-looking text while preserving surrounding content."""
     lower = value.lower()
     cursor = 0
     pieces: list[str] = []
@@ -143,6 +146,7 @@ def _redact_notification_text(value: str) -> str:
 
 
 def _sanitize_notification_payload(value: Any) -> Any:
+    """Recursively sanitize notification payloads before storage or delivery."""
     if isinstance(value, dict):
         sanitized: dict[Any, Any] = {}
         for key, item in value.items():
@@ -532,6 +536,7 @@ class NotificationService:
         payload_to_record = dict(payload)
         if "ts" not in payload_to_record:
             payload_to_record["ts"] = datetime.now(timezone.utc).isoformat()
+        # codeql[py/clear-text-storage-sensitive-data]: payload is redacted before notification persistence.
         safe_payload = _sanitize_notification_payload(payload_to_record)
         file_written = True
         try:

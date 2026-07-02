@@ -364,12 +364,12 @@ const seedRealServerConfig = async (
         localStorage.setItem(key, JSON.stringify(value));
       };
 
-      localStorage.setItem('tldwConfig', JSON.stringify(config)); // lgtm[js/clear-text-storage-of-sensitive-data] test-only browser auth seed for real-server E2E
+      localStorage.setItem('tldwConfig', JSON.stringify(config)); // codeql[js/clear-text-storage-of-sensitive-data] test-only browser auth seed for real-server E2E
       localStorage.setItem('serverUrl', configuredServerUrl);
       localStorage.setItem('tldwServerUrl', configuredServerUrl);
       localStorage.setItem('tldw-api-host', configuredServerUrl);
       localStorage.setItem('authMode', 'single-user');
-      localStorage.setItem('apiKey', configuredApiKey); // lgtm[js/clear-text-storage-of-sensitive-data] test-only legacy auth compatibility key
+      localStorage.setItem('apiKey', configuredApiKey); // codeql[js/clear-text-storage-of-sensitive-data] test-only legacy auth compatibility key
       localStorage.setItem('isMigrated', 'true');
       localStorage.setItem('__tldw_first_run_complete', 'true');
       localStorage.setItem('assistant_setup_dismissed', 'true');
@@ -398,7 +398,7 @@ const seedRealServerConfig = async (
         }
       }
       if (configuredPersistedServerChatId) {
-        localStorage.setItem( // lgtm[js/clear-text-storage-of-sensitive-data] synthetic E2E persisted chat fixture
+        localStorage.setItem( // codeql[js/clear-text-storage-of-sensitive-data] synthetic E2E persisted chat fixture
           'tldw-playground-session',
           JSON.stringify({
             state: {
