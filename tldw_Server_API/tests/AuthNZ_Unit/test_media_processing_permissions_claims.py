@@ -56,3 +56,19 @@ def test_processing_route_requires_media_create_and_rbac_rate_limit(
         getattr(call, "_tldw_rate_limit_resource", None) == "media.create"
         for call in dependency_calls
     )
+
+
+def test_mediawiki_process_endpoint_does_not_open_media_db_for_ephemeral_mode() -> None:
+    module = importlib.import_module(
+        "tldw_Server_API.app.api.v1.endpoints.media.process_mediawiki"
+    )
+
+    ingest_db_param = inspect.signature(
+        module.ingest_mediawiki_dump_endpoint
+    ).parameters["db"]
+    process_db_param = inspect.signature(
+        module.process_mediawiki_dump_ephemeral_endpoint
+    ).parameters["db"]
+
+    assert getattr(ingest_db_param.default, "dependency", None) is module.get_media_db_for_user
+    assert process_db_param.default is None

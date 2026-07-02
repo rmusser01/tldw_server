@@ -3,23 +3,38 @@ id: TASK-12091
 title: Remediate media authorization and tenant-scoped ingestion audit findings
 status: Done
 assignee: []
-created_date: '2026-07-02 03:04'
-updated_date: '2026-07-02 03:34'
+created_date: 2026-07-02 03:04
+updated_date: 2026-07-02 03:42
 labels:
-  - audit
-  - remediation
-  - media
-  - ingestion
-  - wave-1
+- audit
+- remediation
+- media
+- ingestion
+- wave-1
 dependencies: []
 references:
-  - AUDIT-2026-06-27-MEDIA-001
-  - AUDIT-2026-06-27-MEDIA-002
-  - AUDIT-2026-06-27-MEDIA-003
+- AUDIT-2026-06-27-MEDIA-001
+- AUDIT-2026-06-27-MEDIA-002
+- AUDIT-2026-06-27-MEDIA-003
 documentation:
-  - >-
-    Docs/superpowers/reviews/2026-06-27-repo-audit/domains/media-ingestion-storage.md
+- Docs/superpowers/reviews/2026-06-27-repo-audit/domains/media-ingestion-storage.md
 priority: high
+modified_files:
+- Docs/superpowers/plans/2026-07-02-media-authorization-tenant-storage-remediation.md
+- backlog/tasks/task-12091 - Remediate-media-authorization-and-tenant-scoped-ingestion-audit-findings.md
+- tldw_Server_API/app/api/v1/endpoints/media/process_audios.py
+- tldw_Server_API/app/api/v1/endpoints/media/process_code.py
+- tldw_Server_API/app/api/v1/endpoints/media/process_documents.py
+- tldw_Server_API/app/api/v1/endpoints/media/process_ebooks.py
+- tldw_Server_API/app/api/v1/endpoints/media/process_emails.py
+- tldw_Server_API/app/api/v1/endpoints/media/process_mediawiki.py
+- tldw_Server_API/app/api/v1/endpoints/media/process_pdfs.py
+- tldw_Server_API/app/core/Ingestion_Media_Processing/MediaWiki/Media_Wiki.py
+- tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py
+- tldw_Server_API/tests/AuthNZ_Unit/test_media_processing_permissions_claims.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_db_persistence.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_vector_storage.py
+- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py
 ---
 
 ## Description
@@ -76,3 +91,9 @@ Follow-up review fix corrected original-file cleanup to use the real storage del
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-07-02 follow-up self-review: removed the unnecessary per-user media DB dependency from the MediaWiki process-only endpoint while keeping MEDIA_CREATE authorization and user context. Added a regression assertion that ingest still opens the user media DB and process-only mode does not. Verification: focused media suite now reports 29 passed; Bandit touched-path scan reports 0 findings; git diff --check is clean.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->

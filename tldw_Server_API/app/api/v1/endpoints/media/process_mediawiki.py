@@ -139,7 +139,7 @@ async def _process_mediawiki_dump(
     store_to_db: bool,
     store_to_vector_db: bool,
     filter_item_results: bool,
-    db: Any,
+    db: Any | None,
     current_user: User,
 ) -> StreamingResponse:
     """Shared ingestion/processing helper."""
@@ -332,7 +332,7 @@ async def process_mediawiki_dump_ephemeral_endpoint(
         ...,
         description="MediaWiki XML dump file (.xml, .xml.bz2, .xml.gz).",
     ),
-    db: Any = Depends(get_media_db_for_user),
+    db: Any | None = None,
     current_user: User = Depends(get_request_user),
 ) -> StreamingResponse:
     """
