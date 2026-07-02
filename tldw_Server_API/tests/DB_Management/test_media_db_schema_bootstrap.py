@@ -1,5 +1,6 @@
 import importlib
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 import uuid
 
@@ -130,6 +131,72 @@ def test_initialize_sqlite_schema_bridge_routes_through_package_coordinator(monk
 
     assert coordinator_calls == [db]
     assert legacy_calls == []
+
+
+@pytest.mark.unit
+def test_sqlite_media_db_migration_uses_media_owned_migrations_dir(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import (
+        sqlite_helpers as sqlite_helpers_module,
+    )
+
+    db_path = tmp_path / "Media_DB_v2.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE schema_version (version INTEGER)")
+        conn.execute("INSERT INTO schema_version (version) VALUES (22)")
+        conn.commit()
+
+    captured: dict[str, str | None] = {}
+
+    class FakeMigrator:
+        def __init__(self, db_path_arg: str, migrations_dir: str | None = None) -> None:
+            captured["db_path"] = db_path_arg
+            captured["migrations_dir"] = migrations_dir
+            self.migrations_dir = migrations_dir
+
+        def migrate_to_version(self, target_version: int) -> dict[str, object]:
+            with sqlite3.connect(captured["db_path"]) as conn:
+                conn.execute("UPDATE schema_version SET version = ?", (target_version,))
+                conn.commit()
+            return {
+                "status": "success",
+                "previous_version": 22,
+                "current_version": target_version,
+                "migrations_applied": [],
+            }
+
+    def get_db_version(conn: sqlite3.Connection) -> int:
+        row = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()
+        return int(row[0])
+
+    monkeypatch.setattr(sqlite_helpers_module, "DatabaseMigrator", FakeMigrator)
+    monkeypatch.setattr(
+        sqlite_helpers_module,
+        "ensure_sqlite_post_core_structures",
+        lambda _db, _conn: None,
+    )
+
+    db = SimpleNamespace(
+        db_path_str=str(db_path),
+        is_memory_db=False,
+        _CURRENT_SCHEMA_VERSION=23,
+        get_connection=lambda: sqlite3.connect(db_path),
+        _get_db_version=get_db_version,
+    )
+
+    sqlite_helpers_module.bootstrap_sqlite_schema(db)
+
+    expected_dir = (
+        Path(sqlite_helpers_module.__file__).resolve().parents[1]
+        / "migrations"
+        / "sqlite"
+    )
+    assert Path(captured["migrations_dir"]).resolve() == expected_dir
+    assert [path.name for path in sorted(expected_dir.glob("*.sql"))] == [
+        "023_transcript_run_history.sql"
+    ]
 
 
 @pytest.mark.unit

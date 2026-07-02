@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
+from pathlib import Path
 from typing import Any, Protocol
 
 from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator, MigrationError
@@ -123,6 +123,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS content_items_fts USING fts5(
 );
 """
 
+MIN_SUPPORTED_SQLITE_MEDIA_MIGRATION_VERSION = 22
+MEDIA_SQLITE_MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations" / "sqlite"
+
 
 class _SupportsExecutescript(Protocol):
     def executescript(self, script: str) -> Any: ...
@@ -207,32 +210,22 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
             ensure_sqlite_post_core_structures(db, conn)
             logger.info("Database schema initialized to version {}.", target_version)
         elif current_db_version < target_version:
+            if current_db_version < MIN_SUPPORTED_SQLITE_MEDIA_MIGRATION_VERSION:
+                raise SchemaError(
+                    "unsupported legacy Media DB schema version "
+                    f"{current_db_version}; supported automatic migration starts at "
+                    f"version {MIN_SUPPORTED_SQLITE_MEDIA_MIGRATION_VERSION} "
+                    f"for target version {target_version}. Restore from backup or "
+                    "recover/export data with a server version that supports this "
+                    "legacy schema before upgrading."
+                )
             try:
                 if db.is_memory_db:
                     apply_sqlite_core_media_schema(db, conn)
                     ensure_sqlite_post_core_structures(db, conn)
                 else:
                     conn.close()
-
-                    migrations_dir = None
-                    db_name = os.path.basename(db.db_path_str)
-                    db_dir = os.path.dirname(db.db_path_str)
-                    db_dir_lower = db_dir.lower()
-                    if (
-                        "test_" in db_name
-                        or "tmp" in db_dir_lower
-                        or "temp" in db_dir_lower
-                        or "pytest" in db_dir_lower
-                    ):
-                        migrations_dir = os.path.abspath(
-                            os.path.join(
-                                os.path.dirname(__file__),
-                                "..",
-                                "..",
-                                "..",
-                                "migrations",
-                            )
-                        )
+                    migrations_dir = str(MEDIA_SQLITE_MIGRATIONS_DIR)
                     migrator = DatabaseMigrator(db.db_path_str, migrations_dir=migrations_dir)
                     result = migrator.migrate_to_version(target_version)
 
