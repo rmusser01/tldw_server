@@ -272,4 +272,59 @@ describe("useChatActions character integration", () => {
     expect(normalChatModeMock).not.toHaveBeenCalled()
     expect(options.setServerChatId).not.toHaveBeenCalledWith(null)
   })
+
+  it("does not let a stale selected assistant speaker override the active character chat", async () => {
+    const options = {
+      ...createHookOptions(),
+      serverChatId: "other-character-chat",
+      serverChatTitle: "Other character chat",
+      serverChatCharacterId: 42,
+      serverChatAssistantId: "42",
+      selectedCharacter: {
+        id: 99,
+        name: "Miku",
+        system_prompt: "Stale Miku prompt"
+      },
+      selectedAssistant: {
+        kind: "character",
+        id: "99",
+        name: "Miku",
+        system_prompt: "Stale Miku prompt",
+        metadata: { selectionMode: "tracked" }
+      }
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Continue the other character chat",
+        image: ""
+      })
+    })
+
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
+      "other-character-chat",
+      expect.objectContaining({
+        include_character_context: true,
+        model: "deepseek-chat"
+      }),
+      expect.any(Object)
+    )
+    expect(persistCharacterCompletionMock).toHaveBeenCalledWith(
+      "other-character-chat",
+      expect.objectContaining({
+        assistant_content: "Tracked reply",
+        speaker_character_id: 42
+      })
+    )
+    expect(
+      (persistCharacterCompletionMock.mock.calls.at(-1)?.[1] as Record<
+        string,
+        unknown
+      >)?.speaker_character_name
+    ).toBeUndefined()
+    expect(options.setServerChatId).not.toHaveBeenCalledWith(null)
+    expect(options.setServerChatCharacterId).not.toHaveBeenCalledWith(null)
+  })
 })

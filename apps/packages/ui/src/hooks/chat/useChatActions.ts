@@ -272,6 +272,25 @@ const attemptCharacterStreamRecoveryPersist = async ({
   }
 }
 
+const normalizePositiveCharacterId = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.trunc(value)
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseInt(value, 10)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+  }
+  return undefined
+}
+
+const characterIdsMatch = (
+  left: string | number | null | undefined,
+  right: string | number | null | undefined
+): boolean => {
+  if (left == null || right == null) return false
+  return String(left) === String(right)
+}
+
 type UseChatActionsOptions = {
   t: TFunction
   notification: NotificationInstance
@@ -1467,6 +1486,9 @@ export const useChatActions = ({
       }
 
       let chatId = shouldResetServerChat ? null : resolvedServerChatId
+      let chatCharacterId: string | number | null = shouldResetServerChat
+        ? null
+        : serverChatCharacterId
       let createdNewChat = false
       if (!chatId) {
         const created = await tldwClient.createChat({
@@ -1520,6 +1542,7 @@ export const useChatActions = ({
           created && typeof created === "object"
             ? created.character_id ?? activeCharacter?.id ?? null
             : activeCharacter?.id ?? null
+        chatCharacterId = createdCharacterId
         const normalizedCharacterAssistantId =
           createdCharacterId != null ? String(createdCharacterId) : activeCharacterId
         setServerChatTitle(createdTitle)
@@ -1530,6 +1553,7 @@ export const useChatActions = ({
         setServerChatMetaLoaded(true)
         invalidateServerChatHistory()
       } else {
+        chatCharacterId = serverChatCharacterId
         setServerChatAssistantKind("character")
         setServerChatAssistantId(activeCharacterId)
         setServerChatPersonaMemoryMode(null)
@@ -1776,18 +1800,42 @@ export const useChatActions = ({
         let resolvedMoodConfidence: number | undefined
         let resolvedMoodTopic: string | undefined
         let metadataExtra: Record<string, unknown> | undefined
+        let speakerCharacterName: string | undefined
         try {
-          fallbackSpeakerId = Number.parseInt(
-            String(activeCharacter.id),
-            10
+          const directedSpeakerId =
+            normalizePositiveCharacterId(directedCharacterId)
+          fallbackSpeakerId = normalizePositiveCharacterId(activeCharacter.id)
+          const chatSpeakerId = normalizePositiveCharacterId(chatCharacterId)
+          const activeCharacterMatchesChat =
+            chatCharacterId == null ||
+            characterIdsMatch(chatCharacterId, activeCharacter.id)
+          const selectedCharacterMatchesActive = characterIdsMatch(
+            selectedCharacter?.id,
+            activeCharacter.id
           )
+          const selectedAssistantMatchesActive =
+            selectedAssistant?.kind === "character" &&
+            characterIdsMatch(selectedAssistant.id, activeCharacter.id)
+          const explicitCharacterName =
+            typeof (character as any)?.name === "string"
+              ? String((character as any).name).trim()
+              : ""
+          const explicitCharacterMatchesActive =
+            characterIdsMatch(character?.id, activeCharacter.id) &&
+            explicitCharacterName.length > 0 &&
+            explicitCharacterName !== "Assistant"
+          speakerCharacterName =
+            activeCharacterMatchesChat &&
+            (createdNewChat ||
+              selectedCharacterMatchesActive ||
+              selectedAssistantMatchesActive ||
+              explicitCharacterMatchesActive)
+              ? characterName
+              : undefined
           speakerCharacterId =
-            Number.isFinite(directedCharacterId ?? NaN) &&
-            (directedCharacterId ?? 0) > 0
-              ? directedCharacterId
-              : Number.isFinite(fallbackSpeakerId) && fallbackSpeakerId > 0
-                ? fallbackSpeakerId
-                : undefined
+            directedSpeakerId ?? (activeCharacterMatchesChat
+              ? fallbackSpeakerId
+              : chatSpeakerId ?? fallbackSpeakerId)
           detectedMood = detectCharacterMood({
             assistantText: finalPersistedContent,
             userText: message
@@ -1805,9 +1853,13 @@ export const useChatActions = ({
 
           const persistPayload: Record<string, unknown> = {
             assistant_content: finalPersistedContent,
-            assistant_message_id: generateMessageId,
-            speaker_character_id: speakerCharacterId,
-            speaker_character_name: characterName
+            assistant_message_id: generateMessageId
+          }
+          if (speakerCharacterId != null) {
+            persistPayload.speaker_character_id = speakerCharacterId
+          }
+          if (speakerCharacterName) {
+            persistPayload.speaker_character_name = speakerCharacterName
           }
           if (resolvedMoodLabel) {
             persistPayload.mood_label = resolvedMoodLabel
@@ -1823,7 +1875,7 @@ export const useChatActions = ({
           }
           metadataExtra = {
             speaker_character_id: speakerCharacterId ?? null,
-            speaker_character_name: characterName,
+            speaker_character_name: speakerCharacterName ?? null,
             mood_label: resolvedMoodLabel,
             mood_confidence: resolvedMoodConfidence ?? null,
             mood_topic: resolvedMoodTopic ?? null
@@ -1858,7 +1910,7 @@ export const useChatActions = ({
                 serverMessageVersion: createdAsstVersion,
                 metadataExtra,
                 speakerCharacterId: speakerCharacterId ?? null,
-                speakerCharacterName: characterName,
+                speakerCharacterName,
                 moodLabel: resolvedMoodLabel,
                 moodConfidence: resolvedMoodConfidence ?? null,
                 moodTopic: resolvedMoodTopic ?? null
@@ -1885,7 +1937,7 @@ export const useChatActions = ({
                   serverMessageVersion: savedOutcome.version,
                   metadataExtra,
                   speakerCharacterId: speakerCharacterId ?? null,
-                  speakerCharacterName: characterName,
+                  speakerCharacterName,
                   moodLabel: resolvedMoodLabel,
                   moodConfidence: resolvedMoodConfidence ?? null,
                   moodTopic: resolvedMoodTopic ?? null
@@ -1904,16 +1956,16 @@ export const useChatActions = ({
                   if (m.id !== generateMessageId) return m
                   const serverMessageId =
                     createdAsst?.id != null ? String(createdAsst.id) : undefined
-                return updateActiveVariant(m, {
-                  serverMessageId,
-                  serverMessageVersion: createdAsst?.version,
-                  metadataExtra,
-                  speakerCharacterId: speakerCharacterId ?? null,
-                  speakerCharacterName: characterName,
-                  moodLabel: resolvedMoodLabel,
-                  moodConfidence: resolvedMoodConfidence ?? null,
-                  moodTopic: resolvedMoodTopic ?? null
-                })
+                  return updateActiveVariant(m, {
+                    serverMessageId,
+                    serverMessageVersion: createdAsst?.version,
+                    metadataExtra,
+                    speakerCharacterId: speakerCharacterId ?? null,
+                    speakerCharacterName,
+                    moodLabel: resolvedMoodLabel,
+                    moodConfidence: resolvedMoodConfidence ?? null,
+                    moodTopic: resolvedMoodTopic ?? null
+                  })
                 }) as Message[])
               )
             } catch (fallbackError) {
@@ -2699,15 +2751,22 @@ export const useChatActions = ({
             return toChatSubmitResult(personaResult)
           }
 
+          const currentChatTrackedCharacter =
+            resolvedSendMode === "tracked_character"
+              ? resolveTrackedCharacterForCurrentChat()
+              : null
+          const draftTrackedCharacter =
+            resolvedSendMode === "tracked_character" &&
+            selectedAssistant?.kind === "character" &&
+            getAssistantSelectionMode(selectedAssistant) === "tracked"
+              ? assistantSelectionToCharacter<Character & Record<string, unknown>>(
+                  selectedAssistant
+                )
+              : null
           const resolvedSelectedCharacter =
             resolvedSendMode === "tracked_character"
-              ? (selectedAssistant?.kind === "character" &&
-                  getAssistantSelectionMode(selectedAssistant) === "tracked"
-                    ? assistantSelectionToCharacter<
-                        Character & Record<string, unknown>
-                      >(selectedAssistant)
-                    : null) ||
-                resolveTrackedCharacterForCurrentChat() ||
+              ? currentChatTrackedCharacter ||
+                draftTrackedCharacter ||
                 assistantSelectionToCharacter<Character & Record<string, unknown>>(
                   effectiveSelectedAssistant
                 )

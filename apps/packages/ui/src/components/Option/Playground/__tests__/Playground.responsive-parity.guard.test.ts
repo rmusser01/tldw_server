@@ -35,4 +35,30 @@ describe("Playground responsive parity guard", () => {
     expect(source).toContain("compositionPreviewSummary")
     expect(source).toContain("buildPlaygroundCompositionPreviewSummary")
   })
+
+  it("keeps the mobile chat surface compact by hiding secondary chrome", () => {
+    const playgroundSourcePath = path.resolve(__dirname, "../Playground.tsx")
+    const formSourcePath = path.resolve(__dirname, "../PlaygroundForm.tsx")
+    const statusSourcePath = path.resolve(__dirname, "../PlaygroundStatusStrip.tsx")
+    const playgroundSource = fs.readFileSync(playgroundSourcePath, "utf8")
+    const formSource = fs.readFileSync(formSourcePath, "utf8")
+    const statusSource = fs.readFileSync(statusSourcePath, "utf8")
+
+    expect(playgroundSource).toContain("hidden sm:inline-flex")
+    expect(playgroundSource).toContain("px-2 pt-1 sm:px-4 sm:pt-2")
+    expect(playgroundSource).toContain("px-2 sm:px-4")
+    expect(playgroundSource).toContain('!isMobileViewport ? (')
+    expect(formSource).toContain(
+      "grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-2"
+    )
+    expect(formSource).toContain("px-2 pb-3 sm:px-4 sm:pb-6")
+    expect(formSource).toContain("rounded-xl")
+    expect(formSource).toContain("p-2 text-text shadow-sm")
+    expect(formSource).toContain("sm:rounded-3xl sm:p-3 sm:shadow-card")
+    expect(statusSource).toContain("justify-between gap-1 border-t")
+    expect(statusSource).toContain("px-2 py-1")
+    expect(statusSource).toContain("sm:gap-3 sm:px-3 sm:py-2")
+    expect(statusSource).toContain("hidden sm:inline-flex")
+    expect(statusSource).toContain("hidden max-w-[18rem] truncate font-medium text-text sm:inline")
+  })
 })

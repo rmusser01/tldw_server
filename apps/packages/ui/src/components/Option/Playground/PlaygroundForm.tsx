@@ -4868,7 +4868,7 @@ export const PlaygroundForm = ({
       id="playground-form-root"
       onRender={onComposerRenderProfile}
     >
-      <div className="flex w-full flex-col items-center px-4 pb-6">
+      <div className="flex w-full flex-col items-center px-2 pb-3 sm:px-4 sm:pb-6">
         <div
           data-checkwidemode={effectiveWideMode}
           data-ui-mode={uiMode}
@@ -4903,7 +4903,7 @@ export const PlaygroundForm = ({
                     }
                   : undefined
               }
-              className={`relative w-full rounded-3xl border border-transparent bg-surface/95 p-3 text-text shadow-card backdrop-blur-lg transition-all duration-200 data-[istemporary-chat='true']:border-t-4 data-[istemporary-chat='true']:border-t-purple-500 data-[istemporary-chat='true']:border-dashed data-[istemporary-chat='true']:opacity-90 ${
+              className={`relative w-full rounded-xl border border-transparent bg-surface/95 p-2 text-text shadow-sm backdrop-blur-lg transition-all duration-200 data-[istemporary-chat='true']:border-t-4 data-[istemporary-chat='true']:border-t-purple-500 data-[istemporary-chat='true']:border-dashed data-[istemporary-chat='true']:opacity-90 sm:rounded-3xl sm:p-3 sm:shadow-card ${
                 !isConnectionReady ? "opacity-80" : ""
               }`}
             >
@@ -5065,7 +5065,7 @@ export const PlaygroundForm = ({
                     />
 
                     <div
-                      className={`w-full flex flex-col px-2 ${
+                      className={`w-full flex flex-col px-0 sm:px-2 ${
                         !isConnectionReady
                           ? "rounded-md border border-dashed border-border bg-surface2"
                           : ""
@@ -5460,7 +5460,7 @@ export const PlaygroundForm = ({
                             <div
                               className={
                                 isMobileViewport
-                                  ? "grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2"
+                                  ? "grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-2"
                                   : "flex items-end gap-2"
                               }
                             >
@@ -5578,7 +5578,7 @@ export const PlaygroundForm = ({
                                 data-testid="composer-inline-send-control"
                                 className={
                                   isMobileViewport
-                                    ? "col-span-2 flex justify-end self-end"
+                                    ? "flex shrink-0 justify-end self-end"
                                     : "flex shrink-0 items-end self-end"
                                 }
                               >

@@ -6,14 +6,14 @@ import {
 } from "../chat-rail-positioning"
 
 describe("chat rail positioning contract", () => {
-  it("keeps the collapsed chat rail trigger attached to the upper left edge", () => {
+  it("keeps the collapsed chat rail trigger attached lower on the left edge", () => {
     expect(CHAT_RAIL_EDGE_TRIGGER_CLASS.split(" ")).toEqual(
       expect.arrayContaining([
         "absolute",
         "left-0",
-        "top-[clamp(8rem,20vh,14rem)]",
-        "h-28",
-        "w-10",
+        "top-[clamp(10rem,24vh,15rem)]",
+        "h-20",
+        "w-8",
         "rounded-r-lg",
         "border-l-0"
       ])
@@ -21,16 +21,16 @@ describe("chat rail positioning contract", () => {
     expect(CHAT_RAIL_EDGE_TRIGGER_CLASS).not.toContain("top-[calc(50%_-_8rem)]")
   })
 
-  it("offsets the cockpit context restore trigger from the collapsed chat rail edge", () => {
+  it("keeps the cockpit context restore trigger attached to the left edge below the chat trigger", () => {
     expect(COCKPIT_LEFT_RESTORE_WRAPPER_CLASS.split(" ")).toEqual(
       expect.arrayContaining([
-        "absolute",
-        "left-12",
-        "top-[clamp(3rem,18vh,10rem)]",
+        "fixed",
+        "left-0",
+        "top-[clamp(18rem,36vh,24rem)]",
         "z-50"
       ])
     )
-    expect(COCKPIT_LEFT_RESTORE_WRAPPER_CLASS).not.toContain("left-0")
+    expect(COCKPIT_LEFT_RESTORE_WRAPPER_CLASS).not.toContain("left-12")
     expect(COCKPIT_LEFT_RESTORE_WRAPPER_CLASS).not.toContain("top-1/2")
   })
 })

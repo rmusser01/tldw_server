@@ -3333,9 +3333,9 @@ export const Playground = () => {
                 </div>
               </div>
             )}
-            <div className="px-4 pt-2">
+            <div className="px-2 pt-1 sm:px-4 sm:pt-2">
               <div
-                className={`mx-auto flex w-full ${chatContentWidthClassName} items-center justify-between text-[11px] text-text-muted`}
+                className={`mx-auto flex w-full ${chatContentWidthClassName} items-center justify-between gap-2 text-[10px] text-text-muted sm:text-[11px]`}
               >
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <span
@@ -3362,7 +3362,7 @@ export const Playground = () => {
                       </span>
                     ) : null}
                   </span>
-                  <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
+                  <span className="hidden items-center rounded-full border border-border bg-surface2 px-2 py-0.5 sm:inline-flex">
                     {t("playground:regions.timeline", "Conversation timeline")}
                   </span>
                 </div>
@@ -3380,10 +3380,12 @@ export const Playground = () => {
                         "Open keyboard shortcuts (Shift+/)",
                       ) as string
                     }
-                    className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-2 py-0.5 text-text hover:bg-surface"
+                    className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center gap-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
                   >
                     <Keyboard className="h-3 w-3" aria-hidden="true" />
-                    {t("playground:shortcuts.title", "Shortcuts")}
+                    <span className="hidden sm:inline">
+                      {t("playground:shortcuts.title", "Shortcuts")}
+                    </span>
                   </button>
                   <button
                     ref={artifactsTriggerRef}
@@ -3402,7 +3404,11 @@ export const Playground = () => {
                       markArtifactsRead();
                     }}
                     title={artifactBadgeLabel as string}
-                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 transition ${
+                    className={`${
+                      !activeArtifact && !artifactsOpen
+                        ? "hidden sm:inline-flex"
+                        : "inline-flex"
+                    } min-h-[26px] items-center gap-1 rounded-full border px-1.5 py-0.5 transition sm:px-2 ${
                       !activeArtifact && !artifactsOpen
                         ? "cursor-not-allowed border-border bg-surface text-text-subtle opacity-70"
                         : "border-border bg-surface2 text-text hover:bg-surface"
@@ -3666,7 +3672,7 @@ export const Playground = () => {
               aria-live="polite"
               aria-relevant="additions"
               aria-label={t("playground:aria.chatTranscript", "Chat messages")}
-              className="custom-scrollbar flex-1 min-h-0 w-full overflow-x-hidden overflow-y-auto px-4"
+              className="custom-scrollbar flex-1 min-h-0 w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4"
             >
               <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
                 <ChatErrorBoundary>
@@ -3708,13 +3714,15 @@ export const Playground = () => {
                   : ""
               }`}
             >
-              <div
-                className={`mx-auto w-full ${chatContentWidthClassName} px-4 pt-2 text-[11px] text-text-muted`}
-              >
-                <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
-                  {t("playground:regions.composer", "Composer")}
-                </span>
-              </div>
+              {!isMobileViewport ? (
+                <div
+                  className={`mx-auto w-full ${chatContentWidthClassName} px-4 pt-2 text-[11px] text-text-muted`}
+                >
+                  <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
+                    {t("playground:regions.composer", "Composer")}
+                  </span>
+                </div>
+              ) : null}
               {!isAutoScrollToBottom && (
                 <div className="pointer-events-none absolute -top-12 left-0 right-0 flex justify-center">
                   <button
