@@ -127,6 +127,15 @@ class VisualIdentityService:
             actor_id=actor_id,
         )
         if binding is None:
+            legacy = self._resolve_legacy_character_mood(
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+                requested_expression_key=normalized_requested,
+                mood_expression_key=normalize_expression_key(mood_expression_key or ""),
+                default_expression_key="neutral",
+            )
+            if legacy is not None:
+                return legacy
             return self._placeholder(
                 actor_kind=actor_kind,
                 actor_id=actor_id,
@@ -165,26 +174,124 @@ class VisualIdentityService:
                 )
 
         for alias in ("neutral", "default", "normal"):
-            expression_key = normalize_expression_key(alias)
-            if not expression_key:
-                continue
-            asset = assets.get(expression_key)
-            if asset is not None:
+            lookup_keys = (alias, normalize_expression_key(alias))
+            for lookup_key in lookup_keys:
+                if not lookup_key:
+                    continue
+                asset = assets.get(lookup_key)
+                if asset is None:
+                    continue
                 return self._resolved_asset(
                     actor_kind=actor_kind,
                     actor_id=actor_id,
                     requested_expression_key=normalized_requested,
                     binding=binding,
                     asset=asset,
-                    expression_key=expression_key,
+                    expression_key=str(asset["expression_key"]),
                     fallback_reason="neutral_alias",
                 )
+
+        legacy = self._resolve_legacy_character_mood(
+            actor_kind=actor_kind,
+            actor_id=actor_id,
+            requested_expression_key=normalized_requested,
+            mood_expression_key=normalize_expression_key(mood_expression_key or ""),
+            default_expression_key=normalize_expression_key(
+                str(binding.get("pack_default_expression_key") or "")
+            )
+            or "neutral",
+            binding=binding,
+        )
+        if legacy is not None:
+            return legacy
 
         return self._placeholder(
             actor_kind=actor_kind,
             actor_id=actor_id,
             requested_expression_key=normalized_requested,
         )
+
+    def _resolve_legacy_character_mood(
+        self,
+        *,
+        actor_kind: str,
+        actor_id: ActorId,
+        requested_expression_key: str | None,
+        mood_expression_key: str | None,
+        default_expression_key: str | None,
+        binding: dict[str, Any] | None = None,
+    ) -> VisualIdentityResolvedAsset | None:
+        """Resolve legacy character mood image metadata without copying bytes."""
+        if actor_kind != "character":
+            return None
+        try:
+            character_id = int(actor_id)
+        except (TypeError, ValueError):
+            return None
+
+        character = self.db.get_character_card_by_id(character_id)
+        if character is None:
+            return None
+
+        mood_images = self._legacy_mood_images(character)
+        if not mood_images:
+            return None
+
+        normalized_images: dict[str, str] = {}
+        for raw_key, raw_value in mood_images.items():
+            expression_key = normalize_expression_key(str(raw_key))
+            if not expression_key or not isinstance(raw_value, str):
+                continue
+            image_url = raw_value.strip()
+            if image_url:
+                normalized_images.setdefault(expression_key, image_url)
+
+        for expression_key in (
+            requested_expression_key,
+            mood_expression_key,
+            default_expression_key,
+        ):
+            if not expression_key:
+                continue
+            image_url = normalized_images.get(expression_key)
+            if image_url:
+                return VisualIdentityResolvedAsset(
+                    actor_kind=actor_kind,
+                    actor_id=actor_id,
+                    pack_id=int(binding["pack_id"]) if binding is not None else None,
+                    pack_version_id=(
+                        int(binding["active_version_id"]) if binding is not None else None
+                    ),
+                    expression_key=expression_key,
+                    requested_expression_key=requested_expression_key,
+                    asset_id=None,
+                    storage_relpath=None,
+                    fallback_reason="legacy_character_mood",
+                    is_animated=False,
+                    content_type=None,
+                    asset_url=image_url,
+                )
+        return None
+
+    def _legacy_mood_images(self, character: dict[str, Any]) -> dict[str, Any]:
+        """Extract supported legacy mood image maps from a character card."""
+        extensions = character.get("extensions")
+        if isinstance(extensions, dict):
+            tldw_extension = extensions.get("tldw")
+            if isinstance(tldw_extension, dict):
+                for key in ("mood_images", "moodImages"):
+                    value = tldw_extension.get(key)
+                    if isinstance(value, dict):
+                        return value
+            for key in ("mood_images", "moodImages"):
+                value = extensions.get(key)
+                if isinstance(value, dict):
+                    return value
+        for key in ("mood_images", "moodImages"):
+            value = character.get(key)
+            if isinstance(value, dict):
+                return value
+        return {}
 
     def _validate_actor_for_binding(
         self,

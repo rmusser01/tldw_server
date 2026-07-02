@@ -16,6 +16,8 @@ documentation:
 - repository atomic helper if needed
 - exports
 - and service tests.
+- 'Follow-up spec review fixes: add legacy_character_mood resolution signal and raw
+  default/normal neutral alias fallback coverage.'
 modified_files:
 - tldw_Server_API/app/core/Visual_Identities/service.py
 - tldw_Server_API/tests/Visual_Identities/test_visual_identity_service.py
@@ -51,12 +53,20 @@ Stage 4: add VisualIdentityService for pack creation, draft activation into immu
 - Changed visual identity binding actor IDs to string-safe storage/signatures so persona UUID bindings work while integer character callers remain supported.
 - Resolution now returns explicit dataclass results with fallback reasons for manual override, requested expression, mood, pack default, neutral alias, and placeholder.
 - Verification recorded: focused service pytest, full Visual_Identities pytest, Bandit JSON report with no findings, and diff whitespace checks.
+- Follow-up TDD RED captured after spec review:
+  - Legacy character mood fallback tests returned `placeholder` before the fix.
+  - Raw `default`/`normal` version asset tests missed neutral-alias resolution before the fix.
+- Added legacy character mood fallback before placeholder for character cards using supported mood image maps in `extensions.tldw.mood_images`, `extensions.tldw.moodImages`, extension-root `mood_images`/`moodImages`, and top-level card `mood_images`/`moodImages`.
+- Updated neutral alias fallback to check raw stored `default` and `normal` asset keys as well as normalized `neutral`.
+- Follow-up verification recorded: focused service pytest, full Visual_Identities pytest, Bandit JSON report with no findings, and range diff whitespace check.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Stage 4 service activation and resolution is implemented. Added service and repository coverage for character bindings, persona UUID bindings, manual override priority, immutable draft-to-version asset copying, deleted-pack placeholder resolution, and active pack creation without an active version until activation. Verification passed: focused service pytest, full Visual_Identities pytest, Bandit JSON report with no findings, and diff whitespace checks.
+
+Follow-up spec review fixes added legacy character mood-image fallback before placeholder, including extension-root alias coverage, and raw `default`/`normal` stored asset fallback under `neutral_alias`. Verification passed for the focused service file, the full Visual_Identities suite, Bandit, and `git diff --check 7eee48dc66..HEAD`.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

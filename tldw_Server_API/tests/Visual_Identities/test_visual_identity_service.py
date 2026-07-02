@@ -200,8 +200,123 @@ def test_deleted_pack_does_not_resolve_for_new_messages(
     assert resolved.pack_version_id is None
 
 
-def _create_character(db: CharactersRAGDB, *, name: str = "Visual Identity Character") -> int:
-    character_id = db.add_character_card({"name": name})
+def test_resolve_uses_legacy_character_mood_when_no_visual_identity_binding(
+    chacha_db: CharactersRAGDB,
+    service: VisualIdentityService,
+) -> None:
+    character_id = _create_character(
+        chacha_db,
+        name="Legacy Mood Character",
+        extensions={"tldw": {"mood_images": {"happy": "legacy://happy.png"}}},
+    )
+
+    resolved = service.resolve_expression_asset(
+        actor_kind="character",
+        actor_id=character_id,
+        requested_expression_key="happy",
+    )
+
+    assert resolved.fallback_reason == "legacy_character_mood"
+    assert resolved.expression_key == "happy"
+    assert resolved.asset_id is None
+    assert resolved.storage_relpath is None
+    assert resolved.asset_url == "legacy://happy.png"
+
+
+def test_resolve_uses_legacy_character_mood_from_extension_root_alias(
+    chacha_db: CharactersRAGDB,
+    service: VisualIdentityService,
+) -> None:
+    character_id = _create_character(
+        chacha_db,
+        name="Legacy Root Mood Character",
+        extensions={"moodImages": {"joy": "legacy://joy.png"}},
+    )
+
+    resolved = service.resolve_expression_asset(
+        actor_kind="character",
+        actor_id=character_id,
+        requested_expression_key="happy",
+    )
+
+    assert resolved.fallback_reason == "legacy_character_mood"
+    assert resolved.expression_key == "happy"
+    assert resolved.asset_url == "legacy://joy.png"
+
+
+@pytest.mark.parametrize("raw_alias", ("default", "normal"))
+def test_resolve_neutral_alias_checks_raw_default_and_normal_version_assets(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+    raw_alias: str,
+) -> None:
+    character_id = _create_character(chacha_db, name=f"Raw {raw_alias.title()} Character")
+    draft = _create_ready_draft(repo, assets=(raw_alias,))
+    activation = service.activate_draft(
+        draft_id=draft["id"],
+        actor_kind="character",
+        actor_id=character_id,
+    )
+    version_asset = repo.list_assets_for_version(
+        activation.pack_version_id,
+        owner_user_id=OWNER_USER_ID,
+    )[0]
+
+    resolved = service.resolve_expression_asset(
+        actor_kind="character",
+        actor_id=character_id,
+        requested_expression_key="missing",
+    )
+
+    assert resolved.fallback_reason == "neutral_alias"
+    assert resolved.expression_key == raw_alias
+    assert resolved.asset_id == version_asset["id"]
+    assert resolved.storage_relpath == f"visual_identities/{raw_alias}.png"
+
+
+def test_resolve_uses_legacy_character_mood_after_visual_pack_fallbacks_miss(
+    chacha_db: CharactersRAGDB,
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+) -> None:
+    character_id = _create_character(
+        chacha_db,
+        name="Legacy Mood After Pack Character",
+        extensions={"tldw": {"mood_images": {"happy": "legacy://pack-miss-happy.png"}}},
+    )
+    draft = _create_ready_draft(repo, assets=("custom:wave",))
+    activation = service.activate_draft(
+        draft_id=draft["id"],
+        actor_kind="character",
+        actor_id=character_id,
+    )
+
+    resolved = service.resolve_expression_asset(
+        actor_kind="character",
+        actor_id=character_id,
+        requested_expression_key="happy",
+    )
+
+    assert resolved.fallback_reason == "legacy_character_mood"
+    assert resolved.expression_key == "happy"
+    assert resolved.pack_id == activation.pack_id
+    assert resolved.pack_version_id == activation.pack_version_id
+    assert resolved.asset_id is None
+    assert resolved.storage_relpath is None
+    assert resolved.asset_url == "legacy://pack-miss-happy.png"
+
+
+def _create_character(
+    db: CharactersRAGDB,
+    *,
+    name: str = "Visual Identity Character",
+    extensions: dict[str, Any] | None = None,
+) -> int:
+    card_data: dict[str, Any] = {"name": name}
+    if extensions is not None:
+        card_data["extensions"] = extensions
+    character_id = db.add_character_card(card_data)
     assert character_id is not None
     return int(character_id)
 
