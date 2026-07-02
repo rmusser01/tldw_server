@@ -7,12 +7,13 @@ from typing import Any
 from .acquisition.extract import available_extractors
 from .acquisition.service import DocsAcquisitionService
 from .importers.local import DocsImportService
-from .models import AccessScope, ContextRequest, SearchFilters, SearchRequest
+from .models import AccessScope, ContextRequest, SearchFilters, SearchRequest, SyncSourceRequest
 from .retrieval.aliases import DocsAliasResolver
 from .retrieval.context import DocsContextBuilder
 from .retrieval.search import DocsRetrievalService
 from .settings import DocsSettings
 from .store.sqlite import DocsCatalogStore
+from .sync import DocsSourceSyncService
 
 WRITE_CATEGORIES = {"ingestion", "management"}
 
@@ -68,6 +69,7 @@ class DocsMCPToolProvider:
         self.context = DocsContextBuilder(self.retrieval)
         self.aliases = DocsAliasResolver(self.store)
         self.importer = DocsImportService(settings=settings, store=self.store)
+        self.source_sync = DocsSourceSyncService(settings=settings, store=self.store)
         self.acquisition = (
             DocsAcquisitionService(settings=settings, store=self.store) if settings.enable_web_acquisition else None
         )
@@ -178,6 +180,24 @@ class DocsMCPToolProvider:
                 "retrieval",
             ),
         ]
+        if self.settings.enable_source_sync:
+            tools.append(
+                _tool(
+                    "docs.sync_source",
+                    "Refresh one existing docs source with bounded dry-run or apply semantics.",
+                    {
+                        "source_id": {"type": "integer"},
+                        "source_uri": {"type": "string"},
+                        "mode": {"type": "string"},
+                        "max_documents": {"type": "integer"},
+                        "max_pages": {"type": "integer"},
+                        "stale_policy": {"type": "string"},
+                        "force": {"type": "boolean"},
+                    },
+                    [],
+                    "ingestion",
+                )
+            )
         if self.acquisition is not None:
             tools.append(
                 _tool(
@@ -272,6 +292,10 @@ class DocsMCPToolProvider:
                 collection_names=tuple(str(item) for item in args.get("collections") or ()),
                 title_override=_optional_str(args.get("title")),
             )
+        if tool_name == "docs.sync_source":
+            if not self.settings.enable_source_sync:
+                return {"status": "denied", "reason_code": "source_sync_disabled"}
+            return self.source_sync.sync_source(scope=scope, request=_sync_source_request_from_args(args))
         return self._execute_management_or_list(tool_name=tool_name, args=args, scope=scope)
 
     def _execute_management_or_list(self, *, tool_name: str, args: dict[str, Any], scope: AccessScope) -> Any:
@@ -290,7 +314,7 @@ class DocsMCPToolProvider:
             if kind == "keywords":
                 return self.retrieval.list_keywords(scope=scope)
             if kind == "sources":
-                return {"sources": [], "warnings": [{"code": "sources_not_populated_in_stage1"}]}
+                return {"sources": self.store.list_sources(scope=scope, limit=limit, offset=offset), "warnings": []}
             raise ValueError(f"Unsupported docs.list kind: {kind}")
         if tool_name == "docs.collections.list":
             return self.retrieval.list_collections(scope=scope)
@@ -353,6 +377,18 @@ def _filters_from_args(args: dict[str, Any]) -> SearchFilters:
     )
 
 
+def _sync_source_request_from_args(args: dict[str, Any]) -> SyncSourceRequest:
+    return SyncSourceRequest(
+        source_id=_optional_int(args.get("source_id")),
+        source_uri=_optional_str(args.get("source_uri")),
+        mode=str(args.get("mode") or "dry_run"),
+        max_documents=_optional_int(args.get("max_documents")),
+        max_pages=_optional_int(args.get("max_pages")),
+        stale_policy=str(args.get("stale_policy") or "report"),
+        force=bool(args.get("force", False)),
+    )
+
+
 def _optional_str(value: Any) -> str | None:
     if value is None:
         return None
@@ -371,3 +407,11 @@ def _required_int(args: dict[str, Any], name: str) -> int:
     if name not in args:
         raise ValueError(f"{name} is required")
     return int(args[name])
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return int(value)
