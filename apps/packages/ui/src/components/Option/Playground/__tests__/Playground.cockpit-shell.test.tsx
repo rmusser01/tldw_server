@@ -79,6 +79,7 @@ const tldwClientState = vi.hoisted(() => ({
     name: "Route Character",
   })),
   initialize: vi.fn(async () => null),
+  getProvidersStatus: vi.fn(async () => null),
   getResearchBundle: vi.fn(async () => null),
 }));
 
@@ -278,6 +279,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => false,
+  useDesktop: () => true,
 }));
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
@@ -315,6 +317,8 @@ describe("Playground cockpit shell", () => {
     vi.clearAllMocks();
     window.history.replaceState({}, "", "/chat");
     storageState.values.clear();
+    storageState.values.set("playgroundChatContextRailVisible", true);
+    storageState.values.set("playgroundChatRuntimeRailVisible", true);
     messageOptionState.value.messages = [];
     messageOptionState.value.history = [];
     messageOptionState.value.historyId = null;
@@ -1091,8 +1095,18 @@ describe("Playground cockpit shell", () => {
       await screen.findByTestId("playground-cockpit-shell"),
     ).toHaveAttribute("data-mode", "cockpit");
 
-    fireEvent.click(screen.getByRole("button", { name: /hide context rail/i }));
-    fireEvent.click(screen.getByRole("button", { name: /hide runtime rail/i }));
+    fireEvent.click(
+      within(screen.getByTestId("playground-cockpit-left-rail")).getByRole(
+        "button",
+        { name: /collapse context sidechannel/i },
+      ),
+    );
+    fireEvent.click(
+      within(screen.getByTestId("playground-cockpit-right-rail")).getByRole(
+        "button",
+        { name: /collapse runtime sidechannel/i },
+      ),
+    );
 
     await waitFor(() => {
       expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
@@ -1153,7 +1167,12 @@ describe("Playground cockpit shell", () => {
       screen.getByTestId("playground-cockpit-right-rail"),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /hide context rail/i }));
+    fireEvent.click(
+      within(screen.getByTestId("playground-cockpit-left-rail")).getByRole(
+        "button",
+        { name: /collapse context sidechannel/i },
+      ),
+    );
 
     await waitFor(() => {
       expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
@@ -1168,10 +1187,15 @@ describe("Playground cockpit shell", () => {
       false,
     );
     expect(
-      screen.getByRole("button", { name: /show context rail/i }),
+      screen.getByRole("button", { name: /restore context sidechannel/i }),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /hide runtime rail/i }));
+    fireEvent.click(
+      within(screen.getByTestId("playground-cockpit-right-rail")).getByRole(
+        "button",
+        { name: /collapse runtime sidechannel/i },
+      ),
+    );
 
     await waitFor(() => {
       expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
@@ -1185,8 +1209,12 @@ describe("Playground cockpit shell", () => {
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /show context rail/i }));
-    fireEvent.click(screen.getByRole("button", { name: /show runtime rail/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /restore context sidechannel/i }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /restore runtime sidechannel/i }),
+    );
 
     await waitFor(() => {
       expect(

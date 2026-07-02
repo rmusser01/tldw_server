@@ -208,7 +208,6 @@ describe("Playground mature cockpit surfaces", () => {
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
-        onModeChange={vi.fn()}
         leftRailVisible={false}
         rightRailVisible={false}
         leftRail={<div>Context controls</div>}
@@ -257,7 +256,6 @@ describe("Playground mature cockpit surfaces", () => {
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
-        onModeChange={vi.fn()}
         leftRailVisible
         rightRailVisible
         mobilePanel={"context" satisfies PlaygroundCockpitMobilePanel}
@@ -297,12 +295,9 @@ describe("Playground mature cockpit surfaces", () => {
   })
 
   it("keeps mobile cockpit panel state explicit while preserving the draft surface", () => {
-    const onModeChange = vi.fn()
-
     render(
       <PlaygroundCockpitShell
         mode="cockpit"
-        onModeChange={onModeChange}
         leftRailVisible
         rightRailVisible
         mobilePanel={"context" satisfies PlaygroundCockpitMobilePanel}
@@ -329,13 +324,10 @@ describe("Playground mature cockpit surfaces", () => {
       "min-h-[44px]"
     )
 
-    const focusFromPanel = within(mobilePanels).getByRole("button", {
-      name: "Return to focus chat",
-    })
-    expect(focusFromPanel).toBeInTheDocument()
-
-    fireEvent.click(focusFromPanel)
-
-    expect(onModeChange).toHaveBeenCalledWith("focus")
+    expect(
+      within(mobilePanels).queryByRole("button", {
+        name: "Return to focus chat",
+      })
+    ).not.toBeInTheDocument()
   })
 })

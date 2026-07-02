@@ -5460,7 +5460,7 @@ export const PlaygroundForm = ({
                             <div
                               className={
                                 isMobileViewport
-                                  ? "grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-2"
+                                  ? "grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2"
                                   : "flex items-end gap-2"
                               }
                             >
@@ -5578,7 +5578,7 @@ export const PlaygroundForm = ({
                                 data-testid="composer-inline-send-control"
                                 className={
                                   isMobileViewport
-                                    ? "flex shrink-0 justify-end self-end"
+                                    ? "col-span-2 flex shrink-0 justify-end self-end"
                                     : "flex shrink-0 items-end self-end"
                                 }
                               >

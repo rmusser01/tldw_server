@@ -26,7 +26,6 @@ const renderShell = ({
   render(
     <PlaygroundCockpitShell
       mode="cockpit"
-      onModeChange={vi.fn()}
       leftRailVisible={leftRailVisible}
       rightRailVisible={rightRailVisible}
       onLeftRailVisibleChange={onLeftRailVisibleChange}

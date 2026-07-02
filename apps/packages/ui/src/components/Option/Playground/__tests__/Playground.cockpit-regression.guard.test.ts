@@ -31,13 +31,15 @@ describe("Playground cockpit regression guard", () => {
 
   it("keeps cockpit shell test ids and mobile rail state available", () => {
     const source = readFileSync(cockpitShellPath, "utf8");
+    const playgroundSource = readFileSync(playgroundPath, "utf8");
 
     expect(source).toContain("playground-cockpit-shell");
     expect(source).toContain("playground-cockpit-left-rail");
     expect(source).toContain("playground-cockpit-right-rail");
     expect(source).toContain("playground-cockpit-mobile-rails");
-    expect(source).toContain("Enter focus chat");
-    expect(source).toContain("Show cockpit panels");
+    expect(playgroundSource).toContain("Enter focus chat");
+    expect(playgroundSource).toContain("Show cockpit panels");
+    expect(playgroundSource).toContain("playground-chat-layout-mode-trigger");
   });
 
   it("keeps focus mode as a reversible state rather than a separate route", () => {

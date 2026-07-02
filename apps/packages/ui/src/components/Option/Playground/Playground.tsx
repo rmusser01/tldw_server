@@ -60,7 +60,14 @@ import {
 } from "@/store/model";
 import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
-import { ChevronDown, Keyboard, PanelRightOpen, Search, X } from "lucide-react";
+import {
+  ChevronDown,
+  Keyboard,
+  Maximize2,
+  PanelRightOpen,
+  Search,
+  X,
+} from "lucide-react";
 import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings";
 import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
 import { useTranslation } from "react-i18next";
@@ -610,6 +617,16 @@ export const Playground = () => {
     },
     [setChatLayoutMode],
   );
+  const nextChatLayoutMode: PlaygroundCockpitMode =
+    normalizedChatLayoutMode === "focus" ? "cockpit" : "focus";
+  const chatLayoutToggleLabel =
+    normalizedChatLayoutMode === "focus"
+      ? toText(t("playground:cockpit.showPanels", "Show cockpit panels"))
+      : toText(t("playground:cockpit.enterFocus", "Enter focus chat"));
+  const chatLayoutToggleText =
+    normalizedChatLayoutMode === "focus"
+      ? toText(t("playground:cockpit.cockpit", "Cockpit"))
+      : toText(t("playground:cockpit.focus", "Focus"));
 
   React.useEffect(() => {
     setRouteContext({ routeId: "chat", surface: "webui" });
@@ -3273,7 +3290,6 @@ export const Playground = () => {
       <div className="relative z-10 flex h-full min-h-0 w-full">
         <PlaygroundCockpitShell
           mode={normalizedChatLayoutMode}
-          onModeChange={handleChatLayoutModeChange}
           leftRailVisible={normalizedCockpitContextRailVisible}
           rightRailVisible={normalizedCockpitRuntimeRailVisible}
           onLeftRailVisibleChange={setCockpitContextRailVisible}
@@ -3367,6 +3383,20 @@ export const Playground = () => {
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    data-testid="playground-chat-layout-mode-trigger"
+                    aria-label={chatLayoutToggleLabel}
+                    aria-pressed={normalizedChatLayoutMode === "focus"}
+                    onClick={() => handleChatLayoutModeChange(nextChatLayoutMode)}
+                    title={chatLayoutToggleLabel}
+                    className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center gap-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
+                  >
+                    <Maximize2 className="h-3 w-3" aria-hidden="true" />
+                    <span className="hidden sm:inline">
+                      {chatLayoutToggleText}
+                    </span>
+                  </button>
                   <button
                     ref={shortcutsTriggerRef}
                     type="button"

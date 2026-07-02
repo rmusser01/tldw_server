@@ -707,7 +707,7 @@ export const AssistantSelect: React.FC<Props> = ({
   const content = (
     <div
       data-testid="assistant-select-panel"
-      className="w-[320px] rounded-lg border border-border bg-background shadow-lg"
+      className="w-[320px] rounded-lg border border-border bg-surface text-text shadow-lg"
     >
       <div className="border-b border-border p-2">
         <Input
@@ -778,6 +778,7 @@ export const AssistantSelect: React.FC<Props> = ({
       onOpenChange={handleOpenChange}
       menu={{ items: [] }}
       popupRender={() => content}
+      overlayClassName="assistant-select-dropdown bg-surface text-text shadow-lg"
       placement="topLeft"
       trigger={["click"]}
     >

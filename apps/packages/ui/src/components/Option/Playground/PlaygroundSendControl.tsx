@@ -274,6 +274,8 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             "playground:composer.submitAria",
             "Send message"
           ) as string)
+    const compactMobileBlockerAction =
+      isMobileViewport && activeCharacterSendBlocker
     const handlePrimaryButtonClick =
       activeCharacterSendBlocker || shouldQueuePrimaryAction
         ? () => {
@@ -321,7 +323,11 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 isProMode ? "gap-2" : "gap-1"
               }`}
             >
-              {!activeCharacterSendBlocker &&
+              {compactMobileBlockerAction ? (
+                <Settings2 className="h-5 w-5" aria-hidden="true" />
+              ) : null}
+              {!compactMobileBlockerAction &&
+              !activeCharacterSendBlocker &&
               !shouldQueuePrimaryAction &&
               sendWhenEnter ? (
                 <svg
@@ -338,15 +344,17 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                   <path d="M20 4v7a4 4 0 01-4 4H4"></path>
                 </svg>
               ) : null}
-              <span
-                className={
-                  isProMode
-                    ? ""
-                    : "text-[11px] font-semibold uppercase tracking-[0.12em]"
-                }
-              >
-                {primaryActionLabel}
-              </span>
+              {!compactMobileBlockerAction ? (
+                <span
+                  className={
+                    isProMode
+                      ? ""
+                      : "text-[11px] font-semibold uppercase tracking-[0.12em]"
+                  }
+                >
+                  {primaryActionLabel}
+                </span>
+              ) : null}
             </div>
           </Button>
           <Dropdown

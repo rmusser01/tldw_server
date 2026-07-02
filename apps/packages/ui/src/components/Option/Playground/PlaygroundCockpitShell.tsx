@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  Maximize2,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -15,7 +14,6 @@ export type PlaygroundCockpitMobilePanel = "context" | "runtime" | null;
 
 export type PlaygroundCockpitShellProps = {
   mode: PlaygroundCockpitMode;
-  onModeChange: (mode: PlaygroundCockpitMode) => void;
   leftRailVisible?: boolean;
   rightRailVisible?: boolean;
   onLeftRailVisibleChange?: (visible: boolean) => void;
@@ -118,7 +116,6 @@ const buildModeSummaryKey = (
 
 export const PlaygroundCockpitShell = ({
   mode,
-  onModeChange,
   leftRailVisible = true,
   rightRailVisible = true,
   onLeftRailVisibleChange,
@@ -135,14 +132,6 @@ export const PlaygroundCockpitShell = ({
     React.useState<PlaygroundCockpitMobilePanel>("context");
   const mobilePanelIdPrefix = React.useId();
   const focusMode = mode === "focus";
-  const nextMode: PlaygroundCockpitMode = focusMode ? "cockpit" : "focus";
-  const toggleLabel = focusMode
-    ? t("cockpit.showPanels", "Show cockpit panels")
-    : t("cockpit.enterFocus", "Enter focus chat");
-  const mobileReturnToFocusLabel = t(
-    "cockpit.mobileReturnToFocus",
-    "Return to focus chat",
-  );
   const mobileContextTabId = `${mobilePanelIdPrefix}-mobile-context-tab`;
   const mobileRuntimeTabId = `${mobilePanelIdPrefix}-mobile-runtime-tab`;
   const mobileContextPanelId = `${mobilePanelIdPrefix}-mobile-context-panel`;
@@ -182,12 +171,6 @@ export const PlaygroundCockpitShell = ({
             "cockpit.mobilePanelsHiddenSummary",
             "Cockpit panels hidden. Composer draft remains available below.",
           );
-  const leftRailLabel = leftRailVisible
-    ? t("cockpit.hideContextRail", "Hide context rail")
-    : t("cockpit.showContextRail", "Show context rail");
-  const rightRailLabel = rightRailVisible
-    ? t("cockpit.hideRuntimeRail", "Hide runtime rail")
-    : t("cockpit.showRuntimeRail", "Show runtime rail");
   const collapseContextSidechannelLabel = t(
     "cockpit.collapseContextSidechannel",
     "Collapse context sidechannel",
@@ -260,86 +243,12 @@ export const PlaygroundCockpitShell = ({
       data-right-rail={showRightRail ? "visible" : "hidden"}
       className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-bg text-text"
     >
-      <header
-        aria-label={t("cockpit.layoutControls", "Chat layout controls")}
-        className="flex min-h-[42px] shrink-0 items-center justify-between gap-3 border-b border-border bg-surface/80 px-3 py-2 text-xs text-text-muted"
+      <p
+        data-testid="playground-cockpit-mode-summary"
+        className="sr-only"
       >
-        <div className="min-w-0">
-          <p className="truncate font-semibold text-text">
-            {focusMode
-              ? t("cockpit.focusChat", "Focus chat")
-              : t("cockpit.chatCockpit", "Chat cockpit")}
-          </p>
-          <p
-            data-testid="playground-cockpit-mode-summary"
-            className="mt-0.5 max-w-[44rem] truncate text-[11px] text-text-muted"
-          >
-            {modeSummary}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {!focusMode && (
-            <div
-              aria-label={t("cockpit.railVisibility", "Rail visibility")}
-              className="flex items-center gap-1"
-            >
-              <button
-                type="button"
-                aria-label={leftRailLabel}
-                aria-pressed={leftRailVisible}
-                title={leftRailLabel}
-                onClick={() => onLeftRailVisibleChange?.(!leftRailVisible)}
-                className="inline-flex min-h-[30px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-              >
-                {leftRailVisible ? (
-                  <PanelLeftClose className="h-3.5 w-3.5" aria-hidden="true" />
-                ) : (
-                  <PanelLeftOpen className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-                <span className="hidden sm:inline">
-                  {t("cockpit.context", "Context")}
-                </span>
-              </button>
-              <button
-                type="button"
-                aria-label={rightRailLabel}
-                aria-pressed={rightRailVisible}
-                title={rightRailLabel}
-                onClick={() => onRightRailVisibleChange?.(!rightRailVisible)}
-                className="inline-flex min-h-[30px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-              >
-                {rightRailVisible ? (
-                  <PanelRightClose className="h-3.5 w-3.5" aria-hidden="true" />
-                ) : (
-                  <PanelRightOpen className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-                <span className="hidden sm:inline">
-                  {t("cockpit.runtime", "Runtime")}
-                </span>
-              </button>
-            </div>
-          )}
-          <button
-            type="button"
-            aria-label={toggleLabel}
-            aria-pressed={focusMode}
-            title={toggleLabel}
-            onClick={() => onModeChange(nextMode)}
-            className="inline-flex min-h-[30px] items-center gap-1.5 rounded-md border border-border bg-surface2 px-2.5 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            {focusMode ? (
-              <PanelLeftOpen className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
-            <span>
-              {focusMode
-                ? t("cockpit.cockpit", "Cockpit")
-                : t("cockpit.focus", "Focus")}
-            </span>
-          </button>
-        </div>
-      </header>
+        {modeSummary}
+      </p>
 
       {!focusMode && (leftRailVisible || rightRailVisible) && (
         <div
@@ -347,20 +256,6 @@ export const PlaygroundCockpitShell = ({
           data-mobile-panel={visibleMobilePanel ?? "none"}
           className="grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"
         >
-          <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-2">
-            <span className="font-semibold text-text">
-              {t("cockpit.cockpit", "Cockpit")}
-            </span>
-            <button
-              type="button"
-              aria-label={mobileReturnToFocusLabel}
-              onClick={() => onModeChange("focus")}
-              className="inline-flex min-h-[32px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>{t("cockpit.focus", "Focus")}</span>
-            </button>
-          </div>
           <div
             role="tablist"
             aria-label={t("cockpit.mobilePanelTabs", "Mobile cockpit panels")}

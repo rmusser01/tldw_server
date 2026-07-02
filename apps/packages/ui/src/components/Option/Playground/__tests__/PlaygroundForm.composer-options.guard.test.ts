@@ -24,6 +24,15 @@ describe("PlaygroundForm composer options guard", () => {
     expect(source).toContain('sendControlPlacement="external"')
   })
 
+  it("keeps the mobile composer input from sharing width with the send control", () => {
+    const sourcePath = path.resolve(__dirname, "../PlaygroundForm.tsx")
+    const source = fs.readFileSync(sourcePath, "utf8")
+
+    expect(source).toContain("grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2")
+    expect(source).toContain("col-span-2 flex shrink-0 justify-end self-end")
+    expect(source).not.toContain("grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-2")
+  })
+
   it("coordinates composer popovers through a single close-except helper", () => {
     const sourcePath = path.resolve(__dirname, "../PlaygroundForm.tsx")
     const source = fs.readFileSync(sourcePath, "utf8")
@@ -45,7 +54,7 @@ describe("PlaygroundForm composer options guard", () => {
     const sourcePath = path.resolve(__dirname, "../PlaygroundForm.tsx")
     const source = fs.readFileSync(sourcePath, "utf8")
     const legacyReturnStart = source.indexOf("return (", source.indexOf("if (nextgenComposerEnabled)"))
-    const toolbarIndex = source.indexOf("{composerToolbarNode}", legacyReturnStart)
+    const toolbarIndex = source.indexOf("{composerToolbarSlot}", legacyReturnStart)
     const noticesIndex = source.indexOf("{composerNoticesNode}", legacyReturnStart)
 
     expect(toolbarIndex).toBeGreaterThan(legacyReturnStart)

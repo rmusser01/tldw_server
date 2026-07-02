@@ -1675,8 +1675,13 @@ export const CharacterSelect: React.FC<Props> = ({
             setSearchQuery("")
           }
         }}
+        overlayClassName="character-select-dropdown bg-surface text-text shadow-lg"
         popupRender={(menu) => (
-          <div className="w-64" ref={menuContainerRef}>
+          <div
+            data-testid="character-select-popup"
+            className="w-64 rounded-lg border border-border bg-surface text-text shadow-lg"
+            ref={menuContainerRef}
+          >
             <div className="px-2 py-2 border-b border-border flex items-center gap-2">
               <Input
                 ref={searchInputRef}
@@ -1697,6 +1702,7 @@ export const CharacterSelect: React.FC<Props> = ({
                 size="small"
                 value={sortMode}
                 onChange={(value) => setSortMode(value as CharacterSortMode)}
+                popupClassName="character-select-sort-dropdown bg-surface text-text shadow-lg"
                 options={[
                   {
                     value: "favorites",

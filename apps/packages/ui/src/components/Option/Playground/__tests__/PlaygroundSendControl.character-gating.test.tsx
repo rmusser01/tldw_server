@@ -51,4 +51,24 @@ describe("PlaygroundSendControl character chat gating", () => {
     expect(onAction).toHaveBeenCalledTimes(1)
     expect(onSubmitForm).not.toHaveBeenCalled()
   })
+
+  it("keeps the mobile blocker action compact so the composer input keeps width", () => {
+    render(
+      <PlaygroundSendControl
+        {...baseProps}
+        isMobileViewport
+        characterChatSendBlocker={{
+          active: true,
+          title: "Configure the selected model provider before chatting as Ada",
+          actionLabel: "Open model settings",
+          onAction: vi.fn()
+        }}
+      />
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Open model settings" })
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Open model settings")).not.toBeInTheDocument()
+  })
 })

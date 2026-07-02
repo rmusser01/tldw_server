@@ -49,7 +49,10 @@ describe("Playground responsive parity guard", () => {
     expect(playgroundSource).toContain("px-2 sm:px-4")
     expect(playgroundSource).toContain('!isMobileViewport ? (')
     expect(formSource).toContain(
-      "grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-2"
+      "grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2"
+    )
+    expect(formSource).toContain(
+      "col-span-2 flex shrink-0 justify-end self-end"
     )
     expect(formSource).toContain("px-2 pb-3 sm:px-4 sm:pb-6")
     expect(formSource).toContain("rounded-xl")
@@ -60,5 +63,34 @@ describe("Playground responsive parity guard", () => {
     expect(statusSource).toContain("sm:gap-3 sm:px-3 sm:py-2")
     expect(statusSource).toContain("hidden sm:inline-flex")
     expect(statusSource).toContain("hidden max-w-[18rem] truncate font-medium text-text sm:inline")
+  })
+
+  it("keeps cockpit mode controls inside the chat utility row instead of a top rail", () => {
+    const playgroundSourcePath = path.resolve(__dirname, "../Playground.tsx")
+    const cockpitShellSourcePath = path.resolve(
+      __dirname,
+      "../PlaygroundCockpitShell.tsx"
+    )
+    const playgroundSource = fs.readFileSync(playgroundSourcePath, "utf8")
+    const cockpitShellSource = fs.readFileSync(cockpitShellSourcePath, "utf8")
+
+    expect(cockpitShellSource).not.toContain("<header")
+    expect(cockpitShellSource).toContain(
+      'data-testid="playground-cockpit-mode-summary"'
+    )
+    expect(cockpitShellSource).toContain("sr-only")
+    expect(playgroundSource).toContain(
+      'data-testid="playground-chat-layout-mode-trigger"'
+    )
+
+    const modeTriggerIndex = playgroundSource.indexOf(
+      'data-testid="playground-chat-layout-mode-trigger"'
+    )
+    const shortcutsTriggerIndex = playgroundSource.indexOf(
+      'data-testid="playground-shortcuts-help-trigger"'
+    )
+    expect(modeTriggerIndex).toBeGreaterThan(-1)
+    expect(shortcutsTriggerIndex).toBeGreaterThan(-1)
+    expect(modeTriggerIndex).toBeLessThan(shortcutsTriggerIndex)
   })
 })
