@@ -886,7 +886,8 @@ class VisualIdentityRepository:
         actor_kind: str | None = None,
         actor_id: int | str | None = None,
         title: str | None = None,
-        description: str = "",
+        description: str | None = None,
+        source_kind: str | None = None,
         source_context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically activate a draft as a new immutable pack version."""
@@ -913,14 +914,18 @@ class VisualIdentityRepository:
 
             pack_id = draft.get("pack_id")
             default_expression_key = str(draft.get("default_expression_key") or "neutral")
-            resolved_title = title or str(draft["title"])
-            resolved_source_context = {
-                "draft_id": int(draft["id"]),
-                "source_filename": draft.get("source_filename") or "",
-                **dict(source_context or {}),
-            }
 
             if pack_id is None:
+                resolved_title = title if title is not None else str(draft["title"])
+                resolved_description = description if description is not None else ""
+                resolved_source_kind = (
+                    source_kind if source_kind is not None else draft["source_kind"]
+                )
+                resolved_source_context = {
+                    "draft_id": int(draft["id"]),
+                    "source_filename": draft.get("source_filename") or "",
+                    **dict(source_context or {}),
+                }
                 pack_cursor = conn.execute(
                     """
                     INSERT INTO visual_identity_packs (
@@ -938,15 +943,43 @@ class VisualIdentityRepository:
                     (
                         owner_user_id,
                         resolved_title,
-                        description,
+                        resolved_description,
                         default_expression_key,
-                        draft["source_kind"],
+                        resolved_source_kind,
                         _json_dump(resolved_source_context),
                     ),
                 )
                 pack_id = int(pack_cursor.lastrowid)
             else:
                 pack_id = int(pack_id)
+                existing_pack_row = conn.execute(
+                    """
+                    SELECT * FROM visual_identity_packs
+                    WHERE id = ?
+                      AND owner_user_id = ?
+                      AND status != 'deleted'
+                    """,
+                    (pack_id, owner_user_id),
+                ).fetchone()
+                if existing_pack_row is None:
+                    raise ValueError("visual_identity_pack_not_found")
+                existing_pack = dict(existing_pack_row)
+                resolved_title = title if title is not None else str(existing_pack["title"])
+                resolved_description = (
+                    description
+                    if description is not None
+                    else str(existing_pack.get("description") or "")
+                )
+                resolved_source_kind = (
+                    source_kind
+                    if source_kind is not None
+                    else str(existing_pack.get("source_kind") or draft["source_kind"])
+                )
+                resolved_source_context_json = (
+                    _json_dump(dict(source_context))
+                    if source_context is not None
+                    else str(existing_pack.get("source_context_json") or "{}")
+                )
                 update_cursor = conn.execute(
                     """
                     UPDATE visual_identity_packs
@@ -964,10 +997,10 @@ class VisualIdentityRepository:
                     """,
                     (
                         resolved_title,
-                        description,
+                        resolved_description,
                         default_expression_key,
-                        draft["source_kind"],
-                        _json_dump(resolved_source_context),
+                        resolved_source_kind,
+                        resolved_source_context_json,
                         pack_id,
                         owner_user_id,
                     ),

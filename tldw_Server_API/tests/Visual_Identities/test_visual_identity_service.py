@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -174,6 +175,38 @@ def test_activation_copies_draft_assets_into_version_instead_of_mutating_them(
     assert all(asset["pack_version_id"] == activation.pack_version_id for asset in version_assets)
 
 
+def test_activation_preserves_existing_pack_metadata_when_draft_targets_pack(
+    repo: VisualIdentityRepository,
+    service: VisualIdentityService,
+) -> None:
+    pack = repo.create_pack(
+        owner_user_id=OWNER_USER_ID,
+        title="Curated Expressions",
+        description="Keep this user-authored description",
+        source_kind="manual",
+        source_context={"curator": "owner", "keep": True},
+    )
+    draft = _create_ready_draft(
+        repo,
+        assets=("neutral",),
+        title="Imported Replacement Title",
+        pack_id=pack["id"],
+    )
+
+    activation = service.activate_draft(draft_id=draft["id"])
+
+    updated_pack = repo.get_pack(pack["id"], owner_user_id=OWNER_USER_ID)
+    assert updated_pack is not None
+    assert updated_pack["active_version_id"] == activation.pack_version_id
+    assert updated_pack["title"] == "Curated Expressions"
+    assert updated_pack["description"] == "Keep this user-authored description"
+    assert updated_pack["source_kind"] == "manual"
+    assert json.loads(updated_pack["source_context_json"]) == {
+        "curator": "owner",
+        "keep": True,
+    }
+
+
 def test_deleted_pack_does_not_resolve_for_new_messages(
     chacha_db: CharactersRAGDB,
     repo: VisualIdentityRepository,
@@ -221,6 +254,30 @@ def test_resolve_uses_legacy_character_mood_when_no_visual_identity_binding(
     assert resolved.asset_id is None
     assert resolved.storage_relpath is None
     assert resolved.asset_url == "legacy://happy.png"
+
+
+def test_legacy_character_mood_prefers_manual_override_when_assets_miss(
+    chacha_db: CharactersRAGDB,
+    service: VisualIdentityService,
+) -> None:
+    character_id = _create_character(
+        chacha_db,
+        name="Legacy Manual Mood Character",
+        extensions={"tldw": {"mood_images": {"angry": "legacy://manual-angry.png"}}},
+    )
+
+    resolved = service.resolve_expression_asset(
+        actor_kind="character",
+        actor_id=character_id,
+        requested_expression_key="happy",
+        manual_override_expression_key="angry",
+        mood_expression_key="sad",
+    )
+
+    assert resolved.fallback_reason == "legacy_character_mood"
+    assert resolved.expression_key == "angry"
+    assert resolved.asset_id is None
+    assert resolved.asset_url == "legacy://manual-angry.png"
 
 
 def test_resolve_uses_legacy_character_mood_from_extension_root_alias(

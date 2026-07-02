@@ -130,6 +130,9 @@ class VisualIdentityService:
             legacy = self._resolve_legacy_character_mood(
                 actor_kind=actor_kind,
                 actor_id=actor_id,
+                manual_override_expression_key=normalize_expression_key(
+                    manual_override_expression_key or ""
+                ),
                 requested_expression_key=normalized_requested,
                 mood_expression_key=normalize_expression_key(mood_expression_key or ""),
                 default_expression_key="neutral",
@@ -194,6 +197,9 @@ class VisualIdentityService:
         legacy = self._resolve_legacy_character_mood(
             actor_kind=actor_kind,
             actor_id=actor_id,
+            manual_override_expression_key=normalize_expression_key(
+                manual_override_expression_key or ""
+            ),
             requested_expression_key=normalized_requested,
             mood_expression_key=normalize_expression_key(mood_expression_key or ""),
             default_expression_key=normalize_expression_key(
@@ -216,6 +222,7 @@ class VisualIdentityService:
         *,
         actor_kind: str,
         actor_id: ActorId,
+        manual_override_expression_key: str | None,
         requested_expression_key: str | None,
         mood_expression_key: str | None,
         default_expression_key: str | None,
@@ -247,6 +254,7 @@ class VisualIdentityService:
                 normalized_images.setdefault(expression_key, image_url)
 
         for expression_key in (
+            manual_override_expression_key,
             requested_expression_key,
             mood_expression_key,
             default_expression_key,
