@@ -7915,6 +7915,7 @@ import { prototypeWorkspaceMethods } from "./domains/prototype-workspaces"
 import { setupOnboardingMethods } from "./domains/setup-onboarding"
 import { workspaceApiMethods } from "./domains/workspace-api"
 import { webClipperMethods } from "./domains/web-clipper"
+import { visualIdentityMethods } from "./domains/visual-identities"
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class TldwApiClient extends TldwApiClientBase {}
@@ -7940,7 +7941,8 @@ export interface TldwApiClient
     TldwDomainMethods<typeof prototypeWorkspaceMethods>,
     TldwDomainMethods<typeof setupOnboardingMethods>,
     TldwDomainMethods<typeof workspaceApiMethods>,
-    TldwDomainMethods<typeof webClipperMethods> {}
+    TldwDomainMethods<typeof webClipperMethods>,
+    TldwDomainMethods<typeof visualIdentityMethods> {}
 
 // Apply domain methods to the prototype
 Object.assign(
@@ -7955,7 +7957,8 @@ Object.assign(
   prototypeWorkspaceMethods,
   setupOnboardingMethods,
   workspaceApiMethods,
-  webClipperMethods
+  webClipperMethods,
+  visualIdentityMethods
 )
 
 // createChatCompletion and synthesizeSpeech are implemented on

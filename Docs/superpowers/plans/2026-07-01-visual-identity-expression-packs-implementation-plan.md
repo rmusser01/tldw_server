@@ -747,23 +747,24 @@ source .venv/bin/activate && python -m pytest -q \
 
 **Files:**
 
-- [ ] Add `apps/packages/ui/src/types/visual-identities.ts`
-- [ ] Add `apps/packages/ui/src/services/tldw/domains/visual-identities.ts`
-- [ ] Modify `apps/packages/ui/src/services/tldw/TldwApiClient.ts`
-- [ ] Add `apps/packages/ui/src/utils/visual-identity-expressions.ts`
-- [ ] Add `apps/packages/ui/src/utils/visual-identity-emote.ts`
-- [ ] Add `apps/packages/ui/src/utils/__tests__/visual-identity-expressions.test.ts`
-- [ ] Add `apps/packages/ui/src/utils/__tests__/visual-identity-emote.test.ts`
+- [x] Add `apps/packages/ui/src/types/visual-identities.ts`
+- [x] Add `apps/packages/ui/src/services/tldw/domains/visual-identities.ts`
+- [x] Modify `apps/packages/ui/src/services/tldw/TldwApiClient.ts`
+- [x] Add `apps/packages/ui/src/utils/visual-identity-expressions.ts`
+- [x] Add `apps/packages/ui/src/utils/visual-identity-emote.ts`
+- [x] Add `apps/packages/ui/src/utils/__tests__/visual-identity-expressions.test.ts`
+- [x] Add `apps/packages/ui/src/utils/__tests__/visual-identity-emote.test.ts`
+- [x] Add `apps/packages/ui/src/services/__tests__/tldw-api-client.visual-identities.test.ts`
 
 **Implementation Steps:**
 
-- [ ] Add TypeScript interfaces matching the backend schema names.
-- [ ] Add `visualIdentityMethods` domain mixin.
-- [ ] Add methods for capabilities, slots, pack CRUD, asset upload, generated-file import, draft read/update/activate, binding upsert/delete/resolve, and ZIP import start.
-- [ ] Import and merge `visualIdentityMethods` into `TldwApiClient` declaration merging and `Object.assign`.
-- [ ] Implement frontend expression alias normalization using the same V1 slot baseline as `character-mood.ts`.
-- [ ] Implement `parseVisualIdentityEmoteCommand(input: string)` that returns `{ expressionKey, rawExpression }` for `/emote happy`, `/emote anger`, and custom expression labels; return `null` for regular messages.
-- [ ] Keep `/emote` parsing client-side so it does not send a chat message.
+- [x] Add TypeScript interfaces matching the backend schema names.
+- [x] Add `visualIdentityMethods` domain mixin.
+- [x] Add methods for capabilities, slots, pack CRUD, asset upload, generated-file import, draft read/update/activate, binding upsert/delete/resolve, and ZIP import start.
+- [x] Import and merge `visualIdentityMethods` into `TldwApiClient` declaration merging and `Object.assign`.
+- [x] Implement frontend expression alias normalization using the same V1 slot baseline as `character-mood.ts`.
+- [x] Implement `parseVisualIdentityEmoteCommand(input: string)` that returns `{ expressionKey, rawExpression }` for `/emote happy`, `/emote anger`, and custom expression labels; return `null` for regular messages.
+- [x] Keep `/emote` parsing client-side so it does not send a chat message.
 
 **Tests To Write First:**
 
