@@ -263,11 +263,11 @@ def test_append_audio_rejects_decoded_audio_larger_than_buffer_limit():
             {
                 "type": "response.create",
                 "event_id": "evt_create",
-                "response": {"modalities": ["audio", "text"]},
+                "response": {},
             },
             CreateResponseCommand(
                 event_id="evt_create",
-                response={"modalities": ["audio", "text"]},
+                response={},
             ),
         ),
         (
@@ -285,7 +285,23 @@ def test_supported_non_session_commands_parse_to_internal_commands(payload, expe
     [
         (
             {"modalities": ["image"]},
-            "response.create modalities must be a subset of audio and text",
+            "response.create modalities overrides are not supported in Stage 1; use session.update",
+        ),
+        (
+            {"modalities": ["audio", "text"]},
+            "response.create modalities overrides are not supported in Stage 1; use session.update",
+        ),
+        (
+            {"model": "gpt-realtime"},
+            "response.create model overrides are not supported in Stage 1; use session.update",
+        ),
+        (
+            {"voice": "alloy"},
+            "response.create voice overrides are not supported in Stage 1; use session.update",
+        ),
+        (
+            {"instructions": "be brief"},
+            "response.create instructions overrides are not supported in Stage 1; use session.update",
         ),
         (
             {"output_audio_format": "pcm16"},
@@ -293,15 +309,15 @@ def test_supported_non_session_commands_parse_to_internal_commands(payload, expe
         ),
         (
             {"audio": {"output": {"format": "mulaw"}}},
-            "only pcm16 24000 Hz mono response output audio is supported",
+            "response.create audio overrides are not supported in Stage 1; use session.update",
         ),
         (
             {"audio": {"output": {"sample_rate_hz": 16000}}},
-            "only pcm16 24000 Hz mono response output audio is supported",
+            "response.create audio overrides are not supported in Stage 1; use session.update",
         ),
         (
             {"audio": {"output": {"channels": 2}}},
-            "only pcm16 24000 Hz mono response output audio is supported",
+            "response.create audio overrides are not supported in Stage 1; use session.update",
         ),
     ],
 )
@@ -342,6 +358,18 @@ def test_response_create_rejects_unsupported_stage_one_options(response, expecte
                 code="unsupported_session_option",
                 message="only manual turn detection is supported",
                 event_id="evt_vad",
+            ),
+        ),
+        (
+            {
+                "type": "session.update",
+                "event_id": "evt_modalities",
+                "session": {"modalities": ["audio", "text"]},
+            },
+            RealtimeErrorEvent(
+                code="unsupported_session_option",
+                message="session.modalities overrides are not supported in Stage 1",
+                event_id="evt_modalities",
             ),
         ),
         (
@@ -442,6 +470,30 @@ def test_response_audio_delta_oversized_chunk_serializes_to_error_event():
             },
             "session.metadata must be an object when provided",
         ),
+        (
+            {
+                "type": "session.update",
+                "event_id": "evt_bad_type",
+                "session": {"model": 123},
+            },
+            "session.model must be a string when provided",
+        ),
+        (
+            {
+                "type": "session.update",
+                "event_id": "evt_bad_type",
+                "session": {"voice": []},
+            },
+            "session.voice must be a string when provided",
+        ),
+        (
+            {
+                "type": "session.update",
+                "event_id": "evt_bad_type",
+                "session": {"instructions": {"text": "hello"}},
+            },
+            "session.instructions must be a string when provided",
+        ),
     ],
 )
 def test_session_update_rejects_present_fields_with_wrong_json_type(payload, expected_message):
@@ -449,6 +501,44 @@ def test_session_update_rejects_present_fields_with_wrong_json_type(payload, exp
         code="invalid_event",
         message=expected_message,
         event_id="evt_bad_type",
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_message"),
+    [
+        (
+            {
+                "type": "session.update",
+                "event_id": "evt_beta",
+                "input_audio_format": "pcm16",
+                "session": {},
+            },
+            "input_audio_format is a beta-era field; use session.audio.input.format",
+        ),
+        (
+            {
+                "type": "session.update",
+                "event_id": "evt_beta",
+                "session": {"input_audio_format": "pcm16"},
+            },
+            "input_audio_format is a beta-era field; use session.audio.input.format",
+        ),
+        (
+            {
+                "type": "response.create",
+                "event_id": "evt_beta",
+                "response": {"input_audio_format": "pcm16"},
+            },
+            "input_audio_format is a beta-era field; use session.audio.input.format",
+        ),
+    ],
+)
+def test_beta_input_audio_format_aliases_return_explicit_errors(payload, expected_message):
+    assert _parse(payload) == RealtimeErrorEvent(
+        code="unsupported_session_option",
+        message=expected_message,
+        event_id="evt_beta",
     )
 
 

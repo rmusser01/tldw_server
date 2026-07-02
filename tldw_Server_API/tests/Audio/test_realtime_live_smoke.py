@@ -44,6 +44,8 @@ def _require_live_smoke_env() -> str:
         pytest.skip("Set TLDW_REALTIME_LIVE_SMOKE_AUTH_TOKEN or SINGLE_USER_API_KEY for realtime live smoke auth")
 
     os.environ.setdefault("MINIMAL_TEST_INCLUDE_AUDIO", "1")
+    os.environ.setdefault("REALTIME_CHAT_PROVIDER_HINT", os.environ["TLDW_REALTIME_LIVE_SMOKE_LLM_PROVIDER"])
+    os.environ.setdefault("REALTIME_TTS_PROVIDER_HINT", os.environ["TLDW_REALTIME_LIVE_SMOKE_TTS_PROVIDER"])
     os.environ.setdefault("REALTIME_PROVIDER_HINT", os.environ["TLDW_REALTIME_LIVE_SMOKE_LLM_PROVIDER"])
     if os.getenv("TLDW_REALTIME_LIVE_SMOKE_LLM_MODEL"):
         os.environ.setdefault("REALTIME_CHAT_MODEL", os.environ["TLDW_REALTIME_LIVE_SMOKE_LLM_MODEL"])
@@ -124,10 +126,7 @@ def test_openai_compat_realtime_live_smoke_reaches_response_done() -> None:
                         "type": "session.update",
                         "session": {
                             "type": "realtime",
-                            "modalities": ["audio", "text"],
                             "instructions": "Answer with one short sentence.",
-                            "input_audio_format": "pcm16",
-                            "output_audio_format": "pcm16",
                             "turn_detection": None,
                         },
                     }

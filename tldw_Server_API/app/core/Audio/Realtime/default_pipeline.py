@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Literal
 
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
+from tldw_Server_API.app.core.Audio.Realtime.constants import REALTIME_MAX_OUTPUT_CHUNK_BYTES
 from tldw_Server_API.app.core.Audio.Realtime.models import RealtimeSessionConfig
 from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineAudioDelta,
@@ -50,15 +51,18 @@ class DefaultRealtimePipeline:
         tts_service_factory: Callable[[], Any],
         default_model: str,
         default_voice: str,
-        provider_hint: str | None,
-        user_id: int | None,
+        provider_hint: str | None = None,
+        chat_provider_hint: str | None = None,
+        tts_provider_hint: str | None = None,
+        user_id: int | None = None,
     ) -> None:
         self._stt_transcribe_pcm16 = stt_transcribe_pcm16
         self._chat_call = chat_call
         self._tts_service_factory = tts_service_factory
         self._default_model = default_model
         self._default_voice = default_voice
-        self._provider_hint = provider_hint
+        self._chat_provider_hint = chat_provider_hint if chat_provider_hint is not None else provider_hint
+        self._tts_provider_hint = tts_provider_hint if tts_provider_hint is not None else provider_hint
         self._user_id = user_id
 
     async def transcribe_pcm16(self, audio: bytes, *, sample_rate_hz: int, language: str | None) -> str:
@@ -140,7 +144,7 @@ class DefaultRealtimePipeline:
     def _chat_kwargs(self, transcript: str, config: RealtimeSessionConfig) -> dict[str, Any]:
         messages = [{"role": "user", "content": transcript}]
         return {
-            "api_endpoint": self._provider_hint,
+            "api_endpoint": self._chat_provider_hint,
             "messages_payload": messages,
             "message": transcript,
             "system_message": config.instructions,
@@ -162,7 +166,7 @@ class DefaultRealtimePipeline:
             handle = await _call_open_realtime_session(
                 open_realtime_session,
                 request=request,
-                provider_hint=self._provider_hint,
+                provider_hint=self._tts_provider_hint,
                 route=REALTIME_TTS_ROUTE,
                 user_id=self._user_id,
             )
@@ -172,8 +176,8 @@ class DefaultRealtimePipeline:
 
         return BufferedRealtimeSession(
             tts_service=service,
-            config=_tts_config_from_request(request, self._provider_hint),
-            provider_hint=self._provider_hint,
+            config=_tts_config_from_request(request, self._tts_provider_hint),
+            provider_hint=self._tts_provider_hint,
             route=REALTIME_TTS_ROUTE,
             user_id=self._user_id,
         )
@@ -262,7 +266,8 @@ def build_default_realtime_pipeline(principal: Any | None = None, user_id: int |
         tts_service_factory=lambda: get_tts_service_v2(),
         default_model=_default_realtime_model(),
         default_voice=_default_realtime_voice(),
-        provider_hint=_default_provider_hint(),
+        chat_provider_hint=_default_chat_provider_hint(),
+        tts_provider_hint=_default_tts_provider_hint(),
         user_id=resolved_user_id,
     )
 
@@ -345,7 +350,8 @@ async def _drain_tts_audio(session: Any, queue: asyncio.Queue[Any]) -> None:
     try:
         async for chunk in session.audio_stream():
             if chunk:
-                await queue.put(RealtimePipelineAudioDelta(bytes(chunk)))
+                for audio_chunk in _split_output_audio_chunk(bytes(chunk)):
+                    await queue.put(RealtimePipelineAudioDelta(audio_chunk))
         await queue.put(RealtimePipelineAudioDone())
     except Exception as exc:
         await queue.put(exc)
@@ -491,3 +497,20 @@ def _default_tts_model(_chat_model: str) -> str:
 
 def _default_provider_hint() -> str | None:
     return os.getenv("REALTIME_PROVIDER_HINT", "openai")
+
+
+def _default_chat_provider_hint() -> str | None:
+    return os.getenv("REALTIME_CHAT_PROVIDER_HINT") or _default_provider_hint()
+
+
+def _default_tts_provider_hint() -> str | None:
+    return os.getenv("REALTIME_TTS_PROVIDER_HINT") or _default_provider_hint()
+
+
+def _split_output_audio_chunk(chunk: bytes) -> list[bytes]:
+    if len(chunk) <= REALTIME_MAX_OUTPUT_CHUNK_BYTES:
+        return [chunk]
+    return [
+        chunk[index : index + REALTIME_MAX_OUTPUT_CHUNK_BYTES]
+        for index in range(0, len(chunk), REALTIME_MAX_OUTPUT_CHUNK_BYTES)
+    ]
