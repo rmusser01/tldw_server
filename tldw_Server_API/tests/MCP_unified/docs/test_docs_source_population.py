@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pytest
@@ -99,9 +100,15 @@ def test_ingest_url_creates_url_page_source_for_queryless_url(tmp_path: Path) ->
     result = service.ingest_url(scope=AccessScope(), url="https://example.com/page")
 
     sources = store.list_sources(scope=AccessScope())
+    links = store.source_document_links(scope=AccessScope(), source_id=sources[0]["id"])
     assert result["source"]["source_type"] == "url_page"  # nosec B101
+    assert result["source"]["document_count"] == 1  # nosec B101
     assert sources[0]["source_url"] == "https://example.com/page"  # nosec B101
     assert sources[0]["redacted_source_url"] == "https://example.com/page"  # nosec B101
+    assert len(links) == 1  # nosec B101
+    assert links[0]["document_id"] == result["document"]["id"]  # nosec B101
+    assert links[0]["source_item_uri"] == "https://example.com/page"  # nosec B101
+    assert links[0]["status"] == "active"  # nosec B101
 
 
 def test_ingest_query_url_does_not_create_refreshable_source_by_default(tmp_path: Path) -> None:
@@ -159,6 +166,104 @@ def test_ingest_query_url_creates_source_when_query_persistence_enabled(tmp_path
     sources = store.list_sources(scope=AccessScope())
     assert result["source"]["source_url"] == "https://example.com/page?token=secret"  # nosec B101
     assert sources[0]["redacted_source_url"] == "https://example.com/page"  # nosec B101
+
+
+def test_ingest_query_url_preserves_extraction_and_query_warnings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_import_module = importlib.import_module
+
+    def fake_import(name: str) -> object:
+        if name in {"trafilatura", "bs4"}:
+            raise ImportError(name)
+        return real_import_module(name)
+
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    monkeypatch.setattr(importlib, "import_module", fake_import)
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+        }
+    )
+    service = DocsAcquisitionService(
+        settings=settings,
+        store=store,
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [
+                FetchResponse(
+                    status_code=200,
+                    headers={"content-type": "text/html"},
+                    body_chunks=[b"<html><body><h1>Guide</h1><p>Static fallback body.</p></body></html>"],
+                )
+            ]
+        ),
+    )
+
+    result = service.ingest_url(scope=AccessScope(), url="https://example.com/page?token=secret")
+
+    assert result["status"] == "created"  # nosec B101
+    assert result["source"] is None  # nosec B101
+    assert "rich_extractors_unavailable" in result["warnings"]  # nosec B101
+    assert "url_query_not_persisted" in result["warnings"]  # nosec B101
+    assert store.list_sources(scope=AccessScope()) == []  # nosec B101
+
+
+def test_ingest_url_fetch_failure_does_not_create_source(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+        }
+    )
+    service = DocsAcquisitionService(
+        settings=settings,
+        store=store,
+        resolver=FakeResolver({"example.com": []}),
+        transport=FakeTransport([]),
+    )
+
+    result = service.ingest_url(scope=AccessScope(), url="https://example.com/page")
+
+    assert result["status"] == "failed"  # nosec B101
+    assert result["reason_code"] == "dns_resolution_failed"  # nosec B101
+    assert store.list_sources(scope=AccessScope()) == []  # nosec B101
+
+
+def test_ingest_url_extract_empty_does_not_create_source(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    settings = DocsSettings.from_mapping(
+        {
+            "db_path": str(tmp_path / "docs.db"),
+            "enable_web_acquisition": True,
+            "web_source_profile": "online_capable",
+            "allow_arbitrary_public_domains": True,
+        }
+    )
+    service = DocsAcquisitionService(
+        settings=settings,
+        store=store,
+        resolver=FakeResolver({"example.com": ["93.184.216.34"]}),
+        transport=FakeTransport(
+            [FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"  \n\t"])]
+        ),
+    )
+
+    result = service.ingest_url(scope=AccessScope(), url="https://example.com/page")
+
+    assert result["status"] == "failed"  # nosec B101
+    assert result["reason_code"] == "extract_empty"  # nosec B101
+    assert store.list_sources(scope=AccessScope()) == []  # nosec B101
 
 
 def test_redacted_url_for_display_removes_credentials_query_and_fragment() -> None:
