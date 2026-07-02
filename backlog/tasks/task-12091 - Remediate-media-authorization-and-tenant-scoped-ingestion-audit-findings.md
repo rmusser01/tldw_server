@@ -2,35 +2,24 @@
 id: TASK-12091
 title: Remediate media authorization and tenant-scoped ingestion audit findings
 status: Done
-created_date: 2026-07-02 03:04
+assignee: []
+created_date: '2026-07-02 03:04'
+updated_date: '2026-07-02 03:34'
 labels:
-- audit
-- remediation
-- media
-- ingestion
-- wave-1
-priority: high
+  - audit
+  - remediation
+  - media
+  - ingestion
+  - wave-1
+dependencies: []
 references:
-- AUDIT-2026-06-27-MEDIA-001
-- AUDIT-2026-06-27-MEDIA-002
-- AUDIT-2026-06-27-MEDIA-003
+  - AUDIT-2026-06-27-MEDIA-001
+  - AUDIT-2026-06-27-MEDIA-002
+  - AUDIT-2026-06-27-MEDIA-003
 documentation:
-- Docs/superpowers/reviews/2026-06-27-repo-audit/domains/media-ingestion-storage.md
-modified_files:
-- tldw_Server_API/app/api/v1/endpoints/media/process_audios.py
-- tldw_Server_API/app/api/v1/endpoints/media/process_documents.py
-- tldw_Server_API/app/api/v1/endpoints/media/process_pdfs.py
-- tldw_Server_API/app/api/v1/endpoints/media/process_ebooks.py
-- tldw_Server_API/app/api/v1/endpoints/media/process_code.py
-- tldw_Server_API/app/api/v1/endpoints/media/process_emails.py
-- tldw_Server_API/app/api/v1/endpoints/media/process_mediawiki.py
-- tldw_Server_API/app/core/Ingestion_Media_Processing/MediaWiki/Media_Wiki.py
-- tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py
-- tldw_Server_API/tests/AuthNZ_Unit/test_media_processing_permissions_claims.py
-- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_db_persistence.py
-- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_vector_storage.py
-- tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py
-updated_date: 2026-07-02 03:21
+  - >-
+    Docs/superpowers/reviews/2026-06-27-repo-audit/domains/media-ingestion-storage.md
+priority: high
 ---
 
 ## Description
@@ -50,6 +39,7 @@ Track remediation for the 2026-06-27 media audit findings: processing-only media
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wave 1 reconfirmation on refreshed origin/dev 30495536d3 showed MEDIA-001, MEDIA-002, and MEDIA-003 still apply. Smallest safe permission decision: use existing MEDIA_CREATE/media.create rather than introducing a new media.process RBAC permission in this slice. MediaWiki checkpoint user scoping remains a decision point for the implementation plan.
 Implementation plan added at Docs/superpowers/plans/2026-07-02-media-authorization-tenant-storage-remediation.md. Plan locks the permission decision to MEDIA_CREATE/media.create and includes user-scoped MediaWiki checkpointing as part of tenant isolation.
@@ -63,12 +53,18 @@ Final verification before commit:
 - `python -m bandit ... -f json -o /tmp/bandit_media_storage_12091.json` -> 0 issues.
 - `git diff --check` -> clean.
 Residual risk: focused tests cover contracts and unit behavior only; full API integration/streaming behavior was not run per bounded scope and no-service-start restriction.
+2026-07-02 follow-up review fix started. Verified storage contract in `tldw_Server_API/app/core/Storage/storage_interface.py` and `filesystem_storage.py`: real cleanup API is `async delete(path: str) -> bool`, so the previous `storage.delete(user_id=..., storage_path=...)` call shape must be corrected. Review note on `rbac_rate_limit`: this remediation only wires the existing media.create dependency used by comparable media routes; broader limiter enforcement semantics are outside this route-wiring slice.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-07-02 follow-up review fix complete. Updated the original-storage cleanup path to call the real storage API shape, `await storage.delete(storage_path)`, and updated the test fake to `delete(path: str) -> bool` so the old keyword-argument implementation fails. Red/green evidence: original storage test red failed on the old production call with `_FakeStorage.delete() got an unexpected keyword argument user_id` and no deleted path recorded; green after the fix with `test_persistence_original_storage.py -q` -> 13 passed. Full focused suite from the plan -> 28 passed. Bandit on `tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py` -> 0 issues in `/tmp/bandit_media_storage_12091_followup.json`. `git diff --check` -> clean. Residual risk: `rbac_rate_limit` behavior remains outside this route-wiring slice; this task only wires the existing `media.create` dependency used by comparable media.create routes.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Closed the media audit remediation by adding media.create permission and RBAC rate-limit gates to processing-only routes, threading request-scoped MediaWiki writers/vector user/checkpoint scope through ingest, and deleting stored originals when MediaFiles registration fails. The implementation reuses existing AuthNZ contracts and Media DB repository/session patterns instead of adding new permissions or storage abstractions. Focused pytest, Bandit, and whitespace verification passed; no documentation changes were required beyond the task record.
+
+Follow-up review fix corrected original-file cleanup to use the real storage delete(path) API and tightened the fake so the previous keyword-call bug is covered. Focused tests, Bandit, and diff whitespace checks passed. Residual risk: broader `rbac_rate_limit` enforcement semantics are outside this media route-wiring slice.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

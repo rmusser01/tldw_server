@@ -53,9 +53,9 @@ class _FakeStorage:
         self.stored_paths.append(storage_path)
         return storage_path
 
-    async def delete(self, *, user_id: str, storage_path: str) -> None:
-        _ = user_id
-        self.deleted_paths.append(storage_path)
+    async def delete(self, path: str) -> bool:
+        self.deleted_paths.append(path)
+        return True
 
 
 class _FakeDB:

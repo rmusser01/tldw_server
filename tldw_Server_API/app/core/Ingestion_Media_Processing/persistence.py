@@ -3238,10 +3238,7 @@ async def add_media_orchestrate(
                                 try:
                                     delete_original = getattr(storage, "delete", None)
                                     if callable(delete_original):
-                                        await delete_original(
-                                            user_id=user_id_str,
-                                            storage_path=storage_path,
-                                        )
+                                        await delete_original(storage_path)
                                     else:
                                         logger.debug(
                                             "Storage backend has no delete method; cannot clean up original file {}",
