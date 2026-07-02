@@ -164,8 +164,14 @@ def test_ingest_query_url_creates_source_when_query_persistence_enabled(tmp_path
     result = service.ingest_url(scope=AccessScope(), url="https://example.com/page?token=secret")
 
     sources = store.list_sources(scope=AccessScope())
+    links = store.source_document_links(scope=AccessScope(), source_id=sources[0]["id"])
     assert result["source"]["source_url"] == "https://example.com/page?token=secret"  # nosec B101
+    assert result["source"]["document_count"] == 1  # nosec B101
     assert sources[0]["redacted_source_url"] == "https://example.com/page"  # nosec B101
+    assert len(links) == 1  # nosec B101
+    assert links[0]["document_id"] == result["document"]["id"]  # nosec B101
+    assert links[0]["source_item_uri"] == "https://example.com/page?token=secret"  # nosec B101
+    assert links[0]["status"] == "active"  # nosec B101
 
 
 def test_ingest_query_url_preserves_extraction_and_query_warnings(
@@ -174,10 +180,10 @@ def test_ingest_query_url_preserves_extraction_and_query_warnings(
 ) -> None:
     real_import_module = importlib.import_module
 
-    def fake_import(name: str) -> object:
+    def fake_import(name: str, package: str | None = None) -> object:
         if name in {"trafilatura", "bs4"}:
             raise ImportError(name)
-        return real_import_module(name)
+        return real_import_module(name, package)
 
     store = DocsCatalogStore(tmp_path / "docs.db")
     store.migrate()
