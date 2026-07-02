@@ -753,16 +753,29 @@ export const Playground = () => {
   React.useEffect(() => {
     if (!routeCharacterIntentId) return;
     if (routeCharacterIntentChatId) return;
-    if (shouldRestorePersistedSessionOnInit) return;
+    if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId) {
+      return;
+    }
+    if (routeCharacterIntentInFlightRef.current === routeCharacterIntentId) {
+      return;
+    }
+
     const hasActiveConversation =
       Boolean(serverChatId) ||
       Boolean(stableHistoryId) ||
       messages.length > 0 ||
-      history.length > 0 ||
-      composerHasDraft;
-    if (hasActiveConversation) return;
-    if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId) {
-      return;
+      history.length > 0;
+    if (hasActiveConversation) {
+      setHistoryId(null, { preserveServerChatId: false });
+      setHistory([]);
+      setMessages([]);
+      setServerChatCharacterId(null);
+      setServerChatAssistantKind(null);
+      setServerChatAssistantId(null);
+      setServerChatPersonaMemoryMode(null);
+      setServerChatMetaLoaded(false);
+      setServerChatId(null);
+      void clearPersistedSession().catch(() => undefined);
     }
 
     const requestId = routeCharacterIntentRequestRef.current + 1;
@@ -814,17 +827,28 @@ export const Playground = () => {
       if (routeCharacterIntentRequestRef.current === requestId) {
         routeCharacterIntentRequestRef.current += 1;
       }
+      if (routeCharacterIntentInFlightRef.current === routeCharacterIntentId) {
+        routeCharacterIntentInFlightRef.current = null;
+      }
     };
   }, [
-    composerHasDraft,
+    clearPersistedSession,
     history.length,
     messages.length,
     routeCharacterIntentChatId,
     routeCharacterIntentId,
     routeCharacterRetryToken,
     serverChatId,
-    shouldRestorePersistedSessionOnInit,
+    setHistory,
+    setHistoryId,
+    setMessages,
     setSelectedCharacter,
+    setServerChatAssistantId,
+    setServerChatAssistantKind,
+    setServerChatCharacterId,
+    setServerChatId,
+    setServerChatMetaLoaded,
+    setServerChatPersonaMemoryMode,
     stableHistoryId,
   ]);
 
@@ -1365,7 +1389,7 @@ export const Playground = () => {
       }
       return;
     }
-    if (routeCharacterIntentId && !shouldRestorePersistedSessionOnInit) {
+    if (routeCharacterIntentId) {
       return;
     }
 

@@ -19,6 +19,11 @@ const messageOptionState = vi.hoisted(() => ({
     setSelectedSystemPrompt: vi.fn(),
     setSelectedModel: vi.fn(),
     setServerChatId: vi.fn(),
+    setServerChatCharacterId: vi.fn(),
+    setServerChatAssistantKind: vi.fn(),
+    setServerChatAssistantId: vi.fn(),
+    setServerChatPersonaMemoryMode: vi.fn(),
+    setServerChatMetaLoaded: vi.fn(),
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
     streaming: false,
@@ -32,6 +37,7 @@ const messageOptionState = vi.hoisted(() => ({
 const sessionPersistenceState = vi.hoisted(() => ({
   value: {
     restoreSession: vi.fn(async () => false),
+    clearPersistedSession: vi.fn(async () => undefined),
     sessionScopeReady: true,
     hasPersistedSession: false,
     persistedHistoryId: null as string | null,
@@ -41,6 +47,15 @@ const sessionPersistenceState = vi.hoisted(() => ({
 
 const restoreDecisionState = vi.hoisted(() => ({
   value: false
+}))
+
+const tldwClientState = vi.hoisted(() => ({
+  initialize: vi.fn(async () => undefined),
+  getProvidersStatus: vi.fn(async () => null),
+  getCharacter: vi.fn(async (id: string | number) => ({
+    id,
+    name: "Route Character"
+  }))
 }))
 
 vi.mock("react-i18next", () => ({
@@ -75,6 +90,14 @@ vi.mock("@/hooks/playground-session-restore", () => ({
 
 vi.mock("@/services/app", () => ({
   webUIResumeLastChat: vi.fn(async () => false)
+}))
+
+vi.mock("@/services/tldw/TldwApiClient", () => ({
+  tldwClient: tldwClientState
+}))
+
+vi.mock("@/services/tldw-server", () => ({
+  fetchChatModels: vi.fn(async () => [])
 }))
 
 vi.mock("@/db/dexie/helpers", () => ({
@@ -142,7 +165,8 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => false
+  useMobile: () => false,
+  useDesktop: () => true
 }))
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
@@ -194,8 +218,23 @@ describe("Playground coordinator integration", () => {
     messageOptionState.value.serverChatId = null
     messageOptionState.value.selectedCharacter = null
     messageOptionState.value.setServerChatId.mockClear()
+    messageOptionState.value.setServerChatCharacterId.mockClear()
+    messageOptionState.value.setServerChatAssistantKind.mockClear()
+    messageOptionState.value.setServerChatAssistantId.mockClear()
+    messageOptionState.value.setServerChatPersonaMemoryMode.mockClear()
+    messageOptionState.value.setServerChatMetaLoaded.mockClear()
     messageOptionState.value.setSelectedCharacter.mockClear()
+    tldwClientState.initialize.mockClear()
+    tldwClientState.getProvidersStatus.mockClear()
+    tldwClientState.getCharacter.mockClear()
+    tldwClientState.getCharacter.mockImplementation(async (id: string | number) => ({
+      id,
+      name: "Route Character"
+    }))
     sessionPersistenceState.value.restoreSession = vi.fn(async () => false)
+    sessionPersistenceState.value.clearPersistedSession = vi.fn(
+      async () => undefined
+    )
     sessionPersistenceState.value.sessionScopeReady = true
     sessionPersistenceState.value.hasPersistedSession = false
     sessionPersistenceState.value.persistedHistoryId = null
@@ -272,7 +311,7 @@ describe("Playground coordinator integration", () => {
     expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
   })
 
-  it("restores persisted sessions before applying a character route id", async () => {
+  it("applies character route ids before persisted session restore", async () => {
     const restoreSession = vi.fn(async () => true)
     sessionPersistenceState.value.restoreSession = restoreSession
     sessionPersistenceState.value.hasPersistedSession = true
@@ -287,13 +326,37 @@ describe("Playground coordinator integration", () => {
     render(<Playground />)
 
     await waitFor(() => {
-      expect(restoreSession).toHaveBeenCalledTimes(1)
+      expect(tldwClientState.getCharacter).toHaveBeenCalledWith(
+        "route-character"
+      )
     })
-    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
+    expect(restoreSession).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "route-character",
+        name: "Route Character"
+      })
+    )
   })
 
-  it("does not apply explicit character ids over an active server chat", async () => {
+  it("starts a fresh character route chat over an active server chat", async () => {
     messageOptionState.value.serverChatId = "active-chat"
+    messageOptionState.value.historyId = "active-history"
+    messageOptionState.value.messages = [
+      {
+        isBot: true,
+        name: "Assistant",
+        role: "assistant",
+        message: "Prior reply",
+        sources: []
+      }
+    ]
+    messageOptionState.value.history = [
+      {
+        role: "assistant",
+        content: "Prior reply"
+      }
+    ]
     window.history.pushState(
       {},
       "",
@@ -303,8 +366,21 @@ describe("Playground coordinator integration", () => {
     render(<Playground />)
 
     await waitFor(() => {
-      expect(useChatSurfaceCoordinatorStore.getState().routeId).toBe("chat")
+      expect(tldwClientState.getCharacter).toHaveBeenCalledWith(
+        "route-character"
+      )
     })
-    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setHistoryId).toHaveBeenCalledWith(null, {
+      preserveServerChatId: false
+    })
+    expect(messageOptionState.value.setHistory).toHaveBeenCalledWith([])
+    expect(messageOptionState.value.setMessages).toHaveBeenCalledWith([])
+    expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null)
+    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "route-character",
+        name: "Route Character"
+      })
+    )
   })
 })
