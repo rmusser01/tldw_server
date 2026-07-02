@@ -52,8 +52,6 @@ Verification:
 Merged the chat status rail into the composer, removed the standalone bottom rail, and adjusted the hidden-header chat shell so the composer docks to the viewport bottom on desktop and mobile. Focused tests, device-matrix tests, browser measurements, diff check, and Bandit completed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

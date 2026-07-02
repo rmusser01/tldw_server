@@ -79,6 +79,8 @@ export type PlaygroundStatusStripProps = {
 
 const pillClass =
   "inline-flex min-h-[24px] max-w-full items-center rounded-md border border-border bg-surface px-2 text-xs font-medium text-text";
+const mobileAccessiblePillClass =
+  `${pillClass} sr-only sm:not-sr-only sm:inline-flex`;
 const actionClass =
   "inline-flex min-h-[26px] items-center gap-1 rounded-md border border-border bg-surface2 px-2 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus";
 
@@ -390,40 +392,40 @@ export const PlaygroundStatusStrip = ({
           </>
         ) : null}
         {errorMessage ? (
-          <span className={`${pillClass} hidden sm:inline-flex`}>
+          <span className={mobileAccessiblePillClass}>
             {errorMessage}
           </span>
         ) : (
           <>
             {serverBlockedReason ? (
-              <span className={`${pillClass} hidden sm:inline-flex`}>
+              <span className={mobileAccessiblePillClass}>
                 {serverBlockedReason}
               </span>
             ) : null}
             {missingModelReason ? (
-              <span className={`${pillClass} hidden sm:inline-flex`}>
+              <span className={mobileAccessiblePillClass}>
                 {missingModelReason}
               </span>
             ) : null}
             {modelUnavailableReason ? (
-              <span className={`${pillClass} hidden sm:inline-flex`}>
+              <span className={mobileAccessiblePillClass}>
                 {modelUnavailableReason}
               </span>
             ) : null}
             {contextLoadingReason ? (
-              <span className={`${pillClass} hidden sm:inline-flex`}>
+              <span className={mobileAccessiblePillClass}>
                 {contextLoadingReason}
               </span>
             ) : null}
             {webSearchReason ? (
-              <span className={`${pillClass} hidden sm:inline-flex`}>
+              <span className={mobileAccessiblePillClass}>
                 {webSearchReason}
               </span>
             ) : null}
             {!serverBlocked
               ? degradedChecks.map((check, index) => (
                   <span
-                    className={`${pillClass} hidden sm:inline-flex`}
+                    className={mobileAccessiblePillClass}
                     key={`degraded-${index}-${check}`}
                   >
                     {check}
@@ -431,7 +433,7 @@ export const PlaygroundStatusStrip = ({
                 ))
               : null}
             {degradedChatAvailableLabel ? (
-              <span className={`${pillClass} hidden sm:inline-flex`}>
+              <span className={mobileAccessiblePillClass}>
                 {degradedChatAvailableLabel}
               </span>
             ) : null}

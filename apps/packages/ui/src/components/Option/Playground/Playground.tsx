@@ -229,10 +229,10 @@ const updateCharacterChatRouteHash = (
 };
 
 const withTrackedCharacterSelectionMode = (character: Character): Character => {
-  const metadata = (character as Character & { metadata?: unknown }).metadata;
+  const metadata = character.metadata;
   const normalizedMetadata =
     metadata && typeof metadata === "object" && !Array.isArray(metadata)
-      ? (metadata as Record<string, unknown>)
+      ? metadata
       : {};
 
   return {
@@ -241,7 +241,7 @@ const withTrackedCharacterSelectionMode = (character: Character): Character => {
       ...normalizedMetadata,
       selectionMode: "tracked",
     },
-  } as Character;
+  };
 };
 
 type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;

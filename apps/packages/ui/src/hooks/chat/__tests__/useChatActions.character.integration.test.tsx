@@ -462,4 +462,61 @@ describe("useChatActions character integration", () => {
       })
     )
   })
+
+  it("uses the latest store character id when the hook prop still points at another character", async () => {
+    messageStoreState.value = {
+      selectedModel: "deepseek-chat",
+      serverChatId: "miku-current-chat",
+      serverChatCharacterId: 99,
+      serverChatAssistantKind: "character",
+      serverChatSource: "webui-character-chat"
+    }
+    const options = {
+      ...createHookOptions(),
+      serverChatId: "old-character-chat",
+      serverChatTitle: "Old character chat",
+      serverChatCharacterId: 42,
+      serverChatAssistantKind: "character",
+      serverChatAssistantId: "42",
+      serverChatSource: "webui-character-chat",
+      selectedCharacter: {
+        id: 99,
+        name: "Miku",
+        system_prompt: "Miku prompt"
+      },
+      selectedAssistant: {
+        kind: "character",
+        id: "99",
+        name: "Miku",
+        system_prompt: "Miku prompt",
+        metadata: { selectionMode: "tracked" }
+      }
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Continue Miku from the selected greeting",
+        image: ""
+      })
+    })
+
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(streamCharacterChatCompletionMock).toHaveBeenCalledWith(
+      "miku-current-chat",
+      expect.objectContaining({
+        include_character_context: true,
+        model: "deepseek-chat"
+      }),
+      expect.any(Object)
+    )
+    expect(persistCharacterCompletionMock).toHaveBeenCalledWith(
+      "miku-current-chat",
+      expect.objectContaining({
+        assistant_content: "Tracked reply",
+        speaker_character_id: 99,
+        speaker_character_name: "Miku"
+      })
+    )
+  })
 })

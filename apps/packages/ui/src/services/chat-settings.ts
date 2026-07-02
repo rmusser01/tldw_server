@@ -432,7 +432,11 @@ const isMissingRemoteChatSettingsError = (error: unknown): boolean => {
   }
 
   const message = error instanceof Error ? error.message : String(error || "")
-  return /\b404\b/i.test(message) || /not\s+found/i.test(message)
+  return (
+    /\b404\b/i.test(message) ||
+    /chat\s+settings.*not\s+found/i.test(message) ||
+    /not\s+found.*chat\s+settings/i.test(message)
+  )
 }
 
 const toEpoch = (value: string | undefined): number => {

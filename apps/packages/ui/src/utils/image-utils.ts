@@ -102,6 +102,11 @@ function isValidBase64ImagePayload(value: string): boolean {
   const length = value.length
   if (!length || length % 4 !== 0) return false
 
+  const unpaddedValue = value.replace(/=+$/, "")
+  const hasStandardAlphabet = /[+/]/.test(unpaddedValue)
+  const hasUrlSafeAlphabet = /[-_]/.test(unpaddedValue)
+  if (hasStandardAlphabet && hasUrlSafeAlphabet) return false
+
   let paddingStart = length
   for (let i = 0; i < length; i += 1) {
     const code = value.charCodeAt(i)

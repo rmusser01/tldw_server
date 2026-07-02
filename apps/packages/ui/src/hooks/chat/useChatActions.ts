@@ -1585,7 +1585,7 @@ export const useChatActions = ({
         setServerChatMetaLoaded(true)
         invalidateServerChatHistory()
       } else {
-        chatCharacterId = serverChatCharacterId
+        chatCharacterId = effectiveServerChatCharacterId
         setServerChatAssistantKind("character")
         setServerChatAssistantId(activeCharacterId)
         setServerChatPersonaMemoryMode(null)

@@ -215,6 +215,27 @@ describe("syncChatSettingsForServerChat", () => {
       warnSpy.mockRestore()
     }
   })
+
+  it("does not swallow unrelated not-found messages without a 404 status", async () => {
+    const serverChatId = "chat-settings-unrelated-not-found"
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    mocks.getChatSettings.mockRejectedValueOnce(new Error("Prompt not found"))
+
+    try {
+      const result = await syncChatSettingsForServerChat({
+        historyId: null,
+        serverChatId
+      })
+
+      expect(result).toBeNull()
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Failed to fetch server chat settings",
+        expect.any(Error)
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
 })
 
 describe("normalizeChatSettingsRecord", () => {

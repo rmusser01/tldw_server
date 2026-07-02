@@ -133,16 +133,30 @@ const getCurrentHttpPageOrigin = (): string | null => {
   }
 }
 
-const isQuickstartDeploymentMode = (): boolean => {
+const getDeploymentMode = (): string => {
   try {
-    return (
-      typeof process !== "undefined" &&
-      String(process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || "").trim() ===
-        "quickstart"
-    )
+    const viteEnv = import.meta.env as Record<string, unknown> | undefined
+    const viteMode = String(
+      (viteEnv?.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE as string | undefined) || ""
+    ).trim()
+    if (viteMode) return viteMode
   } catch {
-    return false
+    // Fall back to process.env for Next.js/test contexts.
   }
+
+  try {
+    return String(
+      typeof process !== "undefined"
+        ? process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || ""
+        : ""
+    ).trim()
+  } catch {
+    return ""
+  }
+}
+
+const isQuickstartDeploymentMode = (): boolean => {
+  return getDeploymentMode() === "quickstart"
 }
 
 const isSameOriginWebUiOpenApiBase = (base: string): boolean => {

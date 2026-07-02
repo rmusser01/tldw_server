@@ -164,6 +164,23 @@ describe("ComposerToolbar web search", () => {
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
   })
 
+  it("opens casual advanced controls from the collapsed desktop context strip", () => {
+    render(
+      <ComposerToolbar
+        {...createProps({
+          optionsExpanded: false,
+          sendControlPlacement: "external"
+        })}
+      />
+    )
+
+    fireEvent.click(screen.getByTestId("composer-casual-advanced-chip"))
+
+    expect(
+      screen.getByTestId("composer-casual-advanced-controls-row")
+    ).toBeInTheDocument()
+  })
+
   it("keeps mobile image attachment discoverable when options are collapsed", () => {
     render(
       <ComposerToolbar

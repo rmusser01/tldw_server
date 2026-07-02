@@ -40,6 +40,7 @@ const DEPLOYMENT_ENV = {
   NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
 };
 const DOCS_INFO_API_VERSION = 'v1';
+const RUNTIME_ENV_AUTH_OPT_OUT_KEY = 'tldwRuntimeEnvAuthOptOut';
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 
@@ -163,11 +164,17 @@ function writeBrowserConfig(config: AppConfig): void {
   const apiBearer = normalizeBearerValue(config.apiBearer);
   const shouldPersistApiKey = !!apiKey && apiKey !== envApiKey;
   const shouldPersistApiBearer = !!apiBearer && apiBearer !== envApiBearer;
+  const clearedEnvApiKey = !!envApiKey && !apiKey;
+  const clearedEnvApiBearer = !!envApiBearer && !apiBearer;
 
   window.localStorage.removeItem('apiKey');
   window.localStorage.removeItem('apiBearer');
   window.localStorage.removeItem('accessToken');
   window.localStorage.removeItem('refreshToken');
+
+  if (clearedEnvApiKey || clearedEnvApiBearer) {
+    window.localStorage.setItem(RUNTIME_ENV_AUTH_OPT_OUT_KEY, 'true');
+  }
 
   if (!existingConfig && !shouldPersistApiKey && !shouldPersistApiBearer) {
     return;

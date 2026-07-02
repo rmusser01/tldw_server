@@ -1,3 +1,5 @@
+import fs from "node:fs"
+import path from "node:path"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
@@ -75,6 +77,16 @@ describe("background clipper rollout guard", () => {
     set: vi.fn(async () => undefined)
   }
   const warmModels = vi.fn(async () => null)
+
+  it("reads quickstart deployment mode from extension-safe import.meta.env", () => {
+    const source = fs.readFileSync(
+      path.resolve(__dirname, "../background-init.ts"),
+      "utf8"
+    )
+
+    expect(source).toContain("import.meta.env")
+    expect(source).toContain("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE")
+  })
 
   beforeEach(() => {
     Object.keys(watchHandlers).forEach((key) => {

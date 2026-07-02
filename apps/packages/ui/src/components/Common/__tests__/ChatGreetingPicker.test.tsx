@@ -13,6 +13,8 @@ import {
   collectGreetingEntries
 } from "@/utils/character-greetings"
 
+const notificationErrorMock = vi.hoisted(() => vi.fn())
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string }) =>
@@ -25,6 +27,9 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("antd", () => ({
+  notification: {
+    error: notificationErrorMock
+  },
   Select: ({ value, onChange, options, disabled }: any) => (
     <select
       data-testid="greeting-select"
@@ -243,15 +248,80 @@ describe("ChatGreetingPicker", () => {
       )
     })
     expect(historyState).toEqual([
-      {
+      expect.objectContaining({
         role: "assistant",
         content: "Good to see you",
         messageType: "character:greeting"
-      }
+      })
     ])
     expect(tldwClient.addChatMessage).toHaveBeenCalledWith("server-chat-1", {
       role: "assistant",
       content: "Good to see you"
     })
+  })
+
+  it("notifies when a selected greeting cannot be synced to the server chat", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    vi.mocked(tldwClient.addChatMessage).mockRejectedValueOnce(
+      new Error("server unavailable")
+    )
+    const updateSettings = vi.fn(
+      async (patch: Partial<ChatSettingsRecord>) =>
+        normalizeChatSettingsRecord({
+          greetingSelectionId: patch.greetingSelectionId,
+          greetingSelectionChecksum: patch.greetingSelectionChecksum,
+          greetingEnabled: true
+        })
+    )
+    let messageState: Message[] = []
+    let historyState: ChatHistory = []
+    const setMessages = vi.fn((next: Message[] | ((prev: Message[]) => Message[])) => {
+      messageState = typeof next === "function" ? next(messageState) : next
+    })
+    const setHistory = vi.fn((next: ChatHistory | ((prev: ChatHistory) => ChatHistory)) => {
+      historyState = typeof next === "function" ? next(historyState) : next
+    })
+
+    try {
+      renderPicker(
+        {
+          greetingSelectionId: alternateGreetingId,
+          greetingSelectionChecksum: checksum,
+          greetingEnabled: true
+        },
+        updateSettings,
+        {
+          serverChatId: "server-chat-1",
+          setMessages,
+          setHistory
+        }
+      )
+
+      fireEvent.click(screen.getByRole("button", { name: /select greeting/i }))
+
+      await waitFor(() => {
+        expect(notificationErrorMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: "Greeting sync failed",
+            description:
+              "The greeting was added locally but could not be saved to the server chat."
+          })
+        )
+      })
+      expect(messageState[0]).toEqual(
+        expect.objectContaining({
+          message: "Good to see you",
+          messageType: "character:greeting"
+        })
+      )
+      expect(historyState[0]).toEqual(
+        expect.objectContaining({
+          content: "Good to see you",
+          messageType: "character:greeting"
+        })
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })

@@ -1,6 +1,6 @@
 import React from "react"
 import { Check, RefreshCcw } from "lucide-react"
-import { Select, Switch } from "antd"
+import { notification, Select, Switch } from "antd"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useTranslation } from "react-i18next"
 import type { Character } from "@/types/character"
@@ -291,6 +291,15 @@ export const ChatGreetingPicker: React.FC<Props> = ({
         return updated
       })
     } catch (error) {
+      notification.error({
+        message: t("sidepanel:greetingPicker.syncFailed", {
+          defaultValue: "Greeting sync failed"
+        }),
+        description: t("sidepanel:greetingPicker.syncFailedDescription", {
+          defaultValue:
+            "The greeting was added locally but could not be saved to the server chat."
+        })
+      })
       console.warn("Failed to persist selected character greeting:", error)
     }
   }

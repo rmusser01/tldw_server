@@ -1127,6 +1127,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         <>
           {collapsedMobileToolbarLayout}
           {!isMobile ? persistentContextStrip : null}
+          {!isMobile && !isProMode ? casualAdvancedControlsPanel : null}
         </>
       )}
     </div>

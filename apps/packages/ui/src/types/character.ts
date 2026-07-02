@@ -10,6 +10,7 @@ export interface Character {
   title?: string | null
   tags?: string[]
   extensions?: Record<string, unknown> | null
+  metadata?: Record<string, unknown> | null
   version?: number
 }
 

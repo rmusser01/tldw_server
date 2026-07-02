@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   IMAGE_ATTACHMENT_MIME_TYPES,
   createImageDataUrl,
@@ -12,6 +12,10 @@ const ONE_PIXEL_PNG_BASE64 =
 const WEBP_HEADER_BASE64 = "UklGRhAAAABXRUJQVlA4IAAAAAA="
 
 describe("image utils", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it("builds a data URL from valid base64 image content", () => {
     expect(createImageDataUrl(ONE_PIXEL_PNG_BASE64)).toBe(
       `data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`
@@ -41,6 +45,15 @@ describe("image utils", () => {
     )
     expect(createImageDataUrl("data:image/svg+xml;base64,PHN2Zy8+")).toBeNull()
     expect(createImageDataUrl("data:image/png,not-base64")).toBeNull()
+  })
+
+  it("rejects data image URLs that mix standard and URL-safe base64 alphabets", () => {
+    vi.stubGlobal(
+      "atob",
+      vi.fn(() => "\x89PNG\r\n\x1a\n")
+    )
+
+    expect(createImageDataUrl("data:image/png;base64,AAAA+___")).toBeNull()
   })
 
   it("returns an empty string when value is already a data URL", () => {
