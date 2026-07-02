@@ -4,11 +4,11 @@ title: Fix WebUI llama.cpp provider discovery and single-user auth bootstrap
 status: Done
 assignee: []
 created_date: ''
-updated_date: 2026-07-02 04:49
+updated_date: '2026-07-02 05:01'
 labels:
-- bug
-- webui
-- llm-providers
+  - bug
+  - webui
+  - llm-providers
 dependencies: []
 priority: high
 ---
@@ -66,6 +66,8 @@ Verification:
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed latest-dev WebUI llama.cpp setup blockers by aligning provider discovery with env-resolved custom OpenAI config and making NEXT_PUBLIC_X_API_KEY runtime auth work across shared WebUI request paths. Imported/used the available Miku character card, verified normal and character chat through the running llama.cpp server, captured the requested screenshots, and fixed the character-chat avatar path so embedded card image_base64 is shown instead of the generic placeholder.
+
+PR: https://github.com/rmusser01/tldw_server/pull/2573
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
