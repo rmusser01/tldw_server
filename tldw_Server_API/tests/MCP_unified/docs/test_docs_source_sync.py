@@ -226,7 +226,7 @@ def test_url_page_sync_retires_previous_redirect_target_when_canonical_changes_w
         [
             FetchResponse(status_code=302, headers={"location": "https://example.com/b"}),
             FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"oldbmarker body"]),
-            FetchResponse(status_code=302, headers={"location": "https://example.com/c"}),
+            FetchResponse(status_code=302, headers={"location": "https://example.com/c?token=secret"}),
             FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"newcmarker body"]),
         ]
     )
@@ -237,13 +237,28 @@ def test_url_page_sync_retires_previous_redirect_target_when_canonical_changes_w
     service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=transport)
 
     result = service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="apply"))
+    listed = DocsMCPToolProvider(settings=settings, store=store).execute("docs.list", {"kind": "sources"}, scope=scope)
+    stored_source = store.get_source(scope=scope, source_id=source_id)
     links = store.source_document_links(scope=scope, source_id=source_id)
     active_links = [link for link in links if link["status"] == "active"]
     old_search = store.search_chunks(scope=scope, query="oldbmarker", limit=10)
     new_search = store.search_chunks(scope=scope, query="newcmarker", limit=10)
+    future_transport = FakeTransport(
+        [FetchResponse(status_code=200, headers={"content-type": "text/plain"}, body_chunks=[b"newcmarker body"])]
+    )
+    future_service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=future_transport)
+    future_service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="dry_run"))
 
     assert result["counts"]["updated"] == 1  # nosec B101
-    assert [link["source_item_uri"] for link in active_links] == ["https://example.com/c"]  # nosec B101
+    assert "token=secret" not in repr(result["source"])  # nosec B101
+    assert result["source"]["canonical_uri"] == "https://example.com/c"  # nosec B101
+    assert result["source"]["document_count"] == 1  # nosec B101
+    assert listed["sources"][0]["canonical_uri"] == "https://example.com/c"  # nosec B101
+    assert listed["sources"][0]["document_count"] == 1  # nosec B101
+    assert stored_source["id"] == source_id  # nosec B101
+    assert stored_source["source_url"] == "https://example.com/c?token=secret"  # nosec B101
+    assert [link["source_item_uri"] for link in active_links] == ["https://example.com/c?token=secret"]  # nosec B101
+    assert future_transport.calls[0][1].target == "/c?token=secret"  # nosec B101
     assert old_search == []  # nosec B101
     assert new_search  # nosec B101
 
@@ -277,11 +292,16 @@ def test_url_page_sync_relinks_same_body_when_canonical_changes(
     service = DocsSourceSyncService(settings=settings, store=store, resolver=resolver, transport=transport)
 
     result = service.sync_source(scope=scope, request=SyncSourceRequest(source_id=source_id, mode="apply"))
+    listed = DocsMCPToolProvider(settings=settings, store=store).execute("docs.list", {"kind": "sources"}, scope=scope)
     links = store.source_document_links(scope=scope, source_id=source_id)
     active_links = [link for link in links if link["status"] == "active"]
 
     assert result["counts"]["updated"] == 1  # nosec B101
     assert result["counts"]["unchanged"] == 0  # nosec B101
+    assert result["source"]["canonical_uri"] == "https://example.com/c"  # nosec B101
+    assert result["source"]["document_count"] == 1  # nosec B101
+    assert listed["sources"][0]["canonical_uri"] == "https://example.com/c"  # nosec B101
+    assert listed["sources"][0]["document_count"] == 1  # nosec B101
     assert [link["source_item_uri"] for link in active_links] == ["https://example.com/c"]  # nosec B101
 
 

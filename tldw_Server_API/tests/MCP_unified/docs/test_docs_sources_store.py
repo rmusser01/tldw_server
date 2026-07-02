@@ -111,6 +111,75 @@ def test_source_document_count_ignores_out_of_scope_links(tmp_path: Path) -> Non
     assert store.list_sources(scope=scope_a)[0]["document_count"] == 0  # nosec B101
 
 
+def test_source_document_count_ignores_tombstoned_source_links(tmp_path: Path) -> None:
+    store = DocsCatalogStore(tmp_path / "docs.db")
+    store.migrate()
+    scope = AccessScope(owner_scope="owner-a", profile_scope="profile-a")
+    source_id = store.upsert_source(
+        scope=scope,
+        source_type="url_page",
+        canonical_uri="https://example.com/b",
+        display_name="b",
+        source_path=None,
+        source_url="https://example.com/b",
+        redacted_source_url="https://example.com/b",
+        policy_profile="online_capable",
+        sync_enabled=True,
+        metadata={},
+    )
+    old_document_id = store.upsert_document(
+        scope=scope,
+        title="Old",
+        document_type="text",
+        canonical_uri="https://example.com/b",
+        source_path=None,
+        source_url="https://example.com/b",
+        text="old sqlite body",
+        sections=[],
+        chunks=[{"text": "old sqlite body", "citation": "b"}],
+        keywords=(),
+        collection_names=(),
+        metadata={},
+    )
+    new_document_id = store.upsert_document(
+        scope=scope,
+        title="New",
+        document_type="text",
+        canonical_uri="https://example.com/c",
+        source_path=None,
+        source_url="https://example.com/c",
+        text="new sqlite body",
+        sections=[],
+        chunks=[{"text": "new sqlite body", "citation": "c"}],
+        keywords=(),
+        collection_names=(),
+        metadata={},
+    )
+    store.link_source_document(
+        scope=scope,
+        source_id=source_id,
+        document_id=old_document_id,
+        source_item_uri="https://example.com/b",
+        status="active",
+        last_hash="old",
+        metadata={},
+    )
+    store.link_source_document(
+        scope=scope,
+        source_id=source_id,
+        document_id=new_document_id,
+        source_item_uri="https://example.com/c",
+        status="active",
+        last_hash="new",
+        metadata={},
+    )
+    store.tombstone_source_item(scope=scope, source_id=source_id, source_item_uri="https://example.com/b")
+
+    assert store.get_source(scope=scope, source_id=source_id)["document_count"] == 1  # nosec B101
+    assert store.get_source(scope=scope, canonical_uri="https://example.com/b")["document_count"] == 1  # nosec B101
+    assert store.list_sources(scope=scope)[0]["document_count"] == 1  # nosec B101
+
+
 def test_upsert_document_for_sync_merges_existing_organization(tmp_path: Path) -> None:
     store = DocsCatalogStore(tmp_path / "docs.db")
     store.migrate()

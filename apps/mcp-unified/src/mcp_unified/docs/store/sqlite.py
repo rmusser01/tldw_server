@@ -228,6 +228,52 @@ class DocsCatalogStore:
                 )
                 return int(cursor.fetchone()["id"])
 
+    def retarget_source(
+        self,
+        *,
+        scope: AccessScope,
+        source_id: int,
+        canonical_uri: str,
+        display_name: str,
+        source_url: str | None,
+        redacted_source_url: str | None,
+    ) -> bool:
+        owner_scope, profile_scope = _scope_values(scope)
+        normalized_canonical_uri = _required_name(canonical_uri, "canonical URI")
+        normalized_display_name = _required_name(display_name, "display name")
+        with closing(self.connect()) as conn:
+            with conn:
+                try:
+                    cursor = conn.execute(
+                        """
+                        UPDATE docs_sources
+                        SET canonical_uri = ?,
+                            display_name = ?,
+                            source_url = ?,
+                            redacted_source_url = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                          AND owner_scope = ?
+                          AND profile_scope = ?
+                        """,
+                        (
+                            normalized_canonical_uri,
+                            normalized_display_name,
+                            source_url,
+                            redacted_source_url,
+                            source_id,
+                            owner_scope,
+                            profile_scope,
+                        ),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    raise DocsError(
+                        code="source_canonical_uri_conflict",
+                        message="Source canonical URI conflicts with an existing source.",
+                        details={"source_id": source_id, "canonical_uri": normalized_canonical_uri},
+                    ) from exc
+                return cursor.rowcount > 0
+
     def get_source(
         self,
         *,
@@ -244,9 +290,11 @@ class DocsCatalogStore:
                 SELECT s.*, COUNT(DISTINCT d.id) AS document_count
                 FROM docs_sources s
                 LEFT JOIN docs_source_documents sd ON sd.source_id = s.id
+                    AND sd.status = 'active'
                 LEFT JOIN docs_documents d ON d.id = sd.document_id
                     AND d.owner_scope = ?
                     AND d.profile_scope = ?
+                    AND d.lifecycle_status = 'active'
                 WHERE s.owner_scope = ?
                   AND s.profile_scope = ?
                   AND s.id = ?
@@ -258,9 +306,11 @@ class DocsCatalogStore:
                 SELECT s.*, COUNT(DISTINCT d.id) AS document_count
                 FROM docs_sources s
                 LEFT JOIN docs_source_documents sd ON sd.source_id = s.id
+                    AND sd.status = 'active'
                 LEFT JOIN docs_documents d ON d.id = sd.document_id
                     AND d.owner_scope = ?
                     AND d.profile_scope = ?
+                    AND d.lifecycle_status = 'active'
                 WHERE s.owner_scope = ?
                   AND s.profile_scope = ?
                   AND s.canonical_uri = ?
@@ -283,9 +333,11 @@ class DocsCatalogStore:
                 SELECT s.*, COUNT(DISTINCT d.id) AS document_count
                 FROM docs_sources s
                 LEFT JOIN docs_source_documents sd ON sd.source_id = s.id
+                    AND sd.status = 'active'
                 LEFT JOIN docs_documents d ON d.id = sd.document_id
                     AND d.owner_scope = ?
                     AND d.profile_scope = ?
+                    AND d.lifecycle_status = 'active'
                 WHERE s.owner_scope = ? AND s.profile_scope = ?
                 GROUP BY s.id
                 ORDER BY s.display_name COLLATE NOCASE ASC, s.id ASC

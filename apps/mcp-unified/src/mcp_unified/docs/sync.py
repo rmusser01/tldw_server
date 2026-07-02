@@ -374,6 +374,32 @@ class DocsSourceSyncService:
         document_id = int(link["document_id"]) if link is not None else None
 
         if mode == "apply":
+            if _url_source_needs_retarget(source=source, parsed_uri=parsed.canonical_uri):
+                try:
+                    retargeted = self.store.retarget_source(
+                        scope=scope,
+                        source_id=source_id,
+                        canonical_uri=parsed.canonical_uri,
+                        display_name=parsed.title,
+                        source_url=parsed.canonical_uri,
+                        redacted_source_url=redacted_url_for_display(parsed.canonical_uri),
+                    )
+                except DocsError as exc:
+                    return self._failed(
+                        source=source,
+                        request=request,
+                        reason_code=exc.code,
+                        warning=exc.message,
+                    )
+                if not retargeted:
+                    return self._failed(
+                        source=source,
+                        request=request,
+                        reason_code="source_not_found",
+                        warning="Source not found while retargeting URL source.",
+                    )
+                source = self.store.get_source(scope=scope, source_id=source_id) or source
+
             if item_status in {"created", "updated"}:
                 document_id = self.store.upsert_document_for_sync(
                     scope=scope,
@@ -691,6 +717,10 @@ def _stale_url_page_links(*, links: list[dict[str, Any]], parsed_uri: str) -> li
         for link in links
         if link.get("status") == "active" and str(link.get("source_item_uri") or "") != parsed_uri
     ]
+
+
+def _url_source_needs_retarget(*, source: dict[str, Any], parsed_uri: str) -> bool:
+    return str(source.get("canonical_uri") or "") != parsed_uri or str(source.get("source_url") or "") != parsed_uri
 
 
 def _local_sync_metadata(parsed: ParsedDocument) -> dict[str, Any]:
